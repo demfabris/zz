@@ -485,7 +485,7 @@ struct NativeWorkspace: View {
     }
 
     private var status: some View {
-        ZZWorkspaceStatusBar(windowAlignment: client.settings.text("status-align") == "left" ? .leading : .center) {
+        ZZWorkspaceStatusBar {
             HStack(spacing: 6) {
                 if !sidebarVisible {
                     Color.clear.frame(width: client.settings.bool("use-system-titlebar") ? 0 : 72)
@@ -519,11 +519,6 @@ struct NativeWorkspace: View {
                 Text(client.endpoint.hasPrefix("ssh://") ? client.endpoint : ProcessInfo.processInfo.hostName)
                     .font(theme.font(size: 11)).lineLimit(1).frame(maxWidth: 100)
             }
-            if client.settings.text("status-clock") != "off" {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(clockText(context.date)).font(theme.font(size: 11)).monospacedDigit()
-                }
-            }
             if client.settings.bool("status-update"), client.settings.updates.result?.state == "available" {
                 ZZIconButton("Update available", systemName: "arrow.down.circle") {
                     client.settings.section = "about"
@@ -533,16 +528,6 @@ struct NativeWorkspace: View {
             paneActions
             ZZIconButton("New window", systemName: "plus") { client.execute("new-window") }.disabled(!client.connected)
         }
-    }
-
-    private func clockText(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        switch client.settings.text("status-clock") {
-        case "12-hour": formatter.dateFormat = "h:mm a"
-        case "time-date": formatter.dateFormat = "MMM d HH:mm"
-        default: formatter.dateFormat = "HH:mm"
-        }
-        return formatter.string(from: date)
     }
 
     private func showConnection() {

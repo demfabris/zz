@@ -131,7 +131,6 @@ pub struct WorkspaceStatusSlots {
 }
 
 pub fn workspace_status_bar(
-    centered: bool,
     gaps: bool,
     leading_inset: Pixels,
     slots: WorkspaceStatusSlots,
@@ -142,18 +141,17 @@ pub fn workspace_status_bar(
         .flex()
         .flex_1()
         .min_w_0()
-        .h(TITLE_BAR_HEIGHT)
+        .h_full()
         .items_center()
         .gap(px(2.0))
         .px(px(2.0))
         .overflow_hidden()
-        .when(centered, gpui::Styled::justify_center)
         .children(slots.windows);
     let content = div()
         .flex()
         .flex_1()
         .min_w_0()
-        .h(TITLE_BAR_HEIGHT)
+        .h_full()
         .items_center()
         .gap(px(6.0))
         .px(px(6.0))

@@ -91,6 +91,7 @@ pub struct Theme {
     pub shadow: bool,
     pub shadow_strength: f32,
     pub pane_background_opacity: f32,
+    pub pane_glow_strength: f32,
     pub transparent: Hsla,
     /// When scrollbars are visible, default: [`ScrollbarShow::Scrolling`].
     pub scrollbar_show: ScrollbarShow,
@@ -214,6 +215,7 @@ impl From<&ThemeColor> for Theme {
             shadow: true,
             shadow_strength: 1.0,
             pane_background_opacity: 0.5,
+            pane_glow_strength: 1.0,
             scrollbar_show: ScrollbarShow::default(),
             notification: NotificationSettings::default(),
             colors: *colors,

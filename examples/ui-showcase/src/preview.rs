@@ -10,27 +10,33 @@ use gpui::{
 use serde::{Deserialize, Serialize};
 use zz_ui::{
     ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, Root, Sizable as _,
-    StyledExt as _, UiZoom,
+    UiZoom,
     agent::{
         AgentEntry, AgentTimeline, AgentTimelineStore, TimelineRow, agent_pane_header,
         composer::{AgentComposer, COMPOSER_OUTER_PADDING},
         fold_timeline_rows,
     },
     browser::{
-        BrowserEmptyHint, BrowserTabInfo, BrowserTabStrip, BrowserToolbar, browser_toolbar_button,
+        BrowserEmptyHint, BrowserHeader, BrowserSiteMenuState, BrowserTabInfo, BrowserTabStrip,
+        BrowserToolbar, browser_address, browser_site_controls_button, browser_site_menu,
+        browser_toolbar_button,
     },
     button::{Button, ButtonVariants as _},
     h_flex,
     input::InputState,
+    menu::DropdownMenu as _,
     navigation::{
         WORKSPACE_CONTROL_TRAFFIC_LIGHT_INSET, WORKSPACE_SIDEBAR_DEFAULT_WIDTH,
         WorkspaceStatusWindowState, workspace_chrome_controls, workspace_chrome_controls_width,
         workspace_layout_button, workspace_settings_button, workspace_sidebar_surface,
-        workspace_sidebar_titlebar_with_inset, workspace_status_item, workspace_status_window,
-        workspace_tree_action_button, workspace_tree_action_row, workspace_tree_disclosure,
-        workspace_tree_marker, workspace_tree_row,
+        workspace_sidebar_titlebar_with_inset, workspace_tree_action_button,
+        workspace_tree_action_row, workspace_tree_disclosure, workspace_tree_marker,
+        workspace_tree_row,
     },
-    pane::{PaneChrome, PaneSplitAxis, pane_border_color, pane_split_surface, pane_surface},
+    pane::{
+        PaneChrome, PaneSplitAxis, pane_border_color, pane_split_surface, pane_surface,
+        terminal_pane_header,
+    },
     scroll::ScrollableElement as _,
     settings::{SettingsSection, settings_navigation_button, settings_navigation_group_label},
     shell::{WorkspaceStatusSlots, app_shell_surface, app_workspace_surface, workspace_status_bar},
@@ -53,6 +59,7 @@ pub(crate) struct PreviewOptions {
     pub contrast: f32,
     pub shadow_strength: f32,
     pub pane_background_opacity: f32,
+    pub pane_glow_strength: f32,
     pub pane_margin: f32,
     pub pane_radius: f32,
     pub pane_border: f32,
@@ -80,6 +87,7 @@ impl Default for PreviewOptions {
             contrast: 1.0,
             shadow_strength: 1.0,
             pane_background_opacity: 0.5,
+            pane_glow_strength: 1.0,
             pane_margin: 6.0,
             pane_radius: 13.5,
             pane_border: 0.5,
@@ -129,6 +137,7 @@ impl PreviewOptions {
             (&mut self.inactive_opacity, 1.0, 0.7),
             (&mut self.shadow_strength, 1.0, 1.0),
             (&mut self.pane_background_opacity, 1.0, 0.5),
+            (&mut self.pane_glow_strength, 2.0, 1.0),
         ] {
             *value = if value.is_finite() {
                 value.clamp(0.0, maximum)
@@ -136,7 +145,15 @@ impl PreviewOptions {
                 fallback
             };
         }
-        if !["workspace", "browser", "agent", "settings", "catalog"].contains(&self.scene.as_str())
+        if ![
+            "workspace",
+            "browser",
+            "browser-suggestions",
+            "agent",
+            "settings",
+            "catalog",
+        ]
+        .contains(&self.scene.as_str())
         {
             self.scene = "workspace".into();
         }
@@ -154,6 +171,7 @@ impl PreviewOptions {
     fn apply_colors(&self, cx: &mut App) {
         zz_ui::Theme::global_mut(cx).set_contrast(self.contrast);
         zz_ui::Theme::global_mut(cx).pane_background_opacity = self.pane_background_opacity;
+        zz_ui::Theme::global_mut(cx).pane_glow_strength = self.pane_glow_strength;
         let mode = zz_ui::Theme::global(cx).mode;
         let overrides = self
             .chrome_colors
@@ -184,6 +202,7 @@ pub(crate) struct Preview {
     rows: Arc<Vec<TimelineRow>>,
     scroll: ListState,
     settings: SettingsSection,
+    status_active_pane: usize,
     selected: usize,
     collapsed: bool,
     tree_scroll: UniformListScrollHandle,
@@ -213,6 +232,7 @@ impl Preview {
                     .auto_grow(2, 8)
             }),
             timeline: cx.new(|_| AgentTimelineStore::default()),
+            status_active_pane: 1,
             settings: match options.settings_section.as_str() {
                 "panes" => SettingsSection::Panes,
                 "status-bar" => SettingsSection::StatusBar,
@@ -357,7 +377,7 @@ impl Preview {
             (2, "workspace", IconName::AppWindow),
             (3, "~/dev/zz", IconName::SquareTerminal),
             (3, "zzmux.sh", IconName::Globe),
-            (3, "UI iteration", IconName::Bot),
+            (3, "Improve agent pane controls", IconName::Openai),
             (2, "notes", IconName::AppWindow),
         ];
         let (depth, label, icon) = nodes[index].clone();
@@ -511,91 +531,103 @@ impl Preview {
     }
 
     fn status(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let windows = ["workspace", "notes"]
+        let windows = ["Status bar", "notes"]
             .into_iter()
             .enumerate()
             .map(|(i, name)| {
-                let hover_group: SharedString = format!("preview-status-window-{i}").into();
-                workspace_status_window(
+                let panes = if i == 0 {
+                    vec![
+                        (IconName::SquareTerminal, "cargo test"),
+                        (IconName::Globe, "GPUI docs"),
+                        (
+                            zz_ui::pane::agent_provider_icon(zz_protocol::AgentProvider::Codex),
+                            "Rework status bar",
+                        ),
+                        (IconName::Claude, "Review pane titles"),
+                        (IconName::File, "status_bar.rs"),
+                        (IconName::SquareTerminal, "dev server"),
+                    ]
+                } else {
+                    vec![(IconName::SquareTerminal, "notes")]
+                };
+                let entity = cx.entity();
+                zz_ui::navigation::status::status_window(
                     format!("preview-window-{i}"),
                     format!("{i}").into(),
-                    name.into(),
                     name.into(),
                     WorkspaceStatusWindowState {
                         connected: true,
                         active: i == 0,
-                        agent: i == 0,
                         ..Default::default()
+                    },
+                    panes
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, (icon, label))| {
+                            let entity = entity.clone();
+                            zz_ui::navigation::status::StatusPaneEntry {
+                                label: label.into(),
+                                detail: "Sample pane".into(),
+                                icon,
+                                favicon: None,
+                                active: index == self.status_active_pane || i == 1,
+                                select: Rc::new(move |_, cx| {
+                                    entity.update(cx, |this, cx| {
+                                        this.status_active_pane = index;
+                                        cx.notify();
+                                    });
+                                }),
+                            }
+                        })
+                        .collect(),
+                    zz_ui::navigation::status::StatusWindowActions {
+                        select: Rc::new(|_, _| {}),
+                        close: None,
+                        rename: None,
                     },
                     cx,
                 )
-                .group(hover_group.clone())
-                .pr(px(0.0))
-                .child(
-                    div()
-                        .flex_none()
-                        .invisible()
-                        .group_hover(hover_group, gpui::Styled::visible)
-                        .child(workspace_tree_action_button(
-                            format!("preview-window-close-{i}"),
-                            IconName::Xmark,
-                            "Close window",
-                            false,
-                            cx,
-                        )),
-                )
-                .into_any_element()
             })
             .collect();
-        let session = workspace_status_item(
-            "gui-status-session",
-            Some(IconName::Layers),
-            "zz".into(),
-            cx,
-        )
-        .flex_none()
-        .px(px(8.0))
-        .rounded(cx.theme().radius)
-        .when(cx.theme().shadow, |item| {
-            item.border(px(0.5)).border_color(gpui::transparent_white())
-        })
-        .text_color(cx.theme().foreground)
-        .hover(|item| {
-            let item = item.bg(zz_ui::navigation::workspace_row_highlight(cx));
-            if cx.theme().shadow {
-                item.control_highlight(cx)
-            } else {
-                item
-            }
-        })
-        .into_any_element();
+        let session = zz_ui::navigation::status::status_session(
+            "gui-status-session", "zz".into(),
+            vec![zz_ui::navigation::status::StatusSessionEntry {
+                label: "zz · 2 windows".into(),
+                active: true,
+                select: Rc::new(|_, _| {}),
+            }], true, cx,
+        );
         let controls = Some((
             Self::controls(cx),
             workspace_chrome_controls_width(true, window),
         ));
         workspace_status_bar(
-            false,
             self.options.gaps,
             self.inset(cx),
             WorkspaceStatusSlots {
                 session: Some(session),
                 windows,
-                right: vec![
-                    workspace_status_item(
-                        "preview-agents",
-                        Some(IconName::Bot),
-                        "1 agent".into(),
-                        cx,
-                    )
-                    .into_any_element(),
-                    workspace_status_item(
-                        "preview-clock",
-                        Some(IconName::Clock),
-                        "14:32".into(),
-                        cx,
-                    )
-                    .into_any_element(),
-                ],
+                right: vec![zz_ui::navigation::status::status_agents(
+                    "preview-agents",
+                    [
+                        (zz_protocol::AgentProvider::Codex, "Rework status bar", 2),
+                        (zz_protocol::AgentProvider::ClaudeCode, "Review pane titles", 3),
+                    ].into_iter().map(|(provider, label, index)| {
+                        let entity = cx.entity();
+                        zz_ui::navigation::status::StatusAgentEntry {
+                            label: label.into(),
+                            window_name: "Status bar".into(),
+                            icon: zz_ui::pane::agent_provider_icon(provider),
+                            status: Some(zz_ui::navigation::status::AgentAttentionStatus::Working),
+                            select: Rc::new(move |_, cx| {
+                                entity.update(cx, |this, cx| {
+                                    this.status_active_pane = index;
+                                    cx.notify();
+                                });
+                            }),
+                        }
+                    }).collect(), true, cx,
+                )],
                 titlebar_controls: controls,
                 ..Default::default()
             },
@@ -650,27 +682,87 @@ impl Preview {
             .flex_col()
             .size_full()
             .overflow_hidden()
-            .p(px(8.0))
-            .font_family(cx.theme().mono_font_family.clone())
-            .text_size(px(13.0))
-            .line_height(px(18.0))
             .bg(cx
                 .theme()
                 .background
                 .opaque()
                 .opacity(cx.theme().pane_background_opacity))
             .text_color(cx.theme().foreground)
-            .children(lines.into_iter().map(|(text, muted)| {
+            .child(terminal_pane_header(
+                true,
+                "bash",
+                zz_ui::pane::pane_drag_button(
+                    "preview-terminal-drag",
+                    zz_protocol::PaneId(1),
+                    "bash".into(),
+                    true,
+                    |_, _, _| {},
+                    cx,
+                ),
+                |_, _, _| {},
+                cx,
+            ))
+            .child(
                 div()
-                    .flex_none()
-                    .h(px(18.0))
-                    .when(muted, |line| line.text_color(cx.theme().foreground.muted()))
-                    .child(text)
-            }))
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .p(px(8.0))
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .text_size(px(13.0))
+                    .line_height(px(18.0))
+                    .children(lines.into_iter().map(|(text, muted)| {
+                        div()
+                            .flex_none()
+                            .h(px(18.0))
+                            .when(muted, |line| line.text_color(cx.theme().foreground.muted()))
+                            .child(text)
+                    })),
+            )
             .into_any_element()
     }
 
     fn browser(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tabs = BrowserTabStrip::new(self.tabs.clone(), self.active_tab)
+            .on_activate(cx.processor(|this, id, window, cx| {
+                if let Some(index) = this.tabs.iter().position(|tab| tab.id == id) {
+                    this.active_tab = index;
+                    let url = this.tabs[index].detail.clone();
+                    this.address
+                        .update(cx, |input, cx| input.set_value(url, window, cx));
+                    cx.notify();
+                }
+            }))
+            .on_close(cx.processor(|this, id, window, cx| {
+                if this.tabs.len() > 1 {
+                    let active_id = this.tabs[this.active_tab].id;
+                    this.tabs.retain(|tab| tab.id != id);
+                    this.active_tab = this
+                        .tabs
+                        .iter()
+                        .position(|tab| tab.id == active_id)
+                        .unwrap_or(0);
+                    let url = this.tabs[this.active_tab].detail.clone();
+                    this.address
+                        .update(cx, |input, cx| input.set_value(url, window, cx));
+                    cx.notify();
+                }
+            }))
+            .on_new_tab({
+                let view = cx.entity();
+                move |window, cx| {
+                    view.update(cx, |this, cx| {
+                        let id = this.tabs.iter().map(|tab| tab.id).max().unwrap_or(0) + 1;
+                        this.tabs.push(BrowserTabInfo::new(id, "New tab", ""));
+                        this.active_tab = this.tabs.len() - 1;
+                        this.address
+                            .update(cx, |input, cx| input.set_value("", window, cx));
+                        cx.notify();
+                    });
+                }
+            });
         let toolbar = BrowserToolbar::new(
             browser_toolbar_button(
                 cx,
@@ -696,44 +788,27 @@ impl Preview {
                 false,
                 false,
             ),
-            BrowserTabStrip::new(&self.address, self.tabs.clone(), self.active_tab)
-                .on_activate(cx.processor(|this, id, window, cx| {
-                    if let Some(index) = this.tabs.iter().position(|tab| tab.id == id) {
-                        this.active_tab = index;
-                        let url = this.tabs[index].detail.clone();
-                        this.address
-                            .update(cx, |input, cx| input.set_value(url, window, cx));
-                        cx.notify();
-                    }
-                }))
-                .on_close(cx.processor(|this, id, window, cx| {
-                    if this.tabs.len() > 1 {
-                        let active_id = this.tabs[this.active_tab].id;
-                        this.tabs.retain(|tab| tab.id != id);
-                        this.active_tab = this
-                            .tabs
-                            .iter()
-                            .position(|tab| tab.id == active_id)
-                            .unwrap_or(0);
-                        let url = this.tabs[this.active_tab].detail.clone();
-                        this.address
-                            .update(cx, |input, cx| input.set_value(url, window, cx));
-                        cx.notify();
-                    }
-                }))
-                .on_new_tab({
-                    let view = cx.entity();
-                    move |window, cx| {
-                        view.update(cx, |this, cx| {
-                            let id = this.tabs.iter().map(|tab| tab.id).max().unwrap_or(0) + 1;
-                            this.tabs.push(BrowserTabInfo::new(id, "New tab", ""));
-                            this.active_tab = this.tabs.len() - 1;
-                            this.address
-                                .update(cx, |input, cx| input.set_value("", window, cx));
-                            cx.notify();
-                        });
-                    }
+            browser_address(
+                &self.address,
+                browser_site_controls_button(cx).dropdown_menu(|menu, window, cx| {
+                    let muted = window.use_keyed_state("preview-browser-muted", cx, |_, _| false);
+                    let state = BrowserSiteMenuState {
+                        site: "zzmux.sh".into(),
+                        connection_secure: Some(true),
+                        audio_muted: Some(*muted.read(cx)),
+                        can_clear_site_data: false,
+                    };
+                    browser_site_menu(
+                        menu,
+                        state,
+                        move |_, cx| {
+                            muted.update(cx, |muted, _| *muted = !*muted);
+                        },
+                        |_, _| {},
+                    )
                 }),
+                cx,
+            ),
             browser_toolbar_button(
                 cx,
                 "preview-picker",
@@ -745,13 +820,42 @@ impl Preview {
             browser_toolbar_button(
                 cx,
                 "preview-browser-menu",
-                IconName::Ellipsis,
+                IconName::EllipsisVertical,
                 "More",
                 false,
                 false,
             ),
         );
+        let action = |icon, label| {
+            zz_ui::pane::pane_header_icon_button(label, icon, true, cx).tooltip(label)
+        };
+        let actions = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_1()
+            .child(action(IconName::PanelBottom, "Split bottom"))
+            .child(action(IconName::PanelRight, "Split right"))
+            .child(zz_ui::pane::pane_drag_button(
+                "preview-browser-drag",
+                zz_protocol::PaneId(3),
+                "Browser".into(),
+                true,
+                |_, _, _| {},
+                cx,
+            ))
+            .child(action(IconName::Xmark, "Close pane"));
+        let header = BrowserHeader::new(
+            matches!(
+                self.options.scene.as_str(),
+                "browser" | "browser-suggestions"
+            ),
+            tabs,
+            actions,
+            toolbar,
+        );
         div()
+            .relative()
             .flex()
             .flex_col()
             .size_full()
@@ -764,7 +868,7 @@ impl Preview {
                         .background
                         .opaque()
                         .opacity(cx.theme().pane_background_opacity))
-                    .child(toolbar),
+                    .child(header),
             )
             .child(
                 div()
@@ -774,37 +878,174 @@ impl Preview {
                     .bg(cx.theme().background.opaque())
                     .child(zz_ui::browser::browser_start_surface(BrowserEmptyHint)),
             )
+            .when(self.options.scene == "browser-suggestions", |view| {
+                let rows = [
+                    ("zz UI preview", "127.0.0.1:4173/?scene=settings", true),
+                    (
+                        "A long page title that leaves room for its address",
+                        "example.com/guides/a-long-page-address",
+                        false,
+                    ),
+                    ("", "example.com/page-without-a-title", false),
+                ]
+                .into_iter()
+                .enumerate()
+                .map(|(index, (title, url, selected))| {
+                    let favicon = (index == 0).then(|| {
+                        Arc::from(
+                            include_bytes!("../../../crates/zz-browser/tests/fixtures/favicon.png")
+                                .as_slice(),
+                        )
+                    });
+                    zz_ui::browser::browser_omnibox_row(index, title, url, selected, favicon, cx)
+                        .into_any_element()
+                })
+                .collect();
+                view.child(zz_ui::browser::browser_omnibox_panel(rows, cx))
+            })
             .into_any_element()
     }
 
-    fn agent(&self, cx: &App) -> AnyElement {
+    fn agent(&self, window: &mut Window, cx: &mut App) -> AnyElement {
+        use zz_ui::agent::controls::{
+            AgentControlChoice, AgentControlSelection, agent_model_picker,
+        };
+        let selection = window.use_keyed_state("preview-agent-selection", cx, |_, _| {
+            (
+                zz_protocol::AgentProvider::Codex,
+                "astra".to_owned(),
+                "high".to_owned(),
+            )
+        });
+        let (provider, model, effort) = selection.read(cx).clone();
+        let models_for = |provider| {
+            if provider == zz_protocol::AgentProvider::Codex {
+                vec![
+                    ("astra", "6 Astra", "Best for long agentic runs"),
+                    ("sol", "5.6 Sol", "Balanced speed and depth"),
+                    ("terra", "5.6 Terra", "Strong on refactors"),
+                    ("luna", "5.6 Luna", "Fast and affordable"),
+                    ("daybreak", "Daybreak", "Experimental preview"),
+                    ("spark", "5.3 Codex Spark", "Lightweight, low latency"),
+                ]
+            } else {
+                vec![
+                    ("opus", "Opus", "For complex work"),
+                    ("sonnet", "Sonnet", "Balanced speed and depth"),
+                ]
+            }
+        };
+        let models = models_for(provider);
+        let catalogs = window.use_keyed_state("preview-agent-catalogs", cx, |_, _| {
+            Vec::<zz_protocol::agent_stream::AgentCatalogResult>::new()
+        });
+        let loaded = catalogs.read(cx).clone();
+        let picker = agent_model_picker(
+            "preview-model",
+            ("preview".into(), Default::default()),
+            provider,
+            AgentControlSelection {
+                current_value: model,
+                choices: models
+                    .into_iter()
+                    .map(|(value, name, description)| AgentControlChoice {
+                        value: value.into(),
+                        name: name.into(),
+                        description: Some(description.into()),
+                    })
+                    .collect(),
+            },
+            Some(AgentControlSelection {
+                current_value: effort,
+                choices: [
+                    ("low", "Low"),
+                    ("medium", "Medium"),
+                    ("high", "High"),
+                    ("xhigh", "Xhigh"),
+                    ("max", "Max"),
+                    ("ultra", "Ultra"),
+                ]
+                .into_iter()
+                .map(|(value, name)| AgentControlChoice {
+                    value: value.into(),
+                    name: name.into(),
+                    description: None,
+                })
+                .collect(),
+            }),
+            true,
+            true,
+            loaded,
+            move |provider, cx| {
+                let models = models_for(provider);
+                let current = models[0].0;
+                let options: Vec<_> = models
+                    .into_iter()
+                    .map(|(value, name, _)| serde_json::json!({"value": value, "name": name}))
+                    .collect();
+                catalogs.update(cx, |catalogs, cx| {
+                    catalogs.push(zz_protocol::agent_stream::AgentCatalogResult {
+                        catalog_provider: provider, cwd: Default::default(), request_id: 1, error: None,
+                        config_options: Some(serde_json::json!([
+                            {"id": "model", "type": "select", "category": "model", "currentValue": current, "name": "Model", "options": options},
+                            {"id": "effort", "type": "select", "category": "thought_level", "currentValue": "high", "name": "Effort", "options": [
+                                {"value": "low", "name": "Low"}, {"value": "medium", "name": "Medium"}, {"value": "high", "name": "High"}
+                            ]}
+                        ])),
+                    });
+                    cx.notify();
+                });
+            },
+            move |draft, cx| {
+                selection.update(cx, |selection, cx| {
+                    let provider_changed = selection.0 != draft.provider;
+                    selection.0 = draft.provider;
+                    selection.1 = draft.model.unwrap_or_else(|| {
+                        if !provider_changed {
+                            return selection.1.clone();
+                        }
+                        if draft.provider == zz_protocol::AgentProvider::Codex {
+                            "astra"
+                        } else {
+                            "opus"
+                        }
+                        .into()
+                    });
+                    if let Some(effort) = draft.effort {
+                        selection.2 = effort;
+                    }
+                    cx.notify();
+                });
+            },
+            window,
+            cx,
+        );
         let composer = AgentComposer {
             input: self.input.clone(),
             action: Button::compact_icon("preview-send", IconName::ArrowUp)
                 .primary()
                 .rounded_full()
                 .into_any_element(),
-            settings: vec![
-                Button::new("preview-model")
-                    .ghost()
-                    .xsmall()
-                    .label("Default model")
+            settings: vec![picker],
+            usage: None,
+            footer_actions: vec![
+                zz_ui::agent::controls::agent_directory_button("preview-directory", "zz", true, cx)
+                    .into_any_element(),
+                Button::compact_icon("preview-new-thread", IconName::ChatPlus)
+                    .tooltip("New session")
+                    .into_any_element(),
+                Button::compact_icon("preview-history", IconName::History)
+                    .tooltip("History")
                     .into_any_element(),
             ],
-            usage: None,
-            git: Some(
-                h_flex()
-                    .gap_1()
-                    .child(Icon::new(IconName::GitBranch).xsmall())
-                    .child("main")
-                    .into_any_element(),
-            ),
-            directory: Button::new("preview-directory")
-                .ghost()
-                .xsmall()
-                .icon(IconName::Folder)
-                .label("zz")
-                .into_any_element(),
+            git: Some(zz_ui::agent::controls::git_summary_footer(
+                "preview-git-summary",
+                Some("codex/agent-pane-header".into()),
+                3,
+                38,
+                12,
+                cx,
+            )),
             command_hint: None,
             prefix: Vec::new(),
             attachments: None,
@@ -821,21 +1062,54 @@ impl Preview {
                 .opaque()
                 .opacity(cx.theme().pane_background_opacity))
             .child(agent_pane_header(
-                Button::new("preview-agent-picker")
-                    .ghost()
-                    .small()
-                    .icon(IconName::Openai)
-                    .label("Codex"),
+                self.options.scene == "agent",
+                h_flex()
+                    .min_w_0()
+                    .gap_1()
+                    .child(zz_ui::agent::controls::agent_provider_label(provider, cx))
+                    .child(zz_ui::agent::controls::agent_thread_button(
+                        "preview-thread-title",
+                        "Improve agent pane controls",
+                        cx,
+                    )),
                 h_flex()
                     .gap(px(zz_ui::CHROME_GAP))
                     .child(
-                        Button::compact_icon("preview-new-thread", IconName::ChatPlus)
-                            .tooltip("New conversation"),
+                        zz_ui::pane::pane_header_icon_button(
+                            "preview-agent-split-bottom",
+                            IconName::PanelBottom,
+                            true,
+                            cx,
+                        )
+                        .tooltip("Split bottom"),
                     )
                     .child(
-                        Button::compact_icon("preview-history", IconName::History)
-                            .tooltip("History"),
+                        zz_ui::pane::pane_header_icon_button(
+                            "preview-agent-split-right",
+                            IconName::PanelRight,
+                            true,
+                            cx,
+                        )
+                        .tooltip("Split right"),
+                    )
+                    .child(zz_ui::pane::pane_drag_button(
+                        "preview-pane-drag",
+                        zz_protocol::PaneId(2),
+                        "Improve agent pane controls".to_owned(),
+                        true,
+                        |_, _, _| {},
+                        cx,
+                    ))
+                    .child(
+                        zz_ui::pane::pane_header_icon_button(
+                            "preview-pane-close",
+                            IconName::Xmark,
+                            true,
+                            cx,
+                        )
+                        .tooltip("Close pane"),
                     ),
+                true,
                 cx,
             ))
             .child(
@@ -857,14 +1131,16 @@ impl Preview {
             .into_any_element()
     }
 
-    fn workspace(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn workspace(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let content = match self.options.scene.as_str() {
-            "browser" => self.pane("browser-pane", self.browser(cx), true, cx),
-            "agent" => self.pane("agent-pane", self.agent(cx), true, cx),
+            "browser" | "browser-suggestions" => {
+                self.pane("browser-pane", self.browser(cx), true, cx)
+            }
+            "agent" => self.pane("agent-pane", self.agent(window, cx), true, cx),
             _ => {
                 let terminal = self.pane("terminal-pane", Self::terminal(cx), true, cx);
                 let browser = self.pane("browser-pane", self.browser(cx), false, cx);
-                let agent = self.pane("agent-pane", self.agent(cx), false, cx);
+                let agent = self.pane("agent-pane", self.agent(window, cx), false, cx);
                 let right = self.split(
                     "preview-right",
                     PaneSplitAxis::Vertical,
@@ -962,7 +1238,7 @@ impl Render for Preview {
         let content = if settings {
             self.settings_page(cx)
         } else {
-            self.workspace(cx)
+            self.workspace(window, cx)
         };
         let overlays = Root::render_dialog_layer(window, cx)
             .into_iter()

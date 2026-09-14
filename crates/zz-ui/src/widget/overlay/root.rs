@@ -26,6 +26,7 @@ const MAX_FOCUS_STEPS: usize = 100;
 
 #[derive(Clone)]
 struct ActiveDialog {
+    instance_id: u64,
     focus_handle: FocusHandle,
     previous_focused_handle: Option<WeakFocusHandle>,
     builder: Rc<dyn Fn(Dialog, &mut Window, &mut App) -> Dialog>,
@@ -39,6 +40,7 @@ pub struct Root {
     view: AnyView,
     bordered: bool,
     active_dialogs: Vec<ActiveDialog>,
+    next_dialog_id: u64,
     notification: Entity<NotificationList>,
     pending_focus_restore: Option<WeakFocusHandle>,
     pub(crate) text_selection: WindowTextSelection,
@@ -52,6 +54,7 @@ impl Root {
             view: view.into(),
             bordered: true,
             active_dialogs: Vec::new(),
+            next_dialog_id: 0,
             notification: cx.new(|_| NotificationList::new()),
             pending_focus_restore: None,
             text_selection: WindowTextSelection::default(),
@@ -147,6 +150,7 @@ impl Root {
 
                 dialog.focus_handle = active.focus_handle.clone();
                 dialog.layer_ix = ix;
+                dialog.instance_id = active.instance_id;
                 dialog.props.overlay_visible = ix == topmost;
                 dialog
             })
@@ -168,7 +172,10 @@ impl Root {
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);
 
+        let instance_id = self.next_dialog_id;
+        self.next_dialog_id = self.next_dialog_id.wrapping_add(1);
         self.active_dialogs.push(ActiveDialog {
+            instance_id,
             focus_handle,
             previous_focused_handle,
             builder: Rc::new(build),

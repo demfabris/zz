@@ -157,7 +157,6 @@ struct NavigationPresentationGallery: View {
                     })
             } trailing: {
                 ZZStatusAgentCount(2)
-                ZZStatusClock("18:42")
             }
             ZZButton("Reset windows", flat: true) {
                 windows = ["0", "1", "2", "3", "4", "5", "6"]; activeWindow = "0"

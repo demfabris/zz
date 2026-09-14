@@ -253,6 +253,7 @@ fn apply_zz_overrides(cx: &mut App) {
     let chrome_contrast = config::chrome_contrast(cx);
     let shadow_strength = config::shadow_strength(cx);
     let pane_background_opacity = config::pane_background_opacity(cx);
+    let pane_glow_strength = config::resolved_config(cx).pane_glow_strength.value;
     let chrome_preset = config::chrome_preset(Theme::global(cx).mode.is_dark(), cx);
     let chrome = config::chrome_colors(cx);
     let theme = Theme::global_mut(cx);
@@ -267,6 +268,7 @@ fn apply_zz_overrides(cx: &mut App) {
     theme.set_contrast(chrome_contrast);
     theme.shadow_strength = shadow_strength;
     theme.pane_background_opacity = pane_background_opacity;
+    theme.pane_glow_strength = pane_glow_strength;
 }
 
 #[cfg(test)]

@@ -678,6 +678,23 @@ impl InteractiveClient {
         }
     }
 
+    pub fn forward_loopback(&self, port: u16) -> io::Result<()> {
+        if port == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "A nonzero localhost port is required.",
+            ));
+        }
+        #[cfg(target_os = "ios")]
+        if let Some(forward) = &self.russh_forward {
+            return forward.forward_loopback(port);
+        }
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Localhost forwarding requires an embedded SSH connection.",
+        ))
+    }
+
     pub fn attach(&self, session: impl Into<String>) -> Result<(), DaemonError> {
         self.send(&ProtocolMessage::Attach {
             session: session.into(),
@@ -1529,6 +1546,12 @@ fn connect_stream_with_startup_owner<S: TransportStream>(
     client_learned_features_capability(&mut capabilities);
     if kind == ClientKind::Interactive && client_has_terminal {
         capabilities.push(ClientHello::CLIENT_TERMINAL_CAPABILITY.to_owned());
+        if matches!(
+            client_facts,
+            EndpointFactsScope::None | EndpointFactsScope::LocalHostWorkingDirectory
+        ) {
+            capabilities.push(ClientHello::CLIENT_NATIVE_TERMINAL_SEARCH_CAPABILITY.to_owned());
+        }
     }
     terminal_facts_capabilities(
         client_facts,
@@ -1893,6 +1916,109 @@ mod tests {
         assert!(EndpointFactsScope::LocalControlTerminalIdentity.includes_tty());
         assert!(EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal.includes_terminal_size());
         assert!(EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal.includes_tty());
+    }
+
+    #[cfg(all(unix, feature = "daemon"))]
+    #[test]
+    fn handshake_advertises_native_terminal_search_only_for_graphical_terminal_clients() {
+        use super::{ProtocolReceiver, ProtocolSender, connect_stream};
+        use crate::transport::{LocalTransport, Transport, TransportListener};
+        use zz_protocol::{CommandResponse, ProtocolMessage, ServerError};
+
+        for (kind, client_has_terminal, scope, expected) in [
+            (
+                ClientKind::Interactive,
+                true,
+                EndpointFactsScope::LocalHostWorkingDirectory,
+                true,
+            ),
+            (
+                ClientKind::Interactive,
+                true,
+                EndpointFactsScope::None,
+                true,
+            ),
+            (
+                ClientKind::Interactive,
+                true,
+                EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal,
+                false,
+            ),
+            (
+                ClientKind::Interactive,
+                true,
+                EndpointFactsScope::PortableTerminalSize,
+                false,
+            ),
+            (
+                ClientKind::Interactive,
+                false,
+                EndpointFactsScope::LocalHostWorkingDirectory,
+                false,
+            ),
+            (
+                ClientKind::Command,
+                true,
+                EndpointFactsScope::LocalHostWorkingDirectory,
+                false,
+            ),
+            (ClientKind::Control, true, EndpointFactsScope::None, false),
+        ] {
+            let directory = tempfile::Builder::new()
+                .prefix("zz-search-")
+                .tempdir_in("/tmp")
+                .expect("create socket directory");
+            let socket = directory.path().join("daemon.sock");
+            let listener = LocalTransport::bind(&socket).expect("bind handshake listener");
+            let server = std::thread::spawn(move || {
+                let stream = listener.accept().expect("accept client");
+                stream
+                    .set_timeout(Some(std::time::Duration::from_secs(5)))
+                    .expect("set timeout");
+                let mut reader = ProtocolReceiver::new(
+                    super::TransportStream::try_clone(&stream).expect("clone stream"),
+                );
+                let mut writer = ProtocolSender::new(stream);
+                let ProtocolMessage::ClientHello(hello) = reader.recv().expect("receive handshake")
+                else {
+                    panic!("expected ClientHello");
+                };
+                writer
+                    .send(&ProtocolMessage::CommandResponse(CommandResponse::Error {
+                        request_id: 0,
+                        error: ServerError::Internal("handshake captured".to_owned()),
+                        output: Default::default(),
+                    }))
+                    .expect("finish handshake");
+                hello
+            });
+            let result = connect_stream(
+                LocalTransport::connect(&socket).expect("connect handshake client"),
+                socket.display(),
+                kind,
+                None,
+                None,
+                client_has_terminal,
+                false,
+                scope,
+            );
+            assert!(
+                matches!(result, Err(crate::DaemonError::Server(ServerError::Internal(message))) if message == "handshake captured")
+            );
+            let hello = server.join().expect("join handshake server");
+            assert_eq!(
+                hello.capabilities.iter().any(|capability| capability
+                    == ClientHello::CLIENT_NATIVE_TERMINAL_SEARCH_CAPABILITY),
+                expected,
+            );
+            assert_eq!(
+                hello
+                    .capabilities
+                    .iter()
+                    .any(|capability| capability == ClientHello::CLIENT_TERMINAL_CAPABILITY),
+                kind == ClientKind::Interactive && client_has_terminal,
+            );
+        }
     }
 
     #[test]

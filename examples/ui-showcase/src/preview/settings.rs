@@ -9,7 +9,7 @@ use gpui::{
     img, prelude::*, px,
 };
 use zz_ui::{
-    ActiveTheme as _, IndexPath, Sizable as _, Theme, ThemeMode,
+    ActiveTheme as _, Sizable as _, Theme, ThemeMode,
     chrome_palette::{ChromePresetId, chrome_presets, inherited_chrome_colors},
     color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState},
     input::{InputEvent, InputState, NumberInput},
@@ -66,8 +66,6 @@ pub(super) struct SettingsFixture {
     numbers: BTreeMap<&'static str, Entity<InputState>>,
     colors: Vec<Entity<ColorPickerState>>,
     ui_font: Entity<SelectState<Vec<SettingsSelectItem>>>,
-    alignment: Entity<SelectState<Vec<SettingsSelectItem>>>,
-    clock: Entity<SelectState<Vec<SettingsSelectItem>>>,
     toggles: BTreeMap<&'static str, bool>,
     app_icon: usize,
     theme_mode: usize,
@@ -114,6 +112,13 @@ impl SettingsFixture {
                 100.0,
                 5.0,
             ),
+            (
+                "pane-glow-strength",
+                options.pane_glow_strength * 100.0,
+                0.0,
+                200.0,
+                5.0,
+            ),
             ("margin", options.pane_margin, 0.0, 32.0, 1.0),
             ("pane-radius", options.pane_radius, 0.0, 32.0, 0.5),
             ("border", options.pane_border, 0.0, 8.0, 0.5),
@@ -151,6 +156,12 @@ impl SettingsFixture {
                                 this.options.pane_background_opacity;
                             cx.refresh_windows();
                         }
+                        "pane-glow-strength" => {
+                            this.options.pane_glow_strength = value / 100.0;
+                            Theme::global_mut(cx).pane_glow_strength =
+                                this.options.pane_glow_strength;
+                            cx.refresh_windows();
+                        }
                         "shadow-strength" => {
                             this.options.shadow_strength = value / 100.0;
                             Theme::global_mut(cx).shadow_strength = this.options.shadow_strength;
@@ -167,10 +178,6 @@ impl SettingsFixture {
             (key, input)
         })
         .collect();
-        let select =
-            |items: Vec<SettingsSelectItem>, window: &mut Window, cx: &mut Context<Preview>| {
-                cx.new(|cx| SelectState::new(items, Some(IndexPath::default()), window, cx))
-            };
         let colors = (0..COLORS.len())
             .map(|index| {
                 let picker = cx.new(|cx| {
@@ -198,26 +205,6 @@ impl SettingsFixture {
             ui_font,
             numbers,
             colors,
-            alignment: select(
-                vec![
-                    SettingsSelectItem::new("Left", "left"),
-                    SettingsSelectItem::new("Center", "center"),
-                ],
-                window,
-                cx,
-            ),
-            clock: select(
-                [
-                    ("24-hour", "24-hour"),
-                    ("12-hour", "12-hour"),
-                    ("Time and date", "time-date"),
-                    ("Off", "off"),
-                ]
-                .map(|(a, b)| SettingsSelectItem::new(a, b))
-                .to_vec(),
-                window,
-                cx,
-            ),
             toggles: BTreeMap::new(),
             app_icon: 0,
             theme_mode: if options.dark { 2 } else { 1 },
@@ -290,70 +277,53 @@ impl Preview {
     }
 
     fn status_bar_settings(&self, cx: &mut Context<Self>) -> AnyElement {
-        zz_ui::settings::settings_scroll_column("settings-status-bar")
-            .child(zz_ui::settings::settings_page_description(
-                SettingsSection::StatusBar,
-                cx,
-            ))
-            .child(
-                zz_ui::settings::SettingsStack::new()
-                    .child(self.toggle(
-                        "session",
-                        "Session name",
-                        "Show the current session as a chip.",
-                        cx,
-                    ))
-                    .child(self.toggle(
-                        "badges",
-                        "Window badges",
-                        "Show bell, activity, and agent markers on window items.",
-                        cx,
-                    ))
-                    .child({
-                        SettingEntry::new(
-                            "Alignment",
-                            "Align the window strip to the left or center.",
-                        )
-                        .title_actions(Self::annotations("alignment"))
-                        .control(
-                            div().w(px(120.0)).flex_none().child(
-                                Select::new(&self.settings_state.alignment)
-                                    .small()
-                                    .bg(settings_control_fill(cx)),
-                            ),
-                        )
-                    })
-                    .child(self.toggle(
-                        "agents",
-                        "Agents",
-                        "Show the number of running agent panes.",
-                        cx,
-                    ))
-                    .child(self.toggle(
-                        "host",
-                        "Host",
-                        "Show the attached host when it is remote.",
-                        cx,
-                    ))
-                    .child(self.toggle(
-                        "update",
-                        "Update",
-                        "Show an available version and install it from the bar.",
-                        cx,
-                    ))
-                    .child({
-                        SettingEntry::new("Clock", "Choose the clock format, or hide it.")
-                            .title_actions(Self::annotations("clock"))
-                            .control(
-                                div().w(px(120.0)).flex_none().child(
-                                    Select::new(&self.settings_state.clock)
-                                        .small()
-                                        .bg(settings_control_fill(cx)),
-                                ),
-                            )
-                    }),
-            )
-            .into_any_element()
+        use zz_ui::settings::status_bar_preview::StatusBarSettings;
+
+        let enabled = |id| *self.settings_state.toggles.get(id).unwrap_or(&true);
+        let settings = StatusBarSettings {
+            show_session: enabled("session"),
+            badges: enabled("badges"),
+            show_agents: enabled("agents"),
+            show_host: enabled("host"),
+            show_update: enabled("update"),
+        };
+        zz_ui::settings::status_bar_preview::status_bar_page(
+            settings,
+            self.options.gaps,
+            zz_ui::settings::SettingsStack::new()
+                .child(self.toggle(
+                    "session",
+                    "Session",
+                    "Show the session menu in the titlebar.",
+                    cx,
+                ))
+                .child(self.toggle(
+                    "badges",
+                    "Window badges",
+                    "Show bell and activity markers on window items.",
+                    cx,
+                ))
+                .child(self.toggle(
+                    "agents",
+                    "Agent activity",
+                    "Show agent activity in the titlebar.",
+                    cx,
+                ))
+                .child(self.toggle(
+                    "host",
+                    "Host",
+                    "Show the attached host when it is remote.",
+                    cx,
+                ))
+                .child(self.toggle(
+                    "update",
+                    "Update",
+                    "Show an available version and install it from the bar.",
+                    cx,
+                )),
+            cx,
+        )
+        .into_any_element()
     }
 
     pub(super) fn settings_page(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -361,6 +331,13 @@ impl Preview {
             self.status_bar_settings(cx)
         } else if self.settings == SettingsSection::Panes {
             zz_ui::settings::panes_page(
+                zz_ui::settings::panes_preview::PanesPreview {
+                    gaps: self.options.gaps,
+                    margin: self.options.pane_margin,
+                    radius: self.options.pane_radius,
+                    border_width: self.options.pane_border,
+                    inactive_opacity: self.options.inactive_opacity,
+                },
 self.toggle("gaps", "Pane gaps", "Separate panes with card-like spacing and chrome.", cx),
 self.number("pane-background-opacity", "Pane background opacity", "Background strength from 0% to 100%. Browser panes apply this to the toolbar only.", cx)
     .title_actions(settings_reset_button(
@@ -377,10 +354,25 @@ self.number("pane-background-opacity", "Pane background opacity", "Background st
         this.remember(cx);
         cx.refresh_windows();
     }))),
-self.number("opacity", "Inactive pane opacity", "Visible strength of inactive pane content and chrome (0–1). Set to 1 to disable dimming.", cx),
-self.number("margin", "Pane margin", "Space around each pane on all platforms, in logical pixels (0–32).", cx).disabled(!self.options.gaps),
+[self.number("opacity", "Inactive pane opacity", "Visible strength of inactive pane content and chrome (0–1). Set to 1 to disable dimming.", cx),
+self.number("pane-glow-strength", "Selected pane glow", "Glow strength from 0% to 200%. Set to 0 to turn it off.", cx)
+    .title_actions(settings_reset_button(
+        "preview-pane-glow-strength-reset",
+        "Reset selected pane glow to 100%",
+        self.options.pane_glow_strength != super::PreviewOptions::default().pane_glow_strength,
+    ).on_click(cx.listener(|this, _, window, cx| {
+        let value = super::PreviewOptions::default().pane_glow_strength;
+        this.options.pane_glow_strength = value;
+        Theme::global_mut(cx).pane_glow_strength = value;
+        this.settings_state.numbers["pane-glow-strength"].update(cx, |input, cx| {
+            input.set_value((value * 100.0).to_string(), window, cx);
+        });
+        this.remember(cx);
+        cx.refresh_windows();
+    })))],
+[self.number("margin", "Pane margin", "Space around each pane on all platforms, in logical pixels (0–32).", cx).disabled(!self.options.gaps),
 self.number("pane-radius", "Pane corner radius", "Rounds every pane corner on all platforms, in logical pixels (0–32).", cx).disabled(!self.options.gaps),
-self.number("border", "Pane border width", "Border width for gapped panes, in logical pixels (0–8). Set to 0 to disable.", cx).disabled(!self.options.gaps), cx).into_any_element()
+self.number("border", "Pane border width", "Border width for gapped panes, in logical pixels (0–8). Set to 0 to disable.", cx).disabled(!self.options.gaps)], cx).into_any_element()
         } else {
             let view = cx.entity();
             appearance_page(

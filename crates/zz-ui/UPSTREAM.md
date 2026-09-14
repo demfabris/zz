@@ -46,6 +46,13 @@ card stays opaque; the footer inherits the pane background without repainting it
 The composer reserves its measured height, with a 12 px transcript overlap beneath the opaque
 input edge. Prefix cards disable the overlap; the transcript clips before the footer.
 Margins, split gaps, and rounded pane corners need no separate fill.
+The app-owned `pane::drag` module shares a compact grip button, pane drag payload, and drag
+preview. Pane views notify their workspace when dragging starts; the workspace owns drop targets
+and mux commands. The handle uses the six-dot `grip-vertical` glyph and sits between
+the split controls and Close in Terminal, Agent, and Browser headers.
+Terminal and Agent header buttons use the same dimmed foreground at rest and brighten
+on hover without a background, border, or shadow. `pane_header_icon_button` shares that
+treatment for drag, split, and close controls; the clickable Agent title follows it too.
 
 ## Ported modules and local deltas
 
@@ -59,7 +66,8 @@ Margins, split gaps, and rounded pane corners need no separate fill.
 | `menu` | close-to-source | item text `text_sm` → **`text_xs`** (the change that started the fork); owns its actions (`zz_menu`), key context (`ZzPopupMenu`) and `init()`; upstream's native `AppMenuBar` not carried over |
 | `icon` | trimmed | `IconName` is a **hand-written** enum instead of upstream's build-time proc-macro codegen; SVGs live in `assets/icons` and are embedded by our own `Assets`, replacing `gpui-component-assets`; `Globe` uses Tabler’s round `world` artwork. The dedicated `window-close` glyph extends the Tabler X to the same 18-unit span as maximize, keeping its 2-unit stroke and the general-purpose `xmark` unchanged |
 | `tooltip` | trimmed | hangs off gpui's `.tooltip()` rather than upstream's `Root`-owned overlay; dropped `ComponentTooltip` after nothing adopted it |
-| `popover` | trimmed | owns its `Cancel` action and `ZzPopover` context |
+| `popover` | trimmed | owns its `Cancel` action and `ZzPopover` context; `on_dismiss` runs once for every close path, including trigger toggles |
+| `slider` | **zz-original** | `DiscreteSlider` displays compact pills filled through the selected step, per-pill tooltips, a trailing selected value, keyboard navigation, and a slider accessibility value |
 | `list` | trimmed | `ListItem` only; upstream's virtualized delegate `List` is unused |
 | `scroll` | close-to-source | custom-painted scrollbar kept faithful. zz fixes upstream's track-hover ordering bug: it compares the previous axis before storing the new one, so entering a hover-only track requests its repaint. |
 | `button` | close-to-source | reimplements upstream's `pub(crate)` `ButtonIcon` on our `Spinner`; `ButtonRounded` keeps only `Medium` (the theme radius) and `Size(px)`, since a button turns the same corner as everything else; `Button::compact_icon` fixes shared chrome controls at a 24px surface, Small 14px glyph, and 0.5px optical drop. Default, Secondary, and Ghost variants use `background.washed(2)` for hover, pressed, and selected fills, matching sidebar highlights and preserving background blur. Neutral controls use the shared half-pixel edge and soft shadow, with the edge transparent at rest for Ghost buttons. `Button::flat()` keeps nested actions free of extra borders and shadows while retaining their wash and keyboard focus indicator. Local `ButtonVariant::Accent` is Primary's solid shape on the `accent` root instead of `foreground`; upstream's `Info` variant has no counterpart. |
@@ -100,6 +108,11 @@ System default and filters internal dot-prefixed font aliases.
 
 ## Conventions
 
+Picker, chooser, command palette, popup menu, and dialog surfaces share a 160ms entrance:
+they fade in while settling upward by 6px, using GPUI's reduced-motion behavior.
+Dialog movement starts near its final position instead of sliding from the window edge.
+Each opened dialog has its own animation identity so replacement dialogs animate again.
+
 - **Close-to-source ports** keep upstream's structure so a future re-sync is a
   small diff. They carry a module-level
   `#![allow(clippy::pedantic, clippy::style, clippy::complexity)]` because they
@@ -109,12 +122,17 @@ System default and filters internal dot-prefixed font aliases.
   omissions, so a deliberate omission is never mistaken for a missing feature.
 - **Chrome colors come from `cx.theme()`**, never a literal; `clippy.toml`
   enforces it, and the ports were corrected where upstream hardcoded a color.
-- Inputs, number fields, select triggers, dropdown surfaces, and browser address bars use
+- Inputs, number fields, select triggers, and dropdown surfaces use
   `StyledExt::control_surface`: a half-pixel foreground edge and the shared soft shadow.
   Input and select focus changes only the border color, preserving their layout. Clear buttons,
   steppers, browser tab close actions, and tree-row actions stay flat inside the outer control.
   Tree actions end at the row highlight edge; browser tab close actions have no extra right padding.
   Both use the Text button variant for foreground-only hover feedback.
+  Browser URL fields show a washed background and the shared button edge and shadow only while focused.
+  Active browser tabs use the same treatment; both reserve border width across state changes.
+  The browser header uses 28px tabs, URL fields, and browser buttons, with 8px outer padding and row spacing.
+  Pane split and close buttons keep their 24px size.
+  A 24px sliders button inside the URL field opens connection, sound, and site-data controls.
 
 Re-syncing a module against a newer upstream revision means updating the
 revision above, re-applying that module's delta, and re-running the workspace
@@ -173,7 +191,8 @@ The desktop and browser clients share chrome preset definitions and palette reso
 both Control and Command editing shortcuts so browser clients work on either desktop platform.
 
 The shared workspace components also include window tabs and overflow menus in
-`src/navigation/status.rs`, sidebar markers, actions, and keyboard navigation in
+`src/navigation/status.rs`, including session switching and agent activity menus with the window pill surface and height, and overlapping pane icon decks, hover details, and direct pane selection in
+`src/navigation/status/pane_deck.rs`, sidebar markers, actions, and keyboard navigation in
 `src/navigation/sidebar.rs`, and command palette/menu/confirmation presentation in
 `src/command/`. `src/agent/slash.rs` renders provider command suggestions; the matching and
 replacement rules live in `zz-client`. Desktop and browser both use these components.

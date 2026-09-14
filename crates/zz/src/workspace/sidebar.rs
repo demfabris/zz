@@ -244,7 +244,7 @@ impl WorkspaceSidebar {
             .flat_map(|host| &host.sessions)
             .flat_map(|session| &session.windows)
             .flat_map(|window| &window.panes)
-            .filter(|pane| pane.kind == MuxTreePaneKind::Agent)
+            .filter(|pane| matches!(pane.kind, MuxTreePaneKind::Agent(_)))
             .filter_map(|pane| Some(((attached_host, pane.id), controller.pane_status(pane.id)?)))
             .collect()
     }
@@ -1316,7 +1316,7 @@ const fn pane_kind_icon(kind: MuxTreePaneKind) -> IconName {
         MuxTreePaneKind::Picker => IconName::Plus,
         MuxTreePaneKind::Terminal => IconName::SquareTerminal,
         MuxTreePaneKind::Browser => IconName::Globe,
-        MuxTreePaneKind::Agent => IconName::Bot,
+        MuxTreePaneKind::Agent(provider) => zz_ui::pane::agent_provider_icon(provider),
         MuxTreePaneKind::Editor => IconName::File,
     }
 }
@@ -2764,8 +2764,8 @@ mod tests {
     }
 
     #[test]
-    fn agent_panes_have_a_distinct_sidebar_kind_and_fallback_label() {
-        let pane = PaneSnapshot {
+    fn agent_panes_show_the_current_provider_and_session_name() {
+        let mut pane = PaneSnapshot {
             id: PaneId(404),
             title: String::new(),
             kind: PaneKindSnapshot::Agent(zz_protocol::AgentDescriptor::default()),
@@ -2779,8 +2779,27 @@ mod tests {
         };
 
         let projected = MuxTreePane::from_snapshot(&pane);
-        assert_eq!(projected.kind, MuxTreePaneKind::Agent);
-        assert_eq!(projected.label, "agent");
+        assert_eq!(
+            projected.kind,
+            MuxTreePaneKind::Agent(zz_protocol::AgentProvider::Codex)
+        );
+        assert_eq!(pane_kind_icon(projected.kind), IconName::Openai);
+        assert_eq!(projected.label, "New session");
+
+        pane.title = "agent".to_owned();
+        assert_eq!(MuxTreePane::from_snapshot(&pane).label, "New session");
+        pane.title = "Fix the agent header".to_owned();
+        assert_eq!(MuxTreePane::from_snapshot(&pane).label, pane.title);
+
+        let before_switch = MuxTreePane::from_snapshot(&pane);
+        let PaneKindSnapshot::Agent(agent) = &mut pane.kind else {
+            unreachable!()
+        };
+        agent.provider = zz_protocol::AgentProvider::ClaudeCode;
+        let after_switch = MuxTreePane::from_snapshot(&pane);
+        assert_ne!(before_switch, after_switch);
+        assert_eq!(pane_kind_icon(after_switch.kind), IconName::Claude);
+        assert_eq!(after_switch.label, pane.title);
     }
 
     #[test]

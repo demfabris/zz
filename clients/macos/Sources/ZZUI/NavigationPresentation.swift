@@ -116,12 +116,6 @@ public struct ZZStatusAgentCount: View {
     public var body: some View { ZZWorkspaceStatusItem(count == 1 ? "1 agent" : "\(count) agents", icon: "cpu") }
 }
 
-public struct ZZStatusClock: View {
-    private let label: String
-    public init(_ label: String) { self.label = label }
-    public var body: some View { ZZWorkspaceStatusItem(label, icon: "clock") }
-}
-
 extension View {
     public func zzRenameMenu(_ label: String, action: @escaping () -> Void) -> some View {
         contextMenu { Button(label, action: action) }

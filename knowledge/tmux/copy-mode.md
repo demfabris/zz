@@ -72,7 +72,12 @@ actor executes both against the frozen revision. `-X` actions never reach the PT
   pin expands a key argument as a format. `search_present`, `search_match`, `search_count`,
   `search_count_partial` and `search_timed_out` answer off the copy session. The native
   `copy-mode-search-prompt` command still exists for the client's own search box; nothing stock binds
-  it. `word-separators` (a session option) and `set-clipboard` /`copy-command` shape word selection
+  it. For interactive clients advertising `client-native-terminal-search-v1`, the daemon recognizes
+  those stock structured search callbacks and sends `TerminalUiCommand::BeginSearch` to the copy or
+  command-output pane. The desktop opens a pane-local live editor; custom callback templates and
+  clients without that capability retain the generic prompt. See [pane search](/terminal/interaction.md).
+  `word-separators` (a session option)
+  and `set-clipboard` /`copy-command` shape word selection
   and copy destinations.
 
 # TUI command-output navigation

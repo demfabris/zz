@@ -1016,7 +1016,7 @@ impl Render for PopupMenu {
             radius: cx.theme().radius,
         };
 
-        v_flex()
+        let surface = v_flex()
             .id("popup-menu")
             .role(Role::Menu)
             .key_context(CONTEXT)
@@ -1057,7 +1057,8 @@ impl Render for PopupMenu {
             .when(self.scrollable, |this| {
                 // TODO: When the menu is limited by `overflow_y_scroll`, the sub-menu will cannot be displayed.
                 this.vertical_scrollbar(&self.scroll_handle)
-            })
+            });
+        crate::widget::foundation::surface_enter(surface, "menu-open", px(0.0))
     }
 }
 

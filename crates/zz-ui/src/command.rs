@@ -1,7 +1,5 @@
 pub mod floating;
 
-use std::time::Duration;
-
 use crate::{
     ActiveTheme as _, CHROME_GAP, Colorize as _, Sizable as _,
     input::{Input, InputState},
@@ -10,9 +8,9 @@ use crate::{
     tag::Tag,
 };
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, App, BoxShadow, CursorStyle, ElementId, Entity,
-    IntoElement, Keystroke, ParentElement as _, Pixels, RenderOnce, SharedString, Styled as _, div,
-    ease_out_quint, point, prelude::*, px, relative,
+    AnyElement, App, BoxShadow, CursorStyle, ElementId, Entity, IntoElement, Keystroke,
+    ParentElement as _, Pixels, RenderOnce, SharedString, Styled as _, div, point, prelude::*, px,
+    relative,
 };
 
 pub const COMMAND_PALETTE_MAX_WIDTH: f32 = 560.0;
@@ -155,7 +153,7 @@ impl CommandPaletteSurface {
 
 impl RenderOnce for CommandPaletteSurface {
     fn render(self, _: &mut gpui::Window, cx: &mut App) -> impl IntoElement {
-        div()
+        let surface = div()
             .id("command-palette-surface")
             .relative()
             .w_full()
@@ -191,12 +189,12 @@ impl RenderOnce for CommandPaletteSurface {
                     .text_size(crate::rems_from_px(9.0))
                     .text_color(cx.theme().foreground.muted())
                     .children(self.hints.into_iter().map(palette_hint)),
-            )
-            .with_animation(
-                ElementId::NamedInteger("command-palette-open".into(), self.revision),
-                Animation::new(Duration::from_millis(140)).with_easing(ease_out_quint()),
-                |surface, delta| surface.top(px(6.0 * (1.0 - delta))).opacity(delta),
-            )
+            );
+        crate::widget::foundation::surface_enter(
+            surface,
+            ElementId::NamedInteger("command-palette-open".into(), self.revision),
+            px(0.0),
+        )
     }
 }
 

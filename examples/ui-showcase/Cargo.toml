@@ -28,6 +28,7 @@ rust-embed = { version = "8.12.0", features = ["debug-embed", "include-exclude"]
 # The gallery showcases the agent and editor widgets, which the app gates
 # behind cargo features; the showcase always compiles them.
 zz-ui = { path = "../../crates/zz-ui", features = ["agent", "editor"] }
+zz-protocol = { path = "../../crates/zz-protocol" }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 gpui_platform = { git = "https://github.com/zed-industries/zed", default-features = false, features = ["font-kit", "wayland", "x11"] }

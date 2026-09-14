@@ -3077,6 +3077,7 @@ fn close_outbound_too_far_behind(state: &mut OutboundState) {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DaemonCommandDispatch {
+    AgentCatalog,
     CapturePane,
     RunShell,
     IfShell,
@@ -3104,6 +3105,7 @@ enum DaemonCommandDispatch {
 }
 
 const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
+    ("agent-catalog", DaemonCommandDispatch::AgentCatalog),
     ("capture-pane", DaemonCommandDispatch::CapturePane),
     ("capturep", DaemonCommandDispatch::CapturePane),
     ("run-shell", DaemonCommandDispatch::RunShell),
@@ -3199,6 +3201,8 @@ struct Shared {
     agent: Mutex<Option<Arc<crate::agent::fanout::AgentRuntime>>>,
     #[cfg(feature = "agent")]
     agent_effects: Mutex<()>,
+    #[cfg(feature = "agent")]
+    agent_catalog_pending: Mutex<BTreeSet<(ClientId, PaneId, AgentProvider)>>,
     #[cfg(feature = "agent")]
     agent_stopped: AtomicBool,
     #[cfg(all(feature = "agent", unix))]
@@ -4282,6 +4286,8 @@ impl Shared {
             agent: Mutex::new(None),
             #[cfg(feature = "agent")]
             agent_effects: Mutex::new(()),
+            #[cfg(feature = "agent")]
+            agent_catalog_pending: Mutex::new(BTreeSet::new()),
             #[cfg(feature = "agent")]
             agent_stopped: AtomicBool::new(false),
             #[cfg(all(feature = "agent", unix))]
@@ -5663,6 +5669,7 @@ impl Shared {
             inner.client_instances.remove(&client);
             inner.client_kinds.remove(&client);
             inner.client_terminals.remove(&client);
+            inner.native_terminal_search_clients.remove(&client);
             inner.utf8_clients.remove(&client);
             inner.client_features.remove(&client);
             inner.nested_clients.remove(&client);
@@ -6694,6 +6701,9 @@ impl Shared {
                 match daemon_command_dispatch(canonical)
                     .expect("daemon command catalog and dispatch must agree")
                 {
+                    DaemonCommandDispatch::AgentCatalog => {
+                        self.agent_catalog(client, context, &command.args)
+                    }
                     DaemonCommandDispatch::CapturePane => {
                         self.capture_pane(context, canonical, &command.args)
                     }
@@ -8584,6 +8594,28 @@ impl Shared {
                                 "command-prompt requires an interactive client".to_owned(),
                             )
                             .into());
+                        }
+                        if inner.native_terminal_search_clients.contains(&client)
+                            && !inner.command_prompts.contains_key(&client)
+                            && let Some(direction) = native_copy_search_direction(
+                                steps,
+                                template.as_ref(),
+                                *prompt_type,
+                                *mode,
+                            )
+                            && let Some(pane) = inner
+                                .command_outputs
+                                .get(&client)
+                                .map(|output| output.pane)
+                                .or_else(|| {
+                                    inner.copy_sessions.get(&client).map(|session| session.pane)
+                                })
+                        {
+                            client_events.push(EventPayload::TerminalUiCommand {
+                                pane,
+                                command: zz_protocol::TerminalUiCommand::BeginSearch { direction },
+                            });
+                            continue;
                         }
                         dismiss_overlays(
                             &mut inner,
@@ -13131,6 +13163,107 @@ impl Shared {
         } else {
             self.resolve_agent_pane(context, None)
         }
+    }
+
+    fn agent_catalog(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &ExecutionContext,
+        args: &[RawText],
+    ) -> Result<Execution, DaemonError> {
+        let spec = zz_protocol::catalog_command_spec("agent-catalog").expect("registered command");
+        let parsed = zz_protocol::parse_tmux_options(spec, args)?;
+        let [provider, request_id] = parsed.positionals else {
+            return Err(ServerError::CommandParse(
+                "usage: agent-catalog [-t pane] provider request-id".into(),
+            )
+            .into());
+        };
+        let provider = provider
+            .parse::<AgentProvider>()
+            .map_err(ServerError::CommandParse)?;
+        let request_id = request_id
+            .parse::<u64>()
+            .map_err(|_| ServerError::CommandParse("invalid catalog request id".into()))?;
+        let target = parsed.options.iter().find_map(|option| match option {
+            zz_protocol::TmuxOption::Value("-t", value) => Some(*value),
+            _ => None,
+        });
+        let pane = self.resolve_agent_permission_pane(context, target)?;
+        #[cfg(feature = "agent")]
+        {
+            let cwd = self
+                .agent_pane_spec(pane)
+                .ok_or(ServerError::PaneExited(pane))?
+                .cwd;
+            let mut result = zz_protocol::agent_stream::AgentCatalogResult {
+                catalog_provider: provider,
+                cwd: cwd.clone(),
+                request_id,
+                config_options: None,
+                error: None,
+            };
+            let key = (client, pane, provider);
+            {
+                let mut pending = self.agent_catalog_pending.lock();
+                if pending.len() >= 4 || !pending.insert(key) {
+                    result.error =
+                        Some("A catalog request is already running. Try again shortly.".into());
+                    self.publish_agent_catalog(client, pane, result);
+                    return Ok(Execution::default());
+                }
+            }
+            let config = self.agent_spawn_config();
+            let shared = Arc::clone(self);
+            let worker_result = result.clone();
+            if let Err(error) = thread::Builder::new()
+                .name("zz-agent-catalog".into())
+                .spawn(move || {
+                    let mut result = worker_result;
+                    match futures_lite::future::block_on(crate::agent::catalog::load(
+                        config, provider, cwd,
+                    )) {
+                        Ok(options) => result.config_options = Some(options),
+                        Err(error) => result.error = Some(error),
+                    }
+                    shared.agent_catalog_pending.lock().remove(&key);
+                    shared.publish_agent_catalog(client, pane, result);
+                })
+            {
+                self.agent_catalog_pending.lock().remove(&key);
+                result.error = Some(format!("Could not load the model catalog: {error}"));
+                self.publish_agent_catalog(client, pane, result);
+            }
+            Ok(Execution::default())
+        }
+        #[cfg(not(feature = "agent"))]
+        {
+            let _ = (client, pane, provider, request_id);
+            Err(ServerError::InvalidCommand("agent support is disabled".into()).into())
+        }
+    }
+
+    #[cfg(feature = "agent")]
+    fn publish_agent_catalog(
+        &self,
+        client: ClientId,
+        pane: PaneId,
+        mut result: zz_protocol::agent_stream::AgentCatalogResult,
+    ) {
+        let mut encoded = serde_json::to_string(&result).expect("catalog JSON");
+        if encoded.len() > zz_protocol::MAX_AGENT_RESULT_BYTES {
+            result.config_options = None;
+            result.error = Some("The model catalog exceeds the response size limit.".into());
+            encoded = serde_json::to_string(&result).expect("catalog error JSON");
+        }
+        self.publish_to_client(
+            client,
+            EventPayload::AgentSessions {
+                pane,
+                request_id: result.request_id,
+                result: encoded,
+            },
+        );
     }
 
     fn show_agent_permission(
@@ -28077,6 +28210,7 @@ struct ServerState {
     client_instances: BTreeMap<ClientId, ClientInstanceId>,
     client_kinds: BTreeMap<ClientId, ClientKind>,
     client_terminals: BTreeSet<ClientId>,
+    native_terminal_search_clients: BTreeSet<ClientId>,
     /// The clients that raised tmux's `CLIENT_UTF8`. A client not in here is
     /// one `server_client_print` sanitizes its output for.
     utf8_clients: BTreeSet<ClientId>,
@@ -31322,6 +31456,40 @@ fn prompt_history(inner: &ServerState, prompt_type: CommandPromptType) -> &[Stri
     match prompt_type {
         CommandPromptType::Command => &inner.command_history,
         CommandPromptType::Search => &inner.search_history,
+    }
+}
+
+fn native_copy_search_direction(
+    steps: &[CommandPromptStep],
+    template: Option<&CommandPromptTemplate>,
+    prompt_type: CommandPromptType,
+    mode: CommandPromptMode,
+) -> Option<zz_terminal::SearchDirection> {
+    if prompt_type != CommandPromptType::Search || steps.len() != 1 || !steps[0].input.is_empty() {
+        return None;
+    }
+    let CommandPromptTemplate::Commands(commands) = template? else {
+        return None;
+    };
+    let [command] = commands.as_slice() else {
+        return None;
+    };
+    let [flag, action, separator, value] = command.args.as_slice() else {
+        return None;
+    };
+    if command.name != "send-keys" || flag != "-X" || separator != "--" || value != "%%" {
+        return None;
+    }
+    match (mode, action.as_str()) {
+        (CommandPromptMode::Text, "search-forward")
+        | (CommandPromptMode::Incremental, "search-forward-incremental") => {
+            Some(zz_terminal::SearchDirection::Forward)
+        }
+        (CommandPromptMode::Text, "search-backward")
+        | (CommandPromptMode::Incremental, "search-backward-incremental") => {
+            Some(zz_terminal::SearchDirection::Backward)
+        }
+        _ => None,
     }
 }
 
@@ -36131,6 +36299,7 @@ enum EarlyInputActivity {
 }
 
 const READ_ONLY_SAFE_COMMANDS: &[&str] = &[
+    "agent-catalog",
     "attach-session",
     "copy-mode",
     "detach-client",
@@ -39680,6 +39849,13 @@ fn handle_connection<S: TransportStream>(
         let mut inner = shared.inner.lock();
         if let Some(origin) = hello.origin {
             inner.client_origins.insert(client, origin);
+        }
+        if hello.kind == ClientKind::Interactive
+            && hello.capabilities.iter().any(|capability| {
+                capability == ClientHello::CLIENT_NATIVE_TERMINAL_SEARCH_CAPABILITY
+            })
+        {
+            inner.native_terminal_search_clients.insert(client);
         }
         if client_nested_fact(&hello.capabilities) {
             inner.nested_clients.insert(client);
@@ -77520,6 +77696,195 @@ bind - split-window -v -c "#{pane_current_path}"
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn stock_copy_search_uses_advertised_native_ui() {
+        for (native_search, tty, command_output) in [
+            (false, false, false),
+            (false, true, false),
+            (false, false, true),
+            (false, true, true),
+            (true, false, false),
+            (true, true, false),
+            (true, false, true),
+            (true, true, true),
+        ] {
+            for (key, direction) in [
+                ('/', SearchDirection::Forward),
+                ('?', SearchDirection::Backward),
+            ] {
+                let (shared, client, mut context, pane, terminal, mailbox) =
+                    copy_mode_fixture("native-copy-search", ":");
+                assert!(shared.inner.lock().client_terminals.contains(&client));
+                if native_search {
+                    shared
+                        .inner
+                        .lock()
+                        .native_terminal_search_clients
+                        .insert(client);
+                }
+                if tty {
+                    shared
+                        .inner
+                        .lock()
+                        .client_ttys
+                        .insert(client, "/dev/pts/42".to_owned());
+                }
+                shared
+                    .execute(
+                        client,
+                        ClientKind::Interactive,
+                        &mut context,
+                        &CommandInvocation::new("set-window-option", ["mode-keys", "vi"]),
+                    )
+                    .expect("vi copy keys");
+                if command_output {
+                    shared
+                        .open_command_output(
+                            client,
+                            Some(pane),
+                            "search fixture".to_owned(),
+                            "one\ntwo",
+                        )
+                        .expect("open command output");
+                    take_command_output_message(&mailbox);
+                } else {
+                    enter_observed_copy_mode(&shared, client, &mut context, pane, &terminal);
+                }
+                take_reliable_messages(&mailbox);
+                let text = key.to_string();
+                input_test_key(
+                    &shared,
+                    client,
+                    &mut context,
+                    pane,
+                    test_key(KeyCode::Character(key), Modifiers::default(), Some(&text)),
+                );
+                let messages = take_reliable_messages(&mailbox);
+                let native = messages.iter().any(|message| {
+                    matches!(message,
+                    ProtocolMessage::Event(Event { payload: EventPayload::TerminalUiCommand {
+                        pane: target, command: TerminalUiCommand::BeginSearch { direction: actual },
+                    }, .. }) if *target == pane && *actual == direction)
+                });
+                let prompt = messages.iter().any(|message| {
+                    matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::CommandPrompt { state: Some(_) },
+                            ..
+                        })
+                    )
+                });
+                assert_eq!(
+                    native, native_search,
+                    "key={key}, native_search={native_search}, tty={tty}, messages={messages:?}"
+                );
+                assert_eq!(prompt, !native_search);
+                assert_eq!(
+                    shared.inner.lock().command_prompts.contains_key(&client),
+                    !native_search
+                );
+                if command_output {
+                    assert!(shared.inner.lock().command_outputs.contains_key(&client));
+                } else {
+                    assert!(shared.inner.lock().copy_sessions.contains_key(&client));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn native_copy_search_matches_only_standard_search_callbacks() {
+        let steps = vec![CommandPromptStep {
+            label: "(search down) ".to_owned(),
+            input: String::new(),
+        }];
+        for (mode, action, direction) in [
+            (
+                CommandPromptMode::Text,
+                "search-forward",
+                zz_terminal::SearchDirection::Forward,
+            ),
+            (
+                CommandPromptMode::Text,
+                "search-backward",
+                zz_terminal::SearchDirection::Backward,
+            ),
+            (
+                CommandPromptMode::Incremental,
+                "search-forward-incremental",
+                zz_terminal::SearchDirection::Forward,
+            ),
+            (
+                CommandPromptMode::Incremental,
+                "search-backward-incremental",
+                zz_terminal::SearchDirection::Backward,
+            ),
+        ] {
+            let template = CommandPromptTemplate::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-X", action, "--", "%%"],
+            )]);
+            assert_eq!(
+                native_copy_search_direction(
+                    &steps,
+                    Some(&template),
+                    CommandPromptType::Search,
+                    mode
+                ),
+                Some(direction)
+            );
+            assert_eq!(
+                native_copy_search_direction(
+                    &steps,
+                    Some(&template),
+                    CommandPromptType::Command,
+                    mode
+                ),
+                None
+            );
+            let seeded = vec![CommandPromptStep {
+                input: "needle".to_owned(),
+                ..steps[0].clone()
+            }];
+            assert_eq!(
+                native_copy_search_direction(
+                    &seeded,
+                    Some(&template),
+                    CommandPromptType::Search,
+                    mode
+                ),
+                None
+            );
+        }
+        for template in [
+            CommandPromptTemplate::String("send-keys -X search-forward -- %%".to_owned()),
+            CommandPromptTemplate::Commands(vec![CommandInvocation::new(
+                "display-message",
+                ["%%"],
+            )]),
+            CommandPromptTemplate::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-X", "-t", "%4", "search-forward", "--", "%%"],
+            )]),
+            CommandPromptTemplate::Commands(vec![
+                CommandInvocation::new("send-keys", ["-X", "search-forward", "--", "%%"]),
+                CommandInvocation::new("display-message", ["done"]),
+            ]),
+        ] {
+            assert_eq!(
+                native_copy_search_direction(
+                    &steps,
+                    Some(&template),
+                    CommandPromptType::Search,
+                    CommandPromptMode::Text
+                ),
+                None
+            );
+        }
+    }
+
     #[test]
     fn command_prompt_editor_preserves_unicode_boundaries_and_history_drafts() {
         let mut prompt = CommandPrompt::new(
@@ -100285,6 +100650,121 @@ bind - split-window -v -c "#{pane_current_path}"
                     (Some(first), 3)
                 ],
                 "the reliable lane goes first, then one agent frame per pane per turn"
+            );
+        }
+
+        #[test]
+        fn catalog_request_keeps_the_active_provider_and_session_unchanged() {
+            let workspace = workspace(Behavior::Chunk);
+            workspace.wait_for_items("initial session", |items| {
+                items
+                    .iter()
+                    .any(|item| matches!(item.payload, AgentStreamPayload::SessionReady { .. }))
+            });
+            let before = workspace
+                .shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(workspace.agent)
+                .unwrap()
+                .kind
+                .clone();
+            let other = OutboundMailbox::new();
+            let _ = workspace.shared.register_subscribed(
+                ClientKind::Interactive,
+                None,
+                None,
+                Arc::clone(&other),
+            );
+            let mut context = ExecutionContext::default();
+            workspace
+                .shared
+                .execute(
+                    workspace.client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-option",
+                        [
+                            "-g",
+                            "--",
+                            "agent-claude-code-command",
+                            "/nonexistent/zz-catalog-adapter",
+                        ],
+                    ),
+                )
+                .unwrap();
+            take_reliable_messages(&workspace.mailbox);
+            take_reliable_messages(&other);
+            let execution = workspace
+                .shared
+                .execute(
+                    workspace.client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "agent-catalog",
+                        ["-t", &workspace.agent.to_string(), "claude-code", "41"],
+                    ),
+                )
+                .unwrap();
+            assert!(execution.output.is_empty());
+            let deadline = Instant::now() + DEADLINE;
+            let result = loop {
+                let result = take_reliable_messages(&workspace.mailbox)
+                    .into_iter()
+                    .find_map(|message| match message {
+                        ProtocolMessage::Event(Event {
+                            payload:
+                                EventPayload::AgentSessions {
+                                    pane,
+                                    request_id: 41,
+                                    result,
+                                },
+                            ..
+                        }) if pane == workspace.agent => Some(result),
+                        _ => None,
+                    });
+                if let Some(result) = result {
+                    break result;
+                }
+                assert!(Instant::now() < deadline, "catalog reply timed out");
+                thread::sleep(Duration::from_millis(5));
+            };
+            let result: zz_protocol::agent_stream::AgentCatalogResult =
+                serde_json::from_str(&result).unwrap();
+            assert_eq!(result.catalog_provider, AgentProvider::ClaudeCode);
+            assert!(result.config_options.is_none());
+            assert!(result.error.is_some());
+            assert_eq!(
+                workspace
+                    .shared
+                    .inner
+                    .lock()
+                    .engine
+                    .state
+                    .pane(workspace.agent)
+                    .unwrap()
+                    .kind,
+                before
+            );
+            assert_eq!(
+                workspace.runtime.wire_state(workspace.agent).unwrap().phase,
+                zz_protocol::AgentConnectionPhase::Ready
+            );
+            assert!(workspace.shared.agent_catalog_pending.lock().is_empty());
+            assert!(
+                !take_reliable_messages(&other)
+                    .iter()
+                    .any(|message| matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::AgentSessions { request_id: 41, .. },
+                            ..
+                        })
+                    ))
             );
         }
 

@@ -103,7 +103,7 @@ checklist: zz-ui exports no checkbox, slider, calendar, table, or avatar widget.
 | Markdown, text, highlighter, code editor, rendered diagrams | `ZZMarkdown`, `ZZCodeBlock`, `ZZSyntaxSpan`, `ZZSyntaxHighlighter`, `ZZCodeEditor`, `ZZDiagram` | Text & editor |
 | Navigation, tree rows, indent guides, status windows, shell | `ZZWorkspaceTreeRow`, `ZZWorkspaceActionRow`, `ZZWorkspaceSidebar`, `ZZWorkspaceIndentGuides`, status views, `ZZAppShell` | Workspace & navigation |
 | Sidebar badges, host indicators, layout and rename actions | `ZZWorkspaceMarker`, `ZZHostIndicator`, `ZZWindowLayoutMenu`, `zzRenameMenu`; tree-row indicator parameters | Workspace & navigation |
-| Status session, close/rename actions, window overflow, agent count and clock | `ZZStatusSession`, `ZZWorkspaceStatusWindow` callbacks, `ZZStatusWindowOverflow`, `ZZStatusAgentCount`, `ZZStatusClock` | Workspace & navigation |
+| Status session, close/rename actions, window overflow, agent count | `ZZStatusSession`, `ZZWorkspaceStatusWindow` callbacks, `ZZStatusWindowOverflow`, `ZZStatusAgentCount` | Workspace & navigation |
 | Pane and floating surfaces, split and drag presentation, indicators, terminal search/status | `ZZPane`, `ZZPaneCorners`, `ZZFloatingSurface`, `ZZPaneSplit`, `ZZWorkspaceSplit`, drag views, `ZZPaneIndicator`, `ZZFrameRateBadge`, `ZZTerminalSearch`, `ZZTerminalStatus` | Panes & terminal chrome; desktop preview |
 | Browser toolbar, address, tabs, start page, history, omnibox, error, picker status and menu | `ZZBrowserToolbar`, `ZZBrowserAddress`, `ZZBrowserTabStrip`, start/recent/omnibox/error/status/menu views | Browser chrome |
 | Command palette, rows, key hints | `ZZCommandPalette`, `ZZCommandPaletteRow`, `ZZShortcutHints` | Commands & choosers |

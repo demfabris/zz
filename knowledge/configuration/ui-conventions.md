@@ -61,7 +61,7 @@ page backgrounds, simulated window blur, and the font/renderer differences that 
    its row stays unpainted and only its label moves from muted to foreground on hover.
 7. The shared control edge is a 0.5px border at 10% foreground opacity with a small soft shadow.
    `StyledExt::control_surface` applies it to inputs, number fields, select triggers, dropdown
-   surfaces, and browser address bars. Settings stacks draw it around the whole group, with flat
+   surfaces. Settings stacks draw it around the whole group, with flat
    separators between entries. Reserve border width before hover or focus; change only its color
    between states. Use `Button::flat()` for actions embedded in another control, including tree-row
    close buttons, browser tab close buttons, input clear buttons, number steppers, and settings
@@ -70,15 +70,59 @@ page backgrounds, simulated window blur, and the font/renderer differences that 
    foreground, without a button fill. Other embedded actions keep their wash.
    Gapped panes use the same soft shadow and foreground edge, retaining their configured border
    width and a stronger active-pane outline. The continuous app background sits beneath both pane and shadow. Flush panes have no
-   outer shadow.
+   outer shadow. Only shared divider segments touching the active flush pane use the accent
+   color; exterior edges stay unoutlined. The settings preview follows the same rule.
 
    The local renderer makes blurred shadows follow the pane's corner smoothing, including
    its small 2px control shadow. Circular and fully rounded surfaces retain circular shadows.
 
-   Active panes add a soft inset foreground glow above content and below status overlays:
-   3.2% opacity, 96px blur, (16px, 24px) offset, and -8px spread. `PaneChrome::active` shares
-   this top-left emphasis across desktop, browser, and preview callers. The local Metal,
+   Active panes add a soft inset accent glow above content and below status overlays:
+   6% opacity at the default strength, 96px blur, (16px, 24px) offset, and -8px spread.
+   Settings > Panes > Selected pane glow scales its strength from 0–200%; 0 turns it off.
+   `pane-glow-strength` stores the factor from 0–2, defaulting to 1.
+   `PaneChrome::active` shares this top-left emphasis across desktop, browser, and preview callers.
+   The glow fades in over 300ms when a pane becomes selected; reduced motion or disabled
+   animations show the final strength immediately. The local Metal,
    WGPU, and DirectX renderers dither the fade to reduce banding. Pane content roots paint their own backgrounds using the configured pane opacity.
+
+Settings > Panes keeps a three-pane preview above its scrolling controls. The shared
+`settings::panes_preview::PanesPreview` uses sample Terminal, Agent, and Browser content inside
+`pane_surface` and `pane_split_surface`, with full-size logical-pixel margins, corners, and borders.
+A neutral backdrop makes pane transparency visible. Clicking a sample changes only the preview
+selection and replays the selected-pane glow.
+The Browser sample keeps its page opaque; its toolbar follows pane background opacity, and the
+Agent sample keeps its composer opaque. Desktop pane edits and resets refresh the saved configuration
+immediately, including valid numeric input while typing; the file watcher still handles external edits.
+
+Settings > Status bar pins a live preview above its scrolling controls. The session switcher uses
+a Layers/name/chevron button. Session and agent buttons share the active window pill’s background,
+theme border, shadow, and 30px height, with widths sized to their contents. Window pills always align left, and the right edge shows an
+agent status dot and summary with a pane-selection menu. Time/date and alignment controls are absent. Window pills share the
+production pane deck: 26px rounded cards overlap by 9px inside a vertically centered 30px pill, with a theme outline and directional
+shadow. Cards stack left to right above their right-hand neighbors; hovering lifts a card above
+inactive cards, with a fixed hit area to avoid hover flicker. The focused pane always paints last,
+even above a hovered card or overflow, and sits 1px higher at
+rest. Three pane icons plus `+N` bound the width. Tooltips show pane details or hidden pane names;
+clicking a pane card selects it directly. Browser cards use cached favicons with a globe fallback.
+The settings sample allows hover while selection actions remain inert.
+Automatically named window pills use the active browser or agent pane title. Browser labels fall
+back to the active URL and then “browser”; explicitly renamed windows keep their chosen names.
+
+Browser headers use 28px tabs, URL fields, and browser buttons, with 8px outer padding and an 8px gap
+between the tab and navigation rows. Pane split and close buttons keep their 24px size (`crates/zz-ui/src/browser.rs`, `BrowserHeader`).
+A shared 24px pane drag handle sits between the split controls and Close in Terminal, Agent,
+and Browser headers. Its icon is a two-column, three-row grid of dots. It keeps the existing
+drag-to-split or swap behavior and availability rules.
+The URL field contains a 24px site-controls button at its left edge. Its popup reads Chromium connection
+status and tab sound state when opened, and offers the existing site-data clearing confirmation.
+The URL field has no visible resting background, border, or shadow; focusing it adds a
+`background.washed(1)` fill and the shared button border and shadow. Active tabs use the
+same treatment. Both reserve the border width so state changes preserve layout.
+Browser tabs start at 180px wide and shrink evenly to 112px before overflowing into horizontal
+scrolling. Tab labels and URL text use 13px type with a 16px line height. Tab icons have 12px leading padding and a 6px gap before the label.
+Omnibox suggestions use 32px single-line rows with title and muted URL text. Their rounded
+hover and selection fills sit inside the dropdown's 4px padding. Tabs and history rows use
+stored page favicons, with a globe fallback.
 
 # Control density
 
@@ -180,7 +224,8 @@ client keeps the default derivation strengths.
 
 Icon-only chrome controls use `Button::compact_icon`: a 24px hover surface around a Small 14px
 glyph with a 0.5px downward optical adjustment. The titlebar, sidebar row actions, browser pane,
-and Agent pane share this constructor, which fixes padding and icon scale in one place.
+and Agent pane share this constructor, which fixes padding and icon scale in one place. Browser
+controls override the hover surface to 28px while retaining the shared icon scale.
 
 A radius is a *request*, not the final corner. GPUI caps one at half the shorter side . the point a
 rounded rectangle stops existing . so one global setting applied to components of different sizes
@@ -218,10 +263,10 @@ theme,” `Ghostty` → “From Ghostty,” `Override` → “Overridden.” Tho
 appearance provenance; chrome colors carry the client-local `Default`/`Overridden` provenance
 instead, with “Preset” shown when an otherwise-unset root inherits from the selected family.
 
-`ThemeColor` holds six palette roots plus the per-mode scrim. The accent is reserved for four
+`ThemeColor` holds six palette roots plus the per-mode scrim. The accent is reserved for five
 places: the checked `Switch` track, the selected tile ring in `settings::appearance`, the active
 pane border and its inset glow (`pane_border_color`, `pane_focus_glow`), and the Agent composer's
-send button (`ButtonVariant::Accent`); new controls do not reach for it. Only the blurred pane glow
+send button (`ButtonVariant::Accent`), and the effort picker's filled pills; new controls do not reach for it. Only the blurred pane glow
 paints it translucent: a saturated color at partial alpha over a plane blends to brown in gamma
 space, so the tile's selection and focus rings are two opaque 1px strokes with a 1px gap rather
 than a border plus a spread glow. `border()` is an opaque Oklab mix

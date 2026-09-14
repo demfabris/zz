@@ -99,6 +99,7 @@ The native window defaults to 1200×760. For example:
 ```bash
 ZZ_PREVIEW_OPTIONS='{"scene":"agent","dark":true,"zoom":1,"gaps":true}' just showcase-native
 ZZ_PREVIEW_OPTIONS='{"width":1200,"height":600}' just showcase-capture /tmp/zz-preview.png
+ZZ_PREVIEW_OPTIONS='{"scene":"browser-suggestions","width":600,"sidebar":false}' just showcase-capture /tmp/zz-suggestions.png
 ```
 
 The native preview is also isolated from the daemon and normal app configuration.

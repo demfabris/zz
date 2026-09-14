@@ -548,11 +548,9 @@ pub(crate) fn status_bar_settings(cx: &App) -> StatusBarSettings {
     StatusBarSettings {
         show_session: config.status_show_session.value,
         badges: config.status_badges.value,
-        alignment: config.status_alignment.value,
         show_agents: config.status_agents.value,
         show_host: config.status_host.value,
         show_update: config.status_update.value,
-        clock: config.status_clock.value,
     }
 }
 
@@ -751,7 +749,6 @@ pub(crate) fn remove_fleet_host_live(name: &str, cx: &mut App) -> io::Result<boo
 mod tests {
     use crate::keymap::ChromeOverride;
     use std::{env, fs, path::PathBuf};
-    use zz_client::{StatusBarAlignment, StatusBarClock};
     use zz_protocol::MuxOptionKey;
     use zz_terminal::{
         AppearanceColor, AppearanceConfigKey, CellHeightAdjustment, Color, CursorBlinkPolicy,
@@ -1151,58 +1148,33 @@ mod tests {
         let defaults = AppConfig::default();
         assert!(defaults.status_show_session.value);
         assert!(defaults.status_badges.value);
-        assert_eq!(defaults.status_alignment.value, StatusBarAlignment::Left);
         assert!(defaults.status_agents.value);
         assert!(defaults.status_host.value);
         assert!(defaults.status_update.value);
-        assert_eq!(defaults.status_clock.value, StatusBarClock::TwentyFourHour);
 
         let parsed = parse_config(
             "status-show-session = false\n\
              status-badges = false\n\
-             status-align = center\n\
              status-agents = false\n\
              status-host = false\n\
-             status-update = false\n\
-             status-clock = time-date\n",
+             status-update = false\n",
         );
 
         assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
         assert!(!parsed.config.status_show_session.value);
         assert!(!parsed.config.status_badges.value);
-        assert_eq!(
-            parsed.config.status_alignment.value,
-            StatusBarAlignment::Center
-        );
         assert!(!parsed.config.status_agents.value);
         assert!(!parsed.config.status_host.value);
         assert!(!parsed.config.status_update.value);
-        assert_eq!(
-            parsed.config.status_clock.value,
-            StatusBarClock::TimeAndDate
-        );
         for provenance in [
             parsed.config.status_show_session.provenance,
             parsed.config.status_badges.provenance,
-            parsed.config.status_alignment.provenance,
             parsed.config.status_agents.provenance,
             parsed.config.status_host.provenance,
             parsed.config.status_update.provenance,
-            parsed.config.status_clock.provenance,
         ] {
             assert_eq!(provenance, ConfigProvenance::Override);
         }
-
-        let invalid = parse_config("status-align = right\nstatus-clock = seconds\n");
-        assert_eq!(invalid.diagnostics.len(), 2);
-        assert_eq!(
-            invalid.config.status_alignment.value,
-            StatusBarAlignment::Left
-        );
-        assert_eq!(
-            invalid.config.status_clock.value,
-            StatusBarClock::TwentyFourHour
-        );
     }
 
     #[test]
@@ -2133,43 +2105,6 @@ mod tests {
     }
 
     #[test]
-    fn status_bar_enums_round_trip_through_the_config_writer() {
-        let directory = tempfile::tempdir().expect("temporary directory");
-        let path = directory.path().join(CONFIG_FILE_NAME);
-
-        for alignment in [StatusBarAlignment::Left, StatusBarAlignment::Center] {
-            write_config_edit_at(
-                &path,
-                ConfigKey::StatusAlign.as_str(),
-                Some(status_bar_alignment_value(alignment)),
-            )
-            .expect("write status bar alignment");
-            let source = fs::read_to_string(&path).expect("read status bar alignment");
-            let parsed = parse_config(&source);
-            assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
-            assert_eq!(parsed.config.status_alignment.value, alignment);
-        }
-
-        for clock in [
-            StatusBarClock::TwentyFourHour,
-            StatusBarClock::TwelveHour,
-            StatusBarClock::TimeAndDate,
-            StatusBarClock::Off,
-        ] {
-            write_config_edit_at(
-                &path,
-                ConfigKey::StatusClock.as_str(),
-                Some(status_bar_clock_value(clock)),
-            )
-            .expect("write status bar clock");
-            let source = fs::read_to_string(&path).expect("read status bar clock");
-            let parsed = parse_config(&source);
-            assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
-            assert_eq!(parsed.config.status_clock.value, clock);
-        }
-    }
-
-    #[test]
     fn resetting_a_chrome_color_returns_it_to_inherited() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let path = directory.path().join(CONFIG_FILE_NAME);
@@ -2433,6 +2368,40 @@ mod tests {
         }
     }
 
+    #[gpui::test]
+    fn pane_glow_strength_validates_reloads_and_resets(cx: &mut gpui::TestAppContext) {
+        for value in ["-0.01", "2.01", "NaN", "inf", "invalid"] {
+            let parsed = parse_config(&format!("pane-glow-strength = {value}\n"));
+            assert_eq!(parsed.diagnostics.len(), 1, "{value}");
+            assert_f32_eq(parsed.config.pane_glow_strength.value, 1.0);
+        }
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join(CONFIG_FILE_NAME);
+        cx.update(zz_ui::init);
+        for (value, expected, provenance) in [
+            (Some("0"), 0.0, ConfigProvenance::Override),
+            (Some("0.5"), 0.5, ConfigProvenance::Override),
+            (Some("2"), 2.0, ConfigProvenance::Override),
+            (None, 1.0, ConfigProvenance::Default),
+        ] {
+            write_config_edit_at(&path, ConfigKey::PaneGlowStrength.as_str(), value)
+                .expect("write pane glow strength");
+            cx.update(|cx| {
+                install_config(Some(&path), Some(load_config(&path)), cx);
+                crate::theme::refresh_current_theme(cx);
+                assert_f32_eq(zz_ui::Theme::global(cx).pane_glow_strength, expected);
+                assert_eq!(
+                    resolved_config(cx).pane_glow_strength.provenance,
+                    provenance
+                );
+                for mode in [zz_ui::ThemeMode::Dark, zz_ui::ThemeMode::Light] {
+                    zz_ui::Theme::change(mode, None, cx);
+                    assert_f32_eq(zz_ui::Theme::global(cx).pane_glow_strength, expected);
+                }
+            });
+        }
+    }
+
     #[test]
     fn writer_creates_a_fresh_file_and_parent_directories_atomically() {
         let directory = tempfile::tempdir().expect("temporary directory");
@@ -2568,11 +2537,9 @@ mod tests {
         let config = parse_config(
             "status-show-session = false\n\
              status-badges = false\n\
-             status-align = center\n\
              status-agents = false\n\
              status-host = false\n\
-             status-update = false\n\
-             status-clock = off\n",
+             status-update = false\n",
         )
         .config;
         cx.update(|cx| cx.set_global(AppConfig::from(config)));
@@ -2582,11 +2549,9 @@ mod tests {
             StatusBarSettings {
                 show_session: false,
                 badges: false,
-                alignment: StatusBarAlignment::Center,
                 show_agents: false,
                 show_host: false,
                 show_update: false,
-                clock: StatusBarClock::Off,
             }
         );
     }
@@ -3024,15 +2989,14 @@ mod tests {
             "check-for-updates",
             "status-show-session",
             "status-badges",
-            "status-align",
             "status-agents",
             "status-host",
             "status-update",
-            "status-clock",
             "experimental-agent-pane",
             "experimental-editor-pane",
             "pane-gaps",
             "pane-background-opacity",
+            "pane-glow-strength",
             "pane-inactive-opacity",
             "pane-corner-radius",
             "pane-margin",

@@ -21,6 +21,7 @@ pub mod popover;
 pub mod scroll;
 pub mod select;
 pub mod separator;
+pub mod slider;
 pub mod spinner;
 pub mod switch;
 pub mod tag;

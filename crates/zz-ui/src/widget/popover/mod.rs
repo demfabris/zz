@@ -19,6 +19,8 @@ const WINDOW_MARGIN: Pixels = px(8.);
 type ContentBuilder =
     Box<dyn Fn(&mut PopoverState, &mut Window, &mut Context<PopoverState>) -> AnyElement>;
 
+type DismissHandler = std::rc::Rc<dyn Fn(&mut Window, &mut App)>;
+
 type TriggerBuilder = Box<dyn FnOnce(bool) -> AnyElement>;
 
 pub(crate) fn init(cx: &mut App) {
@@ -37,6 +39,7 @@ pub struct Popover {
     overlay_closable: bool,
     trigger: Option<TriggerBuilder>,
     content: Option<ContentBuilder>,
+    on_dismiss: Option<DismissHandler>,
 }
 
 impl Popover {
@@ -52,6 +55,7 @@ impl Popover {
             overlay_closable: true,
             trigger: None,
             content: None,
+            on_dismiss: None,
         }
     }
 
@@ -99,6 +103,12 @@ impl Popover {
         self.content = Some(Box::new(move |state, window, cx| {
             content(state, window, cx).into_any_element()
         }));
+        self
+    }
+
+    #[must_use]
+    pub fn on_dismiss(mut self, handler: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        self.on_dismiss = Some(std::rc::Rc::new(handler));
         self
     }
 
@@ -150,6 +160,8 @@ impl RenderOnce for Popover {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = window.use_keyed_state(self.id.clone(), cx, |_, cx| PopoverState::new(cx));
 
+        state.update(cx, |state, _| state.on_dismiss = self.on_dismiss);
+
         let (open, focus_handle, trigger_bounds, trigger_bounds_captured) = {
             let state = state.read(cx);
             (
@@ -174,8 +186,11 @@ impl RenderOnce for Popover {
                 move |_, window, cx| {
                     cx.stop_propagation();
                     state.update(cx, |state, cx| {
-                        state.open = open;
-                        state.toggle_open(window, cx);
+                        if open {
+                            state.dismiss(window, cx);
+                        } else if !state.open {
+                            state.toggle_open(window, cx);
+                        }
                     });
                     cx.notify(parent_view_id);
                 }
@@ -256,6 +271,7 @@ pub struct PopoverState {
     trigger_bounds_captured: bool,
     open: bool,
     dismiss_subscription: Option<Subscription>,
+    on_dismiss: Option<DismissHandler>,
 }
 
 impl PopoverState {
@@ -267,6 +283,7 @@ impl PopoverState {
             trigger_bounds_captured: false,
             open: false,
             dismiss_subscription: None,
+            on_dismiss: None,
         }
     }
 
@@ -297,6 +314,9 @@ impl PopoverState {
                 && self.focus_handle.contains_focused(window, cx)
             {
                 prev.focus(window, cx);
+            }
+            if let Some(handler) = self.on_dismiss.clone() {
+                handler(window, cx);
             }
         }
 

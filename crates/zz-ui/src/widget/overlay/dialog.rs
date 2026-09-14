@@ -2,12 +2,14 @@
 
 use std::{rc::Rc, time::Duration};
 
-use crate::{cubic_ease, window_paddings};
+use crate::widget::foundation::{SURFACE_ENTER_DURATION, surface_enter};
+use crate::window_paddings;
 use gpui::{
     Animation, AnimationExt as _, AnyElement, App, BoxShadow, ClickEvent, Div, FocusHandle,
     InteractiveElement as _, IntoElement, MouseButton, ParentElement, Pixels, RenderOnce, Role,
     SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, Window,
-    WindowControlArea, anchored, div, point, prelude::FluentBuilder as _, px, relative, size,
+    WindowControlArea, anchored, div, ease_out_quint, point, prelude::FluentBuilder as _, px,
+    relative, size,
 };
 
 use crate::{
@@ -27,7 +29,7 @@ use crate::Colorize as _;
 
 pub(super) const CONTEXT: &str = "ZzDialog";
 
-pub(super) const ANIMATION_DURATION: Duration = Duration::from_millis(250);
+pub(super) const ANIMATION_DURATION: Duration = SURFACE_ENTER_DURATION;
 
 pub(super) const CONTENT_PADDING: Pixels = px(12.);
 const MIN_HEIGHT: Pixels = px(80.);
@@ -192,6 +194,7 @@ pub struct Dialog {
     pub(crate) props: DialogProps,
     pub(crate) focus_handle: FocusHandle,
     pub(crate) layer_ix: usize,
+    pub(crate) instance_id: u64,
 }
 
 impl Dialog {
@@ -211,6 +214,7 @@ impl Dialog {
             props: DialogProps::default(),
             focus_handle: cx.focus_handle(),
             layer_ix: 0,
+            instance_id: 0,
         }
     }
 
@@ -344,8 +348,9 @@ impl RenderOnce for Dialog {
         #[allow(clippy::cast_precision_loss)]
         let y = view_size.height / 10. + px(layer_ix as f32 * LAYER_OFFSET);
 
-        let animation = Animation::new(ANIMATION_DURATION).with_easing(cubic_ease(0.72, 1.));
+        let animation = Animation::new(ANIMATION_DURATION).with_easing(ease_out_quint());
         let shadow_color = cx.theme().scrim;
+        let scrim = cx.theme().scrim;
 
         let body = v_flex()
             .id(layer_ix)
@@ -446,38 +451,35 @@ impl RenderOnce for Dialog {
                         on_close(&ClickEvent::default(), window, cx);
                     })
             }))
-            .with_animation("slide-down", animation.clone(), move |this, delta| {
-                let shadow = shadow_color.opacity(shadow_color.a * delta);
-                this.top(y * delta).shadow(vec![
-                    BoxShadow {
-                        color: shadow,
-                        offset: point(px(0.), px(20.)),
-                        blur_radius: px(25.),
-                        spread_radius: px(-5.),
-                        inset: false,
-                    },
-                    BoxShadow {
-                        color: shadow,
-                        offset: point(px(0.), px(8.)),
-                        blur_radius: px(10.),
-                        spread_radius: px(-6.),
-                        inset: false,
-                    },
-                ])
-            });
+            .shadow(vec![
+                BoxShadow {
+                    color: shadow_color,
+                    offset: point(px(0.), px(20.)),
+                    blur_radius: px(25.),
+                    spread_radius: px(-5.),
+                    inset: false,
+                },
+                BoxShadow {
+                    color: shadow_color,
+                    offset: point(px(0.), px(8.)),
+                    blur_radius: px(10.),
+                    spread_radius: px(-6.),
+                    inset: false,
+                },
+            ]);
+        let body = surface_enter(body, "dialog-open", y);
 
         anchored()
             .position(point(paddings.left, paddings.top))
             .snap_to_window()
             .child(
                 div()
-                    .id("dialog")
+                    .id(("dialog", self.instance_id))
                     .occlude()
                     .w(view_size.width)
                     .h(view_size.height)
                     .when(is_topmost, |this| {
-                        this.bg(cx.theme().scrim)
-                            .window_control_area(WindowControlArea::Drag)
+                        this.window_control_area(WindowControlArea::Drag)
                             .on_any_mouse_down(move |event, window, cx| {
                                 if event.position.y < TITLE_BAR_HEIGHT {
                                     return;
@@ -494,7 +496,13 @@ impl RenderOnce for Dialog {
                             })
                     })
                     .child(body)
-                    .with_animation("fade-in", animation, |this, delta| this.opacity(delta)),
+                    .with_animation(
+                        ("dialog-backdrop", self.instance_id),
+                        animation,
+                        move |this, delta| {
+                            this.when(is_topmost, |this| this.bg(scrim.opacity(delta)))
+                        },
+                    ),
             )
     }
 }

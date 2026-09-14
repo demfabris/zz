@@ -7,9 +7,9 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
     time::SystemTime,
 };
+use zz_client::StatusBarSettings;
 use zz_client::chrome_palette::{AppIconSetting, ChromeColor, ChromePresetId, ThemeModeSetting};
 use zz_client::url_input::SearchProvider;
-use zz_client::{StatusBarAlignment, StatusBarClock, StatusBarSettings};
 pub use zz_daemon::{HostEntry, RejectedHost, configured_fleet_hosts, validate_fleet_host};
 use zz_protocol::{ConfigOverrideEntry, MAX_GUI_TEXT_BYTES, MuxOptionKey};
 use zz_terminal::{
@@ -37,6 +37,7 @@ pub const MAX_WINDOW_CORNER_RADIUS: f32 = 32.0;
 pub const DEFAULT_WINDOW_CORNER_RADIUS: f32 = 13.5;
 
 pub const DEFAULT_PANE_GAPS: bool = false;
+pub const DEFAULT_PANE_GLOW_STRENGTH: f32 = 1.0;
 pub const DEFAULT_PANE_BACKGROUND_OPACITY: f32 = 0.5;
 pub const DEFAULT_PANE_INACTIVE_OPACITY: f32 = 0.7;
 pub const MIN_PANE_INACTIVE_OPACITY: f32 = 0.0;
@@ -112,15 +113,14 @@ pub enum ConfigKey {
     CheckForUpdates,
     StatusShowSession,
     StatusBadges,
-    StatusAlign,
     StatusAgents,
     StatusHost,
     StatusUpdate,
-    StatusClock,
     ExperimentalAgentPane,
     ExperimentalEditorPane,
     PaneGaps,
     PaneBackgroundOpacity,
+    PaneGlowStrength,
     PaneInactiveOpacity,
     PaneCornerRadius,
     PaneMargin,
@@ -158,15 +158,14 @@ impl ConfigKey {
             Self::CheckForUpdates => "check-for-updates",
             Self::StatusShowSession => "status-show-session",
             Self::StatusBadges => "status-badges",
-            Self::StatusAlign => "status-align",
             Self::StatusAgents => "status-agents",
             Self::StatusHost => "status-host",
             Self::StatusUpdate => "status-update",
-            Self::StatusClock => "status-clock",
             Self::ExperimentalAgentPane => "experimental-agent-pane",
             Self::ExperimentalEditorPane => "experimental-editor-pane",
             Self::PaneGaps => "pane-gaps",
             Self::PaneBackgroundOpacity => "pane-background-opacity",
+            Self::PaneGlowStrength => "pane-glow-strength",
             Self::PaneInactiveOpacity => "pane-inactive-opacity",
             Self::PaneCornerRadius => "pane-corner-radius",
             Self::PaneMargin => "pane-margin",
@@ -205,15 +204,14 @@ impl ConfigKey {
             "check-for-updates" => Some(Self::CheckForUpdates),
             "status-show-session" => Some(Self::StatusShowSession),
             "status-badges" => Some(Self::StatusBadges),
-            "status-align" => Some(Self::StatusAlign),
             "status-agents" => Some(Self::StatusAgents),
             "status-host" => Some(Self::StatusHost),
             "status-update" => Some(Self::StatusUpdate),
-            "status-clock" => Some(Self::StatusClock),
             "experimental-agent-pane" => Some(Self::ExperimentalAgentPane),
             "experimental-editor-pane" => Some(Self::ExperimentalEditorPane),
             "pane-gaps" => Some(Self::PaneGaps),
             "pane-background-opacity" => Some(Self::PaneBackgroundOpacity),
+            "pane-glow-strength" => Some(Self::PaneGlowStrength),
             "pane-inactive-opacity" => Some(Self::PaneInactiveOpacity),
             "pane-corner-radius" => Some(Self::PaneCornerRadius),
             "pane-margin" => Some(Self::PaneMargin),
@@ -244,6 +242,7 @@ impl ConfigKey {
     pub const fn numeric_range(self) -> Option<(f32, f32)> {
         match self {
             Self::PaneBackgroundOpacity | Self::ShadowStrength => Some((0.0, 1.0)),
+            Self::PaneGlowStrength => Some((0.0, 2.0)),
             Self::PaneInactiveOpacity => {
                 Some((MIN_PANE_INACTIVE_OPACITY, MAX_PANE_INACTIVE_OPACITY))
             }
@@ -264,11 +263,9 @@ impl ConfigKey {
             | Self::CheckForUpdates
             | Self::StatusShowSession
             | Self::StatusBadges
-            | Self::StatusAlign
             | Self::StatusAgents
             | Self::StatusHost
             | Self::StatusUpdate
-            | Self::StatusClock
             | Self::ExperimentalAgentPane
             | Self::ExperimentalEditorPane
             | Self::PaneGaps
@@ -356,15 +353,14 @@ pub struct AppConfig {
     pub check_for_updates: ConfigValue<bool>,
     pub status_show_session: ConfigValue<bool>,
     pub status_badges: ConfigValue<bool>,
-    pub status_alignment: ConfigValue<StatusBarAlignment>,
     pub status_agents: ConfigValue<bool>,
     pub status_host: ConfigValue<bool>,
     pub status_update: ConfigValue<bool>,
-    pub status_clock: ConfigValue<StatusBarClock>,
     pub experimental_agent_pane: ConfigValue<bool>,
     pub experimental_editor_pane: ConfigValue<bool>,
     pub pane_gaps: ConfigValue<bool>,
     pub pane_background_opacity: ConfigValue<f32>,
+    pub pane_glow_strength: ConfigValue<f32>,
     pub pane_inactive_opacity: ConfigValue<f32>,
     pub pane_corner_radius: ConfigValue<f32>,
     pub pane_margin: ConfigValue<f32>,
@@ -402,15 +398,14 @@ impl Default for AppConfig {
             check_for_updates: ConfigValue::from_default(DEFAULT_CHECK_FOR_UPDATES),
             status_show_session: ConfigValue::from_default(status_bar.show_session),
             status_badges: ConfigValue::from_default(status_bar.badges),
-            status_alignment: ConfigValue::from_default(status_bar.alignment),
             status_agents: ConfigValue::from_default(status_bar.show_agents),
             status_host: ConfigValue::from_default(status_bar.show_host),
             status_update: ConfigValue::from_default(status_bar.show_update),
-            status_clock: ConfigValue::from_default(status_bar.clock),
             experimental_agent_pane: ConfigValue::from_default(DEFAULT_EXPERIMENTAL_AGENT_PANE),
             experimental_editor_pane: ConfigValue::from_default(DEFAULT_EXPERIMENTAL_EDITOR_PANE),
             pane_gaps: ConfigValue::from_default(DEFAULT_PANE_GAPS),
             pane_background_opacity: ConfigValue::from_default(DEFAULT_PANE_BACKGROUND_OPACITY),
+            pane_glow_strength: ConfigValue::from_default(DEFAULT_PANE_GLOW_STRENGTH),
             pane_inactive_opacity: ConfigValue::from_default(DEFAULT_PANE_INACTIVE_OPACITY),
             pane_corner_radius: ConfigValue::from_default(DEFAULT_PANE_CORNER_RADIUS),
             pane_margin: ConfigValue::from_default(DEFAULT_PANE_MARGIN),
@@ -469,6 +464,7 @@ impl AppConfig {
             ConfigKey::BrowserEgress => Some(&mut self.browser_egress),
             ConfigKey::WindowCornerRadius
             | ConfigKey::PaneBackgroundOpacity
+            | ConfigKey::PaneGlowStrength
             | ConfigKey::PaneInactiveOpacity
             | ConfigKey::PaneCornerRadius
             | ConfigKey::PaneMargin
@@ -480,8 +476,6 @@ impl AppConfig {
             | ConfigKey::BrowserElementSelectorHotkey
             | ConfigKey::BrowserRemoteDebuggingPort
             | ConfigKey::BrowserSearchProvider
-            | ConfigKey::StatusAlign
-            | ConfigKey::StatusClock
             | ConfigKey::ThemeMode
             | ConfigKey::UiFontFamily
             | ConfigKey::AppIcon
@@ -966,35 +960,6 @@ pub fn parse_config(source: &str, system_font_family: &str) -> ParsedConfig {
             continue;
         }
 
-        if key == ConfigKey::StatusAlign {
-            let target = &mut parsed.config.status_alignment;
-            target.provenance = ConfigProvenance::Override;
-            match parse_status_bar_alignment(value) {
-                Some(alignment) => target.value = alignment,
-                None => parsed.diagnostics.push(ConfigDiagnostic {
-                    line: line_number,
-                    message: format!("invalid `{}`: expected left or center", key.as_str()),
-                }),
-            }
-            continue;
-        }
-
-        if key == ConfigKey::StatusClock {
-            let target = &mut parsed.config.status_clock;
-            target.provenance = ConfigProvenance::Override;
-            match parse_status_bar_clock(value) {
-                Some(clock) => target.value = clock,
-                None => parsed.diagnostics.push(ConfigDiagnostic {
-                    line: line_number,
-                    message: format!(
-                        "invalid `{}`: expected 24-hour, 12-hour, time-date or off",
-                        key.as_str(),
-                    ),
-                }),
-            }
-            continue;
-        }
-
         if let Some(diagnostic) = apply_theme_key(&mut parsed.config, key, value, line_number) {
             parsed.diagnostics.push(diagnostic);
             continue;
@@ -1012,6 +977,7 @@ pub fn parse_config(source: &str, system_font_family: &str) -> ParsedConfig {
         let target = match key {
             ConfigKey::WindowCornerRadius => &mut parsed.config.window_corner_radius,
             ConfigKey::PaneBackgroundOpacity => &mut parsed.config.pane_background_opacity,
+            ConfigKey::PaneGlowStrength => &mut parsed.config.pane_glow_strength,
             ConfigKey::PaneInactiveOpacity => &mut parsed.config.pane_inactive_opacity,
             ConfigKey::PaneCornerRadius => &mut parsed.config.pane_corner_radius,
             ConfigKey::PaneMargin => &mut parsed.config.pane_margin,
@@ -1041,11 +1007,9 @@ pub fn parse_config(source: &str, system_font_family: &str) -> ParsedConfig {
             | ConfigKey::BrowserRemoteDebuggingPort
             | ConfigKey::BrowserSearchProvider
             | ConfigKey::BrowserEgress
-            | ConfigKey::StatusAlign
             | ConfigKey::StatusAgents
             | ConfigKey::StatusHost
             | ConfigKey::StatusUpdate
-            | ConfigKey::StatusClock
             | ConfigKey::ThemeMode
             | ConfigKey::UiFontFamily
             | ConfigKey::AppIcon
@@ -1248,6 +1212,7 @@ pub fn parse_numeric_value(
         key,
         ConfigKey::PaneInactiveOpacity
             | ConfigKey::PaneBackgroundOpacity
+            | ConfigKey::PaneGlowStrength
             | ConfigKey::ChromeContrast
     ) {
         ""
@@ -1271,40 +1236,6 @@ pub fn parse_boolean(value: &str) -> Result<bool, String> {
         "on" | "yes" | "1" | "true" => Ok(true),
         "off" | "no" | "0" | "false" => Ok(false),
         _ => Err("expected a boolean (`true`/`on`/`yes`/`1` or `false`/`off`/`no`/`0`)".to_owned()),
-    }
-}
-
-pub const fn status_bar_alignment_value(alignment: StatusBarAlignment) -> &'static str {
-    match alignment {
-        StatusBarAlignment::Left => "left",
-        StatusBarAlignment::Center => "center",
-    }
-}
-
-pub fn parse_status_bar_alignment(value: &str) -> Option<StatusBarAlignment> {
-    match value {
-        "left" => Some(StatusBarAlignment::Left),
-        "center" => Some(StatusBarAlignment::Center),
-        _ => None,
-    }
-}
-
-pub const fn status_bar_clock_value(clock: StatusBarClock) -> &'static str {
-    match clock {
-        StatusBarClock::TwentyFourHour => "24-hour",
-        StatusBarClock::TwelveHour => "12-hour",
-        StatusBarClock::TimeAndDate => "time-date",
-        StatusBarClock::Off => "off",
-    }
-}
-
-pub fn parse_status_bar_clock(value: &str) -> Option<StatusBarClock> {
-    match value {
-        "24-hour" => Some(StatusBarClock::TwentyFourHour),
-        "12-hour" => Some(StatusBarClock::TwelveHour),
-        "time-date" => Some(StatusBarClock::TimeAndDate),
-        "off" => Some(StatusBarClock::Off),
-        _ => None,
     }
 }
 

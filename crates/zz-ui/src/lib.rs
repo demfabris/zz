@@ -6,7 +6,8 @@ mod widget;
 
 pub use widget::{
     button, color_picker, dialog, highlighter, icon, input, kbd, list, menu, notification, overlay,
-    popover, scroll, select, separator, spinner, switch, tag, text, theme, title_bar, tooltip,
+    popover, scroll, select, separator, slider, spinner, switch, tag, text, theme, title_bar,
+    tooltip,
 };
 
 #[cfg(feature = "editor")]

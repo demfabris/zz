@@ -80,13 +80,6 @@ const ABOUT_LOGO_SIZE: f32 = 88.0;
 const REPOSITORY_URL: &str = "https://github.com/demfabris/zz";
 const RELEASES_URL: &str = "https://github.com/demfabris/zz/releases";
 const ISSUES_URL: &str = "https://github.com/demfabris/zz/issues/new";
-const STATUS_ALIGNMENT_CHOICES: [(&str, &str); 2] = [("Left", "left"), ("Center", "center")];
-const STATUS_CLOCK_CHOICES: [(&str, &str); 4] = [
-    ("24-hour", "24-hour"),
-    ("12-hour", "12-hour"),
-    ("Time and date", "time-date"),
-    ("Off", "off"),
-];
 
 pub fn init(cx: &mut App) {
     crate::keymap::bind(cx, UI_TABLE, key_bindings);
@@ -138,11 +131,10 @@ pub(crate) struct SettingsView {
     ui_font_family: Entity<SelectState<Vec<SettingsSelectItem>>>,
     browser_element_selector_hotkey: Entity<InputState>,
     browser_search_provider: Entity<SelectState<Vec<SettingsSelectItem>>>,
-    status_alignment: Entity<SelectState<Vec<SettingsSelectItem>>>,
-    status_clock: Entity<SelectState<Vec<SettingsSelectItem>>>,
     ui_zoom: Entity<InputState>,
     observed_ui_zoom: u32,
     pane_background_opacity: Entity<InputState>,
+    pane_glow_strength: Entity<InputState>,
     pane_inactive_opacity: Entity<InputState>,
     pane_corner_radius: Entity<InputState>,
     pane_margin: Entity<InputState>,
@@ -179,22 +171,17 @@ impl SettingsView {
             text_value_input(&observed_browser.element_selector_hotkey.value, window, cx);
         let browser_search_provider =
             search_provider_select(observed_browser.search_provider.value, window, cx);
-        let status_alignment = settings_select_state(
-            &STATUS_ALIGNMENT_CHOICES,
-            config::status_bar_alignment_value(observed.status_alignment.value),
-            window,
-            cx,
-        );
-        let status_clock = settings_select_state(
-            &STATUS_CLOCK_CHOICES,
-            config::status_bar_clock_value(observed.status_clock.value),
-            window,
-            cx,
-        );
         let ui_zoom = ui_zoom_input(window, cx);
         let pane_background_opacity = numeric_value_input(
             ConfigKey::PaneBackgroundOpacity,
             observed.pane_background_opacity.value,
+            5.0,
+            window,
+            cx,
+        );
+        let pane_glow_strength = numeric_value_input(
+            ConfigKey::PaneGlowStrength,
+            observed.pane_glow_strength.value,
             5.0,
             window,
             cx,
@@ -271,12 +258,16 @@ impl SettingsView {
             browser_hotkey_subscription(&browser_element_selector_hotkey, window, cx),
             search_provider_subscription(&browser_search_provider, window, cx),
             ui_font_subscription(&ui_font_family, window, cx),
-            config_select_subscription(&status_alignment, ConfigKey::StatusAlign, window, cx),
-            config_select_subscription(&status_clock, ConfigKey::StatusClock, window, cx),
             ui_zoom_subscription(&ui_zoom, window, cx),
             numeric_input_subscription(
                 &pane_background_opacity,
                 ConfigKey::PaneBackgroundOpacity,
+                window,
+                cx,
+            ),
+            numeric_input_subscription(
+                &pane_glow_strength,
+                ConfigKey::PaneGlowStrength,
                 window,
                 cx,
             ),
@@ -319,11 +310,10 @@ impl SettingsView {
             ui_font_family,
             browser_element_selector_hotkey,
             browser_search_provider,
-            status_alignment,
-            status_clock,
             ui_zoom,
             observed_ui_zoom: crate::ui_scale::percent(cx),
             pane_background_opacity,
+            pane_glow_strength,
             pane_inactive_opacity,
             pane_corner_radius,
             pane_margin,
@@ -517,14 +507,6 @@ impl SettingsView {
         let resolved = config::resolved_config(cx);
         if resolved != self.observed {
             self.observed = resolved;
-            let alignment = config::status_bar_alignment_value(resolved.status_alignment.value);
-            self.status_alignment.update(cx, |select, cx| {
-                select.set_selected_value(&alignment.to_owned(), window, cx);
-            });
-            let clock = config::status_bar_clock_value(resolved.status_clock.value);
-            self.status_clock.update(cx, |select, cx| {
-                select.set_selected_value(&clock.to_owned(), window, cx);
-            });
             synchronize_f32_input(
                 &self.pane_inactive_opacity,
                 resolved.pane_inactive_opacity.value,
@@ -590,6 +572,21 @@ impl SettingsView {
                     &numeric_input_text(
                         ConfigKey::PaneBackgroundOpacity,
                         resolved.pane_background_opacity.value,
+                    ),
+                    window,
+                    cx,
+                );
+            }
+            if !numeric_input_matches_value(
+                ConfigKey::PaneGlowStrength,
+                &self.pane_glow_strength.read(cx).value(),
+                resolved.pane_glow_strength.value,
+            ) {
+                synchronize_text_input(
+                    &self.pane_glow_strength,
+                    &numeric_input_text(
+                        ConfigKey::PaneGlowStrength,
+                        resolved.pane_glow_strength.value,
                     ),
                     window,
                     cx,
@@ -725,8 +722,9 @@ impl SettingsView {
             input.update(cx, |input, cx| input.set_value(displayed, window, cx));
         }
         let value = (value / numeric_input_scale(key)).to_string();
-        if let Err(error) = set_config_key(key, &value) {
-            report_write_error("set", key.as_str(), &error, cx);
+        match set_config_key(key, &value) {
+            Ok(()) => refresh_settings_preview(key, cx),
+            Err(error) => report_write_error("set", key.as_str(), &error, cx),
         }
     }
 
@@ -776,6 +774,8 @@ impl SettingsView {
                     if let Err(error) = set_config_key(key, if *enabled { "true" } else { "false" })
                     {
                         report_write_error("set", key.as_str(), &error, cx);
+                    } else {
+                        refresh_settings_preview(key, cx);
                     }
                 },
             ))
@@ -1099,19 +1099,6 @@ impl SettingsView {
             )
     }
 
-    fn select_setting(
-        key: ConfigKey,
-        title: &'static str,
-        description: &'static str,
-        provenance: ConfigProvenance,
-        select: &Entity<SelectState<Vec<SettingsSelectItem>>>,
-        cx: &Context<Self>,
-    ) -> SettingEntry {
-        SettingEntry::new(title, description)
-            .title_actions(key_annotations(key, provenance))
-            .control(select_control(select, cx))
-    }
-
     fn ui_font_setting(&self, cx: &Context<Self>) -> SettingEntry {
         SettingEntry::new(
             "UI font",
@@ -1137,63 +1124,48 @@ impl SettingsView {
     }
 
     fn status_bar_section(&self, resolved: &AppConfig, cx: &Context<Self>) -> AnyElement {
-        Self::scroll_column("settings-status-bar")
-            .child(settings_page_description(SettingsSection::StatusBar, cx))
-            .child(
-                SettingsStack::new()
-                    .child(Self::boolean_setting(
-                        ConfigKey::StatusShowSession,
-                        "Session name",
-                        "Show the current session as a chip.",
-                        resolved.status_show_session,
-                        cx,
-                    ))
-                    .child(Self::boolean_setting(
-                        ConfigKey::StatusBadges,
-                        "Window badges",
-                        "Show bell, activity, and agent markers on window items.",
-                        resolved.status_badges,
-                        cx,
-                    ))
-                    .child(Self::select_setting(
-                        ConfigKey::StatusAlign,
-                        "Alignment",
-                        "Align the window strip to the left or center.",
-                        resolved.status_alignment.provenance,
-                        &self.status_alignment,
-                        cx,
-                    ))
-                    .child(Self::boolean_setting(
-                        ConfigKey::StatusAgents,
-                        "Agents",
-                        "Show the number of running agent panes.",
-                        resolved.status_agents,
-                        cx,
-                    ))
-                    .child(Self::boolean_setting(
-                        ConfigKey::StatusHost,
-                        "Host",
-                        "Show the attached host when it is remote.",
-                        resolved.status_host,
-                        cx,
-                    ))
-                    .child(Self::boolean_setting(
-                        ConfigKey::StatusUpdate,
-                        "Update",
-                        "Show an available version and install it from the bar.",
-                        resolved.status_update,
-                        cx,
-                    ))
-                    .child(Self::select_setting(
-                        ConfigKey::StatusClock,
-                        "Clock",
-                        "Choose the clock format, or hide it.",
-                        resolved.status_clock.provenance,
-                        &self.status_clock,
-                        cx,
-                    )),
-            )
-            .into_any_element()
+        zz_ui::settings::status_bar_preview::status_bar_page(
+            config::status_bar_settings(cx),
+            resolved.pane_gaps.value,
+            SettingsStack::new()
+                .child(Self::boolean_setting(
+                    ConfigKey::StatusShowSession,
+                    "Session",
+                    "Show the session menu in the titlebar.",
+                    resolved.status_show_session,
+                    cx,
+                ))
+                .child(Self::boolean_setting(
+                    ConfigKey::StatusBadges,
+                    "Window badges",
+                    "Show bell and activity markers on window items.",
+                    resolved.status_badges,
+                    cx,
+                ))
+                .child(Self::boolean_setting(
+                    ConfigKey::StatusAgents,
+                    "Agent activity",
+                    "Show agent activity in the titlebar.",
+                    resolved.status_agents,
+                    cx,
+                ))
+                .child(Self::boolean_setting(
+                    ConfigKey::StatusHost,
+                    "Host",
+                    "Show the attached host when it is remote.",
+                    resolved.status_host,
+                    cx,
+                ))
+                .child(Self::boolean_setting(
+                    ConfigKey::StatusUpdate,
+                    "Update",
+                    "Show an available version and install it from the bar.",
+                    resolved.status_update,
+                    cx,
+                )),
+            cx,
+        )
+        .into_any_element()
     }
 
     fn browser_section(
@@ -1716,6 +1688,13 @@ impl SettingsView {
     fn panes_section(&self, resolved: &AppConfig, cx: &Context<Self>) -> AnyElement {
         let gaps = resolved.pane_gaps.value;
         zz_ui::settings::panes_page(
+            zz_ui::settings::panes_preview::PanesPreview {
+                gaps,
+                margin: resolved.pane_margin.value,
+                radius: resolved.pane_corner_radius.value,
+                border_width: resolved.pane_border_width.value,
+                inactive_opacity: resolved.pane_inactive_opacity.value,
+            },
 Self::boolean_setting(
                 ConfigKey::PaneGaps,
                 "Pane gaps",
@@ -1731,7 +1710,7 @@ Self::numeric_setting(
                 &self.pane_background_opacity,
                 cx,
             ),
-Self::numeric_setting(
+[Self::numeric_setting(
                 ConfigKey::PaneInactiveOpacity,
                 "Inactive pane opacity",
                 "Visible strength of inactive pane content and chrome (0–1). Set to 1 to disable dimming.",
@@ -1740,6 +1719,14 @@ Self::numeric_setting(
                 cx,
             ),
 Self::numeric_setting(
+                ConfigKey::PaneGlowStrength,
+                "Selected pane glow",
+                "Glow strength when a pane is selected (0–200%). Set to 0 to turn it off.",
+                resolved.pane_glow_strength,
+                &self.pane_glow_strength,
+                cx,
+            )],
+[Self::numeric_setting(
                             ConfigKey::PaneMargin,
                             "Pane margin",
                             "Space around each pane on all platforms, in logical pixels (0–32).",
@@ -1763,7 +1750,7 @@ Self::numeric_setting(
                             resolved.pane_border_width,
                             &self.pane_border_width,
                             cx,
-                        ).disabled(!gaps), cx).into_any_element()
+                        ).disabled(!gaps)], cx).into_any_element()
     }
 
     fn editor_section(&self, resolved: &AppConfig, cx: &Context<Self>) -> AnyElement {
@@ -2235,26 +2222,6 @@ fn ui_font_subscription(
     )
 }
 
-fn config_select_subscription(
-    select: &Entity<SelectState<Vec<SettingsSelectItem>>>,
-    key: ConfigKey,
-    window: &mut Window,
-    cx: &mut Context<SettingsView>,
-) -> Subscription {
-    cx.subscribe_in(
-        select,
-        window,
-        move |_, _, event: &SelectEvent<Vec<SettingsSelectItem>>, _, cx| {
-            let SelectEvent::Confirm(Some(value)) = event else {
-                return;
-            };
-            if let Err(error) = set_config_key(key, value) {
-                report_write_error("set", key.as_str(), &error, cx);
-            }
-        },
-    )
-}
-
 fn numeric_value_input(
     key: ConfigKey,
     value: f32,
@@ -2313,17 +2280,47 @@ fn numeric_input_subscription(
         move |settings, input, event: &InputEvent, window, cx| {
             if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
                 settings.commit_numeric_input(key, input, true, window, cx);
-            } else if matches!(
-                key,
-                ConfigKey::ShadowStrength
-                    | ConfigKey::PaneBackgroundOpacity
-                    | ConfigKey::ChromeContrast
-            ) && matches!(event, InputEvent::Change)
+            } else if (is_pane_setting(key)
+                || matches!(key, ConfigKey::ShadowStrength | ConfigKey::ChromeContrast))
+                && matches!(event, InputEvent::Change)
             {
                 settings.commit_numeric_input(key, input, false, window, cx);
             }
         },
     )
+}
+
+fn is_pane_setting(key: ConfigKey) -> bool {
+    matches!(
+        key,
+        ConfigKey::PaneGaps
+            | ConfigKey::PaneBackgroundOpacity
+            | ConfigKey::PaneGlowStrength
+            | ConfigKey::PaneInactiveOpacity
+            | ConfigKey::PaneMargin
+            | ConfigKey::PaneCornerRadius
+            | ConfigKey::PaneBorderWidth
+    )
+}
+
+fn refresh_settings_preview(key: ConfigKey, cx: &mut App) {
+    if !is_pane_setting(key)
+        && !matches!(
+            key,
+            ConfigKey::StatusShowSession
+                | ConfigKey::StatusBadges
+                | ConfigKey::StatusAgents
+                | ConfigKey::StatusHost
+                | ConfigKey::StatusUpdate
+        )
+    {
+        return;
+    }
+    let stamp = config::ConfigFileStamp::detect(&config::config_candidates());
+    let parsed = stamp.path.as_deref().map(config::load_config);
+    config::install_config(stamp.path.as_deref(), parsed, cx);
+    crate::theme::refresh_current_theme(cx);
+    cx.refresh_windows();
 }
 
 fn synchronize_f32_input(
@@ -2332,9 +2329,10 @@ fn synchronize_f32_input(
     window: &mut Window,
     cx: &mut Context<SettingsView>,
 ) {
-    let value = value.to_string();
-    if input.read(cx).value().as_ref() != value {
-        input.update(cx, |input, cx| input.set_value(value, window, cx));
+    if input.read(cx).value().parse::<f32>().ok() != Some(value) {
+        input.update(cx, |input, cx| {
+            input.set_value(value.to_string(), window, cx);
+        });
     }
 }
 
@@ -2362,7 +2360,10 @@ fn numeric_range(key: ConfigKey) -> (f32, f32) {
 fn numeric_input_scale(key: ConfigKey) -> f32 {
     if matches!(
         key,
-        ConfigKey::ShadowStrength | ConfigKey::PaneBackgroundOpacity | ConfigKey::ChromeContrast
+        ConfigKey::ShadowStrength
+            | ConfigKey::PaneGlowStrength
+            | ConfigKey::PaneBackgroundOpacity
+            | ConfigKey::ChromeContrast
     ) {
         100.0
     } else {
@@ -2373,7 +2374,10 @@ fn numeric_input_scale(key: ConfigKey) -> f32 {
 fn numeric_input_text(key: ConfigKey, value: f32) -> String {
     if matches!(
         key,
-        ConfigKey::ShadowStrength | ConfigKey::PaneBackgroundOpacity | ConfigKey::ChromeContrast
+        ConfigKey::ShadowStrength
+            | ConfigKey::PaneGlowStrength
+            | ConfigKey::PaneBackgroundOpacity
+            | ConfigKey::ChromeContrast
     ) {
         format!("{:.2}", value * numeric_input_scale(key))
             .trim_end_matches('0')
@@ -2402,6 +2406,7 @@ fn numeric_input_matches_value(key: ConfigKey, text: &str, value: f32) -> bool {
 fn numeric_config_value(config: &AppConfig, key: ConfigKey) -> f32 {
     match key {
         ConfigKey::PaneBackgroundOpacity => config.pane_background_opacity.value,
+        ConfigKey::PaneGlowStrength => config.pane_glow_strength.value,
         ConfigKey::PaneInactiveOpacity => config.pane_inactive_opacity.value,
         ConfigKey::PaneCornerRadius => config.pane_corner_radius.value,
         ConfigKey::PaneMargin => config.pane_margin.value,
@@ -2421,11 +2426,9 @@ fn numeric_config_value(config: &AppConfig, key: ConfigKey) -> f32 {
         | ConfigKey::CheckForUpdates
         | ConfigKey::StatusShowSession
         | ConfigKey::StatusBadges
-        | ConfigKey::StatusAlign
         | ConfigKey::StatusAgents
         | ConfigKey::StatusHost
         | ConfigKey::StatusUpdate
-        | ConfigKey::StatusClock
         | ConfigKey::ExperimentalAgentPane
         | ConfigKey::ExperimentalEditorPane
         | ConfigKey::PaneGaps
@@ -2632,6 +2635,8 @@ fn config_reset_button(key: ConfigKey, provenance: ConfigProvenance) -> Button {
     .on_click(move |_, _, cx| {
         if let Err(error) = remove_config_key(key) {
             report_write_error("reset", key.as_str(), &error, cx);
+        } else {
+            refresh_settings_preview(key, cx);
         }
     })
 }
@@ -2723,17 +2728,20 @@ mod tests {
 
     #[test]
     fn percentage_inputs_convert_and_reject_invalid_edits() {
-        for (key, default) in [
-            (ConfigKey::ShadowStrength, "100"),
-            (ConfigKey::PaneBackgroundOpacity, "50"),
+        for (key, default, max) in [
+            (ConfigKey::ShadowStrength, "100", 100.0),
+            (ConfigKey::PaneBackgroundOpacity, "50", 100.0),
+            (ConfigKey::PaneGlowStrength, "100", 200.0),
         ] {
-            assert_eq!(numeric_range(key), (0.0, 100.0));
+            assert_eq!(numeric_range(key), (0.0, max));
+            assert_eq!(validate_numeric_value(key, &max.to_string()), Ok(max));
+            assert!(validate_numeric_value(key, &(max + 1.0).to_string()).is_err());
             for (factor, displayed) in [(0.0, "0"), (0.15, "15"), (0.5, "50"), (1.0, "100")] {
                 assert_eq!(numeric_input_text(key, factor), displayed);
                 let parsed = validate_numeric_value(key, displayed).expect("valid percentage");
                 assert!((parsed / numeric_input_scale(key) - factor).abs() < f32::EPSILON);
             }
-            for value in ["", "-1", "101", "NaN", "inf", "invalid"] {
+            for value in ["", "-1", "NaN", "inf", "invalid"] {
                 assert!(validate_numeric_value(key, value).is_err(), "{value}");
             }
             assert!(numeric_input_matches_value(key, "50.", 0.5));
@@ -2851,9 +2859,8 @@ mod tests {
     }
 
     #[gpui::test]
-    fn presentation_selects_follow_live_config_reloads(cx: &mut gpui::TestAppContext) {
+    fn ui_font_select_follows_live_config_reloads(cx: &mut gpui::TestAppContext) {
         use std::{cell::RefCell, rc::Rc};
-        use zz_client::{StatusBarAlignment, StatusBarClock};
 
         cx.update(zz_ui::init);
         let captured = Rc::new(RefCell::new(None));
@@ -2871,9 +2878,7 @@ mod tests {
         });
         let settings = captured.borrow().clone().expect("captured settings view");
         let family = "Test UI font".to_owned();
-        let mut config = AppConfig::default();
-        config.status_alignment.value = StatusBarAlignment::Center;
-        config.status_clock.value = StatusBarClock::Off;
+        let config = AppConfig::default();
 
         cx.update(|window, cx| {
             cx.set_global(config);
@@ -2908,22 +2913,6 @@ mod tests {
                     .selected_value()
                     .map(String::as_str),
                 Some(family.as_str()),
-            );
-            assert_eq!(
-                settings
-                    .status_alignment
-                    .read(cx)
-                    .selected_value()
-                    .map(String::as_str),
-                Some("center")
-            );
-            assert_eq!(
-                settings
-                    .status_clock
-                    .read(cx)
-                    .selected_value()
-                    .map(String::as_str),
-                Some("off")
             );
         });
         cx.update(|window, cx| {

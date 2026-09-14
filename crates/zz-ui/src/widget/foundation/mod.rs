@@ -16,6 +16,7 @@ mod units;
 mod window_border;
 
 pub use animation::cubic_ease;
+pub(crate) use animation::{SURFACE_ENTER_DURATION, surface_enter};
 pub use color::{Colorize, oklab_lightness, parse_hex, to_hex};
 pub use element_ext::{ElementExt, InteractiveElementExt};
 pub use geometry::Side;

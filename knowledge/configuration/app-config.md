@@ -95,13 +95,11 @@ The client-local schema includes these scalar settings and chrome colors.
 | `quit-daemon-on-exit` | `false` | `true` or `false` | Whether quitting the app stops the daemon even while sessions are live |
 | `auto-restart-stale-daemon` | `false` | `true` or `false` | Whether a protocol-mismatched local daemon is terminated and replaced on connect. Off by default because it ends every running session |
 | `check-for-updates` | `true` | `true` or `false` | Whether the GUI fetches the GitHub release list ten seconds after launch and daily after that, offering a newer release as a toast. The channel follows the running build (a `-beta.N` version takes prereleases). One anonymous request; nothing else is sent. Release builds only unless `ZZ_UPDATE_CHECK=1`; `ZZ_UPDATE_CHECK=0` silences every build. Surfaced in Settings under About |
-| `status-show-session` | `true` | `true` or `false` | Whether the native desktop status bar shows the attached session chip. Clicking the chip focuses the session picker in the sidebar |
-| `status-badges` | `true` | `true` or `false` | Whether window entries show bell, activity, and Agent markers. The window strip remains visible when this is off |
-| `status-align` | `left` | `left` or `center` | Align the native window strip at the left edge or center it in the available status-bar space |
-| `status-agents` | `true` | `true` or `false` | Whether the bar may show the count of non-dead Agent panes in the attached session. The item stays hidden at zero |
+| `status-show-session` | `true` | `true` or `false` | Whether the native desktop status bar shows the attached session menu |
+| `status-badges` | `true` | `true` or `false` | Whether window entries show bell and activity markers. Window names and pane icon decks remain visible when this is off |
+| `status-agents` | `true` | `true` or `false` | Whether the bar shows Agent activity in the attached session |
 | `status-host` | `true` | `true` or `false` | Whether the bar shows the host name while attached to a remote host. Local attachment has no host item |
 | `status-update` | `true` | `true` or `false` | Whether an available release appears in the bar with its version and an install action. `check-for-updates` separately controls the release check |
-| `status-clock` | `24-hour` | `24-hour`, `12-hour`, `time-date`, or `off` | Select the desktop clock format. It has no seconds; `time-date` renders 24-hour time plus abbreviated month and day |
 | `experimental-agent-pane` | `true` | `true` or `false` | Whether new Agent panes can be created at all . picker row, palette completion, and the daemon's `split-agent` and `select-pane-kind agent` |
 | `experimental-editor-pane` | `false` | `true` or `false` | Whether new Editor panes can be created at all . picker row, palette completion, and the daemon's `select-pane-kind editor` |
 | `pane-gaps` | `false` | `true` or `false` | Whether panes use the gapped border, radius, surface ring, and divider treatment |
@@ -566,7 +564,7 @@ always-live inactive-opacity factor.
 | Page | Groups |
 | --- | --- |
 | Interface | **Theme** (`theme-mode` as three drawn window previews, `UI font`, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (`chrome-preset-light` and `chrome-preset-dark` as two sideways-scrolling tile strips, the three `chrome-*` pickers, `chrome-contrast`) · **Tweaks** (`animations`, `widget-corner-radius`, `shadow-strength`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
-| Status bar | Title-bar items shown when the sidebar is retracted (`status-show-session`, `status-badges`, `status-align`, `status-agents`, `status-host`, `status-update`, `status-clock`) |
+| Status bar | Title-bar items shown when the sidebar is retracted (`status-show-session`, `status-badges`, `status-agents`, `status-host`, `status-update`) |
 | Browser | **Network** (`browser-egress`) · **Agents** (`browser-remote-debugging-port` as an on/off switch that writes `9222`) · **Search** (`browser-search-provider`) · **Shortcuts** (`browser-element-selector-hotkey`) |
 | Editor | **Typography** (`editor-font-size`) · **Display** (`editor-line-numbers`, `editor-relative-line-numbers`, `editor-soft-wrap`, `editor-vim-mode`) |
 | Panes | **Layout** (`pane-gaps`) · **Appearance** (`pane-background-opacity`) · **Focus** (`pane-inactive-opacity`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width` . all disabled without gaps) |

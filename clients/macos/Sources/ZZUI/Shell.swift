@@ -55,14 +55,12 @@ public struct ZZWorkspaceStatusBar<Leading: View, Windows: View, Trailing: View>
     private let leading: Leading
     private let windows: Windows
     private let trailing: Trailing
-    private let windowAlignment: HorizontalAlignment
 
     public init(
-        windowAlignment: HorizontalAlignment = .center, @ViewBuilder leading: () -> Leading,
+        @ViewBuilder leading: () -> Leading,
         @ViewBuilder windows: () -> Windows,
         @ViewBuilder trailing: () -> Trailing
     ) {
-        self.windowAlignment = windowAlignment
         self.leading = leading()
         self.windows = windows()
         self.trailing = trailing()
@@ -72,7 +70,7 @@ public struct ZZWorkspaceStatusBar<Leading: View, Windows: View, Trailing: View>
         HStack(spacing: 6) {
             leading
             HStack(spacing: 2) { windows }.frame(
-                maxWidth: .infinity, alignment: windowAlignment == .leading ? .leading : .center)
+                maxWidth: .infinity, alignment: .leading)
             trailing
         }
         .padding(.horizontal, 6).frame(height: 35).background(.ultraThinMaterial)

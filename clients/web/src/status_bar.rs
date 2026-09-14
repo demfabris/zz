@@ -1,14 +1,14 @@
 use std::rc::Rc;
 
 use gpui::{AnyElement, App, Context, Entity, IntoElement, px};
-use zz_client::{StatusBarAlignment, StatusBarModel, StatusBarSettings};
+use zz_client::{StatusBarModel, StatusBarSettings};
 use zz_ui::{
     navigation::{
         WorkspaceStatusWindowState,
         status::{
-            MAX_VISIBLE_WINDOWS, StatusAction, StatusWindowActions, StatusWindowEntry,
-            status_agent_count, status_session, status_window, status_window_overflow,
-            visible_window_range,
+            MAX_VISIBLE_WINDOWS, StatusAction, StatusAgentEntry, StatusPaneEntry,
+            StatusSessionEntry, StatusWindowActions, StatusWindowEntry, status_agents,
+            status_session, status_window, status_window_overflow, visible_window_range,
         },
     },
     shell::{WorkspaceStatusSlots, workspace_status_bar},
@@ -54,14 +54,38 @@ pub(super) fn render(view: &WebClient, cx: &mut Context<WebClient>) -> AnyElemen
             status_window(
                 ("web-status-window", id.0),
                 window.index.to_string().into(),
-                window.name.clone().into(),
+                window.label.clone().into(),
                 WorkspaceStatusWindowState {
                     connected,
                     active: window.active,
                     bell: window.bell,
                     activity: window.activity,
-                    agent: window.agent,
                 },
+                window
+                    .panes
+                    .iter()
+                    .map(|pane| {
+                        let connection = view.connection.clone();
+                        let target = pane.id.to_string();
+                        StatusPaneEntry::from_pane(
+                            pane,
+                            Rc::new(move |_, cx| {
+                                connection.update(cx, |connection, cx| {
+                                    connection.command(
+                                        "select-window",
+                                        vec!["-t".into(), target.clone()],
+                                        cx,
+                                    );
+                                    connection.command(
+                                        "select-pane",
+                                        vec!["-t".into(), target.clone()],
+                                        cx,
+                                    );
+                                });
+                            }),
+                        )
+                    })
+                    .collect(),
                 StatusWindowActions {
                     select: command_action(&view.connection, "select-window", id.to_string()),
                     close: writable
@@ -77,7 +101,7 @@ pub(super) fn render(view: &WebClient, cx: &mut Context<WebClient>) -> AnyElemen
             .windows
             .iter()
             .map(|window| StatusWindowEntry {
-                label: format!("{} {}", window.index, window.name).into(),
+                label: format!("{} {}", window.index, window.label).into(),
                 active: window.active,
                 select: command_action(&view.connection, "select-window", window.id.to_string()),
             })
@@ -90,28 +114,68 @@ pub(super) fn render(view: &WebClient, cx: &mut Context<WebClient>) -> AnyElemen
         ));
     }
     let mut right = Vec::new();
-    if let Some(count) = model.agent_count {
-        right.push(status_agent_count("web-status-agents", count, cx));
+    if !model.agents.is_empty() {
+        let agents = model
+            .agents
+            .iter()
+            .map(|agent| {
+                let connection = view.connection.clone();
+                let target = agent.id.to_string();
+                StatusAgentEntry {
+                    label: agent.label.clone().into(),
+                    window_name: agent.window_name.clone().into(),
+                    icon: zz_ui::pane::agent_provider_icon(agent.provider),
+                    status: connected
+                        .then(|| {
+                            core.agent_state(agent.id)
+                                .map(zz_client::agent_attention_status)
+                        })
+                        .flatten(),
+                    select: Rc::new(move |_, cx| {
+                        connection.update(cx, |connection, cx| {
+                            connection.command(
+                                "select-window",
+                                vec!["-t".into(), target.clone()],
+                                cx,
+                            );
+                            connection.command(
+                                "select-pane",
+                                vec!["-t".into(), target.clone()],
+                                cx,
+                            );
+                        });
+                    }),
+                }
+            })
+            .collect();
+        right.push(status_agents("web-status-agents", agents, connected, cx));
     }
-    #[cfg(target_family = "wasm")]
-    right.push(zz_ui::navigation::status::status_clock(
-        "web-status-clock",
-        clock_label().into(),
-        cx,
-    ));
-    let entity = cx.entity();
     let session = model.session_name.map(|name| {
-        status_session(
-            "web-status-session",
-            name.into(),
-            move |window, cx| {
-                entity.update(cx, |view, cx| view.focus_sidebar(window, cx));
-            },
-            cx,
-        )
+        let sessions = core
+            .snapshot()
+            .sessions
+            .iter()
+            .map(|session| {
+                let id = session.id;
+                let connection = view.connection.clone();
+                StatusSessionEntry {
+                    label: format!(
+                        "{} · {} window{}",
+                        session.name,
+                        session.windows.len(),
+                        if session.windows.len() == 1 { "" } else { "s" }
+                    )
+                    .into(),
+                    active: Some(id) == core.attached_session(),
+                    select: Rc::new(move |_, cx| {
+                        connection.update(cx, |connection, cx| connection.attach(id, cx));
+                    }),
+                }
+            })
+            .collect();
+        status_session("web-status-session", name.into(), sessions, connected, cx)
     });
     workspace_status_bar(
-        model.alignment == StatusBarAlignment::Center,
         view.preferences.gaps,
         px(8.0),
         WorkspaceStatusSlots {
@@ -137,10 +201,4 @@ fn command_action(
             connection.command(command, vec!["-t".into(), target.clone()], cx);
         });
     })
-}
-
-#[cfg(target_family = "wasm")]
-fn clock_label() -> String {
-    let now = js_sys::Date::new_0();
-    format!("{:02}:{:02}", now.get_hours(), now.get_minutes())
 }

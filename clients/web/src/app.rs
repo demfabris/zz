@@ -294,17 +294,6 @@ impl WebClient {
             split_drag: None,
             _subscriptions: vec![key_events, observer, events, appearance_observer],
         };
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_secs(30))
-                    .await;
-                if this.update(cx, |_, cx| cx.notify()).is_err() {
-                    break;
-                }
-            }
-        })
-        .detach();
         this.connection.update(cx, Connection::start);
         this.preferences.apply(window, cx);
         this
@@ -761,14 +750,14 @@ impl WebClient {
                 let label = pane
                     .dead_status
                     .map_or_else(|| "dead".to_owned(), |status| format!("dead ({status})"));
-                status_tags.push(zz_ui::pane::pane_waiting_state(label).into_any_element());
+                status_tags.push(zz_ui::pane::pane_waiting_state(label, cx).into_any_element());
             }
             if matches!(&pane.kind, PaneKindSnapshot::Terminal)
                 && self.connection.read(cx).core.viewport(pane_id).is_none()
             {
                 self.waiting_panes.insert(pane_id);
                 status_tags.push(
-                    zz_ui::pane::pane_waiting_state(format!("waiting for {pane_id}"))
+                    zz_ui::pane::pane_waiting_state(format!("Waiting for {pane_id}"), cx)
                         .into_any_element(),
                 );
             }
@@ -1619,7 +1608,7 @@ fn pane_icon(kind: &PaneKindSnapshot) -> IconName {
     match kind {
         PaneKindSnapshot::Terminal => IconName::SquareTerminal,
         PaneKindSnapshot::Browser(_) => IconName::Globe,
-        PaneKindSnapshot::Agent(_) => IconName::RobotFace,
+        PaneKindSnapshot::Agent(agent) => zz_ui::pane::agent_provider_icon(agent.provider),
         PaneKindSnapshot::Editor(_) => IconName::File,
         PaneKindSnapshot::Picker => IconName::Plus,
     }

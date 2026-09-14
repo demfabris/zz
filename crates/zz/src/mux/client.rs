@@ -672,6 +672,8 @@ pub(crate) struct ClientNotificationCleared {
 
 pub(crate) struct InitialConnectionFinished;
 
+pub(crate) struct AgentStateChanged;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct StaleDaemonInfo {
     pub(crate) daemon: Option<u16>,
@@ -2108,6 +2110,15 @@ impl MuxClient {
     #[must_use]
     pub fn snapshot(&self) -> Arc<MuxSnapshot> {
         Arc::clone(self.core.snapshot())
+    }
+
+    pub(crate) fn agent_attention_status(
+        &self,
+        pane: PaneId,
+    ) -> Option<zz_client::AgentAttentionStatus> {
+        self.core
+            .agent_state(pane)
+            .map(zz_client::agent_attention_status)
     }
 
     pub(crate) fn claims_prefix_input(&self, input: &zz_terminal::KeyInput) -> bool {
@@ -3922,6 +3933,7 @@ impl MuxClient {
                 items,
             } => self.apply_agent_updates(pane, first_seq, items),
             CoreEvent::AgentStateChanged { pane, .. } => {
+                cx.emit(AgentStateChanged);
                 #[cfg(feature = "agent-pane")]
                 if let Some(state) = self.core.agent_state(pane).cloned() {
                     self.agent_events.states.push((pane, state));
@@ -4353,6 +4365,7 @@ impl MuxClient {
 }
 
 impl EventEmitter<InitialConnectionFinished> for MuxClient {}
+impl EventEmitter<AgentStateChanged> for MuxClient {}
 impl EventEmitter<ClientNotification> for MuxClient {}
 impl EventEmitter<ClientNotificationCleared> for MuxClient {}
 

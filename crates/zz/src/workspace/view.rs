@@ -33,11 +33,13 @@ use zz_ui::{
 };
 use zz_ui::{
     pane::{
-        FloatingSurface, PaneChrome, PaneDragOverlayState, PaneOverlayCorner, PaneSplitAxis,
-        PaneSplitHighlight, PaneSplitSide, pane_border_color, pane_drag_chip, pane_drag_overlay,
-        pane_drop_preview, pane_indicator_card, pane_indicator_overlay, pane_overlay_stack,
-        pane_split_hit_target, pane_split_slot, pane_split_surface, pane_surface, pane_sync_badge,
-        pane_unzoom_control, pane_waiting_state,
+        FloatingSurface, PaneChrome, PaneDrag, PaneDragOverlayState, PaneOverlayCorner,
+        PaneSplitAxis, PaneSplitHighlight, PaneSplitSide, TERMINAL_HEADER_HEIGHT,
+        TerminalPaneAction, pane_border_color, pane_drag_button, pane_drag_overlay,
+        pane_drag_preview, pane_drop_preview, pane_indicator_card, pane_indicator_overlay,
+        pane_overlay_stack, pane_split_hit_target, pane_split_slot, pane_split_surface,
+        pane_surface, pane_sync_badge, pane_unzoom_control, pane_waiting_state,
+        terminal_pane_header,
     },
     shell::{app_connection_state, app_workspace_surface},
 };
@@ -66,7 +68,7 @@ use crate::{
             SshPromptRequest,
         },
         hosts::HostId,
-        nav::{TreeTarget, kill_target_command},
+        nav::{TreeTarget, kill_target_command, split_picker_command},
         prefix::{PrefixClaim, PressDisposition, terminal_key_input},
     },
     pane::display::DisplayPanesView,
@@ -81,7 +83,6 @@ const MIN_DROP_EDGE: f32 = 80.0;
 const DROP_EDGE_FRACTION: f32 = 0.25;
 const DROP_PREVIEW_MORPH: Duration = Duration::from_millis(180);
 const DROP_PREVIEW_FADE: Duration = Duration::from_millis(140);
-const DRAG_CHIP_OFFSET: f32 = 12.0;
 const OPTIMISTIC_SPLIT: SplitId = SplitId(u64::MAX);
 
 gpui::actions!(zz, [ClosePane]);
@@ -244,11 +245,6 @@ impl Render for SplitDragPreview {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct PaneDrag {
-    pane: PaneId,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DropZone {
     Left,
     Right,
@@ -304,6 +300,7 @@ impl DropPreview {
 #[derive(Clone, Debug, PartialEq)]
 struct PaneDragState {
     source: PaneId,
+    requires_prefix: bool,
     window: WindowId,
     layout: LayoutNode,
     slots: Vec<(PaneId, Bounds<Pixels>)>,
@@ -329,6 +326,7 @@ impl PaneDragState {
             .collect::<Vec<_>>();
         slots.iter().any(|(pane, _)| *pane == source).then(|| Self {
             source,
+            requires_prefix: true,
             window,
             layout: layout.clone(),
             slots,
@@ -408,8 +406,11 @@ impl PaneDragState {
         self.window == window && self.layout == *layout
     }
 
-    fn matches(&self, window: &WindowSnapshot) -> bool {
-        self.matches_layout(window.id, &window.layout)
+    fn matches(&self, window: &WindowSnapshot, prefix_armed: bool) -> bool {
+        (!self.requires_prefix || prefix_armed)
+            && window.zoomed_pane.is_none()
+            && window.panes.len() > 1
+            && self.matches_layout(window.id, &window.layout)
             && self.slots.len() == window.panes.len()
             && self
                 .slots
@@ -458,28 +459,9 @@ impl PaneContent {
     }
 }
 
-struct PaneDragChip {
-    pane: PaneId,
-    title: String,
-    grab: Point<Pixels>,
-}
-
 struct PopupPane {
     state: PopupState,
     terminal: Entity<TerminalView>,
-}
-
-impl Render for PaneDragChip {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .pl(self.grab.x + px(DRAG_CHIP_OFFSET))
-            .pt(self.grab.y + px(DRAG_CHIP_OFFSET))
-            .child(pane_drag_chip(
-                self.pane.to_string(),
-                self.title.clone(),
-                cx,
-            ))
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -589,7 +571,7 @@ pub struct AppView {
     pane_drag: Option<PaneDragState>,
     pane_drop_preview: Rc<Cell<DropPreviewFrame>>,
     pane_layout_override: Option<PaneLayoutOverride>,
-    pane_canvas_size: Rc<Cell<Size<Pixels>>>,
+    pane_canvas_bounds: Rc<Cell<Bounds<Pixels>>>,
     prefix_claim: PrefixClaim,
     dialog_prefix_cancel_sent: bool,
     dialog_prefix_cancel_pending: Option<u64>,
@@ -800,7 +782,7 @@ impl AppView {
             pane_drag: None,
             pane_drop_preview: Rc::new(Cell::new(DropPreviewFrame::default())),
             pane_layout_override: None,
-            pane_canvas_size: Rc::new(Cell::new(Size::default())),
+            pane_canvas_bounds: Rc::new(Cell::new(Bounds::default())),
             prefix_claim: PrefixClaim::default(),
             dialog_prefix_cancel_sent: false,
             dialog_prefix_cancel_pending: None,
@@ -829,6 +811,18 @@ impl AppView {
             return;
         }
         let keystroke = &event.keystroke;
+        if keystroke.key == "escape"
+            && self
+                .pane_drag
+                .as_ref()
+                .is_some_and(|drag| !drag.requires_prefix)
+        {
+            self.pane_drag = None;
+            cx.stop_active_drag(window);
+            cx.notify();
+            cx.stop_propagation();
+            return;
+        }
         if keystroke.modifiers.platform || keystroke.modifiers.function {
             return;
         }
@@ -1200,6 +1194,10 @@ impl AppView {
                                 let view = cx.new(|cx| {
                                     BrowserView::new(pane, &descriptor, controller, mux, window, cx)
                                 });
+                                cx.subscribe(&view, |view, _, drag: &PaneDrag, cx| {
+                                    view.on_pane_drag_start(*drag, cx);
+                                })
+                                .detach();
                                 self.browsers.insert(pane, view);
                             } else if let Some(view) = self.browsers.get(pane) {
                                 view.update(cx, |view, cx| {
@@ -1227,6 +1225,11 @@ impl AppView {
                                 let view = cx.new(|cx| {
                                     AgentView::new(pane, &descriptor, controller, mux, window, cx)
                                 });
+                                #[cfg(feature = "agent-pane")]
+                                cx.subscribe(&view, |view, _, drag: &PaneDrag, cx| {
+                                    view.on_pane_drag_start(*drag, cx);
+                                })
+                                .detach();
                                 self.agents.insert(pane, view);
                             }
                         }
@@ -1331,7 +1334,9 @@ impl AppView {
                 .mux
                 .update(cx, |mux, _| mux.take_terminal_commands(*pane));
             for command in commands {
-                output.update(cx, |output, cx| output.apply_ui_command(command, cx));
+                output.update(cx, |output, cx| {
+                    output.apply_ui_command(command, window, cx);
+                });
             }
         }
 
@@ -1430,7 +1435,9 @@ impl AppView {
                 .update(cx, |mux, _| mux.take_terminal_commands(*pane));
             if let Some(terminal) = self.terminals.get(pane) {
                 for command in commands {
-                    terminal.update(cx, |terminal, cx| terminal.apply_ui_command(command, cx));
+                    terminal.update(cx, |terminal, cx| {
+                        terminal.apply_ui_command(command, window, cx);
+                    });
                 }
             }
         }
@@ -1822,17 +1829,11 @@ impl AppView {
             return;
         };
         if !cx.has_active_drag() {
-            let source = drag.source;
-            self.pane_drag = None;
-            self.finish_pane_drag(source, cx);
+            let drag = take_pane_drag(&mut self.pane_drag).unwrap();
+            self.finish_pane_drag(drag, cx);
             return;
         }
-        let valid_window = active_window.is_some_and(|active_window| {
-            prefix_armed
-                && active_window.zoomed_pane.is_none()
-                && active_window.panes.len() > 1
-                && drag.matches(active_window)
-        });
+        let valid_window = active_window.is_some_and(|window| drag.matches(window, prefix_armed));
         if !valid_window {
             self.pane_drag = None;
             cx.stop_active_drag(window);
@@ -1857,12 +1858,13 @@ impl AppView {
             source,
             window.id,
             &window.layout,
-            self.pane_canvas_size.get(),
+            self.pane_canvas_bounds.get().size,
             pane_split_slot(config::pane_margin(cx)),
         )
     }
 
-    fn on_pane_drag_start(&mut self, pane: PaneId, cx: &mut Context<Self>) {
+    fn on_pane_drag_start(&mut self, payload: PaneDrag, cx: &mut Context<Self>) {
+        let pane = payload.pane;
         if self
             .pane_drag
             .as_ref()
@@ -1870,7 +1872,8 @@ impl AppView {
         {
             return;
         }
-        if let Some(drag) = self.pane_drag_state(pane, cx) {
+        if let Some(mut drag) = self.pane_drag_state(pane, cx) {
+            drag.requires_prefix = payload.requires_prefix;
             self.pane_drop_preview.set(DropPreviewFrame::default());
             self.pane_drag = Some(drag);
             cx.notify();
@@ -1895,10 +1898,12 @@ impl AppView {
         }
     }
 
-    fn on_pane_drop(&mut self, drag: PaneDrag, _: &mut Window, cx: &mut Context<Self>) {
-        let Some(state) = self.pane_drag.take_if(|state| state.source == drag.pane) else {
+    fn on_pane_drop(&mut self, drag: PaneDrag, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(mut state) = self.pane_drag.take_if(|state| state.source == drag.pane) else {
             return;
         };
+        state.target =
+            state.target_at(window.mouse_position() - self.pane_canvas_bounds.get().origin);
         if let Some((target, zone)) = state.target
             && let Some(command) = pane_drop_command(state.source, target, zone)
         {
@@ -1912,11 +1917,13 @@ impl AppView {
                 });
             self.mux.read(cx).execute(command);
         }
-        self.finish_pane_drag(state.source, cx);
+        self.finish_pane_drag(drag, cx);
     }
 
-    fn finish_pane_drag(&self, source: PaneId, cx: &mut Context<Self>) {
-        self.dismiss_armed_prefix(source, cx);
+    fn finish_pane_drag(&self, drag: PaneDrag, cx: &mut Context<Self>) {
+        if drag.requires_prefix && self.mux.read(cx).prefix_armed() {
+            self.dismiss_armed_prefix(drag.pane, cx);
+        }
         cx.notify();
     }
 
@@ -2093,17 +2100,18 @@ impl AppView {
             .on_click(cx.listener(move |view, _, _, cx| {
                 view.on_pane_click(pane, cx);
             }))
-            .on_drag(PaneDrag { pane }, move |drag, grab, _, cx| {
-                app_view.update(cx, |view, cx| {
-                    view.on_pane_drag_start(drag.pane, cx);
-                });
-                let title = title.clone();
-                cx.new(move |_| PaneDragChip {
-                    pane: drag.pane,
-                    title,
-                    grab,
-                })
-            })
+            .on_drag(
+                PaneDrag {
+                    pane,
+                    requires_prefix: true,
+                },
+                move |drag, grab, _, cx| {
+                    app_view.update(cx, |view, cx| {
+                        view.on_pane_drag_start(*drag, cx);
+                    });
+                    pane_drag_preview(drag.pane, title.clone(), grab, cx)
+                },
+            )
             .on_drop(cx.listener(move |view, drag: &PaneDrag, window, cx| {
                 view.on_pane_drop(*drag, window, cx);
             }))
@@ -2150,6 +2158,30 @@ impl AppView {
                 let inactive_opacity = config::pane_inactive_opacity(cx);
                 let pane_snapshot = window.panes.get(pane);
                 let synchronized = pane_snapshot.is_some_and(|pane| pane.synchronized_input);
+                let dead_label = pane_snapshot.filter(|pane| pane.dead).map(|pane| {
+                    pane.dead_status
+                        .map_or_else(|| "Dead".to_owned(), |status| format!("Dead · {status}"))
+                });
+                let terminal_overlay = self
+                    .command_output
+                    .as_ref()
+                    .filter(|(output_pane, _)| output_pane == pane)
+                    .map(|(_, output)| output)
+                    .or_else(|| {
+                        self.terminals
+                            .get(pane)
+                            .filter(|_| !self.pickers.contains_key(pane))
+                    });
+                if let Some(terminal) = terminal_overlay {
+                    terminal.update(cx, |terminal, cx| {
+                        terminal.set_pane_status(
+                            dead_label.clone(),
+                            synchronized,
+                            window.zoomed_pane == Some(*pane),
+                            cx,
+                        );
+                    });
+                }
                 let pane_content = if let Some((_, output)) = self
                     .command_output
                     .as_ref()
@@ -2211,27 +2243,110 @@ impl AppView {
                     },
                     PaneContent::element,
                 );
+                let terminal_header =
+                    pane_snapshot.filter(|pane| matches!(pane.kind, PaneKindSnapshot::Terminal));
+                let content = if let Some(snapshot) = terminal_header {
+                    let pane = *pane;
+                    let mux = self.mux.clone();
+                    let view = cx.entity();
+                    let title = zz_client::navigation::pane_label(snapshot);
+                    let can_drag = self.mux.read(cx).is_connected()
+                        && window.zoomed_pane.is_none()
+                        && window.panes.len() > 1;
+                    let background = self
+                        .command_output
+                        .as_ref()
+                        .filter(|(output_pane, _)| *output_pane == pane)
+                        .map(|(_, terminal)| terminal)
+                        .or_else(|| self.terminals.get(&pane))
+                        .map_or_else(
+                            || crate::theme::app_pane_background(cx),
+                            |terminal| terminal.read(cx).pane_background(cx),
+                        );
+                    let header = terminal_pane_header(
+                        active,
+                        title.clone(),
+                        pane_drag_button(
+                            ("terminal-pane-drag", pane.0),
+                            pane,
+                            title,
+                            can_drag,
+                            move |drag, _, cx| {
+                                view.update(cx, |view, cx| view.on_pane_drag_start(*drag, cx));
+                            },
+                            cx,
+                        ),
+                        move |action, _, cx| {
+                            let command = match action {
+                                TerminalPaneAction::SplitBottom => {
+                                    split_picker_command(pane, Axis::Vertical)
+                                }
+                                TerminalPaneAction::SplitRight => {
+                                    split_picker_command(pane, Axis::Horizontal)
+                                }
+                                TerminalPaneAction::Close => {
+                                    kill_target_command(TreeTarget::Pane(pane))
+                                }
+                            };
+                            mux.read(cx).execute(command);
+                        },
+                        cx,
+                    )
+                    .on_click(cx.listener(move |view, _, window, cx| {
+                        view.mux.read(cx).execute(pane_select_command(pane));
+                        if let Some((_, focus)) = view.pane_focus_target(pane, cx) {
+                            focus.focus(window, cx);
+                        }
+                    }));
+                    div()
+                        .flex()
+                        .flex_col()
+                        .size_full()
+                        .child(
+                            div()
+                                .flex_none()
+                                .bg(background)
+                                .rounded_tl(radii.top_left)
+                                .rounded_tr(radii.top_right)
+                                .child(header.opacity(if inactive {
+                                    inactive_opacity
+                                } else {
+                                    1.0
+                                })),
+                        )
+                        .child(div().flex_1().min_h_0().min_w_0().child(content))
+                        .into_any_element()
+                } else {
+                    content
+                };
                 let mut status_tags: Vec<AnyElement> = Vec::new();
-                if let Some(dead) = pane_snapshot.filter(|pane| pane.dead) {
-                    let label = dead
-                        .dead_status
-                        .map_or_else(|| "dead".to_owned(), |status| format!("dead ({status})"));
-                    status_tags.push(pane_waiting_state(label).into_any_element());
-                }
-                if waiting {
-                    status_tags
-                        .push(pane_waiting_state(format!("waiting for {pane}")).into_any_element());
-                }
-                if synchronized {
-                    status_tags.push(pane_sync_badge(cx).into_any_element());
-                }
-                if window.zoomed_pane == Some(*pane) {
-                    status_tags.push(self.zoom_control(*pane).into_any_element());
+                if terminal_overlay.is_none() {
+                    if let Some(label) = dead_label {
+                        status_tags.push(
+                            zz_ui::pane::pane_status_badge(zz_ui::IconName::CircleX, label, cx)
+                                .into_any_element(),
+                        );
+                    }
+                    if waiting {
+                        status_tags.push(
+                            pane_waiting_state(format!("Waiting for {pane}"), cx)
+                                .into_any_element(),
+                        );
+                    }
+                    if synchronized {
+                        status_tags.push(pane_sync_badge(cx).into_any_element());
+                    }
+                    if window.zoomed_pane == Some(*pane) {
+                        status_tags.push(self.zoom_control(*pane).into_any_element());
+                    }
                 }
                 let mut overlays: Vec<AnyElement> = Vec::with_capacity(3);
                 if !status_tags.is_empty() {
                     overlays.push(
                         pane_overlay_stack(PaneOverlayCorner::TopRight, status_tags)
+                            .when(terminal_header.is_some(), |stack| {
+                                stack.top(px(TERMINAL_HEADER_HEIGHT + 8.0))
+                            })
                             .into_any_element(),
                     );
                 }
@@ -2324,7 +2439,7 @@ impl AppView {
                                 SeparatorSide::First => PaneSplitSide::First,
                                 SeparatorSide::Second => PaneSplitSide::Second,
                             },
-                            cx.theme().foreground.wash(),
+                            cx.theme().accent,
                         )
                     });
                 let split_axis = match axis {
@@ -2506,7 +2621,7 @@ impl AppView {
         let frame = popup_frame(
             state,
             origin,
-            self.pane_canvas_size.get(),
+            self.pane_canvas_bounds.get().size,
             window.scale_factor(),
         );
         let bordered = state.border_lines != PopupBorderLines::None;
@@ -2549,7 +2664,7 @@ impl AppView {
         let frame = menu_frame(
             state,
             origin,
-            self.pane_canvas_size.get(),
+            self.pane_canvas_bounds.get().size,
             window.scale_factor(),
         );
         let bordered = state.border_lines != PopupBorderLines::None;
@@ -2584,7 +2699,7 @@ impl AppView {
 
     fn confirm_overlay(&self, origin: Point<Pixels>, cx: &App) -> Option<AnyElement> {
         let confirm = self.confirm.as_ref()?;
-        let canvas = self.pane_canvas_size.get();
+        let canvas = self.pane_canvas_bounds.get().size;
         let prompt = &confirm.read(cx).state().prompt;
         let width = px((display_width(prompt).saturating_mul(8).saturating_add(32)) as f32)
             .max(px(180.0))
@@ -2813,7 +2928,7 @@ impl Render for AppView {
         if let Some(confirm) = self.confirm_overlay(canvas_origin, cx) {
             overlays.push(confirm);
         }
-        let measured_canvas_size = self.pane_canvas_size.clone();
+        let measured_canvas_bounds = self.pane_canvas_bounds.clone();
         let content = div().relative().size_full().child(
             div()
                 .absolute()
@@ -2829,7 +2944,7 @@ impl Render for AppView {
                         .min_h_0()
                         .relative()
                         .on_prepaint(move |bounds, _, _| {
-                            measured_canvas_size.set(bounds.size);
+                            measured_canvas_bounds.set(bounds);
                         })
                         .on_drag_move::<PaneDrag>(cx.listener(Self::on_pane_drag_move))
                         .on_drop(cx.listener(|view, drag: &PaneDrag, window, cx| {
@@ -3062,9 +3177,12 @@ fn timed_message_key(message_id: u64) -> String {
     format!("timed-message-{message_id}")
 }
 
-fn take_pane_drag(state: &mut Option<PaneDragState>) -> Option<PaneId> {
+fn take_pane_drag(state: &mut Option<PaneDragState>) -> Option<PaneDrag> {
     let state = state.take()?;
-    Some(state.source)
+    Some(PaneDrag {
+        pane: state.source,
+        requires_prefix: state.requires_prefix,
+    })
 }
 
 fn pane_bounds(rect: NormalizedPaneRect, canvas_size: Size<Pixels>) -> Bounds<Pixels> {
@@ -3195,9 +3313,13 @@ mod tests {
                         .id("pane-release-order-source")
                         .w(px(100.0))
                         .h(px(100.0))
-                        .on_drag(PaneDrag { pane: source }, |_, _, _, cx| {
-                            cx.new(|_| PaneReleaseOrderPreview)
-                        }),
+                        .on_drag(
+                            PaneDrag {
+                                pane: source,
+                                requires_prefix: true,
+                            },
+                            |_, _, _, cx| cx.new(|_| PaneReleaseOrderPreview),
+                        ),
                 )
                 .child(
                     div()
@@ -5601,6 +5723,93 @@ mod tests {
         );
     }
 
+    #[gpui::test]
+    fn pane_handle_drop_and_escape_leave_keyboard_input_alone(cx: &mut TestAppContext) {
+        cx.update(zz_ui::init);
+        let (workspace, cx) = cx.add_window_view(|window, cx| {
+            let controller = cx.new(|cx| {
+                BrowserController::new(Err(zz_browser::BrowserError::AlreadyShutdown), cx)
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        let snapshot = two_pane_snapshot(PaneId(0));
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), snapshot.clone(), cx);
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+        let bounds = workspace.read_with(cx, |workspace, _| workspace.pane_canvas_bounds.get());
+        let target = bounds.origin + point(bounds.size.width * 0.75, bounds.size.height * 0.5);
+        cx.simulate_mouse_move(target, None::<MouseButton>, Modifiers::default());
+        let payload = PaneDrag {
+            pane: PaneId(0),
+            requires_prefix: false,
+        };
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.on_pane_drag_start(payload, cx);
+            let state = workspace.pane_drag.as_mut().unwrap();
+            let active_window = &snapshot.sessions[0].windows[0];
+            assert!(state.matches(active_window, false));
+            state.requires_prefix = true;
+            assert!(!state.matches(active_window, false));
+            assert!(state.matches(active_window, true));
+            state.requires_prefix = false;
+            let mut zoomed = active_window.clone();
+            zoomed.zoomed_pane = Some(payload.pane);
+            assert!(!state.matches(&zoomed, false));
+            assert!(state.target.is_none());
+            workspace.on_pane_drop(payload, window, cx);
+            assert!(workspace.pane_drag.is_none());
+            assert_eq!(
+                workspace.pane_layout_override.as_ref().unwrap().layout,
+                predicted_drop_layout(
+                    &active_window.layout,
+                    PaneId(0),
+                    PaneId(2),
+                    DropZone::Center
+                )
+                .unwrap()
+            );
+
+            workspace.on_pane_drag_start(payload, cx);
+            workspace.intercept_keystroke(
+                &gpui::KeystrokeEvent {
+                    keystroke: Keystroke {
+                        key: "escape".to_owned(),
+                        key_char: None,
+                        modifiers: Modifiers::default(),
+                    },
+                    action: None,
+                    context_stack: Vec::new(),
+                    is_held: false,
+                },
+                window,
+                cx,
+            );
+            assert!(workspace.pane_drag.is_none());
+            assert!(!cx.has_active_drag());
+        });
+        assert!(
+            !input
+                .borrow()
+                .iter()
+                .any(|message| matches!(message, InputMessage::Key { .. }))
+        );
+        assert!(!mux.read_with(cx, |mux, _| mux.prefix_armed()));
+    }
+
     #[test]
     fn taking_a_completed_pane_drag_always_clears_drag_state() {
         let mut drag = Some(three_pane_drag(PaneId(3)));
@@ -5611,7 +5820,13 @@ mod tests {
                 DropPreviewFrame::default(),
             );
 
-        assert_eq!(take_pane_drag(&mut drag), Some(PaneId(3)));
+        assert_eq!(
+            take_pane_drag(&mut drag),
+            Some(PaneDrag {
+                pane: PaneId(3),
+                requires_prefix: true
+            })
+        );
         assert!(drag.is_none());
         assert_eq!(take_pane_drag(&mut drag), None);
     }

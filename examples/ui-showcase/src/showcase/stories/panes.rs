@@ -176,7 +176,7 @@ pub(super) fn render(cx: &mut Context<Showcase>) -> AnyElement {
         .child(
             gallery(
                 "Pane status controls",
-                "Synchronized-input caution, the zoom release, and the pending-entity placeholder all reuse the Tag treatment and share one top-right stack so they never overlap.",
+                "Synchronized-input caution, the zoom release, and the pending-entity placeholder use Chroma button surfaces and share one top-right stack.",
                 cx,
             )
             .child(
@@ -199,7 +199,7 @@ pub(super) fn render(cx: &mut Context<Showcase>) -> AnyElement {
                         "pending entity",
                         240.0,
                         150.0,
-                        top_right(pane_waiting_state("waiting for %7")),
+                        top_right(pane_waiting_state("Waiting for %7", cx)),
                         cx,
                     ))
                     .child(specimen_over_terminal(
@@ -220,7 +220,7 @@ pub(super) fn render(cx: &mut Context<Showcase>) -> AnyElement {
         .child(
             gallery(
                 "Terminal mode indicators",
-                "Copy mode, view mode, and unseen output reuse the Tag treatment in the top-right corner.",
+                "Copy mode, view mode, and unseen output use Chroma button surfaces in the top-right corner.",
                 cx,
             )
             .child(
@@ -229,21 +229,21 @@ pub(super) fn render(cx: &mut Context<Showcase>) -> AnyElement {
                         "copy mode",
                         280.0,
                         120.0,
-                        top_right(mode(Some("COPY MODE"), "284/1200 · +14 output")),
+                        top_right(mode(Some("Copy mode"), "284 / 1200 · +14 output", cx)),
                         cx,
                     ))
                     .child(specimen_over_terminal(
                         "view mode",
                         280.0,
                         120.0,
-                        top_right(mode(Some("VIEW MODE"), "96/420 · q close")),
+                        top_right(mode(Some("View mode"), "96 / 420", cx)),
                         cx,
                     ))
                     .child(specimen_over_terminal(
                         "unseen output",
                         280.0,
                         120.0,
-                        top_right(mode(None, "+27 output")),
+                        top_right(mode(None, "+27 output", cx)),
                         cx,
                     )),
             ),
@@ -443,8 +443,8 @@ fn uniform_radii(radius: f32) -> Corners<Pixels> {
     }
 }
 
-fn mode(label: Option<&'static str>, detail: &'static str) -> impl IntoElement {
-    terminal_mode_indicator(label, detail)
+fn mode(label: Option<&'static str>, detail: &'static str, cx: &App) -> impl IntoElement {
+    terminal_mode_indicator(label, detail, cx)
 }
 
 fn key_pill(key: &'static str) -> Kbd {

@@ -7,6 +7,8 @@ use zz_protocol::KeyBindingSnapshot;
 
 pub const MAX_MUX_CONFIG_BYTES: usize = 1024 * 1024;
 
+mod file_rows;
+
 #[derive(Serialize)]
 pub struct Setting {
     pub key: &'static str,
@@ -72,13 +74,6 @@ fn value(parsed: &ParsedConfig, key: ConfigKey) -> (Value, ConfigProvenance) {
             let setting = &parsed.config.status_badges;
             (json!(setting.value), setting.provenance)
         }
-        ConfigKey::StatusAlign => {
-            let setting = &parsed.config.status_alignment;
-            (
-                json!(status_bar_alignment_value(setting.value)),
-                setting.provenance,
-            )
-        }
         ConfigKey::StatusAgents => {
             let setting = &parsed.config.status_agents;
             (json!(setting.value), setting.provenance)
@@ -90,13 +85,6 @@ fn value(parsed: &ParsedConfig, key: ConfigKey) -> (Value, ConfigProvenance) {
         ConfigKey::StatusUpdate => {
             let setting = &parsed.config.status_update;
             (json!(setting.value), setting.provenance)
-        }
-        ConfigKey::StatusClock => {
-            let setting = &parsed.config.status_clock;
-            (
-                json!(status_bar_clock_value(setting.value)),
-                setting.provenance,
-            )
         }
         ConfigKey::ExperimentalAgentPane => {
             let setting = &parsed.config.experimental_agent_pane;
@@ -112,6 +100,10 @@ fn value(parsed: &ParsedConfig, key: ConfigKey) -> (Value, ConfigProvenance) {
         }
         ConfigKey::PaneBackgroundOpacity => {
             let setting = &parsed.config.pane_background_opacity;
+            (json!(setting.value), setting.provenance)
+        }
+        ConfigKey::PaneGlowStrength => {
+            let setting = &parsed.config.pane_glow_strength;
             (json!(setting.value), setting.provenance)
         }
         ConfigKey::PaneInactiveOpacity => {
@@ -225,13 +217,6 @@ fn choices(key: ConfigKey) -> Vec<Choice> {
             ("light", "Light"),
             ("dark", "Dark"),
         ],
-        ConfigKey::StatusAlign => vec![("left", "Left"), ("center", "Center")],
-        ConfigKey::StatusClock => vec![
-            ("24-hour", "24-hour"),
-            ("12-hour", "12-hour"),
-            ("time-date", "Time and date"),
-            ("off", "Off"),
-        ],
         ConfigKey::BrowserSearchProvider => SearchProvider::ALL
             .into_iter()
             .map(|provider| (provider.as_str(), provider.title()))
@@ -253,13 +238,12 @@ fn section(key: ConfigKey) -> &'static str {
     match key {
         ConfigKey::StatusShowSession
         | ConfigKey::StatusBadges
-        | ConfigKey::StatusAlign
         | ConfigKey::StatusAgents
         | ConfigKey::StatusHost
-        | ConfigKey::StatusUpdate
-        | ConfigKey::StatusClock => "status",
+        | ConfigKey::StatusUpdate => "status",
         ConfigKey::PaneGaps
         | ConfigKey::PaneBackgroundOpacity
+        | ConfigKey::PaneGlowStrength
         | ConfigKey::PaneInactiveOpacity
         | ConfigKey::PaneCornerRadius
         | ConfigKey::PaneMargin
@@ -286,11 +270,11 @@ fn title(key: ConfigKey) -> String {
     match key {
         ConfigKey::UiFontFamily => "Interface font".to_owned(),
         ConfigKey::ChromeContrast => "Contrast".to_owned(),
+        ConfigKey::PaneGlowStrength => "Selected pane glow".to_owned(),
         ConfigKey::BrowserElementSelectorHotkey => "Element selector shortcut".to_owned(),
         ConfigKey::BrowserEgress => "Route remote browsing through SSH".to_owned(),
         ConfigKey::ShowFps => "Show frame rate".to_owned(),
         ConfigKey::StatusShowSession => "Show session".to_owned(),
-        ConfigKey::StatusAlign => "Window alignment".to_owned(),
         ConfigKey::StatusAgents => "Agent activity".to_owned(),
         ConfigKey::StatusHost => "Host name".to_owned(),
         ConfigKey::StatusUpdate => "Update indicator".to_owned(),
@@ -319,15 +303,14 @@ pub fn settings(parsed: &ParsedConfig) -> Vec<Setting> {
         ConfigKey::CheckForUpdates,
         ConfigKey::StatusShowSession,
         ConfigKey::StatusBadges,
-        ConfigKey::StatusAlign,
         ConfigKey::StatusAgents,
         ConfigKey::StatusHost,
         ConfigKey::StatusUpdate,
-        ConfigKey::StatusClock,
         ConfigKey::ExperimentalAgentPane,
         ConfigKey::ExperimentalEditorPane,
         ConfigKey::PaneGaps,
         ConfigKey::PaneBackgroundOpacity,
+        ConfigKey::PaneGlowStrength,
         ConfigKey::PaneInactiveOpacity,
         ConfigKey::PaneCornerRadius,
         ConfigKey::PaneMargin,
@@ -395,6 +378,14 @@ pub enum SettingsAction {
     },
     Reset {
         key: String,
+    },
+    SetAppearance {
+        key: String,
+        value: Option<String>,
+    },
+    SetMux {
+        key: String,
+        value: Option<String>,
     },
     Preset {
         value: String,
@@ -542,7 +533,20 @@ impl SettingsModel {
                 }
             })
             .collect::<Vec<_>>();
-        json!({"revision":self.revision,"settings":settings(&self.parsed),"config_path":config_path,"mux_path":mux_path,
+        let mut rows = settings(&self.parsed);
+        rows.extend(file_rows::file_settings(
+            terminal_source
+                .as_ref()
+                .ok()
+                .and_then(|value| value.as_deref())
+                .unwrap_or_default(),
+            mux_source
+                .as_ref()
+                .ok()
+                .and_then(|value| value.as_deref())
+                .unwrap_or_default(),
+        ));
+        json!({"revision":self.revision,"settings":rows,"config_path":config_path,"mux_path":mux_path,
             "terminal_source":terminal_source.as_ref().ok().and_then(|value|value.as_ref()),"mux_source":mux_source.as_ref().ok().and_then(|value|value.as_ref()),
             "editor_error":terminal_source.err().or_else(||mux_source.err()).map(|error|error.to_string()),
             "hosts":hosts,"diagnostics":self.parsed.diagnostics.iter().map(|error|json!({"line":error.line,"message":error.message})).collect::<Vec<_>>(),
@@ -555,6 +559,19 @@ impl SettingsModel {
                 "success":preset.success,"warning":preset.warning,"danger":preset.danger})).collect::<Vec<_>>(),
             "version":env!("CARGO_PKG_VERSION"),"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH})
     }
+    pub fn mux_commands(&self) -> io::Result<Vec<zz_protocol::CommandInvocation>> {
+        let source = read_config_editor_source(&self.mux_path()?, MAX_MUX_CONFIG_BYTES)?;
+        let parsed =
+            zz_mux::MuxEngine::parse_config_without_variable_expansion("iPad preferences", &source);
+        if let Some(error) = parsed.diagnostics.first() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                error.message.clone(),
+            ));
+        }
+        Ok(parsed.commands)
+    }
+
     pub fn action(
         &mut self,
         action: SettingsAction,
@@ -563,6 +580,49 @@ impl SettingsModel {
         let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
         let mut mux_changed = false;
         match action {
+            SettingsAction::SetAppearance { key, value } => {
+                let key = AppearanceConfigKey::from_config_key(&key)
+                    .ok_or_else(|| invalid("Unknown terminal setting."))?;
+                if let Some(value) = value.as_ref() {
+                    file_options::validate_value(value)?;
+                    if key != AppearanceConfigKey::Theme {
+                        let parsed = zz_terminal::apply_appearance_overrides(
+                            zz_terminal::AppearanceLoad::defaults_for(
+                                zz_terminal::TerminalColorScheme::Dark,
+                            ),
+                            &[(key.as_str().to_owned(), value.clone())],
+                        );
+                        if parsed.invalid > 0 || parsed.fatal {
+                            return Err(invalid(&parsed.diagnostics.first().map_or_else(
+                                || "Invalid terminal setting.".to_owned(),
+                                |diagnostic| diagnostic.message.clone(),
+                            )));
+                        }
+                    }
+                }
+                file_options::write_appearance_option(&self.config_path()?, key, value.as_deref())?;
+            }
+            SettingsAction::SetMux { key, value } => {
+                let key = zz_protocol::MuxOptionKey::from_config_key(&key)
+                    .ok_or_else(|| invalid("Unknown multiplexer setting."))?;
+                if let Some(value) = value.as_deref() {
+                    file_options::validate_value(value)?;
+                    zz_mux::MuxEngine::default()
+                        .execute(
+                            &mut zz_mux::ExecutionContext::default(),
+                            &zz_protocol::CommandInvocation::new(
+                                "set-option",
+                                ["-g", key.as_str(), value],
+                            ),
+                        )
+                        .map_err(|error| invalid(&error.to_string()))?;
+                }
+                let path = self.mux_path()?;
+                let source = read_config_editor_source(&path, MAX_MUX_CONFIG_BYTES)?;
+                let edited = file_options::edit_mux_option(&source, key, value.as_deref())?;
+                write_config_editor_source(&path, &edited, MAX_MUX_CONFIG_BYTES)?;
+                mux_changed = true;
+            }
             SettingsAction::Set { key, value } => {
                 let key = ConfigKey::parse(&key).ok_or_else(|| invalid("Unknown setting."))?;
                 let text = match value {
@@ -676,6 +736,109 @@ impl SettingsModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn titlebar_settings_exclude_clock_and_alignment() {
+        let parsed = parse_config(
+            "status-align = center\nstatus-clock = time-date\n",
+            "System",
+        );
+        assert_eq!(parsed.diagnostics.len(), 2);
+        assert!(parsed.daemon_entries.is_empty());
+        assert_eq!(parsed.config, AppConfig::default());
+        for key in ["status-align", "status-clock"] {
+            assert_eq!(ConfigKey::parse(key), None);
+            assert!(!settings(&parsed).iter().any(|setting| setting.key == key));
+        }
+    }
+
+    #[test]
+    fn invalid_terminal_preferences_preserve_existing_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path().join("config");
+        let source = "font-size = 16\nbackground = #123456\n";
+        std::fs::write(&config, source).unwrap();
+        let mut model = SettingsModel::new("System".to_owned(), Some(config.clone()), None);
+        for (key, value) in [
+            ("font-size", "enormous"),
+            ("background", "not-a-color"),
+            ("cursor-style", "triangle"),
+            ("window-padding-x", "-12"),
+            ("background-opacity", "NaN"),
+        ] {
+            assert!(
+                model
+                    .action(
+                        SettingsAction::SetAppearance {
+                            key: key.to_owned(),
+                            value: Some(value.to_owned()),
+                        },
+                        &[]
+                    )
+                    .is_err(),
+                "{key}={value}"
+            );
+            assert_eq!(std::fs::read_to_string(&config).unwrap(), source);
+        }
+        model
+            .action(
+                SettingsAction::SetAppearance {
+                    key: "theme".to_owned(),
+                    value: Some("Dracula".to_owned()),
+                },
+                &[],
+            )
+            .unwrap();
+        assert!(
+            std::fs::read_to_string(&config)
+                .unwrap()
+                .contains("Dracula")
+        );
+    }
+
+    #[test]
+    fn invalid_mux_preferences_preserve_existing_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let mux = directory.path().join("mux.conf");
+        let source = "set -g prefix C-a\n";
+        std::fs::write(&mux, source).unwrap();
+        let mut model = SettingsModel::new(
+            "System".to_owned(),
+            Some(directory.path().join("config")),
+            Some(mux.clone()),
+        );
+        for (key, value) in [
+            ("prefix", "not-a-key"),
+            ("mode-keys", "vim"),
+            ("history-limit", "-1"),
+            ("escape-time", "later"),
+            ("mouse", "sometimes"),
+        ] {
+            assert!(
+                model
+                    .action(
+                        SettingsAction::SetMux {
+                            key: key.to_owned(),
+                            value: Some(value.to_owned()),
+                        },
+                        &[]
+                    )
+                    .is_err(),
+                "{key}={value}"
+            );
+            assert_eq!(std::fs::read_to_string(&mux).unwrap(), source);
+        }
+        model
+            .action(
+                SettingsAction::SetMux {
+                    key: "prefix".to_owned(),
+                    value: Some("C-b".to_owned()),
+                },
+                &[],
+            )
+            .unwrap();
+        assert!(std::fs::read_to_string(&mux).unwrap().contains("C-b"));
+    }
 
     #[test]
     fn contrast_settings_persist_validate_and_reset_with_provenance() {

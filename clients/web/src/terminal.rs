@@ -996,7 +996,7 @@ impl Render for TerminalPane {
         }
         if let Some((label, detail)) = mode {
             root = root.child(
-                terminal_mode_indicator(label, detail)
+                terminal_mode_indicator(label, detail, cx)
                     .absolute()
                     .right(px(8.0))
                     .top(px(8.0)),

@@ -1542,6 +1542,8 @@ impl fmt::Debug for ClientHello {
 
 impl ClientHello {
     pub const CLIENT_TERMINAL_CAPABILITY: &'static str = CLIENT_TERMINAL_CAPABILITY;
+    pub const CLIENT_NATIVE_TERMINAL_SEARCH_CAPABILITY: &'static str =
+        "client-native-terminal-search-v1";
     pub const CLIENT_NESTED_CAPABILITY: &'static str = CLIENT_NESTED_CAPABILITY;
     pub const CLIENT_TTY_CAPABILITY_PREFIX: &'static str = CLIENT_TTY_CAPABILITY_PREFIX;
     pub const CLIENT_SIZE_CAPABILITY_PREFIX: &'static str = CLIENT_SIZE_CAPABILITY_PREFIX;

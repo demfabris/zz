@@ -1,5 +1,30 @@
 //! Easing curves.
 
+use std::time::Duration;
+
+use gpui::{
+    Animation, AnimationElement, AnimationExt as _, ElementId, IntoElement, Pixels, Styled,
+    ease_out_quint, px,
+};
+
+pub(crate) const SURFACE_ENTER_DURATION: Duration = Duration::from_millis(160);
+
+pub(crate) fn surface_enter<E: IntoElement + Styled + 'static>(
+    surface: E,
+    id: impl Into<ElementId>,
+    resting_top: Pixels,
+) -> AnimationElement<E> {
+    surface.with_animation(
+        id,
+        Animation::new(SURFACE_ENTER_DURATION).with_easing(ease_out_quint()),
+        move |surface, delta| {
+            surface
+                .top(resting_top + px(6.0 * (1.0 - delta)))
+                .opacity(delta)
+        },
+    )
+}
+
 /// A cubic easing function from the two interior ordinates `y1` and `y2` of a
 /// Bézier curve with endpoints 0 and 1. Evaluates *y* against `t` directly,
 /// unlike CSS `cubic-bezier`, which solves for `t` from `x`.

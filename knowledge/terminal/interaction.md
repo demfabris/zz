@@ -124,6 +124,25 @@ Input that moves the server's view outranks a pending sync. A keystroke, committ
 a search edit, and search next/previous all call `cancel_local_scroll`, which bumps the generation
 counter the debounced task captured, so the queued `ScrollToOffset` never fires.
 
+# Pane search and status (desktop)
+
+`TerminalView` keeps its search editor and terminal status in one top-right stack. The editor uses
+`InputState` for selection, clipboard editing and IME, sends `SearchUpdate` as the value changes,
+and provides regex, case, previous, next and close controls. It has no Apply action or visible
+keyboard hints. Closing returns focus to the terminal; Enter accepts a copy-mode search and
+returns to copy navigation, while ordinary terminal Find uses Enter to move between matches.
+
+The daemon recognizes the stock structured copy-mode search callbacks in
+`native_copy_search_direction` and opens this editor for interactive clients advertising
+`client-native-terminal-search-v1`. The GPUI client advertises this capability locally and over
+SSH. Terminal-pane support and a client's tty path do not identify its search UI.
+Custom callbacks, seeded prompts and clients without the capability keep the generic command-prompt path.
+`remember_copy_mode_search` retains live queries for copy-mode repeat and later copy-mode entries.
+
+Copy, view, unseen-output, dead, waiting and sync indicators use the Chroma button surface through
+`pane_status_badge`; Unzoom uses a regular Button. They inherit theme colors, radius and shadow.
+Hovered links and shell status remain in the bottom-right corner.
+
 # Keyboard routing (client side)
 
 The window-root [prefix claim](/crates/zz.md) sends the configured tmux prefix and armed sequence to

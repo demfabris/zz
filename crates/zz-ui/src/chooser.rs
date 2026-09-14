@@ -136,7 +136,7 @@ impl RenderOnce for ChooserModal {
         let rows = f32::from(u8::try_from(self.dimensions.row_count.min(10)).unwrap_or(10));
         let notices = u8::from(self.help) + u8::from(self.prompt.is_some());
         let height = 98.0 + rows * CHOOSER_ROW_HEIGHT + f32::from(notices) * 36.0;
-        div()
+        let surface = div()
             .id(self.id)
             .relative()
             .flex()
@@ -225,7 +225,8 @@ impl RenderOnce for ChooserModal {
                 self.hints,
                 self.font_family,
                 cx,
-            ))
+            ));
+        crate::widget::foundation::surface_enter(surface, "chooser-open", px(0.0))
     }
 }
 

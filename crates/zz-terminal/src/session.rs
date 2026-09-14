@@ -7100,6 +7100,7 @@ fn apply_view_action(
             Ok(result)
         }
         TerminalViewAction::SearchBegin(query) => {
+            remember_copy_mode_search(copy_mode.as_deref_mut(), pane_search, &query);
             let selection =
                 search_selection_policy(copy_mode.as_deref(), search_origin, query.direction, true);
             if search_snapshot.is_none()
@@ -7122,6 +7123,7 @@ fn apply_view_action(
             Ok(ViewActionResult::OverlaySnapshot)
         }
         TerminalViewAction::SearchUpdate(query) => {
+            remember_copy_mode_search(copy_mode.as_deref_mut(), pane_search, &query);
             let selection = search_selection_policy(
                 copy_mode.as_deref(),
                 search_origin,
@@ -11483,6 +11485,26 @@ fn append_history_row(
         }
     }
     Ok(())
+}
+
+fn remember_copy_mode_search(
+    mode: Option<&mut CopyModeState>,
+    pane_search: &mut Option<CopyModeSearch>,
+    query: &SearchQuery,
+) {
+    if query.text.is_empty() {
+        return;
+    }
+    if let Some(mode) = mode {
+        let search = CopyModeSearch {
+            text: query.text.clone(),
+            direction: query.direction,
+            regex: query.mode == SearchMode::Regex,
+            incremental: false,
+        };
+        mode.search = Some(search.clone());
+        *pane_search = Some(search);
+    }
 }
 
 /// `window_copy_cmd_search_again` and `window_copy_cmd_search_reverse` re-run
@@ -22305,6 +22327,32 @@ preexec_functions+=(__zz_fixture_preexec)
             .expect("search-again facts");
         assert!(again.search_present);
         assert_eq!(again.search_count, Some((2, false)));
+
+        session.view_action(
+            view,
+            TerminalViewAction::SearchBegin(SearchQuery::default()),
+        );
+        session.view_action(
+            view,
+            TerminalViewAction::SearchUpdate(SearchQuery {
+                text: "omega".to_owned(),
+                ..SearchQuery::default()
+            }),
+        );
+        wait_for_facts(
+            "the live query to replace the old search",
+            &on_line("omega"),
+        );
+        assert_eq!(session.pane_search_string(), "omega");
+        session.view_action(view, TerminalViewAction::CopyMode(CopyModeAction::Cancel));
+        wait_for_facts("live search mode to close", &|facts| facts.is_none());
+        session.view_action(view, TerminalViewAction::EnterCopyMode);
+        wait_for_facts("another fresh entry", &on_line("ZZ_SEARCH_READY"));
+        session.view_action(
+            view,
+            TerminalViewAction::CopyMode(CopyModeAction::SearchAgain { reverse: false }),
+        );
+        wait_for_facts("repeat to use the live query", &on_line("omega"));
     }
 
     #[test]

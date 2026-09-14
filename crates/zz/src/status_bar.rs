@@ -1,42 +1,37 @@
 use std::rc::Rc;
 
-use chrono::Local;
 use gpui::{
     AnyElement, App, Entity, IntoElement, MouseButton, Pixels, SharedString, Stateful, Window, div,
     prelude::*, px,
 };
-use zz_client::{StatusBarAlignment, StatusBarClock, StatusBarModel, StatusBarWindow};
+use zz_client::{StatusBarModel, StatusBarWindow};
 use zz_ui::{
     ActiveTheme as _, IconName, StyledExt as _,
     navigation::{
         WorkspaceStatusWindowState,
         status::{
-            MAX_VISIBLE_WINDOWS, StatusWindowActions, StatusWindowEntry, status_agent_count,
-            status_clock, status_session, status_window, status_window_overflow,
-            visible_window_range,
+            MAX_VISIBLE_WINDOWS, StatusAgentEntry, StatusPaneEntry, StatusSessionEntry,
+            StatusWindowActions, StatusWindowEntry, status_agents, status_session, status_window,
+            status_window_overflow, visible_window_range,
         },
         workspace_controls_leading_inset, workspace_row_highlight, workspace_status_item,
     },
     tooltip::Tooltip,
 };
 
-use crate::{
-    mux::{
-        client::MuxClient,
-        hosts::HostId,
-        nav::{
-            MuxTreeModel, TreeNode, TreeTarget, activate_nav, kill_target_command,
-            select_window_command,
-        },
+use crate::mux::{
+    client::MuxClient,
+    hosts::HostId,
+    nav::{
+        MuxTreeModel, TreeNode, TreeTarget, activate_nav, kill_target_command,
+        select_pane_commands, select_window_command,
     },
-    workspace::sidebar::WorkspaceSidebar,
 };
 
 use zz_ui::shell::{WorkspaceStatusSlots, workspace_status_bar};
 
 pub(crate) fn render_gui_status_bar(
     mux: &Entity<MuxClient>,
-    sidebar: &Entity<WorkspaceSidebar>,
     titlebar_controls: Option<(AnyElement, Pixels)>,
     window_controls: Option<AnyElement>,
     _window: &mut Window,
@@ -81,10 +76,9 @@ pub(crate) fn render_gui_status_bar(
     let session = model
         .session_name
         .as_deref()
-        .map(|name| render_session(name, sidebar, cx));
-    let right = render_right_items(&model, cx);
+        .map(|name| render_session(name, &snapshot, attached, attached_host, connected, mux, cx));
+    let right = render_right_items(&model, mux, connected, cx);
     workspace_status_bar(
-        model.alignment == StatusBarAlignment::Center,
         crate::config::pane_gaps(cx),
         workspace_controls_leading_inset(cx),
         WorkspaceStatusSlots {
@@ -98,22 +92,79 @@ pub(crate) fn render_gui_status_bar(
     )
 }
 
-fn render_session(name: &str, sidebar: &Entity<WorkspaceSidebar>, cx: &App) -> AnyElement {
-    let sidebar = sidebar.clone();
+#[allow(clippy::too_many_arguments)]
+fn render_session(
+    name: &str,
+    snapshot: &zz_protocol::MuxSnapshot,
+    attached: Option<zz_protocol::SessionId>,
+    host: HostId,
+    connected: bool,
+    mux: &Entity<MuxClient>,
+    cx: &App,
+) -> AnyElement {
+    let sessions = snapshot
+        .sessions
+        .iter()
+        .map(|session| {
+            let id = session.id;
+            let mux = mux.clone();
+            StatusSessionEntry {
+                label: format!(
+                    "{} · {} window{}",
+                    session.name,
+                    session.windows.len(),
+                    if session.windows.len() == 1 { "" } else { "s" }
+                )
+                .into(),
+                active: Some(id) == attached,
+                select: Rc::new(move |_, cx| {
+                    mux.update(cx, |mux, cx| {
+                        mux.attach_to_host(host, id, cx);
+                    });
+                }),
+            }
+        })
+        .collect();
     status_session(
         "gui-status-session",
         name.to_owned().into(),
-        move |window, cx| {
-            sidebar.update(cx, |sidebar, cx| sidebar.focus(window, cx));
-        },
+        sessions,
+        connected,
         cx,
     )
 }
 
-fn render_right_items(model: &StatusBarModel, cx: &App) -> Vec<AnyElement> {
+fn render_right_items(
+    model: &StatusBarModel,
+    mux: &Entity<MuxClient>,
+    connected: bool,
+    cx: &App,
+) -> Vec<AnyElement> {
     let mut items = Vec::new();
-    if let Some(count) = model.agent_count {
-        items.push(status_agent_count("gui-status-agents", count, cx));
+    if !model.agents.is_empty() {
+        let agents = model
+            .agents
+            .iter()
+            .map(|agent| {
+                let status = connected
+                    .then(|| mux.read(cx).agent_attention_status(agent.id))
+                    .flatten();
+                let id = agent.id;
+                let mux = mux.clone();
+                StatusAgentEntry {
+                    label: agent.label.clone().into(),
+                    window_name: agent.window_name.clone().into(),
+                    icon: zz_ui::pane::agent_provider_icon(agent.provider),
+                    status,
+                    select: Rc::new(move |_, cx| {
+                        for command in select_pane_commands(id) {
+                            mux.read(cx).execute(command);
+                        }
+                    }),
+                }
+            })
+            .collect();
+        items.push(status_agents("gui-status-agents", agents, connected, cx));
     }
     if let Some(host) = &model.host_name {
         items.push(
@@ -128,9 +179,6 @@ fn render_right_items(model: &StatusBarModel, cx: &App) -> Vec<AnyElement> {
     }
     if let Some(update) = render_update(model.show_update, cx) {
         items.push(update);
-    }
-    if let Some(clock) = render_clock(model.clock, cx) {
-        items.push(clock);
     }
     items
 }
@@ -185,17 +233,6 @@ fn render_update(show: bool, cx: &App) -> Option<AnyElement> {
     )
 }
 
-fn render_clock(clock: StatusBarClock, cx: &App) -> Option<AnyElement> {
-    let now = Local::now();
-    let label = match clock {
-        StatusBarClock::TwentyFourHour => now.format("%H:%M").to_string(),
-        StatusBarClock::TwelveHour => now.format("%I:%M %p").to_string(),
-        StatusBarClock::TimeAndDate => now.format("%H:%M · %b %d").to_string(),
-        StatusBarClock::Off => return None,
-    };
-    Some(status_clock("gui-status-clock", label.into(), cx))
-}
-
 #[allow(clippy::too_many_arguments)]
 fn render_status_window(
     window: &StatusBarWindow,
@@ -225,14 +262,39 @@ fn render_status_window(
     status_window(
         ("gui-status-window", id.0),
         window.index.to_string().into(),
-        window.name.clone().into(),
+        window.label.clone().into(),
         WorkspaceStatusWindowState {
             connected,
             active: window.active,
             bell: window.bell,
             activity: window.activity,
-            agent: window.agent,
         },
+        window
+            .panes
+            .iter()
+            .map(|pane| {
+                let pane_id = pane.id;
+                let mux = mux.clone();
+                let mut entry = StatusPaneEntry::from_pane(
+                    pane,
+                    Rc::new(move |_, cx| {
+                        for command in select_pane_commands(pane_id) {
+                            mux.read(cx).execute(command);
+                        }
+                    }),
+                );
+                if let zz_protocol::PaneKindSnapshot::Browser(browser) = &pane.kind {
+                    entry.favicon =
+                        crate::browser::recent_pages::favicon(&browser.profile, browser.url(), cx);
+                    if let Some(title) =
+                        crate::browser::recent_pages::title(&browser.profile, browser.url(), cx)
+                    {
+                        entry.label = title.into();
+                    }
+                }
+                entry
+            })
+            .collect(),
         StatusWindowActions {
             select: Rc::new(move |_, cx| {
                 select_mux.read(cx).execute(select_window_command(id));
@@ -260,7 +322,7 @@ fn render_window_overflow(
             let id = window.id;
             let mux = mux.clone();
             StatusWindowEntry {
-                label: format!("{} {}", window.index, window.name).into(),
+                label: format!("{} {}", window.index, window.label).into(),
                 active: window.active,
                 select: Rc::new(move |_, cx| {
                     mux.read(cx).execute(select_window_command(id));

@@ -1,12 +1,136 @@
 use crate::{
-    ActiveTheme as _, Colorize as _, ElementExt as _, Sizable as _, control_shadow, surface_ring,
+    ActiveTheme as _, Colorize as _, Disableable as _, ElementExt as _, Icon, IconName,
+    Sizable as _, StyledExt as _,
+    button::{Button, ButtonVariants as _},
+    control_shadow, surface_ring,
     tag::Tag,
 };
 use gpui::{
-    AnyElement, App, Bounds, BoxShadow, Corners, CursorStyle, ElementId, FontWeight, Hsla,
-    IntoElement, ParentElement as _, Pixels, SharedString, Stateful, Styled as _, StyledText,
-    Window, div, point, prelude::*, px, relative, size,
+    Animation, AnimationExt as _, AnyElement, App, Bounds, BoxShadow, Corners, CursorStyle,
+    ElementId, FontWeight, Hsla, IntoElement, ParentElement as _, Pixels, SharedString, Stateful,
+    Styled as _, StyledText, Window, div, point, prelude::*, px, relative, size,
 };
+
+mod drag;
+pub use drag::{PaneDrag, pane_drag_button, pane_drag_preview};
+
+pub const PANE_HEADER_HEIGHT: f32 = 40.0;
+pub const TERMINAL_HEADER_HEIGHT: f32 = 36.0;
+
+pub fn pane_header_icon_button(
+    id: impl Into<ElementId>,
+    icon: IconName,
+    enabled: bool,
+    cx: &App,
+) -> Button {
+    Button::compact_icon(id, icon)
+        .text()
+        .flat()
+        .disabled(!enabled)
+        .when(enabled, |button| {
+            button.text_color(cx.theme().foreground.muted().opacity(0.45))
+        })
+}
+
+pub const fn agent_provider_icon(provider: zz_protocol::AgentProvider) -> IconName {
+    match provider {
+        zz_protocol::AgentProvider::Codex => IconName::Openai,
+        zz_protocol::AgentProvider::ClaudeCode => IconName::Claude,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerminalPaneAction {
+    SplitBottom,
+    SplitRight,
+    Close,
+}
+
+pub fn terminal_pane_header(
+    active: bool,
+    title: impl Into<SharedString>,
+    drag: impl IntoElement,
+    on_action: impl Fn(TerminalPaneAction, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> Stateful<gpui::Div> {
+    let on_action = std::rc::Rc::new(on_action);
+    let action = |action, icon, label: &'static str| {
+        let on_action = std::rc::Rc::clone(&on_action);
+        pane_header_icon_button(label, icon, true, cx)
+            .tooltip(label)
+            .on_click(move |_, window, cx| {
+                cx.stop_propagation();
+                on_action(action, window, cx);
+            })
+    };
+    div()
+        .id("terminal-pane-header")
+        .group("terminal-pane-header")
+        .flex()
+        .w_full()
+        .h(px(TERMINAL_HEADER_HEIGHT))
+        .flex_none()
+        .items_center()
+        .gap(px(8.0))
+        .px(px(8.0))
+        .font_family(cx.theme().font_family.clone())
+        .text_size(crate::rems_from_px(13.0))
+        .line_height(px(16.0))
+        .text_color(cx.theme().foreground.muted())
+        .child(
+            div()
+                .flex()
+                .flex_1()
+                .min_w_0()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .flex_none()
+                        .relative()
+                        .top(px(0.5))
+                        .opacity(0.8)
+                        .child(Icon::new(IconName::SquareTerminal).size(px(14.0))),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .child(title.into()),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap_1()
+                .when(!active, |actions| {
+                    actions
+                        .invisible()
+                        .group_hover("terminal-pane-header", gpui::Styled::visible)
+                })
+                .child(action(
+                    TerminalPaneAction::SplitBottom,
+                    IconName::PanelBottom,
+                    "Split bottom",
+                ))
+                .child(action(
+                    TerminalPaneAction::SplitRight,
+                    IconName::PanelRight,
+                    "Split right",
+                ))
+                .child(drag)
+                .child(action(
+                    TerminalPaneAction::Close,
+                    IconName::Xmark,
+                    "Close pane",
+                )),
+        )
+}
 
 const PANE_DRAG_SOURCE_FADE: f32 = 0.3;
 const PANE_FOCUS_GLOW_ALPHA: f32 = 0.06;
@@ -82,9 +206,10 @@ pub fn pane_surface(
         .border_color(chrome.border_color)
         .shadow(pane_surface_shadow_style(chrome.shadow, cx))
         .child(content)
-        .when(chrome.active, |surface| {
-            surface.child(pane_focus_glow(chrome.radii, cx))
-        })
+        .when(
+            chrome.active && cx.theme().pane_glow_strength > 0.0,
+            |surface| surface.child(pane_focus_glow(chrome.radii, cx)),
+        )
         .when(chrome.inactive_opacity < 1.0, |surface| {
             surface.child(pane_inactive_scrim(
                 chrome.radii,
@@ -103,7 +228,7 @@ fn pane_surface_shadow_style(shadow: bool, cx: &App) -> Vec<BoxShadow> {
     }
 }
 
-fn pane_focus_glow(radii: Corners<Pixels>, cx: &App) -> gpui::Div {
+fn pane_focus_glow(radii: Corners<Pixels>, cx: &App) -> impl IntoElement {
     div()
         .absolute()
         .inset_0()
@@ -112,12 +237,20 @@ fn pane_focus_glow(radii: Corners<Pixels>, cx: &App) -> gpui::Div {
         .rounded_bl(radii.bottom_left)
         .rounded_br(radii.bottom_right)
         .shadow(vec![BoxShadow {
-            color: cx.theme().accent.opacity(PANE_FOCUS_GLOW_ALPHA),
+            color: cx
+                .theme()
+                .accent
+                .opacity(PANE_FOCUS_GLOW_ALPHA * cx.theme().pane_glow_strength),
             offset: point(px(16.0), px(24.0)),
             blur_radius: px(96.0),
             spread_radius: px(-8.0),
             inset: true,
         }])
+        .with_animation(
+            "pane-focus-glow",
+            Animation::new(std::time::Duration::from_millis(300)).with_easing(gpui::ease_in_out),
+            gpui::Styled::opacity,
+        )
 }
 
 fn pane_inactive_scrim(radii: Corners<Pixels>, opacity: f32, cx: &App) -> gpui::Div {
@@ -534,20 +667,37 @@ pub fn pane_split_surface(
 
 /// A pending-entity placeholder shown as a top-right status tag while a pane
 /// waits for its backing terminal, browser, or agent to attach.
-pub fn pane_waiting_state(label: impl IntoElement) -> Tag {
-    Tag::secondary()
-        .text_size(crate::rems_from_px(11.0))
-        .child(label)
+pub fn pane_waiting_state(label: impl IntoElement, cx: &App) -> gpui::Div {
+    pane_status_badge(IconName::Clock, label, cx)
 }
 
 /// Warns that keyboard input is mirrored to every pane in a synchronized group.
-pub fn pane_sync_badge(cx: &App) -> Tag {
-    Tag::secondary()
-        .bg(cx.theme().danger.fill())
-        .border_color(cx.theme().danger.fill())
-        .text_color(cx.theme().danger)
-        .text_size(crate::rems_from_px(11.0))
-        .child("SYNC")
+pub fn pane_sync_badge(cx: &App) -> gpui::Div {
+    pane_status_badge(IconName::Layers, "Sync", cx)
+}
+
+pub fn pane_status_badge(icon: IconName, label: impl IntoElement, cx: &App) -> gpui::Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(7.0))
+        .min_h(px(28.0))
+        .px(px(10.0))
+        .py(px(5.0))
+        .rounded(cx.theme().radius)
+        .bg(cx.theme().background.raised(1))
+        .control_surface(cx)
+        .font_family(cx.theme().font_family.clone())
+        .text_size(crate::rems_from_px(13.0))
+        .line_height(px(16.0))
+        .text_color(cx.theme().foreground)
+        .child(
+            div()
+                .relative()
+                .top(px(0.5))
+                .child(Icon::new(icon).size(px(13.0))),
+        )
+        .child(label)
 }
 
 #[must_use]
@@ -677,25 +827,43 @@ pub fn pane_indicator_card(
         .child(key)
 }
 
-/// The release control for a zoomed pane, as a status tag. The caller wraps it
-/// in an interactive element, since [`Tag`] is not interactive.
-pub fn pane_unzoom_control() -> Tag {
-    Tag::secondary()
-        .text_size(crate::rems_from_px(11.0))
-        .child("UNZOOM")
+pub fn pane_unzoom_control() -> Button {
+    Button::new("pane-unzoom")
+        .small()
+        .icon(IconName::WindowRestore)
+        .label("Unzoom")
 }
 
 pub fn terminal_mode_indicator(
     label: Option<impl Into<SharedString>>,
     detail: impl Into<SharedString>,
-) -> Tag {
-    let mut indicator = Tag::primary()
-        .gap(px(6.0))
-        .text_size(crate::rems_from_px(12.0));
-    if let Some(label) = label {
-        indicator = indicator.child(label.into());
-    }
-    indicator.child(detail.into())
+    cx: &App,
+) -> gpui::Div {
+    let label = label.map(Into::into);
+    let icon = match label.as_deref() {
+        Some("Copy mode" | "COPY MODE") => IconName::Copy,
+        Some(_) => IconName::File,
+        None => IconName::ArrowDown,
+    };
+    let detail = detail.into();
+    pane_status_badge(
+        icon,
+        div()
+            .flex()
+            .items_center()
+            .gap(px(7.0))
+            .when_some(label, gpui::ParentElement::child)
+            .when(!detail.is_empty(), |row| {
+                row.child(
+                    div()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_size(crate::rems_from_px(12.0))
+                        .text_color(cx.theme().foreground.muted())
+                        .child(detail),
+                )
+            }),
+        cx,
+    )
 }
 
 /// The find prompt, shown as a focused status tag in the pane's bottom-right

@@ -1,8 +1,6 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use gpui::{
     AnyElement, App, Context, DragMoveEvent, Entity, IntoElement, KeyUpEvent, MouseButton, Render,
-    Task, Window, div, prelude::*,
+    Window, div, prelude::*,
 };
 use zz_ui::shell::{app_shell_surface, app_titlebar_strip};
 use zz_ui::{
@@ -34,8 +32,6 @@ use crate::{
 
 pub use crate::diagnostics::fps::AppFpsMeter;
 
-const CLOCK_INTERVAL: Duration = Duration::from_mins(1);
-
 pub struct AppShell {
     workspace: Entity<AppView>,
     controller: Entity<BrowserController>,
@@ -43,14 +39,6 @@ pub struct AppShell {
     sidebar: Entity<WorkspaceSidebar>,
     mux: Entity<MuxClient>,
     app_fps_meter: Entity<AppFpsMeter>,
-    _clock_task: Task<()>,
-}
-
-fn duration_until_next_minute(now: SystemTime) -> Duration {
-    let elapsed = now.duration_since(UNIX_EPOCH).unwrap_or_default();
-    let elapsed_in_minute = Duration::from_secs(elapsed.as_secs() % CLOCK_INTERVAL.as_secs())
-        + Duration::from_nanos(u64::from(elapsed.subsec_nanos()));
-    CLOCK_INTERVAL.saturating_sub(elapsed_in_minute)
 }
 
 impl AppShell {
@@ -88,32 +76,18 @@ impl AppShell {
             }
         })
         .detach();
+        cx.subscribe(
+            &mux,
+            |_, _, _: &crate::mux::client::AgentStateChanged, cx| {
+                cx.notify();
+            },
+        )
+        .detach();
         cx.observe_global::<crate::config::AppConfig>(|_, cx| cx.notify())
             .detach();
         cx.observe_global::<crate::update::UpdateState>(|_, cx| cx.notify())
             .detach();
         let app_fps_meter = cx.new(|cx| AppFpsMeter::new(window, cx));
-        let clock_task = cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(duration_until_next_minute(SystemTime::now()))
-                    .await;
-                if this
-                    .update(cx, |this, cx| {
-                        if this.sidebar.read(cx).route() == WorkspaceRoute::App
-                            && this.sidebar.read(cx).mode() == ChromeMode::Titlebar
-                            && crate::config::status_bar_settings(cx).clock
-                                != zz_client::StatusBarClock::Off
-                        {
-                            cx.notify();
-                        }
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
         Self {
             workspace,
             controller,
@@ -121,7 +95,6 @@ impl AppShell {
             sidebar,
             mux,
             app_fps_meter,
-            _clock_task: clock_task,
         }
     }
 
@@ -170,7 +143,6 @@ impl AppShell {
         let controls = self.sidebar.read(cx).render_controls(&self.sidebar, cx);
         let bar = render_gui_status_bar(
             &self.mux,
-            &self.sidebar,
             Some((controls, width)),
             Some(self.window_controls().into_any_element()),
             window,
@@ -331,18 +303,6 @@ mod tests {
 
     use super::*;
     use crate::mux::client::MuxClient;
-
-    #[test]
-    fn clock_task_aligns_to_the_next_minute() {
-        assert_eq!(
-            duration_until_next_minute(UNIX_EPOCH),
-            Duration::from_mins(1)
-        );
-        assert_eq!(
-            duration_until_next_minute(UNIX_EPOCH + Duration::from_millis(61_250)),
-            Duration::from_millis(58_750)
-        );
-    }
 
     #[gpui::test]
     fn mux_notifications_reach_the_mounted_root_layer(cx: &mut TestAppContext) {

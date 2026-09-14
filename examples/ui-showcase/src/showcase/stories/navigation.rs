@@ -4,11 +4,10 @@ use gpui::{
     AnyElement, App, Context, ParentElement as _, SharedString, Styled as _, div, prelude::*, px,
 };
 use zz_ui::navigation::{
-    WORKSPACE_STATUS_CONTENT_HEIGHT, WORKSPACE_TREE_NODE_ICON_SIZE, WorkspaceStatusWindowState,
-    workspace_chrome_controls, workspace_layout_button, workspace_settings_button,
-    workspace_status_item, workspace_status_window, workspace_tree_action_button,
-    workspace_tree_action_row, workspace_tree_disclosure, workspace_tree_marker,
-    workspace_tree_row,
+    WORKSPACE_TREE_NODE_ICON_SIZE, WorkspaceStatusWindowState, workspace_chrome_controls,
+    workspace_layout_button, workspace_settings_button, workspace_status_item,
+    workspace_status_window, workspace_tree_action_button, workspace_tree_action_row,
+    workspace_tree_disclosure, workspace_tree_marker, workspace_tree_row,
 };
 use zz_ui::{
     ActiveTheme as _, Icon, IconName, Sizable as _,
@@ -197,47 +196,47 @@ fn native_status_rail(cx: &App) -> AnyElement {
                 .flex()
                 .flex_1()
                 .min_w_0()
-                .h(WORKSPACE_STATUS_CONTENT_HEIGHT)
+                .h(px(32.0))
                 .items_center()
                 .gap(px(2.0))
                 .overflow_hidden()
-                .child(workspace_status_window(
-                    "nav-status-window-editor",
-                    "0".into(),
-                    "editor".into(),
-                    "0:editor".into(),
-                    WorkspaceStatusWindowState {
-                        connected: true,
-                        active: true,
-                        agent: true,
-                        ..WorkspaceStatusWindowState::default()
-                    },
-                    cx,
-                ))
-                .child(workspace_status_window(
-                    "nav-status-window-server",
-                    "1".into(),
-                    "server".into(),
-                    "1:server".into(),
-                    WorkspaceStatusWindowState {
-                        connected: true,
-                        bell: true,
-                        ..WorkspaceStatusWindowState::default()
-                    },
-                    cx,
-                ))
-                .child(workspace_status_window(
-                    "nav-status-window-docs",
-                    "2".into(),
-                    "docs".into(),
-                    "2:docs".into(),
-                    WorkspaceStatusWindowState {
-                        connected: true,
-                        activity: true,
-                        ..WorkspaceStatusWindowState::default()
-                    },
-                    cx,
-                )),
+                .children(
+                    [
+                        ("editor", IconName::File),
+                        ("server", IconName::SquareTerminal),
+                        ("docs", IconName::Globe),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (name, icon))| {
+                        workspace_status_window(
+                            ("nav-status-window", index),
+                            index.to_string().into(),
+                            name.into(),
+                            format!("{index}:{name}").into(),
+                            WorkspaceStatusWindowState {
+                                connected: true,
+                                active: index == 0,
+                                bell: index == 1,
+                                activity: index == 2,
+                            },
+                            zz_ui::navigation::status::status_pane_deck(
+                                ("nav-status-deck", index),
+                                vec![zz_ui::navigation::status::StatusPaneEntry {
+                                    label: name.into(),
+                                    detail: "Sample pane".into(),
+                                    icon,
+                                    favicon: None,
+                                    active: true,
+                                    select: std::rc::Rc::new(|_, _| {}),
+                                }],
+                                true,
+                                cx,
+                            ),
+                            cx,
+                        )
+                    }),
+                ),
         )
         .child(
             div()
@@ -254,18 +253,6 @@ fn native_status_rail(cx: &App) -> AnyElement {
                     "nav-status-branch",
                     Some(IconName::GitBranch),
                     "main".into(),
-                    cx,
-                ))
-                .child(workspace_status_item(
-                    "nav-status-clock",
-                    Some(IconName::Clock),
-                    "17:49".into(),
-                    cx,
-                ))
-                .child(workspace_status_item(
-                    "nav-status-calendar",
-                    Some(IconName::Calendar),
-                    "23 Aug".into(),
                     cx,
                 )),
         )

@@ -5,8 +5,8 @@ use crate::{
     v_flex,
 };
 use gpui::{
-    App, Div, ElementId, Entity, FontWeight, MouseButton, SharedString, Stateful, div, prelude::*,
-    px, relative,
+    AnimationElement, App, Div, ElementId, Entity, FontWeight, MouseButton, SharedString, Stateful,
+    div, prelude::*, px, relative,
 };
 
 pub fn picker_overlay(id: impl Into<ElementId>, cx: &App) -> Stateful<Div> {
@@ -22,12 +22,21 @@ pub fn picker_overlay(id: impl Into<ElementId>, cx: &App) -> Stateful<Div> {
         .occlude()
 }
 
-pub fn picker_modal(id: impl Into<ElementId>, cx: &App) -> Stateful<Div> {
-    v_flex()
-        .id(id)
+pub fn picker_modal(id: impl Into<ElementId>, cx: &App) -> AnimationElement<Stateful<Div>> {
+    picker_modal_sized(id, 660.0, cx)
+}
+
+pub fn picker_modal_sized(
+    id: impl Into<ElementId>,
+    width: f32,
+    cx: &App,
+) -> AnimationElement<Stateful<Div>> {
+    let id = id.into();
+    let surface = v_flex()
+        .id(id.clone())
         .relative()
         .w(relative(0.92))
-        .max_w(px(660.0))
+        .max_w(px(width))
         .h(relative(0.82))
         .min_h(px(240.0))
         .max_h(px(720.0))
@@ -37,7 +46,8 @@ pub fn picker_modal(id: impl Into<ElementId>, cx: &App) -> Stateful<Div> {
         .border_color(cx.theme().border())
         .bg(cx.theme().background.raised(1))
         .shadow_lg()
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
+    crate::widget::foundation::surface_enter(surface, (id, "picker-open"), px(0.0))
 }
 
 pub fn picker_header(cx: &App) -> Div {

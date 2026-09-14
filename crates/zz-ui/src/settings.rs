@@ -1,4 +1,6 @@
 pub mod appearance;
+pub mod panes_preview;
+pub mod status_bar_preview;
 
 use crate::Colorize as _;
 use crate::{
@@ -316,6 +318,64 @@ mod tests {
                 SettingsNavigationGroup::Advanced,
             ]
         );
+    }
+
+    struct PanesPageTest;
+
+    impl Render for PanesPageTest {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let [gaps, background, opacity, glow, margin, radius, border] =
+                std::array::from_fn::<_, 7, _>(|index| {
+                    SettingEntry::new(format!("Setting {index}"), "Sample pane setting").control(
+                        div()
+                            .w(px(100.0))
+                            .h(px(80.0))
+                            .debug_selector(move || format!("panes-control-{index}")),
+                    )
+                });
+            div().w(px(500.0)).h(px(600.0)).child(panes_page(
+                panes_preview::PanesPreview {
+                    gaps: true,
+                    margin: 6.0,
+                    radius: 13.5,
+                    border_width: 0.5,
+                    inactive_opacity: 0.7,
+                },
+                gaps,
+                background,
+                [opacity, glow],
+                [margin, radius, border],
+                cx,
+            ))
+        }
+    }
+
+    #[gpui::test]
+    fn panes_preview_stays_visible_while_controls_scroll(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let (_, cx) = cx.add_window_view(|_, _| PanesPageTest);
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        let preview = cx.debug_bounds("settings-preview-terminal").unwrap();
+        let control = cx.debug_bounds("panes-control-0").unwrap();
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: control.center(),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(-120.0))),
+            ..Default::default()
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert_eq!(
+            cx.debug_bounds("settings-preview-terminal").unwrap(),
+            preview
+        );
+        assert!(cx.debug_bounds("panes-control-0").unwrap().origin.y < control.origin.y);
     }
 
     #[gpui::test]
@@ -995,24 +1055,44 @@ impl SelectItem for SettingsSelectItem {
 }
 
 pub fn panes_page(
+    preview: panes_preview::PanesPreview,
     gaps: SettingEntry,
     background_opacity: SettingEntry,
-    opacity: SettingEntry,
-    margin: SettingEntry,
-    radius: SettingEntry,
-    border: SettingEntry,
+    focus: [SettingEntry; 2],
+    frame: [SettingEntry; 3],
     cx: &App,
-) -> SettingsScrollColumn {
-    settings_scroll_column("settings-panes")
-        .child(settings_page_description(SettingsSection::Panes, cx))
-        .child(SettingsStack::titled("Layout").child(gaps))
-        .child(SettingsStack::titled("Appearance").child(background_opacity))
-        .child(SettingsStack::titled("Focus").child(opacity))
+) -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .size_full()
+        .min_w_0()
+        .min_h_0()
+        .overflow_hidden()
         .child(
-            SettingsStack::titled("Frame")
-                .description("Applies only while pane gaps are enabled.")
-                .child(margin)
-                .child(radius)
-                .child(border),
+            div().flex_none().p(px(SETTINGS_PAGE_PADDING)).pb_0().child(
+                settings_page_content()
+                    .gap(px(12.0))
+                    .child(settings_page_description(SettingsSection::Panes, cx))
+                    .child(settings_group_header(
+                        "Preview".into(),
+                        Some("Click a pane to preview focus.".into()),
+                        cx,
+                    ))
+                    .child(preview),
+            ),
+        )
+        .child(
+            div().flex_1().min_h_0().flex().child(
+                settings_scroll_column("settings-panes")
+                    .child(SettingsStack::titled("Layout").child(gaps))
+                    .child(SettingsStack::titled("Appearance").child(background_opacity))
+                    .child(SettingsStack::titled("Focus").children(focus))
+                    .child(
+                        SettingsStack::titled("Frame")
+                            .description("Applies only while pane gaps are enabled.")
+                            .children(frame),
+                    ),
+            ),
         )
 }

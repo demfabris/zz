@@ -30,7 +30,7 @@ const WORKSPACE_CHROME_CONTROL_GAP: f32 = 4.0;
 pub const WORKSPACE_STATUS_CONTENT_HEIGHT: Pixels = px(24.0);
 const WORKSPACE_STATUS_LINE_HEIGHT: Pixels = px(16.0);
 const WORKSPACE_STATUS_ITEM_MAX_WIDTH: Pixels = px(180.0);
-const WORKSPACE_STATUS_WINDOW_MAX_WIDTH: Pixels = px(180.0);
+const WORKSPACE_STATUS_WINDOW_DEFAULT_WIDTH: Pixels = px(240.0);
 const WORKSPACE_STATUS_WINDOW_MIN_WIDTH: Pixels = px(36.0);
 const WORKSPACE_STATUS_ICON_SIZE: Pixels = px(13.0);
 const WORKSPACE_STATUS_ICON_DROP: Pixels = px(0.5);
@@ -41,7 +41,6 @@ pub struct WorkspaceStatusWindowState {
     pub active: bool,
     pub bell: bool,
     pub activity: bool,
-    pub agent: bool,
 }
 
 #[must_use]
@@ -139,6 +138,7 @@ pub fn workspace_status_window(
     name: SharedString,
     tooltip: SharedString,
     state: WorkspaceStatusWindowState,
+    deck: Option<gpui::AnyElement>,
     cx: &App,
 ) -> Stateful<gpui::Div> {
     let foreground = cx.theme().foreground;
@@ -153,9 +153,10 @@ pub fn workspace_status_window(
         .relative()
         .flex()
         .flex_shrink_1()
+        .w(WORKSPACE_STATUS_WINDOW_DEFAULT_WIDTH)
         .min_w(WORKSPACE_STATUS_WINDOW_MIN_WIDTH)
-        .max_w(WORKSPACE_STATUS_WINDOW_MAX_WIDTH)
-        .h(WORKSPACE_STATUS_CONTENT_HEIGHT)
+        .max_w(WORKSPACE_STATUS_WINDOW_DEFAULT_WIDTH)
+        .h(px(30.0))
         .items_center()
         .gap(px(5.0))
         .px(px(9.0))
@@ -189,6 +190,7 @@ pub fn workspace_status_window(
                 .text_color(foreground.muted())
                 .child(index),
         )
+        .children(deck)
         .child(
             div()
                 .flex_1()
@@ -197,15 +199,6 @@ pub fn workspace_status_window(
                 .whitespace_nowrap()
                 .text_ellipsis()
                 .child(name),
-        )
-        .child(
-            div()
-                .flex_none()
-                .relative()
-                .top(WORKSPACE_STATUS_ICON_DROP)
-                .text_color(foreground.muted())
-                .opacity(if state.agent { 1.0 } else { 0.0 })
-                .child(Icon::new(IconName::Bot).size(WORKSPACE_STATUS_ICON_SIZE)),
         )
         .child(
             div()

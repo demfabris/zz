@@ -6681,6 +6681,10 @@ impl Shared {
             spec.validate_positional_minimum(positionals)?;
             spec.validate_positional_maximum(positionals)?;
         }
+        let mouse_resolved = context
+            .invoking_mouse()
+            .and_then(|mouse| zz_mux::resolve_invoking_mouse_targets(command, mouse));
+        let command = mouse_resolved.as_ref().unwrap_or(command);
         let unattached_watch = {
             let inner = self.inner.lock();
             inner
@@ -14565,6 +14569,7 @@ impl Shared {
             let variables = popup_position_variables(
                 &inner.engine,
                 &target,
+                context.invoking_mouse(),
                 geometry.columns,
                 geometry.rows,
                 width,
@@ -15152,7 +15157,7 @@ impl Shared {
             if width > geometry.columns || height > geometry.rows {
                 return Ok(Execution::default());
             }
-            let selected = (!parsed.mouse)
+            let selected = (!parsed.mouse && context.invoking_mouse().is_none())
                 .then(|| menu_starting_selection(&starting_choice, &items))
                 .flatten();
             let border_lines = if let Some(value) = parsed.border_lines.as_deref() {
@@ -15170,6 +15175,7 @@ impl Shared {
             let variables = popup_position_variables(
                 &inner.engine,
                 &target,
+                context.invoking_mouse(),
                 geometry.columns,
                 geometry.rows,
                 width,
@@ -16883,6 +16889,7 @@ impl Shared {
                     border,
                     view_action,
                     press_action,
+                    status_range_start,
                 } => {
                     self.input_mouse_key(
                         client,
@@ -16897,6 +16904,7 @@ impl Shared {
                             border,
                             view_action,
                             press_action,
+                            status_range_start,
                         },
                     )?;
                 }
@@ -34091,6 +34099,7 @@ const POPUP_POSITION_CONTEXT_FORMATS: [&str; 19] = [
 fn popup_position_variables(
     engine: &MuxEngine,
     target: &ExecutionContext,
+    mouse: Option<&MouseEventTarget>,
     columns: u16,
     rows: u16,
     width: u16,
@@ -34159,7 +34168,62 @@ fn popup_position_variables(
     ] {
         variables.insert(name.to_owned(), value.to_string());
     }
+    if let Some(mouse) = mouse {
+        for (name, value) in popup_mouse_position_values(engine, target, mouse, rows, width, height)
+        {
+            variables.insert(name.to_owned(), value.to_string());
+        }
+    }
     variables
+}
+
+/// The `popup_mouse_*` and `popup_window_status_line_*` positions
+/// `cmd_display_menu_get_pos` fills from `event->m` and from the status range
+/// the target window owns. Each is the popup's BOTTOM-left corner, which
+/// `popup_position` turns into a top by subtracting the height.
+fn popup_mouse_position_values(
+    engine: &MuxEngine,
+    target: &ExecutionContext,
+    mouse: &MouseEventTarget,
+    rows: u16,
+    width: u16,
+    height: u16,
+) -> Vec<(&'static str, i64)> {
+    let (rows, width, height) = (i64::from(rows), i64::from(width), i64::from(height));
+    let (x, y) = (i64::from(mouse.column), i64::from(mouse.row));
+    let centre_y = y - height / 2;
+    let mut values = vec![
+        (POPUP_MOUSE_X_CONTEXT_FORMAT, x),
+        (POPUP_MOUSE_Y_CONTEXT_FORMAT, y),
+        (POPUP_MOUSE_CENTRE_X_CONTEXT_FORMAT, (x - width / 2).max(0)),
+        (
+            POPUP_MOUSE_CENTRE_Y_CONTEXT_FORMAT,
+            if centre_y + height >= rows {
+                rows - height
+            } else {
+                centre_y
+            },
+        ),
+        (
+            POPUP_MOUSE_TOP_CONTEXT_FORMAT,
+            if y + height >= rows {
+                rows - 1
+            } else {
+                y + height
+            },
+        ),
+        (POPUP_MOUSE_BOTTOM_CONTEXT_FORMAT, (y - height).max(0)),
+    ];
+    if let Some(start) = mouse.status_range_start {
+        let top = engine.status_formats_for_session(target.session).position
+            == zz_protocol::StatusPosition::Top;
+        values.push((POPUP_WINDOW_STATUS_LINE_X_CONTEXT_FORMAT, i64::from(start)));
+        values.push((
+            POPUP_WINDOW_STATUS_LINE_Y_CONTEXT_FORMAT,
+            if top { y + 1 + height } else { y },
+        ));
+    }
+    values
 }
 
 fn popup_position(

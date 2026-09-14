@@ -1,0 +1,9 @@
+# python3 compat/wire-version.py at the branch tip
+#
+# compat/wire-version.py is on origin/main and not yet on this branch's base,
+# so it was read out of origin/main into the worktree, run, and removed.
+
+$ git show origin/main:compat/wire-version.py > compat/.wire-version-tmp.py
+$ python3 compat/.wire-version-tmp.py
+wire-version: 103 is unreleased (v0.9.1 shipped 102); appends are free
+EXIT=0

@@ -8586,6 +8586,7 @@ impl Shared {
                         prompt_type,
                         mode,
                         no_freeze,
+                        pane,
                     } => {
                         if kind != ClientKind::Interactive
                             || !inner.subscribers.contains_key(&client)
@@ -8637,6 +8638,7 @@ impl Shared {
                                 *prompt_type,
                                 *mode,
                                 *no_freeze,
+                                *pane,
                             )
                             .with_key_options(vi_keys, word_separators);
                             // `status_prompt_set` clears any message first, and
@@ -31037,6 +31039,9 @@ struct CommandPrompt {
     prompt_type: CommandPromptType,
     mode: CommandPromptMode,
     no_freeze: bool,
+    /// `-P`'s `wp`: `window_pane_set_prompt` hangs the prompt on a pane, and
+    /// the client draws it over that pane rather than on the status row.
+    pane: Option<PaneId>,
     /// `prompt_create`'s `pr->last`: under `-i` the initial input seeds this
     /// instead of the buffer, and `C-r`/`C-s` restore it into an empty buffer.
     last: String,
@@ -31062,6 +31067,7 @@ impl CommandPrompt {
         prompt_type: CommandPromptType,
         mode: CommandPromptMode,
         no_freeze: bool,
+        pane: Option<PaneId>,
     ) -> Self {
         let first = steps.first();
         let prompt = first.map(|step| step.label.clone()).unwrap_or_default();
@@ -31087,6 +31093,7 @@ impl CommandPrompt {
             prompt_type,
             mode,
             no_freeze,
+            pane,
             last,
             waiter: None,
             vi_keys: false,
@@ -31164,6 +31171,7 @@ impl CommandPrompt {
             prompt_type: self.prompt_type,
             mode: self.mode,
             no_freeze: self.no_freeze,
+            pane: self.pane,
         }
     }
 
@@ -44707,6 +44715,7 @@ mod tests {
                 CommandPromptType::Command,
                 CommandPromptMode::Numeric,
                 false,
+                None,
             ),
         );
         bind_focus_any(
@@ -45068,6 +45077,7 @@ mod tests {
                     CommandPromptType::Command,
                     mode,
                     false,
+                    None,
                 ),
             );
         };
@@ -45670,6 +45680,7 @@ mod tests {
                     CommandPromptType::Command,
                     CommandPromptMode::Text,
                     false,
+                    None,
                 ),
             );
             inner
@@ -63656,6 +63667,7 @@ set-option -g @alias-mixed-next yes
                     CommandPromptType::Command,
                     CommandPromptMode::Text,
                     false,
+                    None,
                 ),
             );
         }
@@ -77900,6 +77912,7 @@ bind - split-window -v -c "#{pane_current_path}"
             CommandPromptType::Command,
             CommandPromptMode::Text,
             false,
+            None,
         );
         assert_eq!(prompt.state(&[]).cursor, 6);
         assert!(prompt.delete_previous_word(zz_terminal::DEFAULT_WORD_SEPARATORS));
@@ -84274,6 +84287,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 CommandPromptType::Command,
                 CommandPromptMode::Text,
                 false,
+                None,
             ),
         );
         shared
@@ -85589,6 +85603,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 CommandPromptType::Command,
                 CommandPromptMode::Text,
                 false,
+                None,
             ),
         );
         shared

@@ -418,6 +418,7 @@ impl Renderer {
                 self.paint_sidebar(model, force);
             }
             self.paint_status_block(model, force);
+            self.paint_pane_prompt(model);
             self.emit_queued_control();
             if !floating_input {
                 self.reconcile_kitty_images(model);
@@ -479,6 +480,7 @@ impl Renderer {
         {
             self.paint_workspace(model, false);
             self.paint_status_area(model);
+            self.paint_pane_prompt(model);
             self.emit_queued_control();
             self.reconcile_kitty_images(model);
             self.place_active_cursor(model);
@@ -1587,6 +1589,38 @@ impl Renderer {
         self.sidebar_rows = rows;
     }
 
+    /// `redraw_draw_pane_prompt`: one row of the pane's own default cells with
+    /// the prompt drawn over it in `message-style`, written after the pane's
+    /// content so a frame never leaves half a prompt on screen.
+    fn paint_pane_prompt(&mut self, model: &Model) {
+        let Some((prompt, content)) = pane_prompt_target(model) else {
+            return;
+        };
+        let view = crate::overlay::prompt_view(
+            &prompt.prompt,
+            &prompt.input,
+            prompt.cursor,
+            content.width,
+        );
+        let style = crate::mode_view::message_style(model, false);
+        let mut line = StyledLine::from_segments(crate::mode_view::over_underlay(
+            &crate::mode_view::message_front(&view.text, content.width, &style),
+            None,
+            &[],
+            content.width,
+        ));
+        line.resolve_theme(&model.status.theme);
+        write_styled_text(
+            &mut self.output,
+            content.x,
+            pane_prompt_row_y(model, content),
+            &line,
+            model.appearance.foreground,
+            model.appearance.background,
+            &model.appearance,
+        );
+    }
+
     fn paint_status_area(&mut self, model: &Model) {
         if model.sidebar_visible() {
             let tree_height = usize::from(model.sidebar_tree_height());
@@ -1891,6 +1925,23 @@ impl Renderer {
         if model.display_panes.is_some() {
             write_cursor_position(&mut self.output, 0, 0);
             self.hide_cursor();
+            return;
+        }
+        if let Some((prompt, content)) = pane_prompt_target(model) {
+            let view = crate::overlay::prompt_view(
+                &prompt.prompt,
+                &prompt.input,
+                prompt.cursor,
+                content.width,
+            );
+            write_cursor_position(
+                &mut self.output,
+                content
+                    .x
+                    .saturating_add(view.cursor.min(content.width.saturating_sub(1))),
+                pane_prompt_row_y(model, content),
+            );
+            self.output.extend_from_slice(b"\x1b[?25h");
             return;
         }
         if let Some(prompt) = &model.command_prompt {
@@ -2341,6 +2392,27 @@ fn client_message_hides_the_cursor(model: &Model) -> bool {
     model.client_message.is_some() && !model.sidebar_visible()
 }
 
+/// `cmd_command_prompt_exec`'s `-P`: the prompt hangs on a pane rather than on
+/// the client, so `redraw_draw_pane_prompt` draws it over that pane and
+/// `status_redraw` keeps the status row. The pane has to be on this client's
+/// screen for the prompt to have a row; a pane prompt whose pane is not laid
+/// out here keeps the status row instead of vanishing.
+fn pane_prompt_target(model: &Model) -> Option<(&zz_protocol::CommandPromptState, Rect)> {
+    let prompt = model.command_prompt.as_ref()?;
+    let content = model.pane_rect(prompt.pane?)?.content();
+    (content.width > 0 && content.height > 0).then_some((prompt, content))
+}
+
+/// `redraw_draw_pane_prompt`: the pane's last row, or its first when the status
+/// block is on top.
+fn pane_prompt_row_y(model: &Model, content: Rect) -> u16 {
+    if model.status_top() {
+        content.y
+    } else {
+        content.y.saturating_add(content.height).saturating_sub(1)
+    }
+}
+
 fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
     let message_style = crate::mode_view::message_style(model, false);
     let filled = model.status_block_rows() > 0;
@@ -2374,7 +2446,9 @@ fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
     if model.sidebar_visible() {
         return None;
     }
-    if let Some(prompt) = &model.command_prompt {
+    if let Some(prompt) = &model.command_prompt
+        && pane_prompt_target(model).is_none()
+    {
         let view = crate::overlay::prompt_view(&prompt.prompt, &prompt.input, prompt.cursor, width);
         return Some(message(&view.text));
     }
@@ -4361,11 +4435,64 @@ mod tests {
             prompt_type: zz_protocol::CommandPromptType::Command,
             mode: zz_protocol::CommandPromptMode::Text,
             no_freeze: false,
+            pane: None,
         });
         let mut renderer = Renderer::new();
         renderer.place_active_cursor(&model);
         let output = String::from_utf8(renderer.output).unwrap();
         assert!(output.ends_with("\x1b[?25h"), "{output:?}");
+    }
+
+    #[test]
+    fn a_pane_prompt_draws_over_its_pane_and_leaves_the_status_row() {
+        let mut model = block_model(40, 8);
+        attach_one_pane(&mut model, PaneId(1));
+        model.set_status(block_status(vec!["ROW"], false));
+        model.command_prompt = Some(zz_protocol::CommandPromptState {
+            prompt: "(search down) ".to_owned(),
+            input: "77".to_owned(),
+            cursor: 2,
+            kind: zz_protocol::CommandPromptKind::Value,
+            history: Vec::new(),
+            prompt_type: zz_protocol::CommandPromptType::Search,
+            mode: zz_protocol::CommandPromptMode::Incremental,
+            no_freeze: false,
+            pane: Some(PaneId(1)),
+        });
+
+        let (_, content) = pane_prompt_target(&model).expect("the pane carries the prompt");
+        assert_eq!(
+            pane_prompt_row_y(&model, content),
+            content.y + content.height - 1
+        );
+        assert!(status_overlay(&model, 40).is_none());
+
+        let mut renderer = Renderer::new();
+        renderer.paint_pane_prompt(&model);
+        let painted = String::from_utf8(renderer.output).unwrap();
+        assert!(painted.contains("(search down) 77"), "{painted:?}");
+        let mut renderer = Renderer::new();
+        renderer.place_active_cursor(&model);
+        let placed = String::from_utf8(renderer.output).unwrap();
+        assert!(
+            placed.contains(&format!(
+                "\x1b[{};{}H",
+                pane_prompt_row_y(&model, content) + 1,
+                content.x + 17
+            )),
+            "{placed:?}"
+        );
+
+        model
+            .command_prompt
+            .as_mut()
+            .expect("the prompt is still up")
+            .pane = None;
+        assert!(pane_prompt_target(&model).is_none());
+        assert!(matches!(
+            status_overlay(&model, 40),
+            Some(StatusOverlay { .. })
+        ));
     }
 
     #[test]

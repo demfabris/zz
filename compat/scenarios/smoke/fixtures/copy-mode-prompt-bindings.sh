@@ -160,7 +160,7 @@ check_equal 'vi-entry' '0,0' "$(xy)"
 
 # '/' and '?' raise the prompt whose answer runs `send-keys -X search-forward`
 # or `-X search-backward` with the typed string. The prompt is the pin's
-# `command-prompt -P`; zz raises it on the client surface it owns.
+# `command-prompt -P`, which both engines draw over the target pane's last row.
 drive 2f
 drive 7a657461
 drive 0d

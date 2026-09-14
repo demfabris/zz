@@ -13342,7 +13342,7 @@ fn copy_mode_snapshot(
     if let Some(selection) = mode.selection {
         push_mode_selection_overlays(&mut overlays, revision, selection, offset);
     }
-    if let Some(search) = view.search.as_ref() {
+    if let Some(search) = view.search.as_ref().filter(|_| mode.search_marks) {
         let visible_end = offset.saturating_add(u32::from(revision.viewport_rows));
         for (index, found) in search.matches.iter().enumerate() {
             if found.row < offset || found.row >= visible_end {

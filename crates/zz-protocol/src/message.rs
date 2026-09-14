@@ -2383,6 +2383,11 @@ pub struct CommandPromptState {
     pub prompt_type: CommandPromptType,
     pub mode: CommandPromptMode,
     pub no_freeze: bool,
+    /// `-P`: `window_pane_set_prompt` hangs the prompt on a pane rather than on
+    /// the client, and `redraw_draw_pane_prompt` draws it over that pane's last
+    /// row - its first under `status-position top` - leaving the status row
+    /// alone. `None` is the client prompt `status_prompt_set` raises.
+    pub pane: Option<PaneId>,
 }
 
 #[repr(u8)]
@@ -4723,11 +4728,24 @@ mod tests {
             prompt_type: super::CommandPromptType::Search,
             mode: super::CommandPromptMode::Incremental,
             no_freeze: true,
+            pane: None,
         };
         let bytes = postcard::to_stdvec(&state).expect("prompt state");
         assert_eq!(
             postcard::from_bytes::<super::CommandPromptState>(&bytes).expect("state decodes"),
             state
+        );
+        assert_eq!(bytes.last().copied(), Some(0));
+        let on_pane = super::CommandPromptState {
+            pane: Some(crate::PaneId(7)),
+            ..state.clone()
+        };
+        let pane_bytes = postcard::to_stdvec(&on_pane).expect("pane prompt state");
+        assert_eq!(pane_bytes[..bytes.len() - 1], bytes[..bytes.len() - 1]);
+        assert_eq!(pane_bytes[bytes.len() - 1..], [1, 7]);
+        assert_eq!(
+            postcard::from_bytes::<super::CommandPromptState>(&pane_bytes).expect("pane decodes"),
+            on_pane
         );
     }
 

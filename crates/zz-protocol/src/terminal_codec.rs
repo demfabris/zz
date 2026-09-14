@@ -4475,6 +4475,7 @@ mod tests {
                     prompt_type: crate::CommandPromptType::Command,
                     mode: crate::CommandPromptMode::Text,
                     no_freeze: false,
+                    pane: None,
                 }),
             },
         });

@@ -653,7 +653,11 @@ opens: `ChooseTreeKind` gains a trailing `Clients`, `ChooseTreeTarget` a trailin
 status_width }` and `Markup { lines }` that `window_client_draw` and `window_client_draw_info`
 fill, and `ChooseTreeAction` the trailing `ClientDetach`, `ClientDetachTagged` and `ClientInfo`
 the daemon resolves `d`, `D` and `i` to inside that mode. All five are pure end-appends with both
-halves in the same push.
+halves in the same push. v102 also appends `pane: Option<PaneId>` to `CommandPromptState` after
+`no_freeze`: `command-prompt -P` is `window_pane_set_prompt`, so the prompt belongs to that pane
+rather than to the client, and `redraw_draw_pane_prompt` draws it over the pane's last row - its
+first under `status-position top` - and leaves the status row alone. `None` is the client prompt
+`status_prompt_set` raises. The raw TUI is the consumer half and it shipped in the same push.
 
 # Versioning & compatibility
 

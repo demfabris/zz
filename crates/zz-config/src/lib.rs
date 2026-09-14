@@ -23,7 +23,7 @@ pub mod keymap;
 pub mod mux_bindings;
 pub mod update;
 
-pub const CONFIG_DIRECTORY_NAME: &str = "zz";
+pub const CONFIG_DIRECTORY_NAME: &str = zz_protocol::app_identity::DIRECTORY;
 pub const CONFIG_FILE_NAME: &str = "config";
 pub const MAX_CONFIG_BYTES: usize = 64 * 1024;
 
@@ -1837,6 +1837,37 @@ pub mod settings;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configuration_discovery_keeps_build_identities_separate() {
+        let root = tempfile::tempdir().unwrap();
+        let other = if zz_protocol::app_identity::DEVELOPMENT {
+            "zz"
+        } else {
+            "zz-dev"
+        };
+        let home = root.path();
+        for base in [
+            home.join(".config"),
+            home.join("Library/Application Support"),
+        ] {
+            let path = base.join(other).join("config");
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "pane-margin = 99\n").unwrap();
+        }
+        let candidates = config_candidates_for(
+            ConfigPlatform::Macos,
+            ConfigEnvironment {
+                home: Some(home),
+                ..ConfigEnvironment::default()
+            },
+        );
+        assert_eq!(discover_config_path(&candidates), None);
+        let own = preferred_config_creation_path(None, Some(home)).unwrap();
+        fs::create_dir_all(own.parent().unwrap()).unwrap();
+        fs::write(&own, "pane-margin = 2\n").unwrap();
+        assert_eq!(discover_config_path(&candidates), Some(own));
+    }
 
     #[test]
     fn retired_status_keys_diagnose_without_overriding_roots() {

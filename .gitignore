@@ -1,6 +1,7 @@
 /target
 /clients/web/target
 /clients/web/dist
+/clients/web/dist-dev
 /dist
 /TODO.md
 /IDEAS.md

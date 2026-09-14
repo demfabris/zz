@@ -2491,7 +2491,7 @@ fn run_app(
             let window_decorations = config::window_decorations(cx);
             let mut titlebar = config::titlebar_options();
             if cfg!(target_os = "linux") {
-                titlebar.title = Some("zz".into());
+                titlebar.title = Some(zz_protocol::app_identity::DISPLAY_NAME.into());
             }
             let main_window = cx.open_window(
                 WindowOptions {
@@ -2502,7 +2502,7 @@ fn run_app(
                     display_id: restored_window.display_id,
                     window_min_size: Some(minimum_window_size),
                     window_decorations: Some(window_decorations),
-                    app_id: Some("zz".into()),
+                    app_id: Some(zz_protocol::app_identity::DIRECTORY.into()),
                     #[cfg(target_os = "linux")]
                     icon: Some(app_icon::x11_window_icon()),
                     ..Default::default()

@@ -4,7 +4,7 @@ title: Building and running zz
 description: How to build and run the zz GPUI client and its daemon, what the first build downloads, and how to exercise the browser pane with the loopback fixture.
 resource: crates/zz/src/lib.rs
 tags: [running, cargo, cef-download, daemon, browser-fixture, pacman, profiling, instruments]
-timestamp: 2026-09-05T00:00:00Z
+timestamp: 2026-09-14T00:00:00Z
 ---
 
 # Overview
@@ -67,10 +67,56 @@ zero-based session/window/pane ids. The installed TUI launcher now shares this b
 materialization is serialized, so simultaneous default attaches and a command-side session creator
 converge on one session.
 
-The normal development loop is `just run <mac|linux>`. On Linux this runs the binary straight from
-Cargo; on macOS it builds an unoptimized, locally signed bundle separately from the release output
-and launches a fresh app instance. `just run` does not accept `windows`. Extra args are
-`--verbose` and `--features <list>` (merged into `ZZ_CARGO_FEATURES`), not Cargo passthrough.
+The normal development loop is `just run <mac|linux>`. It builds **zz Dev**, an isolated desktop
+instance beside an installed zz. On Linux it copies the debug executable to `target/debug/zz-dev`
+(or the corresponding `CARGO_TARGET_DIR`) and launches it with `app`. On macOS it builds and
+launches the locally signed `dist/zz-dev/zz Dev.app`. `just run` does not accept `windows`. Extra
+args are `--verbose` and `--features <list>` (merged into `ZZ_CARGO_FEATURES`), not Cargo passthrough.
+
+The launcher sets `ZZ_DEV_BUILD=1` only for compilation. `zz-protocol/src/app_identity.rs` records
+that identity in the binaries, independent of debug/release optimization or the version number.
+Dev builds use `zz-dev` wherever installed builds use `zz` for configuration, browser profiles,
+agent preferences, window state, and daemon journals. On macOS the bundle ID is `dev.zz.app.dev`;
+on Linux the application and tray ID is `zz-dev`. Update checks are disabled for dev builds.
+
+Dev icons use an orange logo in the Dock, tray, iPhone/iPad app icon, and browser favicon.
+The macOS tray uses a color image; ordinary zz keeps its system-colored template image. Linux dev
+runs register `zz-dev.desktop` and an orange SVG under the user data directory so Wayland taskbars
+can resolve the dev app ID. The X11 window icon and tray pixmap also use the orange mark.
+
+Dev config discovery searches `zz-dev/config` and `zz-dev/mux.conf` beneath the usual platform
+config roots. It never falls back to installed zz's files. Dev starts with defaults; copy individual
+config files into the corresponding `zz-dev` directory if you want your existing settings.
+The default dev socket is `$XDG_RUNTIME_DIR/zz-dev/default.sock`, or
+`<system temporary directory>/zz-dev-$USER/default.sock` when XDG_RUNTIME_DIR is unset.
+The launcher clears inherited socket, pane, session, tmux, and startup context, so running it from
+an installed zz pane cannot select that pane's daemon. Dev terminal jobs receive the dev socket.
+Explicit socket arguments on direct CLI invocations still work.
+
+Desktop dev runs also link `~/.local/bin/zz-dev` to the development executable for SSH clients.
+They leave a regular file at that location alone and report an error if one prevents linking.
+Dev SSH clients select `zz-dev` for protocol discovery, daemon startup, and proxying, and use the
+remote `zz-dev` socket namespace. Run `just run` on the remote development host first. To inspect
+it from an installed zz pane, use `env -u ZZ_SOCKET ~/.local/bin/zz-dev list-sessions`.
+
+The other development recipes share this identity:
+
+- `just web`, `just web-build`, and `just web-serve` use dev assets in `clients/web/dist-dev`,
+  port 8081, separate browser preferences, and the existing dev daemon. `web-serve --socket PATH`
+  overrides the socket. `web-build-release` retains ordinary release assets in `clients/web/dist`.
+- `just ios`, `just ipad`, their build/test recipes, and `just ios-device` build **zz Dev** with
+  bundle ID `dev.zz.ios.dev` and URL scheme `zz-dev`. Its app container, saved host, and SSH key
+  are separate from the installed app. Simulator launches use the desktop dev socket;
+  `ZZ_DEV_SOCKET=/absolute/path just ios` selects an explicit socket.
+- Physical Apple devices connect over SSH to the remote dev executable and daemon. An explicit
+  `ssh://user@host/absolute/dev/socket` also works and disables daemon auto-start. It still needs
+  the matching `zz-dev` CLI on the remote host.
+- `just ios-preview` keeps the production bundle ID and Rust identity. Optimized local device
+  builds (`ZZ_IOS_CONFIGURATION=Release just ios-device`) still use the dev identity.
+
+`just build` and package installation keep their existing identity and destinations. Brew/AUR
+beta selection is independent of development isolation. Plain Cargo builds do not enable the
+development identity unless you set `ZZ_DEV_BUILD=1`.
 
 To verify the installed-command shape without replacing `/Applications/zz.app`, build the release
 bundle and run its packaged launcher fixture:
@@ -88,8 +134,8 @@ the app.
 the GUI and can render kitty-graphics browser panes when CEF is available in the environment.
 
 ```sh
-just run linux   # cargo run -p zz
-just run mac     # dev bundle in dist/zz-dev + open a fresh instance
+just run linux
+just run mac
 ```
 
 For UI iteration, `just watch <platform>` uses Cargo watch to rebuild and relaunch only after a
@@ -102,7 +148,7 @@ just watch mac
 
 The current client remains open across compile failures. After a successful build the watcher
 starts the replacement client, closes the previous development client, and leaves the compatible
-daemon plus its terminal sessions running. Rebuild and relaunch are native, so transient
+development daemon plus its terminal sessions running. Rebuild and relaunch are native, so transient
 client-side UI and Chromium renderer state reset; nothing hot-reloads in process.
 
 `just build linux` / `just build mac` produce the release bundle (`cargo xtask bundle-cef --release`)
@@ -112,7 +158,8 @@ copying over a running executable fails with `ETXTBSY`. Dropping the directory e
 that daemon on the inode it started from, so it keeps serving the previous build until restarted.
 
 macOS local bundles auto-select a sole valid Apple Development identity. This keeps TCC privacy
-grants for protected app data attached to `dev.zz.app` across rebuilds. With no unique candidate,
+grants for protected app data attached to each bundle identity across rebuilds (`dev.zz.app.dev`
+for development, `dev.zz.app` for installed builds). With no unique candidate,
 bundling falls back to ad-hoc signing; `MACOS_LOCAL_SIGN_IDENTITY` selects an identity by name or
 SHA-1, while `MACOS_LOCAL_SIGN_IDENTITY=-` forces ad-hoc signing. Public release signing remains a
 separate Developer ID/notarization step.
@@ -137,10 +184,12 @@ link command if neither candidate qualifies. Run `zz app` through that launcher 
 bare `zz` runs `new-session -A` through the raw-terminal client, and so does the bundled
 executable itself when a shell runs it without a command word.
 
-The recipe writes `dist/zz-dev/zz.app`. Its debug CEF runtime uses Chromium's mock keychain so
-local rebuilds do not repeatedly prompt for Chromium Safe Storage; release bundles continue using
-the macOS Keychain. A compatible daemon already listening on the default socket is reused, so stop
-it separately when daemon-side changes must be exercised.
+The development recipe writes `dist/zz-dev/zz Dev.app`. Its debug CEF runtime uses Chromium's
+mock keychain so local rebuilds do not repeatedly prompt for Chromium Safe Storage; release bundles
+continue using the macOS Keychain. A compatible daemon on the development socket survives GUI
+rebuilds. When testing daemon changes, restart that dev daemon; only its dev sessions are affected.
+Use the development app's restart action, or run its bundled binary with an explicit `-S` pointing
+to the development socket and `kill-server`, then run `just run` again.
 
 Run with continuous diagnostics (records a `.verbose.log`; treat as sensitive, since it logs raw
 terminal I/O, browser URLs/input, and process environment):
@@ -165,7 +214,7 @@ cargo run -p zz -- --verbose list-panes
 
 `ZZ_LOG_DIR` overrides the log directory; otherwise logs default to `$XDG_STATE_HOME/zz/logs` (or
 `~/.local/state/zz/logs`) on Linux, `~/Library/Logs/zz` on macOS, and `%LOCALAPPDATA%\zz\logs` on
-Windows. The `just run` development launcher defaults `ZZ_LOG_DIR` to the git-ignored `logs/`
+Windows. The `just run` development launcher sets `ZZ_LOG_DIR` to the git-ignored `logs/`
 folder in the repository and executes the macOS bundle binary directly (not via `open -n`), so
 `ZZ_BROWSER_*` environment flags set in the shell reach the app.
 

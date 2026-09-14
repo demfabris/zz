@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-const MUX_CONFIG_DIRECTORY_NAME: &str = "zz";
+const MUX_CONFIG_DIRECTORY_NAME: &str = zz_protocol::app_identity::DIRECTORY;
 const MUX_CONFIG_FILE_NAME: &str = "mux.conf";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MuxConfigPlatform {

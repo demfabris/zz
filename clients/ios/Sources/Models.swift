@@ -1398,7 +1398,7 @@ struct ZZNavigationTarget: Equatable, Sendable {
     let attention: Bool
 
     init?(url: URL) {
-        guard url.scheme?.lowercased() == "zz",
+        guard ["zz", "zz-dev"].contains(url.scheme?.lowercased() ?? ""),
               let host = url.host?.lowercased(),
               ["open", "pane", "attention"].contains(host) else {
             return nil

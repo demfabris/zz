@@ -86,11 +86,18 @@ struct PlatformReduceMotion(bool);
 impl gpui::Global for PlatformReduceMotion {}
 
 impl Preferences {
+    #[cfg(target_family = "wasm")]
+    const STORAGE_KEY: &str = if zz_protocol::app_identity::DEVELOPMENT {
+        "zz-dev-web-preferences"
+    } else {
+        "zz-web-preferences"
+    };
+
     pub(super) fn load(_: &App) -> Self {
         #[cfg(target_family = "wasm")]
         if let Some(value) = web_sys::window()
             .and_then(|window| window.local_storage().ok().flatten())
-            .and_then(|storage| storage.get_item("zz-web-preferences").ok().flatten())
+            .and_then(|storage| storage.get_item(Self::STORAGE_KEY).ok().flatten())
             .and_then(|value| serde_json::from_str::<Self>(&value).ok())
         {
             return value.sanitized();
@@ -124,7 +131,7 @@ impl Preferences {
             web_sys::window().and_then(|window| window.local_storage().ok().flatten())
             && let Ok(value) = serde_json::to_string(self)
         {
-            let _ = storage.set_item("zz-web-preferences", &value);
+            let _ = storage.set_item(Self::STORAGE_KEY, &value);
         }
     }
 

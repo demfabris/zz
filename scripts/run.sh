@@ -55,15 +55,17 @@ fi
 
 cd "$ROOT"
 
+unset ZZ_SOCKET ZZ_PANE ZZ_SESSION TMUX TMUX_PANE ZZ_TMUX_EXECUTABLE ZZ_APP_STARTUP_DIRECTORY ZZ_STARTUP_REENTRY ZZ_DEV_BUILD
+mkdir -p logs
+export ZZ_LOG_DIR="$ROOT/logs"
+
 if [[ "$PLATFORM" == "linux" ]]; then
-    mkdir -p logs
-    export ZZ_LOG_DIR="${ZZ_LOG_DIR:-$PWD/logs}"
-    # ZZ_CARGO_FEATURES opts a dev run into compiled-out features (CLI
-    # --features merges into it); the macOS path reads it inside xtask.
-    if [[ "$VERBOSE" == "--verbose" ]]; then
-        exec cargo run -p zz ${ZZ_CARGO_FEATURES:+--features "$ZZ_CARGO_FEATURES"} -- --verbose app
-    fi
-    exec cargo run -p zz ${ZZ_CARGO_FEATURES:+--features "$ZZ_CARGO_FEATURES"} -- app
+    ZZ_DEV_BUILD=1 cargo build -p zz --bin zz ${ZZ_CARGO_FEATURES:+--features "$ZZ_CARGO_FEATURES"}
+    target_dir="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
+    cp "$target_dir/debug/zz" "$target_dir/debug/zz-dev.$$"
+    mv -f "$target_dir/debug/zz-dev.$$" "$target_dir/debug/zz-dev"
+    bash "$ROOT/scripts/link-dev-cli.sh" "$target_dir/debug/zz-dev"
+    exec "$target_dir/debug/zz-dev" ${VERBOSE:+"$VERBOSE"} app
 fi
 
 zig_version="${ZZ_ZIG_VERSION:?the just recipe supplies this; export it to run the script directly}"
@@ -73,13 +75,12 @@ if [[ "$version" != "$zig_version" ]]; then
     exit 2
 fi
 
-cargo xtask bundle-cef --output dist/zz-dev
-mkdir -p logs
-export ZZ_LOG_DIR="${ZZ_LOG_DIR:-$PWD/logs}"
+ZZ_DEV_BUILD=1 cargo xtask bundle-cef --output dist/zz-dev
+bash "$ROOT/scripts/link-dev-cli.sh" "$ROOT/dist/zz-dev/zz Dev.app/Contents/MacOS/zz"
 
 if [[ "$VERBOSE" == "--verbose" ]]; then
-    ./dist/zz-dev/zz.app/Contents/MacOS/zz --verbose app >/dev/null 2>&1 &
+    "$ROOT/dist/zz-dev/zz Dev.app/Contents/MacOS/zz" --verbose app >/dev/null 2>&1 &
 else
-    ./dist/zz-dev/zz.app/Contents/MacOS/zz app >/dev/null 2>&1 &
+    "$ROOT/dist/zz-dev/zz Dev.app/Contents/MacOS/zz" app >/dev/null 2>&1 &
 fi
 disown

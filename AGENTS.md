@@ -49,7 +49,7 @@ Run `just` recipes from the repo root; `just --list` shows everything.
 | `cargo test --workspace --all-features` | Tests (what CI runs) |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | Lint (what CI runs) |
 | `cargo fmt --all` | Format |
-| `just run <mac\|linux> [--verbose] [--features <list>]` | Launch a fresh debug instance. Extra args are those two flags, not Cargo passthrough. No `windows` |
+| `just run <mac\|linux> [--verbose] [--features <list>]` | Launch isolated zz Dev (own daemon, config, browser, and data). Extra args are those two flags, not Cargo passthrough. No `windows` |
 | `just watch <platform>` | Rebuild and relaunch on source change |
 | `just build <platform>` | Release bundle into `dist/zz` (wraps `cargo xtask bundle-cef`) |
 | `just install mac` | Build and swap `/Applications/zz.app`; the daemon survives the swap |
@@ -82,6 +82,8 @@ A few `zz-daemon` tests are timing-sensitive and only fail under full-workspace 
 <important if="you are debugging a running daemon or checking the CLI">
 
 - The daemon outlives the app: after installing a new build, existing sessions keep running the old daemon binary until it restarts. Don't chase "missing" behavior in a stale daemon.
+- `just run` / `just watch` build zz Dev with `ZZ_DEV_BUILD=1`, clear inherited daemon/pane context, and use `zz-dev` config/data/socket paths. The macOS bundle is `dist/zz-dev/zz Dev.app` (`dev.zz.app.dev`); Linux launches `target/debug/zz-dev`. Installed and beta packages keep their existing behavior.
+- `just web` / `web-build` / `web-serve` use dev assets and port 8081. iPhone/iPad dev recipes install `zz Dev` (`dev.zz.ios.dev`); simulators use the dev socket (`ZZ_DEV_SOCKET` overrides it). Dev SSH selects `zz-dev`, linked by desktop dev runs into `~/.local/bin`. `ios-preview` and `web-build-release` retain production identity.
 - `ZZ_SOCKET` overrides the socket the app dials. Unix socket paths have a low length cap (`sun_path`); put test sockets directly under `/tmp`.
 - Recipes live in `knowledge/playbooks/running-zz.md`.
 </important>

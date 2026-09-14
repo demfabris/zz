@@ -139,7 +139,9 @@ fn browser_data_dir() -> io::Result<PathBuf> {
             "could not resolve the current user's application-data directory",
         )
     })?;
-    Ok(data.join("zz").join("browser"))
+    Ok(data
+        .join(zz_protocol::app_identity::DIRECTORY)
+        .join("browser"))
 }
 
 #[cfg(target_os = "linux")]

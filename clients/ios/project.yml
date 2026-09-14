@@ -8,6 +8,11 @@ settings:
     MARKETING_VERSION: "0.2.0"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "6.0"
+    ZZ_DEV_BUILD: "0"
+    ZZ_APP_BUNDLE_ID: dev.zz.ios
+    ZZ_APP_DISPLAY_NAME: zz
+    ZZ_APP_URL_SCHEME: zz
+    ZZ_APP_ICON: zz
 packages:
   swift-markdown:
     url: https://github.com/swiftlang/swift-markdown.git
@@ -21,10 +26,10 @@ targets:
       path: Support/Info.plist
       properties:
         CFBundleURLTypes:
-          - CFBundleURLName: dev.zz.ios
+          - CFBundleURLName: $(ZZ_APP_BUNDLE_ID)
             CFBundleURLSchemes:
-              - zz
-        CFBundleDisplayName: zz
+              - $(ZZ_APP_URL_SCHEME)
+        CFBundleDisplayName: $(ZZ_APP_DISPLAY_NAME)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         LSApplicationCategoryType: public.app-category.developer-tools
         NSLocalNetworkUsageDescription: zz connects to your computer on the local network.
@@ -62,13 +67,15 @@ targets:
         buildPhase: resources
       - path: ../../assets/zz.icon
         buildPhase: resources
+      - path: ../../assets/zz-dev.icon
+        buildPhase: resources
     dependencies:
       - package: swift-markdown
         product: Markdown
     settings:
       base:
-        ASSETCATALOG_COMPILER_APPICON_NAME: zz
-        PRODUCT_BUNDLE_IDENTIFIER: dev.zz.ios
+        ASSETCATALOG_COMPILER_APPICON_NAME: $(ZZ_APP_ICON)
+        PRODUCT_BUNDLE_IDENTIFIER: $(ZZ_APP_BUNDLE_ID)
         PRODUCT_NAME: ZZ
         TARGETED_DEVICE_FAMILY: "1,2"
         ARCHS: arm64
@@ -102,7 +109,7 @@ targets:
       - target: ZZMobile
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.zz.ios.tests
+        PRODUCT_BUNDLE_IDENTIFIER: $(ZZ_APP_BUNDLE_ID).tests
         GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/ZZ.app/ZZ
         BUNDLE_LOADER: $(TEST_HOST)
@@ -118,7 +125,7 @@ targets:
       - target: ZZMobile
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.zz.ios.uitests
+        PRODUCT_BUNDLE_IDENTIFIER: $(ZZ_APP_BUNDLE_ID).uitests
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: ZZMobile
         TARGETED_DEVICE_FAMILY: "1,2"

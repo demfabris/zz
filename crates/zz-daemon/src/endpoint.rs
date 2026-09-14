@@ -56,18 +56,20 @@ macro_rules! remote_path_fallback {
 #[cfg(any(unix, windows, test))]
 // Runs under `sh -lc` so `zz` resolves through the login shell's PATH; the sentinel prefixes
 // let the parser skip whatever a login profile prints around the probe's own output.
-pub(crate) const REMOTE_SOCKET_PROBE: &str = concat!(
-    "'",
-    remote_path_fallback!(),
-    "if [ -n \"$XDG_RUNTIME_DIR\" ]; then zz_dir=\"$XDG_RUNTIME_DIR/zz\"; \
-     else zz_tmp=\"$TMPDIR\"; \
-     if [ -z \"$zz_tmp\" ]; then zz_tmp=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null); fi; \
-     case \"$zz_tmp\" in /*) ;; *) zz_tmp=/tmp ;; esac; \
-     zz_dir=\"${zz_tmp%/}/zz-$USER\"; fi; \
-     printf \"zz-probe-socket=%s\\n\" \"$zz_dir/default.sock\"; \
-     if command -v zz >/dev/null 2>&1; then printf \"zz-probe-protocol=%s\\n\" \"$(zz protocol-version 2>/dev/null || echo unknown)\"; \
-     else printf \"zz-probe-protocol=missing\\n\"; fi'"
-);
+pub(crate) fn remote_socket_probe() -> String {
+    shell_quote(&format!(
+        "{fallback}if [ -n \"$XDG_RUNTIME_DIR\" ]; then zz_dir=\"$XDG_RUNTIME_DIR/{name}\"; \
+         else zz_tmp=\"$TMPDIR\"; \
+         if [ -z \"$zz_tmp\" ]; then zz_tmp=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null); fi; \
+         case \"$zz_tmp\" in /*) ;; *) zz_tmp=/tmp ;; esac; \
+         zz_dir=\"${{zz_tmp%/}}/{name}-$USER\"; fi; \
+         printf \"zz-probe-socket=%s\\n\" \"$zz_dir/default.sock\"; \
+         if command -v {name} >/dev/null 2>&1; then printf \"zz-probe-protocol=%s\\n\" \"$({name} protocol-version 2>/dev/null || echo unknown)\"; \
+         else printf \"zz-probe-protocol=missing\\n\"; fi",
+        fallback = remote_path_fallback!(),
+        name = zz_protocol::app_identity::DIRECTORY,
+    ))
+}
 /// Exit codes the auto-start script picks for itself; ssh reports its own failures as 255.
 #[cfg(any(unix, windows, test))]
 pub(crate) const REMOTE_ZZ_MISSING_STATUS: i32 = 127;
@@ -201,24 +203,27 @@ impl EndpointError {
                 format!("Could not sign in to {target}: {reason}")
             }
             Self::RemoteBinaryMissing { target } => format!(
-                "zz is not installed on {target}.\nInstall it there, or put it on the login \
-                 shell's PATH."
+                "{} is not installed on {target}.\nInstall it there, or put it on the login shell's PATH.",
+                zz_protocol::app_identity::DIRECTORY
             ),
             Self::RemoteDaemonUnavailable { target } => format!(
-                "Started zz on {target}, but its daemon socket never appeared.\nRun `zz daemon` \
-                 there to see why."
+                "Started {name} on {target}, but its daemon socket never appeared.\nRun `{name} daemon` \
+                 there to see why.",
+                name = zz_protocol::app_identity::DIRECTORY,
             ),
             Self::RemoteProtocolMismatch {
                 target,
                 daemon,
                 client,
             } => format!(
-                "zz on {target} speaks protocol v{daemon}; this zz speaks v{client}.\nUpdate zz on \
-                 that host, then reconnect."
+                "{name} on {target} speaks protocol v{daemon}; this {name} speaks v{client}.\nUpdate {name} on \
+                 that host, then reconnect.",
+                name = zz_protocol::app_identity::DIRECTORY,
             ),
             Self::RemoteProtocolUnknown { target } => {
                 format!(
-                    "zz on {target} predates protocol version reporting; update it, then reconnect"
+                    "{} on {target} predates protocol version reporting; update it, then reconnect",
+                    zz_protocol::app_identity::DIRECTORY,
                 )
             }
             Self::ForwardExited { target, status, .. } => format!(
@@ -486,7 +491,7 @@ fn ssh_probe_command(endpoint: &SshEndpoint, session: SshSession<'_>) -> Command
         .arg(&endpoint.host)
         .arg("sh")
         .arg("-lc")
-        .arg(REMOTE_SOCKET_PROBE);
+        .arg(remote_socket_probe());
     command
 }
 
@@ -511,10 +516,10 @@ fn ssh_daemon_start_command(
 pub(crate) fn remote_daemon_start_script(remote_socket: &Path) -> String {
     let socket = shell_quote(&remote_socket.to_string_lossy());
     format!(
-        "{fallback}command -v zz >/dev/null 2>&1 || exit {REMOTE_ZZ_MISSING_STATUS}; \
+        "{fallback}command -v {name} >/dev/null 2>&1 || exit {REMOTE_ZZ_MISSING_STATUS}; \
          if setsid true >/dev/null 2>&1; \
-         then setsid zz daemon --socket {socket} >/dev/null 2>&1 </dev/null & \
-         else nohup zz daemon --socket {socket} >/dev/null 2>&1 </dev/null & fi; \
+         then setsid {name} daemon --socket {socket} >/dev/null 2>&1 </dev/null & \
+         else nohup {name} daemon --socket {socket} >/dev/null 2>&1 </dev/null & fi; \
          if sleep {REMOTE_DAEMON_POLL_INTERVAL} 2>/dev/null; \
          then delay={REMOTE_DAEMON_POLL_INTERVAL}; attempts={REMOTE_DAEMON_POLL_ATTEMPTS}; \
          else delay=1; attempts={REMOTE_DAEMON_POLL_FALLBACK_ATTEMPTS}; fi; \
@@ -524,6 +529,7 @@ pub(crate) fn remote_daemon_start_script(remote_socket: &Path) -> String {
          sleep \"$delay\"; attempt=$((attempt + 1)); done; \
          exit {REMOTE_DAEMON_TIMEOUT_STATUS}",
         fallback = remote_path_fallback!(),
+        name = zz_protocol::app_identity::DIRECTORY,
     )
 }
 
@@ -531,8 +537,9 @@ pub(crate) fn remote_daemon_start_script(remote_socket: &Path) -> String {
 #[cfg(any(windows, target_os = "ios", test))]
 pub(crate) fn remote_proxy_script(remote_socket: &Path) -> String {
     format!(
-        "{fallback}exec zz proxy --socket {socket}",
+        "{fallback}exec {name} proxy --socket {socket}",
         fallback = remote_path_fallback!(),
+        name = zz_protocol::app_identity::DIRECTORY,
         socket = shell_quote(&remote_socket.to_string_lossy()),
     )
 }
@@ -1581,7 +1588,7 @@ mod tests {
             let mut expected = shared_ssh_options();
             expected.extend(options.into_iter().map(str::to_owned));
             expected.extend(
-                ["--", "host", "sh", "-lc", REMOTE_SOCKET_PROBE]
+                ["--", "host", "sh", "-lc", &remote_socket_probe()]
                     .into_iter()
                     .map(str::to_owned),
             );
@@ -1652,7 +1659,7 @@ mod tests {
         let mut expected = ["-o", "ConnectTimeout=10"].map(str::to_owned).to_vec();
         #[cfg(windows)]
         expected.extend(["-o", "ControlMaster=no", "-o", "ControlPath=none"].map(str::to_owned));
-        expected.extend(["--", "host", "sh", "-lc", REMOTE_SOCKET_PROBE].map(str::to_owned));
+        expected.extend(["--", "host", "sh", "-lc", &remote_socket_probe()].map(str::to_owned));
         assert_eq!(command_args(&command), expected);
         assert_eq!(
             command_envs(&command),
@@ -1787,7 +1794,7 @@ mod tests {
     #[test]
     fn every_remote_script_looks_where_the_installer_puts_the_cli() {
         let scripts = [
-            REMOTE_SOCKET_PROBE.to_owned(),
+            remote_socket_probe(),
             remote_daemon_start_script(Path::new("/run/zz.sock")),
             remote_proxy_script(Path::new("/run/zz.sock")),
         ];
@@ -1798,24 +1805,57 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn remote_probe_and_proxy_select_the_builds_executable() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        for name in ["zz", "zz-dev"] {
+            let binary = directory.path().join(name);
+            fs::write(&binary, format!("#!/bin/sh\nprintf '%s\\n' '{name}'\n"))
+                .expect("write executable");
+            fs::set_permissions(&binary, fs::Permissions::from_mode(0o755))
+                .expect("executable permissions");
+        }
+        let path = format!("{}:/usr/bin:/bin", directory.path().display());
+        let name = zz_protocol::app_identity::DIRECTORY;
+        for (script, expected) in [
+            (remote_socket_probe(), format!("zz-probe-protocol={name}\n")),
+            (
+                shell_quote(&remote_proxy_script(Path::new("/tmp/explicit.sock"))),
+                format!("{name}\n"),
+            ),
+        ] {
+            let output = Command::new("/bin/sh")
+                .args(["-c", &format!("sh -c {script}")])
+                .env("PATH", &path)
+                .output()
+                .expect("run remote script");
+            assert!(output.status.success());
+            assert!(String::from_utf8_lossy(&output.stdout).ends_with(&expected));
+        }
+    }
+
     #[test]
     fn autostart_script_starts_the_daemon_on_the_resolved_socket() {
         let script = remote_daemon_start_script(Path::new("/run/user/1000/zz/default.sock"));
         assert!(
-            script.starts_with(concat!(
+            script.starts_with(&format!(
+                "{}command -v {} >/dev/null 2>&1 || exit 127;",
                 remote_path_fallback!(),
-                "command -v zz >/dev/null 2>&1 || exit 127;"
+                zz_protocol::app_identity::DIRECTORY
             )),
             "missing zz needs its own exit status before anything but the PATH line runs: {script}"
         );
         assert!(
-            script.contains(
-                "setsid zz daemon --socket '/run/user/1000/zz/default.sock' >/dev/null 2>&1 \
-                 </dev/null &"
-            ) && script.contains(
-                "nohup zz daemon --socket '/run/user/1000/zz/default.sock' >/dev/null 2>&1 \
-                 </dev/null &"
-            ),
+            script.contains(&format!(
+                "setsid {} daemon --socket '/run/user/1000/zz/default.sock' >/dev/null 2>&1 \
+                 </dev/null &",
+                zz_protocol::app_identity::DIRECTORY
+            )) && script.contains(&format!(
+                "nohup {} daemon --socket '/run/user/1000/zz/default.sock' >/dev/null 2>&1 \
+                 </dev/null &",
+                zz_protocol::app_identity::DIRECTORY
+            )),
             "the daemon must be detached and pinned to the resolved socket by either arm: \
              {script}"
         );
@@ -1844,7 +1884,7 @@ mod tests {
     fn autostart_script_starts_the_daemon_without_trusting_an_existing_socket_file() {
         let script = remote_daemon_start_script(Path::new("/run/user/1000/zz/default.sock"));
         let start = script
-            .find("zz daemon")
+            .find(&format!("{} daemon", zz_protocol::app_identity::DIRECTORY))
             .expect("the script must start the daemon");
         assert!(
             !script[..start].contains("[ -S "),
@@ -1937,7 +1977,10 @@ mod tests {
             reason(EndpointError::RemoteBinaryMissing {
                 target: "ssh://desk".to_owned(),
             })
-            .starts_with("zz is not installed on ssh://desk")
+            .starts_with(&format!(
+                "{} is not installed on ssh://desk",
+                zz_protocol::app_identity::DIRECTORY
+            ))
         );
         assert!(
             reason(EndpointError::RemoteDaemonUnavailable {
@@ -2030,7 +2073,7 @@ mod tests {
         let mut command = Command::new("/bin/sh");
         command
             .arg("-c")
-            .arg(format!("sh -c {REMOTE_SOCKET_PROBE}"));
+            .arg(format!("sh -c {}", remote_socket_probe()));
         for (key, value) in environment {
             if let Some(value) = value {
                 command.env(key, value);
@@ -2075,7 +2118,10 @@ mod tests {
                 "/tmp/zz-ada/default.sock",
             ),
         ] {
-            assert_eq!(probe_socket_path(&environment), expected);
+            assert_eq!(
+                probe_socket_path(&environment),
+                expected.replace("/zz", &format!("/{}", zz_protocol::app_identity::DIRECTORY))
+            );
         }
     }
 
@@ -2103,7 +2149,10 @@ mod tests {
                 ("TMPDIR", None),
                 ("USER", Some("ada")),
             ]),
-            format!("{expected_root}/zz-ada/default.sock")
+            format!(
+                "{expected_root}/{}-ada/default.sock",
+                zz_protocol::app_identity::DIRECTORY
+            )
         );
     }
 
@@ -2126,7 +2175,10 @@ mod tests {
                 ("USER", Some("ada")),
                 ("PATH", Some(&path)),
             ]),
-            "/tmp/zz-ada/default.sock"
+            format!(
+                "/tmp/{}-ada/default.sock",
+                zz_protocol::app_identity::DIRECTORY
+            )
         );
     }
 

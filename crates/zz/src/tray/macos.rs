@@ -163,7 +163,11 @@ fn tray_image() -> Option<Retained<NSImage>> {
         .expect("the embedded zz glyph must be a valid PNG")
         .into_rgba8();
     for pixel in glyph.chunks_exact_mut(4) {
-        pixel[..3].fill(0);
+        pixel[..3].copy_from_slice(if zz_protocol::app_identity::DEVELOPMENT {
+            &[242, 140, 40]
+        } else {
+            &[0, 0, 0]
+        });
     }
     let scaled = image::imageops::resize(
         &glyph,
@@ -179,7 +183,7 @@ fn tray_image() -> Option<Retained<NSImage>> {
     }
     let image = NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(&png))?;
     image.setSize(NSSize::new(TRAY_IMAGE_POINTS, TRAY_IMAGE_POINTS));
-    image.setTemplate(true);
+    image.setTemplate(!zz_protocol::app_identity::DEVELOPMENT);
     Some(image)
 }
 

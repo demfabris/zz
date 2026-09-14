@@ -4,8 +4,19 @@ use zz_web::{Gateway, GatewayConfig};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut bind: SocketAddr = "127.0.0.1:8080".parse()?;
-    let mut assets = PathBuf::from("clients/web/dist");
+    let mut bind = SocketAddr::from((
+        [127, 0, 0, 1],
+        if zz_protocol::app_identity::DEVELOPMENT {
+            8081
+        } else {
+            8080
+        },
+    ));
+    let mut assets = PathBuf::from(if zz_protocol::app_identity::DEVELOPMENT {
+        "clients/web/dist-dev"
+    } else {
+        "clients/web/dist"
+    });
     let mut socket = zz_daemon::default_socket_path();
     let mut arguments = std::env::args_os().skip(1);
     while let Some(argument) = arguments.next() {
@@ -26,7 +37,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Some("--help" | "-h") => {
                 println!(
-                    "Usage: zz-web [--assets clients/web/dist] [--bind 127.0.0.1:8080] [--socket PATH]\n\nServe the zz browser client and connect each browser to the existing daemon.\nOnly loopback addresses are supported. Use SSH forwarding for remote hosts."
+                    "Usage: zz-web [--assets DIR] [--bind ADDRESS:PORT] [--socket PATH]\n\nDefaults: assets={}, bind={bind}, socket={}\nServe the zz browser client and connect each browser to the existing daemon.\nOnly loopback addresses are supported. Use SSH forwarding for remote hosts.",
+                    assets.display(),
+                    socket.display()
                 );
                 return Ok(());
             }
@@ -39,7 +52,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         socket,
     })
     .await?;
-    println!("zz browser client: http://{}", gateway.local_addr());
+    println!(
+        "{} browser client: http://{}",
+        zz_protocol::app_identity::DISPLAY_NAME,
+        gateway.local_addr()
+    );
     gateway.serve().await?;
     Ok(())
 }

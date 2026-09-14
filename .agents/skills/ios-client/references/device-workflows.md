@@ -36,15 +36,15 @@ Just recipe does not preserve whitespace in a device name; a single-word name al
 Simulator and device archives differ:
 
 ```text
-target/aarch64-apple-ios-sim/<profile>/libzz_client_ffi.a
-target/aarch64-apple-ios/<profile>/libzz_client_ffi.a
+target/ios-client-core/<identity>/aarch64-apple-ios-sim/<profile>/libzz_client_ffi.a
+target/ios-client-core/<identity>/aarch64-apple-ios/<profile>/libzz_client_ffi.a
 ```
 
-Debug and Release archives also differ. A simulator build cannot refresh the physical-device
+Identity `1` is development; `0` is production. Debug and Release archives also differ. A simulator build cannot refresh the physical-device
 archive.
 
 `ZZ_IOS_REUSE_CLIENT_CORE=1` skips Cargo and copies the archive that already exists for the selected
-platform and profile. Use it only after Swift-only edits and only after a fresh matching archive.
+identity, platform, and profile. Use it only after Swift-only edits and only after a fresh matching archive.
 
 Use an authoritative fresh build after changes to Rust, FFI, transport, protocol, build scripts, or
 the selected profile:
@@ -70,8 +70,9 @@ startup. Rebuilding a simulator does not rule it out.
 ## Simulator behavior
 
 `scripts/ios-sim.sh` starts or selects a simulator, builds the same universal app, installs bundle
-`dev.zz.ios`, and launches it with `SIMCTL_CHILD_ZZ_SOCKET`. `ZZStore.start` sees `ZZ_SOCKET` and
-bypasses host setup and SSH.
+`dev.zz.ios.dev`, and launches it with `SIMCTL_CHILD_ZZ_SOCKET`. `ZZStore.start` sees `ZZ_SOCKET` and
+bypasses host setup and SSH. The recipe selects the desktop dev socket, ignores inherited
+`ZZ_SOCKET`, and accepts `ZZ_DEV_SOCKET` as an explicit override.
 
 The recipe selects the newest installed iOS runtime with a device in the requested family,
 preferring a booted device within that runtime. It waits for boot completion before installing.
@@ -86,6 +87,10 @@ Read the script warning and verify a real session, window, pane, and terminal fr
 A physical device cannot use the Mac's Unix socket. It stores a normalized `ssh://user@host`
 endpoint, reaches SSH over the LAN, and uses its Keychain-backed identity. See
 [connection diagnostics](connection-diagnostics.md) for the transport and evidence ladder.
+
+Local recipes install the separate `zz Dev` app. Its SSH transport uses the host’s `zz-dev`
+executable and socket namespace; desktop dev runs create the executable link in `~/.local/bin`.
+`just ios-preview` retains the production identity.
 
 Physical Debug builds are the default. The recipe requires a paired device with Developer Mode,
 valid signing, and an unlocked screen for launch.
@@ -108,7 +113,7 @@ Use read-only commands first:
 xcrun devicectl list devices
 xcrun devicectl device info details --device <device-id>
 xcrun devicectl device info lockState --device <device-id>
-xcrun devicectl device info apps --device <device-id> --bundle-id dev.zz.ios
+xcrun devicectl device info apps --device <device-id> --bundle-id dev.zz.ios.dev
 xcrun devicectl device info processes --device <device-id> --search ZZ
 ```
 
@@ -120,7 +125,7 @@ xcrun devicectl device process launch \
   --device <device-id> \
   --terminate-existing \
   --console \
-  dev.zz.ios
+  dev.zz.ios.dev
 ```
 
 The console command remains attached until the app exits. A forgotten attachment can interfere with
@@ -166,9 +171,11 @@ env -u ZZ_IOS_REUSE_CLIENT_CORE xcodebuild \
   -project clients/ios/ZZMobile.xcodeproj \
   -scheme ZZMobile \
   -destination 'platform=iOS Simulator,id=<iPad-UDID>' \
-  -derivedDataPath target/ios-sim \
+  -derivedDataPath target/ios-sim-dev \
   -only-testing:ZZMobileUITests \
   -resultBundlePath /tmp/zz-ipad-ui-result.xcresult \
+  ZZ_DEV_BUILD=1 ZZ_APP_BUNDLE_ID=dev.zz.ios.dev \
+  ZZ_APP_DISPLAY_NAME="zz Dev" ZZ_APP_URL_SCHEME=zz-dev \
   CODE_SIGNING_ALLOWED=NO test
 xcrun simctl spawn <iPad-UDID> launchctl unsetenv ZZ_IOS_UI_TEST_SOCKET
 ```

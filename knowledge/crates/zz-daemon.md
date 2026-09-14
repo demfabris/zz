@@ -160,9 +160,14 @@ cannot recover that history from the final map.
 
 | Step | Command | Why |
 |------|---------|-----|
-| Probe | `ssh … <host> sh -lc '<REMOTE_SOCKET_PROBE>'` | Resolve the remote default socket path and run `zz protocol-version`. This always runs before dialing, including for an explicit `remote_socket`. Output lines carry `zz-probe-` sentinels so login-profile noise is ignored; a differing number is incompatible, `unknown` (zz present but too old) asks the user to update zz first, and `missing` (no zz on the login PATH) dials anyway. |
+| Probe | `ssh … <host> sh -lc '<remote_socket_probe()>'` | Resolve the remote default socket path and run `zz protocol-version`. This always runs before dialing, including for an explicit `remote_socket`. Output lines carry `zz-probe-` sentinels so login-profile noise is ignored; a differing number is incompatible, `unknown` (zz present but too old) asks the user to update zz first, and `missing` (no zz on the login PATH) dials anyway. |
 | Auto-start | `ssh … <host> sh -lc '<start script>'` | Start the daemon detached (`setsid`, else `nohup`), then poll for its socket (50 × 100 ms, or 5 × 1 s where `sleep` refuses a fraction). `sh -lc` because `zz` usually lives on the login shell's PATH only; a missing binary exits 127 and a timeout exits 3 |
 | Forward | `ssh -N -o ExitOnForwardFailure=yes -o StreamLocalBindMask=0177 -L <local>:<remote> … <host>` | The tunnel. `wait_for_socket` polls 250 × 20 ms; `Drop` kills the child, cancels the forwarding on the master, and unlinks the local socket |
+
+Dev builds select `zz-dev` for the executable and socket namespace throughout probe, auto-start,
+and proxy scripts. Production builds use `zz`. Desktop dev recipes link the development executable
+into `~/.local/bin/zz-dev`; remote dev clients never fall back to the installed `zz` command.
+Explicit socket paths still use the build-selected executable for protocol checks and proxying.
 
 All three remote scripts open with `remote_path_fallback!`, which appends `$HOME/.local/bin`,
 `/opt/homebrew/bin`, and `/usr/local/bin` to `PATH`. Those are the three directories `install.sh`

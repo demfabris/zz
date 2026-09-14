@@ -412,7 +412,9 @@ fn window_state_path() -> io::Result<PathBuf> {
             "could not resolve the current user's application-data directory",
         )
     })?;
-    Ok(data.join("zz").join(WINDOW_STATE_FILE_NAME))
+    Ok(data
+        .join(zz_protocol::app_identity::DIRECTORY)
+        .join(WINDOW_STATE_FILE_NAME))
 }
 
 #[cfg(test)]

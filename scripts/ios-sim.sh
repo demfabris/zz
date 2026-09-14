@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+unset ZZ_SOCKET ZZ_PANE ZZ_SESSION TMUX TMUX_PANE ZZ_TMUX_EXECUTABLE ZZ_APP_STARTUP_DIRECTORY ZZ_STARTUP_REENTRY ZZ_DEV_BUILD
 
 die() { echo "error: $*" >&2; exit 1; }
 
@@ -14,9 +15,9 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 spec="$repo_root/clients/ios/project.yml"
 project_dir="$repo_root/clients/ios"
 project="$project_dir/ZZMobile.xcodeproj"
-derived="$repo_root/target/ios-sim"
+derived="$repo_root/target/ios-sim-dev"
 app="$derived/Build/Products/Debug-iphonesimulator/ZZ.app"
-bundle_id="dev.zz.ios"
+bundle_id="dev.zz.ios.dev"
 simulator_family="${ZZ_IOS_SIMULATOR_FAMILY:-iPhone}"
 workspace_version="$(sed -nE 's/^version = "([^"]+)"$/\1/p' "$repo_root/Cargo.toml" | head -1)"
 marketing_version="${workspace_version%%[-+]*}"
@@ -56,6 +57,7 @@ if [[ "$mode" == "--test" ]]; then
         -derivedDataPath "$derived" \
         MARKETING_VERSION="$marketing_version" \
         CODE_SIGNING_ALLOWED=NO \
+        ZZ_DEV_BUILD=1 ZZ_APP_BUNDLE_ID="$bundle_id" ZZ_APP_DISPLAY_NAME="zz Dev" ZZ_APP_URL_SCHEME=zz-dev ZZ_APP_ICON=zz-dev \
         test
     exit 0
 fi
@@ -68,6 +70,7 @@ xcodebuild \
     -derivedDataPath "$derived" \
     MARKETING_VERSION="$marketing_version" \
     CODE_SIGNING_ALLOWED=NO \
+    ZZ_DEV_BUILD=1 ZZ_APP_BUNDLE_ID="$bundle_id" ZZ_APP_DISPLAY_NAME="zz Dev" ZZ_APP_URL_SCHEME=zz-dev ZZ_APP_ICON=zz-dev \
     build
 
 [[ -d "$app" ]] || die "build finished but $app is missing"
@@ -83,15 +86,15 @@ else
     open -a Simulator
 fi
 
-socket="${ZZ_SOCKET:-}"
+socket="${ZZ_DEV_SOCKET:-}"
 if [[ -z "$socket" ]]; then
     if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
-        socket="$XDG_RUNTIME_DIR/zz/default.sock"
+        socket="$XDG_RUNTIME_DIR/zz-dev/default.sock"
     else
-        socket="${TMPDIR:-/tmp}/zz-${USER}/default.sock"
+        socket="${TMPDIR:-/tmp}/zz-dev-${USER}/default.sock"
     fi
 fi
-[[ -S "$socket" ]] || echo "warning: no daemon socket at $socket; start zz first" >&2
+[[ -S "$socket" ]] || echo "warning: no daemon socket at $socket; run just run mac first" >&2
 
 xcrun simctl terminate "$udid" "$bundle_id" 2>/dev/null || true
 xcrun simctl install "$udid" "$app"

@@ -40,7 +40,7 @@ fn launch(cx: &mut App) {
             ..Default::default()
         },
         |window, cx| {
-            window.set_window_title("zz");
+            window.set_window_title(zz_protocol::app_identity::DISPLAY_NAME);
             window.set_default_corner_smoothing(4.0);
             window.set_adaptive_corner_fraction(Some(0.45));
             let client = cx.new(|cx| app::WebClient::new(window, cx));

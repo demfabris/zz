@@ -32,9 +32,9 @@ use zeroize::Zeroizing;
 use crate::{
     askpass::{AskpassMode, AskpassPrompt, AskpassReply, SshPrompts},
     endpoint::{
-        EndpointError, PROXY_READY_MARKER, REMOTE_DAEMON_TIMEOUT_STATUS, REMOTE_SOCKET_PROBE,
-        REMOTE_ZZ_MISSING_STATUS, SshEndpoint, parse_remote_probe_output,
-        remote_daemon_start_script, remote_proxy_script, shell_quote,
+        EndpointError, PROXY_READY_MARKER, REMOTE_DAEMON_TIMEOUT_STATUS, REMOTE_ZZ_MISSING_STATUS,
+        SshEndpoint, parse_remote_probe_output, remote_daemon_start_script, remote_proxy_script,
+        remote_socket_probe, shell_quote,
     },
     ios_keychain::{self, KeychainError},
     russh_socks::{LoopbackForward, SocksForward, discover_loopback_ports},
@@ -550,12 +550,13 @@ async fn probe_remote_socket(
     session: &mut SshSession,
     target: &str,
 ) -> Result<PathBuf, EndpointError> {
-    let (status, stdout, stderr) = exec_capture(session, format!("sh -lc {REMOTE_SOCKET_PROBE}"))
-        .await
-        .map_err(|error| EndpointError::ProbeFailure {
-            target: target.to_owned(),
-            reason: error.to_string(),
-        })?;
+    let (status, stdout, stderr) =
+        exec_capture(session, format!("sh -lc {}", remote_socket_probe()))
+            .await
+            .map_err(|error| EndpointError::ProbeFailure {
+                target: target.to_owned(),
+                reason: error.to_string(),
+            })?;
     if status != Some(0) {
         return Err(EndpointError::ProbeFailure {
             target: target.to_owned(),

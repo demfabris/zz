@@ -21,7 +21,10 @@ On macOS, the bundle copies the checked-in `packaging/mac/Assets.car` and `zz.ic
 `Contents/Resources` before signing. `CFBundleIconName` points macOS 26+ at the compiled catalog so
 the Dock renders every appearance (light, dark, tinted, clear) natively. Run
 `scripts/compile-macos-icon.sh` after editing `assets/zz.icon`, then commit the regenerated
-`Assets.car`. The script requires Xcode 26+ because `actool` ships with Xcode proper, not the Command
+`Assets.car`. For the orange dev variant, run `scripts/compile-macos-icon.sh dev` after editing
+`assets/zz-dev.icon`; it updates `packaging/mac-dev` and the light/dark preview PNGs. Dev bundles
+select the `zz-dev` catalog entry and copy those dev resources before signing.
+The script requires Xcode 26+ because `actool` ships with Xcode proper, not the Command
 Line Tools. Bundling does not run `actool`: its GPU-backed renderer crashed repeatedly on virtualized
 CI runners. Local bundles use a sole installed Apple Development identity when available and fall
 back to ad-hoc signing otherwise. `just release-mac <version-label>` layers the separate public

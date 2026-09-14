@@ -528,7 +528,8 @@ sessions never inherit the docked keyboard's height.
 The project is intentionally generated and ignored. Its pre-build phase cross-compiles
 `zz-client-ffi` as an arm64 static library for the selected Apple SDK and links it into Swift through
 `ZZ-Bridging-Header.h`. The universal target compiles the shared `assets/zz.icon` Icon Composer
-document for its iPhone, iPad, and App Store icon variants.
+document for its iPhone, iPad, and App Store icon variants. Dev recipes select the orange
+`assets/zz-dev.icon` through `ZZ_APP_ICON=zz-dev`; production builds retain the `zz` icon.
 
 ```sh
 just ios-build
@@ -542,17 +543,25 @@ ZZ_IOS_REUSE_CLIENT_CORE=1 just ios-device <device-name>
 just ios-preview [build-number]
 ```
 
-`just ios` builds, boots an available iPhone simulator, installs `dev.zz.ios`, injects `ZZ_SOCKET`,
-and launches it against a daemon on the same Mac. The matching `just ipad` recipes select an iPad
+`just ios` builds, boots an available iPhone simulator, installs `zz Dev` (`dev.zz.ios.dev`), injects the dev daemon path as `ZZ_SOCKET`,
+and launches it against the dev daemon on the same Mac. `ZZ_DEV_SOCKET` overrides that path;
+the recipe ignores an inherited stable `ZZ_SOCKET`. The matching `just ipad` recipes select an iPad
 simulator while building the same universal application. `just ios-device` signs, installs, and
-launches the app on a named Apple device; the app then asks for one SSH host and can copy its generated
+launches the separate dev app on a named Apple device; the app then asks for one SSH host and can copy its generated
 public key or use a one-shot password. Physical-device development builds use Debug by default;
 `ZZ_IOS_CONFIGURATION=Release` selects Release when needed. Simulator tests can run against either
 device family. For a Swift-only device iteration, `ZZ_IOS_REUSE_CLIENT_CORE=1` skips Cargo and copies
-the existing target archive; it fails when that archive is missing, and must not be used after a Rust
-or FFI change.
+the cached archive for that build identity, platform, and profile under `target/ios-client-core`;
+it fails when that archive is missing, and must not be used after a Rust or FFI change.
 
-`just ios-preview` creates a fresh Release archive, derives the marketing version from the workspace,
+The dev app registers `zz-dev://` links and has its own app container, preferences, saved host,
+and SSH key. Development recipes pass `ZZ_DEV_BUILD=1` through Xcode to Cargo. Over SSH the dev
+client selects the `zz-dev` executable and socket namespace; run `just run mac` or `just run linux`
+on the remote host to build it and create `~/.local/bin/zz-dev`. An explicit remote socket disables
+auto-start but still uses the dev executable for protocol checks and proxying. Simulator products
+live in `target/ios-sim-dev`; device products live in `target/ios-device-dev`.
+
+`just ios-preview` keeps the production `dev.zz.ios` identity and `zz://` links, creates a fresh Release archive, derives the marketing version from the workspace,
 uses the optional numeric argument or a UTC timestamp as the unique build number, and uploads through
 Xcode automatic signing. Its export options mark the build TestFlight Internal Only, so that uploaded
 build can be assigned only to internal tester groups and cannot be promoted to external testing or the

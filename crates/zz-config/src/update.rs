@@ -48,6 +48,9 @@ pub fn build_version() -> Result<Version, String> {
 }
 
 pub fn checks_enabled() -> bool {
+    if zz_protocol::app_identity::DEVELOPMENT {
+        return false;
+    }
     match std::env::var("ZZ_UPDATE_CHECK") {
         Ok(value) => !matches!(value.as_str(), "" | "0" | "false" | "off"),
         Err(_) => !cfg!(debug_assertions),

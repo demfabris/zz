@@ -3,10 +3,17 @@ use ksni::blocking::TrayMethods as _;
 
 use super::TrayEvent;
 
-const TRAY_ICON_PNG: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/linux/hicolor/256x256/apps/zz.png"
-));
+const TRAY_ICON_PNG: &[u8] = if zz_protocol::app_identity::DEVELOPMENT {
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/linux/hicolor/256x256/apps/zz-dev.png"
+    ))
+} else {
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/linux/hicolor/256x256/apps/zz.png"
+    ))
+};
 
 /// A live `StatusNotifierItem`. Dropping it shuts the service down, which is what
 /// removes the icon.
@@ -58,15 +65,19 @@ impl ksni::Tray for SniTray {
     }
 
     fn id(&self) -> String {
-        "zz".into()
+        zz_protocol::app_identity::DIRECTORY.into()
     }
 
     fn title(&self) -> String {
-        "zz".into()
+        zz_protocol::app_identity::DISPLAY_NAME.into()
     }
 
     fn icon_name(&self) -> String {
-        "zz".into()
+        if zz_protocol::app_identity::DEVELOPMENT {
+            String::new()
+        } else {
+            "zz".into()
+        }
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {

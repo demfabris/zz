@@ -40,8 +40,6 @@ install platform *args:
     @just build mac {{ args }}
     @scripts/install-macos.sh
 
-# ctrl-c detaches the console and the app keeps running; `ZZ_SOCKET`
-# overrides the daemon socket the app dials.
 ios:
     @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios requires macOS" >&2; exit 2; fi
     @scripts/ios-sim.sh
@@ -219,4 +217,4 @@ web-build-release:
     @scripts/build-web-wasm.sh --release
 
 web-serve *args:
-    @cargo run -p zz-web -- --assets clients/web/dist {{ args }}
+    @scripts/web-dev.sh --serve-only {{ args }}

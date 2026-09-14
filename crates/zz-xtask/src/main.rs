@@ -62,7 +62,7 @@ const MACOS_ICON_KEY: &str = "CFBundleIconFile";
 #[cfg(target_os = "macos")]
 const MACOS_ICON_NAME_KEY: &str = "CFBundleIconName";
 #[cfg(target_os = "macos")]
-const MACOS_ICON_NAME: &str = "zz";
+const MACOS_ICON_NAME: &str = zz_protocol::app_identity::DIRECTORY;
 #[cfg(target_os = "macos")]
 const MACOS_LOCAL_SIGN_IDENTITY_ENV: &str = "MACOS_LOCAL_SIGN_IDENTITY";
 #[cfg(target_os = "macos")]
@@ -529,6 +529,12 @@ fn configure_macos_main_app(app: &Path) -> Result<(), Box<dyn Error>> {
         plist::Value::String(MACOS_ICON_NAME.to_owned()),
     );
     info.to_file_xml(&info_path)?;
+    if zz_protocol::app_identity::DEVELOPMENT {
+        let icons = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packaging/mac-dev");
+        for name in ["Assets.car", MACOS_ICON_FILE] {
+            fs::copy(icons.join(name), app.join("Contents/Resources").join(name))?;
+        }
+    }
     // Assets.car reaches Resources/ through the packaging/mac resource copy.
     // It is compiled from assets/zz.icon by scripts/compile-macos-icon.sh and
     // committed: actool renders the layered icon through the GPU and does so
@@ -547,20 +553,35 @@ fn build_macos_bundle(
     let resources_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join("packaging");
+    let bundle_output = if zz_protocol::app_identity::DEVELOPMENT {
+        output.join("build")
+    } else {
+        output.to_owned()
+    };
     let app = cef::build_util::mac::bundle(
-        output,
+        &bundle_output,
         &target_path,
         APP_NAME,
         MACOS_HELPER_NAME,
         Some(resources_path),
         cef::build_util::mac::BundleInfo {
-            name: APP_NAME.to_owned(),
-            identifier: "dev.zz.app".to_owned(),
-            display_name: APP_NAME.to_owned(),
+            name: zz_protocol::app_identity::DISPLAY_NAME.to_owned(),
+            identifier: zz_protocol::app_identity::MACOS_BUNDLE_ID.to_owned(),
+            display_name: zz_protocol::app_identity::DISPLAY_NAME.to_owned(),
             development_region: "English".to_owned(),
             version: product_version(env!("CARGO_PKG_VERSION")).parse()?,
         },
     )?;
+    let destination = output.join(format!("{}.app", zz_protocol::app_identity::DISPLAY_NAME));
+    let app = if app == destination {
+        app
+    } else {
+        if destination.exists() {
+            fs::remove_dir_all(&destination)?;
+        }
+        fs::rename(&app, &destination)?;
+        destination
+    };
     prune_locales(
         &app.join(MACOS_CEF_FRAMEWORK).join("Resources"),
         "lproj",

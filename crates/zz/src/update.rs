@@ -279,7 +279,7 @@ fn dismiss(version: &Version, cx: &mut App) {
 fn dismissed_path() -> Option<PathBuf> {
     Some(
         user_data::platform_data_dir()?
-            .join("zz")
+            .join(zz_protocol::app_identity::DIRECTORY)
             .join(DISMISSED_FILE_NAME),
     )
 }

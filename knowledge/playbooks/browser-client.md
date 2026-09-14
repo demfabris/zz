@@ -21,7 +21,7 @@ key bindings, copy mode, and Agent processes.
 
 # Run
 
-Start a zz daemon with the installed app or an existing zz command, then run from the repo root:
+Start the development daemon with `just run mac` or `just run linux`, then run from the repo root:
 
 ```sh
 just web-setup
@@ -29,11 +29,15 @@ just web-build
 just web-serve
 ```
 
-Open `http://127.0.0.1:8080`. `just web` builds the assets, starts the gateway, and watches
+Open `http://127.0.0.1:8081`. `just web` builds the assets, starts the gateway, and watches
 the client and shared crates for changes. Refresh the page after a rebuild.
-`just web-build-release` produces optimized assets under `clients/web/dist`.
+`just web-build` produces dev assets under `clients/web/dist-dev`. Dev builds use a separate
+local-storage key for preferences. `just web-build-release` produces optimized release assets
+under `clients/web/dist` with the ordinary zz identity. Serve those with
+`ZZ_DEV_BUILD=0 cargo run -p zz-web -- --assets clients/web/dist` (port 8080 by default).
 
-The gateway connects to the existing default daemon socket. `ZZ_SOCKET` or an explicit
+The dev recipes compile the gateway with `ZZ_DEV_BUILD=1` and connect to the existing
+`zz-dev` daemon socket. They clear inherited `ZZ_SOCKET` and pane context. An explicit
 `--socket` selects another daemon:
 
 ```sh

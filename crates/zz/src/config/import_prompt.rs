@@ -9,7 +9,10 @@ use crate::{config, user_data::platform_data_dir};
 const MARKER_FILE_NAME: &str = "import-prompted-v2";
 
 fn marker_path() -> Option<PathBuf> {
-    platform_data_dir().map(|data| data.join("zz").join(MARKER_FILE_NAME))
+    platform_data_dir().map(|data| {
+        data.join(zz_protocol::app_identity::DIRECTORY)
+            .join(MARKER_FILE_NAME)
+    })
 }
 
 fn mark_prompted() {

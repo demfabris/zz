@@ -983,6 +983,8 @@ final class TerminalInteractionTests: XCTestCase {
         )
 
         let attentionURL = try XCTUnwrap(URL(string: "zz://attention"))
+        let devURL = try XCTUnwrap(URL(string: "zz-dev://pane?session=7&pane=11"))
+        XCTAssertEqual(ZZNavigationTarget(url: devURL), ZZNavigationTarget(session: 7, pane: 11))
         XCTAssertEqual(ZZNavigationTarget(url: attentionURL)?.attention, true)
 
         let unknownURL = try XCTUnwrap(URL(string: "zz://delete?session=7&pane=11"))

@@ -6,19 +6,40 @@ use smallvec::smallvec;
 use zz_ui::ThemeMode;
 
 #[cfg(any(target_os = "linux", test))]
-const APP_ICON_PNG: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/linux/hicolor/256x256/apps/zz.png"
-));
+const APP_ICON_PNG: &[u8] = if zz_protocol::app_identity::DEVELOPMENT {
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/linux/hicolor/256x256/apps/zz-dev.png"
+    ))
+} else {
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/linux/hicolor/256x256/apps/zz.png"
+    ))
+};
 
-const APP_ICON_LIGHT_PNG: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/zz-light-512.png"
-));
-const APP_ICON_DARK_PNG: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/zz-dark-512.png"
-));
+const APP_ICON_LIGHT_PNG: &[u8] = if zz_protocol::app_identity::DEVELOPMENT {
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/zz-dev-light-512.png"
+    ))
+} else {
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/zz-light-512.png"
+    ))
+};
+const APP_ICON_DARK_PNG: &[u8] = if zz_protocol::app_identity::DEVELOPMENT {
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/zz-dev-dark-512.png"
+    ))
+} else {
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/zz-dark-512.png"
+    ))
+};
 
 const SETTINGS_PREVIEW_RASTER_SIZE: u32 = 96;
 

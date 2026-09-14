@@ -11684,4 +11684,5 @@ dependencies = [
  "cef",
  "editpe",
  "plist",
+ "zz-protocol",
 ]

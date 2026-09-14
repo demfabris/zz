@@ -790,25 +790,34 @@ fn platform_log_dir() -> PathBuf {
     #[cfg(target_os = "linux")]
     {
         if let Some(path) = std::env::var_os("XDG_STATE_HOME") {
-            return PathBuf::from(path).join("zz").join("logs");
+            return PathBuf::from(path)
+                .join(zz_protocol::app_identity::DIRECTORY)
+                .join("logs");
         }
         if let Some(home) = std::env::var_os("HOME") {
             return PathBuf::from(home)
                 .join(".local")
                 .join("state")
-                .join("zz")
+                .join(zz_protocol::app_identity::DIRECTORY)
                 .join("logs");
         }
     }
     #[cfg(target_os = "macos")]
     if let Some(home) = std::env::var_os("HOME") {
-        return PathBuf::from(home).join("Library").join("Logs").join("zz");
+        return PathBuf::from(home)
+            .join("Library")
+            .join("Logs")
+            .join(zz_protocol::app_identity::DIRECTORY);
     }
     #[cfg(target_os = "windows")]
     if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-        return PathBuf::from(local).join("zz").join("logs");
+        return PathBuf::from(local)
+            .join(zz_protocol::app_identity::DIRECTORY)
+            .join("logs");
     }
-    std::env::temp_dir().join("zz").join("logs")
+    std::env::temp_dir()
+        .join(zz_protocol::app_identity::DIRECTORY)
+        .join("logs")
 }
 
 #[cfg(unix)]

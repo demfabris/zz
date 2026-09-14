@@ -63,7 +63,13 @@ capture_clients() {
         if [[ -n "$pid" ]]; then
             OLD_CLIENT_PIDS+=("$pid")
         fi
-    done < <(pgrep -f "^${client_path}( --verbose)? app$" || true)
+    done < <(ps -axo pid=,command= | awk -v client="$client_path" '
+        {
+            pid=$1
+            sub(/^[[:space:]]*[0-9]+[[:space:]]+/, "")
+            if ($0 == client " app" || $0 == client " --verbose app") print pid
+        }
+    ')
 }
 
 stop_old_clients() {
@@ -73,7 +79,7 @@ stop_old_clients() {
 }
 
 reload_mac() {
-    local client_path="$ROOT/dist/zz-dev/zz.app/Contents/MacOS/zz"
+    local client_path="$ROOT/dist/zz-dev/zz Dev.app/Contents/MacOS/zz"
 
     capture_clients "$client_path"
     just run mac
@@ -81,7 +87,9 @@ reload_mac() {
 }
 
 reload_linux() {
-    local client_path="$ROOT/target/debug/zz"
+    local target_dir
+    target_dir="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
+    local client_path="$target_dir/debug/zz-dev"
 
     command -v setsid >/dev/null 2>&1 || {
         echo "just watch linux requires setsid (normally provided by util-linux)" >&2
@@ -89,12 +97,18 @@ reload_linux() {
     }
 
     capture_clients "$client_path"
-    cargo build -p zz --bin zz ${ZZ_CARGO_FEATURES:+--features "$ZZ_CARGO_FEATURES"}
-    setsid -f "$client_path"
+    ZZ_DEV_BUILD=1 cargo build -p zz --bin zz ${ZZ_CARGO_FEATURES:+--features "$ZZ_CARGO_FEATURES"}
+    cp "$target_dir/debug/zz" "$client_path.$$"
+    mv -f "$client_path.$$" "$client_path"
+    bash "$ROOT/scripts/link-dev-cli.sh" "$client_path"
+    setsid -f "$client_path" app
     stop_old_clients
 }
 
 cd "$ROOT"
+unset ZZ_SOCKET ZZ_PANE ZZ_SESSION TMUX TMUX_PANE ZZ_TMUX_EXECUTABLE ZZ_APP_STARTUP_DIRECTORY ZZ_STARTUP_REENTRY ZZ_DEV_BUILD
+mkdir -p logs
+export ZZ_LOG_DIR="$ROOT/logs"
 
 if [[ "$MODE" == "--reload" ]]; then
     if [[ "$PLATFORM" == "mac" ]]; then

@@ -67,10 +67,13 @@ fn resolve_socket_path(override_path: Option<OsString>) -> PathBuf {
 #[cfg(unix)]
 fn platform_default_socket_path() -> PathBuf {
     if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") {
-        return PathBuf::from(runtime).join("zz/default.sock");
+        return PathBuf::from(runtime)
+            .join(zz_protocol::app_identity::DIRECTORY)
+            .join("default.sock");
     }
     let user = std::env::var("USER").unwrap_or_else(|_| "user".to_owned());
-    std::env::temp_dir().join(format!("zz-{user}/default.sock"))
+    let directory = zz_protocol::app_identity::DIRECTORY;
+    std::env::temp_dir().join(format!("{directory}-{user}/default.sock"))
 }
 
 #[cfg(windows)]
@@ -86,7 +89,8 @@ fn platform_default_socket_path() -> PathBuf {
             }
         })
         .collect::<String>();
-    PathBuf::from(format!(r"\\.\pipe\zz-{user}-default"))
+    let directory = zz_protocol::app_identity::DIRECTORY;
+    PathBuf::from(format!(r"\\.\pipe\{directory}-{user}-default"))
 }
 
 pub(crate) struct LocalTransport;
@@ -234,9 +238,10 @@ mod tests {
             return;
         }
         let user = std::env::var("USER").unwrap_or_else(|_| "user".to_owned());
+        let directory = zz_protocol::app_identity::DIRECTORY;
         assert_eq!(
             platform_default_socket_path(),
-            std::env::temp_dir().join(format!("zz-{user}/default.sock"))
+            std::env::temp_dir().join(format!("{directory}-{user}/default.sock"))
         );
     }
 }

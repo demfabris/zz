@@ -10,7 +10,7 @@ use std::{
 
 use crate::Endpoint;
 
-const CONFIG_DIRECTORY_NAME: &str = "zz";
+const CONFIG_DIRECTORY_NAME: &str = zz_protocol::app_identity::DIRECTORY;
 const CONFIG_FILE_NAME: &str = "config";
 const MAX_CONFIG_BYTES: usize = 64 * 1024;
 static CONFIG_TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(1);

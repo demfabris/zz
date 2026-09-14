@@ -304,7 +304,9 @@ fn preferences_path() -> io::Result<PathBuf> {
             "could not resolve the current user's application-data directory",
         )
     })?;
-    Ok(data.join("zz").join(PREFERENCES_FILE_NAME))
+    Ok(data
+        .join(zz_protocol::app_identity::DIRECTORY)
+        .join(PREFERENCES_FILE_NAME))
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+unset ZZ_SOCKET ZZ_PANE ZZ_SESSION TMUX TMUX_PANE ZZ_TMUX_EXECUTABLE ZZ_APP_STARTUP_DIRECTORY ZZ_STARTUP_REENTRY ZZ_DEV_BUILD
 
 die() { echo "error: $*" >&2; exit 1; }
 
@@ -13,7 +14,7 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 spec="$repo_root/clients/ios/project.yml"
 project_dir="$repo_root/clients/ios"
 project="$project_dir/ZZMobile.xcodeproj"
-derived="$repo_root/target/ios-device"
+derived="$repo_root/target/ios-device-dev"
 app="$derived/Build/Products/$configuration-iphoneos/ZZ.app"
 workspace_version="$(sed -nE 's/^version = "([^"]+)"$/\1/p' "$repo_root/Cargo.toml" | head -1)"
 marketing_version="${workspace_version%%[-+]*}"
@@ -29,8 +30,9 @@ xcodebuild \
     -derivedDataPath "$derived" \
     -allowProvisioningUpdates \
     MARKETING_VERSION="$marketing_version" \
+    ZZ_DEV_BUILD=1 ZZ_APP_BUNDLE_ID=dev.zz.ios.dev ZZ_APP_DISPLAY_NAME="zz Dev" ZZ_APP_URL_SCHEME=zz-dev ZZ_APP_ICON=zz-dev \
     build
 
 [[ -d "$app" ]] || die "build finished but $app is missing"
 xcrun devicectl device install app --device "$device" "$app"
-xcrun devicectl device process launch --device "$device" dev.zz.ios
+xcrun devicectl device process launch --device "$device" dev.zz.ios.dev

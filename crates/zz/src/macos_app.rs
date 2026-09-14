@@ -30,7 +30,7 @@ pub(crate) fn key_bindings() -> [KeyBinding; 6] {
 
 fn app_menus() -> [Menu; 2] {
     [
-        Menu::new("zz").items([
+        Menu::new(zz_protocol::app_identity::DISPLAY_NAME).items([
             MenuItem::action("Settings…", OpenSettings),
             MenuItem::separator(),
             MenuItem::os_submenu("Services", SystemMenuType::Services),

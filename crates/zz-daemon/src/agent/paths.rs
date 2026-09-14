@@ -17,7 +17,9 @@ pub(crate) fn daemon_data_dir() -> io::Result<PathBuf> {
             "could not resolve the current user's application-data directory",
         )
     })?;
-    Ok(data.join("zz").join(DAEMON_DIRECTORY_NAME))
+    Ok(data
+        .join(zz_protocol::app_identity::DIRECTORY)
+        .join(DAEMON_DIRECTORY_NAME))
 }
 
 pub(crate) fn journal_directory() -> io::Result<PathBuf> {
@@ -41,7 +43,11 @@ mod tests {
         let root = daemon_data_dir().expect("daemon data directory");
         let journal = journal_directory().expect("journal directory");
 
-        assert_eq!(root, data.join("zz").join(DAEMON_DIRECTORY_NAME));
+        assert_eq!(
+            root,
+            data.join(zz_protocol::app_identity::DIRECTORY)
+                .join(DAEMON_DIRECTORY_NAME)
+        );
         assert_eq!(journal.parent(), Some(root.as_path()));
         assert_eq!(
             journal.file_name().and_then(OsStr::to_str),

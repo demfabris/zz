@@ -31,7 +31,7 @@ The source path is:
 - `InteractiveClient::connect_endpoint_with_prompts_and_terminal` in
   `crates/zz-daemon/src/client.rs`
 - `RusshForward::start` and `establish` in `crates/zz-daemon/src/russh_client.rs`
-- `REMOTE_SOCKET_PROBE`, `remote_daemon_start_script`, `remote_proxy_script`, and
+- `remote_socket_probe`, `remote_daemon_start_script`, `remote_proxy_script`, and
   `remote_path_fallback!` in `crates/zz-daemon/src/endpoint.rs`
 
 Physical-device endpoints require an explicit user, such as `ssh://user@host`. The app stores the
@@ -42,7 +42,9 @@ Authentication tries that identity, keyboard-interactive prompts, and password w
 offers them. A setup password stays in memory for that attempt. Host-key prompts support reject,
 trust once, and trust/save.
 
-Remote scripts append these install locations before they look up `zz`:
+Remote scripts select `zz-dev` for dev builds and `zz` for production builds. The socket namespace
+follows the same identity. Desktop dev recipes link the dev executable into `~/.local/bin/zz-dev`;
+run the dev recipe on the target host before attaching. Remote scripts append these locations:
 
 ```text
 $HOME/.local/bin
@@ -50,7 +52,7 @@ $HOME/.local/bin
 /usr/local/bin
 ```
 
-The probe compares protocol versions before it opens `zz proxy`. Without an explicit socket in the
+The probe compares protocol versions before it opens the selected executable’s `proxy` command. Without an explicit socket in the
 endpoint, it starts the remote daemon when needed. An explicit socket disables auto-start and must
 already be usable.
 
@@ -73,7 +75,7 @@ to the host's SSH service. Keep `NSLocalNetworkUsageDescription` in the generate
 ### 2. Installed app, process, and saved endpoint
 
 ```sh
-xcrun devicectl device info apps --device <device-id> --bundle-id dev.zz.ios
+xcrun devicectl device info apps --device <device-id> --bundle-id dev.zz.ios.dev
 xcrun devicectl device info processes --device <device-id> --search ZZ
 ```
 
@@ -83,11 +85,11 @@ Copy the app preferences without changing them. Use an unused destination path:
 xcrun devicectl device copy from \
   --device <device-id> \
   --domain-type appDataContainer \
-  --domain-identifier dev.zz.ios \
-  --source Library/Preferences/dev.zz.ios.plist \
-  --destination /tmp/dev.zz.ios.plist
+  --domain-identifier dev.zz.ios.dev \
+  --source Library/Preferences/dev.zz.ios.dev.plist \
+  --destination /tmp/dev.zz.ios.dev.plist
 
-plutil -p /tmp/dev.zz.ios.plist
+plutil -p /tmp/dev.zz.ios.dev.plist
 ```
 
 This copies data into a local `/tmp` artifact but does not change the device container. Skip it under

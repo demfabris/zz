@@ -991,6 +991,15 @@ fn command_prompt_template_name(template: &CommandPromptTemplate) -> &str {
     }
 }
 
+/// What a `source-file -` request reads. The pin's `file_read` hands the
+/// caller's stream to the first `-` of an invocation; a later `-` reopens a
+/// stream the caller already gave away and gets `EBADF` for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SourceStream {
+    Bytes(RawText),
+    Spent,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MuxEffect {
     PaneCreated {
@@ -1210,9 +1219,8 @@ pub enum MuxEffect {
         parse_only: bool,
         verbose: bool,
         context: ExecutionContext,
-        /// The caller's standard input when `path` is `-`, so the daemon parses
-        /// the stream instead of reading a file.
-        stdin: Option<RawText>,
+        /// What `-` reads, when `path` is `-` and the caller brought a stream.
+        stdin: Option<SourceStream>,
     },
     /// Write the caller's standard input into a pane that holds no process, the
     /// way `display-message -I` and `split-window -I` do on the pin.
@@ -13512,6 +13520,7 @@ impl MuxEngine {
             }
         }
         let mut stream = stdin.cloned();
+        let carried_a_stream = stdin.is_some();
         Ok(Execution {
             output: RawText::default(),
             effects: positional
@@ -13528,7 +13537,15 @@ impl MuxEngine {
                     } else {
                         path.clone()
                     };
-                    let stdin = (path == "-").then(|| stream.take()).flatten();
+                    let stdin = if path == "-" {
+                        match stream.take() {
+                            Some(bytes) => Some(SourceStream::Bytes(bytes)),
+                            None if carried_a_stream => Some(SourceStream::Spent),
+                            None => None,
+                        }
+                    } else {
+                        None
+                    };
                     MuxEffect::SourceFile {
                         path,
                         quiet,

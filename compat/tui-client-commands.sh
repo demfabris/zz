@@ -66,10 +66,9 @@
 # load-buffer -             caller stdin into a buffer        adopted, same                  PROVED
 # save-buffer - / -a -      buffer bytes to caller stdout     adopted, same                  PROVED
 # show-buffer [-b]          buffer bytes to stdout            same                           PROVED
-# source-file -             caller stdin as a config file     loudly unsupported             DECLARED, CHILD TUI-018
-#                                                                                             protocol.binary-streams
-# display-message -I        caller stdin into the pane        loudly unsupported             DECLARED, CHILD TUI-018
-# split-window -I           caller stdin into the new pane    loudly unsupported             DECLARED, CHILD TUI-018
+# source-file -             caller stdin as a config file     adopted, same                  PROVED
+# display-message -I        caller stdin into the pane        adopted, same                  PROVED
+# split-window -I           caller stdin into the new pane    adopted, same                  PROVED
 # show-hooks [-Bgpw] [-t]   the hook table                    same                           PROVED
 # show-messages             the server log                    same shape and the same tty    DECLARED, the log
 #                                                               for an attached client, but a  carries client
@@ -737,26 +736,27 @@ restore_case() {
   fi
 }
 
-# `split-window -I` builds a pane on the pin and is refused on zz, so the pin's
-# extra pane is killed before the next case reads the state.
-restore_pin_pane() {
+# `split-window -I` builds a pane on both sides, so both extra panes are killed
+# before the next case reads the state.
+restore_extra_panes() {
   local name="$1"
   CASE_LABEL="$name"
-  local extra
-  extra="$(tmux_inner_command list-panes -t "=$INNER_SESSION:$WINDOW_NAME" \
-    -F '#{pane_index} #{pane_id}' | awk '$1 > 0 { print $2 }')"
-  if [ -n "$extra" ]; then
-    local pane
-    for pane in $extra; do
-      tmux_inner_command kill-pane -t "$pane" >/dev/null 2>&1 || true
-    done
-    wait_for "the pin extra pane gone for $name" pin_window_pane_count 1
-  fi
+  local side extra pane
+  for side in zz tmux; do
+    extra="$(side_command "$side" list-panes -t "=$INNER_SESSION:$WINDOW_NAME" \
+      -F '#{pane_index} #{pane_id}' | awk '$1 > 0 { print $2 }')"
+    if [ -n "$extra" ]; then
+      for pane in $extra; do
+        side_command "$side" kill-pane -t "$pane" >/dev/null 2>&1 || true
+      done
+      wait_for "the extra $side pane gone for $name" window_pane_count "$side" 1
+    fi
+  done
   restore_case "$name"
 }
 
-pin_window_pane_count() {
-  [ "$(tmux_inner_command list-panes -t "=$INNER_SESSION:$WINDOW_NAME" -F x | wc -l)" = "$1" ]
+window_pane_count() {
+  [ "$(side_command "$1" list-panes -t "=$INNER_SESSION:$WINDOW_NAME" -F x | wc -l)" = "$2" ]
 }
 
 # --- the roster's cases -----------------------------------------------------
@@ -764,7 +764,6 @@ NATIVE_CLIENT_TOOLS='commands.native-client-tools, accepted: the pin paints clie
 INTERACTIVE_REFRESH='clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported'
 LOCK_PROGRAM='options.lock-program, accepted: the pin spawns lock-command on the client tty and a daemon that only publishes frames cannot run a program on a client terminal'
 RICH_CAPTURE='capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser'
-BINARY_STREAMS='protocol.binary-streams, accepted: typed UTF-8 arguments are the contract and the remaining - forms stay loudly refused rather than pretending the daemon process is the caller'
 LOG_IDENTITY='DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. Measured 2026-09-14 on both sides: the pin names ANY tty-bearing client by that tty, including the attached terminal client whose attach-session row reads /dev/pts/<n>, and zz named none of them - it spelled every row by the device name the client sent, which for an interactive client is the hostname. That half is closed: the server log now names a client by its tty whenever it has one. What stays is the clientless CLI, which names a process that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked'
 SERVER_ACCESS='zz has no multi-user socket access list: the daemon socket is the invoking user, so there is no user or group to add, and TUI-014 carries the refusal shape'
 CLIENT_TREE_CLIENTLESS='clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer, while the pin exits 0 with no output and, alone among the three, opens no mode either: cmd_choose_tree_exec returns CMD_RETURN_NORMAL before window_pane_set_mode when server_client_how_many() == 0 (cmd-choose-tree.c), so the exit status and the error text are what diverge here, measured 2026-09-14. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open'
@@ -833,14 +832,14 @@ buffer_stream_cases() {
   case_run buffer-delete same '' -- delete-buffer -b zzpiped
   case_run buffer-show-empty same '' -- show-buffer
   CASE_STDIN='set -g @zzcc-stream one'
-  case_run stream-source-file record "$BINARY_STREAMS" -- source-file -
+  case_run stream-source-file same '' -- source-file -
   CASE_STDIN=''
-  case_run stream-source-file-effect record "$BINARY_STREAMS" -- show-options -gqv @zzcc-stream
+  case_run stream-source-file-effect same '' -- show-options -gqv @zzcc-stream
   CASE_STDIN='typed-into-the-pane'
-  case_run stream-display-message record "$BINARY_STREAMS" -- display-message -I
-  case_run stream-split-window record "$BINARY_STREAMS" -- split-window -I -t PANE
+  case_run stream-display-message same '' -- display-message -I
+  case_run stream-split-window same '' -- split-window -I -t PANE
   CASE_STDIN=''
-  restore_pin_pane stream-split-window-restored
+  restore_extra_panes stream-split-window-restored
 }
 
 message_hook_cases() {

@@ -807,6 +807,7 @@ Five pinned forms move raw bytes between the invoking client's standard streams 
 - Items: `semantic:non-utf8-command-arguments`, `semantic:show-buffer-binary-policy`
 - Depends on: none
 - Evidence:
+  - `file:compat/tui-command-streams.sh`
   - `resource:crates/zz-mux/src/parser.rs`
   - `resource:crates/zz-protocol/src/catalog.rs`
   - `resource:crates/zz/src/lib.rs`

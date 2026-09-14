@@ -68,7 +68,13 @@ commands.native-client-tools closed here.
   (0 for a sibling lane)` three times, and twelve sabotages caught.
 - client-commands-run-1/2/3.txt - compat/tui-client-commands.sh, three runs, each
   `all 61 asserted comparisons identical, 37 recorded not asserted (0 for a sibling lane)`,
-  exit 0. Unchanged from the cycle 8 tip: this attempt adds nothing to that fixture.
+  exit 0, taken after the last commit. Unchanged from the cycle 8 tip: this attempt adds
+  nothing to that fixture.
+- client-commands-run-2-server-exit.txt - the run that replaced: the fixture's own inner
+  pin server exited part way through and every step after it read `no server running on
+  /tmp/tmux-1000/zzcci-...`, so client-tree-usage compared a dead server's error against a
+  live one's state. Kept rather than deleted, because it is the only red seen in six runs
+  of this fixture today and it names its own cause.
 - client-commands-self-check.txt - `--self-check`, exit 0.
 - copy-mode.txt, screen-diff.txt, attached-client.txt, corpus.txt, cargo-crates.txt,
   cargo-zz.txt, clippy.txt - the shared proof set, listed in TUI-006/attempt-03/notes.md.

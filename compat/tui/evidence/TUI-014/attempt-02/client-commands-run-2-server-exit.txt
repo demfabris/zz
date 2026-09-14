@@ -281,45 +281,45 @@ ok    hooks-show-target
       case messages-log
       stdout differs
         1,530c1,540
-        < 10:35: client-3287553 command: show-messages
-        < 10:35: client-3287552 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
-        < 10:35: client-3287548 command: list-clients -F "#{client_name}"
-        < 10:35: client-3287514 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
-        < 10:35: client-3287513 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
-        < 10:35: client-3287512 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
-        < 10:35: client-3287511 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
-        < 10:35: client-3287510 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
-        < 10:35: client-3287475 command: show-hooks -t "%0"
-        < 10:35: client-3287474 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
-        < 10:35: client-3287470 command: list-clients -F "#{client_name}"
-        < 10:35: client-3287436 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
-        < 10:35: client-3287435 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
-        < 10:35: client-3287434 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
-        < 10:35: client-3287433 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
-        < 10:35: client-3287432 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
-        < 10:35: client-3287397 message: invalid option: no-such-hook
-        < 10:35: client-3287397 command: show-hooks -g no-such-hook
-        < 10:35: client-3287396 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
-        < 10:35: client-3287392 command: list-clients -F "#{client_name}"
-        < 10:35: client-3287358 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
-        < 10:35: client-3287357 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
-        < 10:35: client-3287356 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
-        < 10:35: client-3287355 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
-        < 10:35: client-3287354 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
-        < 10:35: client-3287319 command: show-hooks -g after-lock-server
-        < 10:35: client-3287318 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
-        < 10:35: client-3287314 command: list-clients -F "#{client_name}"
-        < 10:35: client-3287280 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
-        < 10:35: client-3287279 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
-        < 10:35: client-3287278 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
-        < 10:35: client-3287277 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
-        < 10:35: client-3287276 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
-        < 10:35: client-3287241 command: show-hooks -B
-        < 10:35: client-3287240 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
-        < 10:35: client-3287236 command: list-clients -F "#{client_name}"
-        < 10:35: client-3287202 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
-        < 10:35: client-3287201 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
-        < 10:35: client-3287200 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 10:33: client-3280009 command: show-messages
+        < 10:33: client-3280007 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 10:33: client-3280003 command: list-clients -F "#{client_name}"
+        < 10:33: client-3279940 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 10:33: client-3279939 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 10:33: client-3279938 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 10:33: client-3279937 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 10:33: client-3279936 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 10:33: client-3279882 command: show-hooks -t "%0"
+        < 10:33: client-3279881 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 10:33: client-3279877 command: list-clients -F "#{client_name}"
+        < 10:33: client-3279833 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 10:33: client-3279832 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 10:33: client-3279831 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 10:33: client-3279830 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 10:33: client-3279829 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 10:33: client-3279769 message: invalid option: no-such-hook
+        < 10:33: client-3279769 command: show-hooks -g no-such-hook
+        < 10:33: client-3279768 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 10:33: client-3279764 command: list-clients -F "#{client_name}"
+        < 10:33: client-3279638 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 10:33: client-3279637 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 10:33: client-3279636 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 10:33: client-3279635 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 10:33: client-3279634 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 10:33: client-3279576 command: show-hooks -g after-lock-server
+        < 10:33: client-3279575 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 10:33: client-3279571 command: list-clients -F "#{client_name}"
+        < 10:33: client-3279522 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 10:33: client-3279521 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 10:33: client-3279520 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 10:33: client-3279519 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 10:33: client-3279518 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 10:33: client-3279468 command: show-hooks -B
+        < 10:33: client-3279467 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 10:33: client-3279463 command: list-clients -F "#{client_name}"
+        < 10:33: client-3279401 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 10:33: client-3279400 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 10:33: client-3279399 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
 note  messages-log recorded, not asserted: the server log names the client that ran each command - client-<pid> on the pin, device-<n> on zz - and the pin reprints the command through its own argument printer
       case messages-jobs
       exit tmux: 0  zz: 1
@@ -378,45 +378,45 @@ note  messages-terminals recorded, not asserted: TUI-016: show-messages -J lists
       exit tmux: 0  zz: 1
       stdout differs
         1,554d0
-        < 10:35: client-3287808 command: show-messages -t /dev/pts/6
-        < 10:35: client-3287807 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
-        < 10:35: client-3287803 command: list-clients -F "#{client_name}"
-        < 10:35: client-3287759 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
-        < 10:35: client-3287758 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
-        < 10:35: client-3287757 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
-        < 10:35: client-3287756 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
-        < 10:35: client-3287755 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
-        < 10:35: client-3287720 command: show-messages -T
-        < 10:35: client-3287719 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
-        < 10:35: client-3287715 command: list-clients -F "#{client_name}"
-        < 10:35: client-3287676 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
-        < 10:35: client-3287675 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
-        < 10:35: client-3287674 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
-        < 10:35: client-3287673 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
-        < 10:35: client-3287672 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
-        < 10:35: client-3287637 command: show-messages -J
-        < 10:35: client-3287636 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
-        < 10:35: client-3287632 command: list-clients -F "#{client_name}"
-        < 10:35: client-3287593 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
-        < 10:35: client-3287592 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
-        < 10:35: client-3287591 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
-        < 10:35: client-3287590 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
-        < 10:35: client-3287589 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
-        < 10:35: client-3287553 command: show-messages
-        < 10:35: client-3287552 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
-        < 10:35: client-3287548 command: list-clients -F "#{client_name}"
-        < 10:35: client-3287514 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
-        < 10:35: client-3287513 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
-        < 10:35: client-3287512 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
-        < 10:35: client-3287511 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
-        < 10:35: client-3287510 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
-        < 10:35: client-3287475 command: show-hooks -t "%0"
-        < 10:35: client-3287474 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
-        < 10:35: client-3287470 command: list-clients -F "#{client_name}"
-        < 10:35: client-3287436 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
-        < 10:35: client-3287435 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
-        < 10:35: client-3287434 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
-        < 10:35: client-3287433 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 10:33: client-3280373 command: show-messages -t /dev/pts/6
+        < 10:33: client-3280372 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 10:33: client-3280368 command: list-clients -F "#{client_name}"
+        < 10:33: client-3280316 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 10:33: client-3280315 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 10:33: client-3280314 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 10:33: client-3280313 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 10:33: client-3280312 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 10:33: client-3280251 command: show-messages -T
+        < 10:33: client-3280250 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 10:33: client-3280246 command: list-clients -F "#{client_name}"
+        < 10:33: client-3280191 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 10:33: client-3280190 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 10:33: client-3280189 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 10:33: client-3280188 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 10:33: client-3280187 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 10:33: client-3280126 command: show-messages -J
+        < 10:33: client-3280125 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 10:33: client-3280121 command: list-clients -F "#{client_name}"
+        < 10:33: client-3280068 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 10:33: client-3280067 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 10:33: client-3280066 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 10:33: client-3280065 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 10:33: client-3280064 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 10:33: client-3280009 command: show-messages
+        < 10:33: client-3280007 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 10:33: client-3280003 command: list-clients -F "#{client_name}"
+        < 10:33: client-3279940 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 10:33: client-3279939 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 10:33: client-3279938 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 10:33: client-3279937 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 10:33: client-3279936 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 10:33: client-3279882 command: show-hooks -t "%0"
+        < 10:33: client-3279881 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 10:33: client-3279877 command: list-clients -F "#{client_name}"
+        < 10:33: client-3279833 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 10:33: client-3279832 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 10:33: client-3279831 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 10:33: client-3279830 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
       stderr differs
         0a1
         > unsupported command: show-messages -t
@@ -445,7 +445,7 @@ ok    lock-command-store
         > choose-client requires an interactive client
       screen differs
         1c1,13
-        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) /dev/pts/6: 10:35: session cli^[[39m
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) /dev/pts/6: 10:33: session cli^[[39m
         ---
         > $ printf 'SCENE-%s\n' %0
         > SCENE-%0
@@ -484,168 +484,20 @@ note  client-tree-open recorded, not asserted: clients.interactive-refresh, acce
 ok    client-tree-closed
 ok    client-tree-unknown-flag
 ok    client-tree-bad-sort
-ok    client-tree-usage
-      case clock-mode-open
-      exit tmux: 0  zz: 1
-      stderr differs
-        0a1
-        > unsupported command: clock-mode
-      screen differs
-        0a1,5
-        > $ printf 'SCENE-%s\n' %0
-        > SCENE-%0
-        > $
-        > 
-        > 
-        9,13d13
-        <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m
-        <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
-        <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m
-        <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
-        <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m
-        cursor tmux: 54,12 flag=0 pane=80x24 shape=default
-        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+no server running on /tmp/tmux-1000/zzcco-ExWsx4
+no server running on /tmp/tmux-1000/zzcco-ExWsx4
+      case client-tree-usage
       state differs
-        4c4
-        < P cli:0.0 mode=1/clock-mode 80x23 ptitle
-        ---
-        > P cli:0.0 mode=0/ 80x23 ptitle
-note  clock-mode-open recorded, not asserted: commands.native-client-tools, accepted: the pin paints client chrome inside the target pane and zz answers each intent with a native surface. The raw TUI half is TUI-014
-ok    clock-mode-closed
-      case customize-mode-open
-      exit tmux: 0  zz: 1
-      stderr differs
-        0a1
-        > unsupported command: customize-mode
-      screen differs
-        1,8c1,20
-        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
-        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
-        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
-        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
-        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
-        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
-        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
-        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
-        ---
-        > $ printf 'SCENE-%s\n' %0
-        > SCENE-%0
-        > $
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        12,23d23
-        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
-        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
-        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
-        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
-        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
-        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
-        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
-        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
-        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
-        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
-        cursor zz:   2,2 flag=1 pane=80x24 shape=default
-      state differs
-        4c4
-        < P cli:0.0 mode=1/options-mode 80x23 ptitle
-        ---
-        > P cli:0.0 mode=0/ 80x23 ptitle
-note  customize-mode-open recorded, not asserted: commands.native-client-tools, accepted: the pin paints client chrome inside the target pane and zz answers each intent with a native surface. The raw TUI half is TUI-014
-ok    customize-mode-closed
-      case switch-mode
-      exit tmux: 0  zz: 1
-      stderr differs
-        0a1
-        > unsupported command: switch-mode
-      screen differs
-        1c1,3
-        < ^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m2 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mwin^[[0m^[[48;2;184;134;11m
-        ---
-        > $ printf 'SCENE-%s\n' %0
-        > SCENE-%0
-        > $
-        22,23d23
-        < 
-        < ^[[38;2;13;13;13m(search) ^[[39m^[[49m
-        cursor tmux: 9,22 flag=1 pane=80x24 shape=default
-        cursor zz:   2,2 flag=1 pane=80x24 shape=default
-      state differs
-        4c4
-        < P cli:0.0 mode=1/switch-mode 80x23 ptitle
-        ---
-        > P cli:0.0 mode=0/ 80x23 ptitle
-note  switch-mode recorded, not asserted: commands.native-client-tools, accepted: the pin paints client chrome inside the target pane and zz answers each intent with a native surface. The raw TUI half is TUI-014
-ok    switch-mode-closed
-      case server-access-bare
-      stderr differs
-        1c1
-        < missing user or group argument
-        ---
-        > unsupported command: server-access
-note  server-access-bare recorded, not asserted: zz has no multi-user socket access list: the daemon socket is the invoking user, so there is no user or group to add, and TUI-014 carries the refusal shape
-      case server-access-user
-      stderr differs
-        1c1
-        < unknown user: zzcc-nobody
-        ---
-        > unsupported command: server-access
-note  server-access-user recorded, not asserted: zz has no multi-user socket access list: the daemon socket is the invoking user, so there is no user or group to add, and TUI-014 carries the refusal shape
-ok    client-tools-restored
-note  suspend-client: the tmux screen never settled within 6 seconds
-      case suspend-client
-      exit tmux: 0  zz: 1
-      stderr differs
-        0a1
-        > unsupported command: suspend-client
-      screen differs
-        0a1,3
-        > $ printf 'SCENE-%s\n' %0
-        > SCENE-%0
-        > $
-        1a5,24
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
-        cursor tmux: 0,0 flag=1 pane=80x24 shape=default
-        cursor zz:   2,2 flag=1 pane=80x24 shape=default
-      state differs
-        1c1
-        < S cli 2 0
+        1,5c1,5
+        < no server running on /tmp/tmux-1000/zzcci-ExWsx4
+        < no server running on /tmp/tmux-1000/zzcci-ExWsx4
+        < no server running on /tmp/tmux-1000/zzcci-ExWsx4
+        < no server running on /tmp/tmux-1000/zzcci-ExWsx4
+        < no server running on /tmp/tmux-1000/zzcci-ExWsx4
         ---
         > S cli 2 1
-        5a6
-        > C cli 80x24 0
-note  suspend-client recorded, not asserted: commands.native-client-tools, accepted: the pin paints client chrome inside the target pane and zz answers each intent with a native surface. The raw TUI half is TUI-014
-all 61 asserted comparisons identical, 37 recorded not asserted (0 for a sibling lane)
+        > W cli:0 win * 1
+        > W cli:1 two  1
+        > P cli:0.0 mode=0/ 80x23 ptitle
+        > P cli:1.0 mode=0/ 80x24 ptitle
+DIFF  client-tree-usage

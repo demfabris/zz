@@ -41,8 +41,11 @@ three are `same` now and the fixture records nothing.
   regression gate on that landing. The copy-mode corpus runs with `status off`, where the
   pane's last row IS the last screen row, which is why the fixture was green before and
   after.
-- screen-diff.txt - compat/tui-screen-diff.sh, 147 identical / 6 recorded, exit 0.
-- attached-client.txt - compat/attached-client.sh, PASS.
+- screen-diff.txt - compat/tui-screen-diff.sh, 147 identical / 6 recorded, exit 0, taken
+  after the last commit.
+- attached-client.txt - compat/attached-client.sh, PASS, taken after the last commit.
+  compat/attached-client.sh is green at origin/main and this lane changes input and
+  presentation, so it is run here and reports nothing red.
 - corpus.txt - seventeen corpus rows for the touched commands: copy-mode-bindings,
   smoke/copy-mode-prompt-bindings, smoke/copy-mode-search, smoke/copy-mode-formats,
   smoke/command-prompt-chain, smoke/command-prompt-target,

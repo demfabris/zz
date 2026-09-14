@@ -101,11 +101,11 @@ an absolute path.
 
 ## Coverage this attempt did not reach
 
-- `command-item-format` is the delta row this box needs up to eight minutes for,
-  which does not fit a single 590-second call; it is not run here. It is a
-  `list-keys` row and its neighbours `list-keys-padding`, `copy-mode-bindings`
-  and `copy-mode-stock-action-keys` are all clean at this tip.
-- 167 rows were selected and 226 completed (the smoke set comes in whole with
+- `command-item-format`, the delta row this box needs up to eight minutes for,
+  was run alone at the end and is clean: 125 steps, no divergence in any
+  channel. Its result line is the last one in `10-corpus-delta.txt`, so 227 rows
+  completed in all.
+- 167 rows were selected and 227 completed (the smoke set comes in whole with
   any delta), which leaves part of the smoke set unrun. Every smoke row whose
   text names `send-keys`, `send -`, `copy-mode`, `list-keys`, `bind-key`,
   `bind -`, `Mouse`, `Wheel`, `Click`, `select-word` or `paste-buffer` was run

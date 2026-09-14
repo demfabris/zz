@@ -1016,8 +1016,8 @@ case_status_clicks() {
     "$(current_window zz)" "$(current_window tmux)"
 
   send_mouse_both 2 "$column" "$row" M
-  wait_for 'the pin raised its window menu' screen_has tmux 'Rename'
-  settle_both 'second' 'the status right click'
+  both_screen_has 'Rename' 'the window menu'
+  settle_both Rename 'the status right click'
   check_screen STATUS_MENU status-clicks/right-click-screen
   send_bytes zz $'\033'
   send_bytes tmux $'\033'
@@ -1025,9 +1025,8 @@ case_status_clicks() {
   send_mouse_both 2 "$column" "$row" m
 
   send_mouse_both 10 "$column" "$row" M
-  wait_for 'the pin raised its window menu on the alt right click' \
-    screen_has tmux 'Rename'
-  settle_both 'second' 'the alt status right click'
+  both_screen_has 'Rename' 'the alt window menu'
+  settle_both Rename 'the alt status right click'
   check_screen STATUS_MENU status-clicks/alt-right-click-screen
   send_bytes zz $'\033'
   send_bytes tmux $'\033'

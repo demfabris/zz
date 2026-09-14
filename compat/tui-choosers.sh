@@ -64,13 +64,18 @@
 #   `list-clients`, becomes one fixed token, and on the rows that carried it the
 #   run of box fill that follows collapses, because a name of a different width
 #   moves the fill by a column, and the `HH:MM` of
-#   `#{t/p:client_activity}` becomes `NN:NN`. On a row where another box is
-#   drawn over the one that carries the name - at 100x40 the help box covers
-#   the middle of the tree's title row - the text between the name and that
-#   box's edge becomes one token too: the title is cut at a fixed column, so
-#   two ttys whose numbers differ in digit count leave a different number of
-#   title characters standing. The title itself is asserted whole on every
-#   checkpoint where no box covers it. That clock is each client's own
+#   `#{t/p:client_activity}` becomes `NN:NN`. ONE ROW, AND ONLY IT, LOSES THE
+#   TAIL OF ITS TITLE: the tree title row with another box drawn over it. At
+#   100x40 `mode_tree_draw_help` centres a 42-column box at column 29
+#   (measured 2026-09-14), so `┌ <name> (sort: name) (view: preview) ` is cut
+#   there and a tty whose number carries one more digit leaves one title
+#   character fewer standing. That row is recognised by the preview box's own
+#   top-left corner opening it with the name right after, and the span between
+#   the name and the covering box's edge is truncated to a fixed 13 columns -
+#   what a five-digit pty number leaves - rather than replaced. So the sort
+#   label inside it is still compared, and no other row is touched: a client
+#   row followed by a box edge keeps every cell it had. The title is asserted
+#   whole on every checkpoint where no box covers it. That clock is each client's own
 #   last activity time, stamped by its own server from its own key press: this
 #   driver types into zz and then into the pin, so a minute boundary between the
 #   two sends leaves the two rows a minute apart, and no option can pin it the
@@ -140,9 +145,10 @@
 # other recorded case keeps its clause open.
 #
 # --self-check runs the driver against a deliberate one-sided difference in each
-# channel - a tree row, a preview cell, a tag mark, the cursor, the -Z zoom and
-# the chooser's own prompt row - and requires the comparison to catch each in
-# that channel, plus two equivalences it must NOT report. A fixture that only
+# channel - a tree row, a preview cell, a tag mark, the cursor, the -Z zoom, the
+# chooser's own prompt row and the one title span a mask truncates - and
+# requires the comparison to catch each in that channel, plus two equivalences
+# it must NOT report. A fixture that only
 # passes has proved nothing.
 set -eEuo pipefail
 
@@ -537,7 +543,10 @@ mark_both() {
 
 # The masked comparison, see the header. Reads one side's rows on stdin and
 # writes them back with that side's own client name replaced by a fixed token,
-# and with the box fill that follows it on the same row collapsed.
+# and with the box fill that follows it on the same row collapsed. The one row
+# whose title another box cuts - the preview box's title row with the help box
+# over it - keeps a fixed 13 columns of that title; every other row carrying
+# the name keeps all of its text.
 client_row_mask() {
   local name
   name="$(client_name "$1")"
@@ -546,10 +555,14 @@ client_row_mask() {
 import os, re, sys
 
 name = re.escape(os.environ["ZZ_MASK_NAME"])
+title = re.compile(
+    r"^((?:\x1b\[[0-9;]*m)*\u250c (?:\x1b\[[0-9;]*m)*/dev/CLIENT)([^\u2502]*)(?=\u2502)"
+)
+TITLE_KEPT = 13
 for line in sys.stdin.read().split("\n"):
     if re.search(name, line):
         line = re.sub(name, "/dev/CLIENT", line)
-        line = re.sub(r"(/dev/CLIENT).*?(?=\u2502)", r"\1 (CUT) ", line, count=1)
+        line = title.sub(lambda cut: cut.group(1) + cut.group(2)[:TITLE_KEPT], line, count=1)
         line = re.sub(r"\d\d:\d\d", "NN:NN", line)
         line = re.sub("\u2500{2,}", "\u2500", line)
     sys.stdout.write(line + "\n")
@@ -1324,6 +1337,26 @@ run_self_check() {
   wait_screen tmux hard 'the one-sided filter prompt' "$before" '(filter) '
   compare_rows self-check-buffer-filter-prompt styled || true
   self_check_case 'prompt, the buffer tree filter prompt on one side only' rows
+
+  # THE SPAN THE TITLE CUT COVERS, the only text `client_row_mask` drops. At
+  # 100x40 the help box lands over the middle of the tree title row, so the
+  # title is cut at a fixed column and the mask truncates what is left of it to
+  # a fixed width. The sort order is changed on the zz side alone before the box
+  # goes up - one client per side, so the rows themselves do not move - and the
+  # two titles then differ inside that span. A mask that replaced the span with
+  # one token, as this one once did on every client row, would report nothing.
+  CASE_LABEL='self-check title cut'
+  attach_both_at 100 40
+  ROW_MASK=client_row_mask
+  mark_both titlecut
+  prefix_step 'session cho' D
+  before="$(styled_screen_of zz)"
+  type_on_side zz O
+  wait_screen zz hard 'the sort order changed on the zz side alone' "$before" '(sort: size)'
+  step 'Exit mode' F1
+  compare_rows self-check-title-cut styled || true
+  self_check_case 'title cut, the sort label inside the span a box cuts' rows
+  ROW_MASK=
 
   if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
     printf '%s self-check expectations unmet\n' "$SELF_CHECK_FAILURES"

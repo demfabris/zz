@@ -26,3 +26,12 @@ pin commit: d77c9dc6 (next-3.8)
 rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
 cargo: cargo 1.97.0 (c980f4866 2026-06-30)
 locale: LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8
+
+# gate addendum
+
+date: 2026-09-14
+gate worktree: /home/demfabris/dev/zz-gate-tui7 (worktree of /home/demfabris/dev/zz)
+gate branch: gate-keys, rebased onto origin/main 289c8a7c (already its descendant; nothing replayed)
+gate tip before records: the three must-fix commits on top of 7f593a59
+zz under test: /home/demfabris/dev/zz-gate-target/debug/zz, built in this worktree
+pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux, next-3.8 d77c9dc6

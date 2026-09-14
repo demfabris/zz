@@ -212,3 +212,23 @@ gates the ARMING and `window_pane_key` hands an arriving report to the pane -
 and the GUI has no arming handshake to gate. A GUI-side arming gate reading
 `focus-events`, in `crates/zz/src/terminal/view.rs`, is the follow-up; the raw
 TUI already reads the option in `tty.rs` and arms only when it is on.
+
+## Gate addendum, 2026-09-14 (cycle 6 keys gate)
+
+Files the gate added to this directory:
+
+- `review.md` -- the reviewer's verdict JSON verbatim, their checks_run and
+  notes, and what the gate did with each must-fix.
+- `gate-tui-mouse.txt` -- compat/tui-mouse.sh at the merged tip, exit 0,
+  26 asserted / 10 recorded (the lane's 24 plus the border-click case's two).
+- `gate-tui-mouse-self-check.txt` -- --self-check at the merged tip, exit 0,
+  fourteen sabotages each caught in its own channel and three controls quiet.
+- `gate-tui-stock-keys.txt` -- exit 0 on its first run, 50 cases agree.
+- `gate-attached-client.txt` -- PASS.
+- `gate-status-background-jobs-baseline.txt` -- the one red the gate chased:
+  three solo runs red at the tip, nine runs at origin/main 289c8a7c in the same
+  worktree and target dir, 2 green and 7 red in both failure spellings.
+
+Excursion the lane's list did not name, added here on the reviewer's nit 5:
+`crates/zz-mux/src/lib.rs` carries a single re-export line for
+`MouseEventTarget`, whose type lives in `command.rs`, which is in zone.

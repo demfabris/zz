@@ -1,0 +1,28 @@
+# smoke/status-background-jobs is red at origin/main on this box
+
+The gate's corpus chunk hit this row red, run.sh retried it alone and it failed again.
+Three more solo runs at the gate tip were red, so the gate built origin/main 289c8a7c in
+the same worktree and target dir and sampled the same row nine times there.
+
+## gate tip (eaeb362f), three solo runs, all red
+run 1: exit 1
+AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 3, 1789355608093532367, b'\n\n\n\n\n\n\n\n\n\n\
+run 2: exit 1
+AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 3, 1789355719205139386, b'\n\n\n\n\n\n\n\n\n\n\
+run 3: exit 1
+AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 3, 1789355829042396578, b'\n\n\n\n\n\n\n\n\n\n\
+
+## origin/main 289c8a7c, nine solo runs: 2 green, 7 red
+run 1: exit 0  green
+run 2: exit 1  AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 1, 0, b'\n\n\n\n\n\n\n\n\n\n\n\n\n\n\
+run 3: exit 1  AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 1, 0, b'\n\n\n\n\n\n\n\n\n\n\n\n\n\n\
+run 4: exit 1  AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 3, 1789356301543878373, b'\n\n\n\n\n\
+run 5: exit 0  green
+run 6: exit 1  AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 1, 0, b'\n\n\n\n\n\n\n\n\n\n\n\n\n\n\
+run 7: exit 1  AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 3, 1789356574859504402, b'\n\n\n\n\n\
+run 8: exit 1  AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 1, 0, b'\n\n\n\n\n\n\n\n\n\n\n\n\n\n\
+run 9: exit 1  AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 3, 1789356789035392835, b'\n\n\n\n\n\
+(runs 4-9 were sampled in one call: pass=1 fail=5; their per-run logs are base-sbj4..9)
+
+Both failure spellings appear at origin/main: sample 1 empty (DATE[]) and sample 3
+unchanged from sample 1. The row is a timing-sensitive status job, not this lane's.

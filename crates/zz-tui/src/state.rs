@@ -129,6 +129,10 @@ pub(crate) struct Model {
     /// pin's own spelling. A pointer gesture whose name is in here runs that
     /// binding instead of the client's own pointer handling.
     pub mouse_bindings: std::collections::HashSet<String>,
+    /// The same, for the two copy tables. A pointer event reaches them only
+    /// while the pane it landed on holds a mode, which is the condition
+    /// `server_client_handle_key` puts on the mode table.
+    pub copy_mouse_bindings: std::collections::HashSet<String>,
     /// `c->tty.mouse_drag_flag` and `mouse_last_pane`: once a button goes down
     /// the location that press resolved to owns every drag and the release
     /// that follow it, however far the pointer travels. Without the latch a
@@ -150,6 +154,19 @@ pub struct MouseDragLatch {
     pub pane: Option<PaneId>,
     pub window: Option<zz_protocol::WindowId>,
     pub border: Option<zz_protocol::Axis>,
+    /// `c->tty.mouse_drag_flag`, which `server_client_check_mouse` raises on
+    /// the first MOUSEDRAG and reads on the release: a release that ends a
+    /// drag is `MouseDragEnd`, and a release that ends nothing is `MouseUp`.
+    pub dragging: bool,
+    /// `c->tty.mouse_drag_update`: a drag whose name a binding claimed owns the
+    /// release that ends it, so the `MouseDragEnd` goes to the server whatever
+    /// the client last saw of the pane's mode - the drag itself is what may
+    /// have put the pane in one.
+    pub bound: bool,
+    /// Where the press landed, in the client's own screen and in pixels:
+    /// `m->lx`/`m->ly` on the pin's event record, which is the anchor
+    /// `copy-mode -M` starts its selection from.
+    pub press: (u16, u16, u32, u32),
 }
 
 impl Model {
@@ -212,6 +229,7 @@ impl Model {
             last_sent_command_output_geometry: None,
             mouse_option: crate::app::mouse_option_enabled(core.mux_options()),
             mouse_bindings: crate::app::mouse_binding_names(core.key_tables()),
+            copy_mouse_bindings: crate::app::copy_mouse_binding_names(core.key_tables()),
             mouse_drag: None,
             focus_follows_mouse: crate::app::focus_follows_mouse_enabled(core.mux_options()),
             mouse_arming: if crate::app::mouse_option_enabled(core.mux_options()) {

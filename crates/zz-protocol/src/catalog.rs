@@ -2052,7 +2052,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-l", "literal text"),
             CommandOptionSpec::value("-c", FreeForm, "target client"),
             CommandOptionSpec::flag("-K", "inject keys into the target client"),
-            CommandOptionSpec::unsupported_flag("-M"),
+            CommandOptionSpec::flag("-M", "send the invoking mouse event to its pane"),
             CommandOptionSpec::flag("-R", "reset the pane terminal state"),
         ],
         positionals: &[],

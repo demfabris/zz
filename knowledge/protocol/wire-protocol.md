@@ -640,10 +640,11 @@ end of those enums, and `PreviewCycle` at the end of each of the two before them
 `EventPayload::ChooserPresentation { presentation: Option<Box<ChooserPresentation>> }` at tail tag
 52, with the payload types `ChooserPresentation`, `ChooserRow`, `ChooserPreview`,
 `ChooserPreviewSize` and `ChooserPreviewTile` the daemon fills from the mode tree. v102 also
-appends `InputMessage::MouseKey { key, pane, window, column, row, border }` after
+appends `InputMessage::MouseKey { key, pane, window, column, row, border, view_action,
+press_action }` after
 `DismissClientMessage`, the pin's own mouse key name a client resolved from a decoded pointer event
-together with the pane and window that event landed on, its cell in the client's screen and the
-axis of the divider a `Border` gesture grabbed. v102 also appends
+together with the pane and window that event landed on, its cell in the client's screen, the
+axis of the divider a `Border` gesture grabbed and the pane input the gesture and its press carry. v102 also appends
 `ProtocolMessage::ClientTerminalFeatures { features: Vec<String> }` at the tail of the message
 enum, the terminal features a client learned from its own terminal after the hello; `features` is
 capped at `MAX_CLIENT_TERMINAL_FEATURES` (64) entries of `MAX_CLIENT_TERMINAL_FEATURE_BYTES` (64)
@@ -693,7 +694,8 @@ halves in the same push.
   appends into one entry.
 - v102 also carries a decoded pointer event that resolved to one of the pin's mouse key names.
   `InputMessage` appends `MouseKey { key: String, pane: Option<PaneId>, window: Option<WindowId>,
-  column: u16, row: u16, border: Option<Axis> }` after `DismissClientMessage`. The client owns
+  column: u16, row: u16, border: Option<Axis>, view_action: Option<TerminalViewAction>,
+  press_action: Option<TerminalViewAction> }` after `DismissClientMessage`. The client owns
   the pointer and names the
   key the way `server_client_check_mouse` does, from the gesture, its button and where on the
   client's screen it landed; the daemon looks that name up in the table the client is in and then
@@ -703,8 +705,15 @@ halves in the same push.
   pointer handling. `border` is the trailing field, appended within 102 by the cycle-8 keys lane:
   a press latches the location it resolved to for the drag and the release that follow it, the way
   `c->tty.mouse_drag_flag` latches them, and `resize-pane -M` reads the latched axis to know which
-  edge of the pane the drag is moving. Pure appends with their consumer halves in the same push;
-  GUI clients send the message never and are unchanged.
+  edge of the pane the drag is moving. `view_action` and `press_action` are the two trailing
+  fields appended within 102 by the cycle-9 mouse lane: the pane input this gesture carries and the
+  one its press carried, which are the pin's own `m->x`/`m->y` and `m->lx`/`m->ly`. `send-keys -M`
+  hands the first to the pane the event landed on, the way
+  `window_pane_key(wp, tc, s, wl, m->key, m)` re-encodes the event through `input_key_pane`, and
+  `copy-mode -M` anchors its selection on the second before the first extends it, the way
+  `window_copy_start_drag` reads `cmd_mouse_at(wp, m, &x, &y, 1)`. The client encodes both because
+  it owns the cell grid and the pixel geometry the encoding needs. Pure appends with their consumer
+  halves in the same push; GUI clients send the message never and are unchanged.
 - v102 also carries what a client learned from its own terminal after the hello.
   `ProtocolMessage` appends `ClientTerminalFeatures { features: Vec<String> }` at the tail. The pin
   has no wire here: its client and its server share one process, so `tty_keys_device_attributes`,

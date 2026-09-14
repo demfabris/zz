@@ -16730,6 +16730,8 @@ impl Shared {
                     column,
                     row,
                     border,
+                    view_action,
+                    press_action,
                 } => {
                     self.input_mouse_key(
                         client,
@@ -16742,6 +16744,8 @@ impl Shared {
                             column,
                             row,
                             border,
+                            view_action,
+                            press_action,
                         },
                     )?;
                 }
@@ -18309,10 +18313,20 @@ impl Shared {
                 .get(&client)
                 .and_then(KeyEngine::active_table)
                 .map(str::to_owned);
+            let mode_table = active_table
+                .as_deref()
+                .is_none_or(|table| table == root_table)
+                .then(|| mouse_mode_key_table(&inner, client, pane))
+                .flatten();
             let binding = active_table
                 .as_deref()
                 .filter(|table| *table != root_table)
                 .and_then(|table| inner.engine.keys.get(table, key))
+                .or_else(|| {
+                    mode_table
+                        .as_deref()
+                        .and_then(|table| inner.engine.keys.get(table, key))
+                })
                 .or_else(|| inner.engine.keys.get(&root_table, key));
             binding.map(|binding| {
                 let window =
@@ -36404,6 +36418,31 @@ fn terminal_mouse_rejected(inner: &ServerState, client: ClientId, input: &InputM
             .unwrap_or_else(|| terminal.latest_viewport())
             .mouse_tracking
     })
+}
+
+/// `server_client_handle_key`: with the client on its default key table and
+/// the pane `cmd_find_from_mouse` resolved holding a mode, a mouse key is
+/// looked up in `wme->mode->key_table(wme)` before the client's own table. The
+/// mode's table is the window's effective `mode-keys` table, and only a pane a
+/// client actually holds a copy session on is in a mode at all.
+fn mouse_mode_key_table(
+    inner: &ServerState,
+    client: ClientId,
+    pane: Option<PaneId>,
+) -> Option<String> {
+    let pane = pane?;
+    let in_mode = inner
+        .copy_sessions
+        .get(&client)
+        .is_some_and(|copy| copy.pane == pane && !copy.exiting);
+    if !in_mode {
+        return None;
+    }
+    inner
+        .engine
+        .copy_mode_table_for_pane(pane)
+        .ok()
+        .map(str::to_owned)
 }
 
 fn wait_for_terminal_identity(terminal: &TerminalSession) {

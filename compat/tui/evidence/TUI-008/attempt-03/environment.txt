@@ -23,3 +23,26 @@ pin commit: d77c9dc6 (next-3.8)
 rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
 cargo: cargo 1.97.0 (c980f4866 2026-06-30)
 locale: LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8
+
+# rebase addendum
+
+origin/main moved to 879b68fc mid-cycle, after every run above was taken at
+b6a57af1 with the same four commits. The branch was rebased onto it; main's
+commit touches compat/tui/campaign.json (TUI-015 and TUI-018, neither this
+lane's), compat/tmux-gaps.json (desktop.overlay-consumers, not this lane's),
+compat/tui/lint-runner.py, compat/tui/run-9.js and knowledge/designs/tui-parity.md,
+and no crate at all, so nothing here was rebuilt by it. There were no conflicts.
+
+tip after the rebase: e6ae5bf73dee7d6d0fb6a0cf2489ea9fb1bf3571
+base after the rebase: origin/main 879b68fcbba93d04a56926c4719108e553fdf910
+zz sha256 after the rebase: d1132d84e47251ea76ba36dae9e277f8c441cbcacdee935ad9bc4d21f723c988
+  (a cargo debug build of zz is not bit-reproducible on this box; the revision
+   and a clean worktree attest the artifact, not the hash)
+
+re-run at the rebased tip, all three clean:
+  compat/tui-mouse.sh              33 asserted, 3 recorded, byte-identical to
+                                   01-tui-mouse-run-1.txt at md5 cd55b00d
+                                   (16-tui-mouse-after-rebase.txt)
+  compat/tui-mouse.sh --self-check every sabotage caught in its own channel
+                                   (18-tui-mouse-self-check-after-rebase.txt)
+  compat/attached-client.sh        PASS (17-attached-client-after-rebase.txt)

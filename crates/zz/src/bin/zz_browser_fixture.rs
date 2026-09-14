@@ -127,6 +127,7 @@ const SHARED_TEXTURE_SPIKE_HTML: &str = r#"<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <link rel="icon" href="/fixture-icon.svg" type="image/svg+xml">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>zz shared-texture spike</title>
   <style>
@@ -941,6 +942,13 @@ impl SharedTextureSpikeView {
                         session.mark_closed();
                     }
                 }
+                BrowserEvent::FaviconChanged { url, png, .. } => {
+                    if url.ends_with("/shared-texture-spike")
+                        && png.starts_with(b"\x89PNG\r\n\x1a\n")
+                    {
+                        self.observations.favicon_received = true;
+                    }
+                }
                 BrowserEvent::AddressChanged { .. }
                 | BrowserEvent::TitleChanged { .. }
                 | BrowserEvent::LoadingChanged { .. }
@@ -1144,12 +1152,22 @@ fn run_shared_texture_spike_inner(duration: Duration, port: u16) -> Result<(), S
     let url = format!("http://{address}/shared-texture-spike");
     println!("zz shared-texture animated fixture: {url}");
 
-    let mut runtime = match zz_browser::bootstrap().map_err(|error| error.to_string())? {
-        BrowserBootstrap::SubprocessExit(code) => {
-            return Err(format!("unexpected CEF subprocess exit {code}"));
-        }
-        BrowserBootstrap::Runtime(runtime) => runtime,
+    let profile = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let profile_root = profile
+        .path()
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let paths = BrowserProfilePaths {
+        profile: profile_root.join("zz-default"),
+        root: profile_root,
     };
+    let mut runtime =
+        match zz_browser::bootstrap_with_profile_paths(paths).map_err(|error| error.to_string())? {
+            BrowserBootstrap::SubprocessExit(code) => {
+                return Err(format!("unexpected CEF subprocess exit {code}"));
+            }
+            BrowserBootstrap::Runtime(runtime) => runtime,
+        };
     if !runtime.shared_texture_enabled() {
         runtime
             .shutdown()
@@ -1182,10 +1200,19 @@ fn run_shared_texture_spike_inner(duration: Duration, port: u16) -> Result<(), S
         "observing accelerated-paint callbacks for {:.3} seconds (GPUI external textures are unavailable on this platform)",
         duration.as_secs_f64()
     );
+    let mut site_controls_verified = false;
     let deadline = Instant::now() + duration;
     while Instant::now() < deadline {
         pump_runtime(&mut runtime, &signals)?;
         handle_session_events(&mut session, &events, &mut fixture_observations);
+        if !site_controls_verified && session.site_connection_secure() == Some(false) {
+            let controls = session.command_sink();
+            controls.set_audio_muted(true);
+            let muted = session.audio_muted() == Some(true);
+            controls.set_audio_muted(false);
+            site_controls_verified = muted && session.audio_muted() == Some(false);
+        }
+        session.send_external_begin_frame();
         thread::sleep(PUMP_INTERVAL);
     }
 
@@ -1200,6 +1227,13 @@ fn run_shared_texture_spike_inner(duration: Duration, port: u16) -> Result<(), S
     runtime
         .shutdown()
         .map_err(|error| format!("could not shut down CEF: {error}"))?;
+    if !fixture_observations.favicon_received {
+        return Err("CEF did not deliver the fixture page favicon".to_owned());
+    }
+    if !site_controls_verified {
+        return Err("CEF site connection and sound controls did not pass verification".to_owned());
+    }
+    println!("site controls verified: HTTP connection status and mute/unmute");
     Ok(())
 }
 
@@ -1354,6 +1388,12 @@ fn handle_session_events(
                 eprintln!("CEF renderer terminated ({error_code}): {status}");
             }
             BrowserEvent::Closed { .. } => session.mark_closed(),
+            BrowserEvent::FaviconChanged { url, png, .. } => {
+                if url.ends_with("/shared-texture-spike") && png.starts_with(b"\x89PNG\r\n\x1a\n") {
+                    observations.favicon_received = true;
+                    println!("favicon received for fixture page: {} PNG bytes", png.len());
+                }
+            }
             BrowserEvent::AddressChanged { .. }
             | BrowserEvent::TitleChanged { .. }
             | BrowserEvent::LoadingChanged { .. }
@@ -1390,6 +1430,7 @@ fn close_spike_session(
 
 #[derive(Default)]
 struct FixtureObservations {
+    favicon_received: bool,
     mailbox_owned_bgra_frames: u64,
     mailbox_gpu_frames: u64,
     painted_owned_bgra_frames: u64,
@@ -1419,6 +1460,7 @@ fn print_accelerated_paint_report(
         "shared-texture spike observations after {:.3} seconds:",
         duration.as_secs_f64()
     );
+    println!("  favicon_received={}", observations.favicon_received);
     println!(
         "  callbacks={} view={} popup={} missing_info={} unique_handles={} handle_transitions={} consecutive_handle_reuses={} readback_fallback_frames={}",
         diagnostics.callback_count,
@@ -1670,6 +1712,11 @@ struct Response {
 
 fn response_for(path: &str) -> Response {
     match path.split('?').next().unwrap_or(path) {
+        "/fixture-icon.svg" => Response {
+            status: "200 OK",
+            content_type: "image/svg+xml",
+            body: r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" rx="3" fill="#705adc"/><path d="M4 4h8l-8 8h8" fill="none" stroke="white" stroke-width="2"/></svg>"##,
+        },
         "/" => Response {
             status: "200 OK",
             content_type: "text/html; charset=utf-8",

@@ -3,10 +3,11 @@
 
 use gpui::{AnyElement, App, Context, ParentElement as _, Styled as _, div, prelude::*, px};
 use zz_ui::browser::{
-    BrowserActionMenuState, BrowserEmptyHint, BrowserErrorPanel, BrowserMenuActions,
-    BrowserMenuProfile, BrowserPickStatus, BrowserProfileDiscoveryState, BrowserTabInfo,
-    BrowserTabStrip, browser_action_menu as shared_browser_action_menu, browser_address,
-    browser_recent_row, browser_toolbar_button,
+    BrowserActionMenuState, BrowserEmptyHint, BrowserErrorPanel, BrowserHeader, BrowserMenuActions,
+    BrowserMenuProfile, BrowserPickStatus, BrowserProfileDiscoveryState, BrowserSiteMenuState,
+    BrowserTabInfo, BrowserTabStrip, BrowserToolbar,
+    browser_action_menu as shared_browser_action_menu, browser_address, browser_recent_row,
+    browser_site_controls_button, browser_site_menu, browser_toolbar_button,
 };
 use zz_ui::{
     ActiveTheme as _, IconName, Sizable as _,
@@ -23,7 +24,7 @@ pub(super) fn render(showcase: &mut Showcase, cx: &mut Context<Showcase>) -> Any
         .child(
             gallery(
                 "Toolbar buttons",
-                "The 24px ghost toolbar controls, in their enabled, disabled, active, and action-menu forms.",
+                "The 28px ghost toolbar controls, in their enabled, disabled, active, and action-menu forms.",
                 cx,
             )
             .child(
@@ -59,7 +60,7 @@ pub(super) fn render(showcase: &mut Showcase, cx: &mut Context<Showcase>) -> Any
         .child(
             gallery(
                 "Address bar",
-                "The borderless URL field that fills the toolbar between the controls, at rest and while a navigation is loading.",
+                "The URL field fills the navigation row between the browser controls.",
                 cx,
             )
             .child(
@@ -69,22 +70,22 @@ pub(super) fn render(showcase: &mut Showcase, cx: &mut Context<Showcase>) -> Any
                         "URL input",
                         div()
                             .w(px(520.0))
-                            .child(browser_address(&showcase.browser_address, cx)),
+                            .child(browser_address(&showcase.browser_address, site_controls(cx), cx)),
                         cx,
                     ))
                     .child(specimen_block(
                         "loading",
                         div()
                             .w(px(520.0))
-                            .child(browser_address(&showcase.browser_address_loading, cx)),
+                            .child(browser_address(&showcase.browser_address_loading, site_controls(cx), cx)),
                         cx,
                     )),
             ),
         )
         .child(
             gallery(
-                "Tab strip",
-                "Safari-compact tabs in the address slot. The address bar forms the active tab; hostname pills hold the others. Hover either kind to reveal its close button. The new-tab button stays at the end.",
+                "Browser header",
+                "Page tabs sit above the navigation row. Hover a tab to reveal its close button; use the plus button to open another tab.",
                 cx,
             )
             .child(
@@ -92,11 +93,10 @@ pub(super) fn render(showcase: &mut Showcase, cx: &mut Context<Showcase>) -> Any
                     "four tabs · active second",
                     div()
                         .w(px(680.0))
-                        .h(px(40.0))
+                        .h(BrowserHeader::HEIGHT)
                         .flex()
                         .child(
-                            BrowserTabStrip::new(
-                                &showcase.browser_tab_address,
+                            BrowserHeader::new(true, BrowserTabStrip::new(
                                 vec![
                                     BrowserTabInfo::new(1, "gpui.rs", "GPUI"),
                                     BrowserTabInfo::new(2, "github.com", "zz: a terminal for the 2020s"),
@@ -105,6 +105,21 @@ pub(super) fn render(showcase: &mut Showcase, cx: &mut Context<Showcase>) -> Any
                                 ],
                                 1,
                             ),
+                            div().flex().flex_none().items_center().gap_1().children(
+                                [(IconName::PanelBottom, "Split bottom"), (IconName::PanelRight, "Split right")]
+                                    .into_iter()
+                                    .map(|(icon, label)| zz_ui::pane::pane_header_icon_button(label, icon, true, cx).tooltip(label)),
+                            ).child(zz_ui::pane::pane_drag_button(
+                                "gallery-browser-drag", zz_protocol::PaneId(3), "Browser".into(), true, |_, _, _| {}, cx,
+                            )).child(zz_ui::pane::pane_header_icon_button("gallery-browser-close", IconName::Xmark, true, cx).tooltip("Close pane")),
+                            BrowserToolbar::new(
+                                browser_toolbar_button(cx, "header-back", IconName::ArrowLeft, "Back", false, false),
+                                browser_toolbar_button(cx, "header-forward", IconName::ArrowRight, "Forward", true, false),
+                                browser_toolbar_button(cx, "header-reload", IconName::Redo2, "Reload", false, false),
+                                browser_address(&showcase.browser_tab_address, site_controls(cx), cx),
+                                browser_toolbar_button(cx, "header-picker", IconName::Inspector, "Pick an element", false, false),
+                                browser_toolbar_button(cx, "header-more", IconName::EllipsisVertical, "More browser actions", false, false).dropdown_menu(browser_action_menu),
+                            )),
                         ),
                     cx,
                 )),
@@ -168,7 +183,7 @@ pub(super) fn render(showcase: &mut Showcase, cx: &mut Context<Showcase>) -> Any
 }
 
 fn recent_row(url: &'static str, cx: &App) -> AnyElement {
-    browser_recent_row(format!("br-recent-{url}"), url, cx).into_any_element()
+    browser_recent_row(format!("br-recent-{url}"), url, None, cx).into_any_element()
 }
 
 fn recent_list(cx: &App) -> impl IntoElement {
@@ -210,4 +225,20 @@ fn browser_action_menu(
         },
         BrowserMenuActions::default(),
     )
+}
+
+fn site_controls(cx: &App) -> impl IntoElement {
+    browser_site_controls_button(cx).dropdown_menu(|menu, _, _| {
+        browser_site_menu(
+            menu,
+            BrowserSiteMenuState {
+                site: "Example page".into(),
+                connection_secure: None,
+                audio_muted: None,
+                can_clear_site_data: false,
+            },
+            |_, _| {},
+            |_, _| {},
+        )
+    })
 }

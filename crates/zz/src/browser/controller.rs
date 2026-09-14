@@ -1244,6 +1244,31 @@ impl BrowserController {
         self.queue_cef_work(move || browser.reload(), cx);
     }
 
+    pub(crate) fn site_connection_secure(&self, pane: PaneId, tab: TabId) -> Option<bool> {
+        self.sessions.get(&(pane, tab))?.site_connection_secure()
+    }
+
+    pub(crate) fn audio_muted(&self, pane: PaneId, tab: TabId) -> Option<bool> {
+        self.sessions.get(&(pane, tab))?.audio_muted()
+    }
+
+    pub(crate) fn set_audio_muted(
+        &mut self,
+        pane: PaneId,
+        tab: TabId,
+        muted: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(browser) = self
+            .sessions
+            .get(&(pane, tab))
+            .map(BrowserSession::command_sink)
+        else {
+            return;
+        };
+        self.queue_cef_work(move || browser.set_audio_muted(muted), cx);
+    }
+
     pub(crate) fn toggle_dev_tools(&self, pane: PaneId, tab: TabId) {
         if let Some(session) = self.sessions.get(&(pane, tab)) {
             session.toggle_dev_tools();
@@ -2442,6 +2467,7 @@ impl BrowserController {
                     log::debug!("CEF browser load failed ({code}): {description}");
                 }
                 BrowserEvent::TitleChanged { .. }
+                | BrowserEvent::FaviconChanged { .. }
                 | BrowserEvent::AddressChanged { .. }
                 | BrowserEvent::CursorChanged { .. }
                 | BrowserEvent::ElementPicked { .. }

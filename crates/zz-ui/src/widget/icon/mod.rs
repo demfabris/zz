@@ -146,6 +146,7 @@ pub enum IconName {
     Xmark,
     Copy,
     Cpu,
+    DragHandle,
     Ellipsis,
     EllipsisVertical,
     ExternalLink,
@@ -154,6 +155,7 @@ pub enum IconName {
     GalleryVerticalEnd,
     GitBranch,
     Globe,
+    GripVertical,
     HardDrive,
     History,
     Inbox,
@@ -176,6 +178,7 @@ pub enum IconName {
     RobotFace,
     Search,
     Settings,
+    SiteControls,
     SquareTerminal,
     Star,
     Sun,
@@ -187,6 +190,7 @@ pub enum IconName {
     WindowMinimize,
     WindowRestore,
     ZoomIn,
+    Zz,
 }
 
 impl IconName {
@@ -216,6 +220,7 @@ impl IconName {
         Self::Xmark,
         Self::Copy,
         Self::Cpu,
+        Self::DragHandle,
         Self::Ellipsis,
         Self::EllipsisVertical,
         Self::ExternalLink,
@@ -224,6 +229,7 @@ impl IconName {
         Self::GalleryVerticalEnd,
         Self::GitBranch,
         Self::Globe,
+        Self::GripVertical,
         Self::HardDrive,
         Self::History,
         Self::Inbox,
@@ -246,6 +252,7 @@ impl IconName {
         Self::RobotFace,
         Self::Search,
         Self::Settings,
+        Self::SiteControls,
         Self::SquareTerminal,
         Self::Star,
         Self::Sun,
@@ -257,6 +264,7 @@ impl IconName {
         Self::WindowMinimize,
         Self::WindowRestore,
         Self::ZoomIn,
+        Self::Zz,
     ];
 
     /// The icon's asset path, such as `icons/arrow-down.svg`. Resolved through
@@ -288,6 +296,7 @@ impl IconName {
             Self::Xmark => "icons/xmark.svg",
             Self::Copy => "icons/copy.svg",
             Self::Cpu => "icons/cpu.svg",
+            Self::DragHandle => "icons/drag-handle.svg",
             Self::Ellipsis => "icons/ellipsis.svg",
             Self::EllipsisVertical => "icons/ellipsis-vertical.svg",
             Self::ExternalLink => "icons/external-link.svg",
@@ -296,6 +305,7 @@ impl IconName {
             Self::GalleryVerticalEnd => "icons/gallery-vertical-end.svg",
             Self::GitBranch => "icons/git-branch.svg",
             Self::Globe => "icons/globe.svg",
+            Self::GripVertical => "icons/grip-vertical.svg",
             Self::HardDrive => "icons/hard-drive.svg",
             Self::History => "icons/history.svg",
             Self::Inbox => "icons/inbox.svg",
@@ -318,6 +328,7 @@ impl IconName {
             Self::RobotFace => "icons/robot-face.svg",
             Self::Search => "icons/search.svg",
             Self::Settings => "icons/settings.svg",
+            Self::SiteControls => "icons/site-controls.svg",
             Self::SquareTerminal => "icons/square-terminal.svg",
             Self::Star => "icons/star.svg",
             Self::Sun => "icons/sun.svg",
@@ -329,6 +340,7 @@ impl IconName {
             Self::WindowMinimize => "icons/window-minimize.svg",
             Self::WindowRestore => "icons/window-restore.svg",
             Self::ZoomIn => "icons/zoom-in.svg",
+            Self::Zz => "icons/zz.svg",
         }
     }
 }

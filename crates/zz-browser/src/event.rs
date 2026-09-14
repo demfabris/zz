@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+pub const MAX_FAVICON_BYTES: usize = 8 * 1024;
+
 /// Identifies one immutable CEF browser generation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SessionId(pub u64);
@@ -66,6 +68,11 @@ pub enum BrowserEvent {
     TitleChanged {
         session: SessionId,
         title: Arc<str>,
+    },
+    FaviconChanged {
+        session: SessionId,
+        url: Arc<str>,
+        png: Arc<[u8]>,
     },
     LoadingChanged {
         session: SessionId,
@@ -136,6 +143,7 @@ impl BrowserEvent {
             Self::Created { session }
             | Self::AddressChanged { session, .. }
             | Self::TitleChanged { session, .. }
+            | Self::FaviconChanged { session, .. }
             | Self::LoadingChanged { session, .. }
             | Self::FrameReady { session, .. }
             | Self::SharedTextureFailed { session, .. }

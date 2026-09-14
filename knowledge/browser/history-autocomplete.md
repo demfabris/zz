@@ -2,7 +2,7 @@
 type: Concept
 title: Browser history & omnibox autocomplete
 description: Profile-scoped browser history, recent-use ranking, learned selections, and Chrome-like URL-bar autocomplete.
-resource: crates/zz/src/browser/recent_pages.rs
+resource: crates/zz-chrome-import/src/recent_pages.rs
 tags:
 - browser
 - history
@@ -27,13 +27,14 @@ scorer.
 
 # Stored records
 
-`recent-pages` starts with a `v2` marker and contains two tab-separated record
+`recent-pages` starts with a `v2` marker and contains three tab-separated record
 types:
 
 | Record | Fields | Limit |
 | --- | --- | --- |
 | `p` | profile, last visit, visit count, typed count, last typed use, URL, title | 5,000 across profiles |
 | `s` | profile, last selection, selection count, normalized input, destination URL | 5,000 across profiles |
+| `f` | profile, page URL, base64 PNG favicon | 512 icons, at most 8 KiB decoded per icon |
 
 URLs, titles, inputs, profile names, record counts, and the whole file carry
 independent bounds. The loader rejects files over 64 MiB. Writes use the app's
@@ -101,6 +102,16 @@ For non-empty input:
   profile;
 - pointer selection opens the chosen result.
 
+Suggestions use single-line title and muted URL text, with ellipsis for overflow.
+Hover and keyboard selection share a rounded highlight, inset 4px from the dropdown edge.
+
+CEF's favicon URL callback downloads the page icon through the browser session and converts
+it to a PNG at up to 32px. Each completion carries the page URL captured before the download,
+so navigating elsewhere does not attach the icon to the new page. The history store keeps
+icons by profile and exact page URL; tabs, suggestions, and recent-page rows use the stored
+image. Missing or unreadable icons show a globe. Older history entries acquire icons when
+their pages load again. Removing an entry also removes its stored icon.
+
 A one-character append can inline-complete the top URL-prefix result. Root URLs
 need one typed use; URLs with a path, query, or fragment need two. The suffix is
 selected so the next typed character replaces it. Deletes and multi-character
@@ -118,7 +129,8 @@ without weakening locally learned use.
 
 | File | Role |
 | --- | --- |
-| `crates/zz/src/browser/recent_pages.rs` | Bounded storage, migration, matching, scoring, learning, deletion, and tests. |
+| `crates/zz-chrome-import/src/recent_pages.rs` | Bounded storage, migration, matching, scoring, learning, deletion, and tests. |
+| `crates/zz/src/browser/recent_pages.rs` | Desktop history access and window refreshes. |
 | `crates/zz/src/browser/view.rs` | Input events, successful-use credit, keyboard selection, Escape stages, and result actions. |
 | `crates/zz-ui/src/browser.rs` | Native result panel and title/URL rows under the compact toolbar. |
 | `crates/zz-chrome-import/src/history.rs` | Read-only extraction of Chrome timestamps and use counts. |

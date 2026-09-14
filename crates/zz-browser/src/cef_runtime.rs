@@ -1174,6 +1174,12 @@ pub struct BrowserCommandSink {
 }
 
 impl BrowserCommandSink {
+    pub fn set_audio_muted(&self, muted: bool) {
+        if let Some(host) = self.browser.host() {
+            host.set_audio_muted(i32::from(muted));
+        }
+    }
+
     pub fn navigate(&self, url: &str) {
         navigate_browser(&self.browser, self.id, url);
     }
@@ -1416,6 +1422,25 @@ pub struct BrowserSession {
 }
 
 impl BrowserSession {
+    #[must_use]
+    pub fn site_connection_secure(&self) -> Option<bool> {
+        let ssl = self
+            .browser
+            .host()?
+            .visible_navigation_entry()?
+            .sslstatus()?;
+        Some(
+            ssl.is_secure_connection() != 0
+                && cef::is_cert_status_error(ssl.cert_status()) == 0
+                && ssl.content_status() == SslContentStatus::NORMAL_CONTENT,
+        )
+    }
+
+    #[must_use]
+    pub fn audio_muted(&self) -> Option<bool> {
+        Some(self.browser.host()?.is_audio_muted() != 0)
+    }
+
     pub fn take_popup(&mut self, popup: SessionId) -> Option<Self> {
         let mut session = self.popups.lock().remove(&popup.0)?;
         if session.active_session.0.finished.load(Ordering::Acquire) {
@@ -4245,6 +4270,42 @@ cef::wrap_render_handler! {
     }
 }
 
+cef::wrap_download_image_callback! {
+    struct FaviconDownloadCallback {
+        bridge: SessionBridge,
+        url: Arc<str>,
+    }
+
+    impl DownloadImageCallback {
+        fn on_download_image_finished(
+            &self,
+            _image_url: Option<&CefString>,
+            _http_status_code: i32,
+            image: Option<&mut Image>,
+        ) {
+            let (mut width, mut height) = (0, 0);
+            let Some(data) = image.and_then(|image| {
+                image.as_png(1.0, 1, Some(&mut width), Some(&mut height))
+            }) else {
+                return;
+            };
+            let len = data.size();
+            if len == 0 || len > crate::MAX_FAVICON_BYTES {
+                return;
+            }
+            let mut png = vec![0; len];
+            if data.data(Some(&mut png), 0) != len {
+                return;
+            }
+            self.bridge.emit(BrowserEvent::FaviconChanged {
+                session: self.bridge.id,
+                url: self.url.clone(),
+                png: png.into(),
+            });
+        }
+    }
+}
+
 cef::wrap_display_handler! {
     struct DisplayHandlerBuilder {
         bridge: SessionBridge,
@@ -4273,6 +4334,30 @@ cef::wrap_display_handler! {
                 session: self.bridge.id,
                 title: Arc::from(title.map(ToString::to_string).unwrap_or_default()),
             });
+        }
+
+        fn on_favicon_urlchange(
+            &self,
+            browser: Option<&mut Browser>,
+            icon_urls: Option<&mut CefStringList>,
+        ) {
+            let Some(browser) = browser else { return; };
+            let Some(host) = browser.host() else { return; };
+            let Some(frame) = browser.main_frame() else { return; };
+            let Some(icon_url) = icon_urls.and_then(|urls| std::mem::take(urls).into_iter().next()) else {
+                return;
+            };
+            let mut callback = FaviconDownloadCallback::new(
+                self.bridge.clone(),
+                CefString::from(&frame.url()).to_string().into(),
+            );
+            host.download_image(
+                Some(&CefString::from(icon_url.as_str())),
+                1,
+                32,
+                0,
+                Some(&mut callback),
+            );
         }
 
         fn on_cursor_change(

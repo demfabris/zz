@@ -28,7 +28,9 @@ pub use cookies::{
 };
 #[cfg(any(feature = "cef-runtime", test))]
 pub use element_picker::ElementPickerAppearance;
-pub use event::{BrowserCursor, BrowserEvent, ContextMenuRequest, EditFlags, SessionId};
+pub use event::{
+    BrowserCursor, BrowserEvent, ContextMenuRequest, EditFlags, MAX_FAVICON_BYTES, SessionId,
+};
 pub use frame::{
     BrowserGpuContext, FrameError, FrameMailbox, FrameMailboxDiagnostics, FrameTier, GpuFrame,
     OsrFrame, OwnedBgraFrame,

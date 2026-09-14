@@ -159,7 +159,7 @@ function start(token: string, requestedAppearance: ElementPickerAppearance): voi
     "--zz-picker-font-family",
     `${JSON.stringify(appearance.fontFamily)}, monospace`,
   );
-  host.style.setProperty("--zz-picker-outline-width", `${2 * scale}px`);
+  host.style.setProperty("--zz-picker-outline-width", `${scale}px`);
   host.style.setProperty("--zz-picker-hairline", `${scale}px`);
   host.style.setProperty("--zz-picker-viewport-inset", `${16 * scale}px`);
   host.style.setProperty("--zz-picker-label-max-width", `${360 * scale}px`);
@@ -179,8 +179,7 @@ function start(token: string, requestedAppearance: ElementPickerAppearance): voi
       box-sizing: border-box;
       border: var(--zz-picker-outline-width) solid var(--zz-picker-highlight-outline);
       background: var(--zz-picker-highlight-fill);
-      box-shadow: 0 0 0 var(--zz-picker-hairline) var(--zz-picker-highlight-contrast);
-      corner-shape: squircle;
+      box-shadow: 0 0 0 calc(var(--zz-picker-hairline) / 2) var(--zz-picker-highlight-contrast);
       pointer-events: none;
     }
     .label {
@@ -266,12 +265,6 @@ function start(token: string, requestedAppearance: ElementPickerAppearance): voi
     outline.style.top = `${rect.top}px`;
     outline.style.width = `${rect.width}px`;
     outline.style.height = `${rect.height}px`;
-    outline.style.borderRadius = `${adaptiveRadius(
-      radius,
-      rect.width,
-      rect.height,
-      scale,
-    )}px`;
     label.textContent = labelFor(selected);
     positionLabel(rect);
   };
@@ -279,7 +272,10 @@ function start(token: string, requestedAppearance: ElementPickerAppearance): voi
   const cleanup = (): void => {
     window.removeEventListener("pointermove", onPointerMove, true);
     window.removeEventListener("pointerdown", onPointerDown, true);
-    window.removeEventListener("pointerup", onPointerUp, true);
+    window.removeEventListener("pointerup", suppressPrimaryButton, true);
+    window.removeEventListener("mousedown", suppressPrimaryButton, true);
+    window.removeEventListener("mouseup", suppressPrimaryButton, true);
+    window.removeEventListener("click", onClick, true);
     window.removeEventListener("keydown", onKeyDown, true);
     window.removeEventListener("scroll", paint, true);
     window.removeEventListener("resize", paint);
@@ -310,7 +306,13 @@ function start(token: string, requestedAppearance: ElementPickerAppearance): voi
     event.stopImmediatePropagation();
   }
 
-  function onPointerUp(event: PointerEvent): void {
+  function suppressPrimaryButton(event: MouseEvent): void {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+
+  function onClick(event: MouseEvent): void {
     if (event.button !== 0) return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -342,7 +344,10 @@ function start(token: string, requestedAppearance: ElementPickerAppearance): voi
 
   window.addEventListener("pointermove", onPointerMove, true);
   window.addEventListener("pointerdown", onPointerDown, true);
-  window.addEventListener("pointerup", onPointerUp, true);
+  window.addEventListener("pointerup", suppressPrimaryButton, true);
+  window.addEventListener("mousedown", suppressPrimaryButton, true);
+  window.addEventListener("mouseup", suppressPrimaryButton, true);
+  window.addEventListener("click", onClick, true);
   window.addEventListener("keydown", onKeyDown, true);
   window.addEventListener("scroll", paint, true);
   window.addEventListener("resize", paint);

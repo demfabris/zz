@@ -1,4 +1,5 @@
 use gpui::{App, Global};
+use std::sync::Arc;
 
 pub(crate) use zz_chrome_import::recent_pages::{
     HistorySuggestion, MAX_TITLE_BYTES, MAX_URL_BYTES, RecentPage,
@@ -52,6 +53,28 @@ pub(crate) fn record_title(profile: &str, url: &str, title: &str, cx: &mut App) 
             .global_mut::<RecentPages>()
             .0
             .record_title(profile, url, title)
+    {
+        cx.refresh_windows();
+    }
+}
+
+pub(crate) fn favicon(profile: &str, url: &str, cx: &App) -> Option<Arc<[u8]>> {
+    cx.try_global::<RecentPages>()
+        .and_then(|pages| pages.0.favicon(profile, url))
+}
+
+pub(crate) fn title(profile: &str, url: &str, cx: &App) -> Option<String> {
+    cx.try_global::<RecentPages>()
+        .and_then(|pages| pages.0.title(profile, url))
+        .map(str::to_owned)
+}
+
+pub(crate) fn record_favicon(profile: &str, url: &str, png: Arc<[u8]>, cx: &mut App) {
+    if cx.has_global::<RecentPages>()
+        && cx
+            .global_mut::<RecentPages>()
+            .0
+            .record_favicon(profile, url, png)
     {
         cx.refresh_windows();
     }

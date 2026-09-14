@@ -2,12 +2,16 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     path::PathBuf,
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 
 use crate::fs_util::{atomic_write, restrict_to_current_user};
 
 const MAX_ENTRIES: usize = 5_000;
+const MAX_FAVICONS: usize = 512;
 const MAX_SHORTCUTS: usize = 5_000;
 const MAX_INPUT_BYTES: usize = 512;
 const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
@@ -21,6 +25,7 @@ pub struct RecentPage {
     pub url: String,
     pub title: String,
     pub visited_at: u64,
+    favicon: Option<Arc<[u8]>>,
     profile: String,
     visit_count: u32,
     typed_count: u32,
@@ -28,6 +33,10 @@ pub struct RecentPage {
 }
 
 impl RecentPage {
+    pub fn favicon(&self) -> Option<Arc<[u8]>> {
+        self.favicon.clone()
+    }
+
     pub fn imported(
         profile: impl Into<String>,
         url: String,
@@ -44,6 +53,7 @@ impl RecentPage {
             visit_count: visit_count.max(1),
             typed_count,
             last_typed_at: if typed_count > 0 { visited_at } else { 0 },
+            favicon: None,
         }
     }
 }
@@ -87,6 +97,7 @@ impl RecentPages {
                     visit_count: 0,
                     typed_count: 0,
                     last_typed_at: 0,
+                    favicon: None,
                 },
                 |index| self.entries.remove(index),
             );
@@ -306,6 +317,7 @@ impl RecentPages {
     fn parse(source: &str) -> (Vec<RecentPage>, Vec<HistoryShortcut>) {
         let mut entries = Vec::new();
         let mut shortcuts = Vec::new();
+        let mut favicons = HashMap::new();
         let mut seen_entries = HashSet::new();
         let mut seen_shortcuts = HashSet::new();
         for line in source.lines() {
@@ -352,7 +364,30 @@ impl RecentPages {
                     visit_count: visit_count.max(1),
                     typed_count,
                     last_typed_at,
+                    favicon: None,
                 });
+                continue;
+            }
+            if let Some(record) = line.strip_prefix("f\t") {
+                let mut parts = record.splitn(3, '\t');
+                let (Some(profile), Some(url), Some(encoded)) = (
+                    parts.next().and_then(valid_profile),
+                    parts.next(),
+                    parts.next(),
+                ) else {
+                    continue;
+                };
+                if favicons.len() >= MAX_FAVICONS
+                    || !recordable_url(url)
+                    || encoded.len() > zz_browser::MAX_FAVICON_BYTES.div_ceil(3) * 4
+                {
+                    continue;
+                }
+                if let Ok(png) = STANDARD.decode(encoded)
+                    && valid_favicon(&png)
+                {
+                    favicons.insert((profile, url.to_owned()), Arc::from(png));
+                }
                 continue;
             }
             if let Some(record) = line.strip_prefix("s\t") {
@@ -409,7 +444,11 @@ impl RecentPages {
                 visit_count: 1,
                 typed_count: 0,
                 last_typed_at: 0,
+                favicon: None,
             });
+        }
+        for entry in &mut entries {
+            entry.favicon = favicons.remove(&(entry.profile.clone(), entry.url.clone()));
         }
         let known_urls = entries
             .iter()
@@ -441,6 +480,17 @@ impl RecentPages {
             contents.push_str(&single_line(&entry.title, MAX_TITLE_BYTES));
             contents.push('\n');
         }
+        for entry in &self.entries {
+            if let Some(png) = &entry.favicon {
+                contents.push_str("f\t");
+                contents.push_str(&entry.profile);
+                contents.push('\t');
+                contents.push_str(&entry.url);
+                contents.push('\t');
+                contents.push_str(&STANDARD.encode(png));
+                contents.push('\n');
+            }
+        }
         for shortcut in &self.shortcuts {
             contents.push_str("s\t");
             contents.push_str(&shortcut.profile);
@@ -459,6 +509,15 @@ impl RecentPages {
 
     fn prune(&mut self) {
         self.entries.truncate(MAX_ENTRIES);
+        let mut icons = 0;
+        for entry in &mut self.entries {
+            if entry.favicon.is_some() {
+                icons += 1;
+                if icons > MAX_FAVICONS {
+                    entry.favicon = None;
+                }
+            }
+        }
         let known_urls = self
             .entries
             .iter()
@@ -558,6 +617,41 @@ impl RecentPages {
         if title.is_empty() || !self.retitle(profile, url, title) {
             return false;
         }
+        self.save();
+        true
+    }
+
+    pub fn favicon(&self, profile: &str, url: &str) -> Option<Arc<[u8]>> {
+        self.entries
+            .iter()
+            .find(|entry| entry.profile == profile && entry.url == url)
+            .and_then(|entry| entry.favicon.clone())
+    }
+
+    pub fn title(&self, profile: &str, url: &str) -> Option<&str> {
+        self.entries
+            .iter()
+            .find(|entry| entry.profile == profile && entry.url == url)
+            .map(|entry| entry.title.trim())
+            .filter(|title| !title.is_empty())
+    }
+
+    pub fn record_favicon(&mut self, profile: &str, url: &str, png: Arc<[u8]>) -> bool {
+        if !valid_favicon(&png) {
+            return false;
+        }
+        let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.profile == profile && entry.url == url)
+        else {
+            return false;
+        };
+        if entry.favicon.as_deref() == Some(png.as_ref()) {
+            return false;
+        }
+        entry.favicon = Some(png);
+        self.prune();
         self.save();
         true
     }
@@ -759,6 +853,10 @@ fn address_text(url: &str) -> String {
     }
 }
 
+fn valid_favicon(png: &[u8]) -> bool {
+    png.len() <= zz_browser::MAX_FAVICON_BYTES && png.starts_with(b"\x89PNG\r\n\x1a\n")
+}
+
 fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -810,9 +908,78 @@ mod tests {
         let suggestions = restored.suggestions("work", "exa", 8);
         assert_eq!(suggestions.len(), 1);
         assert_eq!(suggestions[0].title, "Example");
+        assert_eq!(restored.title("work", "https://example.com"), Some("Example"));
+        assert_eq!(restored.title("personal", "https://example.com"), None);
         assert!(restored.suggestions("personal", "exa", 8).is_empty());
         assert!(restored.remove("work", "https://example.com"));
+        assert_eq!(restored.title("work", "https://example.com"), None);
         assert!(restored.suggestions("work", "exa", 8).is_empty());
+    }
+
+    #[test]
+    fn favicons_persist_by_page_and_profile_and_follow_history_removal() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("recent-pages");
+        let mut pages = RecentPages::load(Some(path.clone()));
+        let png: Arc<[u8]> =
+            Arc::from(include_bytes!("../../zz-browser/tests/fixtures/favicon.png").as_slice());
+        assert!(!pages.record_favicon("work", "https://example.com", png.clone()));
+        pages.record_visit("work", "https://example.com");
+        pages.record_visit("work", "https://example.com/other");
+        pages.record_visit("personal", "https://example.com");
+        assert!(pages.record_favicon("work", "https://example.com", png.clone()));
+        assert!(!pages.record_favicon("work", "https://example.com", png.clone()));
+        let mut restored = RecentPages::load(Some(path));
+        assert_eq!(restored.favicon("work", "https://example.com"), Some(png));
+        assert!(
+            restored
+                .favicon("work", "https://example.com/other")
+                .is_none()
+        );
+        assert!(
+            restored
+                .favicon("personal", "https://example.com")
+                .is_none()
+        );
+        assert!(!restored.record_favicon(
+            "work",
+            "https://example.com",
+            Arc::from(b"not an image".as_slice())
+        ));
+        restored.remove("work", "https://example.com");
+        assert!(restored.favicon("work", "https://example.com").is_none());
+    }
+
+    #[test]
+    fn favicon_storage_limits_size_and_retention() {
+        let png: Arc<[u8]> =
+            Arc::from(include_bytes!("../../zz-browser/tests/fixtures/favicon.png").as_slice());
+        let mut pages = pages_with(Vec::new());
+        for index in 0..=MAX_FAVICONS {
+            let url = format!("https://example.com/{index}");
+            pages.visit(DEFAULT, &url, index as u64);
+            assert!(pages.record_favicon(DEFAULT, &url, png.clone()));
+        }
+        assert_eq!(
+            pages
+                .entries
+                .iter()
+                .filter(|entry| entry.favicon.is_some())
+                .count(),
+            MAX_FAVICONS
+        );
+        assert!(pages.favicon(DEFAULT, "https://example.com/0").is_none());
+        let mut oversized = png.to_vec();
+        oversized.resize(zz_browser::MAX_FAVICON_BYTES + 1, 0);
+        assert!(!pages.record_favicon(DEFAULT, "https://example.com/1", oversized.into()));
+        let (entries, _) = RecentPages::parse(&pages.serialize());
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.favicon.is_some())
+                .count(),
+            MAX_FAVICONS
+        );
     }
 
     #[test]

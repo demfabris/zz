@@ -4,7 +4,7 @@ title: In-page element picker
 description: A token-guarded, single-use overlay that lets the user pick a DOM element in the page and returns a bounded, sanitized source-context string plus an optional screenshot of the picked area.
 resource: crates/zz-browser/src/element_picker.rs
 tags: [browser, element-picker, devtools, message-router]
-timestamp: 2026-09-12T00:00:00Z
+timestamp: 2026-09-13T00:00:00Z
 ---
 
 # Overview
@@ -44,10 +44,15 @@ The highlighter derives its outline and wash from `foreground`, while the DOM
 preview uses `background.raised(1).opaque()`, `foreground`, `border`, the widget
 radius, the resolved mono family, and the theme's shadow policy. Browser page
 zoom is carried with the snapshot so the overlay's border, label, and radius
-remain app-chrome sized instead of growing with the inspected page. Both
-surfaces use the same adaptive-radius curve and squircle shape as native zz
-widgets. Changing page zoom during an active pick replaces that snapshot so the
-screen-space metrics stay stable.
+remain app-chrome sized instead of growing with the inspected page. The
+highlight follows the element's rectangular bounds with a 1px border and a
+half-pixel contrast edge. The preview label uses the same adaptive-radius curve
+and squircle shape as native zz widgets. Changing page zoom during an active
+pick replaces that snapshot so the screen-space metrics stay stable.
+
+`BrowserPickStatus` in `crates/zz-ui/src/browser.rs` shows the native bottom
+instructions on an opaque `background.raised(1)` pill, with padded 12px text,
+a 16px line height, and the shared control border and shadow.
 
 # How it works
 
@@ -75,6 +80,12 @@ The active pick is auto-cancelled on navigation (`on_before_browse`), before clo
 (`on_before_close`), and on renderer termination
 (`on_render_process_terminated`), each emitting `ElementPickCancelled`.
 `cancel_element_pick()` runs `globalThis.__zzElementPicker?.cancel()`.
+
+The picker consumes primary pointer-down/up, mouse-down/up, and click events
+in the window capture phase. It resolves the element context from the click
+handler after preventing the default action and stopping propagation. Pointer
+event cancellation alone does not suppress the later click. Cleanup removes
+these listeners after completion or cancellation so ordinary page input resumes.
 
 # Protocol & validation (`ElementPickState`)
 

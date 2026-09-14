@@ -35,18 +35,19 @@ use zz_browser::{
 };
 use zz_client::{BROWSER_TABLE, ChromeAction};
 use zz_protocol::{
-    BrowserCommand, BrowserDescriptor, ClientMessageKind, CommandInvocation, GuiResponse,
+    Axis, BrowserCommand, BrowserDescriptor, ClientMessageKind, CommandInvocation, GuiResponse,
     InputMessage, KeyToken, MAX_BROWSER_KEY_REPEAT, PaneId,
 };
 use zz_terminal::{KeyAction as TerminalKeyAction, KeyInput as TerminalKeyInput};
 use zz_ui::browser::{
-    BrowserActionMenuState, BrowserEmptyHint, BrowserErrorPanel, BrowserMenuActions,
-    BrowserMenuProfile, BrowserPickStatus, BrowserProfileDiscoveryState, BrowserTabInfo,
-    BrowserTabStrip, BrowserToolbar, browser_action_menu, browser_omnibox_panel,
-    browser_omnibox_row, browser_recent_row, browser_start_surface, browser_toolbar_button,
+    BrowserActionMenuState, BrowserEmptyHint, BrowserErrorPanel, BrowserHeader, BrowserMenuActions,
+    BrowserMenuProfile, BrowserPickStatus, BrowserProfileDiscoveryState, BrowserSiteMenuState,
+    BrowserTabInfo, BrowserTabStrip, BrowserToolbar, browser_action_menu, browser_address,
+    browser_omnibox_panel, browser_omnibox_row, browser_recent_row, browser_site_controls_button,
+    browser_site_menu, browser_start_surface, browser_toolbar_button,
 };
 use zz_ui::feedback::browser_clear_site_data_alert;
-use zz_ui::pane::frame_rate_badge;
+use zz_ui::pane::{PaneDrag, frame_rate_badge, pane_drag_button, pane_header_icon_button};
 use zz_ui::{
     ActiveTheme as _, Colorize as _, IconName, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
@@ -71,7 +72,11 @@ use crate::{
     diagnostics,
     diagnostics::fps::{FPS_SAMPLE_INTERVAL, FrameRateSampler},
     keymap::ChromeChord,
-    mux::{client::MuxClient, prefix::terminal_key_input},
+    mux::{
+        client::MuxClient,
+        nav::{TreeTarget, kill_target_command, split_picker_command},
+        prefix::terminal_key_input,
+    },
     window::corners::{WindowCorners, round_div_radii},
     workspace::ClosePane,
 };
@@ -355,7 +360,11 @@ enum ChromeProfileDiscovery {
 
 #[derive(Clone, PartialEq)]
 struct ChromeState {
+    active: bool,
+    can_drag: bool,
+    drag_title: String,
     opacity: f32,
+    shows_empty_state: bool,
     can_go_back: bool,
     can_go_forward: bool,
     element_pick_active: bool,
@@ -595,7 +604,11 @@ impl BrowserView {
             let browser = cx.entity().downgrade();
             let address = address.clone();
             let state = ChromeState {
+                active: false,
+                can_drag: false,
+                drag_title: initial_url.clone(),
                 opacity: 1.0,
+                shows_empty_state: is_blank_url(&initial_url),
                 can_go_back: false,
                 can_go_forward: false,
                 element_pick_active: false,
@@ -1238,6 +1251,9 @@ impl BrowserView {
                     self.title = title.to_string();
                     recent_pages::record_title(&self.profile, &self.current_url, title, cx);
                 }
+                BrowserEvent::FaviconChanged { url, png, .. } => {
+                    recent_pages::record_favicon(&self.profile, url, png.clone(), cx);
+                }
                 BrowserEvent::LoadingChanged {
                     loading,
                     can_go_back,
@@ -1391,6 +1407,9 @@ impl BrowserView {
             BrowserEvent::TitleChanged { title, .. } => {
                 recent_pages::record_title(&self.profile, &entry.url, title, cx);
                 entry.title = title.to_string();
+            }
+            BrowserEvent::FaviconChanged { url, png, .. } => {
+                recent_pages::record_favicon(&self.profile, url, png.clone(), cx);
             }
             BrowserEvent::LoadingChanged {
                 loading,
@@ -1873,7 +1892,7 @@ impl BrowserView {
         self.activate_tab(tab, window, cx);
     }
 
-    fn tab_strip_state(&self) -> (Vec<BrowserTabInfo>, usize) {
+    fn tab_strip_state(&self, cx: &App) -> (Vec<BrowserTabInfo>, usize) {
         let tabs = self
             .tabs
             .iter()
@@ -1884,7 +1903,13 @@ impl BrowserView {
                     (tab.url.as_str(), tab.title.as_str())
                 };
                 let detail = if title.is_empty() { url } else { title };
-                BrowserTabInfo::new(tab.id.0, tab_host_label(url), detail.to_owned())
+                let label = if title.is_empty() {
+                    tab_host_label(url)
+                } else {
+                    title.to_owned().into()
+                };
+                BrowserTabInfo::new(tab.id.0, label, detail.to_owned())
+                    .favicon(recent_pages::favicon(&self.profile, url, cx))
             })
             .collect();
         (tabs, self.active_tab_index())
@@ -2918,6 +2943,7 @@ impl BrowserView {
                     suggestion.title.clone(),
                     suggestion.display_url.clone(),
                     self.omnibox.selected == Some(index),
+                    recent_pages::favicon(&self.profile, &suggestion.url, cx),
                     cx,
                 )
                 .on_mouse_down(MouseButton::Left, move |_, window, cx| {
@@ -2982,16 +3008,19 @@ impl BrowserView {
     ) -> impl IntoElement {
         let url = page.url.clone();
         let view = cx.entity();
-        browser_recent_row(("browser-recent", index), display_url(&page.url), cx).on_mouse_down(
-            MouseButton::Left,
-            move |_, window, cx| {
-                view.update(cx, |view, cx| {
-                    view.submit_address(&url, cx);
-                    view.focus_page(window, cx);
-                });
-                cx.stop_propagation();
-            },
+        browser_recent_row(
+            ("browser-recent", index),
+            display_url(&page.url),
+            page.favicon(),
+            cx,
         )
+        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+            view.update(cx, |view, cx| {
+                view.submit_address(&url, cx);
+                view.focus_page(window, cx);
+            });
+            cx.stop_propagation();
+        })
     }
 }
 
@@ -3131,6 +3160,8 @@ impl EntityInputHandler for BrowserView {
         Some(0)
     }
 }
+
+impl gpui::EventEmitter<PaneDrag> for BrowserView {}
 
 impl Render for BrowserChromeView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -3344,43 +3375,159 @@ impl Render for BrowserChromeView {
             browser_action_menu(menu, window, cx, state, actions)
         })
         .anchor(Anchor::TopRight);
+        let site_browser = self.browser.clone();
+        let site_focus_browser = self.browser.clone();
+        let site_controls = browser_site_controls_button(cx)
+            .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                if let Some(browser) = site_focus_browser.upgrade() {
+                    browser.update(cx, |view, cx| view.select_pane(cx));
+                }
+            })
+            .dropdown_menu(move |menu, _, cx| {
+                let Some(browser) = site_browser.upgrade() else {
+                    return menu;
+                };
+                let (state, pane, tab) = {
+                    let view = browser.read(cx);
+                    let controller = view.controller.read(cx);
+                    let http = has_http_origin(&view.current_url);
+                    let site = url::Url::parse(&view.current_url)
+                        .ok()
+                        .and_then(|url| url.host_str().map(str::to_owned))
+                        .unwrap_or_else(|| "This page".to_owned());
+                    (
+                        BrowserSiteMenuState {
+                            site: site.into(),
+                            connection_secure: http
+                                .then(|| {
+                                    controller.site_connection_secure(view.pane, view.active_tab)
+                                })
+                                .flatten(),
+                            audio_muted: controller.audio_muted(view.pane, view.active_tab),
+                            can_clear_site_data: http,
+                        },
+                        view.pane,
+                        view.active_tab,
+                    )
+                };
+                let muted = state.audio_muted;
+                let sound_browser = browser.downgrade();
+                let clear_browser = browser.downgrade();
+                browser_site_menu(
+                    menu,
+                    state,
+                    move |_, cx| {
+                        if let Some(browser) = sound_browser.upgrade()
+                            && let Some(muted) = muted
+                        {
+                            browser.update(cx, |view, cx| {
+                                view.controller.update(cx, |controller, cx| {
+                                    controller.set_audio_muted(pane, tab, !muted, cx);
+                                });
+                            });
+                        }
+                    },
+                    move |window, cx| {
+                        if let Some(browser) = clear_browser.upgrade() {
+                            browser.update(cx, |view, cx| {
+                                if view.pane == pane && view.active_tab == tab {
+                                    BrowserView::confirm_clear_site_data(window, cx);
+                                }
+                            });
+                        }
+                    },
+                )
+            });
         let address_browser = self.browser.clone();
         let activate_browser = self.browser.clone();
         let close_browser = self.browser.clone();
         let new_tab_browser = self.browser.clone();
-        let tabs = BrowserTabStrip::new(
-            &self.address,
-            self.state.tabs.clone(),
-            self.state.active_tab_index,
-        )
-        .on_address_mouse_down(move |_, cx| {
-            if let Some(browser) = address_browser.upgrade() {
-                browser.update(cx, |view, cx| view.select_pane(cx));
-            }
-        })
-        .on_activate(move |id, window, cx| {
-            if let Some(browser) = activate_browser.upgrade() {
-                browser.update(cx, |view, cx| view.activate_tab(TabId(id), window, cx));
-            }
-        })
-        .on_close(move |id, window, cx| {
-            if let Some(browser) = close_browser.upgrade() {
-                browser.update(cx, |view, cx| view.close_tab_by_id(TabId(id), window, cx));
-            }
-        })
-        .on_new_tab(move |window, cx| {
-            if let Some(browser) = new_tab_browser.upgrade() {
-                browser.update(cx, |view, cx| view.open_tab(None, true, window, cx));
-            }
-        });
+        let address = browser_address(&self.address, site_controls, cx).on_mouse_down(
+            MouseButton::Left,
+            move |_, _, cx| {
+                if let Some(browser) = address_browser.upgrade() {
+                    browser.update(cx, |view, cx| view.select_pane(cx));
+                }
+            },
+        );
+        let tabs = BrowserTabStrip::new(self.state.tabs.clone(), self.state.active_tab_index)
+            .on_activate(move |id, window, cx| {
+                if let Some(browser) = activate_browser.upgrade() {
+                    browser.update(cx, |view, cx| view.activate_tab(TabId(id), window, cx));
+                }
+            })
+            .on_close(move |id, window, cx| {
+                if let Some(browser) = close_browser.upgrade() {
+                    browser.update(cx, |view, cx| view.close_tab_by_id(TabId(id), window, cx));
+                }
+            })
+            .on_new_tab(move |window, cx| {
+                if let Some(browser) = new_tab_browser.upgrade() {
+                    browser.update(cx, |view, cx| view.open_tab(None, true, window, cx));
+                }
+            });
 
+        let drag_browser = self.browser.clone();
+        let drag = self.browser.upgrade().map(|browser| {
+            let pane = browser.read(cx).pane;
+            pane_drag_button(
+                ("browser-pane-drag", pane.0),
+                pane,
+                self.state.drag_title.clone(),
+                self.state.can_drag,
+                move |drag, _, cx| {
+                    if let Some(browser) = drag_browser.upgrade() {
+                        browser.update(cx, |_, cx| cx.emit(*drag));
+                    }
+                },
+                cx,
+            )
+        });
+        let action = |icon, label: &'static str, axis: Option<Axis>| {
+            let browser = self.browser.clone();
+            pane_header_icon_button(label, icon, true, cx)
+                .tooltip(label)
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    if let Some(browser) = browser.upgrade() {
+                        browser.update(cx, |view, cx| {
+                            let command = axis.map_or_else(
+                                || kill_target_command(TreeTarget::Pane(view.pane)),
+                                |axis| split_picker_command(view.pane, axis),
+                            );
+                            view.mux.read(cx).execute(command);
+                        });
+                    }
+                })
+        };
+        let actions = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_1()
+            .child(action(
+                IconName::PanelBottom,
+                "Split bottom",
+                Some(Axis::Vertical),
+            ))
+            .child(action(
+                IconName::PanelRight,
+                "Split right",
+                Some(Axis::Horizontal),
+            ))
+            .children(drag)
+            .child(action(IconName::Xmark, "Close pane", None));
         div()
-            .h(BrowserToolbar::HEIGHT)
+            .h(BrowserHeader::HEIGHT)
             .w_full()
             .flex_none()
             .opacity(self.state.opacity)
-            .child(BrowserToolbar::new(
-                back, forward, reload, tabs, picker, more,
+            .child(BrowserHeader::new(
+                self.state.active,
+                tabs,
+                actions,
+                BrowserToolbar::new(back, forward, reload, address, picker, more)
+                    .show_separator(!self.state.shows_empty_state),
             ))
     }
 }
@@ -3394,9 +3541,32 @@ impl Render for BrowserView {
         if self.chrome_profile_discovery == ChromeProfileDiscovery::NotStarted {
             self.refresh_chrome_profiles(false, window, cx);
         }
-        let (tabs, active_tab_index) = self.tab_strip_state();
+        let (tabs, active_tab_index) = self.tab_strip_state(cx);
+        let (active, can_drag, drag_title) = {
+            let mux = self.mux.read(cx);
+            let snapshot = mux.snapshot();
+            let pane_window = snapshot
+                .sessions
+                .iter()
+                .flat_map(|session| &session.windows)
+                .find(|window| window.panes.contains_key(&self.pane));
+            (
+                pane_window.is_some_and(|window| window.active_pane == self.pane),
+                mux.is_connected()
+                    && pane_window.is_some_and(|window| {
+                        window.zoomed_pane.is_none() && window.panes.len() > 1
+                    }),
+                pane_window
+                    .and_then(|window| window.panes.get(&self.pane))
+                    .map_or_else(|| "Browser".to_owned(), zz_client::navigation::pane_label),
+            )
+        };
         let snapshot = ChromeState {
+            active,
+            can_drag,
+            drag_title,
             opacity: self.chrome_opacity,
+            shows_empty_state,
             can_go_back: self.can_go_back,
             can_go_forward: self.can_go_forward,
             element_pick_active: self.element_pick_active,
@@ -3491,7 +3661,11 @@ impl Render for BrowserView {
 
         let browser_surface = div()
             .id("browser-content")
-            .bg(crate::theme::app_pane_background(cx).opaque())
+            .bg(if shows_empty_state {
+                crate::theme::app_pane_background(cx)
+            } else {
+                crate::theme::app_pane_background(cx).opaque()
+            })
             .relative()
             .flex()
             .flex_1()
@@ -3640,7 +3814,7 @@ impl Render for BrowserView {
                         .bg(crate::theme::app_pane_background(cx))
                         .rounded_tl(content_radii.top_left)
                         .rounded_tr(content_radii.top_right)
-                        .h(BrowserToolbar::HEIGHT)
+                        .h(BrowserHeader::HEIGHT)
                         .w_full()
                         .flex_none()
                         .on_mouse_down(
@@ -3652,7 +3826,7 @@ impl Render for BrowserView {
                         .child(
                             AnyView::from(self.chrome.clone()).cached(
                                 StyleRefinement::default()
-                                    .h(BrowserToolbar::HEIGHT)
+                                    .h(BrowserHeader::HEIGHT)
                                     .w_full()
                                     .flex_none(),
                             ),

@@ -297,6 +297,7 @@ impl TuiBrowserProvider {
                         );
                     }
                     BrowserEvent::TitleChanged { .. }
+                    | BrowserEvent::FaviconChanged { .. }
                     | BrowserEvent::LoadingChanged { .. }
                     | BrowserEvent::FrameReady { .. }
                     | BrowserEvent::CursorChanged { .. }
@@ -362,6 +363,7 @@ impl TuiBrowserProvider {
                     BrowserEvent::Closed { .. } => session.browser.mark_closed(),
                     BrowserEvent::AddressChanged { .. }
                     | BrowserEvent::TitleChanged { .. }
+                    | BrowserEvent::FaviconChanged { .. }
                     | BrowserEvent::LoadingChanged { .. }
                     | BrowserEvent::FrameReady { .. }
                     | BrowserEvent::SharedTextureFailed { .. }

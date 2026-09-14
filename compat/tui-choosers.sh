@@ -531,6 +531,45 @@ for line in sys.stdin.read().split("\n"):
 '
 }
 
+# THE INFO VIEW'S MASK, the client mask plus the four values `i` puts on screen
+# that two servers cannot agree on: the client's own PID, the absolute and
+# relative `#{t:client_created}` and `#{t:client_activity}` of two clients
+# attached one after the other, and `#{client_written}`, which counts the bytes
+# each binary's own renderer has sent. Each becomes a fixed token, and the run
+# of box fill that follows a substituted value collapses, because a token of a
+# different width moves the box's right edge by a column. The relative half is
+# masked whole rather than digit by digit: the driver attaches one client and
+# then the other, so the two ages differ by the second between the attaches
+# (measured 2026-09-14: `Mon Sep 14 07:51:48 2026 (13s)` against
+# `Mon Sep 14 07:51:47 2026 (15s)`), and `format_relative_time` expands to
+# nothing at all for a stamp that is not yet in the past, which one run caught
+# on the pin's own side. Every other cell of the view - the labels, the acs
+# rules, the session, the terminal type, TERM, the size, the feature grid and
+# the box - is asserted whole.
+client_info_mask() {
+  local name
+  name="$(client_name "$1")"
+  [ -n "$name" ] || die "the $1 side has no client name to mask"
+  ZZ_MASK_NAME="$name" python3 -c '
+import os, re, sys
+
+name = re.escape(os.environ["ZZ_MASK_NAME"])
+stamp = r"[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9]?[0-9] \d\d:\d\d:\d\d \d{4}"
+for line in sys.stdin.read().split("\n"):
+    masked = re.sub(name, "/dev/CLIENT", line)
+    masked = re.sub(r"\(PID \d+\)", "(PID NNNN)", masked)
+    masked = re.sub(stamp, "TIMESTAMP", masked)
+    masked = re.sub(r"(TIMESTAMP(?:\s|\x1b\[[0-9;]*m)*)\([^)]*\)", r"\g<1>(REL)", masked)
+    masked = re.sub(r"(Bytes Written.*?\s)\d+", r"\g<1>NNNN", masked)
+    masked = re.sub(r"\(\d+ discarded\)", "(NN discarded)", masked)
+    masked = re.sub(r"\d\d:\d\d", "NN:NN", masked)
+    if masked != line:
+        masked = re.sub(r"  +", " ", masked)
+        masked = re.sub("\u2500{2,}", "\u2500", masked)
+    sys.stdout.write(masked + "\n")
+'
+}
+
 compare_rows() {
   local name="$1"
   local styled="$2"
@@ -902,7 +941,12 @@ wait_soft() {
 # the chosen client's current pane over a rule, and a copy of that client's own
 # status row at the bottom of the box. The client name is the one value this
 # fixture cannot pin, so this case, and only it, compares through the mask the
-# header describes. q ends the mode and the pane comes back whole.
+# header describes. `i` swaps that box for `window_client_draw_info`, the
+# twenty-three `window_client_info_lines` drawn down to the box's height with
+# an acs rule down column 14 and the box title reading `(view: info)`; those
+# two checkpoints compare through `client_info_mask`, which pins the four
+# values two servers cannot agree on and asserts every other cell. q ends the
+# mode and the pane comes back whole.
 client_case() {
   CASE_LABEL=client-tree
   ROW_MASK=client_row_mask
@@ -929,6 +973,12 @@ client_case() {
   verdict client-tag-all same
   step '(sort: name)' T
   verdict client-tag-all-cleared same
+  ROW_MASK=client_info_mask
+  step '(view: info)' i
+  verdict client-info-view same
+  step '(view: preview)' i
+  verdict client-info-view-off same
+  ROW_MASK=client_row_mask
   step '(filter) ' f
   verdict client-filter-prompt same
   step '(sort: name)' Escape
@@ -1152,6 +1202,18 @@ run_self_check() {
   self_check_case 'client info, the pin client tree on its info view alone' rows
   type_on_side tmux i
   wait_screen tmux hard 'the one-sided info view withdrawn' '' 'session cho'
+
+  # The same sabotage the other way round, which is the one that catches a
+  # wrong zz info view: the pin stays on `window_client_draw` and zz alone
+  # swaps in `window_client_draw_info`, so every info row it draws is a row the
+  # pin does not have.
+  before="$(styled_screen_of zz)"
+  type_on_side zz i
+  wait_screen zz hard 'the one-sided info view on zz' "$before" 'Client Name'
+  compare_rows self-check-client-info-zz styled || true
+  self_check_case 'client info, the zz client tree on its info view alone' rows
+  type_on_side zz i
+  wait_screen zz hard 'the one-sided info view on zz withdrawn' '' 'session cho'
   step 'MARK-clientinfo' q
   ROW_MASK=
 

@@ -5672,6 +5672,7 @@ impl Shared {
             inner.native_terminal_search_clients.remove(&client);
             inner.utf8_clients.remove(&client);
             inner.client_features.remove(&client);
+            inner.client_terminal_types.remove(&client);
             inner.nested_clients.remove(&client);
             inner.client_ttys.remove(&client);
             inner.client_sizes.remove(&client);
@@ -23083,6 +23084,29 @@ impl Shared {
         }
     }
 
+    /// `tty_keys_extended_device_attributes` stores the reply on the client
+    /// before `tty_update_features` reads it, so the name lands whether or not
+    /// the daemon knows any feature by it.
+    fn set_client_terminal_type(&self, client: ClientId, kind: ClientKind, term_type: &str) {
+        if kind != ClientKind::Interactive || term_type.is_empty() {
+            return;
+        }
+        let changed = {
+            let mut inner = self.inner.lock();
+            if !inner.client_terminals.contains(&client) {
+                return;
+            }
+            inner
+                .client_terminal_types
+                .insert(client, term_type.to_owned())
+                .as_deref()
+                != Some(term_type)
+        };
+        if changed {
+            self.refresh_status(true);
+        }
+    }
+
     fn set_terminal_preview(&self, client: ClientId, kind: ClientKind, enabled: bool) {
         if kind != ClientKind::Interactive {
             return;
@@ -28217,6 +28241,9 @@ struct ServerState {
     /// one `server_client_print` sanitizes its output for.
     utf8_clients: BTreeSet<ClientId>,
     client_features: BTreeMap<ClientId, u32>,
+    /// `c->term_type`: the terminal's own name out of its XTVERSION reply,
+    /// which `#{client_termtype}` answers and `window_client_draw_info` draws.
+    client_terminal_types: BTreeMap<ClientId, String>,
     nested_clients: BTreeSet<ClientId>,
     client_ttys: BTreeMap<ClientId, String>,
     client_sizes: BTreeMap<ClientId, (u16, u16)>,
@@ -32748,6 +32775,21 @@ fn client_colour_count(inner: &ServerState, client: ClientId) -> Option<u32> {
 /// `c->term_features`: what the client's flags asked for and what its terminal
 /// has since answered, folded with the set `tty_term_create` derives from the
 /// terminfo entry, the `terminal-features` array and `COLORTERM`.
+/// `tty_update_features`: a feature a client's terminal answered for goes on
+/// that client's own `tty_term`, so `#{I/f:<name>}` sees it beside the ones the
+/// `terminal-features` option asked for. The option array is the pin's channel
+/// for exactly that, so the learned set rides it as one more entry matching
+/// this client's own `TERM`.
+fn client_terminal_features_option(inner: &ServerState, client: ClientId) -> Vec<String> {
+    let mut features = inner.engine.terminal_features_option();
+    let term = client_environment_value(inner, client, "TERM").unwrap_or_default();
+    let learned = terminal_features_list(inner.client_features.get(&client).copied().unwrap_or(0));
+    if !term.is_empty() && !learned.is_empty() {
+        features.push(format!("{term}:{}", learned.replace(',', ":")));
+    }
+    features
+}
+
 fn client_feature_mask(inner: &ServerState, client: ClientId) -> u32 {
     let mut features = inner.client_features.get(&client).copied().unwrap_or(0);
     if let Some(term) = client_terminal_facts(
@@ -33074,7 +33116,11 @@ fn client_format_facts(
             .filter(|term| !term.is_empty())
             .unwrap_or("unknown")
             .to_owned(),
-        termtype: String::new(),
+        termtype: inner
+            .client_terminal_types
+            .get(&client)
+            .cloned()
+            .unwrap_or_default(),
         theme: inner
             .client_color_schemes
             .get(&client)
@@ -33093,7 +33139,7 @@ fn client_format_facts(
                 client_terminal_facts(
                     client_environment_value(inner, client, "TERM").unwrap_or_default(),
                     client_environment_value(inner, client, "COLORTERM"),
-                    &inner.engine.terminal_features_option(),
+                    &client_terminal_features_option(inner, client),
                     &inner.engine.terminal_overrides_option(),
                 )
             })
@@ -40148,6 +40194,9 @@ fn handle_connection<S: TransportStream>(
             }
             ProtocolMessage::ClientTerminalFeatures { features } => {
                 shared.add_client_terminal_features(client, hello.kind, &features);
+            }
+            ProtocolMessage::ClientTerminalType { term_type } => {
+                shared.set_client_terminal_type(client, hello.kind, &term_type);
             }
             ProtocolMessage::Input(input) => {
                 if let Some(context) = context.as_mut() {

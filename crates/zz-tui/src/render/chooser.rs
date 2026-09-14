@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use unicode_width::UnicodeWidthChar as _;
 use zz_protocol::{
     ChooseBufferState, ChooseTreeState, ChooserPresentation, ChooserPreview, ChooserPreviewSize,
-    ChooserPreviewTile, ThemeColours, TmuxColour, TmuxStyle, apply_style, parse_style,
-    parse_styled_segments,
+    ChooserPreviewTile, ThemeColours, TmuxAttributeState, TmuxColour, TmuxStyle, apply_style,
+    parse_style, parse_styled_segments,
 };
 use zz_terminal::{
     CellWidth, Color, Glyph, PackedCell, PackedStyle, TerminalAppearance, TerminalViewport,
@@ -153,6 +153,55 @@ fn resolved(style: &TmuxStyle, theme: &ThemeColours) -> TmuxStyle {
     style
 }
 
+/// `tty_acs_table`: the VT100 line-drawing set a style's `acs` attribute draws
+/// its text through. An entry the table does not name is left alone, which is
+/// what `tty_acs_get` does with a character outside the range.
+fn acs_text(text: &str) -> String {
+    text.chars().map(acs_glyph).collect()
+}
+
+fn acs_glyph(character: char) -> char {
+    match character {
+        '+' => '\u{2192}',
+        ',' => '\u{2190}',
+        '-' => '\u{2191}',
+        '.' => '\u{2193}',
+        '0' => '\u{25ae}',
+        '`' => '\u{25c6}',
+        'a' => '\u{2592}',
+        'b' => '\u{2409}',
+        'c' => '\u{240c}',
+        'd' => '\u{240d}',
+        'e' => '\u{240a}',
+        'f' => '\u{00b0}',
+        'g' => '\u{00b1}',
+        'h' => '\u{2424}',
+        'i' => '\u{240b}',
+        'j' => '\u{2518}',
+        'k' => '\u{2510}',
+        'l' => '\u{250c}',
+        'm' => '\u{2514}',
+        'n' => '\u{253c}',
+        'o' => '\u{23ba}',
+        'p' => '\u{23bb}',
+        'q' => '\u{2500}',
+        'r' => '\u{23bc}',
+        's' => '\u{23bd}',
+        't' => '\u{251c}',
+        'u' => '\u{2524}',
+        'v' => '\u{2534}',
+        'w' => '\u{252c}',
+        'x' => '\u{2502}',
+        'y' => '\u{2264}',
+        'z' => '\u{2265}',
+        '{' => '\u{03c0}',
+        '|' => '\u{2260}',
+        '}' => '\u{00a3}',
+        '~' => '\u{00b7}',
+        other => other,
+    }
+}
+
 fn text_width(text: &str) -> usize {
     text.chars()
         .map(|character| character.width().unwrap_or(0))
@@ -282,10 +331,16 @@ impl Grid {
                 style.fg = base.fg;
                 style.bg = base.bg;
             }
+            let text = if style.attributes.acs == TmuxAttributeState::On {
+                style.attributes.acs = TmuxAttributeState::Unset;
+                acs_text(&segment.text)
+            } else {
+                segment.text.clone()
+            };
             used += self.text(
                 x.saturating_add(used),
                 y,
-                &segment.text,
+                &text,
                 &Paint::Style(style),
                 limit - used,
             );

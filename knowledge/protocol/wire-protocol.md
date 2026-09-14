@@ -658,6 +658,11 @@ halves in the same push. v102 also appends `pane: Option<PaneId>` to `CommandPro
 rather than to the client, and `redraw_draw_pane_prompt` draws it over the pane's last row - its
 first under `status-position top` - and leaves the status row alone. `None` is the client prompt
 `status_prompt_set` raises. The raw TUI is the consumer half and it shipped in the same push.
+v102 also appends `ProtocolMessage::ClientTerminalType { term_type: String }` after
+`ClientTerminalFeatures`, the terminal's own name out of its XTVERSION reply as
+`tty_keys_extended_device_attributes` stores it in `c->term_type`; `term_type` is capped at
+`MAX_CLIENT_TERMINAL_TYPE_BYTES` (128) bytes, rejected during deserialization, and the daemon
+answers `#{client_termtype}` from it.
 
 # Versioning & compatibility
 

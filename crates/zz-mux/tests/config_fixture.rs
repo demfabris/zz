@@ -73,6 +73,7 @@ fn existing_tmux_config_applies_supported_subset_and_skips_the_rest() {
                 prompt_type: zz_protocol::CommandPromptType::Command,
                 mode: zz_protocol::CommandPromptMode::Text,
                 no_freeze: false,
+                pane: None,
             }]
         );
     }

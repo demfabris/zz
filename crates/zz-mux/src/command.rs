@@ -1091,6 +1091,9 @@ pub enum MuxEffect {
         prompt_type: CommandPromptType,
         mode: CommandPromptMode,
         no_freeze: bool,
+        /// `-P`: the pane `window_pane_set_prompt` hangs the prompt on, so the
+        /// client draws it over that pane instead of on the status row.
+        pane: Option<PaneId>,
     },
     ChooseTree {
         pane: PaneId,
@@ -8173,6 +8176,14 @@ impl MuxEngine {
                 "command prompt template exceeds {MAX_COMMAND_PROMPT_TEMPLATE_BYTES} bytes"
             )));
         }
+        let pane = if options.has("-P") {
+            match self.resolve_pane(None, context.window, context.pane) {
+                Ok(pane) => Some(pane),
+                Err(_) => return Ok(Execution::default()),
+            }
+        } else {
+            None
+        };
         Ok(Execution::effect(MuxEffect::CommandPrompt {
             steps,
             template,
@@ -8180,6 +8191,7 @@ impl MuxEngine {
             prompt_type,
             mode,
             no_freeze: options.has("-C"),
+            pane,
         }))
     }
 
@@ -39182,6 +39194,7 @@ mod tests {
                 prompt_type: CommandPromptType::Command,
                 mode: CommandPromptMode::Text,
                 no_freeze: false,
+                pane: None,
             }]
         );
 
@@ -39214,6 +39227,7 @@ mod tests {
                 prompt_type: CommandPromptType::Command,
                 mode: CommandPromptMode::Text,
                 no_freeze: false,
+                pane: None,
             }]
         );
         let with_pane_flag = engine
@@ -39229,8 +39243,25 @@ mod tests {
                     ],
                 ),
             )
-            .expect("-P raises the client prompt");
-        assert_eq!(with_pane_flag.effects, execution.effects);
+            .expect("-P raises the prompt on the pane it targets");
+        assert_eq!(
+            with_pane_flag.effects,
+            vec![MuxEffect::CommandPrompt {
+                steps: vec![CommandPromptStep {
+                    label: "(rename-window) ".to_owned(),
+                    input: "work tree / editor pane".to_owned(),
+                }],
+                template: Some(CommandPromptTemplate::String(
+                    "rename-window -- '%%'".to_owned(),
+                )),
+                source: None,
+                prompt_type: CommandPromptType::Command,
+                mode: CommandPromptMode::Text,
+                no_freeze: false,
+                pane: context.pane,
+            }]
+        );
+        assert!(context.pane.is_some());
 
         for (index, value) in [
             (90, "a10e=display-message"),
@@ -39366,6 +39397,19 @@ mod tests {
             engine.execute(&mut context, &command("command-prompt", &["-T", "bogus"])),
             Err(ServerError::InvalidCommand(message)) if message == "unknown type: bogus"
         ));
+        assert!(
+            engine
+                .execute(&mut context, &command("command-prompt", &["-P", "-1"]))
+                .expect("-P with no pane is cmd_command_prompt_exec's silent NORMAL")
+                .effects
+                .is_empty()
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-s", "prompt pane"]),
+            )
+            .expect("a pane for the pane prompt");
         assert_eq!(
             mode(&mut engine, &mut context, &["-P", "-1"]),
             (CommandPromptMode::Single, CommandPromptType::Command, false),

@@ -829,30 +829,26 @@ find_window_case() {
 # in the stock emacs table is copy-selection-and-cancel and so is also the way
 # back to the pane - with the grid, the submitted search and the restoration
 # asserted and the copied text compared as a note.
-# The view surface itself now matches: output-shown and output-searched are
-# asserted whole. Two divergences the modes landing did not carry are recorded
-# with the bytes that name them.
+# The whole run is asserted: the view surface, the pane prompt the stock search
+# raises, the submitted search and the selection that drops its marks.
 #
 # THE PANE PROMPT. Both stock search bindings are `command-prompt -P`
 # (key-bindings.c:569-570 and 654), and -P is window_pane_set_prompt, whose
 # prompt redraw_draw_pane_prompt (screen-redraw.c:1524) draws over the pane's
 # LAST row - its first under status-position top - leaving the status row
-# alone. zz raises the same prompt on the client and its raw TUI draws it on
-# the status row instead, so the pin's row 22 carries `(search down) ` while
-# zz's row 23 does and zz's row 22 still carries the output line. Closing it
-# needs the -P flag on the wire with the pane it targets, which is more than
-# this obligation's chooser surfaces.
+# alone. The raw TUI carries -P and the pane it targets on the wire
+# (CommandPromptState.pane, v102) and paints that row itself, so both sides put
+# `(search down) ` on row 22 in message-style over the pane's own default cells
+# and keep the status row. Closed 2026-09-14.
 #
 # THE SEARCH MARK UNDER A SELECTION. window_copy_command clears
 # `data->searchmark` for every command that is not `search-*` unless the
 # command's clear column says never (window-copy.c:3767), so begin-selection
-# and cursor-right drop the marks: the pin's `77` is plain and only the
-# selection is painted. zz keeps the current-match cell painted under the
-# selection. zz-terminal already carries that rule
-# (CopyModeAction::clears_search_marks, session.rs:8734) and applies it to a
-# pane's copy mode; the retained command output does not reach it.
-OUTPUT_PROMPT_REASON='the pin draws the stock search prompt over the pane with command-prompt -P (window_pane_set_prompt, screen-redraw.c:1524) and zz draws the same prompt on the status row; measured 2026-09-12, pin row 22 `(search down) ` with the status row kept, zz row 23'
-OUTPUT_MARK_REASON='the pin clears the search marks on any non-search copy-mode command (window-copy.c:3767) so the selection alone is painted; zz keeps the current-match cell under the selection in the retained command output; measured 2026-09-12, row 18 `77` plain on the pin and in the current-match style on zz'
+# and cursor-right drop the marks and only the selection is painted. zz already
+# carried the rule (CopyModeAction::clears_search_marks) but painted the mode
+# snapshot's match overlays from the view's own search rather than from the
+# marks, so the retained command output kept the current-match cell under the
+# selection; the overlays now follow the marks. Closed 2026-09-14.
 OUTPUT_REASON='the copied text is compared as a note because the view surfaces above it are compared whole'
 command_output_case() {
   CASE_LABEL=command-output
@@ -865,14 +861,14 @@ command_output_case() {
   wait_screen zz soft 'the run-shell output on the zz screen' "$before_zz" '/177]'
   verdict output-shown same
   step '(search down)' C-s
-  verdict output-search-prompt record "$OUTPUT_PROMPT_REASON"
+  verdict output-search-prompt same
   step '(search down)' -l 77
-  verdict output-search-typed record "$OUTPUT_PROMPT_REASON"
+  verdict output-search-typed same
   step '' Enter
   verdict output-searched same
   type_on_both C-Space
   step '' Right Right
-  verdict output-selected record "$OUTPUT_MARK_REASON"
+  verdict output-selected same
   step 'MARK-output' M-w
   verdict output-closed same
   wait_for 'the copied selection on the tmux side' top_buffer_is tmux buffer0
@@ -1190,6 +1186,36 @@ run_self_check() {
   wait_for 'the armed prefix on the tmux client' client_prefix_is tmux 1
   type_on_side tmux z
   wait_screen tmux hard 'the one-sided zoom withdrawn' "$before" "$UNZOOMED_STATUS"
+
+  # THE PANE PROMPT AND THE SEARCH MARKS, the two channels command_output_case
+  # asserts that no other sabotage here reaches. The run-shell output is raised
+  # on both sides; C-s then goes into the pin's client alone, which puts
+  # `(search down) ` on the pin's pane prompt row and leaves zz's row carrying
+  # the output line, and the submitted search that follows paints the pin's
+  # current match and nothing on zz. A comparison blind to either row would
+  # report neither.
+  CASE_LABEL='self-check command output'
+  attach_both_at 80 24
+  mark_both outputsab
+  before="$(styled_screen_of tmux)"
+  on_both_active run-shell -t PANE 'seq 1 200'
+  wait_screen tmux hard 'the run-shell output on the tmux screen' "$before" '/177]'
+  wait_screen zz hard 'the run-shell output on the zz screen' '' '/177]'
+  before="$(styled_screen_of tmux)"
+  type_on_side tmux C-s
+  wait_screen tmux hard 'the one-sided pane prompt' "$before" '(search down)'
+  compare_rows self-check-pane-prompt styled || true
+  self_check_case 'pane prompt, the stock search prompt over one pane only' rows
+  before="$(styled_screen_of tmux)"
+  type_on_side tmux -l 77
+  type_on_side tmux Enter
+  wait_screen tmux hard 'the one-sided search marks' "$before" ''
+  compare_rows self-check-search-marks styled || true
+  self_check_case 'search marks, the current match painted on one side only' rows
+  type_on_side tmux q
+  wait_screen tmux hard 'the pin back on its pane' '' 'MARK-outputsab'
+  type_on_side zz q
+  wait_screen zz hard 'zz back on its pane' '' 'MARK-outputsab'
 
   # The chooser's own prompt row: f typed into the pin's buffer tree alone.
   # Only the prompt row and the cursor on it can carry the difference.

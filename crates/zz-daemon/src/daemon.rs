@@ -18302,6 +18302,7 @@ impl Shared {
         mouse: &MouseEventTarget,
     ) -> Result<(), DaemonError> {
         let (pane, window) = (mouse.pane, mouse.window);
+        let root_was_first;
         let Some((commands, repeat_binding, session, window, pane)) = ({
             let inner = self.inner.lock();
             let Some(session) = client_attached_session(&inner, client) else {
@@ -18318,6 +18319,10 @@ impl Shared {
                 .is_none_or(|table| table == root_table)
                 .then(|| mouse_mode_key_table(&inner, client, pane))
                 .flatten();
+            root_was_first = mode_table.is_none()
+                && active_table
+                    .as_deref()
+                    .is_none_or(|table| table == root_table);
             let binding = active_table
                 .as_deref()
                 .filter(|table| *table != root_table)
@@ -18345,6 +18350,9 @@ impl Shared {
                 )
             })
         }) else {
+            if root_was_first {
+                self.forward_mouse_key_to_pane(client, mouse);
+            }
             return Ok(());
         };
         let Some(pane) = pane else {
@@ -18371,6 +18379,38 @@ impl Shared {
         context.format_variables = previous_variables;
         self.sync_prefix_armed(client);
         result
+    }
+
+    /// `server_client_handle_key`'s `forward_key`: a mouse key that matched
+    /// nothing in the first table tried, and so was never looked up anywhere
+    /// but the root table, is handed to the pane the event landed on through
+    /// `window_pane_key`. `input_key_mouse` writes it only while that pane has
+    /// a mouse mode armed, so the pane input the client encoded with the event
+    /// is the write, and anything the client encoded for its own pointer
+    /// handling instead is dropped the way an unarmed pane drops a report.
+    fn forward_mouse_key_to_pane(self: &Arc<Self>, client: ClientId, mouse: &MouseEventTarget) {
+        let Some(pane) = mouse.pane else {
+            return;
+        };
+        let Some(action @ zz_terminal::TerminalViewAction::Mouse(_)) = mouse.view_action.clone()
+        else {
+            return;
+        };
+        let terminal = {
+            let inner = self.inner.lock();
+            if inner.client_flags.contains(client)
+                || !client_is_attached_to_pane(&inner, client, pane)
+            {
+                None
+            } else {
+                inner.terminals.get(&pane).cloned()
+            }
+        };
+        let Some(terminal) = terminal else {
+            return;
+        };
+        self.note_terminal_input(client, pane);
+        terminal.view_action(TerminalViewId(client.0), action);
     }
 
     fn input_browser_surface_key(

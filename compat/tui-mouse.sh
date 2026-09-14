@@ -64,6 +64,12 @@
 #   app-mouse-report            the SGR report a program in the pane received,
 #                               read off the pane's own decoded screen
 #   app-mouse-report-mouse-off  the same with `mouse off`
+#   app-mouse-drag              the three reports a program under button-event
+#                               tracking received from a press, a motion with
+#                               the button held and the release that ends the
+#                               drag, in order
+#   app-mouse-double-click      the four reports the same program received from
+#                               two clicks inside the click timeout, in order
 #   paste-into-pane             the bracketed paste a program in the pane
 #                               received, read off its decoded screen
 #   paste-into-copy-mode        the decoded screen and `#{pane_in_mode}` while
@@ -1078,6 +1084,118 @@ program_saw() {
   esac
 }
 
+# --- the pin's fallthrough, with tracking armed ----------------------------
+#
+# `\033[?1002h` is BUTTON-EVENT tracking: the pane asks for presses, releases
+# and motion with a button held, which is what a program that wants drags arms.
+# `#{mouse_any_flag}` is then 1 on both binaries, so the pin's own
+# `MouseDown1Pane` and `MouseDrag1Pane` rows take their `send -M` branch and
+# hand their event to the pane. What the two cases below drive is the gestures
+# whose remaining events are bound to NOTHING in the root table, which is where
+# `server_client_handle_key` ends at `forward_key` and `window_pane_key` hands
+# the event to the pane rather than swallowing it.
+arm_button_event_both() {
+  local marker="$1" side
+  for side in zz tmux; do
+    side_command "$side" respawn-pane -k -t "=$INNER_SESSION:0.0" sh -c \
+      "stty -echo -icanon min 1 time 0; printf '$marker\n\033[?1002h\033[?1006h'; exec cat -v" >/dev/null ||
+      die "$side refused respawn-pane"
+  done
+  settle_both "$marker" "the button-event program behind $marker"
+}
+# The one row a program under tracking prints its reports onto: `cat -v` wraps
+# nothing, so every report of a gesture lands on the row under the marker. The
+# two cases below read that row and nothing else, where the rest of the fixture
+# reads four rows: a message another case left on the row below would otherwise
+# ride along in a channel that is about the reports.
+app_reports() {
+  capture_plain "$1" | sed -n "/$2/,\$p" | sed "1d" | sed '/^[[:space:]]*$/d' |
+    head -n 1 | cat -v
+}
+# How many SGR reports that row carries: every report this fixture can produce
+# starts `\e[<`.
+report_count() {
+  app_reports "$1" "$2" | grep -o -- '\[<' | wc -l | tr -d ' '
+}
+program_saw_reports() {
+  [ "$(report_count "$1" "$2")" -ge "$3" ]
+}
+# `KEYC_CLICK_TIMEOUT` is 300 ms and the timer that runs out at the end of it
+# replays the stored press under a `DoubleClick` name, so a reading taken
+# before that has happened cannot see what the replay did. This waits for the
+# report count to HOLD at what it should be for longer than the timeout:
+# twelve consecutive polls at 50 ms, with any poll that finds a different count
+# starting the twelve again. It is a bounded wait on an observable, not a
+# sleep: a count that moves is what it is watching for.
+reports_held() {
+  local side="$1" marker="$2" want="$3" attempt held=0
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    if [ "$(report_count "$side" "$marker")" = "$want" ]; then
+      held=$((held + 1))
+      [ "$held" -ge 12 ] && return 0
+    else
+      held=0
+    fi
+    sleep 0.05
+  done
+  dump_state "the $side report count holding at $want"
+  die "the $side report count never held at $want"
+}
+
+# A press, a motion with the button held and the release that ends the drag.
+# The press is `MouseDown1Pane` and the motion `MouseDrag1Pane`, both stock
+# root rows that run `send -M` while the pane tracks. The release is
+# `MouseDragEnd1Pane`, which `key-bindings.c` installs in the two copy tables
+# and in NEITHER root table: with the client on root and the pane in no mode,
+# root is the first and only table tried, nothing matches, and the pin forwards
+# the release to the pane. Channel: the three reports the program received, in
+# the order it received them.
+case_app_mouse_drag() {
+  CASE_LABEL=app-mouse-drag
+  arm_button_event_both DRAGREPORT
+  local left top row
+  left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
+  top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  row="$((top + 3))"
+  send_mouse_both 0 "$((left + 2))" "$row" M
+  send_mouse_both 32 "$((left + 8))" "$row" M
+  send_mouse_both 0 "$((left + 8))" "$row" m
+  wait_for "the pin's program saw the press, the motion and the release" \
+    program_saw_reports tmux DRAGREPORT 3
+  settle_both DRAGREPORT 'the drag under button-event tracking'
+  assert_value app-mouse-drag/reports \
+    "$(app_reports zz DRAGREPORT)" "$(app_reports tmux DRAGREPORT)"
+  respawn_shell_both
+}
+
+# Two clicks at one cell inside the click timeout. The first press is
+# `MouseDown1Pane` and the first release `MouseUp1Pane`, which root does not
+# bind; the second press is `SecondClick1Pane`, which root does not bind
+# either, so both fall through to the pane the moment they arrive. The timer
+# behind them replays the stored press as `DoubleClick1Pane`, whose stock row
+# does run `send -M` while the pane tracks - and that replayed event is the one
+# `server_client_check_mouse` marks `m->ignore`, which `input_key_mouse` drops.
+# So the pane sees press, release, press, release and nothing else, and the
+# ORDER is the whole point: a second press held back until its timer expires
+# would arrive behind its own release.
+case_app_mouse_double_click() {
+  CASE_LABEL=app-mouse-double-click
+  arm_button_event_both CLICKREPORT
+  local left top row column
+  left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
+  top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  row="$((top + 3))"
+  column="$((left + 5))"
+  click_both 0 "$column" "$row"
+  click_both 0 "$column" "$row"
+  wait_for "the pin's program saw both clicks" program_saw_reports tmux CLICKREPORT 4
+  reports_held tmux CLICKREPORT 4
+  settle_both CLICKREPORT 'the double click under button-event tracking'
+  assert_value app-mouse-double-click/reports \
+    "$(app_reports zz CLICKREPORT)" "$(app_reports tmux CLICKREPORT)"
+  respawn_shell_both
+}
+
 # Bracketed paste, into a pane, into copy mode, into the command prompt and
 # under a menu. The bytes are a real `\e[200~ ... \e[201~`, which is what the
 # outer terminal sends when a user pastes.
@@ -1253,6 +1371,8 @@ run_cases() {
   case_status_user_binding
   case_app_mouse mouse-on on
   case_app_mouse mouse-off off
+  case_app_mouse_drag
+  case_app_mouse_double_click
   case_paste_into_pane
   case_paste_into_copy_mode
   case_paste_into_prompt
@@ -1423,6 +1543,29 @@ sc_one_sided_border_click() {
   case_border_click
   side_command zz bind-key -T root MouseDown1Border select-pane -M >/dev/null 2>&1
 }
+# `MouseDragEnd1Pane` bound in zz's ROOT table only. The name is the one a
+# release that ends a drag carries, and a binding that claims it is a binding
+# that stops it falling through to the pane, so zz's program sees the press and
+# the motion and never the release. The binding sets a user option, which is
+# silent: nothing but the missing report reaches the screen. app-mouse-drag/reports is the only asserted
+# check in that case and has to carry it.
+sc_one_sided_drag_release() {
+  side_command zz bind-key -T root MouseDragEnd1Pane set-option -g @claimed dragend >/dev/null
+  case_app_mouse_drag
+  side_command zz unbind-key -T root MouseDragEnd1Pane >/dev/null
+  side_command zz set-option -gu @claimed >/dev/null 2>&1
+}
+# `SecondClick1Pane` bound in zz's ROOT table only, so zz's second press is
+# claimed by a binding where the pin's falls through to the pane and zz's
+# program sees three reports where the pin's sees four.
+# app-mouse-double-click/reports is the only asserted check in that case and
+# has to carry it.
+sc_one_sided_second_click() {
+  side_command zz bind-key -T root SecondClick1Pane set-option -g @claimed second >/dev/null
+  case_app_mouse_double_click
+  side_command zz unbind-key -T root SecondClick1Pane >/dev/null
+  side_command zz set-option -gu @claimed >/dev/null 2>&1
+}
 # zz out of copy mode before the paste, so its pane takes the text the mode
 # would have eaten. paste-into-copy-mode/after-cancel-screen is where the two
 # screens part.
@@ -1480,6 +1623,10 @@ run_self_check() {
     sc_one_sided_mouse_target
   self_check_case 'zz out of copy mode before the paste' catches \
     sc_one_sided_copy_mode_paste
+  self_check_case 'MouseDragEnd1Pane bound in zz-s root table only' catches \
+    sc_one_sided_drag_release
+  self_check_case 'SecondClick1Pane bound in zz-s root table only' catches \
+    sc_one_sided_second_click
   self_check_case 'only the focus-out report sent to zz with focus-events off' catches \
     sc_one_sided_focus_off
 

@@ -1,0 +1,136 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m using prebuilt zz: target/debug/zz
+[1;36m==>[0m running smoke/client-non-utf8-cwd
+smoke/client-non-utf8-cwd: 4 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 3 OUT divergence(s), 0 WARN divergence(s)
+[1;33mwarn:[0m smoke/client-non-utf8-cwd failed; it is retried alone after the corpus
+    OUT: divergence
+    --- zz OUT step 2
+    +++ tmux OUT step 2
+    @@ -1 +1 @@
+    -NON_UTF8_CWD=broken:d127n127q127m127DmissNmisso0e163no0ne163qo0qe163
+    +NON_UTF8_CWD=clean:12
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 3
+    COMMAND: out: show-environment -g NON_UTF8_CWD_DIRECT
+    zz exit: 0
+    tmux exit: 0
+    zz stderr:
+        <empty>
+    tmux stderr:
+        <empty>
+    zz stdout:
+        NON_UTF8_CWD_DIRECT=miss
+    tmux stdout:
+        NON_UTF8_CWD_DIRECT=hit
+    OUT: divergence
+    --- zz OUT step 3
+    +++ tmux OUT step 3
+    @@ -1 +1 @@
+    -NON_UTF8_CWD_DIRECT=miss
+    +NON_UTF8_CWD_DIRECT=hit
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 4
+    COMMAND: out: show-environment -g NON_UTF8_CWD_NESTED
+    zz exit: 0
+    tmux exit: 0
+    zz stderr:
+        <empty>
+    tmux stderr:
+        <empty>
+    zz stdout:
+        NON_UTF8_CWD_NESTED=miss
+    tmux stdout:
+        NON_UTF8_CWD_NESTED=hit
+    OUT: divergence
+    --- zz OUT step 4
+    +++ tmux OUT step 4
+    @@ -1 +1 @@
+    -NON_UTF8_CWD_NESTED=miss
+    +NON_UTF8_CWD_NESTED=hit
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    SUMMARY steps=4 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=3 warn_divergences=0
+[1;36m==>[0m retrying smoke/client-non-utf8-cwd alone
+smoke/client-non-utf8-cwd: 4 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 3 OUT divergence(s), 0 WARN divergence(s)
+[1;33mwarn:[0m smoke/client-non-utf8-cwd failed again alone; see /home/demfabris/dev/zz-tui-mouse/compat/results/smoke/client-non-utf8-cwd.log
+    OUT: divergence
+    --- zz OUT step 2
+    +++ tmux OUT step 2
+    @@ -1 +1 @@
+    -NON_UTF8_CWD=broken:d127n127q127m127DmissNmisso0e163no0ne163qo0qe163
+    +NON_UTF8_CWD=clean:12
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 3
+    COMMAND: out: show-environment -g NON_UTF8_CWD_DIRECT
+    zz exit: 0
+    tmux exit: 0
+    zz stderr:
+        <empty>
+    tmux stderr:
+        <empty>
+    zz stdout:
+        NON_UTF8_CWD_DIRECT=miss
+    tmux stdout:
+        NON_UTF8_CWD_DIRECT=hit
+    OUT: divergence
+    --- zz OUT step 3
+    +++ tmux OUT step 3
+    @@ -1 +1 @@
+    -NON_UTF8_CWD_DIRECT=miss
+    +NON_UTF8_CWD_DIRECT=hit
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 4
+    COMMAND: out: show-environment -g NON_UTF8_CWD_NESTED
+    zz exit: 0
+    tmux exit: 0
+    zz stderr:
+        <empty>
+    tmux stderr:
+        <empty>
+    zz stdout:
+        NON_UTF8_CWD_NESTED=miss
+    tmux stdout:
+        NON_UTF8_CWD_NESTED=hit
+    OUT: divergence
+    --- zz OUT step 4
+    +++ tmux OUT step 4
+    @@ -1 +1 @@
+    -NON_UTF8_CWD_NESTED=miss
+    +NON_UTF8_CWD_NESTED=hit
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    SUMMARY steps=4 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=3 warn_divergences=0
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| smoke/client-non-utf8-cwd | 4 | yes | 0 | yes | no | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+

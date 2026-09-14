@@ -1,0 +1,174 @@
+self-check: one deliberate one-sided difference per channel
+ok    click-selects-pane/active-pane: both 1
+ok    self-check control, a click with nothing sabotaged: no difference reported
+ok    paste-into-pane/received: both ^[[200~pasted-text^[[201~|L0:win*|
+ok    self-check control, the same paste on both sides: no difference reported
+ok    focus-sc-control/received: both ^[[O^[[I|L0:win*|
+ok    self-check control, the same focus reports on both sides: no difference reported
+DIFF  paste-into-pane/received
+        tmux: ^[[200~pasted-text^[[201~|L0:win*|
+        zz:   ^[[200~other-text^[[201~|L0:win*|
+ok    self-check a one-sided paste: caught
+DIFF  app-mouse-sc-encoding/report
+        tmux: ^[[<0;5;3M^[[<0;5;3m|L0:win*|
+        zz:   ^[[M %#^[[M#%#|L0:win*|
+ok    self-check the SGR mouse extension dropped on zz only: caught
+DIFF  focus-sc-focus/received
+        tmux: ^[[O^[[I|L0:win*|
+        zz:   ^[[O|L0:win*|
+ok    self-check only the focus-out report sent to zz: caught
+DIFF  status-clicks/row
+        tmux: L0:win* 1:second
+        zz:   LL0:win* 1:second
+ok    status-clicks/window-after-name-click: both 1
+ok    status-clicks/window-after-wheel-down: both 1
+ok    status-clicks/window-after-wheel-up: both 0
+note  status-clicks/right-click-screen recorded, not asserted: MouseDown3Status raises the pin's window menu through a root binding whose command is a display-menu of eleven items over swap-window, kill-window, respawn-window, select-pane -m and a command-prompt rename, positioned with -x W -y W, which answers the status range the pointer landed in and not the screen centre the raw TUI answers today; the row is not installed (keys.root-native-mouse key:root:MouseDown3Status)
+        row 10 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@1:secondM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m
+        row 10 zz:   
+        row 11 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Swap Left  (l) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 11 zz:   
+        row 12 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Swap Right (r) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 12 zz:   
+        row 13 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m ^[[2mSwap Marked^[[0m^[[38;2;229;229;229m^[[48;2;38;38;38m    ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 13 zz:   
+        row 14 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^\M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-$^[[39m^[[49m
+        row 14 zz:   
+        row 15 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Kill       (X) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 15 zz:   
+        row 16 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Respawn    (R) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 16 zz:   
+        row 17 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Mark       (m) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 17 zz:   
+        row 18 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Rename     (n) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 18 zz:   
+        row 19 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^\M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-$^[[39m^[[49m
+        row 19 zz:   
+        row 20 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m New After  (w) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 20 zz:   
+        row 21 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m New At End (W) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 21 zz:   
+        row 22 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m
+        row 22 zz:   
+        row 23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:second-
+        row 23 zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mLL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:second-
+ok    self-check a status-left only zz carries: caught
+DIFF  click-selects-pane/active-pane
+        tmux: 1
+        zz:   0
+ok    self-check zz's click aimed at the pane it already sits in: caught
+DIFF  click-user-binding/option
+        tmux: fired
+        zz:   other
+ok    self-check the same root mouse binding set differently on zz: caught
+DIFF  border-click/marked-set
+        tmux: 0
+        zz:   1
+ok    border-click/active-pane: both 0
+ok    self-check MouseDown1Border unbound on zz only: caught
+DIFF  border-user-binding/option
+        tmux: fired
+        zz:   other
+ok    self-check the border mouse binding set differently on zz: caught
+DIFF  click-user-binding-target/context
+        tmux: 6,4,%0,
+        zz:   8,4,%0,
+ok    self-check zz's context click aimed one cell further along: caught
+DIFF  border-drag/pane-width
+        tmux: 32
+        zz:   76
+ok    self-check zz's border drag released four cells short: caught
+ok    status-clicks/row: both L0:win* 1:second
+ok    status-clicks/window-after-name-click: both 1
+DIFF  status-clicks/window-after-wheel-down
+        tmux: 1
+        zz:   0
+DIFF  status-clicks/window-after-wheel-up
+        tmux: 0
+        zz:   1
+note  status-clicks/right-click-screen recorded, not asserted: MouseDown3Status raises the pin's window menu through a root binding whose command is a display-menu of eleven items over swap-window, kill-window, respawn-window, select-pane -m and a command-prompt rename, positioned with -x W -y W, which answers the status range the pointer landed in and not the screen centre the raw TUI answers today; the row is not installed (keys.root-native-mouse key:root:MouseDown3Status)
+        row 0 tmux: MARK-status
+        row 0 zz:   $
+        row 1 tmux: $
+        row 1 zz:   
+        row 10 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@1:secondM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m
+        row 10 zz:   
+        row 11 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Swap Left  (l) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 11 zz:   
+        row 12 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Swap Right (r) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 12 zz:   
+        row 13 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m ^[[2mSwap Marked^[[0m^[[38;2;229;229;229m^[[48;2;38;38;38m    ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 13 zz:   
+        row 14 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^\M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-$^[[39m^[[49m
+        row 14 zz:   
+        row 15 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Kill       (X) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 15 zz:   
+        row 16 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Respawn    (R) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 16 zz:   
+        row 17 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Mark       (m) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 17 zz:   
+        row 18 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Rename     (n) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 18 zz:   
+        row 19 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^\M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-$^[[39m^[[49m
+        row 19 zz:   
+        row 20 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m New After  (w) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 20 zz:   
+        row 21 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m New At End (W) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 21 zz:   
+        row 22 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m
+        row 22 zz:   
+        row 23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:second-
+        row 23 zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL0:win- ^[[4m1:second*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+ok    self-check WheelDownStatus unbound on zz only: caught
+DIFF  wheel-up-pane/pane-in-mode
+        tmux: 1
+        zz:   0
+DIFF  wheel-up-pane/pane-mode
+        tmux: copy-mode
+        zz:   
+ok    self-check WheelUpPane unbound on zz only: caught
+DIFF  drag-selects/buffer
+        tmux: DRAGLIN
+        zz:   
+DIFF  drag-selects/pane-in-mode
+        tmux: 0
+        zz:   1
+DIFF  drag-selects/selection
+        tmux: 
+        zz:   1
+ok    self-check the copy table's MouseDragEnd1Pane unbound on zz only: caught
+DIFF  multi-click/double-buffer
+        tmux: alpha
+        zz:   
+ok    multi-click/triple-buffer: both MULTI alpha beta gamma
+ok    self-check DoubleClick1Pane unbound on zz only: caught
+DIFF  click-mouse-target/=-clicked-pane
+        tmux: clicked
+        zz:   
+DIFF  click-mouse-target/=-other-pane
+        tmux: 
+        zz:   clicked
+DIFF  click-mouse-target/{mouse}-clicked-pane
+        tmux: clicked
+        zz:   
+DIFF  click-mouse-target/{mouse}-other-pane
+        tmux: 
+        zz:   clicked
+ok    self-check zz's mouse-target click aimed into the other pane: caught
+DIFF  paste-into-copy-mode/pane-in-mode
+        tmux: 1
+        zz:   0
+DIFF  paste-into-copy-mode/screen: 2 of 24 rows differ, first 0
+        row 0 tmux: MARK-pastecopy                                                             ^[[38;2;13;13;13m^[[48;2;184;134;11m[0/1]
+        row 0 zz:   MARK-pastecopy
+        row 1 tmux: ^[[39m^[[49m$
+        row 1 zz:   $ ^[[38;2;16;19;24m^[[48;2;216;222;233mpasted-text^[[39m^[[49m
+DIFF  paste-into-copy-mode/after-cancel-screen: 1 of 24 rows differ, first 1
+        row 1 tmux: $
+        row 1 zz:   $ ^[[38;2;16;19;24m^[[48;2;216;222;233mpasted-text^[[39m^[[49m
+ok    self-check zz out of copy mode before the paste: caught
+DIFF  focus-sc-focus-off/received
+        tmux: ^[[O^[[I|L0:win*|
+        zz:   ^[[O|L0:win*|
+ok    self-check only the focus-out report sent to zz with focus-events off: caught
+self-check: every sabotage caught in its own channel

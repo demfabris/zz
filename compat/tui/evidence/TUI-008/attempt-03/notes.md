@@ -281,3 +281,11 @@ which only the click timer produces.
 reach a corpus row: `input_mouse_key` runs only for `InputMessage::MouseKey`,
 which only a client with a pointer sends, and the `send-keys -M` gate needs an
 invoking key named `DoubleClick`, which only the click timer produces.
+
+## The fix pass's one zone excursion
+
+`knowledge/index.md` and `knowledge/protocol/index.md` carry the wire protocol
+document's title, which is `zz wire protocol (v102)`. Moving the number to 103
+moves the title, and OKF v0.1 has each directory's `index.md` mirror the
+frontmatter it lists, so both listings move with it. One word each, forced by
+the wire blocker; nothing else in either file changed.

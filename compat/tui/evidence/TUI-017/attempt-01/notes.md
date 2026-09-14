@@ -17,6 +17,9 @@ untouched and stay refused.
 - `corpus-capture.txt` — `compat/run.sh --strict-geometry` over capture-pane,
   display-message and every other corpus row that captures a pane.
 - `package-tests.txt`, `clippy.txt` — every touched crate.
+- `tui-copy-mode.txt` — `compat/tui-copy-mode.sh`, because `-M` now routes to
+  the pane when no mode is open and copy mode is the other half of that
+  routing: 147 cases agree on every channel they assert, 0 recorded.
 - The fixture runs and the self-check are in `../../TUI-016/attempt-01/`; one
   fixture carries both obligations' cases.
 

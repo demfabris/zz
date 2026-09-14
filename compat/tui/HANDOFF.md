@@ -6,10 +6,10 @@ a campaign branch, and the resume point is a well defined one: run the gates.
 
 | Fact | Value |
 | --- | --- |
-| `origin/main` | `8fc4c325`, the wire guard, over fabrico's `v0.9.0` release at `8365c868` |
+| `origin/main` | the wire guard and this handoff, under fabrico's `v0.9.1` release at `416c0b4d` |
 | Ledger | 8/12 baseline verified (TUI-001 to 005, 007, 009, 010); added scope 0/6 |
 | Merged this cycle | nothing; no gate ran |
-| `PROTOCOL_VERSION` | 102, and **102 is released**: zz 0.9.0 shipped it. The first wire change to land opens 103 |
+| `PROTOCOL_VERSION` | 102, and **102 is released**: zz 0.9.0 and 0.9.1 both shipped it. The first wire change to land opens 103 |
 | Board | `F-TUI-CYCLE-9-LANES` claimed by `alienware/orchestrator`; MAIN and TRIAGE free |
 | Runners | `run-9.js` (this cycle), `run-9b.js` (its second half), `run-10.js` (ready, and the last cycle) |
 | Deferred | TUI-013 still waits for a macOS box; `compat/tui/run-2.js` is its ready runner |
@@ -27,6 +27,12 @@ a campaign branch, and the resume point is a well defined one: run the gates.
 
 The gate order is mouse, choosers, introspection, then the menus branch. Each rebases onto the main
 the previous one pushed.
+
+Every branch here is based on `879b68fc` and main has moved a long way past it: fabrico's two
+releases, a GPUI and CEF refresh, a third-party notice, and a clippy and test pass that touched
+`compat/tmux-gaps.json`, `crates/zz-daemon/src/daemon.rs` and `crates/zz-daemon/src/client.rs`,
+which are campaign zones. The choosers lane predicted a clean merge with `git merge-tree` before it
+stopped; predict it again at your tip rather than trusting that, and merge `tmux-gaps.json` by item.
 
 1. **The wire version moved under this cycle.** zz 0.9.0 shipped `PROTOCOL_VERSION` 102 while three
    lanes were appending to 102. The mouse branch adds `view_action` and `press_action` to
@@ -68,10 +74,40 @@ stream, modes, capture:
   grid, its history limit and its per-line `cellused` and `cellsize`, none of which zz's terminal
   engine has in that shape, and the clause allows a measured refusal.
 
+Before launching it, pre-position the six worktrees the runner expects, because each lane's prompt
+says the orchestrator already made one and a lane that finds nothing will improvise:
+
+```sh
+for w in stream modes capture; do
+  git -C <checkout> worktree add --detach ../zz-tui-$w-10 origin/main
+  git -C <checkout> worktree add --detach ../zz-tui-$w-10-review origin/main
+done
+```
+
+Each lane builds into its own worktree's `target/`, which is a cold build of about 30 minutes and
+150 GB apiece on this workspace. Point a lane at a finished lane's warm target instead where one
+exists; `run-9b.js` shows the wording. The gates make their own worktree.
+
 TUI-011 rides on the last gate. It is a baseline id whose clause 2 holds 37 recorded roster entries
 that flip as TUI-014 through TUI-018 land, so that gate is what takes the baseline to 12/12.
 
 ## Resuming on another machine
+
+**The runner is parameterised, and its defaults describe alienware.** `run-10.js` reads `args` for
+`machine`, `boxNote`, `dev`, `holder`, `date`, `workerJobs` and `gateJobs`, and every default is
+this Linux box. Pass your own or the lanes will be told the wrong things, and one of them does not
+merely mislead: **the cargo memory wrapper is `systemd-run --user --scope`, which does not exist on
+macOS.** Every cargo command in every prompt goes through it. On a mac, replace that wrapper in the
+box note with something local, or drop the cap and keep the two-slot `flock`, which is what the
+concurrency limit actually needs. The locale note, the five environmental corpus rows and the known
+flakes are also measurements of this box, not of yours: re-measure them rather than inherit them.
+
+```js
+Workflow({ scriptPath: '<checkout>/compat/tui/run-10.js', args: {
+  root: '<checkout>', dev: '<worktree parent>', holder: '<box>/orchestrator',
+  machine: '<cores, RAM, OS>', date: '<today>', boxNote: '<your box, measured>',
+} })
+```
 
 The campaign resumes from the repo and the board, not from a session. On a fresh box:
 

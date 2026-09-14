@@ -23,6 +23,20 @@ const WINDOW_BUFFER_DEFAULT_FORMAT: &str = "#{t/p:buffer_created}: #{buffer_samp
 /// `WINDOW_CLIENT_DEFAULT_FORMAT`.
 const WINDOW_CLIENT_DEFAULT_FORMAT: &str =
     "#[fg=themelightgrey]#{t/p:client_activity}: session #[default]#{session_name}";
+/// `WINDOW_CLIENT_FEATURE`: the feature's name padded to fifteen columns, green
+/// when this client's terminal carries it and grey when it does not.
+macro_rules! window_client_feature {
+    ($name:literal) => {
+        concat!(
+            "#{?#{I/f:",
+            $name,
+            "},#[fg=themegreen],#[fg=themelightgrey]}#{p/15:#{l:",
+            $name,
+            "}}#[default]"
+        )
+    };
+}
+
 /// `window_client_info_lines`, the `i` view, verbatim.
 const WINDOW_CLIENT_INFO_LINES: &[&str] = &[
     concat!(
@@ -59,8 +73,95 @@ const WINDOW_CLIENT_INFO_LINES: &[&str] = &[
         "#{client_written} #[fg=themelightgrey](#{client_discarded} discarded)#[default]"
     ),
     concat!(
+        "#[fg=themelightgrey]Features      #[#{E:tree-mode-border-style},acs]x#[default] ",
+        window_client_feature!("256"),
+        " ",
+        window_client_feature!("RGB"),
+        " ",
+        window_client_feature!("bpaste"),
+        " ",
+        window_client_feature!("ccolour")
+    ),
+    concat!(
+        "              #[#{E:tree-mode-border-style},acs]x#[default] ",
+        window_client_feature!("clipboard"),
+        " ",
+        window_client_feature!("cstyle"),
+        " ",
+        window_client_feature!("extkeys"),
+        " ",
+        window_client_feature!("focus")
+    ),
+    concat!(
+        "              #[#{E:tree-mode-border-style},acs]x#[default] ",
+        window_client_feature!("hyperlinks"),
+        " ",
+        window_client_feature!("ignorefkeys"),
+        " ",
+        window_client_feature!("margins"),
+        " ",
+        window_client_feature!("mouse")
+    ),
+    concat!(
+        "              #[#{E:tree-mode-border-style},acs]x#[default] ",
+        window_client_feature!("osc7"),
+        " ",
+        window_client_feature!("overline"),
+        " ",
+        window_client_feature!("progressbar"),
+        " ",
+        window_client_feature!("rectfill")
+    ),
+    concat!(
+        "              #[#{E:tree-mode-border-style},acs]x#[default] ",
+        window_client_feature!("sixel"),
+        " ",
+        window_client_feature!("strikethrough"),
+        " ",
+        window_client_feature!("sync"),
+        " ",
+        window_client_feature!("title")
+    ),
+    concat!(
+        "              #[#{E:tree-mode-border-style},acs]x#[default] ",
+        window_client_feature!("usstyle")
+    ),
+    "#[#{E:tree-mode-border-style},acs]qqqqqqqqqqqqqqn#{R:q,#{window_width}}#[default]",
+    concat!(
         "#[fg=themelightgrey]prefix        #[#{E:tree-mode-border-style},acs]x#[default] ",
         "#{prefix}"
+    ),
+    concat!(
+        "#[fg=themelightgrey]mouse         #[#{E:tree-mode-border-style},acs]x#[default] ",
+        "#{?mouse,#{?#{I/c:kmous},,#[fg=themered]}on,#[fg=themelightgrey]off} ",
+        "#{?#{I/c:kmous},,#[align=right]unavailable: [kmous] missing}"
+    ),
+    concat!(
+        "#[fg=themelightgrey]set-clipboard #[#{E:tree-mode-border-style},acs]x#[default] ",
+        "#{?#{!=:#{set-clipboard},off},#{?#{I/f:clipboard},,",
+        "#[fg=themered]}#{set-clipboard},#[fg=themelightgrey]off} ",
+        "#{?#{I/f:clipboard},,#[align=right]unavailable: [Ms] missing}"
+    ),
+    concat!(
+        "#[fg=themelightgrey]get-clipboard #[#{E:tree-mode-border-style},acs]x#[default] ",
+        "#{?#{!=:#{get-clipboard},off},#{?#{I/f:clipboard},,",
+        "#[fg=themered]}#{get-clipboard},#[fg=themelightgrey]off} ",
+        "#{?#{I/f:clipboard},,#[align=right]unavailable: [Ms] missing}"
+    ),
+    concat!(
+        "#[fg=themelightgrey]focus-events  #[#{E:tree-mode-border-style},acs]x#[default] ",
+        "#{?focus-events,#{?#{I/f:focus},,#[fg=themered]}on,#[fg=themelightgrey]off} ",
+        "#{?#{I/f:focus},,#[align=right]unavailable: [Enfcs] or [Dcfcs] missing}"
+    ),
+    concat!(
+        "#[fg=themelightgrey]extended-keys #[#{E:tree-mode-border-style},acs]x#[default] ",
+        "#{?#{!=:#{extended-keys},off},#{?#{I/f:extkeys},,",
+        "#[fg=themered]}#{extended-keys},#[fg=themelightgrey]off} ",
+        "#{?#{I/f:extkeys},,#[align=right]unavailable: [Eneks] or [Dseks] missing}"
+    ),
+    concat!(
+        "#[fg=themelightgrey]set-titles    #[#{E:tree-mode-border-style},acs]x#[default] ",
+        "#{?set-titles,on,#[fg=themelightgrey]off}"
     ),
     concat!(
         "#[fg=themelightgrey]escape-time   #[#{E:tree-mode-border-style},acs]x#[default] ",
@@ -68,6 +169,11 @@ const WINDOW_CLIENT_INFO_LINES: &[&str] = &[
     ),
 ];
 const TREE_MODE_BORDER_STYLE: &str = "bg=themedarkgrey,fg=themelightgrey";
+/// `#{E:tree-mode-border-style}`, which `window_client_info_lines` reads for
+/// the acs rule down column 14. The mode tree's box takes the same style from
+/// [`TREE_MODE_BORDER_STYLE`] rather than from the option, so the info lines
+/// take it from there too and the two agree on screen.
+const TREE_MODE_BORDER_STYLE_FORMAT: &str = "#{E:tree-mode-border-style}";
 const TREE_MODE_SELECTION_STYLE: &str = "#{E:mode-style}";
 const TREE_MODE_PREVIEW_FORMAT: &str =
     "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}";
@@ -203,6 +309,7 @@ fn client_info_lines(inner: &ServerState, client: ClientId) -> Vec<String> {
         session_id,
     );
     context.config_files.clone_from(&inner.config_files);
+    context.format_now = i64::try_from(unix_timestamp()).ok().filter(|now| *now != 0);
     let facts = FormatHookFacts {
         client: Some(client_format_facts(inner, client, session_id)),
         ..format_hook_facts(inner)
@@ -210,8 +317,9 @@ fn client_info_lines(inner: &ServerState, client: ClientId) -> Vec<String> {
     WINDOW_CLIENT_INFO_LINES
         .iter()
         .map(|line| {
+            let line = line.replace(TREE_MODE_BORDER_STYLE_FORMAT, TREE_MODE_BORDER_STYLE);
             let mut hooks = DaemonFormatHooks::command(&facts).with_option_engine(&inner.engine);
-            expand_format_values(line, &context, &mut hooks)
+            expand_format_values(&line, &context, &mut hooks)
         })
         .collect()
 }
@@ -456,7 +564,11 @@ pub(super) fn chooser_presentation(
             selected: chooser.rendered.selected,
             rows: chooser.presentation_rows.clone(),
             sort: sort_label(chooser.sort),
-            view: "preview".to_owned(),
+            view: if chooser.info_preview {
+                "info".to_owned()
+            } else {
+                "preview".to_owned()
+            },
             filter: chooser.filter.is_some(),
             selection_style: styles.selection(chooser.source_pane),
             border_style: TREE_MODE_BORDER_STYLE.to_owned(),

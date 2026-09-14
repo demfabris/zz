@@ -33,6 +33,9 @@ pub const CLIENT_FEATURES_CAPABILITY_PREFIX: &str = "client-features-v1:";
 pub const MAX_CLIENT_TERMINAL_FEATURES: usize = 64;
 /// Longest single feature name in that message.
 pub const MAX_CLIENT_TERMINAL_FEATURE_BYTES: usize = 64;
+/// Longest terminal name one [`ProtocolMessage::ClientTerminalType`] may carry;
+/// `tty_keys_extended_device_attributes` reads the reply into a 128-byte buffer.
+pub const MAX_CLIENT_TERMINAL_TYPE_BYTES: usize = 128;
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
 pub const MAX_CHOOSE_TREE_QUERY_BYTES: usize = 4 * 1024;
@@ -3659,6 +3662,29 @@ pub enum ProtocolMessage {
         #[serde(deserialize_with = "deserialize_client_terminal_features")]
         features: Vec<String>,
     },
+    /// The terminal's own name, as `tty_keys_extended_device_attributes` reads
+    /// it out of the XTVERSION reply and stores it in `c->term_type`. The
+    /// daemon answers `#{client_termtype}` from it, and
+    /// `window_client_draw_info` draws that as `Terminal Type`. Appended in
+    /// v102.
+    ClientTerminalType {
+        #[serde(deserialize_with = "deserialize_client_terminal_type")]
+        term_type: String,
+    },
+}
+
+fn deserialize_client_terminal_type<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let term_type = String::deserialize(deserializer)?;
+    if term_type.len() > MAX_CLIENT_TERMINAL_TYPE_BYTES {
+        return Err(D::Error::invalid_length(
+            term_type.len(),
+            &"a terminal type within the wire entry limit",
+        ));
+    }
+    Ok(term_type)
 }
 
 fn deserialize_client_terminal_features<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>

@@ -127,6 +127,7 @@ fn secondary_device_attributes_name(kind: u8) -> &'static str {
 /// terminal outright, and `tty_default_features` decides what that name
 /// carries.
 pub(crate) fn note_extended_device_attributes(name: &str) {
+    zz_daemon::report_terminal_type(name);
     learn_terminal_features(terminal_default_features(extended_device_attributes_name(
         name,
     )));

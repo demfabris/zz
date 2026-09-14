@@ -1286,6 +1286,21 @@ fn report_learned_terminal_features(learned: u32) {
         .send(&ProtocolMessage::ClientTerminalFeatures { features });
 }
 
+/// `tty_keys_extended_device_attributes` keeps the XTVERSION reply on the
+/// client as `c->term_type` beside the features it implies, so the raw name
+/// travels too and the daemon can answer `#{client_termtype}` with it.
+pub fn report_terminal_type(term_type: &str) {
+    if term_type.is_empty() || term_type.len() > zz_protocol::MAX_CLIENT_TERMINAL_TYPE_BYTES {
+        return;
+    }
+    let Some(writer) = INTERACTIVE_WRITER.lock().as_ref().and_then(Weak::upgrade) else {
+        return;
+    };
+    let _ = writer.lock().send(&ProtocolMessage::ClientTerminalType {
+        term_type: term_type.to_owned(),
+    });
+}
+
 const MAX_CLIENT_FEATURE_SPECS: usize = 16;
 const MAX_CLIENT_FEATURE_SPEC_BYTES: usize = 200;
 

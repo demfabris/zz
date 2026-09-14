@@ -59,7 +59,8 @@ pub use askpass::run_helper;
 pub use askpass::{ASKPASS_SOCKET_ENV, AskpassPrompt, AskpassPromptKind, AskpassReply, SshPrompts};
 pub use client::{
     ClientTerminalFlags, client_takes_utf8_terminal, client_terminal_colour_count,
-    client_terminal_feature_mask, learn_client_terminal_features, set_client_terminal_flags,
+    client_terminal_feature_mask, learn_client_terminal_features, report_terminal_type,
+    set_client_terminal_flags,
 };
 pub use client::{CommandClient, CommandOutcome, InteractiveClient, short_device_name};
 #[cfg(feature = "daemon")]

@@ -21,10 +21,7 @@ is rendered.
 
 The house-style reference is `crates/zz/src/command/palette.rs`. It demonstrates `cx.theme()`
 derivations alongside the `Input`/`InputState`, `ListItem`, `Kbd`, and `Tag` widgets.
-`examples/ui-showcase` renders a fixture workspace and component catalog from the same shared
-GPUI components. Run `just showcase` for the WASM/WebGPU preview or `just showcase-native`
-for the same fixtures in a native window. The preview README describes scene coverage,
-page backgrounds, simulated window blur, and the font/renderer differences that still need native checks.
+The browser client in `clients/web` (`just web`) uses the shared GPUI components outside the desktop app.
 
 # Rules
 

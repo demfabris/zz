@@ -422,10 +422,10 @@ The browser-specific environment controls:
 
 ## Checks
 
-The root workspace excludes `examples/ui-showcase`. CI checks that standalone
+The root workspace excludes `clients/web`. CI checks that standalone browser-client
 workspace in a separate Linux step, and local release checks must include its
-native and shipped WASM configurations. `just showcase-setup` installs the
-nightly WASM target used by the second command.
+native tests and shipped WASM configuration. `just web-setup` installs the nightly
+WASM target used by the browser check below.
 
 ```sh
 cargo fmt --all -- --check
@@ -434,8 +434,8 @@ cargo test --workspace --all-features --quiet
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo build --workspace --all-targets --all-features
 cargo check --workspace --all-targets --all-features
-cargo check --manifest-path examples/ui-showcase/Cargo.toml --all-targets --locked
-rustup run nightly cargo check --manifest-path examples/ui-showcase/Cargo.toml --target wasm32-unknown-unknown --all-targets --locked
+cargo test --manifest-path clients/web/Cargo.toml --lib --locked
+rustup run nightly cargo check --manifest-path clients/web/Cargo.toml --target wasm32-unknown-unknown --all-targets --locked
 ```
 
 Browser-domain tests can run without downloading or linking Chromium at all (package `zz-browser`,

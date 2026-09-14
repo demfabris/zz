@@ -1,5 +1,5 @@
 //! Target-agnostic presentation components and the widget layer, shared by the
-//! zz desktop app and the WASM showcase.
+//! zz desktop app and the browser client.
 
 pub mod chrome_palette;
 mod widget;

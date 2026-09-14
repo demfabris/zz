@@ -86,15 +86,6 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-      - name: Check UI showcase
-        if: runner.os == 'Linux'
-        env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/target
-        run: |
-          cargo check --manifest-path examples/ui-showcase/Cargo.toml --all-targets --locked
-          rustup toolchain install nightly --profile minimal --target wasm32-unknown-unknown
-          rustup run nightly cargo check --manifest-path examples/ui-showcase/Cargo.toml --target wasm32-unknown-unknown --all-targets --locked
-
       - name: Check browser client
         if: runner.os == 'Linux'
         env:
@@ -102,6 +93,7 @@ jobs:
         run: |
           cargo fmt --manifest-path clients/web/Cargo.toml -- --check
           cargo test --manifest-path clients/web/Cargo.toml --lib --locked
+          rustup toolchain install nightly --profile minimal --target wasm32-unknown-unknown
           rustup run nightly cargo check --manifest-path clients/web/Cargo.toml --target wasm32-unknown-unknown --all-targets --locked
 
       # Windows is second-class support, so its test failures warn rather than

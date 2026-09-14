@@ -35,6 +35,6 @@ cargo watch \
     --watch crates/zz-terminal/src \
     --watch crates/zz-ui/src \
     --watch crates/zz-ui/assets \
-    --watch examples/ui-showcase/assets/fonts \
+    --watch clients/web/assets/fonts \
     --watch scripts/build-web-wasm.sh \
     --shell "$WEB_ROOT/scripts/build-web-wasm.sh"

@@ -85,10 +85,9 @@ treatment for drag, split, and close controls; the clickable Agent title follows
 ## Two gotchas
 
 **Syntax highlighting is target- and feature-gated.** With default features,
-including the WASM showcase, `highlighter/syntax.rs` still returns no styles
-and its parity test remains the contract. The desktop `zz` app and native UI
-showcase enable `zz-ui/tree-sitter`, which activates the vendored parser for
-Rust, Markdown, JSON and TOML. Both paths use the same `HighlightTheme` colour
+including the browser client (`clients/web`), `highlighter/syntax.rs` still returns no styles
+and its parity test remains the contract. The desktop `zz` app enables `zz-ui/tree-sitter`,
+which activates the vendored parser for Rust, Markdown, JSON and TOML. Both paths use the same `HighlightTheme` colour
 tables; no second theme registry exists.
 
 **The foundation flipped last, on purpose.** `Theme` and the shared traits sit
@@ -103,7 +102,7 @@ landed in a single commit.
 
 The shared Interface settings page includes a font picker using the existing virtualized Select.
 Native entrypoints register `AvailableFonts` with their platform text system so the list excludes
-GPUI's hardcoded fallback names. The browser showcase uses GPUI's font list. The picker includes
+GPUI's hardcoded fallback names. The browser client uses GPUI's font list. The picker includes
 System default and filters internal dot-prefixed font aliases.
 
 ## Conventions
@@ -136,7 +135,7 @@ Each opened dialog has its own animation identity so replacement dialogs animate
 
 Re-syncing a module against a newer upstream revision means updating the
 revision above, re-applying that module's delta, and re-running the workspace
-build, the tests, and the UI showcase.
+build, the tests, and the browser client (`just web-build`).
 
 ## Cherry-picked since the fork revision
 

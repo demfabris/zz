@@ -24,7 +24,7 @@ key bindings, copy mode, and Agent processes.
 Start a zz daemon with the installed app or an existing zz command, then run from the repo root:
 
 ```sh
-just showcase-setup
+just web-setup
 just web-build
 just web-serve
 ```
@@ -86,8 +86,8 @@ pane-picker rows use the desktop components. Panes settings use the shared Layou
 Frame groups for gaps, inactive opacity, margins, pane radius, and border width. These settings are
 saved independently from widget radius. Sidebar rows share desktop labels, markers, layout and
 rename menus, add/split/close actions, and keyboard navigation. The window strip shares tabs,
-overflow, rename/close menus, session selection, agent count, and clock presentation. The bundled
-fonts include CJK and color emoji fallback.
+overflow, rename/close menus, session selection, agent count, and clock presentation. The browser
+client bundles Inter without CJK or emoji fallback; unsupported glyphs render as missing glyphs.
 
 The command palette shares its input, result rows, and keyboard hints with desktop. Both clients
 use `zz-client` completion for commands, options, recent commands, and live session/window/pane
@@ -103,11 +103,12 @@ of transcript limits so older replay entries can be discarded without losing com
 Unsupported controls stay visible and disabled. Native window behavior, OS fonts and credentials,
 native file dialogs, desktop notifications, local file editing, Chromium execution inside a pane, and
 direct SSH host setup require capabilities outside the browser client. Browser panes retain their
-toolbar and offer an external tab for their URL. The WASM editor has no tree-sitter highlighting.
+toolbar and offer an external tab for their URL. The browser client does not enable the shared
+code editor.
 
 # Checks
 
-The browser has its own Cargo workspace and lockfile, like the UI showcase. Keep both GPUI
+The browser has its own Cargo workspace and lockfile. Keep both GPUI
 patch revisions aligned with the root workspace.
 
 ```sh

@@ -68,7 +68,7 @@ Current forks and why:
   Rebase gotchas learned on the 2026-08-16 rebase (base 90d024b → f543a76):
 
   - The wgpu 30 bump patch is load-bearing, not droppable: upstream still pins
-    wgpu 29, but zz's own lock (and the showcase's) resolve wgpu 30 through
+    wgpu 29, but zz's own lock (and `clients/web/Cargo.lock`) resolve wgpu 30 through
     the fork's bump; dropping it downgrades zz. Re-port it (Cargo.toml bump +
     `color_space: SurfaceColorSpace::Auto` on both `SurfaceConfiguration`s +
     `Queue::present(frame)` instead of `frame.present()`). Its companion
@@ -85,10 +85,10 @@ Current forks and why:
     (mixed wgpu 29/30 records, missing new gpui deps). Regenerate the lock and
     inspect dependency drift against upstream, accounting for the carried wgpu
     version and device-context dependency. Check the resolved graph used by zz.
-  - The showcase's excluded lock needs its own `Cargo.toml` rev bump plus a
+  - The browser client's excluded lock needs a `clients/web/Cargo.toml` rev bump plus a
     `cargo metadata` re-resolve, and can need a second re-resolve to pick up
     brand-new transitive deps (hdrhistogram, crossbeam-channel from the
-    profiler feature) — verify `just showcase-build` passes, since `--locked`
+    profiler feature) — verify `just web-build` passes, since `--locked`
     is what catches it.
   - Upstream unified perf tracking under gpui's `profiler` feature: zz must
     enable it on the desktop crate's `gpui` dependency, not the shared workspace
@@ -132,23 +132,23 @@ uncommitted work or unpublished fork commits.
 
 1. Check the cache clone's status and worktrees. Fetch both remotes, record the
    full remote patch tip and upstream target, and compare the patch tip with
-   all three zz pins. Preserve any local-only commits.
+   both zz pins. Preserve any local-only commits.
 2. Create a backup branch at the old tip and a separate `codex/` branch in an
    isolated worktree. Rebase there. Keep zz's behavior when resolving conflicts;
    only drop a patch after proving upstream supplies its full behavior.
 3. Compare old and new patch series with `git range-diff`, inspect changed
    patches and GPU layouts, and run the carried regressions.
-4. Publish a separate candidate branch, then update all three zz manifests and
+4. Publish a separate candidate branch, then update both zz manifests and
    regenerate their lockfiles against that exact GitHub commit. Keep
    `zz-patches` at the old tip until validation finishes. Local Git URL
    overrides can work with a complete clone, but a blobless clone can fail
    because upload-pack disables lazy fetching of missing historical objects.
-5. Run the workspace gates below, `just showcase-build`, `just web-build`, and
+5. Run the workspace gates below, `just web-build`, and
    an isolated native app run. Record any platform checks that need another host.
 6. Publish the tested tip to `zz-patches` with an explicit
    `--force-with-lease=refs/heads/zz-patches:<recorded-old-tip>`. A changed remote
    tip requires reconciliation. Keep the backup and verify `just forks` and
-   all three manifest/lock pairs after publication.
+   both manifest/lock pairs after publication.
 
 The 2026-09-12 rebase also needed explicit `gpui/profiler` validation: upstream's
 new debug-overlay `Quad` initializer omitted zz's smoothing and padding fields.

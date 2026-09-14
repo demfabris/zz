@@ -10,20 +10,19 @@ timestamp: 2026-09-12T00:00:00Z
 # Overview
 
 zz's GPUI application layer comes from the `demfabris/zed` `zz-patches` branch rather than a
-published crate. Desktop, browser, and showcase pin the same published fork revision through
+published crate. The desktop and browser clients pin the same published fork revision through
 their manifests and lockfiles.
 On Linux, `gpui_platform` is built with `font-kit`, Wayland, and X11 enabled; the same crate
 selects the native macOS and Windows backends automatically.
 
-**Do not read a revision out of this document.** The normal pin lives in three manifests and
-three lockfiles, which must agree outside a local experiment:
+**Do not read a revision out of this document.** The normal pin lives in two manifests and
+two lockfiles, which must agree outside a local experiment:
 
 | Place | Role |
 | --- | --- |
 | `Cargo.toml`, `[patch."https://github.com/zed-industries/zed"]` | The `rev = "…"` on `gpui` and `gpui_platform`. This is the authority . editing it is how the pin moves. |
-| `examples/ui-showcase/Cargo.toml` | The gallery's independent workspace patch. Keep it on the desktop revision so stories use the same GPUI behavior. |
 | `clients/web/Cargo.toml` | The browser client's independent workspace patch. Keep it on the desktop revision. |
-| `Cargo.lock`, `examples/ui-showcase/Cargo.lock`, and `clients/web/Cargo.lock` | The resolved `source = "git+https://github.com/demfabris/zed?rev=…"` for normal Git pins. Regenerated, never hand-edited. |
+| `Cargo.lock` and `clients/web/Cargo.lock` | The resolved `source = "git+https://github.com/demfabris/zed?rev=…"` for normal Git pins. Regenerated, never hand-edited. |
 
 The appearance diagnostics log line no longer holds a third copy to keep in sync:
 `crates/zz/build.rs` reads the resolved source out of `Cargo.lock` and stamps it into
@@ -31,7 +30,7 @@ The appearance diagnostics log line no longer holds a third copy to keep in sync
 trust this document:
 
 ```bash
-rg 'demfabris/zed|zz-forks/zed' Cargo.toml Cargo.lock examples/ui-showcase/{Cargo.toml,Cargo.lock} clients/web/{Cargo.toml,Cargo.lock}
+rg 'demfabris/zed|zz-forks/zed' Cargo.toml Cargo.lock clients/web/{Cargo.toml,Cargo.lock}
 ```
 
 The fork itself is declared in `scripts/forks.conf` (`zed  zed-industries/zed  demfabris/zed
@@ -48,7 +47,7 @@ Fork commit `37d0b352ed` carries the pane renderer changes. Metal, WGPU, and Dir
 use position-seeded stochastic alpha rounding in 1/128 steps to reduce banding. WGPU applies
 this before any required premultiplication. Dithering changes only alpha.
 The GPU test `faint_inset_shadows_dither_dark_composites` checks variation, noise size,
-brightness, and opaque composition. All three workspaces resolve these changes
+brightness, and opaque composition. Both workspaces resolve these changes
 through their shared Git revision pin.
 
 Blurred shadows also follow the element's superellipse cross-section in Metal, WGPU, and
@@ -165,8 +164,8 @@ Adding a carried patch (no rebase; the lock is already at the branch tip):
 just forks   # confirm LOCK is "in sync" before appending a commit
 ```
 
-Bumping upstream means rebasing `zz-patches`, then moving the `rev` in `Cargo.toml`,
-`examples/ui-showcase/Cargo.toml`, and `clients/web/Cargo.toml` before regenerating their lockfiles.
+Bumping upstream means rebasing `zz-patches`, then moving the `rev` in `Cargo.toml`
+and `clients/web/Cargo.toml` before regenerating their lockfiles.
 
 # Rebase checks from 2026-09-12
 

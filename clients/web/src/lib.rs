@@ -13,21 +13,12 @@ use zz_ui::{Root, Theme, UiZoom};
 fn launch(cx: &mut App) {
     cx.text_system()
         .add_fonts(vec![
+            Cow::Borrowed(include_bytes!("../assets/fonts/inter/InterVariable.ttf")),
             Cow::Borrowed(include_bytes!(
-                "../../../examples/ui-showcase/assets/fonts/inter/InterVariable.ttf"
-            )),
-            Cow::Borrowed(include_bytes!(
-                "../../../examples/ui-showcase/assets/fonts/inter/InterVariable-Italic.ttf"
+                "../assets/fonts/inter/InterVariable-Italic.ttf"
             )),
         ])
         .expect("failed to load the interface fonts");
-    #[cfg(target_family = "wasm")]
-    cx.text_system()
-        .add_fonts(vec![
-            Cow::Borrowed(include_bytes!("../assets/fonts/NotoSansCJKjp-Regular.otf")),
-            Cow::Borrowed(include_bytes!("../assets/fonts/NotoColorEmoji.ttf")),
-        ])
-        .expect("failed to load the browser fallback fonts");
     zz_ui::init(cx);
     Theme::sync_system_appearance(None, cx);
     let theme = Theme::global_mut(cx);

@@ -1,7 +1,4 @@
 /target
-# The ui-showcase is an excluded sub-workspace, so its build output lands here
-# rather than under the root /target above.
-/examples/ui-showcase/target
 /clients/web/target
 /clients/web/dist
 /dist

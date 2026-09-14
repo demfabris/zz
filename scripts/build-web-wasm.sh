@@ -3,9 +3,9 @@ set -euo pipefail
 
 WEB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WEB_MANIFEST="$WEB_ROOT/clients/web/Cargo.toml"
-WEB_TARGET="$WEB_ROOT/target/ui-showcase"
+WEB_TARGET="$WEB_ROOT/target/web-client"
 WEB_DIST="$WEB_ROOT/clients/web/dist"
-WEB_TOOLCHAIN="${WEB_TOOLCHAIN:-${SHOWCASE_TOOLCHAIN:-nightly}}"
+WEB_TOOLCHAIN="${WEB_TOOLCHAIN:-nightly}"
 WEB_PROFILE="debug"
 WEB_BUILD_ARGS=(--profile dev)
 
@@ -18,17 +18,17 @@ elif [[ "$#" != 0 ]]; then
 fi
 
 if ! rustup run "$WEB_TOOLCHAIN" rustc --version >/dev/null 2>&1; then
-    echo "missing Rust $WEB_TOOLCHAIN; run: just showcase-setup" >&2
+    echo "missing Rust $WEB_TOOLCHAIN; run: just web-setup" >&2
     exit 2
 fi
 
 if ! rustup target list --installed --toolchain "$WEB_TOOLCHAIN" | rg -qx 'wasm32-unknown-unknown'; then
-    echo "missing WASM target; run: just showcase-setup" >&2
+    echo "missing WASM target; run: just web-setup" >&2
     exit 2
 fi
 
 if ! command -v wasm-bindgen >/dev/null 2>&1 || [[ "$(wasm-bindgen --version)" != "wasm-bindgen 0.2.128" ]]; then
-    echo "wasm-bindgen 0.2.128 is required; run: just showcase-setup" >&2
+    echo "wasm-bindgen 0.2.128 is required; run: just web-setup" >&2
     exit 2
 fi
 
@@ -48,7 +48,7 @@ cp "$WEB_ROOT/clients/web/web/index.html" "$WEB_DIST/index.html"
 cp "$WEB_ROOT/clients/web/web/main.js" "$WEB_DIST/main.js"
 cp "$WEB_ROOT/clients/web/web/style.css" "$WEB_DIST/style.css"
 cp "$WEB_ROOT/assets/linux/hicolor/256x256/apps/zz.png" "$WEB_DIST/favicon.png"
-cp "$WEB_ROOT/examples/ui-showcase/assets/fonts/inter/LICENSE.txt" "$WEB_DIST/licenses/inter.txt"
+cp "$WEB_ROOT/clients/web/assets/fonts/inter/LICENSE.txt" "$WEB_DIST/licenses/inter.txt"
 cp "$WEB_ROOT/clients/web/web/licenses/"*.txt "$WEB_DIST/licenses/"
 
 echo "browser client ready: $WEB_DIST"

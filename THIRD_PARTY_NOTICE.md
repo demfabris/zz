@@ -70,8 +70,7 @@ each face.
 | [Geist Mono](https://github.com/vercel/geist-font) | iPhone and iPad client | The Geist Project Authors (Vercel) |
 | [IBM Plex Sans](https://github.com/IBM/plex) | Browser client | IBM Corp. |
 | [Lilex](https://github.com/mishamyrt/Lilex) | Browser client | The Lilex Project Authors |
-| [Noto Sans CJK, Noto Color Emoji](https://github.com/notofonts) | Browser client | Google |
-| [Inter](https://github.com/rsms/inter) | UI showcase | The Inter Project Authors |
+| [Inter](https://github.com/rsms/inter) | Browser client | The Inter Project Authors |
 | [Fantasque Sans Mono](https://github.com/belluzj/fantasque-sans) | zzmux.sh | Jany Belluz |
 
 The desktop clients ship no fonts; they render with the system text stack.
@@ -80,7 +79,7 @@ The desktop clients ship no fonts; they render with the system text stack.
 
 | Set | Used for | License |
 | --- | --- | --- |
-| [Tabler Icons](https://tabler.io/icons) | Every glyph in the app, the UI showcase, and the site. Two copies: `crates/zz-ui/assets/icons`, which the app and the showcase both render from, and `site/src/icons`, which the Astro site inlines at build time. A handful are locally redrawn, noted in the zz-ui port table. | MIT, © 2020–2026 Paweł Kuna. Retained as `LICENSE-TABLER` beside each copy. |
+| [Tabler Icons](https://tabler.io/icons) | Every glyph in the app and the site. Two copies: `crates/zz-ui/assets/icons` for the app and `site/src/icons`, which the Astro site inlines at build time. A handful are locally redrawn, noted in the zz-ui port table. | MIT, © 2020–2026 Paweł Kuna. Retained as `LICENSE-TABLER` beside each copy. |
 | [Simple Icons](https://simpleicons.org) | The vendor brand marks `openai.svg` and `claude.svg`. | CC0-1.0 |
 
 ## Color schemes

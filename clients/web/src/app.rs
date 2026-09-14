@@ -1117,6 +1117,7 @@ impl WebClient {
             let (title, targets) = match state.kind {
                 ChooseTreeKind::Windows => ("Choose window", "sessions and windows"),
                 ChooseTreeKind::Panes => ("Choose pane", "sessions, windows, and panes"),
+                ChooseTreeKind::Clients => ("Choose client", "clients"),
             };
             subtitle = chooser_subtitle(format!("{count} {targets}"), state.filter_no_matches);
             max_width = 600.0;

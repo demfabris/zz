@@ -10,7 +10,7 @@ tag-message = "zz {{version}}"
 tag-name = "v{{version}}"
 
 [[pre-release-replacements]]
-file = "../../examples/ui-showcase/Cargo.lock"
+file = "../../clients/web/Cargo.lock"
 search = '(?m)(name = "zz-ui"\nversion = ")[^"]+'
 replace = '${1}{{version}}'
 exactly = 1

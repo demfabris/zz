@@ -202,6 +202,13 @@ site:
     npm --prefix site install
     npm --prefix site run dev
 
+# Install the toolchain used by the browser client.
+web-setup:
+    rustup toolchain install nightly --profile minimal --component rustfmt --component clippy
+    rustup target add --toolchain nightly wasm32-unknown-unknown
+    command -v cargo-watch >/dev/null 2>&1 || cargo install cargo-watch --locked
+    cargo install wasm-bindgen-cli --version 0.2.128 --locked
+
 web:
     @scripts/web-dev.sh
 
@@ -213,30 +220,3 @@ web-build-release:
 
 web-serve *args:
     @cargo run -p zz-web -- --assets clients/web/dist {{ args }}
-
-# Run the zz UI showcase with Cargo watch and Vite live reload.
-showcase:
-    @scripts/showcase-dev.sh
-
-showcase-capture path:
-    ZZ_PREVIEW_CAPTURE="{{path}}" cargo run --locked --features native-capture --manifest-path examples/ui-showcase/Cargo.toml --target-dir target/ui-showcase-native
-
-showcase-native:
-    cargo run --locked --manifest-path examples/ui-showcase/Cargo.toml --target-dir target/ui-showcase-native
-
-# Install the toolchain used by the browser showcase.
-showcase-setup:
-    rustup toolchain install nightly --profile minimal --component rustfmt --component clippy
-    rustup target add --toolchain nightly wasm32-unknown-unknown
-    command -v cargo-watch >/dev/null 2>&1 || cargo install cargo-watch --locked
-    cargo install wasm-bindgen-cli --version 0.2.128 --locked
-    npm --prefix examples/ui-showcase/web install
-    python3 scripts/prepare-showcase-fonts.py
-
-# Build browser-ready debug assets into examples/ui-showcase/web/src/wasm.
-showcase-build:
-    @scripts/build-showcase-wasm.sh
-
-# Build optimized browser assets into examples/ui-showcase/web/src/wasm.
-showcase-build-release:
-    @scripts/build-showcase-wasm.sh --release

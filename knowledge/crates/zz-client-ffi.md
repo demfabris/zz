@@ -1,7 +1,7 @@
 ---
 type: Rust Crate
 title: zz-client-ffi crate
-description: Native client C ABI for transport, terminal viewports, Agent transcripts, settings, chrome bindings, and optional CEF browsers.
+description: Native client C ABI for transport, terminal viewports, Agent transcripts, settings, and chrome bindings.
 resource: crates/zz-client-ffi/include/zz-client.h
 tags: [client, ffi, c-abi, unix, ios, ipad, crate]
 timestamp: 2026-09-08T02:00:00Z
@@ -92,21 +92,12 @@ The default ABI includes Agent transcript reduction, ordered replay, preferences
 completion, config/settings, prefix claims, and chrome-keymap resolution. Swift
 consumes these through `zz_agent_model`, `zz_settings_model`, and `zz_chrome_keymap`.
 
-The optional `native-browser` feature adds the CEF runtime, retained IOSurface/BGRA
-frames, session input/actions, browser history, Chrome import, and SSH egress. The
-shell pumps CEF on its main thread. It retains frames through GPU completion and
-frees JSON/event handles after reading their borrowed buffers. Shutdown waits for
-sessions and pending data operations before releasing the runtime.
-
-`zz_client_connect_native` adds bundled-helper startup and guarded incompatible
-local-daemon replacement. It accepts a JSON options object with endpoint, helper,
-appearance, startup policy, and optional working-directory/mux-config paths. The
-original connection APIs remain available to other clients.
+Browser panes are not part of the C ABI; the native macOS client that used a CEF surface here was retired 2026-09-14, tag `archive/macos-native`.
 
 Command-catalog export, terminal history chunks, Kitty images, multi-host selection,
 retained daemon-expanded status accessors, and Editor viewport data remain open.
 `ZZ_EVENT_STATUS_CHANGED` wakes consumers, but does not expose the formatted status
-fields. See [the native macOS guide](/playbooks/native-macos-client.md).
+fields.
 
 # Testing
 
@@ -141,8 +132,6 @@ Apple build cross-compiles the crate for `aarch64-apple-ios-sim` on every Xcode 
 | `crates/zz-client-ffi/src/ffi.rs` | Lifecycle, transport reader, wake fd, reduction, snapshots, and exports. |
 | `crates/zz-client-ffi/src/ffi/agent.rs` | Transcript presentation, completion, preferences, and agent actions. |
 | `crates/zz-client-ffi/src/ffi/settings.rs` | Shared settings snapshots, actions, and connection overrides. |
-| `crates/zz-client-ffi/src/ffi/browser.rs` | Optional CEF runtime and browser data operations. |
-| `crates/zz-client-ffi/src/ffi/native_connection.rs` | Native helper startup and SSH prompts. |
 | `crates/zz-client-ffi/tests/smoke.c` | From-scratch C consumer with live daemon assertions. |
 | `crates/zz-client-ffi/tests/smoke.rs` | Harness that compiles, links, and runs the C client. |
 | `crates/zz-client-ffi/tests/paste.rs` | Byte-level proof of the paste encoding against a live daemon. |

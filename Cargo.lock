@@ -11493,13 +11493,10 @@ name = "zz-client-ffi"
 version = "0.9.1"
 dependencies = [
  "agent-client-protocol-schema",
- "async-channel",
  "rustix",
  "serde",
  "serde_json",
  "zeroize",
- "zz-browser",
- "zz-chrome-import",
  "zz-client",
  "zz-config",
  "zz-daemon",

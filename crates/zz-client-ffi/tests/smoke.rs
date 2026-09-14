@@ -61,8 +61,6 @@ fn compile_smoke_client(scratch: &Path) -> PathBuf {
         "-framework",
         "Metal",
         "-framework",
-        "IOSurface",
-        "-framework",
         "QuartzCore",
         "-Wl,-dead_strip",
         "-lc++",

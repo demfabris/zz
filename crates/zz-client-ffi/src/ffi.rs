@@ -8,13 +8,6 @@ mod chrome;
 pub use chrome::*;
 mod gui;
 pub use gui::*;
-mod native_connection;
-pub use native_connection::*;
-
-#[cfg(all(feature = "native-browser", target_os = "macos"))]
-mod browser;
-#[cfg(all(feature = "native-browser", target_os = "macos"))]
-pub use browser::*;
 
 use std::{
     collections::VecDeque,
@@ -25,13 +18,13 @@ use std::{
     thread,
 };
 
-use zeroize::Zeroize;
 #[cfg(target_os = "ios")]
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 use zz_client::{
     AgentAttentionEdge, AgentAttentionStatus, ClientCore, CoreEvent, NormalizedPaneRect, Outbound,
     ViewportDamage, agent_attention_status, pane_rects,
 };
+#[cfg(target_os = "ios")]
 use zz_daemon::{AskpassPromptKind, AskpassReply, SshPrompts};
 use zz_daemon::{DaemonError, Endpoint, EndpointError, InteractiveClient};
 use zz_protocol::{
@@ -893,17 +886,9 @@ fn interactive_prompts(
     callback: Option<ZzSshPromptCallback>,
     context: *mut c_void,
 ) -> Option<SshPrompts> {
-    native_interactive_prompts(Path::new("").to_owned(), callback, context)
-}
-
-fn native_interactive_prompts(
-    helper: PathBuf,
-    callback: Option<ZzSshPromptCallback>,
-    context: *mut c_void,
-) -> Option<SshPrompts> {
     let callback = callback?;
     let context = context as usize;
-    Some(SshPrompts::new(helper, move |prompt| {
+    Some(SshPrompts::new(PathBuf::new(), move |prompt| {
         let (kind, title) = match prompt.kind() {
             AskpassPromptKind::Secret => (
                 ZzSshPromptKind::Secret,

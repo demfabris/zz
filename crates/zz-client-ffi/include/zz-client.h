@@ -103,45 +103,6 @@ typedef struct zz_pane_rect {
     float height;
 } zz_pane_rect;
 
-typedef struct zz_browser_runtime zz_browser_runtime;
-typedef struct zz_browser_event zz_browser_event;
-typedef struct zz_browser_frame zz_browser_frame;
-zz_browser_runtime *zz_browser_runtime_new(const char *cache_root, char *error, size_t capacity);
-bool zz_browser_runtime_pump(zz_browser_runtime *runtime);
-bool zz_browser_runtime_set_egress(zz_browser_runtime *runtime, const zz_client *client, const char *endpoint, bool enabled);
-zz_json *zz_browser_history_suggestions(const zz_browser_runtime *runtime, const char *profile, const char *input, size_t limit);
-zz_json *zz_browser_history_recent(const zz_browser_runtime *runtime, const char *profile, size_t limit);
-bool zz_browser_history_remove(zz_browser_runtime *runtime, const char *profile, const char *url);
-uint64_t zz_browser_chrome_profiles(zz_browser_runtime *runtime);
-uint64_t zz_browser_import_chrome(zz_browser_runtime *runtime, uint64_t session, const char *source_profile);
-zz_bytes zz_browser_runtime_error(const zz_browser_runtime *runtime);
-bool zz_browser_runtime_free(zz_browser_runtime *runtime);
-uint64_t zz_browser_session_new(zz_browser_runtime *runtime, const char *profile,
-    const char *url, uint32_t width, uint32_t height, float scale);
-void zz_browser_session_close(zz_browser_runtime *runtime, uint64_t session);
-void zz_browser_session_viewport(zz_browser_runtime *runtime, uint64_t session,
-    uint32_t width, uint32_t height, float scale, float zoom,
-    int32_t screen_x, int32_t screen_y, bool visible, bool focused);
-bool zz_browser_session_action(zz_browser_runtime *runtime, uint64_t session, const char *json);
-bool zz_browser_session_dispatch(zz_browser_runtime *runtime, uint64_t session, const char *json);
-void zz_browser_session_pointer(zz_browser_runtime *runtime, uint64_t session,
-    int32_t x, int32_t y, uint32_t phase, uint32_t button, int32_t clicks, uint8_t flags);
-void zz_browser_session_wheel(zz_browser_runtime *runtime, uint64_t session,
-    int32_t x, int32_t y, int32_t dx, int32_t dy, bool precise, uint8_t flags);
-void zz_browser_session_key(zz_browser_runtime *runtime, uint64_t session,
-    uint32_t code, uint32_t scalar, uint8_t function, uint32_t action, uint8_t flags);
-zz_browser_event *zz_browser_event_next(zz_browser_runtime *runtime);
-zz_bytes zz_browser_event_json(const zz_browser_event *event);
-zz_bytes zz_browser_event_image(const zz_browser_event *event);
-void zz_browser_event_free(zz_browser_event *event);
-zz_browser_frame *zz_browser_frame_take(zz_browser_runtime *runtime, uint64_t session);
-void zz_browser_frame_free(zz_browser_frame *frame);
-uint32_t zz_browser_frame_width(const zz_browser_frame *frame);
-uint32_t zz_browser_frame_height(const zz_browser_frame *frame);
-void *zz_browser_frame_surface(const zz_browser_frame *frame);
-zz_bytes zz_browser_frame_bgra(const zz_browser_frame *frame);
-size_t zz_browser_resolve_address(const char *input, const char *provider, char *output, size_t capacity);
-
 typedef enum zz_connect_failure {
     ZZ_CONNECT_FAILURE_NONE = 0,
     ZZ_CONNECT_FAILURE_RETRYABLE = 1,
@@ -283,9 +244,6 @@ size_t zz_client_default_endpoint(char *buf, size_t capacity);
 zz_client *zz_client_connect_endpoint(const char *endpoint,
                                       const char *password, char *error,
                                       size_t error_capacity);
-zz_client *zz_client_connect_native(
-    const char *options_json, zz_ssh_prompt_callback callback, void *context,
-    zz_connect_failure *failure, char *error, size_t error_capacity);
 zz_client *zz_client_connect_endpoint_interactive(
     const char *endpoint, zz_ssh_prompt_callback callback, void *context,
     zz_connect_failure *failure, char *error, size_t error_capacity);

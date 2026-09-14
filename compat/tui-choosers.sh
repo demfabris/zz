@@ -80,6 +80,24 @@
 #   selection colours and the cursor - is asserted whole.
 # Nothing else is masked. Anything not in those lists is compared.
 #
+# ONE CELL IN THIS SCENE IS INTERMITTENT AND IS NOT MASKED, because it is a
+# real divergence and masking it would hide one: the window tree's pane row
+# prints `#{pane_current_command}`, and for the scene's `ENV= PS1='$ ' exec
+# /bin/sh` the pin always answers `sh` while zz answers `sh` most runs and
+# `bash` in some, which shows up as a failed `filter-cleared` or another
+# window-tree checkpoint. Measured 2026-09-14: the pin runs osdep_get_name on
+# every expansion, reading /proc/<pgid>/cmdline and taking its first argument
+# through parse_window_name, and falls back to the pane's own argv and then to
+# its shell when that read comes back empty (format.c:941-949). zz reads the
+# process name once per change of the pane's foreground pid, and execve does
+# not change a pid, so a read that landed before `exec /bin/sh` keeps answering
+# with the login shell's name for the pane's whole life. Reading
+# /proc/<pgid>/cmdline per publish instead was tried the same day and reverted:
+# it makes this fixture green but publishes an empty command whenever the
+# foreground pgid is a child that has already gone, and three zz-daemon tests
+# then fail under parallel load on `pane runtime facts did not settle`. The
+# pin's fallback chain is the missing half of that fix.
+#
 # SETTLED CHECKPOINTS. A chooser swallows every key typed into it, so, as in
 # tui-indicators.sh, each phase marks FIRST - `printf 'MARK-%s\n' NAME` into the
 # pane, settled on both screens - and only then opens its surface. After that,

@@ -739,7 +739,9 @@ impl TerminalPane {
             window.invalidate_character_coordinates();
         }
         let measured = geometry.grid;
-        if self.geometry != Some(measured) && attached {
+        let measurable =
+            bounds.size.width >= geometry.cell_width && bounds.size.height >= geometry.line_height;
+        if measurable && self.geometry != Some(measured) && attached {
             self.geometry = Some(measured);
             match self.surface {
                 TerminalSurface::Pane => self.send(

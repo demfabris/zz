@@ -4,8 +4,9 @@ use std::borrow::Cow;
 
 use gpui::{AssetSource, Result, SharedString};
 
-/// zz's embedded SVG icon set, read from `crates/zz-ui/assets/icons/`. Debug
-/// builds read from disk, so an edited SVG needs no rebuild.
+/// zz's embedded SVG icon set, read from `crates/zz-ui/assets/icons/`. Native
+/// debug builds read from disk, so an edited SVG needs no rebuild; wasm builds
+/// always embed because the browser has no disk to read.
 #[derive(rust_embed::RustEmbed)]
 #[folder = "assets"]
 #[include = "icons/**/*.svg"]

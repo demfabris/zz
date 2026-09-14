@@ -57,6 +57,11 @@ zz-client = { path = "../zz-client" }
 zz-protocol = { path = "../zz-protocol" }
 zz-terminal = { path = "../zz-terminal", default-features = false }
 
+[target.'cfg(target_family = "wasm")'.dependencies]
+# Browsers have no filesystem for the debug-build disk reads, so the icon set
+# is embedded in every wasm profile.
+rust-embed = { version = "8.12", features = ["include-exclude", "debug-embed"] }
+
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 tree-sitter = { version = "0.26.13", optional = true }
 tree-sitter-json = { version = "0.24.8", optional = true }

@@ -23728,7 +23728,6 @@ impl Shared {
         }
     }
 
-    /// Append one line to the running Command request's stderr.
     /// `window_pane_input_callback`: the caller's stream reaches a PTY-free
     /// pane's parser as if a child had printed it. The mux has already refused
     /// a pane that holds a process.
@@ -23742,6 +23741,7 @@ impl Shared {
         }
     }
 
+    /// Append one line to the running Command request's stderr.
     fn record_command_stderr(&self, client: ClientId, line: &str) {
         if let Some(streams) = self.inner.lock().command_streams.get_mut(&client) {
             streams.stderr.push_str(line);

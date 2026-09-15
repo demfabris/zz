@@ -61,12 +61,12 @@ use zz_browser::{BrowserBootstrap, BrowserError, BrowserRuntime};
 use zz_daemon::default_socket_path;
 #[cfg(not(target_os = "ios"))]
 use zz_daemon::{
-    CommandClient, CommandOutcome, CommandStdinSink, Daemon, Endpoint,
+    CommandClient, CommandOutcome, CommandStdinSink, Daemon, Endpoint, append_stdin_payload,
     classify_local_connect_error, terminate_incompatible_daemon,
 };
 use zz_daemon::{DaemonError, InteractiveClient};
 #[cfg(not(target_os = "ios"))]
-use zz_mux::{MuxEngine, format_command};
+use zz_mux::MuxEngine;
 #[cfg(not(target_os = "ios"))]
 use zz_protocol::{
     CommandInvocation, MAX_AGENT_SEND_BYTES, MAX_CLIENT_WORKING_DIRECTORY_BYTES, PROTOCOL_VERSION,
@@ -1506,14 +1506,6 @@ fn prepared_command_invocations(command: &PreparedCommand) -> Option<Cow<'_, [Co
 }
 
 #[cfg(not(target_os = "ios"))]
-fn prepared_command_tail(command: &PreparedCommand) -> Option<Cow<'_, CommandInvocation>> {
-    match prepared_command_invocations(command)? {
-        Cow::Borrowed(commands) => commands.last().map(Cow::Borrowed),
-        Cow::Owned(mut commands) => commands.pop().map(Cow::Owned),
-    }
-}
-
-#[cfg(not(target_os = "ios"))]
 fn prepared_command_any(
     command: &PreparedCommand,
     mut matches: impl FnMut(&CommandInvocation, &str) -> bool,
@@ -1539,48 +1531,15 @@ fn prepared_command_error(commands: &[PreparedCommand]) -> Option<&ServerError> 
 
 #[cfg(not(target_os = "ios"))]
 fn prepared_command_reads_stdin(command: &PreparedCommand) -> Option<CommandStdinSink> {
-    let tail = prepared_command_tail(command)?;
-    let canonical_name = command
-        .canonical_name
-        .as_deref()
-        .unwrap_or_else(|| canonical_command(&tail.name));
-    zz_daemon::command_stdin_sink(canonical_name, &tail.args)
-}
-
-#[cfg(not(target_os = "ios"))]
-fn stdin_payload_has_argument_boundary(canonical_name: &str, arguments: &[RawText]) -> bool {
-    if canonical_name == "load-buffer" {
-        return true;
-    }
-    let Some(spec) = catalog_command_spec(canonical_name) else {
-        return false;
-    };
-    let mut index = 0;
-    while let Some(argument) = arguments.get(index) {
-        if argument == "--" {
-            return true;
-        }
-        if !argument.starts_with('-') || argument == "-" {
-            return false;
-        }
-        let consumes_next = spec
-            .option(argument)
-            .is_some_and(|option| option.value.is_some());
-        index += if consumes_next { 2 } else { 1 };
-    }
-    false
-}
-
-#[cfg(not(target_os = "ios"))]
-fn append_stdin_payload(
-    canonical_name: &str,
-    arguments: &mut Vec<RawText>,
-    payload: impl Into<RawText>,
-) {
-    if !stdin_payload_has_argument_boundary(canonical_name, arguments) {
-        arguments.push("--".into());
-    }
-    arguments.push(payload.into());
+    prepared_command_invocations(command)?
+        .iter()
+        .find_map(|invocation| {
+            let canonical_name = command
+                .canonical_name
+                .as_deref()
+                .unwrap_or_else(|| canonical_command(&invocation.name));
+            zz_daemon::command_stdin_sink(canonical_name, &invocation.args)
+        })
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1592,22 +1551,7 @@ fn append_prepared_command_stdin_payload(
         append_stdin_payload(&canonical_name, &mut command.invocation.args, payload);
         return;
     }
-    let has_argument_boundary = prepared_command_tail(command).is_some_and(|tail| {
-        stdin_payload_has_argument_boundary(canonical_command(&tail.name), &tail.args)
-    });
-    let body = MuxEngine::command_alias_group_body(&command.invocation)
-        .expect("stdin-reading prepared command must be an alias group");
-    let marker = "__zz-stdin-payload";
-    let mut suffix_arguments = Vec::with_capacity(2);
-    if !has_argument_boundary {
-        suffix_arguments.push(RawText::from("--"));
-    }
-    suffix_arguments.push(payload.into());
-    let suffix = format_command(&CommandInvocation::new(marker, suffix_arguments));
-    let suffix = suffix
-        .strip_prefix(marker)
-        .expect("stdin payload formatter must preserve an unknown command name");
-    command.invocation.args[0] = format!("{{ {body}{suffix} }}").into();
+    command.invocation.set_stdin(payload);
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -3489,7 +3433,7 @@ mod tests {
     }
 
     #[test]
-    fn prepared_cli_routing_scans_alias_groups_but_stdin_uses_the_final_command() {
+    fn prepared_cli_routing_uses_the_first_stream_sink_in_alias_groups() {
         let prepared_alias = |body: &str, args: &[&str]| {
             let mut engine = MuxEngine::default();
             let mut context = ExecutionContext::default();
@@ -3576,8 +3520,8 @@ mod tests {
                 .expect("prepared command is an alias group");
             assert_eq!(commands[0].name, "display-message");
             assert_eq!(commands[1].name, "send-text");
-            assert_eq!(&commands[1].args[..3], ["-t", "%1", "--"]);
-            assert_eq!(commands[1].args[3], payload);
+            assert_eq!(commands[1].args, ["-t", "%1"]);
+            assert_eq!(send_text.invocation.stdin(), Some(&RawText::from(payload)));
         }
 
         let mut bounded = prepared_alias("display-message -p before ; send-text -t %1 --", &[]);
@@ -3586,18 +3530,19 @@ mod tests {
         let commands = MuxEngine::command_alias_group_commands(&bounded.invocation)
             .expect("parse prepared alias group")
             .expect("prepared command is an alias group");
-        assert_eq!(commands[1].args, ["-t", "%1", "--", "piped"]);
+        assert_eq!(commands[1].args, ["-t", "%1", "--"]);
+        assert_eq!(bounded.invocation.stdin(), Some(&RawText::from("piped")));
 
         for (body, payload, expected) in [
             (
                 "display-message -p before ; send-text -t --",
                 "--no-enter",
-                vec!["-t", "--", "--", "--no-enter"],
+                vec!["-t", "--"],
             ),
             (
                 "display-message -p before ; agent-send --context --",
                 "--submit",
-                vec!["--context", "--", "--", "--submit"],
+                vec!["--context", "--"],
             ),
         ] {
             let mut prepared = prepared_alias(body, &[]);
@@ -3607,13 +3552,25 @@ mod tests {
                 .expect("parse prepared alias group")
                 .expect("prepared command is an alias group");
             assert_eq!(commands[1].args, expected);
+            assert_eq!(prepared.invocation.stdin(), Some(&RawText::from(payload)));
         }
+
+        let mut binary = prepared_alias("load-buffer -b alias - ; source-file -", &[]);
+        assert_eq!(
+            prepared_command_reads_stdin(&binary),
+            Some(super::CommandStdinSink::Argument { binary: true })
+        );
+        let body = binary.invocation.args.clone();
+        let payload = RawText::from_bytes(b"a\xff\0z\n".to_vec());
+        append_prepared_command_stdin_payload(&mut binary, payload.clone());
+        assert_eq!(binary.invocation.args, body);
+        assert_eq!(binary.invocation.stdin(), Some(&payload));
 
         let agent_send = prepared_alias("display-message -p before ; agent-send --submit", &[]);
         assert!(prepared_command_reads_stdin(&agent_send).is_some());
         let nonfinal_agent_send =
             prepared_alias("agent-send --submit ; display-message -p after", &[]);
-        assert!(prepared_command_reads_stdin(&nonfinal_agent_send).is_none());
+        assert!(prepared_command_reads_stdin(&nonfinal_agent_send).is_some());
 
         let empty = prepared_alias("", &["agent-send", "--submit"]);
         assert!(!prepared_attach_uses_tui("route", &empty));

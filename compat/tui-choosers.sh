@@ -147,9 +147,10 @@
 # --self-check runs the driver against a deliberate one-sided difference in each
 # channel - a tree row, a preview cell, a tag mark, the cursor, the -Z zoom, the
 # chooser's own prompt row and the one title span a mask truncates - and
-# requires the comparison to catch each in that channel, plus two equivalences
-# it must NOT report. A fixture that only
-# passes has proved nothing.
+# requires the comparison to catch each in that channel, plus equivalences
+# it must NOT report. The info mask also compares counter widths across an SGR
+# reset and checks that colours, labels, alignment and borders still differ.
+# A fixture that only passes has proved nothing.
 set -eEuo pipefail
 export ZZ_TRAY=0
 
@@ -598,7 +599,7 @@ import os, re, sys
 name = re.escape(os.environ["ZZ_MASK_NAME"])
 stamp = r"[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9]?[0-9] \d\d:\d\d:\d\d \d{4}"
 TOKEN_FILL = (
-    r"(/dev/CLIENT|\(PID NNNN\)|\(NN discarded\)|\(REL\)|TIMESTAMP|NN:NN|NNNN)( {2,})"
+    r"((?:/dev/CLIENT|\(PID NNNN\)|\(NN discarded\)|\(REL\)|TIMESTAMP|NN:NN|NNNN)(?:\x1b\[[0-9;]*m)*)( {2,})"
 )
 for line in sys.stdin.read().split("\n"):
     masked = re.sub(name, "/dev/CLIENT", line)
@@ -1161,9 +1162,32 @@ outer_cursor_is_not() {
   [ "$(cursor_tuple zz)" != "$1" ]
 }
 
+self_check_info_mask_case() {
+  local name="$1" expectation="$2" left="$3" right="$4"
+  LAST_ROWS_DIFFERED=0
+  LAST_CURSOR_DIFFERED=0
+  if [ "$(printf '%s\n' "$left" | client_info_mask zz)" != \
+    "$(printf '%s\n' "$right" | client_info_mask zz)" ]; then
+    LAST_ROWS_DIFFERED=1
+  fi
+  self_check_case "info mask, $name" "$expectation"
+}
+
 run_self_check() {
-  printf 'self-check: one deliberate difference per channel, plus two equivalences\n'
+  printf 'self-check: one deliberate difference per channel, plus equivalences and info-mask checks\n'
   attach_both_at 80 24
+
+  local info_short info_long
+  printf -v info_short '│ Bytes Written │ 12345 (0 discarded)\033[39m%41s│' ''
+  printf -v info_long '│ Bytes Written │ 123456789 (0 discarded)\033[39m%37s│' ''
+  self_check_info_mask_case 'styled counter widths' none "$info_short" "$info_long"
+  self_check_info_mask_case 'plain counter widths' none \
+    "${info_short//$'\033[39m'/}" "${info_long//$'\033[39m'/}"
+  self_check_info_mask_case 'colour' rows "$info_short" "${info_short/$'\033[39m'/$'\033[31m'}"
+  self_check_info_mask_case 'label alignment' rows "$info_short" "${info_short/Written │/Written  │}"
+  self_check_info_mask_case 'label text' rows "$info_short" "${info_short/Written/WrittenX}"
+  self_check_info_mask_case 'border' rows "$info_short" "${info_short%│}┃"
+  self_check_info_mask_case 'extra reset' rows "$info_short" "${info_short/$'\033[39m'/$'\033[0m\033[39m'}"
 
   # The equivalence first: the same window tree opened on both sides with
   # nothing planted must report nothing, or every sabotage below would be
@@ -1363,7 +1387,7 @@ run_self_check() {
     printf '%s self-check expectations unmet\n' "$SELF_CHECK_FAILURES"
     exit 1
   fi
-  printf 'self-check complete: every sabotage was caught and both equivalences passed\n'
+  printf 'self-check complete: every sabotage was caught and all equivalences passed\n'
 }
 
 if [ "$SELF_CHECK" -eq 1 ]; then

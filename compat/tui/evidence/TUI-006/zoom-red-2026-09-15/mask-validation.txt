@@ -1,0 +1,44 @@
+client-info-view baseline reproduction: run 3 failed on row 19 with 41 versus 37 filler spaces after ESC[39m. The mask previously required spaces immediately after the dynamic token.
+
+Original and patched mask, replayed on width-equivalent SGR-bearing rows and five distinct sabotages:
+Before: exit 1
+FAIL styled dynamic width equivalence
+PASS plain dynamic width equivalence
+PASS colour sabotage
+PASS label alignment sabotage
+PASS label text sabotage
+PASS border sabotage
+PASS extra reset sabotage
+After: exit 0
+PASS styled dynamic width equivalence
+PASS plain dynamic width equivalence
+PASS colour sabotage
+PASS label alignment sabotage
+PASS label text sabotage
+PASS border sabotage
+PASS extra reset sabotage
+
+Final whole-fixture self-check:
+$ ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins ZZ_CHOOSER_CAPTURE_DIR=/tmp/zoom-red-evidence/chooser-self-final compat/tui-choosers.sh --self-check ./target/debug/zz /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+exit 0
+ok    self-check info mask, styled counter widths
+ok    self-check info mask, plain counter widths
+ok    self-check info mask, colour
+ok    self-check info mask, label alignment
+ok    self-check info mask, label text
+ok    self-check info mask, border
+ok    self-check info mask, extra reset
+ok    self-check equivalence: the same window tree on both sides
+ok    self-check tag, a mark on one side only
+ok    self-check preview, one cell of one previewed pane differs
+ok    self-check row, one tree row differs on one side
+ok    self-check cursor, one column at one prompt
+ok    self-check equivalence: the pane restored after a chooser
+ok    self-check client info, the pin client tree on its info view alone
+ok    self-check client info, the zz client tree on its info view alone
+ok    self-check zoom, the attached window zoomed on one side only
+ok    self-check pane prompt, the stock search prompt over one pane only
+ok    self-check search marks, the current match painted on one side only
+ok    self-check prompt, the buffer tree filter prompt on one side only
+ok    self-check title cut, the sort label inside the span a box cuts
+self-check complete: every sabotage was caught and all equivalences passed

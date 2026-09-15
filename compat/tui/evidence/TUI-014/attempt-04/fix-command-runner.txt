@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -u
+source /tmp/zz-modes12/env.sh
+label=$1
+shift
+start=$(date +%s)
+printf 'tip=%s\ncommand=' "$(git rev-parse HEAD)" > "/tmp/zz-modes12/$label.txt"
+printf '%q ' "$@" >> "/tmp/zz-modes12/$label.txt"
+printf '\n' >> "/tmp/zz-modes12/$label.txt"
+timeout -k 15s 570s "$@" >> "/tmp/zz-modes12/$label.txt" 2>&1
+rc=$?
+end=$(date +%s)
+printf '\nexit=%s elapsed=%ss\n' "$rc" "$((end-start))" >> "/tmp/zz-modes12/$label.txt"
+printf '%s\t%s\t%s\t%s\n' "$label" "$rc" "$((end-start))" "$(git rev-parse HEAD)" >> /tmp/zz-modes12/results.tsv
+printf '%s exit=%s seconds=%s\n' "$label" "$rc" "$((end-start))"
+tail -n 5 "/tmp/zz-modes12/$label.txt"
+exit "$rc"
+
+#!/usr/bin/env python3
+import os,random,sys,shlex
+args=sys.argv[1:]
+if args and args[0] not in ('fmt','metadata','--version'):
+    pos=args.index('--') if '--' in args else len(args)
+    args[pos:pos]=['--jobs','3']
+    if args[0]=='test':
+        if '--' not in args: args.append('--')
+        args.append('--test-threads=3')
+command=['systemd-run','--user','--scope','-q','-p','MemoryMax=8G','-p','MemorySwapMax=4G','flock','-w','540',f'/tmp/zz-cargo-slot-{random.randrange(2)}.lock','/home/demfabris/.cargo/bin/cargo',*args]
+print('cargo runner: '+shlex.join(command),file=sys.stderr,flush=True)
+os.execvp(command[0],command)
+
+export ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+export ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins
+export TMUX_BIN="$ZZ_COMPAT_TMUX"
+export ZZ_BIN=/home/demfabris/dev/zz-tui-modes-10/target/debug/zz
+export ZZ_COMPAT_ZZ="$ZZ_BIN"
+export ZZ_TRAY=0
+
+export PATH=/tmp/zz-modes12/bin:$PATH

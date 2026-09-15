@@ -9,7 +9,7 @@ this lane's polls, so this attempt sits on 287e3815 and clause 2 is untouched he
 - `environment.txt` — the box, the branch, the base, the zz build under test and the pin.
 - `01-tui-client-commands-run.txt` — `compat/tui-client-commands.sh` at the landing. Summary line:
   `all 89 asserted comparisons identical, 39 recorded not asserted (0 for a sibling lane)`, up from
-  `58` and `37` at the base. The capture family is lines 57 to 165.
+  `58` and `37` at the base. The capture family is lines 57 to 226.
 - `02-tui-client-commands-self-check.txt` — `--self-check`, including the numbered-capture sabotage
   this attempt added.
 - `03-rich-transports-probe.txt` — what the pin emits for each of the six flags on a 40x8 pane, what

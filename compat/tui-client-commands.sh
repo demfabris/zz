@@ -1129,19 +1129,22 @@ run_self_check() {
   zz_command set-option -gu @zzcc-sab-lock >/dev/null || die 'zz refused set-option -gu'
 
   # The numbered capture, whose whole output is one transform of a capture that
-  # already matched: one space typed at the zz prompt moves a numbered line the
-  # same way it moves the plain one, so the -L bytes are compared and not just
-  # produced. The space is withdrawn before the equivalence below.
+  # already matched: one glyph typed at the zz prompt has to move a numbered
+  # line the way it moves the plain one, so the -L bytes are compared and not
+  # just produced. It has to be a glyph and not the space the screen sabotage
+  # uses, because capture-pane without -N trims the trailing blank away and
+  # there would be nothing in the bytes to catch. It is withdrawn before the
+  # equivalence below.
   zz_before="$(cursor_tuple zz)"
-  tmux_outer_command send-keys -t "=$OUTER_SESSION:zz" Space ||
+  tmux_outer_command send-keys -t "=$OUTER_SESSION:zz" zzq ||
     die 'the outer tmux refused send-keys'
-  wait_for 'the one-sided space for the numbered capture' zz_cursor_is_not "$zz_before"
+  wait_for 'the one-sided glyphs for the numbered capture' zz_cursor_is_not "$zz_before"
   self_check_run capture-line-numbers-sabotage capture-pane -p -L -t PANE -S 0 -E 2
-  self_check_expect 'a numbered capture of one column on one side only' \
+  self_check_expect 'a numbered capture of three columns on one side only' \
     exit=0 stdout=1 stderr=0
-  tmux_outer_command send-keys -t "=$OUTER_SESSION:zz" BSpace ||
+  tmux_outer_command send-keys -t "=$OUTER_SESSION:zz" BSpace BSpace BSpace ||
     die 'the outer tmux refused send-keys'
-  wait_for 'the space withdrawn again' zz_cursor_is "$zz_before"
+  wait_for 'the glyphs withdrawn again' zz_cursor_is "$zz_before"
 
   # The second equivalence: with every sabotage withdrawn the comparison is
   # silent again, so none of the seven above was a difference the scene kept.

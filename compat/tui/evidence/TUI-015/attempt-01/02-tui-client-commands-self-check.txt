@@ -35,6 +35,36 @@ ok    self-check state, a session on one side only
         cursor tmux: 2,2 flag=1 pane=80x24 shape=default
         cursor zz:   3,2 flag=1 pane=80x24 shape=default
 ok    self-check screen, one column at one prompt
+      case normalize-off
+      stdout differs
+        1c1
+        < tty /dev/pts/32
+        ---
+        > tty /dev/pts/31
+ok    self-check two pts numbers differ while nothing normalizes them
+ok    self-check the same two numbers compare equal once normalized
+      case normalize-keeps-the-line
+      stdout differs
+        1a2
+        > zzcc-norm /dev/pts/N
+      state differs
+        1a2
+        > S zzcc-norm 1 0
+        3a5
+        > W zzcc-norm:0 0 * 1
+        5a8
+        > P zzcc-norm:0.0 mode=0/ 80x24 ubuntu
+ok    self-check a one-sided line beside a normalized number is still reported
+      case live-job-sabotage
+      stdout differs
+        0a1
+        > Job 0: sleep 40; echo zzcc-job [fd=N, pid=N, status=0]
+      screen differs
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+ok    self-check a format job armed on one side only
       case lock-target-sabotage
       exit tmux: 1  zz: 0
       stderr differs

@@ -1,0 +1,47 @@
+ok    click-selects-pane/active-pane: both 1
+ok    click-user-binding/option: both fired
+ok    click-user-binding-target/context: both 6,4,%0,
+ok    click-mouse-target/=-clicked-pane: both clicked
+ok    click-mouse-target/=-other-pane: both 
+ok    click-mouse-target/{mouse}-clicked-pane: both clicked
+ok    click-mouse-target/{mouse}-other-pane: both 
+ok    wheel-up-pane/pane-in-mode: both 1
+ok    wheel-up-pane/pane-mode: both copy-mode
+ok    drag-selects/buffer: both DRAGLIN
+ok    drag-selects/pane-in-mode: both 0
+ok    drag-selects/selection: both 
+ok    multi-click/double-buffer: both alpha
+ok    multi-click/triple-buffer: both MULTI alpha beta gamma
+ok    right-click-pane/screen: all 24 rows identical
+ok    right-click-pane/over-a-word: all 24 rows identical
+ok    mouse-context/over-a-word: both [beta][MOUSECTX alpha beta gamma][]
+ok    mouse-context/wrapped-head: both [WRAPPEDHEADxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxLONGTAIL][WRAPPEDHEADxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx][]
+ok    mouse-context/wrapped-tail: both [WRAPPEDHEADxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxLONGTAIL][xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxLONGTAIL][]
+ok    mouse-context/hyperlink: both [LINKTEXT][LINKTEXT][https://example.com/page]
+ok    mouse-context/blank-cell: both [][][]
+ok    border-drag/pane-width: both 32
+ok    border-click/marked-set: both 0
+ok    border-click/active-pane: both 0
+ok    status-clicks/row: both L0:win* 1:second
+ok    status-clicks/window-after-name-click: both 1
+ok    status-clicks/window-after-wheel-down: both 1
+ok    status-clicks/window-after-wheel-up: both 0
+ok    status-clicks/right-click-screen: all 24 rows identical
+ok    status-clicks/alt-right-click-screen: all 24 rows identical
+ok    border-user-binding/option: both fired
+ok    status-user-binding/option: both fired
+ok    app-mouse-mouse-on/report: both ^[[<0;5;3M^[[<0;5;3m|L0:win*|
+ok    app-mouse-mouse-off/report: both ^[[<0;5;3M^[[<0;5;3m|L0:win*|
+ok    app-mouse-drag/reports: both ^[[<0;2;3M^[[<32;8;3M^[[<0;8;3m
+ok    app-mouse-double-click/reports: both ^[[<0;5;3M^[[<0;5;3m^[[<0;5;3M^[[<0;5;3m
+ok    paste-into-pane/received: both ^[[200~pasted-text^[[201~|L0:win*|
+ok    paste-into-copy-mode/pane-in-mode: both 1
+ok    paste-into-copy-mode/screen: all 24 rows identical
+ok    paste-into-copy-mode/after-cancel-screen: all 24 rows identical
+ok    paste-into-prompt/row: both PASTEPROMPT  pasted-text
+ok    paste-under-menu/screen: all 24 rows identical
+ok    paste-under-menu/option: both alpha
+ok    focus-events-on/received: both ^[[O^[[I|L0:win*|
+ok    focus-events-off/received: both ^[[O^[[I|L0:win*|
+45 asserted checks, 0 recorded checks
+all 45 asserted checks identical

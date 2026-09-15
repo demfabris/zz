@@ -1,0 +1,23 @@
+# Environment for TUI-008 attempt-05, the mouse-context lane
+
+Linux ubuntu 7.0.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 04:26:38 UTC 2026 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 26.04.1 LTS"
+NAME="Ubuntu"
+
+date: Tue Sep 15 02:16:11 PM UTC 2026
+worktree: /home/demfabris/dev/zz-tui-context-10
+branch: campaign/tui-mouse-context
+base: 6fbdf4c3 (tip of campaign/tui-mouse-menus-2)
+head at the time of writing: 902fcf542a6cea5a6f2c8ca45f1a3341cca04e6e
+pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux d77c9dc6 (next-3.8)
+tmux next-3.8
+zz build: target/debug/zz tmux 3.8-zz
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+bash: 5.3.9(1)-release
+python: Python 3.14.4
+locale: en_US.UTF-8
+
+RUN_ENV used on every compat invocation:
+  ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+  ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins

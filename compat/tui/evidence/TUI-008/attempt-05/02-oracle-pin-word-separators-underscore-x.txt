@@ -1,0 +1,34 @@
+=== tmux (/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux) word-separators=_x ===
+--- the sample grid (capture-pane -p on the inner side) ---
+alpha beta gamma$
+WRAPPEDHEADxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx$
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxLONGTAIL$
+LINKTEXT$
+pre^Ihere post$
+wide CJKM-fM-^WM-%M-fM-^\M-,M-hM-*M-^^ tail$
+$
+                                                                         ENDWORD$
+dash-joined_word end$
+$
+--- probes (SGR MouseDown3Pane, 1-based screen cell) ---
+plain-word-beta              col=8   row=1   <beta|alpha beta gamma||7,0|||%0>
+word-first-cell              col=1   row=1   <alpha|alpha beta gamma||0,0|||%0>
+word-at-row-end              col=80  row=1   <|alpha beta gamma||79,0|||%0>
+separator-cell               col=6   row=1   <beta|alpha beta gamma||5,0|||%0>
+wrapped-head                 col=3   row=2   <WRAPPEDHEAD|WRAPPEDHEADxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx||2,1|||%0>
+wrapped-head-last-col        col=80  row=2   <|WRAPPEDHEADxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx||79,1|||%0>
+wrapped-tail                 col=5   row=3   <|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxLONGTAIL||4,2|||%0>
+hyperlink                    col=4   row=4   <LINKTEXT|LINKTEXT|https://example.com/page|3,3|||%0>
+hyperlink-past-end           col=20  row=4   <|LINKTEXT||19,3|||%0>
+tab-row                      col=2   row=5   <pre|pre	here post||1,4|||%0>
+tab-cell                     col=4   row=5   <here|pre	here post||3,4|||%0>
+wide-char-first-half         col=11  row=6   <CJKM-fM-^WM-%M-fM-^\M-,M-hM-*M-^^|wide CJKM-fM-^WM-%M-fM-^\M-,M-hM-*M-^^ tail||10,5|||%0>
+wide-char-second-half        col=12  row=6   <CJKM-fM-^WM-%M-fM-^\M-,M-hM-*M-^^|wide CJKM-fM-^WM-%M-fM-^\M-,M-hM-*M-^^ tail||11,5|||%0>
+blank-row                    col=10  row=7   <|||9,6|||%0>
+end-of-screen-word           col=78  row=8   <ENDWORD|                                                                         ENDWORD||77,7|||%0>
+dash-joined                  col=3   row=9   <dash-joined|dash-joined_word end||2,8|||%0>
+underscore-joined            col=12  row=9   <word|dash-joined_word end||11,8|||%0>
+below-content                col=10  row=20  <|||9,19|||%0>
+status-row-left              col=1   row=24  <|||0,0|0|left|%0>
+status-row-window            col=5   row=24  <|||4,0|0|window|%0>
+status-row-right             col=79  row=24  <|||78,0|0||%0>

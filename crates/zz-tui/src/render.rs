@@ -2026,13 +2026,18 @@ impl Renderer {
             .and_then(|pane| pane.mode.as_ref())
         {
             let content = entry.content();
-            let (column, row) = pane_mode::surface(mode, content, &model.status.theme).cursor;
+            let surface = pane_mode::surface(mode, content, &model.status.theme);
+            let (column, row) = surface.cursor;
             write_cursor_position(
                 &mut self.output,
                 content.x.saturating_add(column),
                 content.y.saturating_add(row),
             );
-            self.hide_cursor();
+            if surface.cursor_visible {
+                self.output.extend_from_slice(b"\x1b[?25h");
+            } else {
+                self.hide_cursor();
+            }
             return;
         }
         let Some(viewport) = model.pane_viewport(pane) else {

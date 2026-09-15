@@ -193,13 +193,18 @@ mode on the first key no table claimed, the way `window_clock_key` does. The raw
 `window_clock_table`'s big face over the pane; the GUI reads the new snapshot field for
 nothing and keeps its own presentation.
 
-## Parked by decision or by model (4)
+## Parked by decision or by model (3)
 
 | Command | Why it stays out |
 | --- | --- |
 | `link-window` / `unlink-window` | Linked windows and session groups are skipped permanently (drop-in plan decision 3). One window belongs to one session. |
 | `new-pane` | Creates a tmux floating pane by default. zz has no floating-pane mux model; the phase-1 picker verb was renamed off `new-pane` so the name stays tmux's. |
-| `switch-mode` | Targets an ordinary pane and installs tmux's switch mode. zz's native mode ownership has no equivalent command transition. |
+
+`switch-mode` left this table on 2026-09-15. It opens the same server-owned pane mode
+`clock-mode` opens, listing sessions or, under `-w`, windows through the pin's own
+`WINDOW_SWITCH_DEFAULT_FORMAT` over a `(search)` prompt. Its movement keys and its
+incremental filter stay open as `semantic:switch-mode-vocabulary` under
+`clients.interactive-refresh`.
 
 # Flag-level gaps on implemented commands: 2026-08-22 snapshot
 

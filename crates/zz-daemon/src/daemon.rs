@@ -18438,7 +18438,7 @@ impl Shared {
                 // leaves the mode up, an unbound one ends it and reaches the
                 // pane no further.
                 if input.action != zz_terminal::KeyAction::Release
-                    && self.end_pane_mode_on_key(client, pane, &input, text_follows)
+                    && self.pane_mode_key(client, kind, context, pane, &input, text_follows)?
                 {
                     self.sync_prefix_armed(client);
                     return Ok(());
@@ -18467,17 +18467,22 @@ impl Shared {
     }
 
     /// `window_pane_key` for a pane holding a server-owned mode: the mode
-    /// swallows the key and ends. Returns whether the key was spent here.
-    fn end_pane_mode_on_key(
-        &self,
+    /// answers the key itself and the pane never sees it. `window_clock_key`
+    /// ends on any key; `window_switch_key` ends on Escape, `C-[`, `C-c` and
+    /// `C-g`, runs its command on Enter and swallows everything else. Returns
+    /// whether the key was spent here.
+    fn pane_mode_key(
+        self: &Arc<Self>,
         client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
         pane: PaneId,
         input: &zz_terminal::KeyInput,
         text_follows: bool,
-    ) -> bool {
-        if self.inner.lock().pane_modes.remove(&pane).is_none() {
-            return false;
-        }
+    ) -> Result<bool, DaemonError> {
+        let Some(mode) = self.inner.lock().pane_modes.get(&pane).cloned() else {
+            return Ok(false);
+        };
         self.suppress_committed_character(
             client,
             pane,
@@ -18485,8 +18490,32 @@ impl Shared {
             input,
             text_follows,
         );
+        let key = input_key_name(input);
+        let activate = match &mode {
+            PaneModeRequest::Clock => None,
+            PaneModeRequest::Switch { .. } => {
+                match key.as_str() {
+                    "Escape" | "C-[" | "C-c" | "C-g" => None,
+                    "Enter" => switch_mode_target(&self.inner.lock(), pane),
+                    // `prompt_key` swallows every other key into the mode's own
+                    // `(search)` prompt, so the pane never sees it and the mode
+                    // stays up.
+                    _ => return Ok(true),
+                }
+            }
+        };
+        self.inner.lock().pane_modes.remove(&pane);
         self.publish_mux_snapshots();
-        true
+        if let Some(target) = activate {
+            self.execute_gesture(
+                client,
+                kind,
+                context,
+                "switch_mode_activate",
+                &CommandInvocation::new("switch-client", ["-Z", "-t", target.as_str()]),
+            )?;
+        }
+        Ok(true)
     }
 
     /// `server_client_key_callback`'s mouse half. A decoded pointer event the
@@ -34398,24 +34427,20 @@ fn stamp_snapshot_for_client(
         format_client,
         snapshot,
     );
-    stamp_pane_modes(&inner.engine, &facts, &inner.pane_modes, snapshot);
+    stamp_pane_modes(inner, &facts, snapshot);
 }
 
 /// Carries each pane's server-owned mode to the client, resolved from the
 /// window options the pin's own draw reads on every redraw.
-fn stamp_pane_modes(
-    engine: &MuxEngine,
-    facts: &FormatHookFacts,
-    modes: &BTreeMap<PaneId, PaneModeRequest>,
-    snapshot: &mut MuxSnapshot,
-) {
-    if modes.is_empty() {
+fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut MuxSnapshot) {
+    if inner.pane_modes.is_empty() {
         return;
     }
+    let engine = &inner.engine;
     for session in &mut snapshot.sessions {
         for window in &mut session.windows {
             for (pane, pane_snapshot) in &mut window.panes {
-                pane_snapshot.mode = modes.get(pane).map(|mode| match mode {
+                pane_snapshot.mode = inner.pane_modes.get(pane).map(|mode| match mode {
                     PaneModeRequest::Clock => {
                         let (colour, style) = engine.clock_mode_options(window.id);
                         PaneMode::Clock {
@@ -34423,6 +34448,14 @@ fn stamp_pane_modes(
                             colour,
                         }
                     }
+                    PaneModeRequest::Switch { windows } => PaneMode::Switch {
+                        rows: chooser_presentation::switch_rows(inner, *windows),
+                        selected: 0,
+                        offset: 0,
+                        selection_style: chooser_presentation::mode_style_for_pane(inner, *pane),
+                        prompt: "(search) ".to_owned(),
+                        prompt_style: chooser_presentation::prompt_style(),
+                    },
                 });
             }
         }
@@ -37037,6 +37070,36 @@ fn buffer_format_facts(buffer: &PasteBuffer) -> BufferFormatFacts {
     }
 }
 
+/// `window_switch_run_command`'s `target` for the current row, which is
+/// `=<session>:` for a session row and `=<session>:<index>.` for a window one.
+/// The current row is the first, because the mode's own movement keys are the
+/// residue this lane records rather than closes.
+fn switch_mode_target(inner: &ServerState, pane: PaneId) -> Option<String> {
+    let windows = matches!(
+        inner.pane_modes.get(&pane),
+        Some(PaneModeRequest::Switch { windows: true })
+    );
+    let state = &inner.engine.state;
+    if windows {
+        let mut entries = state
+            .windows
+            .iter()
+            .map(|(window, entry)| (entry.name.clone(), *window, entry.session, entry.index))
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.0.cmp(&right.1.0)));
+        let (_, _, session, index) = entries.into_iter().next()?;
+        let name = state.sessions.get(&session)?.name.clone();
+        return Some(format!("={name}:{index}."));
+    }
+    let mut names = state
+        .sessions
+        .values()
+        .map(|entry| entry.name.clone())
+        .collect::<Vec<_>>();
+    names.sort();
+    names.into_iter().next().map(|name| format!("={name}:"))
+}
+
 /// Whether any pane still holds `window_clock_mode`, which is what keeps the
 /// redraw timer alive.
 fn clock_modes_are_open(inner: &ServerState) -> bool {
@@ -37066,6 +37129,7 @@ fn pane_mode_format_facts(inner: &ServerState) -> BTreeMap<PaneId, &'static str>
                 *pane,
                 match mode {
                     PaneModeRequest::Clock => "clock-mode",
+                    PaneModeRequest::Switch { .. } => "switch-mode",
                 },
             )
         })
@@ -66459,7 +66523,7 @@ set-option -g @alias-mixed-next yes
         let specs = zz_protocol::command_specs()
             .filter(|spec| spec.uses_tmux_option_grammar())
             .collect::<Vec<_>>();
-        assert_eq!(specs.len(), 86);
+        assert_eq!(specs.len(), 87);
         assert_eq!(
             specs.iter().map(|spec| spec.aliases.len()).sum::<usize>(),
             74
@@ -66517,9 +66581,9 @@ set-option -g @alias-mixed-next yes
                 }
             }
         }
-        assert_eq!(spellings, 160);
-        assert_eq!(diagnostic_cases, 640);
-        assert_eq!(required_cases, 414);
+        assert_eq!(spellings, 161);
+        assert_eq!(diagnostic_cases, 644);
+        assert_eq!(required_cases, 416);
 
         let mut prefix_cases = 0;
         for spec in &specs {
@@ -66541,7 +66605,7 @@ set-option -g @alias-mixed-next yes
                 );
             }
         }
-        assert_eq!(prefix_cases, 539);
+        assert_eq!(prefix_cases, 542);
 
         for spec in &specs {
             let unknown = ('0'..='9')
@@ -66603,7 +66667,7 @@ set-option -g @alias-mixed-next yes
             .filter(|spec| !zz_protocol::NATIVE_COMMAND_NAMES.contains(&spec.name))
             .filter(|spec| spec.positional_maximum().is_some())
             .collect::<Vec<_>>();
-        assert_eq!(specs.len(), 75);
+        assert_eq!(specs.len(), 76);
         for spec in specs {
             let maximum = spec.positional_maximum().expect("finite maximum");
             let arguments = vec![argument.clone(); maximum.saturating_add(1)];

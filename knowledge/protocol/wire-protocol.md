@@ -679,6 +679,12 @@ face, one that attaches later gets it with its first snapshot, and a clientless 
 on the whole second, the way `window_clock_timer_callback` redraws. The raw TUI is the consumer
 half and it shipped in the same push; the GPUI, iOS and web clients read the field for nothing and
 keep the pane's own presentation. Copy mode is not here - it stays on each client's terminal view.
+`PaneMode::Switch { rows, selected, offset, selection_style, prompt, prompt_style }` is
+`window_switch_mode`: the server expands one row per session, or per window under `-w`, through
+`WINDOW_SWITCH_DEFAULT_FORMAT` and sends each with its `#[...]` markup intact, beside the resolved
+`mode-style` the current row is drawn over and the `message-style` `prompt_draw` gives the
+`(search)` prompt on the pane's last row. Appending a variant to `PaneMode` is a tail append like
+any other, and both halves ship together.
 
 # Versioning & compatibility
 

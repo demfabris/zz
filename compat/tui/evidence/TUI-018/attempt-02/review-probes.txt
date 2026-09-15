@@ -1,0 +1,96 @@
+tmux setup ['new-session', '-d', '-s', 'probe', '-n', 'win', '-x', '80', '-y', '24', 'sleep 300'] exit 0 stdout b'' stderr b''
+tmux  ['set', '-s', 'command-alias[77]', 'reviewstream=source-file - ; source-file -'] exit 0 stdout b'' stderr b''
+tmux two-source ['reviewstream'] exit 1 stdout b'' stderr b'Bad file descriptor: -\n'
+tmux two-source-value ['show-options', '-gqv', '@review'] exit 0 stdout b'once\n' stderr b''
+tmux  ['set', '-s', 'command-alias[77]', 'reviewstream=load-buffer -b binary - ; source-file -'] exit 0 stdout b'' stderr b''
+tmux binary-first ['reviewstream'] exit 1 stdout b'' stderr b'Bad file descriptor: -\n'
+tmux binary-readback ['save-buffer', '-b', 'binary', '-'] exit 0 stdout b'a\xff\x00z\n' stderr b''
+tmux od -c 0000000   a 377  \0   z  \n
+0000005
+
+tmux  ['set', '-s', 'command-alias[77]', 'reviewstream=source-file -'] exit 0 stdout b'' stderr b''
+tmux single-alias ['reviewstream'] exit 0 stdout b'' stderr b''
+tmux single-alias-value ['show-options', '-gqv', '@review'] exit 0 stdout b'single\n' stderr b''
+tmux direct-source ['source-file', '-'] exit 0 stdout b'' stderr b''
+tmux direct-source-value ['show-options', '-gqv', '@review'] exit 0 stdout b'direct\n' stderr b''
+tmux  ['set', '-s', 'command-alias[77]', 'reviewstream=set -g @x 1 ; source-file -'] exit 0 stdout b'' stderr b''
+tmux second-reader ['reviewstream'] exit 0 stdout b'' stderr b''
+tmux second-reader-value ['show-options', '-gqv', '@review'] exit 0 stdout b'second\n' stderr b''
+tmux nonreader-value ['show-options', '-gqv', '@x'] exit 0 stdout b'1\n' stderr b''
+tmux  ['split-window', '-d', '-t', 'probe:win.0', ''] exit 0 stdout b'' stderr b''
+tmux  ['set', '-s', 'command-alias[77]', 'reviewstream=set -g @x 2 ; display-message -I -t probe:win.1'] exit 0 stdout b'' stderr b''
+tmux pane-input-group ['reviewstream'] exit 0 stdout b'' stderr b''
+tmux pane-input-readback ['capture-pane', '-p', '-t', 'probe:win.1', '-S', '0', '-E', '1'] exit 0 stdout b'pane input\n\n' stderr b''
+tmux  ['set', '-s', 'command-alias[77]', 'reviewstream=source-file -t probe:win.0 - ; source-file -t probe:win.1 -'] exit 0 stdout b'' stderr b''
+tmux source-targets ['reviewstream'] exit 1 stdout b'' stderr b'Bad file descriptor: -\n'
+tmux source-target-value ['show-options', '-wqv', '-t', 'probe:win', '@target'] exit 0 stdout b'yes\n' stderr b''
+tmux  ['set', '-s', 'command-alias[77]', 'reviewstream=set -g @x 3 ; split-window -d -I -c /tmp -t probe:win.0'] exit 0 stdout b'' stderr b''
+tmux split-target-cwd ['reviewstream'] exit 0 stdout b'' stderr b''
+tmux split-target-readback ['capture-pane', '-p', '-t', 'probe:win.1', '-S', '0', '-E', '1'] exit 0 stdout b'split input\n\n' stderr b''
+tmux  ['set', '-s', 'command-alias[77]', 'reviewstream=source-file - ; source-file -'] exit 0 stdout b'' stderr b''
+tmux config-alias ['source-file', '/tmp/zzprobe-review018-wo2ftwd0/invoke.conf'] exit 1 stdout b'' stderr b'Bad file descriptor: -\n'
+tmux config-alias-value ['show-options', '-gqv', '@review'] exit 0 stdout b'from-config\n' stderr b''
+tmux direct-binary ['load-buffer', '-b', 'binary', '-'] exit 0 stdout b'' stderr b''
+tmux direct-binary-value ['save-buffer', '-b', 'binary', '-'] exit 0 stdout b'd\xfe\x00e\n' stderr b''
+tmux direct-send-keys ['send-keys', '-l', '-t', 'probe:win.0', '--', '--literal'] exit 0 stdout b'' stderr b''
+tmux  ['kill-server'] exit 0 stdout b'' stderr b''
+zz setup ['new-session', '-d', '-s', 'probe', '-n', 'win', '-x', '80', '-y', '24', 'sleep 300'] exit 0 stdout b'' stderr b''
+zz  ['set', '-s', 'command-alias[77]', 'reviewstream=source-file - ; source-file -'] exit 0 stdout b'' stderr b''
+zz two-source ['reviewstream'] exit 1 stdout b'' stderr b'Bad file descriptor: -\n'
+zz two-source-value ['show-options', '-gqv', '@review'] exit 0 stdout b'once\n' stderr b''
+zz  ['set', '-s', 'command-alias[77]', 'reviewstream=load-buffer -b binary - ; source-file -'] exit 0 stdout b'' stderr b''
+zz binary-first ['reviewstream'] exit 1 stdout b'' stderr b'Bad file descriptor: -\n'
+zz binary-readback ['save-buffer', '-b', 'binary', '-'] exit 0 stdout b'a\xff\x00z\n' stderr b''
+zz od -c 0000000   a 377  \0   z  \n
+0000005
+
+zz  ['set', '-s', 'command-alias[77]', 'reviewstream=source-file -'] exit 0 stdout b'' stderr b''
+zz single-alias ['reviewstream'] exit 0 stdout b'' stderr b''
+zz single-alias-value ['show-options', '-gqv', '@review'] exit 0 stdout b'single\n' stderr b''
+zz direct-source ['source-file', '-'] exit 0 stdout b'' stderr b''
+zz direct-source-value ['show-options', '-gqv', '@review'] exit 0 stdout b'direct\n' stderr b''
+zz  ['set', '-s', 'command-alias[77]', 'reviewstream=set -g @x 1 ; source-file -'] exit 0 stdout b'' stderr b''
+zz second-reader ['reviewstream'] exit 0 stdout b'' stderr b''
+zz second-reader-value ['show-options', '-gqv', '@review'] exit 0 stdout b'second\n' stderr b''
+zz nonreader-value ['show-options', '-gqv', '@x'] exit 0 stdout b'1\n' stderr b''
+zz  ['split-window', '-d', '-t', 'probe:win.0', ''] exit 0 stdout b'' stderr b''
+zz  ['set', '-s', 'command-alias[77]', 'reviewstream=set -g @x 2 ; display-message -I -t probe:win.1'] exit 0 stdout b'' stderr b''
+zz pane-input-group ['reviewstream'] exit 0 stdout b'' stderr b''
+zz pane-input-readback ['capture-pane', '-p', '-t', 'probe:win.1', '-S', '0', '-E', '1'] exit 0 stdout b'pane input\n\n' stderr b''
+zz  ['set', '-s', 'command-alias[77]', 'reviewstream=source-file -t probe:win.0 - ; source-file -t probe:win.1 -'] exit 0 stdout b'' stderr b''
+zz source-targets ['reviewstream'] exit 1 stdout b'' stderr b'Bad file descriptor: -\n'
+zz source-target-value ['show-options', '-wqv', '-t', 'probe:win', '@target'] exit 0 stdout b'yes\n' stderr b''
+zz  ['set', '-s', 'command-alias[77]', 'reviewstream=set -g @x 3 ; split-window -d -I -c /tmp -t probe:win.0'] exit 0 stdout b'' stderr b''
+zz split-target-cwd ['reviewstream'] exit 0 stdout b'' stderr b''
+zz split-target-readback ['capture-pane', '-p', '-t', 'probe:win.1', '-S', '0', '-E', '1'] exit 0 stdout b'split input\n\n' stderr b''
+zz  ['set', '-s', 'command-alias[77]', 'reviewstream=source-file - ; source-file -'] exit 0 stdout b'' stderr b''
+zz config-alias ['source-file', '/tmp/zzprobe-review018-09u05v3y/invoke.conf'] exit 1 stdout b'' stderr b'source-file from standard input is not supported\n'
+zz config-alias-value ['show-options', '-gqv', '@review'] exit 0 stdout b'second\n' stderr b''
+zz direct-binary ['load-buffer', '-b', 'binary', '-'] exit 0 stdout b'' stderr b''
+zz direct-binary-value ['save-buffer', '-b', 'binary', '-'] exit 0 stdout b'd\xfe\x00e\n' stderr b''
+zz direct-send-keys ['send-keys', '-l', '-t', 'probe:win.0', '--', '--literal'] exit 0 stdout b'' stderr b''
+zz direct-send-text ['send-text', '-t', 'probe:win.0', '--no-enter'] exit 0 stdout b'' stderr b''
+zz  ['kill-server'] exit 0 stdout b'' stderr b''
+COMPARE setup IDENTICAL
+COMPARE two-source IDENTICAL
+COMPARE two-source-value IDENTICAL
+COMPARE binary-first IDENTICAL
+COMPARE binary-readback IDENTICAL
+COMPARE single-alias IDENTICAL
+COMPARE single-alias-value IDENTICAL
+COMPARE direct-source IDENTICAL
+COMPARE direct-source-value IDENTICAL
+COMPARE second-reader IDENTICAL
+COMPARE second-reader-value IDENTICAL
+COMPARE nonreader-value IDENTICAL
+COMPARE pane-input-group IDENTICAL
+COMPARE pane-input-readback IDENTICAL
+COMPARE source-targets IDENTICAL
+COMPARE source-target-value IDENTICAL
+COMPARE split-target-cwd IDENTICAL
+COMPARE split-target-readback IDENTICAL
+COMPARE config-alias DIFFERENT
+COMPARE config-alias-value DIFFERENT
+COMPARE direct-binary IDENTICAL
+COMPARE direct-binary-value IDENTICAL
+COMPARE direct-send-keys IDENTICAL

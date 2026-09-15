@@ -4708,7 +4708,7 @@ impl MuxEngine {
                 reject_positionals("start-server", &positional)?;
                 Execution::default()
             }
-            "server-access" => self.server_access(&command.args)?,
+            "server-access" => self.server_access(context, &command.args, hooks)?,
             "kill-server" => {
                 parse_command_options("kill-server", &command.args)?;
                 Execution::effect(MuxEffect::KillServer)
@@ -8623,7 +8623,7 @@ impl MuxEngine {
     /// holds that one owner here: every lookup, every ordering and every
     /// refusal the pin spells out is answered, and the requests that would
     /// admit a second identity are refused rather than stored.
-    fn server_access(&self, args: &[RawText]) -> Result<Execution, ServerError> {
+    fn server_access(&self, context: &ExecutionContext, args: &[RawText], hooks: &mut impl StatusHooks) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("server-access", args)?;
         let owner = server_socket_owner();
         if options.has("-l") {
@@ -8634,7 +8634,7 @@ impl MuxEngine {
                 "missing user or group argument".to_owned(),
             ));
         };
-        let argument = argument.to_string();
+        let argument = self.expand_pane_format(argument, context, context.session, context.target_format_client(), hooks);
         let group = options.has("-g");
         let kind = if group { "group" } else { "user" };
         let Some((name, owns)) = server_access_identity(&argument, group) else {
@@ -22070,6 +22070,9 @@ mod tests {
                 .tmux_message(),
             format!("{owner} owns the server, can't change access")
         );
+        assert!(engine.execute(&mut context,
+            &command("server-access", &["#{?#{==:1,1},nobody,root}"]))
+            .expect("formatted non-owner without action").output.is_empty());
         let group = primary_group_name().expect("a primary group");
         assert_eq!(
             engine

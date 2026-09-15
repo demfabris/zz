@@ -74,7 +74,8 @@ pub use snapshot::{
     DEFAULT_BROWSER_PROFILE, EditorDescriptor, EditorDescriptorError, LayoutNode,
     MAX_BROWSER_PROFILE_NAME_BYTES, MAX_EDITOR_PATH_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES,
     MuxSnapshot, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneKindSnapshot,
-    PaneSnapshot, SessionSnapshot, SessionViewer, WindowSnapshot, normalize_browser_profile_name,
+    PaneMode, PaneSnapshot, SessionSnapshot, SessionViewer, WindowSnapshot,
+    normalize_browser_profile_name,
 };
 pub use style::{
     COLOUR_THEME_COUNT, DEFAULT_DARK_THEME_COLOURS, StyledSegment, ThemeColours, TmuxAlign,

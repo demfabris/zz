@@ -3556,6 +3556,7 @@ mod tests {
                     border_colour: None,
                     active_border_colour: None,
                     border_status_text: String::new(),
+                    mode: None,
                 },
             )]
             .into_iter()
@@ -4622,6 +4623,7 @@ mod tests {
             border_colour: None,
             active_border_colour: None,
             border_status_text: String::new(),
+            mode: None,
         };
         let window = WindowSnapshot {
             id: WindowId(0),

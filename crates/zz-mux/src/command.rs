@@ -175,6 +175,8 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "window-style",
     "window-active-style",
     "mode-style",
+    "clock-mode-colour",
+    "clock-mode-style",
     "pane-border-style",
     "pane-active-border-style",
     "pane-border-format",
@@ -1229,6 +1231,19 @@ pub enum MuxEffect {
     UserOptionChanged {
         channel: String,
     },
+    /// `window_pane_set_mode` and `window_pane_reset_mode`: the server-owned
+    /// pane mode this pane carries, `None` to end whatever it carries.
+    PaneModeChanged {
+        pane: PaneId,
+        mode: Option<PaneModeRequest>,
+    },
+}
+
+/// The pane mode a command asked for, before the daemon resolves the window
+/// options the surface is drawn from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PaneModeRequest {
+    Clock,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3162,6 +3177,22 @@ impl MuxEngine {
         PaneBorderIndicators::parse(&self.window_knobs(window).pane_border_indicators)
     }
 
+    /// `window_clock_draw_screen` reads `clock-mode-colour` and
+    /// `clock-mode-style` off `w->options` on every redraw, so the surface
+    /// carries the window's current values rather than the ones the mode
+    /// opened with.
+    #[must_use]
+    pub fn clock_mode_options(&self, window: WindowId) -> (String, u8) {
+        let knobs = self.window_knobs(window);
+        let style = match knobs.clock_mode_style.as_str() {
+            "12" => 0,
+            "12-with-seconds" => 2,
+            "24-with-seconds" => 3,
+            _ => 1,
+        };
+        (knobs.clock_mode_colour, style)
+    }
+
     #[must_use]
     pub fn pane_border_format(&self, pane: PaneId) -> String {
         self.scalar_option_effective(TmuxOptionTarget::Pane(pane), "pane-border-format")
@@ -4548,6 +4579,7 @@ impl MuxEngine {
             "send-keys" => self.send_keys(context, &command.args, hooks)?,
             "send-prefix" => self.send_prefix(context, &command.args)?,
             "copy-mode" => self.copy_mode(context, &command.args)?,
+            "clock-mode" => self.clock_mode(context, &command.args)?,
             "copy-mode-search-prompt" => self.copy_mode_search_prompt(context, &command.args)?,
             "command-prompt" => self.command_prompt(context, command)?,
             "focus-sidebar" => self.focus_sidebar(context, &command.args)?,
@@ -8330,6 +8362,23 @@ impl MuxEngine {
             action: TerminalViewAction::ClearHistory,
             target_client: None,
             require_mode: false,
+        }))
+    }
+
+    /// `cmd_copy_mode_exec` under `cmd_clock_mode_entry`: the pane takes
+    /// `window_clock_mode` with no client of its own, so a clientless CLI
+    /// opens it the same way an attached one does.
+    fn clock_mode(
+        &self,
+        context: &ExecutionContext,
+        args: &[RawText],
+    ) -> Result<Execution, ServerError> {
+        let (options, positional) = parse_command_options("clock-mode", args)?;
+        reject_positionals("clock-mode", &positional)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+        Ok(Execution::effect(MuxEffect::PaneModeChanged {
+            pane,
+            mode: Some(PaneModeRequest::Clock),
         }))
     }
 
@@ -17550,7 +17599,7 @@ mod tests {
     #[test]
     fn static_command_chain_leaves_capability_and_native_checks_to_runtime() {
         let commands = [
-            command("clock-mode", &[]),
+            command("customize-mode", &[]),
             command("capture-pane", &["-C", "-p"]),
             command("agent-send", &["--submit", "hello"]),
             command("agent-send", &["--wait", "--on-block", "fail", "hello"]),
@@ -17564,8 +17613,8 @@ mod tests {
     #[test]
     fn static_command_chain_validates_unimplemented_tmux_syntax() {
         for (name, args, expected) in [
-            ("clock-mode", &["-Z"][..], "unknown flag -Z"),
-            ("clock-mode", &["extra"][..], "too many arguments"),
+            ("link-window", &["-Z"][..], "unknown flag -Z"),
+            ("link-window", &["extra"][..], "too many arguments"),
             ("newp", &["-B"][..], "expects an argument"),
             ("suspend-c", &["extra"][..], "too many arguments"),
         ] {
@@ -17576,7 +17625,7 @@ mod tests {
         }
 
         validate_static_command_chain(&[
-            command("clock-mode", &["-t", "%1"]),
+            command("link-window", &["-t", "@1"]),
             command("newp", &["-d", "printf", "hello"]),
             command("suspend-c", &["-t", "/dev/pts/1"]),
         ])
@@ -21637,14 +21686,20 @@ mod tests {
         );
         assert_eq!(
             engine
-                .execute(&mut context, &command("server-access", &["-g", "-d", &group]))
+                .execute(
+                    &mut context,
+                    &command("server-access", &["-g", "-d", &group])
+                )
                 .expect_err("not in the list")
                 .tmux_message(),
             format!("group {group} not found")
         );
         assert_eq!(
             engine
-                .execute(&mut context, &command("server-access", &["-g", "-a", &group]))
+                .execute(
+                    &mut context,
+                    &command("server-access", &["-g", "-a", &group])
+                )
                 .expect_err("no access list")
                 .tmux_message(),
             format!("zz has no socket access list: the daemon socket admits {owner} alone")
@@ -34788,7 +34843,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 146);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 148);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)

@@ -668,6 +668,18 @@ terminal's own name out of its XTVERSION reply as `tty_keys_extended_device_attr
 in `c->term_type`; `term_type` is capped at `MAX_CLIENT_TERMINAL_TYPE_BYTES` (128) bytes, rejected
 during deserialization, and the daemon answers `#{client_termtype}` from it.
 
+v103 also appends `mode: Option<PaneMode>` to `PaneSnapshot` after `border_status_text`, the
+server-owned pane mode `wp->modes` holds. `None` is a pane in no such mode; `PaneMode::Clock {
+time, colour }` is `window_clock_mode`, carrying the `tim` string `window_clock_draw_screen`
+formatted from `clock-mode-style` and the `clock-mode-colour` option value the client resolves the
+way `style_parse_colour` resolves it into `gc.fg`. It rides the pane snapshot rather than a client
+event because the mode belongs to the pane: every client attached to the window draws the same
+face, one that attaches later gets it with its first snapshot, and a clientless `list-panes` reads
+`#{pane_in_mode}` and `#{pane_mode}` from the daemon's own map. The daemon republishes the snapshot
+on the whole second, the way `window_clock_timer_callback` redraws. The raw TUI is the consumer
+half and it shipped in the same push; the GPUI, iOS and web clients read the field for nothing and
+keep the pane's own presentation. Copy mode is not here - it stays on each client's terminal view.
+
 # Versioning & compatibility
 
 - **`PROTOCOL_VERSION: u16 = 103`** is stamped into every frame's envelope and re-checked inside

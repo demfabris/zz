@@ -111,7 +111,7 @@ Two cells in the table do NOT agree and neither is owned by these formats:
   the same commit as the gap items.
 - The GUI is untouched: no hunk under crates/zz, and `cargo test -p zz` is green.
 
-Unit tests in zz-terminal, one per row of the oracle table: `pointer_formats_*`,
+Seven unit tests in zz-terminal cover the oracle table's nineteen rows: `pointer_formats_*`,
 `pointer_word_crosses_a_wrap_where_the_line_does_not`,
 `pointer_hyperlink_answers_the_osc_8_uri_of_the_cell`,
 `pointer_word_reads_the_same_text_from_both_halves_of_a_wide_cell`,

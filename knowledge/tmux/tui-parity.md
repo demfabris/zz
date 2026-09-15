@@ -19,7 +19,7 @@ Existing tmux gap decisions remain in `compat/tmux-gaps.json`. Accepted or close
 
 Fixed baseline: **9/12 verified**. Added scope: **0/6 verified**.
 
-Status counts: unmeasured: 5, different: 0, active: 2, review: 2, blocked: 0, verified: 9.
+Status counts: unmeasured: 4, different: 0, active: 2, review: 3, blocked: 0, verified: 9.
 
 Dependency-ready obligations, by priority: TUI-008, TUI-013, TUI-014, TUI-015, TUI-016, TUI-017, TUI-018.
 
@@ -54,7 +54,7 @@ Dependency-ready obligations, by priority: TUI-008, TUI-013, TUI-014, TUI-015, T
 | TUI-015: A lock surface a client can draw | unmeasured | 15 | none |
 | TUI-016: Server log and terminal introspection | unmeasured | 16 | none |
 | TUI-017: Rich capture transports and the snapshot residues | unmeasured | 17 | none |
-| TUI-018: Caller stream forms | unmeasured | 18 | none |
+| TUI-018: Caller stream forms | review | 18 | none |
 
 ## Obligation details
 
@@ -802,7 +802,7 @@ Next action: The three residues are worth more than the six rich flags and are a
 
 ### TUI-018: Caller stream forms
 
-Status: unmeasured.
+Status: review.
 
 Acceptance:
 
@@ -812,13 +812,18 @@ Acceptance:
 Sources:
 
 - `compat/tui-client-commands.sh`
-- `crates/zz/src/lib.rs`
-- `crates/zz-protocol/src/catalog.rs`
+- `compat/tui-command-streams.sh`
 - `crates/zz-daemon/src/daemon.rs`
+- `crates/zz-mux/src/command.rs`
+- `crates/zz-protocol/src/catalog.rs`
+- `crates/zz-protocol/src/message.rs`
+- `crates/zz-tui/src/render.rs`
+- `crates/zz/src/lib.rs`
+- `knowledge/designs/command-stream-channel.md`
 - `knowledge/designs/tmux-superset-roadmap.md`
 
 Tmux gap references: `protocol.binary-streams`.
 
-SPLIT FROM TUI-011 on 2026-09-13. THE MEASUREMENT, 2026-09-13: `printf 'set -g @x one' | source-file -` exits 0 on the pin and the option reads back `one`; zz answers `source-file from standard input is not supported` with exit 1 and the option stays unset. `display-message -I` answers `pane is not empty` on the pin against a shell pane and `unsupported command: display-message -I` on zz. `split-window -I` builds a pane on the pin, which the fixture kills again, and is refused on zz. The two adopted forms are already at parity: load-buffer - from caller stdin, save-buffer - and save-buffer -a - to caller stdout all compare identical on exit, stdout, stderr, screen and state. protocol.binary-streams' second acceptance clause is the shape of this obligation: one reviewed channel, not five transports. SCOPE DECIDED 2026-09-14 by fabrico: the full channel is built, not deferred and not trimmed to the cheap forms.
+BOTH CLAUSES ASSERT ON THE BRANCH, 2026-09-14. Clause 1: the channel is designed in knowledge/designs/command-stream-channel.md - one reader bounded by MAX_AGENT_SEND_BYTES, one byte-preserving carrier (CommandInvocation.stdin, appended in protocol 103) and one resolver (zz_daemon::command_stdin_sink) naming three sinks: Argument (load-buffer -, send-text -, agent-send -, unchanged), Config (source-file -) and PaneInput (display-message -I, split-window -I). All three refused forms are carried over it; nothing is left refused. Clause 2: compat/tui-command-streams.sh is new and compares each form's exit status, stdout bytes, stderr bytes and the state it leaves behind, and its own summary line reads `all 33 asserted comparisons identical, 0 recorded not asserted, 4 decided (0 for a sibling lane)`; compat/tui-client-commands.sh, whose four stream cases flipped from record to same, reads `all 65 asserted comparisons identical, 33 recorded not asserted (0 for a sibling lane)`, the 33 being other obligations' records. THE PIN APPLIES ITS STDIN AND SO DOES ZZ: `printf 'set -g @zzcs-one alpha' | source-file -` exits 0 on both and show-options reads `alpha` back on both; a bad line answers `-:1: unknown command: ...` with exit 1 on both; `source-file - -` applies the first and answers `Bad file descriptor: -` for the second on both; -n parses without applying and -v prints `-:1: set-option -g ...` identically. THE FOUR DECIDED CASES ARE ONE FACT: the cap. Pinned tmux streams a caller payload in acknowledged 16 KiB chunks with no total limit; zz refuses one larger than MAX_AGENT_SEND_BYTES (1048576) at the reader, before the daemon sees a byte, so a 1 MiB payload is identical on both sides and a 1 MiB + 1 payload is refused. Bulk file transfer through a command client is a workload zz does not serve, because an unbounded stream lets one caller grow daemon memory without limit; decided 2026-09-14 by the orchestrator under fabrico's TUI parity contract of 2026-09-09; reversible. TWO LANDINGS THE FORMS FORCED, both measured against the pin: an empty pane now carries the screen mode spawn.c gives it (MODE_CRLF on, MODE_CURSOR off), and crates/zz-tui/src/render.rs leaves a hidden cursor on its pane's own cell the way tty_cursor does instead of parking it where the paint ended - a zone excursion, named in the attempt's notes.md with the measurement that forced it. compat/tmux-gaps.json's protocol.binary-streams loses protocol:command-stream, flag:display-message:-I, flag:split-window:-I and semantic:source-file-stdin and stays accepted for the two items the channel does not touch. WHAT REMAINS: nothing in this obligation. compat/attached-client.sh is red on this box today at its copy-mode search-again step for reasons outside this lane - the same step fails with the cycle-9 chooser gate's own binary, which carries none of this branch - and the delta corpus ran in four chunks over the rows that name the touched commands, every one clean. History and every run's output are in compat/tui/evidence/TUI-018/attempt-01/.
 
-Next action: Approved as scoped work by fabrico on 2026-09-14: build the full bounded command-stream channel rather than carrying only the cheap text forms. It is milestone 5 of knowledge/designs/tmux-superset-roadmap.md and the last thing between the campaign and 12/12. Design the channel first (stdin, stdout, binary bytes, backpressure, cancellation, process lifetime), then carry source-file -, save-buffer -, display-message -I and split-window -I over it beside the load-buffer - pipe zz already supports.
+Next action: Gate review: re-measure with python3 compat/tui/verify-claims.py --run TUI-018, which now maps this id to compat/tui-command-streams.sh and compat/tui-client-commands.sh. The four decided cases are the cap and nothing else; if the gate rejects that decision the fix is a larger MAX_AGENT_SEND_BYTES or a chunked transport, not a change to the sinks.

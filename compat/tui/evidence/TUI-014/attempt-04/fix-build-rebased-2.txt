@@ -1,0 +1,6 @@
+   Compiling zz-daemon v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-daemon)
+   Compiling zz-chrome-import v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-chrome-import)
+   Compiling zz-config v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-config)
+   Compiling zz-tui v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-tui)
+   Compiling zz v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 26.35s

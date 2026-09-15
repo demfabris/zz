@@ -182,4 +182,6 @@ emacs mode-keys, and that is decided by copy mode's own cursor readers
   green. It is not in this diff's path: the only status.rs hunk here is the match arm that lists
   the three new format names.
 - 31-clippy-touched-crates-tip.txt - zz-terminal, zz-daemon and zz-mux, -D warnings
-- 32-*, 33-*: the proofs re-taken after the last commit
+- 32-verify-claims-after-last-commit.txt, 33-compat-check-after-last-commit.txt,
+  34-tui-mouse-after-last-commit.txt (md5 64d94af2, the same bytes as the three tip runs) - taken
+  after the commit that added 25 to 31, whose only content is evidence and the ledger

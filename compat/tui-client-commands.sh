@@ -1009,6 +1009,10 @@ client_tool_cases() {
   case_run clock-injected-byte same '' -- send-keys -H -t PANE ff
   run_both clock-mode -t PANE
   case_run clock-injected-prefix same '' -- send-prefix -t PANE
+  run_both clock-mode -t PANE
+  case_run clock-injected-backtab same '' -- send-keys -t PANE BTab
+  run_both clock-mode -t PANE
+  case_run clock-injected-keypad same '' -- send-keys -t PANE KPEnter
   run_both switch-mode -t PANE
   case_run switch-injected-escape same '' -- send-keys -H -t PANE 1b
   CASE_CLOCK_FACE=1
@@ -1057,6 +1061,8 @@ client_tool_cases() {
   case_run switch-mode-format same '' -- switch-mode -F 'REVIEW-#{session_name}' -t PANE
   restore_case switch-mode-format-closed
   case_run switch-mode-template same '' -- switch-mode -t PANE 'set-option -g @review-command "%%"'
+  case_run switch-mode-control-j same '' -- send-keys -t PANE C-j
+  case_run switch-mode-linefeed same '' -- send-keys -H -t PANE 0a
   for side in tmux zz; do
     tmux_outer_command send-keys -t "=$OUTER_SESSION:$side" Enter
   done

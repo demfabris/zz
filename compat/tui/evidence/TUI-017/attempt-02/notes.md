@@ -1,15 +1,18 @@
 # TUI-017 attempt-02, cycle 10 capture lane, 2026-09-15
 
-Clause 1 only. Attempt-01 belongs to cycle 9's introspection lane, which closed clause 2's three
-text residues on `campaign/tui-introspection`; that branch had not reached `origin/main` at any of
-this lane's polls, so this attempt sits on 287e3815 and clause 2 is untouched here.
+Clause 1. Attempt-01 belongs to cycle 9's introspection lane, which closed clause 2's residues on
+`campaign/tui-introspection`; that branch reached `origin/main` as 627e717a while this lane was
+proving clause 1 on 287e3815, and this branch was rebased onto it. Two cases this lane had recorded
+against clause 2 then flipped to asserted with no code change of its own: `capture-control-escape`
+(`-C` with `-e`) and `capture-line-numbers-trailing` (`-L` with `-N`). Both clauses assert at the
+rebased tip.
 
 ## Files
 
 - `environment.txt` — the box, the branch, the base, the zz build under test and the pin.
 - `01-tui-client-commands-run.txt` — `compat/tui-client-commands.sh` at the landing. Summary line:
-  `all 89 asserted comparisons identical, 39 recorded not asserted (0 for a sibling lane)`, up from
-  `58` and `37` at the base. The capture family is lines 57 to 226.
+  `all 109 asserted comparisons identical, 28 recorded not asserted (0 for a sibling lane)` at the
+  rebased tip. The capture family is lines 57 to 167.
 - `02-tui-client-commands-self-check.txt` — `--self-check`, including the numbered-capture sabotage
   this attempt added.
 - `03-rich-transports-probe.txt` — what the pin emits for each of the six flags on a 40x8 pane, what
@@ -39,14 +42,13 @@ number is not, so the pin puts the number of every joined row inside the joined 
 `0 $ printf 'AAAA1 AAAA2 BBB\n'`. zz reproduces that by numbering against a second unjoined pass and
 walking the two together, rather than by asking the engine a wrap question it does not answer.
 
-Asserted against the pin: `-C`, `-L`, `-C -L`, `-L` over a history start where the numbers go
-negative, `-L -J` over a soft-wrapped row, `-L` with reversed bounds, `-L` on a missing pane, and
-`-C` into a named buffer read back with `show-buffer`. Eleven cases in the fixture and eight corpus
-steps.
+Asserted against the pin: `-C`, `-C -e`, `-L`, `-C -L`, `-L` over a history start where the numbers
+go negative, `-L -J` over a soft-wrapped row, `-L -N`, `-L` with reversed bounds, `-L` on a missing
+pane, and `-C` into a named buffer read back with `show-buffer`. Thirteen cases in the fixture and
+eight corpus steps.
 
-One combination is recorded, not asserted: `-L -N`. The numbers are identical and the rows are not,
-because `-N` is clause 2's residue — the pin pads to the pane edge and zz stops at the last written
-cell. The case flips to `same` when clause 2 lands.
+`-C -e` and `-L -N` assert too, on the rebased base: both ride on clause 2's residues, which cycle
+9 closed. The only recorded capture cases left are the four refusals below.
 
 ## What stays refused, and why
 
@@ -81,9 +83,9 @@ its measurement in the fixture's own reason string.
 Clause 2 names one trailing cell for `-e`. On a coloured row there is more: the pin writes
 `^[[31mRED^[[39m` and zz writes `^[[0m^[[38;5;1mRED^[[0m`, so the colour spelling and the reset
 differ as well. The fixture's own scene has no colour, which is why the roster only ever saw the
-trailing cell. Whoever closes clause 2 should know the `-e` residue is wider than one cell. It also
-holds `-C -e` open here: that combination is implemented and correct as a transform, and it can only
-match once `-e` matches.
+trailing cell. Whoever closes clause 2 should know the `-e` residue is wider than one cell. It no longer holds `-C -e` open — that case
+asserts on the rebased base — but a scene with colour in it would still diverge, and no case covers
+one. It is a formatter question rather than a transport one and wants its own owner.
 
 ## The sabotage
 

@@ -40928,7 +40928,7 @@ struct SourceGlobMatches {
     errors: Vec<String>,
 }
 
-/// `spawn_pane`'s SPAWN_EMPTY branch in the pin (spawn.c) gives a pane with no
+/// `spawn_pane`'s `SPAWN_EMPTY` branch in the pin (spawn.c) gives a pane with no
 /// process newline mode and no cursor, so a stream written into it starts each
 /// line at column 0 and nothing blinks where nobody can type.
 const EMPTY_PANE_SCREEN_MODE: &str = "\x1b[20h\x1b[?25l";

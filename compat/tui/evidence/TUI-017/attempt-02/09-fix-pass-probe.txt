@@ -1,0 +1,198 @@
+tmux colourwrap 0 b'0 \x1b[31mAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2 AAAAAAAAAA\n3 \x1b[39mNEXT\n'
+tmux named 0 b'\\033[31mRED\\033[39m\n'
+tmux indexed 0 b'\\033[38;5;196mRED\\033[39m\n'
+tmux low-indexed 0 b'\\033[38;5;1mRED\\033[39m\n'
+tmux rgb 0 b'\\033[38;2;1;2;3mRGB\\033[39m\n'
+tmux bold 0 b'\\033[1mBOLD\\033[0m\n'
+tmux underline 0 b'\\033[4mUNDER\\033[0m\n'
+tmux charset 0 b'\\016qqq\\017\n'
+tmux history 0 b'-3 H09\n-2 H10\n-1 H11\n0 H12\n'
+tmux wrapped 0 b'0 WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW1 WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW2 WWWWWWWWWW\n3 NEXT\n'
+tmux named-background 0 b'\\033[32m\\033[44mCOLOUR\\033[39m\\033[49m\n'
+tmux bright 0 b'\\033[91m\\033[104mBRIGHT\\033[39m\\033[49m\n'
+tmux attribute-reset 0 b'\\033[1;4m\\033[31mONE\\033[0;4m\\033[31mTWO\\033[0m\n'
+tmux erased-background 0 b'\\033[41m\n'
+tmux erased-rgb-background 0 b'\\033[48;2;4;5;6m\n'
+zz colourwrap 0 b'0 \x1b[31mAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2 AAAAAAAAAA\n3 \x1b[39mNEXT\n'
+zz named 0 b'\\033[31mRED\\033[39m\n'
+zz indexed 0 b'\\033[38;5;196mRED\\033[39m\n'
+zz low-indexed 0 b'\\033[31mRED\\033[39m\n'
+zz rgb 0 b'\\033[38;2;1;2;3mRGB\\033[39m\n'
+zz bold 0 b'\\033[1mBOLD\\033[0m\n'
+zz underline 0 b'\\033[4mUNDER\\033[0m\n'
+zz charset 0 b'\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n'
+zz history 0 b'-3 H09\n-2 H10\n-1 H11\n0 H12\n'
+zz wrapped 0 b'0 WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW1 WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW2 WWWWWWWWWW\n3 NEXT\n'
+zz named-background 0 b'\\033[32m\\033[44mCOLOUR\\033[39m\\033[49m\n'
+zz bright 0 b'\\033[91m\\033[104mBRIGHT\\033[39m\\033[49m\n'
+zz attribute-reset 0 b'\\033[1;4m\\033[31mONE\\033[0;4m\\033[31mTWO\\033[0m\n'
+zz erased-background 0 b'\\033[41m\n'
+zz erased-rgb-background 0 b'\\033[48;2;4;5;6m\n'
+
+Exact comparison and byte dumps at dea459e7:
+cmp /tmp/zz-capture-fix/probes/attribute-reset.tmux.out /tmp/zz-capture-fix/probes/attribute-reset.zz.out: exit 0
+od -c /tmp/zz-capture-fix/probes/attribute-reset.tmux.out
+0000000   \   0   3   3   [   1   ;   4   m   \   0   3   3   [   3   1
+0000020   m   O   N   E   \   0   3   3   [   0   ;   4   m   \   0   3
+0000040   3   [   3   1   m   T   W   O   \   0   3   3   [   0   m  \n
+0000060
+od -c /tmp/zz-capture-fix/probes/attribute-reset.zz.out
+0000000   \   0   3   3   [   1   ;   4   m   \   0   3   3   [   3   1
+0000020   m   O   N   E   \   0   3   3   [   0   ;   4   m   \   0   3
+0000040   3   [   3   1   m   T   W   O   \   0   3   3   [   0   m  \n
+0000060
+cmp /tmp/zz-capture-fix/probes/bold.tmux.out /tmp/zz-capture-fix/probes/bold.zz.out: exit 0
+od -c /tmp/zz-capture-fix/probes/bold.tmux.out
+0000000   \   0   3   3   [   1   m   B   O   L   D   \   0   3   3   [
+0000020   0   m  \n
+0000023
+od -c /tmp/zz-capture-fix/probes/bold.zz.out
+0000000   \   0   3   3   [   1   m   B   O   L   D   \   0   3   3   [
+0000020   0   m  \n
+0000023
+cmp /tmp/zz-capture-fix/probes/bright.tmux.out /tmp/zz-capture-fix/probes/bright.zz.out: exit 0
+od -c /tmp/zz-capture-fix/probes/bright.tmux.out
+0000000   \   0   3   3   [   9   1   m   \   0   3   3   [   1   0   4
+0000020   m   B   R   I   G   H   T   \   0   3   3   [   3   9   m   \
+0000040   0   3   3   [   4   9   m  \n
+0000050
+od -c /tmp/zz-capture-fix/probes/bright.zz.out
+0000000   \   0   3   3   [   9   1   m   \   0   3   3   [   1   0   4
+0000020   m   B   R   I   G   H   T   \   0   3   3   [   3   9   m   \
+0000040   0   3   3   [   4   9   m  \n
+0000050
+cmp /tmp/zz-capture-fix/probes/charset.tmux.out /tmp/zz-capture-fix/probes/charset.zz.out: exit 1
+/tmp/zz-capture-fix/probes/charset.tmux.out /tmp/zz-capture-fix/probes/charset.zz.out differ: byte 1, line 1
+od -c /tmp/zz-capture-fix/probes/charset.tmux.out
+0000000   \   0   1   6   q   q   q   \   0   1   7  \n
+0000014
+od -c /tmp/zz-capture-fix/probes/charset.zz.out
+0000000 342 224 200 342 224 200 342 224 200  \n
+0000012
+cmp /tmp/zz-capture-fix/probes/colourwrap.tmux.out /tmp/zz-capture-fix/probes/colourwrap.zz.out: exit 0
+od -c /tmp/zz-capture-fix/probes/colourwrap.tmux.out
+0000000   0     033   [   3   1   m   A   A   A   A   A   A   A   A   A
+0000020   A   A   A   A   A   A   A   A   A   A   A   A   A   A   A   A
+*
+0000120   A   A   A   A   A   A   A   1       A   A   A   A   A   A   A
+0000140   A   A   A   A   A   A   A   A   A   A   A   A   A   A   A   A
+*
+0000240   A   A   A   A   A   A   A   A   A   2       A   A   A   A   A
+0000260   A   A   A   A   A  \n   3     033   [   3   9   m   N   E   X
+0000300   T  \n
+0000302
+od -c /tmp/zz-capture-fix/probes/colourwrap.zz.out
+0000000   0     033   [   3   1   m   A   A   A   A   A   A   A   A   A
+0000020   A   A   A   A   A   A   A   A   A   A   A   A   A   A   A   A
+*
+0000120   A   A   A   A   A   A   A   1       A   A   A   A   A   A   A
+0000140   A   A   A   A   A   A   A   A   A   A   A   A   A   A   A   A
+*
+0000240   A   A   A   A   A   A   A   A   A   2       A   A   A   A   A
+0000260   A   A   A   A   A  \n   3     033   [   3   9   m   N   E   X
+0000300   T  \n
+0000302
+cmp /tmp/zz-capture-fix/probes/erased-background.tmux.out /tmp/zz-capture-fix/probes/erased-background.zz.out: exit 0
+od -c /tmp/zz-capture-fix/probes/erased-background.tmux.out
+0000000   \   0   3   3   [   4   1   m  \n
+0000011
+od -c /tmp/zz-capture-fix/probes/erased-background.zz.out
+0000000   \   0   3   3   [   4   1   m  \n
+0000011
+cmp /tmp/zz-capture-fix/probes/erased-rgb-background.tmux.out /tmp/zz-capture-fix/probes/erased-rgb-background.zz.out: exit 0
+od -c /tmp/zz-capture-fix/probes/erased-rgb-background.tmux.out
+0000000   \   0   3   3   [   4   8   ;   2   ;   4   ;   5   ;   6   m
+0000020  \n
+0000021
+od -c /tmp/zz-capture-fix/probes/erased-rgb-background.zz.out
+0000000   \   0   3   3   [   4   8   ;   2   ;   4   ;   5   ;   6   m
+0000020  \n
+0000021
+cmp /tmp/zz-capture-fix/probes/history.tmux.out /tmp/zz-capture-fix/probes/history.zz.out: exit 0
+od -c /tmp/zz-capture-fix/probes/history.tmux.out
+0000000   -   3       H   0   9  \n   -   2       H   1   0  \n   -   1
+0000020       H   1   1  \n   0       H   1   2  \n
+0000033
+od -c /tmp/zz-capture-fix/probes/history.zz.out
+0000000   -   3       H   0   9  \n   -   2       H   1   0  \n   -   1
+0000020       H   1   1  \n   0       H   1   2  \n
+0000033
+cmp /tmp/zz-capture-fix/probes/indexed.tmux.out /tmp/zz-capture-fix/probes/indexed.zz.out: exit 0
+od -c /tmp/zz-capture-fix/probes/indexed.tmux.out
+0000000   \   0   3   3   [   3   8   ;   5   ;   1   9   6   m   R   E
+0000020   D   \   0   3   3   [   3   9   m  \n
+0000032
+od -c /tmp/zz-capture-fix/probes/indexed.zz.out
+0000000   \   0   3   3   [   3   8   ;   5   ;   1   9   6   m   R   E
+0000020   D   \   0   3   3   [   3   9   m  \n
+0000032
+cmp /tmp/zz-capture-fix/probes/low-indexed.tmux.out /tmp/zz-capture-fix/probes/low-indexed.zz.out: exit 1
+/tmp/zz-capture-fix/probes/low-indexed.tmux.out /tmp/zz-capture-fix/probes/low-indexed.zz.out differ: byte 7, line 1
+od -c /tmp/zz-capture-fix/probes/low-indexed.tmux.out
+0000000   \   0   3   3   [   3   8   ;   5   ;   1   m   R   E   D   \
+0000020   0   3   3   [   3   9   m  \n
+0000030
+od -c /tmp/zz-capture-fix/probes/low-indexed.zz.out
+0000000   \   0   3   3   [   3   1   m   R   E   D   \   0   3   3   [
+0000020   3   9   m  \n
+0000024
+cmp /tmp/zz-capture-fix/probes/named-background.tmux.out /tmp/zz-capture-fix/probes/named-background.zz.out: exit 0
+od -c /tmp/zz-capture-fix/probes/named-background.tmux.out
+0000000   \   0   3   3   [   3   2   m   \   0   3   3   [   4   4   m
+0000020   C   O   L   O   U   R   \   0   3   3   [   3   9   m   \   0
+0000040   3   3   [   4   9   m  \n
+0000047
+od -c /tmp/zz-capture-fix/probes/named-background.zz.out
+0000000   \   0   3   3   [   3   2   m   \   0   3   3   [   4   4   m
+0000020   C   O   L   O   U   R   \   0   3   3   [   3   9   m   \   0
+0000040   3   3   [   4   9   m  \n
+0000047
+cmp /tmp/zz-capture-fix/probes/named.tmux.out /tmp/zz-capture-fix/probes/named.zz.out: exit 0
+od -c /tmp/zz-capture-fix/probes/named.tmux.out
+0000000   \   0   3   3   [   3   1   m   R   E   D   \   0   3   3   [
+0000020   3   9   m  \n
+0000024
+od -c /tmp/zz-capture-fix/probes/named.zz.out
+0000000   \   0   3   3   [   3   1   m   R   E   D   \   0   3   3   [
+0000020   3   9   m  \n
+0000024
+cmp /tmp/zz-capture-fix/probes/rgb.tmux.out /tmp/zz-capture-fix/probes/rgb.zz.out: exit 0
+od -c /tmp/zz-capture-fix/probes/rgb.tmux.out
+0000000   \   0   3   3   [   3   8   ;   2   ;   1   ;   2   ;   3   m
+0000020   R   G   B   \   0   3   3   [   3   9   m  \n
+0000034
+od -c /tmp/zz-capture-fix/probes/rgb.zz.out
+0000000   \   0   3   3   [   3   8   ;   2   ;   1   ;   2   ;   3   m
+0000020   R   G   B   \   0   3   3   [   3   9   m  \n
+0000034
+cmp /tmp/zz-capture-fix/probes/underline.tmux.out /tmp/zz-capture-fix/probes/underline.zz.out: exit 0
+od -c /tmp/zz-capture-fix/probes/underline.tmux.out
+0000000   \   0   3   3   [   4   m   U   N   D   E   R   \   0   3   3
+0000020   [   0   m  \n
+0000024
+od -c /tmp/zz-capture-fix/probes/underline.zz.out
+0000000   \   0   3   3   [   4   m   U   N   D   E   R   \   0   3   3
+0000020   [   0   m  \n
+0000024
+cmp /tmp/zz-capture-fix/probes/wrapped.tmux.out /tmp/zz-capture-fix/probes/wrapped.zz.out: exit 0
+od -c /tmp/zz-capture-fix/probes/wrapped.tmux.out
+0000000   0       W   W   W   W   W   W   W   W   W   W   W   W   W   W
+0000020   W   W   W   W   W   W   W   W   W   W   W   W   W   W   W   W
+*
+0000120   W   W   1       W   W   W   W   W   W   W   W   W   W   W   W
+0000140   W   W   W   W   W   W   W   W   W   W   W   W   W   W   W   W
+*
+0000240   W   W   W   W   2       W   W   W   W   W   W   W   W   W   W
+0000260  \n   3       N   E   X   T  \n
+0000270
+od -c /tmp/zz-capture-fix/probes/wrapped.zz.out
+0000000   0       W   W   W   W   W   W   W   W   W   W   W   W   W   W
+0000020   W   W   W   W   W   W   W   W   W   W   W   W   W   W   W   W
+*
+0000120   W   W   1       W   W   W   W   W   W   W   W   W   W   W   W
+0000140   W   W   W   W   W   W   W   W   W   W   W   W   W   W   W   W
+*
+0000240   W   W   W   W   2       W   W   W   W   W   W   W   W   W   W
+0000260  \n   3       N   E   X   T  \n
+0000270
+Only the two documented provenance cases differ; no stderr and exit 0 for all capture commands.

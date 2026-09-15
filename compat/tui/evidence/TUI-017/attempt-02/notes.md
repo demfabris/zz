@@ -1,5 +1,7 @@
 # TUI-017 attempt-02, cycle 10 capture lane, 2026-09-15
 
+Fix-pass status: **active**. The rejected historical narrative below is superseded by the fix-pass section.
+
 Clause 1. Attempt-01 belongs to cycle 9's introspection lane, which closed clause 2's residues on
 `campaign/tui-introspection`; that branch reached `origin/main` as 627e717a while this lane was
 proving clause 1 on 287e3815, and this branch was rebased onto it. Two cases this lane had recorded
@@ -110,3 +112,43 @@ physical rows.
 This pass also removes the added explanatory comments from `compat/scenarios/capture-pane.txt`.
 The source fix in `crates/zz-terminal/src/session.rs` uses the physical row's wrap flag and keeps
 its line number regardless of whether the newline is joined.
+
+
+The pin's 80x24 coloured wrap gives three numbered continuation rows followed by row 3 NEXT.
+The live capture renderer now reads cell styles, retains the previous style across physical rows,
+and emits separate foreground and background sequences. It removes attributes through reset 0,
+then re-emits remaining attributes and nondefault colours, following grid_string_cells_code.
+The fixture asserts named foreground/background, bright colours, indexed colour 196, RGB 1/2/3,
+bold, underline, a combined attribute removal, three-row wrapping and actual negative history.
+Each asserted scene has a one-sided self-check mutation. The Unicode line-drawing case uses literal
+Unicode input; it does not pretend to preserve DEC charset input bytes.
+
+Two distinct limits remain. Ghostty maps ESC(0 source bytes to Unicode before storing them;
+plain -C therefore gives box-drawing where the pin gives qqq, and -C -e gives box-drawing where
+the pin gives literal \016qqq\017. Both records carry the authorized charset decision. Explicit
+indexed colour 1 is stored as Palette(1), exactly like named red: the pin gives
+\033[38;5;1mRED\033[39m and zz gives \033[31mRED\033[39m. This is an owned divergence, not a
+decision, and keeps clause 1 active. The frozen styled mode serializer is unchanged; the asserted
+-M fallback cases do not establish exact styled frozen capture bytes.
+
+The source evidence is the pinned grid.c and cmd-capture-pane.c, Ghostty Terminal.zig charset
+mapping and page.zig cell fields, and libghostty-vt StyleColor. No wire field or version changed.
+
+
+### Fix-pass files
+
+- `06-fix-pass-fixture.txt`: corrected pre-closing fixture run, 168 assertions and 30 records.
+- `07-fix-pass-self-check.txt`: pre-closing self-check, including rich scenes, negative hooks, window targets, pane IDs and pane components. Exit 0.
+- `environment.txt`: refreshed base, branch and final-tip selector. A committed file cannot contain its own commit hash; the final JSON report supplies that hash and post-commit proof commands.
+- `notes.md`: this fix-pass account and the corrected historical counts.
+
+
+The final raw-cell review found that erased background-only cells have neither text nor a style
+ID in Ghostty. The used-width scan now includes its background palette/RGB content tags. The pin
+emits literal `\033[41m` for a red erased row and `\033[48;2;4;5;6m` for an RGB erased row,
+each followed by newline; both are in the existing colour-transition unit table.
+
+- `08-fix-pass-probe.py`: isolated 80x24 exact-byte probe, including all colour classes,
+  charset provenance, negative history, wrapping and erased backgrounds.
+- `09-fix-pass-probe.txt`: measured pin/zz bytes, cmp results and od output.
+- `10-fix-pass-validation.txt`: pre-closing Rust test and lint results, including corrected failures.

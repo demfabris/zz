@@ -1,5 +1,7 @@
 # TUI-015 attempt-01, cycle 10 capture lane, 2026-09-15
 
+Fix-pass status: **active**. The rejected historical narrative below is superseded by the fix-pass section.
+
 Clause 1 was already recorded before this attempt: fabrico's amendment of 2026-09-14 sits in
 `knowledge/designs/tui-parity.md` and in the `options.lock-program` gap, and zz builds no lock
 surface. This attempt is clause 2 only: the three lock commands answering what the pin answers,
@@ -100,3 +102,44 @@ screen records with fabrico's OS-locking decision. CLI channels remain asserted.
 comments described the intended hook checks but did not implement negative assertions. This pass
 adds those assertions separately. A target sabotage creates a session only on zz, and a hook
 sabotage compares the marker after zz alone fires the hook; silent lock stdout is insufficient.
+
+
+The default target matrix now asserts the same CLI channels for lock-session, has-session and
+list-windows. `=cli:win`, `=cli:win.0`, `%0` and `cli:.%1` succeed. The pin and zz now name the
+missing component: `=cli:nosuchwin` gives `can't find window: nosuchwin`, `%99` gives
+`can't find pane: %99`, `=cli:win.9` gives `can't find pane: 9`, and `=nosuch:win` gives
+`can't find session: nosuch`. `=%0` remains an exact session name, rather than a pane ID.
+Each error exits 1 with empty stdout and a newline-terminated stderr message.
+
+Clause 2 remains open. With pane-base-index=1, the pin accepts `=cli:win.1` while zz rejects pane 1.
+The fixture records this for all three commands under TUI-015. MuxState has no configured index
+option; CommandEngine owns it. Fixing that requires plumbing outside the authorized one-function
+excursion, so this pass makes no claim that the configured target grammar is closed.
+
+The earlier standalone hook probe printed comparisons and called lock-client without a current
+client. It did not prove negative hook behavior. The new fixture clears the marker before each
+successful lock-session and targeted lock-client, then asserts empty output. Its self-check runs
+lock-server on zz alone after those commands and requires the marker comparison to detect that
+inappropriate effect. It also sabotages window targets, pane IDs and pane components for each of
+the three session-targeted commands.
+
+
+### Fix-pass files
+
+- `05-fix-pass-fixture.txt`: corrected pre-closing fixture run, 168 assertions and 30 records.
+- `06-fix-pass-self-check.txt`: pre-closing self-check, including rich scenes, negative hooks, window targets, pane IDs and pane components. Exit 0.
+- `environment.txt`: refreshed base, branch and final-tip selector. A committed file cannot contain its own commit hash; the final JSON report supplies that hash and post-commit proof commands.
+- `notes.md`: this fix-pass account and the corrected historical counts.
+
+
+The full mux suite caught an internal fallback regression before the closing commit:
+window_targets_accept_pane_forms_like_tmux returned the active window for a bare 0.0 target.
+The resolver grammar excursion therefore includes a private TargetSlot::Session tag and the
+resolve_session entry call selecting it. Internal window/pane fallback calls retain name-only
+lookup. This is resolver context plumbing inside model.rs; configured pane-index ownership
+remains outside that scope. The existing regression test and the new compound-session test both
+exercise this distinction.
+
+
+- `07-fix-pass-validation.txt`: pre-closing Rust test and lint results, including the internal
+  resolver regression caught and fixed before final-tip validation.

@@ -1,0 +1,86 @@
+Pre-closing validation only; final-tip proofs are listed in the final JSON report.
+Source changes under test are described in notes.md; these are not final-tip proof claims.
+
+{"label": "pre-self-check", "tip": "fb6a5c48180076c38ae0e75b986bf60861ca3b25", "tip_after": "fb6a5c48180076c38ae0e75b986bf60861ca3b25", "command": "compat/tui-client-commands.sh --self-check", "exit_code": 0, "elapsed_seconds": 106.36, "utc": "2026-09-15T21:48:25.317558+00:00"}
+
+
+{"label": "pre-tests", "tip": "24f2f7e9ce27c51d12094c8f2fbc146e53f4f69c", "tip_after": "24f2f7e9ce27c51d12094c8f2fbc146e53f4f69c", "command": "env HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config RUSTUP_HOME=/home/demfabris/.rustup CARGO_HOME=/home/demfabris/.cargo /tmp/zz-capture-fix/cargo.sh test -p zz-terminal -p zz-mux -p zz-protocol -p zz --jobs 3 -- --test-threads=3", "exit_code": 101, "elapsed_seconds": 116.25, "utc": "2026-09-15T21:50:35.397861+00:00"}
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 642 filtered out; finished in 0.00s
+test result: ok. 642 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.62s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.02s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.02s
+test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 72.26s
+test model::tests::window_targets_accept_pane_forms_like_tmux ... FAILED
+test result: FAILED. 526 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.05s
+error: test failed, to rerun pass `-p zz-mux --lib`
+
+{"label": "pre-targets", "tip": "24f2f7e9ce27c51d12094c8f2fbc146e53f4f69c", "tip_after": "24f2f7e9ce27c51d12094c8f2fbc146e53f4f69c", "command": "/tmp/zz-capture-fix/cargo.sh test -p zz-mux --lib targets_ --jobs 3 -- --test-threads=3", "exit_code": 0, "elapsed_seconds": 2.97, "utc": "2026-09-15T21:51:57.788279+00:00"}
+test model::tests::window_targets_accept_pane_forms_like_tmux ... ok
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 510 filtered out; finished in 0.13s
+
+{"label": "pre-tests-retry", "tip": "9f751c36d8c751484396f010357433f0964bec43", "tip_after": "9f751c36d8c751484396f010357433f0964bec43", "command": "env HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config RUSTUP_HOME=/home/demfabris/.rustup CARGO_HOME=/home/demfabris/.cargo /tmp/zz-capture-fix/cargo.sh test -p zz-terminal -p zz-mux -p zz-protocol -p zz --jobs 3 -- --test-threads=3", "exit_code": 0, "elapsed_seconds": 97.31, "utc": "2026-09-15T21:54:09.836889+00:00"}
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 642 filtered out; finished in 0.00s
+test result: ok. 642 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.69s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.00s
+test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 70.82s
+test model::tests::window_targets_accept_pane_forms_like_tmux ... ok
+test result: ok. 527 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.15s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.81s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 60 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+test result: ok. 223 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 263 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.76s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+{"label": "pre-daemon", "tip": "9f751c36d8c751484396f010357433f0964bec43", "tip_after": "9f751c36d8c751484396f010357433f0964bec43", "command": "env HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config RUSTUP_HOME=/home/demfabris/.rustup CARGO_HOME=/home/demfabris/.cargo /tmp/zz-capture-fix/cargo.sh test -p zz-daemon --lib --jobs 3 -- --test-threads=3", "exit_code": 0, "elapsed_seconds": 130.25, "utc": "2026-09-15T21:56:25.983732+00:00"}
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 918 filtered out; finished in 0.64s
+test result: ok. 919 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 102.36s
+
+{"label": "pre-background-test", "tip": "9f751c36d8c751484396f010357433f0964bec43", "tip_after": "9f751c36d8c751484396f010357433f0964bec43", "command": "/tmp/zz-capture-fix/cargo.sh test -p zz-terminal --lib styled_capture_matches --jobs 3 -- --test-threads=3", "exit_code": 0, "elapsed_seconds": 2.42, "utc": "2026-09-15T21:59:38.983748+00:00"}
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 263 filtered out; finished in 0.01s
+
+{"label": "pre-clippy", "tip": "9f751c36d8c751484396f010357433f0964bec43", "tip_after": "9f751c36d8c751484396f010357433f0964bec43", "command": "/tmp/zz-capture-fix/cargo.sh clippy -p zz-terminal -p zz-mux -p zz-protocol -p zz-daemon --all-targets --all-features --jobs 3 -- -D warnings", "exit_code": 101, "elapsed_seconds": 2.97, "utc": "2026-09-15T21:59:59.921375+00:00"}
+error: redundant closure
+error: redundant closure
+error: this boolean expression can be simplified
+error: could not compile `zz-terminal` (lib) due to 3 previous errors
+error: could not compile `zz-terminal` (lib test) due to 3 previous errors
+
+{"label": "pre-clippy-retry", "tip": "9f751c36d8c751484396f010357433f0964bec43", "tip_after": "9f751c36d8c751484396f010357433f0964bec43", "command": "/tmp/zz-capture-fix/cargo.sh clippy -p zz-terminal -p zz-mux -p zz-protocol -p zz-daemon --all-targets --all-features --jobs 3 -- -D warnings", "exit_code": 0, "elapsed_seconds": 19.51, "utc": "2026-09-15T22:00:41.879535+00:00"}
+
+
+{"label": "pre-terminal-final", "tip": "9f751c36d8c751484396f010357433f0964bec43", "tip_after": "9f751c36d8c751484396f010357433f0964bec43", "command": "/tmp/zz-capture-fix/cargo.sh test -p zz-terminal --jobs 3 -- --test-threads=3", "exit_code": 0, "elapsed_seconds": 4.27, "utc": "2026-09-15T22:00:59.273267+00:00"}
+test result: ok. 263 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.89s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+{"label": "pre-format", "tip": "dea459e7bb1f1670cf8eaac21c76358ec7b19737", "tip_after": "dea459e7bb1f1670cf8eaac21c76358ec7b19737", "command": "/tmp/zz-capture-fix/cargo.sh fmt --all -- --check", "exit_code": 0, "elapsed_seconds": 3.22, "utc": "2026-09-15T22:01:22.192638+00:00"}
+
+
+{"label": "pre-build-final", "tip": "dea459e7bb1f1670cf8eaac21c76358ec7b19737", "tip_after": "dea459e7bb1f1670cf8eaac21c76358ec7b19737", "command": "/tmp/zz-capture-fix/cargo.sh build -p zz --jobs 3", "exit_code": 0, "elapsed_seconds": 17.14, "utc": "2026-09-15T22:01:44.664009+00:00"}
+
+
+The first full suite caught an internal session-resolution fallback regression; 9f751c36 fixed it and the whole suite passed. Clippy caught two redundant closures and a nonminimal boolean; dea459e7 fixes them. These failures were corrected, not waived.

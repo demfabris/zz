@@ -1,18 +1,23 @@
-TUI-017 attempt-02 environment
-2026-09-15T14:05:36-03:00
-Linux ubuntu 7.0.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 04:26:38 UTC 2026 x86_64 GNU/Linux
-PRETTY_NAME="Ubuntu 26.04.1 LTS"
-NAME="Ubuntu"
-repo: /home/demfabris/dev/zz-tui-capture-10
-branch: campaign/tui-capture-10
-base: 287e381563fa060de594db35f58cac2a9fbc4f9f (origin/main, unmoved at every poll)
-landing: 15c44069727938dce0960a28234da1e2f7b79371
-zz: /home/demfabris/dev/zz-tui-capture-10/target/debug/zz
--rwxrwxr-x 2 demfabris demfabris 866555896 Sep 15 13:00 target/debug/zz
-tmux next-3.8
-pin revision: d77c9dc6aa021e4bc61f0da128c591af695e6466
+TUI-017 attempt-02 fix-pass environment
+Date: 2026-09-15
+OS: Ubuntu 26.04.1 LTS, Linux 7.0.0-31-generic, x86_64
+Repository: /home/demfabris/dev/zz-tui-capture-10
+Final branch: campaign/tui-capture-11
+Final tip selector: refs/heads/campaign/tui-capture-11 (the commit containing this file)
+The final JSON report binds this selector to its full SHA; post-commit proofs record that SHA.
+Base: 7e7cb1ee25122a10e7f1d8815241422eb00c4199 (origin/main at rebase)
+Pre-fix rebased baseline: 0f7ea318dfb3f8cce25182fcb801b155833d6520
+Rust implementation commits: 31a03de7, edfc07fb, fb6a5c48
+Binary: /home/demfabris/dev/zz-tui-capture-10/target/debug/zz
+Pin: tmux next-3.8, d77c9dc6aa021e4bc61f0da128c591af695e6466
 ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
 ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins
-bash: 5.3.9(1)-release
-python: Python 3.14.4
-locale: en_US.UTF-8
+ZZ_TRAY=0; ZZ_DEV_BUILD is unset.
+Cargo: shared /tmp/zz-cargo-slot-0.lock or -1.lock, wait 540 seconds;
+systemd scope MemoryMax=8G MemorySwapMax=4G, jobs=3, test-threads=3.
+Daemon unit tests: HOME=/tmp/zz-emptyhome, XDG_CONFIG_HOME=/tmp/zz-emptyhome/config.
+The first build lock wait expired without starting cargo; the retry built successfully.
+Adversarial fixture implementation: 6ff3420d; capture limitation documentation: 24f2f7e9.
+Resolver entry-context correction: 9f751c36.
+Resolve the exact final tip: git log -1 --format=%H -- compat/tui/evidence/TUI-017/attempt-02/environment.txt
+Erased-background capture and lint correction: dea459e7.

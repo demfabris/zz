@@ -1,0 +1,86 @@
+# pin      /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux (d77c9dc6, next-3.8)
+# driver   /home/demfabris/dev/zz-tui-modes-10/compat/tui/evidence/TUI-014/attempt-03/pin-probe.sh
+# command  /home/demfabris/dev/zz-tui-modes-10/compat/tui/evidence/TUI-014/attempt-03/pin-probe.sh customize-mode -t PANE
+# taken    2026-09-15T12:51:31-03:00
+### pane=%0 client=/dev/pts/11
+### BEFORE (plain)
+$ printf 'SCENE-%s\n' %0$
+SCENE-%0$
+$$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+L0:win* 1:two$
+### rc=0
+### stdout
+### stderr
+### pane_in_mode: 1 options-mode
+### AFTER (plain)
+(0) + Server Options$
+(1) + Session Options$
+(2) + Window & Pane Options$
+(3) + Key Table - copy-mode$
+(4) + Key Table - copy-mode-vi$
+(5) + Key Table - move$
+(6) + Key Table - prefix$
+(7) + Key Table - root$
+$
+$
+$
+M-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P$
+M-bM-^TM-^B                                                                              M-bM-^TM-^B$
+M-bM-^TM-^B                                                                              M-bM-^TM-^B$
+M-bM-^TM-^B                                                                              M-bM-^TM-^B$
+M-bM-^TM-^B                                                                              M-bM-^TM-^B$
+M-bM-^TM-^B                                                                              M-bM-^TM-^B$
+M-bM-^TM-^B                                                                              M-bM-^TM-^B$
+M-bM-^TM-^B                                                                              M-bM-^TM-^B$
+M-bM-^TM-^B                                                                              M-bM-^TM-^B$
+M-bM-^TM-^B                                                                              M-bM-^TM-^B$
+M-bM-^TM-^B                                                                              M-bM-^TM-^B$
+M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X$
+L0:win* 1:two$
+### AFTER (styled)
+[38;2;13;13;13m[48;2;184;134;11m(0) + Server Options[39m
+[38;2;179;179;179m[49m(1) [38;2;154;205;50m+[38;2;179;179;179m [39mSession Options
+[38;2;179;179;179m(2) [38;2;154;205;50m+[38;2;179;179;179m [39mWindow & Pane Options
+[38;2;179;179;179m(3) [38;2;154;205;50m+[38;2;179;179;179m [39mKey Table - copy-mode
+[38;2;179;179;179m(4) [38;2;154;205;50m+[38;2;179;179;179m [39mKey Table - copy-mode-vi
+[38;2;179;179;179m(5) [38;2;154;205;50m+[38;2;179;179;179m [39mKey Table - move
+[38;2;179;179;179m(6) [38;2;154;205;50m+[38;2;179;179;179m [39mKey Table - prefix
+[38;2;179;179;179m(7) [38;2;154;205;50m+[38;2;179;179;179m [39mKey Table - root
+
+
+
+[38;2;179;179;179m[48;2;38;38;38m┌ Server Options ──────────────────────────────────────────────────────────────┐
+│[39m[49m                                                                              [38;2;179;179;179m[48;2;38;38;38m│
+│[39m[49m                                                                              [38;2;179;179;179m[48;2;38;38;38m│
+│[39m[49m                                                                              [38;2;179;179;179m[48;2;38;38;38m│
+│[39m[49m                                                                              [38;2;179;179;179m[48;2;38;38;38m│
+│[39m[49m                                                                              [38;2;179;179;179m[48;2;38;38;38m│
+│[39m[49m                                                                              [38;2;179;179;179m[48;2;38;38;38m│
+│[39m[49m                                                                              [38;2;179;179;179m[48;2;38;38;38m│
+│[39m[49m                                                                              [38;2;179;179;179m[48;2;38;38;38m│
+│[39m[49m                                                                              [38;2;179;179;179m[48;2;38;38;38m│
+│[39m[49m                                                                              [38;2;179;179;179m[48;2;38;38;38m│
+└──────────────────────────────────────────────────────────────────────────────┘
+[38;2;13;13;13m[48;2;154;205;50mL[4m0:win*[0m[38;2;13;13;13m[48;2;154;205;50m 1:two
+### cursor: 0,0 flag=0 shape=default
+# exit     0

@@ -1,0 +1,1 @@
+3505423 /bin/bash -c pgrep -fa 'zz-cli-|zz-user|zzprobe|zzcs' > compat/tui/evidence/TUI-018/attempt-02/final-processes-before.txt cat compat/tui/evidence/TUI-018/attempt-02/final-processes-before.txt

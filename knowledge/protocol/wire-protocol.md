@@ -688,6 +688,20 @@ during deserialization, and the daemon answers `#{client_termtype}` from it.
   web clients read neither field and keep the prompt on their own client surface. 102 shipped in
   zz 0.9.0 and 0.9.1 while the cycle-9 lanes were still appending to it, so the version moves
   rather than the v102 entry growing.
+  v103 also carries the pane input a pointer gesture would have handed the pane on its own.
+  `InputMessage::MouseKey` appends `view_action: Option<TerminalViewAction>` and
+  `press_action: Option<TerminalViewAction>` after `border`, the pin's own `m->x`/`m->y` and
+  `m->lx`/`m->ly`. `send-keys -M` hands the first to the pane the event landed on, the way
+  `window_pane_key(wp, tc, s, wl, m->key, m)` re-encodes the event through `input_key_pane`, and
+  the daemon hands the same field over when a mouse key matched no binding in the first table it
+  tried, which is `server_client_handle_key`'s own `forward_key`. `copy-mode -M` anchors its
+  selection on the second before the first extends it, the way `window_copy_start_drag` reads
+  `cmd_mouse_at(wp, m, &x, &y, 1)`. The client encodes both because it owns the cell grid and the
+  pixel geometry the encoding needs. Pure end-appends with their consumer halves in the same push;
+  GUI clients send the message never and are unchanged. The cycle-9 mouse lane wrote them against
+  102, which shipped in zz 0.9.0 and 0.9.1 while the lane was running: a released version cannot
+  take appends, because two builds would both claim it and disagree about the bytes, so the version
+  moves rather than the 102 entry growing.
 - v102 carries the colour class each style's two grounds came from, and the client's own terminal
   features. Viewport and patch payloads append one `u32` class word per style, per appended style
   for a patch, after the kitty placements; the word packs the two-bit class code and the palette
@@ -719,20 +733,6 @@ during deserialization, and the daemon answers `#{client_termtype}` from it.
   already carried. The daemon publishes them and the raw TUI paints the prompt row; GUI clients read
   the same state through their own chooser. Pure appends; the cycle's gate folds every lane's 102
   appends into one entry.
-- v103 carries the pane input a pointer gesture would have handed the pane on its own.
-  `InputMessage::MouseKey` appends `view_action: Option<TerminalViewAction>` and
-  `press_action: Option<TerminalViewAction>` after `border`, the pin's own `m->x`/`m->y` and
-  `m->lx`/`m->ly`. `send-keys -M` hands the first to the pane the event landed on, the way
-  `window_pane_key(wp, tc, s, wl, m->key, m)` re-encodes the event through `input_key_pane`, and
-  the daemon hands the same field over when a mouse key matched no binding in the first table it
-  tried, which is `server_client_handle_key`'s own `forward_key`. `copy-mode -M` anchors its
-  selection on the second before the first extends it, the way `window_copy_start_drag` reads
-  `cmd_mouse_at(wp, m, &x, &y, 1)`. The client encodes both because it owns the cell grid and the
-  pixel geometry the encoding needs. Pure end-appends with their consumer halves in the same push;
-  GUI clients send the message never and are unchanged. The cycle-9 mouse lane wrote them against
-  102, which shipped in zz 0.9.0 and 0.9.1 while the lane was running: a released version cannot
-  take appends, because two builds would both claim it and disagree about the bytes, so the version
-  moves rather than the 102 entry growing.
 - v102 also carries a decoded pointer event that resolved to one of the pin's mouse key names.
   `InputMessage` appends `MouseKey { key: String, pane: Option<PaneId>, window: Option<WindowId>,
   column: u16, row: u16, border: Option<Axis> }` after `DismissClientMessage`. The client owns the

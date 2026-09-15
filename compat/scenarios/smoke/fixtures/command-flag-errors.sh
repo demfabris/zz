@@ -119,7 +119,7 @@ done
 probe_failure unsupported-attach-then-unknown \
     'command attach-session: unknown flag -0' attach-session -x -0
 probe_failure unsupported-capture-then-unknown \
-    'command capture-pane: unknown flag -0' capture-pane -C -0
+    'command capture-pane: unknown flag -0' capture-pane -F -0
 probe_failure unsupported-move-then-unknown \
     'command move-pane: unknown flag -0' move-pane -M -0
 probe_failure unsupported-required-then-unknown \

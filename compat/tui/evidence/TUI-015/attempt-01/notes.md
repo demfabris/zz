@@ -10,7 +10,7 @@ and the two knobs named as accepted and arming nothing.
 - `environment.txt` — the box, the branch, the base commit, the zz build under test and the pin.
 - `01-tui-client-commands-run.txt` — `compat/tui-client-commands.sh` at the landing.
   Summary line: `all 79 asserted comparisons identical, 39 recorded not asserted (0 for a sibling
-  lane)`. The lock family is lines 424 to 465: 31 asserted
+  lane)`. The lock family is lines 430 to 471: 31 asserted
   comparisons and 5 records. 27 of the 31 assert all five channels; 4 are `cli` cases that
   assert the three CLI channels and record the two attached ones against
   `options.lock-program`, which is where the pin's drawn lock lives. The fifth record is the

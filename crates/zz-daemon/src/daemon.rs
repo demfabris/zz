@@ -34025,6 +34025,11 @@ const POPUP_POSITION_CONTEXT_FORMATS: [&str; 19] = [
     POPUP_WINDOW_STATUS_LINE_Y_CONTEXT_FORMAT,
 ];
 
+/// The `popup_*` names `cmd_display_menu_get_pos` builds its format tree from.
+/// The mouse ones are added only under `event->m.valid` and the window status
+/// ones only when the target window owns a range on the target client's status,
+/// so an absent one expands empty and `strtol` reads it as 0 rather than as the
+/// screen centre.
 fn popup_position_variables(
     engine: &MuxEngine,
     target: &ExecutionContext,
@@ -34035,6 +34040,19 @@ fn popup_position_variables(
     height: u16,
 ) -> BTreeMap<String, String> {
     let status = engine.format_status_context(target.session, target.window, target.pane);
+    let status_row = engine.status_formats_for_session(target.session);
+    let status_lines = if status_row.enabled {
+        u16::from(status_row.lines)
+    } else {
+        0
+    };
+    let status_line_y = (status_lines > 0).then(|| {
+        if status_row.position == zz_protocol::StatusPosition::Top {
+            i64::from(status_lines) + i64::from(height)
+        } else {
+            i64::from(rows.saturating_sub(status_lines))
+        }
+    });
     let centre_x = i64::from(columns.saturating_sub(1)) / 2 - i64::from(width) / 2;
     let centre_x = centre_x.max(0);
     let centre_y = i64::from(rows.saturating_sub(1)) / 2 + i64::from(height) / 2;
@@ -34084,18 +34102,11 @@ fn popup_position_variables(
         (POPUP_LAST_X_CONTEXT_FORMAT.to_owned(), "0".to_owned()),
         (POPUP_LAST_Y_CONTEXT_FORMAT.to_owned(), height.to_string()),
     ]);
-    for (name, value) in [
-        (POPUP_MOUSE_X_CONTEXT_FORMAT, i64::from(columns) / 2),
-        (POPUP_MOUSE_Y_CONTEXT_FORMAT, i64::from(rows) / 2),
-        (POPUP_MOUSE_CENTRE_X_CONTEXT_FORMAT, centre_x),
-        (POPUP_MOUSE_CENTRE_Y_CONTEXT_FORMAT, centre_y),
-        (POPUP_MOUSE_TOP_CONTEXT_FORMAT, centre_y),
-        (POPUP_MOUSE_BOTTOM_CONTEXT_FORMAT, centre_y),
-        (POPUP_STATUS_LINE_Y_CONTEXT_FORMAT, centre_y),
-        (POPUP_WINDOW_STATUS_LINE_X_CONTEXT_FORMAT, centre_x),
-        (POPUP_WINDOW_STATUS_LINE_Y_CONTEXT_FORMAT, centre_y),
-    ] {
-        variables.insert(name.to_owned(), value.to_string());
+    if let Some(status_line_y) = status_line_y {
+        variables.insert(
+            POPUP_STATUS_LINE_Y_CONTEXT_FORMAT.to_owned(),
+            status_line_y.to_string(),
+        );
     }
     if let Some(mouse) = mouse {
         for (name, value) in popup_mouse_position_values(engine, target, mouse, rows, width, height)

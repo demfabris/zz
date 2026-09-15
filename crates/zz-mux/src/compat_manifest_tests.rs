@@ -969,7 +969,7 @@ fn command_flag_fixture_matches_the_pin() {
         rows += 1;
     }
 
-    assert_eq!((rows, aliases, required), (85, 74, 80));
+    assert_eq!((rows, aliases, required), (86, 74, 81));
     assert_eq!(
         fs::read_to_string(root().join("compat/scenarios/smoke/fixtures/command-flag-errors.tsv"))
             .expect("command flag fixture corpus"),
@@ -1020,8 +1020,8 @@ fn positional_maximum_runtime_inventory_matches_the_pin() {
         }
     }
 
-    assert_eq!(implemented.len(), 74);
-    assert_eq!(unimplemented.len(), 6);
+    assert_eq!(implemented.len(), 75);
+    assert_eq!(unimplemented.len(), 5);
     assert_eq!(implemented.len() + unimplemented.len(), 80);
 }
 
@@ -1109,10 +1109,10 @@ fn tmux_option_consumer_partition_matches_pinned_inventory() {
         .iter()
         .copied()
         .collect::<BTreeSet<_>>();
-    assert_eq!(TMUX_OPTION_CONSUMERS.len(), 146);
+    assert_eq!(TMUX_OPTION_CONSUMERS.len(), 148);
     assert_eq!(
         consumers.len(),
-        146,
+        148,
         "option consumer roster contains duplicates"
     );
     assert!(
@@ -1131,13 +1131,13 @@ fn tmux_option_consumer_partition_matches_pinned_inventory() {
         };
         scope_counts[index] += 1;
     }
-    assert_eq!(scope_counts, [37, 47, 43, 19]);
+    assert_eq!(scope_counts, [37, 47, 45, 19]);
 
     let tracked = items
         .keys()
         .filter_map(|item| item.strip_prefix("option:"))
         .collect::<BTreeSet<_>>();
-    assert_eq!(tracked.len(), 34, "active option gap count changed");
+    assert_eq!(tracked.len(), 32, "active option gap count changed");
     assert!(
         consumers.is_disjoint(&tracked),
         "consumed and tracked option names overlap"

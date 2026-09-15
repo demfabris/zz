@@ -677,7 +677,6 @@ pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
     "new-pane",
     "newp",
     "customize-mode",
-    "clock-mode",
     "suspend-client",
     "suspendc",
     "link-window",
@@ -688,15 +687,6 @@ pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
 ];
 
 static UNIMPLEMENTED_TMUX_COMMAND_SPECS: &[CommandSpec] = &[
-    CommandSpec {
-        name: "clock-mode",
-        aliases: &[],
-        description: "Unsupported tmux command",
-        usage: "[-t target-pane]",
-        options: &[CommandOptionSpec::unsupported_value("-t")],
-        positionals: &[],
-        variadic: None,
-    },
     CommandSpec {
         name: "customize-mode",
         aliases: &[],
@@ -2355,6 +2345,15 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         variadic: None,
     },
     CommandSpec {
+        name: "clock-mode",
+        aliases: &[],
+        description: "Show the clock in a pane",
+        usage: "[-t target-pane]",
+        options: &[CommandOptionSpec::value("-t", Pane, "target pane")],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
         name: "bind-key",
         aliases: &["bind"],
         description: "Bind a key to a command",
@@ -2998,14 +2997,14 @@ mod tests {
                 usage_overrides.insert(spec.name);
             }
         }
-        assert_eq!(implemented, 85);
+        assert_eq!(implemented, 86);
         assert_eq!(aliases, 74);
-        assert_eq!(flag_shapes.values().sum::<usize>(), 521);
+        assert_eq!(flag_shapes.values().sum::<usize>(), 522);
         assert_eq!(
             flag_shapes,
-            BTreeMap::from([("none", 293), ("optional", 8), ("required", 220)])
+            BTreeMap::from([("none", 293), ("optional", 8), ("required", 221)])
         );
-        assert_eq!((supported, unsupported), (496, 25));
+        assert_eq!((supported, unsupported), (497, 25));
         assert_eq!(usage_overrides.len(), 21);
         assert_eq!(
             usage_overrides,
@@ -3025,7 +3024,7 @@ mod tests {
             .into_iter()
             .map(|command| (command.name.clone(), command))
             .collect::<BTreeMap<_, _>>();
-        assert_eq!(UNIMPLEMENTED_TMUX_COMMAND_SPECS.len(), 7);
+        assert_eq!(UNIMPLEMENTED_TMUX_COMMAND_SPECS.len(), 6);
         for spec in UNIMPLEMENTED_TMUX_COMMAND_SPECS {
             let command = &oracle[spec.name];
             assert_eq!(spec.aliases, command.aliases, "aliases for {}", spec.name);
@@ -4244,6 +4243,7 @@ mod tests {
             "show-messages",
             "display-panes",
             "clear-history",
+            "clock-mode",
             "bind-key",
             "unbind-key",
             "list-keys",

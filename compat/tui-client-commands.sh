@@ -566,6 +566,54 @@ attached_channels_differ() {
   [ "$LAST_SCREEN_DIFFERED" -eq 1 ] || [ "$LAST_STATE_DIFFERED" -eq 1 ]
 }
 
+declare -A RECORD_OWNERS=([unattributed]=0)
+
+case_owner() {
+  case "$1" in
+  refresh-pan-* | refresh-clipboard | refresh-adjustment | client-tree-open)
+    printf 'gap:clients.interactive-refresh'
+    ;;
+  capture-control | capture-flags | capture-hyperlinks | capture-line-numbers | capture-pending | capture-grid)
+    printf 'TUI-017'
+    ;;
+  stream-source-file | stream-source-file-effect | stream-display-message | stream-split-window)
+    printf 'TUI-018'
+    ;;
+  lock-server | lock-session | lock-client | lock-client-current)
+    printf 'TUI-015'
+    ;;
+  clock-mode-open | customize-mode-open | switch-mode | suspend-client | server-access-bare | server-access-user)
+    printf 'TUI-014'
+    ;;
+  messages-log)
+    printf 'TUI-016'
+    ;;
+  esac
+}
+
+note_record() {
+  local owner key
+  owner="$(case_owner "$1")"
+  if [ -z "$owner" ]; then
+    key=unattributed
+  else
+    case "$2" in
+    DECIDED\ *) key="decided:$owner" ;;
+    *) key="$owner" ;;
+    esac
+  fi
+  RECORD_OWNERS[$key]=$((${RECORD_OWNERS[$key]:-0} + 1))
+  RECORDS=$((RECORDS + 1))
+}
+
+owner_tally() {
+  local key entries=()
+  for key in $(printf '%s\n' "${!RECORD_OWNERS[@]}" | LC_ALL=C sort); do
+    entries+=("$key=${RECORD_OWNERS[$key]}")
+  done
+  printf 'owners %s' "${entries[*]}"
+}
+
 # NAME MODE REASON -- command...
 #   same    all five channels asserted
 #   cli     exit, stdout and stderr asserted; screen and state recorded
@@ -606,7 +654,7 @@ case_run() {
     ;;
   cli)
     CHECKS=$((CHECKS + 1))
-    RECORDS=$((RECORDS + 1))
+    note_record "$name" "$reason"
     [ -n "$reason" ] || die "recorded attached channels at $name say nothing about why"
     if cli_channels_differ; then
       FAILURES=$((FAILURES + 1))
@@ -621,7 +669,7 @@ case_run() {
     fi
     ;;
   record)
-    RECORDS=$((RECORDS + 1))
+    note_record "$name" "$reason"
     [ -n "$reason" ] || die "recorded case $name says nothing about why"
     if [ "$same" -eq 0 ]; then
       printf 'note  %s is identical on all five channels, the record can close\n' "$name"
@@ -894,12 +942,12 @@ run_cases() {
   case_run suspend-client record "$NATIVE_CLIENT_TOOLS" -- suspend-client
 
   if [ "$FAILURES" -ne 0 ]; then
-    printf '%s of %s asserted comparisons differ, %s recorded (%s for a sibling lane)\n' \
-      "$FAILURES" "$CHECKS" "$RECORDS" "$SIBLINGS"
+    printf '%s of %s asserted comparisons differ, %s recorded (%s for a sibling lane, %s)\n' \
+      "$FAILURES" "$CHECKS" "$RECORDS" "$SIBLINGS" "$(owner_tally)"
     exit 1
   fi
-  printf 'all %s asserted comparisons identical, %s recorded not asserted (%s for a sibling lane)\n' \
-    "$CHECKS" "$RECORDS" "$SIBLINGS"
+  printf 'all %s asserted comparisons identical, %s recorded not asserted (%s for a sibling lane, %s)\n' \
+    "$CHECKS" "$RECORDS" "$SIBLINGS" "$(owner_tally)"
 }
 
 # --- self-check -------------------------------------------------------------

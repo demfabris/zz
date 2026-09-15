@@ -18,6 +18,7 @@ This directory is the campaign's state, shaped like the tmux compat campaign one
 | `campaign.json` | The ledger: twelve obligations with acceptance clauses, dependencies, status and proof | `compat/tmux-gaps.json` |
 | `tracker.py` | Validates the ledger, generates the report, lists ready obligations | `compat/tmux-tracker.py` |
 | `tracker_test.py` | The validator's tests; `compat/check.sh` runs them | `compat/board_test.py` |
+| `verify_claims_test.py` | The re-measurement guard's tests, attribution included; `compat/check.sh` runs them | |
 | `run-1.js` | The cycle-1 runner: one worker lane, one adversarial reviewer, one gate | `compat/orchestration/opus-compat-run-N.js` |
 | `run-N.js` | Each cycle's runner; `lint-runner.py` must pass before one is launched | `compat/orchestration/opus-compat-run-N.js` |
 | `HANDOFF.md` | Where the campaign stopped and how to pick it up on another box | `compat/orchestration/HANDOFF.md` |
@@ -59,6 +60,21 @@ RGB) stays part of the cell, as `tui.status-row` in `compat/tmux-gaps.json` esta
 - `compat/tui-overlays.sh`: the command prompt, confirm-before, display-menu, display-popup and
   display-panes, whole screen plus the cursor tuple, including resizes, a message over an open
   surface and keys that must not reach a covered pane (TUI-007).
+
+A fixture that several obligations share attributes each of its recorded cases to the one
+obligation that case keeps open, because `verified` means zero recorded cases of this obligation's
+own, not zero in the file. `compat/tui-client-commands.sh` is the roster of that kind:
+`case_owner` names, for every recorded case, either an obligation id or `gap:<id>` for a divergence
+`compat/tmux-gaps.json` already accepted and no obligation will close, and the summary line ends in
+the per-owner tally `owners TUI-014=6 TUI-015=4 TUI-017=6 TUI-018=4 decided:TUI-016=1
+gap:clients.interactive-refresh=8 unattributed=0` beside the total. A reason that opens with
+`DECIDED` is a settled registration rather than an open clause - the case a clause asks for by name,
+the way TUI-016 clause 2 asks for `messages-log` - and lands under `decided:<owner>`, which that
+owner's own entry does not include. `compat/tui/verify-claims.py --run <ID>` then charges the
+obligation its own entry plus every `unattributed` case, and charges the whole recorded count when
+a fixture prints no tally at all, when the tally does not add up to the total, or when an owner
+token is neither a ledger obligation nor a registry gap: a case added without an owner fails closed
+against every obligation mapped to that fixture rather than sliding past one.
 
 ## State
 

@@ -13,6 +13,13 @@ mechanically at every close-out.
 With --run, each named obligation's fixtures are executed and their own tally
 line is parsed. A non-zero recorded count under a `verified` obligation is a
 defect in the ledger, not in the fixture.
+
+A fixture that several obligations share prints a per-owner tally beside its
+total, `owners TUI-017=6 decided:TUI-016=1 gap:capture.rich-transports=2
+unattributed=0`, and only the entry for the obligation under check plus every
+unattributed case counts against it. A fixture that prints no such tally is
+read the old way, its whole recorded count against every obligation mapped to
+it, so silence never buys a pass.
 """
 import argparse
 import json
@@ -46,11 +53,75 @@ FIXTURES = {
 }
 
 TALLY = re.compile(r"(\d+)\s+recorded not asserted|(\d+)\s+assert none and are recorded in full")
+OWNERS = re.compile(r"\bowners((?:\s+[A-Za-z0-9_.:-]+=\d+)+)")
+OWNER_ENTRY = re.compile(r"([A-Za-z0-9_.:-]+)=(\d+)")
+DECLARED_OWNER = re.compile(r"printf '(TUI-[0-9]{3,}|gap:[A-Za-z0-9_.-]+)'")
+
+
+def accepted_gaps(root):
+    registry = json.loads((root / "compat/tmux-gaps.json").read_text(encoding="utf-8"))
+    return {gap["id"] for gap in registry["gaps"] + registry["closed"]}
+
+
+def owner_tally(output):
+    found = None
+    for found in OWNERS.finditer(output):
+        pass
+    if found is None:
+        return None
+    return {name: int(count) for name, count in OWNER_ENTRY.findall(found.group(1))}
+
+
+def resolve_owner(name, ids, gaps):
+    kind, separator, token = name.partition(":")
+    if not separator:
+        return name in ids
+    if kind == "gap":
+        return token in gaps
+    if kind == "decided":
+        return token in ids
+    return False
+
+
+def attribution(pid, rel, recorded, output, ids, gaps, problems):
+    owners = owner_tally(output)
+    if owners is None:
+        return recorded
+    if sum(owners.values()) != recorded:
+        problems.append(f"{pid}: {rel} reports {recorded} recorded case(s) but its owner tally "
+                        f"sums to {sum(owners.values())}, so the tally cannot be trusted and the "
+                        f"whole count stands")
+        return recorded
+    unattributed = owners.get("unattributed", 0)
+    for name, count in sorted(owners.items()):
+        if name == "unattributed" or resolve_owner(name, ids, gaps):
+            continue
+        problems.append(f"{pid}: {rel} attributes {count} recorded case(s) to {name!r}, which is "
+                        f"neither an obligation in the ledger nor a gap in the registry; they "
+                        f"count against every obligation on this fixture")
+        unattributed += count
+    return owners.get(pid, 0) + unattributed
 
 
 def git(*args):
     return subprocess.run(["git", "-C", str(ROOT), *args],
                           capture_output=True, text=True).stdout.strip()
+
+
+def declared_owners(items, problems):
+    ids = {i["id"] for i in items}
+    gaps = accepted_gaps(ROOT)
+    for rel in sorted({rel for mapped in FIXTURES.values() for rel in mapped}):
+        path = ROOT / rel
+        if not path.is_file():
+            continue
+        body = path.read_text(encoding="utf-8")
+        if "case_owner()" not in body:
+            continue
+        for name in sorted(set(DECLARED_OWNER.findall(body))):
+            if not resolve_owner(name, ids, gaps):
+                problems.append(f"{rel}: its case_owner table names {name!r}, which is neither an "
+                                f"obligation in the ledger nor a gap in compat/tmux-gaps.json")
 
 
 def structural(items, problems):
@@ -83,6 +154,7 @@ def structural(items, problems):
 
 def run_fixtures(ids, items, problems, zz=None):
     by_id = {i["id"]: i for i in items}
+    gaps = accepted_gaps(ROOT)
     env = dict(os.environ)
     env.setdefault("ZZ_COMPAT_TMUX", str(ROOT / "compat/.cache/tmux-src/tmux"))
     env.setdefault("ZZ_COMPAT_CORPUS", str(ROOT / "compat/.cache/plugins"))
@@ -117,13 +189,16 @@ def run_fixtures(ids, items, problems, zz=None):
             recorded = 0
             for m in TALLY.finditer(r.stdout or ""):
                 recorded += int(m.group(1) or m.group(2) or 0)
+            owed = attribution(pid, rel, recorded, r.stdout or "", set(by_id), gaps, problems)
             state = item["status"]
             print(f"    {last[:150]}")
-            if recorded and state == "verified":
-                problems.append(f"{pid} is VERIFIED but {rel} still reports {recorded} "
-                                f"recorded case(s): {last[:150]}")
+            if owed and state == "verified":
+                problems.append(f"{pid} is VERIFIED but {rel} still reports {owed} recorded "
+                                f"case(s) attributed to it: {last[:150]}")
+            elif owed:
+                print(f"    ({state}, {owed} recorded for {pid}, which is consistent)")
             elif recorded:
-                print(f"    ({state}, {recorded} recorded, which is consistent)")
+                print(f"    ({recorded} recorded, none of them {pid}'s)")
 
 
 def main(argv):
@@ -141,6 +216,7 @@ def main(argv):
     verified = [i["id"] for i in items if i["status"] == "verified"]
     print(f"verified: {', '.join(verified) or 'none'}")
     structural(items, problems)
+    declared_owners(items, problems)
     if args.run is not None:
         targets = args.run or verified
         print(f"re-measuring: {', '.join(targets)}")

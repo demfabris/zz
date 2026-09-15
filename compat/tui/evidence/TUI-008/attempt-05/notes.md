@@ -173,4 +173,13 @@ emacs mode-keys, and that is decided by copy mode's own cursor readers
 - 19-attached-client.txt
 - 20-corpus-delta-formats.txt, 21-corpus-delta-menus.txt
 - 22-cargo-test-zz.txt, 23-verify-claims-TUI-008.txt, 24-compat-check.txt
-- 25-*, 26-*: the proofs re-taken at the final tip
+- 25/26/27-tui-mouse-tip-run-*.txt - three runs at the tip, md5 64d94af2 each
+- 28-tui-mouse-tip-self-check.txt - 3 quiet controls, 28 sabotages, each caught
+- 29-cargo-test-zz-daemon-tip.txt - 894 pass, one load flake:
+  status_command_cache_survives_transient_clients_in_the_same_directory reads the cached value
+  back after a client is forgotten, and under the full parallel run the cache interval expired and
+  the shell command re-ran. 30-cargo-test-zz-daemon-solo-rerun.txt is the same test --exact solo,
+  green. It is not in this diff's path: the only status.rs hunk here is the match arm that lists
+  the three new format names.
+- 31-clippy-touched-crates-tip.txt - zz-terminal, zz-daemon and zz-mux, -D warnings
+- 32-*, 33-*: the proofs re-taken after the last commit

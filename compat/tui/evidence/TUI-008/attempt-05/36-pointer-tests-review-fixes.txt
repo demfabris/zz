@@ -1,0 +1,37 @@
+   Compiling serde v1.0.229
+   Compiling thiserror-impl v1.0.69
+   Compiling event-listener v5.4.2
+   Compiling proc-macro2-diagnostics v0.10.1
+   Compiling rustix v1.1.4
+   Compiling int-enum v1.2.0
+   Compiling smallvec v1.16.1
+   Compiling parking_lot_core v0.9.12
+   Compiling event-listener-strategy v0.5.4
+   Compiling concurrent-queue v2.5.0
+   Compiling async-channel v2.5.0
+   Compiling csscolorparser v0.8.4
+   Compiling tempfile v3.27.0
+   Compiling parking_lot v0.12.5
+   Compiling libghostty-vt v0.2.1 (https://github.com/uzaaft/libghostty-rs?rev=46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0#46a9d2ac)
+   Compiling thiserror v1.0.69
+   Compiling filedescriptor v0.8.3
+   Compiling portable-pty v0.9.0
+   Compiling zz-terminal v0.8.0 (/home/demfabris/dev/zz-tui-context-10/crates/zz-terminal)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.32s
+     Running unittests src/terminal_core.rs (target/debug/deps/zz_terminal-7db0db14678bac4a)
+
+running 11 tests
+test interaction::tests::pointer_records_keep_their_packed_layout ... ok
+test session::tests::pointer_formats_answer_nothing_past_a_row_and_on_a_blank_row ... ok
+test session::tests::pointer_formats_read_the_word_and_the_row_under_the_cell ... ok
+test session::tests::pointer_formats_read_the_frozen_mode_at_its_own_viewport_offset ... ok
+test session::tests::pointer_line_keeps_leading_blanks_and_trims_trailing_ones ... ok
+test session::tests::pointer_hyperlink_answers_the_osc_8_uri_of_the_cell ... ok
+test session::tests::pointer_word_crosses_a_wrap_back_into_the_scrollback ... ok
+test session::tests::pointer_word_reads_the_same_text_from_both_halves_of_a_wide_cell ... ok
+test session::tests::pointer_word_crosses_a_wrap_where_the_line_does_not ... ok
+test session::tests::pointer_word_honours_the_word_separators_option ... ok
+test session::tests::out_of_range_pointer_selection_clamps_and_pty_free_worker_survives ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 259 filtered out; finished in 0.02s
+

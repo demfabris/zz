@@ -1,0 +1,59 @@
+# Mutation check for the two unit tests attempt-05's review asked for.
+# Neither test is vacuous, and each catches ITS OWN mutation only.
+#
+# RUN 1: LiveGrid::active_base() stubbed to Ok(0) AND the Some(mode) arm of
+# pointer_context rewritten to read the live grid. Both tests fail.
+#
+# RUN 2: active_base() restored, the Some(mode) arm still reading the live
+# grid. Only pointer_formats_read_the_frozen_mode_at_its_own_viewport_offset
+# fails; pointer_word_crosses_a_wrap_back_into_the_scrollback passes.
+#
+# Both mutations were reverted afterwards: the committed tree is unmutated and
+# 36-pointer-tests-review-fixes.txt is the clean run.
+
+=== RUN 1: active_base -> Ok(0) AND the frozen arm reading the live grid ===
+running 2 tests
+test session::tests::pointer_word_crosses_a_wrap_back_into_the_scrollback ... FAILED
+test session::tests::pointer_formats_read_the_frozen_mode_at_its_own_viewport_offset ... FAILED
+failures:
+---- session::tests::pointer_word_crosses_a_wrap_back_into_the_scrollback stdout ----
+thread 'session::tests::pointer_word_crosses_a_wrap_back_into_the_scrollback' (3663806) panicked at crates/zz-terminal/src/session.rs:14122:9:
+assertion `left == right` failed
+  left: 0
+ right: 31
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+---- session::tests::pointer_formats_read_the_frozen_mode_at_its_own_viewport_offset stdout ----
+thread 'session::tests::pointer_formats_read_the_frozen_mode_at_its_own_viewport_offset' (3663805) panicked at crates/zz-terminal/src/session.rs:14165:9:
+assertion `left == right` failed
+  left: "FILLER001"
+ right: "FILLER029"
+failures:
+    session::tests::pointer_formats_read_the_frozen_mode_at_its_own_viewport_offset
+    session::tests::pointer_word_crosses_a_wrap_back_into_the_scrollback
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 268 filtered out; finished in 0.00s
+error: test failed, to rerun pass `-p zz-terminal --lib`
+
+=== RUN 2: active_base restored, the frozen arm still reading the live grid ===
+running 11 tests
+test interaction::tests::pointer_records_keep_their_packed_layout ... ok
+test session::tests::pointer_formats_answer_nothing_past_a_row_and_on_a_blank_row ... ok
+test session::tests::pointer_formats_read_the_word_and_the_row_under_the_cell ... ok
+test session::tests::pointer_formats_read_the_frozen_mode_at_its_own_viewport_offset ... FAILED
+test session::tests::pointer_hyperlink_answers_the_osc_8_uri_of_the_cell ... ok
+test session::tests::pointer_line_keeps_leading_blanks_and_trims_trailing_ones ... ok
+test session::tests::pointer_word_crosses_a_wrap_back_into_the_scrollback ... ok
+test session::tests::pointer_word_reads_the_same_text_from_both_halves_of_a_wide_cell ... ok
+test session::tests::pointer_word_crosses_a_wrap_where_the_line_does_not ... ok
+test session::tests::pointer_word_honours_the_word_separators_option ... ok
+test session::tests::out_of_range_pointer_selection_clamps_and_pty_free_worker_survives ... ok
+failures:
+---- session::tests::pointer_formats_read_the_frozen_mode_at_its_own_viewport_offset stdout ----
+thread 'session::tests::pointer_formats_read_the_frozen_mode_at_its_own_viewport_offset' (3665546) panicked at crates/zz-terminal/src/session.rs:14167:9:
+assertion `left == right` failed
+  left: "TAIL000"
+ right: "FILLER029"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+failures:
+    session::tests::pointer_formats_read_the_frozen_mode_at_its_own_viewport_offset
+test result: FAILED. 10 passed; 1 failed; 0 ignored; 0 measured; 259 filtered out; finished in 0.02s
+error: test failed, to rerun pass `-p zz-terminal --lib`

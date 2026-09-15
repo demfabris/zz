@@ -95,10 +95,16 @@ Two cells in the table do NOT agree and neither is owned by these formats:
   it read before; a new `LiveGrid` implements it over the live terminal through
   `Point::Screen`, which is `gd->hsize + y` addressing and lets the word walk cross a wrap into the
   scrollback. `pointer_context` answers all three for one cell, off the copy mode's revision when
-  the pane has one and off the live grid otherwise, with the OSC 8 URI read through the same
-  `hyperlink_uri_bytes` the hover path uses (split into a point-addressed twin). It is reached
-  synchronously through `Command::PointerContext` and `TerminalSession::pointer_context`, the same
-  request/reply shape `capture` uses, with the same timeout.
+  the requesting client's view holds one and off the live grid otherwise, with the OSC 8 URI read
+  through the same `hyperlink_uri_bytes` the hover path uses (split into a point-addressed twin).
+  It is reached synchronously through `Command::PointerContext` and
+  `TerminalSession::pointer_context`, the same request/reply shape `capture` uses, with the same
+  timeout, and the request carries the client's `TerminalViewId` so the read answers off that
+  client's own frozen mode rather than off whichever view happens to hold one.
+  The URI is published RAW, with none of the scheme allowlist `hover_link_at` runs its result
+  through: that is deliberate, because `format_grid_hyperlink` does no filtering either, so a
+  binding that interpolates `#{mouse_hyperlink}` into `run-shell` is exposed exactly as far on the
+  pin as it is here, and filtering on this side alone would be the divergence.
 - crates/zz-daemon/src/daemon.rs: `mouse_format_variables` hands back the pane worker and the
   event's cell alongside the variables it already published, and the mouse-invoked command path
   takes the worker read OUTSIDE the server lock, so the three names reach the command's format tree
@@ -106,9 +112,42 @@ Two cells in the table do NOT agree and neither is owned by these formats:
   rectangle.
 - crates/zz-daemon/src/status.rs: the delegated-format hook consumes the three names, the way it
   consumes `mouse_pane`, `mouse_x` and `mouse_y`.
+
+WHICH COPY MODE IS READ (attempt-05's review, must-fix 3). `PointerContextRequest` carries the
+requesting client's `TerminalViewId`, and the worker selects THAT view's `copy_mode`, the way
+`TerminalSession::copy_mode_facts(&self, view)` addresses one. The daemon's mouse-invoked command
+path already knows the client, so `mouse_format_variables` takes the view and the probe carries it.
+Before this the worker COUNTED the views holding a mode and took the one it found, which meant two
+clients in copy mode on one pane answered off the LIVE grid - the inverse of the pin, whose
+`format_cb_mouse_word` reads `window_copy_get_word` whenever `!TAILQ_EMPTY(&wp->modes)`.
+
+Measured with two real clients attached to one session, both looking at the same pane, both sent
+the same real SGR report at the same cell (two-client-probe.sh, output in
+35-two-client-copy-mode-probe.txt). Sixty labelled rows; the FIRST client in copy mode a page back,
+the SECOND at the bottom:
+
+| clients | client | pin | zz |
+| --- | --- | --- | --- |
+| first in copy mode, second not | first | `[ROW019][ROW019 word019 tail]` | same |
+| | second | `[ROW019][ROW019 word019 tail]` | `[ROW040][ROW040 word040 tail]` |
+| both in copy mode, at different offsets | first | `[ROW019][ROW019 word019 tail]` | same |
+| | second | `[ROW019][ROW019 word019 tail]` | `[ROW040][ROW040 word040 tail]` |
+
+So every client that is ITSELF in copy mode now answers exactly what the pin answers, including
+the both-in-copy-mode case the counting arm inverted. WHAT REMAINS AND IS CARRIED IN next_action:
+a client that is NOT in copy mode, on a pane where another client is, answers off the live grid
+here and off the pane's mode on the pin - `[ROW040][ROW040 word040 tail]` against
+`[ROW019][ROW019 word019 tail]` in both rows above. That is not this reader's to settle: the pin
+holds one mode per PANE and zz one per VIEW, so the two answers are the two models, and closing it
+means changing which one zz has, not which grid this reader walks.
 - crates/zz-mux/src/formats.rs: the three registrations moved from the constant backing to the
   delegated one, with compat_manifest_tests.rs's partition counts (43/99/56, 155 nonconstant) in
   the same commit as the gap items.
+- crates/zz-terminal/src/terminal_core.rs: `PointerContext` is re-exported from the crate root,
+  beside the other worker reply types. It is in TUI-008's sources for that one line.
+  crates/zz-terminal/src/session/mode_revision.rs stays in sources and is NOT modified here: the
+  frozen readers the copy-mode arm walks are `ModeRevision`'s own accessors, so it decides what a
+  pane in copy mode answers even though the `FormatGrid` impl over it lives in session.rs.
 - The GUI is untouched: no hunk under crates/zz, and `cargo test -p zz` is green.
 
 Nine unit tests in zz-terminal cover the oracle table's nineteen rows: `pointer_formats_*`,
@@ -187,7 +226,7 @@ emacs mode-keys, and that is decided by copy mode's own cursor readers
 - 06-oracle-zz-after.txt, 08-oracle-zz-word-separators-underscore-x.txt
 - 04-cargo-test-zz-terminal.txt, 05-clippy-zz-terminal.txt
 - 07-clippy-zz-daemon.txt, 11-cargo-test-zz-mux.txt, 12-clippy-zz-mux.txt
-- 13-cargo-test-zz-daemon.txt (the run that caught the delegated-consumer count; the tip run is 25)
+- 13-cargo-test-zz-daemon.txt (the run that caught the delegated-consumer count; the tip run is 29)
 - 09-tui-mouse-run-1.txt, 10-tui-mouse-self-check.txt (taken while the fixture was being built)
 - 14-tui-copy-mode.txt, 15-tui-copy-mode-self-check.txt
 - 16-tui-caps.txt, 17-tui-stock-keys.txt, 18-tui-stock-keys-self-check.txt

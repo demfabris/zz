@@ -1,0 +1,15 @@
+two clients on one pane, the FIRST in copy mode one page back, the SECOND not
+cell: pane_left+2, pane_top+2, a real SGR report with the control bit (button 18)
+binding: bind -n C-MouseDown3Pane set-option -gF @mousectx "[#{mouse_word}][#{mouse_line}]"
+
+zz   ONE IN COPY MODE  first  client: [ROW019][ROW019 word019 tail]
+zz   ONE IN COPY MODE  second client: [ROW040][ROW040 word040 tail]
+zz   BOTH IN COPY MODE first  client: [ROW019][ROW019 word019 tail]
+zz   BOTH IN COPY MODE second client: [ROW040][ROW040 word040 tail]
+zz   pane_in_mode after the probe: 1
+
+tmux ONE IN COPY MODE  first  client: [ROW019][ROW019 word019 tail]
+tmux ONE IN COPY MODE  second client: [ROW019][ROW019 word019 tail]
+tmux BOTH IN COPY MODE first  client: [ROW019][ROW019 word019 tail]
+tmux BOTH IN COPY MODE second client: [ROW019][ROW019 word019 tail]
+tmux pane_in_mode after the probe: 1

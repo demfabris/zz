@@ -2075,9 +2075,12 @@ impl TerminalSession {
     /// The three formats the pin reads off the grid under a pointer cell,
     /// answered synchronously by the worker that owns that grid. `column` and
     /// `row` are the event's cell inside the pane, which is what
-    /// `cmd_mouse_at` hands `format_cb_mouse_word` and its two neighbours.
+    /// `cmd_mouse_at` hands `format_cb_mouse_word` and its two neighbours, and
+    /// `view` is the client the event came from, whose own frozen mode the
+    /// read answers off, the way `copy_mode_facts` addresses one.
     pub fn pointer_context(
         &self,
+        view: TerminalViewId,
         column: u16,
         row: u16,
     ) -> Result<PointerContext, TerminalCaptureError> {
@@ -2085,7 +2088,12 @@ impl TerminalSession {
         let started = Instant::now();
         self.commands
             .send_timeout(
-                Command::PointerContext(Box::new(PointerContextRequest { column, row, reply })),
+                Command::PointerContext(Box::new(PointerContextRequest {
+                    view,
+                    column,
+                    row,
+                    reply,
+                })),
                 CAPTURE_TIMEOUT,
             )
             .map_err(|error| match error {
@@ -2337,6 +2345,7 @@ struct CaptureRequest {
 
 #[derive(Debug)]
 struct PointerContextRequest {
+    view: TerminalViewId,
     column: u16,
     row: u16,
     reply: Sender<PointerContext>,
@@ -4654,14 +4663,15 @@ fn run_output_view(
                     let _ = reply.send(capture_terminal(&terminal, mode, options));
                 }
                 Ok(Command::PointerContext(request)) => {
-                    let PointerContextRequest { column, row, reply } = *request;
-                    let mut copy_modes = active_views
-                        .values()
-                        .filter_map(|view| view.copy_mode.as_deref());
-                    let mode = match (copy_modes.next(), copy_modes.next()) {
-                        (Some(mode), None) => Some(mode),
-                        _ => None,
-                    };
+                    let PointerContextRequest {
+                        view,
+                        column,
+                        row,
+                        reply,
+                    } = *request;
+                    let mode = active_views
+                        .get(&view)
+                        .and_then(|view| view.copy_mode.as_deref());
                     let _ = reply.send(
                         pointer_context(&terminal, mode, column, row, &word_separators)
                             .unwrap_or_default(),
@@ -5892,14 +5902,15 @@ fn run_terminal(
                     let _ = reply.send(result);
                 }
                 Command::PointerContext(request) => {
-                    let PointerContextRequest { column, row, reply } = *request;
-                    let mut copy_modes = active_views
-                        .values()
-                        .filter_map(|view| view.copy_mode.as_deref());
-                    let mode = match (copy_modes.next(), copy_modes.next()) {
-                        (Some(mode), None) => Some(mode),
-                        _ => None,
-                    };
+                    let PointerContextRequest {
+                        view,
+                        column,
+                        row,
+                        reply,
+                    } = *request;
+                    let mode = active_views
+                        .get(&view)
+                        .and_then(|view| view.copy_mode.as_deref());
                     let result = pointer_context(&terminal, mode, column, row, &word_separators)
                         .unwrap_or_default();
                     let _ = reply.send(result);
@@ -13268,9 +13279,11 @@ impl FormatGrid for LiveGrid<'_, '_, '_> {
 
 /// `format_cb_mouse_word`, `format_cb_mouse_line` and
 /// `format_cb_mouse_hyperlink` read the pane's CURRENT grid under the event's
-/// cell. A pane with a mode up answers off the copy mode's own backing
-/// instead, which `window_copy_get_word` and `window_copy_get_line` index at
-/// `gd->hsize + y - data->oy`: the retained revision's own absolute row.
+/// cell. A mode up answers off the copy mode's own backing instead, which
+/// `window_copy_get_word` and `window_copy_get_line` index at
+/// `gd->hsize + y - data->oy`: the retained revision's own absolute row. The
+/// pin holds one mode per pane, zz one per view, so the mode passed here is
+/// the requesting client's own.
 fn pointer_context(
     terminal: &Terminal<'_, '_>,
     mode: Option<&CopyModeState>,

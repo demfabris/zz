@@ -18585,7 +18585,8 @@ impl Shared {
             window,
             ..mouse.clone()
         };
-        let (variables, probe) = mouse_format_variables(&self.inner.lock(), &mouse);
+        let (variables, probe) =
+            mouse_format_variables(&self.inner.lock(), &mouse, TerminalViewId(client.0));
         context.format_variables.extend(variables);
         if let Some(probe) = probe {
             context
@@ -33322,6 +33323,7 @@ fn client_format_facts(
 /// mouse formats.
 struct PointerProbe {
     terminal: Arc<TerminalSession>,
+    view: TerminalViewId,
     column: u16,
     row: u16,
 }
@@ -33332,12 +33334,17 @@ struct PointerProbe {
 /// expands empty, when the event has no pane. The three that read the screen
 /// under the pointer come off the pane's own grid, which only the worker that
 /// owns it can read, so the probe travels back for a read taken outside this
-/// lock. `cmd_mouse_at` fails for an event outside the pane's own rectangle
-/// and the three then answer NULL, so no probe leaves here for one. The two
+/// lock, carrying the view the event came from so the read answers off that
+/// client's own frozen mode. The rectangle guard below is those three names'
+/// own: `cmd_mouse_at` fails for an event outside the pane's rectangle and
+/// the three then answer NULL, so no probe leaves here for one. `mouse_x` and
+/// `mouse_y` are published above that guard, off the pane's origin alone,
+/// which is their own divergence and is recorded against TUI-008. The two
 /// that name the status range it landed in stay unanswered.
 fn mouse_format_variables(
     inner: &ServerState,
     mouse: &MouseEventTarget,
+    view: TerminalViewId,
 ) -> (BTreeMap<String, String>, Option<PointerProbe>) {
     let mut variables = BTreeMap::new();
     let Some(pane) = mouse.pane else {
@@ -33370,6 +33377,7 @@ fn mouse_format_variables(
                 .cloned()
                 .map(|terminal| PointerProbe {
                     terminal,
+                    view,
                     column: x,
                     row: y,
                 });
@@ -33385,7 +33393,10 @@ fn mouse_format_variables(
 /// nothing publishes nothing.
 fn pointer_format_variables(probe: &PointerProbe) -> BTreeMap<String, String> {
     let mut variables = BTreeMap::new();
-    let Ok(context) = probe.terminal.pointer_context(probe.column, probe.row) else {
+    let Ok(context) = probe
+        .terminal
+        .pointer_context(probe.view, probe.column, probe.row)
+    else {
         return variables;
     };
     for (name, value) in [

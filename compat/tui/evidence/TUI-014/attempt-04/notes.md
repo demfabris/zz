@@ -160,11 +160,13 @@ and nothing else, each withdrawn with the one key that ends it.
   TUI-018=4 decided:TUI-016=1 gap:clients.interactive-refresh=9
   gap:protocol.socket-acl=1 unattributed=0)`, exit 0.
 - `client-commands-self-check.txt` — `--self-check`, exit 0, nine ok lines.
-- `choosers-run-1/2/3/4.txt` — compat/tui-choosers.sh. Runs 1, 2 and 4 end `all
-  78 asserted comparisons identical, 0 recorded not asserted` at exit 0. Run 3
-  is red in `zoom-tree-open` with zz's whole screen blank at a load average of
-  8.7, which is the load flake the box is known for; run 4 is the exact-solo
-  rerun at 6.4 and it is green. Kept rather than dropped.
+- `choosers-run-1/2/3/4/5.txt` — compat/tui-choosers.sh five times. Runs 1, 2, 4
+  and 5 end `all 78 asserted comparisons identical, 0 recorded not asserted` at
+  exit 0. Run 3 is red in `zoom-tree-open` with zz's whole screen blank at a load
+  average of 8.7, which is the load flake the box is known for; run 4 is the
+  exact-solo rerun at 6.4 and green, and run 5 at 3.1 is green too. Kept rather
+  than dropped. verify-claims.py's own first pass hit the same flake once at a
+  higher load and its rerun at 3.8 is the committed one.
 - `choosers-self-check.txt` — `--self-check`, exit 0.
 - `screen-diff.txt` — compat/tui-screen-diff.sh, `all 147 asserted checkpoints
   identical, 6 recorded not asserted`, exit 0.
@@ -190,7 +192,6 @@ and nothing else, each withdrawn with the one key that ends it.
   seven russh_prompt errors are repaired on the main this branch sits on.
 - `fmt.txt` — `cargo fmt --all -- --check`, exit 0.
 - `check.txt` — RUN_ENV compat/check.sh from this worktree.
-- `verify-claims.txt` — RUN_ENV compat/tui/verify-claims.py --run TUI-014.
 - `mode-probe.sh` — the two-sided driver this lane iterated with: an outer pinned
   tmux driving one attached pin client and one attached zz client at 80x24,
   printing both screens, cursors and pane-mode states with a diff. Throwaway
@@ -198,8 +199,16 @@ and nothing else, each withdrawn with the one key that ends it.
   `-f /dev/null`, and a trap that reaps all three. Kept so it can be re-run
   verbatim.
 - `probe-clock-mode.txt`, `probe-switch-mode.txt` — that driver's output for the
-  two commands at the final tip, both ending `STYLED SCREENS IDENTICAL` and
-  `STATE IDENTICAL` with equal cursors while the mode is up.
+  two commands at the final tip. Both BEFORE and AFTER sections end `STYLED
+  SCREENS IDENTICAL` and `STATE IDENTICAL` with equal cursors, which is the mode
+  up. The clock's RESTORED section is identical too; the switch probe's is not,
+  because the probe's own teardown sends one key with a fixed pause and the pin's
+  switch mode was still up when it captured. The fixture ends it properly, waits
+  for `#{pane_in_mode}` to fall and asserts the restored screen, which is the
+  green `switch-mode-closed` case in every client-commands run.
+- `verify-claims.txt` — the gate's own re-measurement of TUI-014 against this
+  binary: both fixtures green and `(active, 2 recorded for TUI-014, which is
+  consistent)`, ending `every verified obligation holds up` at exit 0.
 
 ## Count churn a reader will meet
 

@@ -1,0 +1,118 @@
+self-check: one deliberate one-sided difference per channel, plus two equivalences
+ok    self-check equivalence: the same command on both sides
+      case stdout-sabotage
+      stdout differs
+        0a1
+        > zzcc-sabotage
+      state differs
+        5a6
+        > B zzcc-sabotage 8
+ok    self-check stdout, a buffer on one side only
+      case access-sabotage
+      stdout differs
+        2d1
+        < demfabris (G,W)
+      state differs
+        5a6
+        > B zzcc-sabotage 8
+ok    self-check stdout, an access entry on the pin only
+      case exit-sabotage
+      exit tmux: 1  zz: 0
+      stdout differs
+        0a1
+        > SABOTAGE
+        \ No newline at end of file
+      stderr differs
+        1d0
+        < no buffer zzcc-sabotage
+      state differs
+        5a6
+        > B zzcc-sabotage 8
+ok    self-check exit and stderr, a buffer missing on one side
+      case state-sabotage
+      state differs
+        1a2
+        > S zzcc-sab 1 0
+        3a5
+        > W zzcc-sab:0 0 * 1
+        5a8
+        > P zzcc-sab:0.0 mode=0/ 80x24 ubuntu
+ok    self-check state, a session on one side only
+      case clock-sabotage
+      screen differs
+        1,5d0
+        < $ printf 'SCENE-%s\n' %0
+        < SCENE-%0
+        < $
+        < 
+        < 
+        13a9,13
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m         ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   54,12 flag=0 pane=80x24 shape=default
+      state differs
+        4c4
+        < P cli:0.0 mode=0/ 80x23 ptitle
+        ---
+        > P cli:0.0 mode=1/clock-mode 80x23 ptitle
+ok    self-check screen and state, a clock on one side only
+      case switch-sabotage
+      screen differs
+        1,3c1
+        < $ printf 'SCENE-%s\n' %0
+        < SCENE-%0
+        < $
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m2 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mwin^[[0m^[[48;2;184;134;11m
+        23a22,23
+        > 
+        > ^[[38;2;13;13;13m(search) ^[[39m^[[49m
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   9,22 flag=1 pane=80x24 shape=default
+      state differs
+        4c4
+        < P cli:0.0 mode=0/ 80x23 ptitle
+        ---
+        > P cli:0.0 mode=1/switch-mode 80x23 ptitle
+ok    self-check screen and state, a switch mode on one side only
+      case screen-sabotage
+      screen differs
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   3,2 flag=1 pane=80x24 shape=default
+ok    self-check screen, one column at one prompt
+      case normalize-off
+      stdout differs
+        1c1
+        < tty /dev/pts/22
+        ---
+        > tty /dev/pts/20
+ok    self-check two pts numbers differ while nothing normalizes them
+ok    self-check the same two numbers compare equal once normalized
+      case normalize-keeps-the-line
+      stdout differs
+        1a2
+        > zzcc-norm /dev/pts/N
+      state differs
+        1a2
+        > S zzcc-norm 1 0
+        3a5
+        > W zzcc-norm:0 0 * 1
+        5a8
+        > P zzcc-norm:0.0 mode=0/ 80x24 ubuntu
+ok    self-check a one-sided line beside a normalized number is still reported
+      case live-job-sabotage
+      stdout differs
+        0a1
+        > Job 0: sleep 40; echo zzcc-job [fd=N, pid=N, status=0]
+      screen differs
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+ok    self-check a format job armed on one side only
+ok    self-check equivalence: every sabotage withdrawn
+self-check complete: every sabotage was caught in its own channel and both equivalences passed

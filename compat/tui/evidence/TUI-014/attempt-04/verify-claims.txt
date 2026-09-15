@@ -1,0 +1,10 @@
+verified: TUI-001, TUI-002, TUI-003, TUI-004, TUI-005, TUI-006, TUI-007, TUI-009, TUI-010, TUI-016
+re-measuring: TUI-014
+  comparing /home/demfabris/dev/zz-tui-modes-10/target/debug/zz
+  running compat/tui-client-commands.sh for TUI-014 ...
+    all 95 asserted comparisons identical, 27 recorded not asserted (0 for a sibling lane, owners TUI-014=2 TUI-015=4 TUI-017=6 TUI-018=4 decided:TUI-016=
+    (active, 2 recorded for TUI-014, which is consistent)
+  running compat/tui-choosers.sh for TUI-014 ...
+    all 78 asserted comparisons identical, 0 recorded not asserted (0 for a sibling lane)
+
+every verified obligation holds up

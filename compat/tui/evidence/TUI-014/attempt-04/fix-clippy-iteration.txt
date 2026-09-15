@@ -1,0 +1,64 @@
+tip=8dc210d953480714b42a669f6643998276b86caf
+command=cargo clippy -p zz-protocol -p zz-mux -p zz-tui -p zz-client -p zz-client-ffi -p zz-daemon -p zz --all-targets --all-features -- -D warnings 
+cargo runner: systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=4G flock -w 540 /tmp/zz-cargo-slot-1.lock /home/demfabris/.cargo/bin/cargo clippy -p zz-protocol -p zz-mux -p zz-tui -p zz-client -p zz-client-ffi -p zz-daemon -p zz --all-targets --all-features --jobs 3 -- -D warnings
+    Checking zz-terminal v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-terminal)
+   Compiling cef-dll-sys v152.2.0+152.0.6
+    Checking cef v152.2.0+152.0.6
+    Checking zz-protocol v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-protocol)
+    Checking zz-mux v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-mux)
+    Checking zz-client v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-client)
+    Checking zz-browser v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-browser)
+    Checking zz-ui v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-ui)
+    Checking zz-chrome-import v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-chrome-import)
+    Checking zz-daemon v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-daemon)
+error: called `map(<f>).unwrap_or_else(<g>)` on an `Option` value
+    --> crates/zz-daemon/src/daemon.rs:9387:48
+     |
+9387 |   ...                   let mode = existing
+     |  __________________________________^
+9388 | | ...                       .map(|index| modes.remove(index))
+9389 | | ...                       .unwrap_or_else(|| mode.clone());
+     | |__________________________________________________________^ help: try: `existing.map_or_else(|| mode.clone(), |index| modes.remove(index))`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#map_unwrap_or
+     = note: `-D clippy::map-unwrap-or` implied by `-D warnings`
+     = help: to override `-D warnings` add `#[allow(clippy::map_unwrap_or)]`
+
+error: this function's return value is unnecessarily wrapped by `Result`
+     --> crates/zz-daemon/src/daemon.rs:18585:5
+      |
+18585 | /     fn pane_mode_key(
+18586 | |         self: &Arc<Self>,
+18587 | |         client: ClientId,
+18588 | |         _kind: ClientKind,
+...     |
+18592 | |         text_follows: bool,
+18593 | |     ) -> Result<bool, DaemonError> {
+      | |__________________________________^
+      |
+      = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#unnecessary_wraps
+      = note: `-D clippy::unnecessary-wraps` implied by `-D warnings`
+      = help: to override `-D warnings` add `#[allow(clippy::unnecessary_wraps)]`
+help: remove `Result` from the return type...
+      |
+18593 -     ) -> Result<bool, DaemonError> {
+18593 +     ) -> bool {
+      |
+help: ...and then remove the surrounding `Ok()` from returning expressions
+      |
+18602 ~             return false;
+18603 |         };
+  ...
+18618 |                 }
+18619 ~                 _ => return true,
+18620 |             },
+  ...
+18648 |         }
+18649 ~         true
+      |
+
+error: could not compile `zz-daemon` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `zz-daemon` (lib test) due to 2 previous errors
+
+exit=101 elapsed=23s

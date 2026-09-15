@@ -4653,6 +4653,22 @@ cef::wrap_download_handler! {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
+trait PointerTarget {
+    type Target;
+}
+
+#[cfg(not(target_os = "macos"))]
+impl<T> PointerTarget for *mut T {
+    type Target = T;
+}
+
+#[cfg(target_os = "macos")]
+type KeyboardOsEvent<'a> = *mut u8;
+
+#[cfg(not(target_os = "macos"))]
+type KeyboardOsEvent<'a> = Option<&'a mut <EventHandle as PointerTarget>::Target>;
+
 cef::wrap_keyboard_handler! {
     struct ConsumedKeyboardHandler;
 
@@ -4661,7 +4677,7 @@ cef::wrap_keyboard_handler! {
             &self,
             _browser: Option<&mut Browser>,
             _event: Option<&KeyEvent>,
-            _os_event: *mut u8,
+            _os_event: KeyboardOsEvent<'_>,
         ) -> i32 {
             1
         }
@@ -4850,7 +4866,11 @@ mod tests {
     #[test]
     fn keys_the_page_ignores_are_reported_handled() {
         let handler = ConsumedKeyboardHandler::new();
-        assert_eq!(handler.on_key_event(None, None, std::ptr::null_mut()), 1);
+        #[cfg(target_os = "macos")]
+        let absent: KeyboardOsEvent<'_> = std::ptr::null_mut();
+        #[cfg(not(target_os = "macos"))]
+        let absent: KeyboardOsEvent<'_> = None;
+        assert_eq!(handler.on_key_event(None, None, absent), 1);
     }
 
     #[test]

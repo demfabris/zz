@@ -13,7 +13,7 @@ carry the history and nothing here restates it.
   `39 asserted checks, 0 recorded checks` and
   `all 39 asserted checks identical`.
 - `04-tui-mouse-self-check.txt` — the fixture's `--self-check`: three controls
-  that stay quiet and twenty one-sided sabotages, each caught in its own
+  that stay quiet and twenty-two one-sided sabotages, each caught in its own
   channel. Three of the sabotages are new here, one per channel that flipped.
 - `05-attached-client.txt` — `attached-client compatibility: PASS`.
 - `06-tui-stock-keys.txt`, `07-…-self-check.txt` — 50 cases agree on every

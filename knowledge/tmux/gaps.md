@@ -819,7 +819,7 @@ Five pinned forms move raw bytes between the invoking client's standard streams 
 - Acceptance:
   - `The typed byte-capable command protocol stays the contract; the caller's standard input and output cross it as one bounded channel, and what this group still refuses is a non-UTF-8 argv word's remaining consumers and show-buffer's binary output.`
   - `Any later stream support arrives as one reviewed channel covering stdin, stdout, binary bytes, backpressure, cancellation, and process lifetime, not as five separate transports.`
-  - `A caller's non-UTF-8 argv word reaches the daemon as bytes over the typed protocol. The remaining refusal is show-buffer's binary policy.`
+  - `A caller's non-UTF-8 argv word reaches the daemon as bytes over the typed protocol. The remaining refusals are that word's remaining consumers and show-buffer's binary policy.`
 
 ### `protocol.socket-acl`: Keep the daemon socket single-user
 

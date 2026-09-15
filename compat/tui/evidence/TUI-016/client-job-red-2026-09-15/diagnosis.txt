@@ -1,0 +1,80 @@
+Client-command flake diagnosis, Ubuntu, 2026-09-15
+Base: 2e5094d8e74c3de2917a15ce249c723f2211b3e1
+Pin: d77c9dc6aa021e4bc61f0da128c591af695e6466
+
+Three unchanged fixture runs returned 0, 0, 1. Run 3 named messages-jobs-live.
+The CLI channels, state and cursor matched. Only the status row differed:
+tmux showed the clipped pending-job placeholder <'sleep 40 while zz's
+status-left segment was empty. baseline-red.txt retains the complete output.
+
+Cause: (b), fixture timing race. job_rows_are observes child creation, not
+placeholder rendering. Both implementations initially expand a running job
+to empty text and produce the pending placeholder only on a later expansion
+more than one integer second after launch. Independent status timers can
+therefore put the two screens on opposite sides of that transition.
+
+A focused probe confirmed that both job tables existed while both status rows
+were empty. With the default interval, the placeholder was still absent at the
+end of a bounded ten-second wait (probe exit 2). With status-interval=1, both
+status rows acquired the same placeholder about 2.65 seconds after the tables
+were ready. The before/after/restoration comparisons passed (probe exit 0).
+job-probes.txt retains the timestamps and screen captures.
+
+The fixture now saves its interval, uses one second for this case, preserves
+both job-count waits, waits for the placeholder on each outer terminal's last
+row, compares the same five channels, then restores status-left and interval.
+The existing one-sided job sabotage uses the same visible predicate and now
+also requires screen=1, alongside its existing stdout=1 assertion.
+
+Sources: pinned format.c format_job_get; crates/zz-daemon/src/status.rs
+shell format-job cache handling; crates/zz-daemon/src/daemon.rs
+status sampler; compat/tui-client-commands.sh message_live_job_cases and case_run.
+Forced refresh is unsuitable as the readiness poll: it restarts the job and
+resets the placeholder's age on both implementations.
+
+The original self-check and the strengthened self-check both returned 0.
+The fixture's asserted/recorded totals remain 80/29; the ledger is unchanged.
+
+The focused probe sourced the fixture definitions before top-level write_attach
+and started throwaway servers with its isolated environment. For the second
+probe, it added set_on_both status-interval 1 before setting status-left.
+The driver follows.
+
+#!/usr/bin/env bash
+source /tmp/zoom-red-evidence/client-library.sh "$@"
+write_attach zz "$SCRATCH_DIR/attach-zz.sh"
+write_attach tmux "$SCRATCH_DIR/attach-tmux.sh"
+attach_both_at 80 24
+pending_status() {
+  capture_plain "$1" | tail -n 1 | grep -Fq "<'sleep 40"
+}
+CASE_LABEL=messages-jobs-live
+printf 'armed-start %s\n' "$EPOCHREALTIME"
+set_on_both status-left "$LIVE_JOB_COMMAND"
+wait_for 'the pin armed one format job' job_rows_are tmux 1
+wait_for 'zz armed one format job' job_rows_are zz 1
+printf 'jobs-present %s\n' "$EPOCHREALTIME"
+for side in zz tmux; do
+  printf '%s initial status: ' "$side"
+  capture_plain "$side" | tail -n 1
+  capture_screen "$side" >"$ZZ_CLIENT_COMMANDS_CAPTURE_DIR/initial.$side.txt"
+done
+CASE_NORMALIZE="$PER_PROCESS_NUMBERS"
+case_run messages-jobs-live-before same '' -- show-messages -J
+for side in zz tmux; do
+  wait_for "pending job on the $side status row" pending_status "$side"
+  printf '%s pending-status %s\n' "$side" "$EPOCHREALTIME"
+  capture_screen "$side" >"$ZZ_CLIENT_COMMANDS_CAPTURE_DIR/pending.$side.txt"
+done
+CASE_NORMALIZE="$PER_PROCESS_NUMBERS"
+case_run messages-jobs-live-after same '' -- show-messages -J
+set_on_both status-left L
+restore_case messages-jobs-live-restored
+printf 'job-probe failures=%s checks=%s\n' "$FAILURES" "$CHECKS"
+
+Final proof on the rebuilt binary: three consecutive whole-fixture runs each
+passed all 80 assertions with the same 29 declared differences (exits 0, 0, 0).
+The final self-check returned 0, including stdout and screen differences for
+the one-sided live job. Exact commands and full output are in
+fixture-validation.txt. An additional patched fixture run during the rebuild
+also passed, but is not counted among these three final runs.

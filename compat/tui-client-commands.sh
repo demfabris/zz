@@ -132,7 +132,11 @@
 # draw: after every invocation each screen is polled until it is unchanged
 # between two consecutive polls, and only then compared. Where the pin opens a
 # mode the case waits, bounded, for the pin's own needle first and gives zz the
-# same bounded wait made soft. No wait in this file is a sleep.
+# same bounded wait made soft. The live-job case also waits for the pending-job
+# placeholder on each status row: a running job first expands to empty text,
+# then to the placeholder on a later timer tick. That case temporarily sets
+# status-interval to one second so the bounded wait reaches that tick.
+# No wait in this file is a sleep.
 #
 # --self-check runs the driver against a deliberate one-sided difference in each
 # channel - stdout, stderr with the exit status, the screen and the session
@@ -876,14 +880,24 @@ job_rows_are() {
   [ "$(side_command "$1" show-messages -J 2>/dev/null | grep -c '^Job ')" = "$2" ]
 }
 
+job_status_pending() {
+  capture_plain "$1" | tail -n 1 | grep -Fq "<'sleep 40"
+}
+
 message_live_job_cases() {
+  local interval
+  interval="$(tmux_inner_command show-options -gv status-interval)"
   CASE_LABEL=messages-jobs-live
+  set_on_both status-interval 1
   set_on_both status-left "$LIVE_JOB_COMMAND"
   wait_for 'the pin armed one format job' job_rows_are tmux 1
   wait_for 'zz armed one format job' job_rows_are zz 1
+  wait_for 'the pin drew its pending format job' job_status_pending tmux
+  wait_for 'zz drew its pending format job' job_status_pending zz
   CASE_NORMALIZE="$PER_PROCESS_NUMBERS"
   case_run messages-jobs-live same '' -- show-messages -J
   set_on_both status-left L
+  set_on_both status-interval "$interval"
   restore_case messages-jobs-live-restored
 }
 
@@ -1080,15 +1094,22 @@ run_self_check() {
   # collapses the fd and the pid but not the command beside them, so the
   # difference has to reach stdout. The status draws the job on one side too,
   # which is the screen channel doing its own job.
+  local interval
+  interval="$(zz_command show-options -gv status-interval)"
+  zz_command set-option -g status-interval 1 >/dev/null ||
+    die 'zz refused set-option -g status-interval'
   zz_command set-option -g status-left "$LIVE_JOB_COMMAND" >/dev/null ||
     die 'zz refused set-option -g status-left'
   wait_for 'the one-sided format job' job_rows_are zz 1
+  wait_for 'the one-sided pending format job on the status row' job_status_pending zz
   CASE_NORMALIZE="$PER_PROCESS_NUMBERS"
   self_check_run live-job-sabotage show-messages -J
   CASE_NORMALIZE=''
-  self_check_expect 'a format job armed on one side only' exit=0 stdout=1 stderr=0
+  self_check_expect 'a format job armed on one side only' exit=0 stdout=1 stderr=0 screen=1
   zz_command set-option -g status-left L >/dev/null ||
     die 'zz refused set-option -g status-left'
+  zz_command set-option -g status-interval "$interval" >/dev/null ||
+    die 'zz refused set-option -g status-interval'
   wait_for 'the one-sided format job withdrawn from the status' zz_status_left_is L
 
   # The second equivalence: with every sabotage withdrawn the comparison is

@@ -1,0 +1,243 @@
+=== job-probe-1.txt ===
+armed-start 1789496617.388717
+jobs-present 1789496617.737662
+zz initial status: 0:win* 1:two
+tmux initial status: 0:win* 1:two
+ok    messages-jobs-live-before
+wait that ran out: pending job on the zz status row (case messages-jobs-live-before)
+--- zz screen ---
+$ printf 'SCENE-%s\n' %0
+SCENE-%0
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+0:win* 1:two
+--- zz clients ---
+cli 80x24
+--- zz panes ---
+%0 in_mode=0 mode=
+%1 in_mode=0 mode=
+--- tmux screen ---
+$ printf 'SCENE-%s\n' %0
+SCENE-%0
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+0:win* 1:two
+--- tmux clients ---
+cli 80x24
+--- tmux panes ---
+%0 in_mode=0 mode=
+%1 in_mode=0 mode=
+error: pending job on the zz status row did not happen within 10 seconds
+=== job-probe-2.txt ===
+armed-start 1789496697.574449
+jobs-present 1789496698.252151
+zz initial status: 0:win* 1:two
+tmux initial status: 0:win* 1:two
+ok    messages-jobs-live-before
+zz pending-status 1789496700.898862
+tmux pending-status 1789496700.906629
+ok    messages-jobs-live-after
+ok    messages-jobs-live-restored
+job-probe failures=0 checks=3
+=== baseline red tmux ===
+$ printf 'SCENE-%s\n' %0
+SCENE-%0
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[38;2;13;13;13m[48;2;154;205;50m<'sleep 40[4m0:win*[0m[38;2;13;13;13m[48;2;154;205;50m 1:two
+cursor 2,2 flag=1 pane=80x24 shape=default
+S cli 2 1
+W cli:0 win * 1
+W cli:1 two  1
+P cli:0.0 mode=0/ 80x23 ptitle
+P cli:1.0 mode=0/ 80x24 ptitle
+C cli 80x24 0
+=== interval-one probe initial tmux ===
+$ printf 'SCENE-%s\n' %0
+SCENE-%0
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[4m[38;2;13;13;13m[48;2;154;205;50m0:win*[0m[38;2;13;13;13m[48;2;154;205;50m 1:two
+=== interval-one probe pending tmux ===
+$ printf 'SCENE-%s\n' %0
+SCENE-%0
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[38;2;13;13;13m[48;2;154;205;50m<'sleep 40[4m0:win*[0m[38;2;13;13;13m[48;2;154;205;50m 1:two
+=== baseline red zz ===
+$ printf 'SCENE-%s\n' %0
+SCENE-%0
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[4m[38;2;13;13;13m[48;2;154;205;50m0:win*[0m[38;2;13;13;13m[48;2;154;205;50m 1:two
+cursor 2,2 flag=1 pane=80x24 shape=default
+S cli 2 1
+W cli:0 win * 1
+W cli:1 two  1
+P cli:0.0 mode=0/ 80x23 ptitle
+P cli:1.0 mode=0/ 80x24 ptitle
+C cli 80x24 0
+=== interval-one probe initial zz ===
+$ printf 'SCENE-%s\n' %0
+SCENE-%0
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[4m[38;2;13;13;13m[48;2;154;205;50m0:win*[0m[38;2;13;13;13m[48;2;154;205;50m 1:two
+=== interval-one probe pending zz ===
+$ printf 'SCENE-%s\n' %0
+SCENE-%0
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[38;2;13;13;13m[48;2;154;205;50m<'sleep 40[4m0:win*[0m[38;2;13;13;13m[48;2;154;205;50m 1:two

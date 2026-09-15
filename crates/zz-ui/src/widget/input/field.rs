@@ -271,15 +271,20 @@ impl RenderOnce for Input {
         element
             .when(self.appearance, |this| {
                 this.bg(background)
-                    .rounded(cx.theme().radius)
+                    .rounded(if multi_line {
+                        cx.theme().radius
+                    } else {
+                        cx.theme().control_radius()
+                    })
                     .when(self.bordered, |this| {
                         this.control_surface(cx)
+                            .border_1()
                             .when(self.disabled, |this| {
                                 this.border_color(cx.theme().foreground.opacity(0.05))
                                     .shadow_none()
                             })
                             .when(focused && self.focus_bordered, |this| {
-                                this.border_color(cx.theme().foreground)
+                                this.border_color(cx.theme().accent)
                             })
                     })
             })

@@ -351,7 +351,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn panes_preview_stays_visible_while_controls_scroll(cx: &mut TestAppContext) {
+    fn panes_preview_scrolls_with_controls(cx: &mut TestAppContext) {
         cx.update(crate::init);
         cx.update(|cx| cx.set_reduce_motion(true));
         let (_, cx) = cx.add_window_view(|_, _| PanesPageTest);
@@ -371,11 +371,16 @@ mod tests {
         cx.update(|window, cx| {
             _ = window.draw(cx);
         });
-        assert_eq!(
-            cx.debug_bounds("settings-preview-terminal").unwrap(),
-            preview
-        );
-        assert!(cx.debug_bounds("panes-control-0").unwrap().origin.y < control.origin.y);
+        let preview_offset = cx
+            .debug_bounds("settings-preview-terminal")
+            .unwrap()
+            .origin
+            .y
+            - preview.origin.y;
+        let control_offset =
+            cx.debug_bounds("panes-control-0").unwrap().origin.y - control.origin.y;
+        assert!(preview_offset < px(0.0));
+        assert_eq!(preview_offset, control_offset);
     }
 
     #[gpui::test]
@@ -1070,29 +1075,27 @@ pub fn panes_page(
         .min_h_0()
         .overflow_hidden()
         .child(
-            div().flex_none().p(px(SETTINGS_PAGE_PADDING)).pb_0().child(
-                settings_page_content()
-                    .gap(px(12.0))
-                    .child(settings_page_description(SettingsSection::Panes, cx))
-                    .child(settings_group_header(
-                        "Preview".into(),
-                        Some("Click a pane to preview focus.".into()),
-                        cx,
-                    ))
-                    .child(preview),
-            ),
-        )
-        .child(
-            div().flex_1().min_h_0().flex().child(
-                settings_scroll_column("settings-panes")
-                    .child(SettingsStack::titled("Layout").child(gaps))
-                    .child(SettingsStack::titled("Appearance").child(background_opacity))
-                    .child(SettingsStack::titled("Focus").children(focus))
-                    .child(
-                        SettingsStack::titled("Frame")
-                            .description("Applies only while pane gaps are enabled.")
-                            .children(frame),
-                    ),
-            ),
+            settings_scroll_column("settings-panes")
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(12.0))
+                        .child(settings_page_description(SettingsSection::Panes, cx))
+                        .child(settings_group_header(
+                            "Preview".into(),
+                            Some("Click a pane to preview focus.".into()),
+                            cx,
+                        ))
+                        .child(preview),
+                )
+                .child(SettingsStack::titled("Layout").child(gaps))
+                .child(SettingsStack::titled("Appearance").child(background_opacity))
+                .child(SettingsStack::titled("Focus").children(focus))
+                .child(
+                    SettingsStack::titled("Frame")
+                        .description("Applies only while pane gaps are enabled.")
+                        .children(frame),
+                ),
         )
 }

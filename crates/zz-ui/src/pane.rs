@@ -934,7 +934,7 @@ pub fn pane_picker_row(
         .items_center()
         .gap(px(10.0))
         .px(px(12.0))
-        .rounded(cx.theme().radius)
+        .rounded(cx.theme().menu_radius())
         .bg(if selected && enabled {
             crate::navigation::workspace_row_highlight(cx)
         } else {

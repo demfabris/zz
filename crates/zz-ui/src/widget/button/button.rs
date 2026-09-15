@@ -455,7 +455,7 @@ fn focus_ring<T: ParentElement + Styled + Sized>(
             .right(-(inset + border_widths.right))
             .bottom(-(inset + border_widths.bottom))
             .border(RING_BORDER_WIDTH)
-            .border_color(cx.theme().foreground.alpha(0.2))
+            .border_color(cx.theme().accent)
             .refine_style(&inner_style),
     )
 }
@@ -486,7 +486,7 @@ impl RenderOnce for Button {
         let is_focused = focus_handle.is_focused(window);
 
         let rounding = match self.rounded {
-            ButtonRounded::Medium => cx.theme().radius,
+            ButtonRounded::Medium => cx.theme().control_radius(),
             ButtonRounded::Size(px) => px,
         };
 
@@ -632,6 +632,9 @@ impl RenderOnce for Button {
                     .justify_center();
 
                 button_text_size(label, self.size)
+                    .when(self.dropdown_caret, |this| {
+                        this.text_size(rems_from_px(13.0))
+                    })
                     .map(|this| match self.size {
                         Size::XSmall => this.gap_1(),
                         Size::Small => this.gap_1(),

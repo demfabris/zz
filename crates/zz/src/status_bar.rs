@@ -203,7 +203,7 @@ fn render_update(show: bool, cx: &App) -> Option<AnyElement> {
         )
         .flex_none()
         .px(px(6.0))
-        .rounded(cx.theme().radius)
+        .rounded(cx.theme().control_radius())
         .when(cx.theme().shadow, |item| {
             item.border(px(0.5)).border_color(gpui::transparent_white())
         })

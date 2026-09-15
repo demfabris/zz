@@ -195,9 +195,10 @@ impl RenderOnce for NumberInput {
             .items_center()
             .when(self.appearance, |this| {
                 this.bg(cx.theme().background.raised(1))
-                    .rounded(cx.theme().radius)
+                    .rounded(cx.theme().control_radius())
                     .control_surface(cx)
-                    .when(focused, |this| this.border_color(cx.theme().foreground))
+                    .border_1()
+                    .when(focused, |this| this.border_color(cx.theme().accent))
             })
             .when(self.disabled, |this| this.opacity(0.5))
             .refine_style(&self.style)

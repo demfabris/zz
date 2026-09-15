@@ -114,7 +114,7 @@ impl Preferences {
         );
         self.shadow_strength = bounded(self.shadow_strength, 0.0, 1.0, 1.0);
         self.zoom = bounded(self.zoom, 0.5, 3.0, 1.0);
-        self.radius = bounded(self.radius, 0.0, 24.0, 6.0);
+        self.radius = bounded(self.radius, 0.0, 25.0, 6.0);
         self.contrast = bounded(self.contrast, 0.5, 2.0, 1.0);
         for control in PaneControl::ALL {
             let (min, max, _) = control.limits();
@@ -253,7 +253,7 @@ impl Controls {
                 .default_value(format!("{:.0}", preferences.radius))
                 .step(1.0)
                 .min(0.0)
-                .max(24.0)
+                .max(25.0)
         });
         let contrast = cx.new(|cx| {
             InputState::new(window, cx)
@@ -288,7 +288,7 @@ impl Controls {
                         "zoom" => (50.0, 300.0, this.preferences.zoom * 100.0),
                         "contrast" => (50.0, 200.0, this.preferences.contrast * 100.0),
                         "shadow-strength" => (0.0, 100.0, this.preferences.shadow_strength * 100.0),
-                        _ => (0.0, 24.0, this.preferences.radius),
+                        _ => (0.0, 25.0, this.preferences.radius),
                     };
                     let parsed = input
                         .read(cx)
@@ -610,8 +610,12 @@ impl WebClient {
                 );
                 rows.push(
                     SettingEntry::new(
-                        "Widget corner radius",
-                        "Round buttons, fields, and other interface controls.",
+                        if self.preferences.radius > 24.0 {
+                            "Widget corner radius (Full)"
+                        } else {
+                            "Widget corner radius"
+                        },
+                        "Set corners from 0 to 24px. At 25, Full mode rounds buttons, fields, and rows into pills.",
                     )
                     .control(
                         div().w(px(120.0)).flex_none().child(
@@ -1188,6 +1192,19 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn full_widget_radius_survives_saved_preferences() {
+        let preferences = Preferences {
+            radius: 25.0,
+            ..Preferences::default()
+        };
+        let saved = serde_json::to_string(&preferences).unwrap();
+        let loaded = serde_json::from_str::<Preferences>(&saved)
+            .unwrap()
+            .sanitized();
+        assert_eq!(loaded.radius, 25.0);
     }
 
     #[test]

@@ -825,6 +825,11 @@ impl SettingsView {
         input: &Entity<InputState>,
         cx: &Context<Self>,
     ) -> SettingEntry {
+        let title = if key == ConfigKey::WidgetCornerRadius && setting.value > 24.0 {
+            "Widget corner radius (Full)"
+        } else {
+            title
+        };
         SettingEntry::new(title, description)
             .title_actions(key_annotations(key, setting.provenance))
             .control(numeric_control(input, cx))
@@ -903,7 +908,7 @@ impl SettingsView {
             AppearancePageItem::WidgetCornerRadius => Self::numeric_setting(
                 ConfigKey::WidgetCornerRadius,
                 "Widget corner radius",
-                "Rounds every widget: buttons, inputs, tags, menus, dialogs.",
+                "Set corners from 0 to 24px. At 25, Full mode rounds buttons, fields, and rows into pills.",
                 resolved.widget_corner_radius,
                 &self.widget_corner_radius,
                 cx,
@@ -2281,7 +2286,12 @@ fn numeric_input_subscription(
             if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
                 settings.commit_numeric_input(key, input, true, window, cx);
             } else if (is_pane_setting(key)
-                || matches!(key, ConfigKey::ShadowStrength | ConfigKey::ChromeContrast))
+                || matches!(
+                    key,
+                    ConfigKey::ShadowStrength
+                        | ConfigKey::ChromeContrast
+                        | ConfigKey::WidgetCornerRadius
+                ))
                 && matches!(event, InputEvent::Change)
             {
                 settings.commit_numeric_input(key, input, false, window, cx);
@@ -2307,7 +2317,8 @@ fn refresh_settings_preview(key: ConfigKey, cx: &mut App) {
     if !is_pane_setting(key)
         && !matches!(
             key,
-            ConfigKey::StatusShowSession
+            ConfigKey::WidgetCornerRadius
+                | ConfigKey::StatusShowSession
                 | ConfigKey::StatusBadges
                 | ConfigKey::StatusAgents
                 | ConfigKey::StatusHost

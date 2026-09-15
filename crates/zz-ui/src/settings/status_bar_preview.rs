@@ -17,8 +17,7 @@ use crate::{
 };
 
 use super::{
-    SETTINGS_PAGE_PADDING, SettingsSection, settings_group_header, settings_page_content,
-    settings_page_description, settings_scroll_column,
+    SettingsSection, settings_group_header, settings_page_description, settings_scroll_column,
 };
 
 pub fn status_bar_page(
@@ -35,24 +34,21 @@ pub fn status_bar_page(
         .min_h_0()
         .overflow_hidden()
         .child(
-            div().flex_none().p(px(SETTINGS_PAGE_PADDING)).pb_0().child(
-                settings_page_content()
-                    .gap(px(12.0))
-                    .child(settings_page_description(SettingsSection::StatusBar, cx))
-                    .child(settings_group_header(
-                        "Preview".into(),
-                        Some("Sample windows, a remote host, and an available update.".into()),
-                        cx,
-                    ))
-                    .child(status_bar_preview(settings, gaps, cx)),
-            ),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_h_0()
-                .flex()
-                .child(settings_scroll_column("settings-status-bar").child(controls)),
+            settings_scroll_column("settings-status-bar")
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(12.0))
+                        .child(settings_page_description(SettingsSection::StatusBar, cx))
+                        .child(settings_group_header(
+                            "Preview".into(),
+                            Some("Sample windows, a remote host, and an available update.".into()),
+                            cx,
+                        ))
+                        .child(status_bar_preview(settings, gaps, cx)),
+                )
+                .child(controls),
         )
 }
 
@@ -166,7 +162,7 @@ fn status_bar_preview(settings: StatusBarSettings, gaps: bool, cx: &App) -> gpui
             workspace_status_item("settings-preview-update", None, "v0.9.0".into(), cx)
                 .flex_none()
                 .px(px(6.0))
-                .rounded(cx.theme().radius)
+                .rounded(cx.theme().control_radius())
                 .when(cx.theme().shadow, |item| {
                     item.border(px(0.5)).border_color(gpui::transparent_white())
                 })

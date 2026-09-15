@@ -74,7 +74,7 @@ impl RenderOnce for DiscreteSlider {
                         div()
                             .w_full()
                             .h(px(6.0))
-                            .rounded(cx.theme().radius)
+                            .rounded(cx.theme().control_radius())
                             .bg(if index <= selected { accent } else { track })
                             .when(focused && index == selected, |this| {
                                 this.border_1().border_color(foreground)

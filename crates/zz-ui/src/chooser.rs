@@ -3,8 +3,8 @@ use crate::{
     list::ListItem, tag::Tag,
 };
 use gpui::{
-    AnyElement, App, BoxShadow, CursorStyle, IntoElement, Keystroke, ParentElement as _,
-    RenderOnce, SharedString, Styled as _, div, point, prelude::*, px, relative,
+    AnyElement, App, CursorStyle, IntoElement, Keystroke, ParentElement as _, RenderOnce,
+    SharedString, Styled as _, div, prelude::*, px, relative,
 };
 
 pub const CHOOSER_ROW_HEIGHT: f32 = 40.0;
@@ -44,7 +44,7 @@ pub struct ChooserRowTheme {
 impl ChooserRowTheme {
     pub fn from_theme(cx: &App) -> Self {
         Self {
-            selection_background: crate::navigation::workspace_row_highlight(cx),
+            selection_background: cx.theme().selection_background(),
             primary: cx.theme().foreground,
             foreground: cx.theme().foreground,
             secondary_foreground: cx.theme().foreground,
@@ -135,7 +135,7 @@ impl RenderOnce for ChooserModal {
     fn render(self, window: &mut gpui::Window, cx: &mut App) -> impl IntoElement {
         let rows = f32::from(u8::try_from(self.dimensions.row_count.min(10)).unwrap_or(10));
         let notices = u8::from(self.help) + u8::from(self.prompt.is_some());
-        let height = 98.0 + rows * CHOOSER_ROW_HEIGHT + f32::from(notices) * 36.0;
+        let height = 106.0 + rows * CHOOSER_ROW_HEIGHT + f32::from(notices) * 36.0;
         let surface = div()
             .id(self.id)
             .relative()
@@ -146,11 +146,8 @@ impl RenderOnce for ChooserModal {
             .h(px(height))
             .max_h((window.viewport_size().height - px(44.0)).max(px(0.0)))
             .overflow_hidden()
-            .rounded(cx.theme().radius + px(4.0))
-            .control_surface(cx)
-            .bg(cx.theme().background.raised(1).opaque())
-            .text_color(cx.theme().foreground)
-            .shadow(chooser_shadow(cx))
+            .popover_style(cx)
+            .rounded(cx.theme().radius + px(8.0))
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
@@ -217,7 +214,7 @@ impl RenderOnce for ChooserModal {
                     .flex_1()
                     .overflow_hidden()
                     .min_h_0()
-                    .p(px(4.0))
+                    .p(px(8.0))
                     .child(self.rows),
             )
             .child(chooser_footer(
@@ -296,6 +293,7 @@ pub fn chooser_row(
         .h(px(CHOOSER_ROW_HEIGHT))
         .w_full()
         .cursor(CursorStyle::PointingHand)
+        .selected(selected)
         .when(selected, |row| row.bg(selection_background))
 }
 
@@ -330,8 +328,8 @@ pub fn chooser_subtitle(summary: impl Into<String>, filter_no_matches: bool) -> 
 
 fn chooser_key_cell(
     key: &SharedString,
-    theme: ChooserRowTheme,
     font_family: SharedString,
+    selected: bool,
 ) -> impl IntoElement {
     div()
         .w(px(30.0))
@@ -340,7 +338,7 @@ fn chooser_key_cell(
         .whitespace_nowrap()
         .font_family(font_family)
         .text_size(crate::rems_from_px(10.0))
-        .text_color(theme.muted_foreground)
+        .opacity(if selected { 1.0 } else { 0.8 })
         .child(chooser_key_label(key))
 }
 
@@ -383,14 +381,14 @@ pub fn tree_chooser_row(
                 .flex()
                 .items_center()
                 .when(show_key_gutter, |row| {
-                    row.child(chooser_key_cell(&key, theme, font_family.clone()))
+                    row.child(chooser_key_cell(&key, font_family.clone(), selected))
                 })
                 .child(div().w(px(f32::from(depth) * 16.0)).flex_none())
                 .child(
                     div()
                         .w(px(16.0))
                         .flex_none()
-                        .text_color(theme.muted_foreground)
+                        .opacity(if selected { 1.0 } else { 0.8 })
                         .when(!disclosure.is_empty(), |slot| {
                             slot.child(
                                 Icon::new(if disclosure == "▾" {
@@ -406,11 +404,7 @@ pub fn tree_chooser_row(
                     Icon::new(icon)
                         .size(px(14.0))
                         .flex_none()
-                        .text_color(if active {
-                            theme.foreground
-                        } else {
-                            theme.muted_foreground
-                        }),
+                        .opacity(if active || selected { 1.0 } else { 0.8 }),
                 )
                 .child(
                     div()
@@ -419,7 +413,6 @@ pub fn tree_chooser_row(
                         .ml(px(8.0))
                         .truncate()
                         .text_size(crate::rems_from_px(13.0))
-                        .text_color(theme.foreground)
                         .when(active, crate::StyledExt::font_medium)
                         .child(label.into()),
                 )
@@ -430,7 +423,7 @@ pub fn tree_chooser_row(
                         .ml(px(12.0))
                         .truncate()
                         .text_size(crate::rems_from_px(11.0))
-                        .text_color(theme.muted_foreground)
+                        .opacity(if selected { 1.0 } else { 0.8 })
                         .child(detail.into()),
                 )
                 .child(
@@ -439,7 +432,7 @@ pub fn tree_chooser_row(
                         .flex_none()
                         .font_family(font_family.clone())
                         .text_size(crate::rems_from_px(10.0))
-                        .text_color(theme.muted_foreground)
+                        .opacity(if selected { 1.0 } else { 0.8 })
                         .child(target),
                 )
                 .when(tagged, |row| {
@@ -458,11 +451,7 @@ pub fn tree_chooser_row(
                         .flex()
                         .justify_end()
                         .when(active, |slot| {
-                            slot.child(
-                                Icon::new(IconName::Check)
-                                    .size(px(12.0))
-                                    .text_color(theme.foreground),
-                            )
+                            slot.child(Icon::new(IconName::Check).size(px(12.0)))
                         }),
                 ),
         )
@@ -495,7 +484,7 @@ pub fn buffer_chooser_row(
                 .items_center()
                 .gap(px(12.0))
                 .when(show_key_gutter, |row| {
-                    row.child(chooser_key_cell(&key, theme, font_family.clone()))
+                    row.child(chooser_key_cell(&key, font_family.clone(), selected))
                 })
                 .child(
                     div()
@@ -506,7 +495,6 @@ pub fn buffer_chooser_row(
                         .text_ellipsis()
                         .font_family(font_family.clone())
                         .text_size(crate::rems_from_px(11.0))
-                        .text_color(theme.foreground)
                         .child(name.into()),
                 )
                 .child(
@@ -517,7 +505,6 @@ pub fn buffer_chooser_row(
                         .whitespace_nowrap()
                         .text_ellipsis()
                         .text_size(crate::rems_from_px(11.0))
-                        .text_color(theme.foreground)
                         .child(preview.into()),
                 )
                 .child(
@@ -527,7 +514,7 @@ pub fn buffer_chooser_row(
                         .text_right()
                         .font_family(font_family.clone())
                         .text_size(crate::rems_from_px(9.0))
-                        .text_color(theme.foreground.muted())
+                        .opacity(if selected { 1.0 } else { 0.8 })
                         .child(size.into()),
                 )
                 .child(
@@ -537,7 +524,7 @@ pub fn buffer_chooser_row(
                         .text_right()
                         .font_family(font_family.clone())
                         .text_size(crate::rems_from_px(9.0))
-                        .text_color(theme.foreground.muted())
+                        .opacity(if selected { 1.0 } else { 0.8 })
                         .child(age.into()),
                 )
                 .when(tagged, |row| {
@@ -564,25 +551,6 @@ fn chooser_hint(hint: ChooserHint) -> impl IntoElement {
                 .map(|key| Kbd::new(Keystroke::parse(key).expect("static chooser keystroke"))),
         )
         .child(hint.label)
-}
-
-fn chooser_shadow(cx: &App) -> Vec<BoxShadow> {
-    vec![
-        BoxShadow {
-            color: cx.theme().border().subtle(),
-            offset: point(px(0.0), px(0.0)),
-            blur_radius: px(0.0),
-            spread_radius: px(1.0),
-            inset: false,
-        },
-        BoxShadow {
-            color: cx.theme().scrim,
-            offset: point(px(0.0), px(14.0)),
-            blur_radius: px(36.0),
-            spread_radius: px(0.0),
-            inset: false,
-        },
-    ]
 }
 
 #[cfg(test)]

@@ -42,7 +42,7 @@ impl<D: SelectDelegate> Select<D> {
         self
     }
 
-    /// Cap on the dropdown's height, default 20rem. Rows scroll past it.
+    /// Cap on the dropdown's height; defaults to the popup menu height limit.
     #[must_use]
     pub fn menu_max_h(mut self, max_h: impl Into<Length>) -> Self {
         self.options.menu_max_h = Some(max_h.into());

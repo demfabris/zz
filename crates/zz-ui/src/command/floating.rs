@@ -25,6 +25,7 @@ pub fn menu_row(
         .items_center()
         .justify_between()
         .px(px(12.0))
+        .rounded(cx.theme().menu_radius())
         .font_family(font_family.into())
         .text_size(px(13.0))
         .line_height(px(16.0))
@@ -35,7 +36,7 @@ pub fn menu_row(
             row.text_color(cx.theme().foreground.muted())
         })
         .when(!selected && enabled, |row| {
-            row.hover(|row| row.bg(cx.theme().background.raised(1).opaque()))
+            row.hover(|row| row.bg(cx.theme().background.washed(2)))
         })
         .child(name.into())
         .when_some(annotation, |row, key| row.child(format!("({key})")))

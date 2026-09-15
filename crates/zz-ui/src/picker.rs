@@ -1,5 +1,6 @@
 use crate::{
-    ActiveTheme as _, CHROME_GAP, Colorize as _, Icon, IconName, Sizable as _, h_flex,
+    ActiveTheme as _, CHROME_GAP, Colorize as _, Icon, IconName, Sizable as _, StyledExt as _,
+    h_flex,
     input::{Input, InputState},
     tag::Tag,
     v_flex,
@@ -41,11 +42,7 @@ pub fn picker_modal_sized(
         .min_h(px(240.0))
         .max_h(px(720.0))
         .overflow_hidden()
-        .rounded(cx.theme().radius)
-        .border_1()
-        .border_color(cx.theme().border())
-        .bg(cx.theme().background.raised(1))
-        .shadow_lg()
+        .popover_style(cx)
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
     crate::widget::foundation::surface_enter(surface, (id, "picker-open"), px(0.0))
 }
@@ -54,35 +51,25 @@ pub fn picker_header(cx: &App) -> Div {
     v_flex()
         .flex_none()
         .gap(px(CHROME_GAP))
-        .border_b_1()
-        .border_color(cx.theme().border())
-        .p(px(CHROME_GAP))
+        .border_b(px(0.5))
+        .border_color(cx.theme().foreground.opacity(0.1))
+        .p(px(8.0))
 }
 
 pub fn picker_search(input: &Entity<InputState>, cx: &App) -> Div {
-    h_flex()
-        .w_full()
-        .h(px(32.0))
-        .rounded(cx.theme().radius)
-        .border_1()
-        .border_color(cx.theme().border())
-        .bg(cx.theme().background.raised(1))
-        .px_2p5()
-        .child(
-            Icon::new(IconName::Search)
-                .xsmall()
-                .text_color(cx.theme().foreground.muted()),
-        )
-        .child(
-            Input::new(input)
-                .small()
-                .flex_1()
-                .min_w_0()
-                .text_size(crate::rems_from_px(12.0))
-                .appearance(false)
-                .bordered(false)
-                .focus_bordered(false),
-        )
+    div().w_full().child(
+        Input::new(input)
+            .small()
+            .h(px(32.0))
+            .w_full()
+            .min_w_0()
+            .text_size(crate::rems_from_px(12.0))
+            .prefix(
+                Icon::new(IconName::Search)
+                    .xsmall()
+                    .text_color(cx.theme().foreground.muted()),
+            ),
+    )
 }
 
 pub fn picker_list() -> Div {
@@ -91,7 +78,7 @@ pub fn picker_list() -> Div {
         .flex_1()
         .min_h_0()
         .overflow_hidden()
-        .p(px(CHROME_GAP))
+        .p(px(8.0))
 }
 
 pub fn picker_empty(label: impl Into<SharedString>, cx: &App) -> Div {
@@ -112,8 +99,8 @@ pub fn picker_footer(cx: &App) -> Div {
         .min_h(px(40.0))
         .flex_none()
         .gap(px(CHROME_GAP))
-        .border_t_1()
-        .border_color(cx.theme().border())
+        .border_t(px(0.5))
+        .border_color(cx.theme().foreground.opacity(0.1))
         .py(px(CHROME_GAP))
         .pl_4()
         .pr(px(CHROME_GAP))
@@ -127,12 +114,14 @@ pub fn picker_row(id: impl Into<ElementId>, selected: bool, cx: &App) -> Statefu
         .w_full()
         .items_center()
         .gap_2()
-        .rounded(cx.theme().radius)
+        .rounded(cx.theme().menu_radius())
+        .border(px(0.5))
+        .border_color(gpui::transparent_white())
         .px_2p5()
         .cursor_pointer()
-        .when(selected, |row| row.bg(cx.theme().background.hover()))
+        .when(selected, |row| row.selection_highlight(cx))
         .when(!selected, |row| {
-            row.hover(|row| row.bg(cx.theme().background.hover()))
+            row.hover(|row| row.selection_highlight(cx))
         })
 }
 
@@ -154,13 +143,10 @@ pub fn path_row(
 ) -> Stateful<Div> {
     picker_row(id, selected, cx)
         .h(px(26.0))
-        .when(selected, |row| {
-            row.bg(cx.theme().background.raised(2).wash())
-        })
         .child(
             Icon::new(icon)
                 .xsmall()
-                .text_color(cx.theme().foreground.muted()),
+                .opacity(if selected { 1.0 } else { 0.8 }),
         )
         .child(
             div()
@@ -204,7 +190,7 @@ pub fn history_row(
                     .min_w_0()
                     .gap_1()
                     .text_size(crate::rems_from_px(9.0))
-                    .text_color(cx.theme().foreground.muted())
+                    .opacity(if selected { 1.0 } else { 0.8 })
                     .child(
                         Tag::secondary()
                             .xsmall()
@@ -221,10 +207,10 @@ pub fn history_row(
                             div()
                                 .flex_none()
                                 .rounded(px(999.0))
-                                .bg(cx.theme().success.fill())
+                                .bg(cx.theme().success.opaque())
                                 .px_1()
                                 .text_size(crate::rems_from_px(8.0))
-                                .text_color(cx.theme().success)
+                                .text_color(cx.theme().success.on())
                                 .child("CURRENT"),
                         )
                     })

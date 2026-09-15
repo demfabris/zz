@@ -108,7 +108,7 @@ The client-local schema includes these scalar settings and chrome colors.
 | `pane-margin` | `6` | `0..=32` | Inset around each pane, on every platform; applies only with `pane-gaps` |
 | `pane-corner-radius` | `13.5` | `0..=32` | All four corners of every pane, on every platform; applies only with `pane-gaps` |
 | `pane-border-width` | `0.5` | `0..=8` | Border width while pane gaps are enabled; `0` disables the border |
-| `widget-corner-radius` | `6` | `0..=24` | The corner every zz-ui widget turns . buttons, inputs, tags, menus, dialogs |
+| `widget-corner-radius` | `6` | `0..=25` | Widget corners in pixels through 24; values above 24 enable Full mode for buttons, fields, navigation chips, and picker rows |
 | `shadow-strength` | `1` | `0..=1` | Multiplier for shadows around controls and gapped panes; `0` turns them off |
 | `editor-font-size` | `13` | `8..=32` | Buffer text size in editor panes, in pixels |
 | `editor-line-numbers` | `true` | `true` or `false` | Whether editor panes draw the line-number rail |

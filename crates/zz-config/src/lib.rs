@@ -30,7 +30,7 @@ pub const MAX_CONFIG_BYTES: usize = 64 * 1024;
 pub const MAX_PANE_MARGIN: f32 = 32.0;
 pub const MAX_PANE_CORNER_RADIUS: f32 = 32.0;
 pub const MAX_PANE_BORDER_WIDTH: f32 = 8.0;
-pub const MAX_WIDGET_CORNER_RADIUS: f32 = 24.0;
+pub const MAX_WIDGET_CORNER_RADIUS: f32 = 25.0;
 pub const MAX_WINDOW_CORNER_RADIUS: f32 = 32.0;
 
 // Tangent-circle fit of the native macOS 27 window corner, measured off a screenshot.

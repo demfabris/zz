@@ -203,7 +203,7 @@ pub fn browser_address(
         .flex_1()
         .min_w_0()
         .items_center()
-        .rounded(cx.theme().radius)
+        .rounded(cx.theme().control_radius())
         .border(px(0.5))
         .border_color(cx.theme().foreground.opacity(0.0))
         .focus(|style| style.bg(focused_background).control_highlight(cx))
@@ -225,7 +225,11 @@ pub fn browser_address(
 pub fn browser_site_controls_button(cx: &App) -> Button {
     Button::compact_icon("browser-site-controls", IconName::SiteControls)
         .flat()
-        .rounded(px(12.0))
+        .rounded(if cx.theme().control_radius() == gpui::FULL_CORNER_RADIUS {
+            gpui::FULL_CORNER_RADIUS
+        } else {
+            px(12.0)
+        })
         .text_color(cx.theme().foreground.muted())
         .tooltip("Site controls")
         .debug_selector(|| "browser-site-controls".into())
@@ -469,7 +473,7 @@ fn browser_tab_shell(
         .gap(px(6.0))
         .pl(px(12.0))
         .min_w(px(BROWSER_TAB_MIN_WIDTH))
-        .rounded(cx.theme().radius)
+        .rounded(cx.theme().control_radius())
         .border(px(0.5))
         .border_color(foreground.opacity(0.0))
         .text_color(if active {
@@ -631,7 +635,7 @@ pub fn browser_recent_row(
         .items_center()
         .gap(px(8.0))
         .px(px(12.0))
-        .rounded(cx.theme().radius)
+        .rounded(cx.theme().menu_radius())
         .bg(rest)
         .cursor_pointer()
         .hover(move |style| style.bg(highlight))
@@ -687,7 +691,7 @@ pub fn browser_omnibox_row(
         .items_center()
         .gap(px(8.0))
         .px(px(8.0))
-        .rounded(cx.theme().radius)
+        .rounded(cx.theme().menu_radius())
         .overflow_hidden()
         .text_size(crate::rems_from_px(13.0))
         .line_height(px(16.0))
@@ -788,6 +792,7 @@ pub struct BrowserMenuActions {
     zoom_in: BrowserMenuAction,
     zoom_out: BrowserMenuAction,
     reset_zoom: BrowserMenuAction,
+    zoom_percent: Option<Rc<dyn Fn(&App) -> u16>>,
     import_chrome_data: BrowserProfileAction,
     import_cookies: BrowserMenuAction,
     clear_site_data: BrowserMenuAction,
@@ -807,6 +812,7 @@ impl Default for BrowserMenuActions {
             zoom_in: Rc::clone(&noop),
             zoom_out: Rc::clone(&noop),
             reset_zoom: Rc::clone(&noop),
+            zoom_percent: None,
             import_chrome_data: Rc::new(|_, _, _| {}),
             import_cookies: Rc::clone(&noop),
             clear_site_data: Rc::clone(&noop),
@@ -860,6 +866,11 @@ impl BrowserMenuActions {
         self
     }
 
+    pub fn zoom_percent(mut self, read: impl Fn(&App) -> u16 + 'static) -> Self {
+        self.zoom_percent = Some(Rc::new(read));
+        self
+    }
+
     pub fn import_chrome_data(
         mut self,
         action: impl Fn(SharedString, &mut Window, &mut App) + 'static,
@@ -907,7 +918,7 @@ pub fn browser_action_menu(
     let open_url = Rc::clone(&actions.open_url);
     let copy_url = Rc::clone(&actions.copy_url);
     let menu = menu
-        .min_w(px(250.0))
+        .min_w(px(310.0))
         .item(
             PopupMenuItem::new("Open in default browser")
                 .icon(IconName::ExternalLink)
@@ -918,12 +929,7 @@ pub fn browser_action_menu(
                 .icon(IconName::Copy)
                 .on_click(move |_, window, cx| copy_url(window, cx)),
         )
-        .separator()
-        .item(
-            PopupMenuItem::new(format!("Profile · {}", state.current_profile_label))
-                .icon(IconName::CircleUser)
-                .disabled(true),
-        );
+        .separator();
 
     let selected_profile = state.selected_profile.clone();
     let default_profile = state.default_profile.clone();
@@ -933,7 +939,7 @@ pub fn browser_action_menu(
     let refresh_profiles = Rc::clone(&actions.refresh_profiles);
     let menu = menu.submenu_with_icon(
         Some(Icon::new(IconName::User)),
-        "Switch profile",
+        format!("Profile · {}", state.current_profile_label),
         window,
         cx,
         move |profile_menu, _, _| {
@@ -997,24 +1003,22 @@ pub fn browser_action_menu(
     let reload = Rc::clone(&actions.reload);
     let toggle_picker = Rc::clone(&actions.toggle_picker);
     let dev_tools = Rc::clone(&actions.dev_tools);
-    let menu = menu
-        .separator()
-        .item(PopupMenuItem::new(format!("Page zoom · {}%", state.zoom_percent)).disabled(true))
-        .item(
-            PopupMenuItem::new("Zoom in")
-                .icon(IconName::Plus)
-                .on_click(move |_, window, cx| zoom_in(window, cx)),
-        )
-        .item(
-            PopupMenuItem::new("Zoom out")
-                .icon(IconName::Minus)
-                .on_click(move |_, window, cx| zoom_out(window, cx)),
-        )
-        .item(
-            PopupMenuItem::new("Reset zoom")
-                .disabled(state.zoom_percent == 100)
-                .on_click(move |_, window, cx| reset_zoom(window, cx)),
-        );
+    let zoom_percent = actions.zoom_percent.clone();
+    let menu = menu.item(PopupMenuItem::stepper(
+        "Page zoom",
+        move |cx| {
+            format!(
+                "{}%",
+                zoom_percent
+                    .as_ref()
+                    .map_or(state.zoom_percent, |read| read(cx))
+            )
+            .into()
+        },
+        move |window, cx| zoom_out(window, cx),
+        move |window, cx| reset_zoom(window, cx),
+        move |window, cx| zoom_in(window, cx),
+    ));
 
     let import_profiles = state.profiles.clone();
     let import_profile_discovery = state.profile_discovery;

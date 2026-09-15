@@ -74,7 +74,7 @@ pub trait StyledExt: Styled + Sized {
     /// A 1px border in the theme's ring color.
     #[inline]
     fn focused_border(self, cx: &App) -> Self {
-        self.border_1().border_color(cx.theme().foreground)
+        self.border_1().border_color(cx.theme().accent)
     }
 
     fn control_highlight(self, cx: &App) -> Self {
@@ -90,6 +90,19 @@ pub trait StyledExt: Styled + Sized {
         self.border(px(0.5)).control_highlight(cx)
     }
 
+    fn menu_item_corners(self, row_height: Pixels, cx: &App) -> Self {
+        self.rounded(cx.theme().menu_radius().min(row_height * 0.40))
+            .corner_radius_mode(gpui::CornerRadiusMode::Fixed)
+            .corner_smoothing(2.5)
+    }
+
+    fn selection_highlight(self, cx: &App) -> Self {
+        self.bg(cx.theme().selection_background())
+            .border_color(cx.theme().selection_background())
+            .text_color(cx.theme().foreground)
+            .shadow_none()
+    }
+
     font_weight!(font_thin, THIN);
     font_weight!(font_extralight, EXTRA_LIGHT);
     font_weight!(font_light, LIGHT);
@@ -103,10 +116,24 @@ pub trait StyledExt: Styled + Sized {
     /// The floating-panel look: popover background, border, shadow and radius.
     #[inline]
     fn popover_style(self, cx: &App) -> Self {
-        self.bg(cx.theme().background.raised(1).opaque())
+        let surface = self
+            .bg(cx.theme().background.raised(2).opaque())
             .text_color(cx.theme().foreground)
             .control_surface(cx)
-            .rounded(cx.theme().radius)
+            .rounded(cx.theme().radius);
+        if cx.theme().shadow && cx.theme().shadow_strength > 0.0 {
+            let mut shadows = control_shadow(cx);
+            shadows.push(BoxShadow {
+                color: cx.theme().scrim.opacity(cx.theme().shadow_strength),
+                offset: point(px(0.0), px(12.0)),
+                blur_radius: px(32.0),
+                spread_radius: px(-4.0),
+                inset: false,
+            });
+            surface.shadow(shadows)
+        } else {
+            surface
+        }
     }
 
     fn corner_radii(self, radius: Corners<Pixels>) -> Self {

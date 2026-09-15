@@ -41,13 +41,21 @@ The browser client in `clients/web` (`just web`) uses the shared GPUI components
    application chrome.
 4. Do not scatter branding or palette literals through views, fixtures that model application
    chrome, or component state branches.
-5. **Selection and list highlights derive from a palette root.** A highlighted menu, dropdown, or
-   chooser row is a flat `background.raised(2)` fill
-   (`crates/zz-ui/src/widget/select/state.rs::render_row`), so it follows the window's base plane.
-   `list::ListItem` is the deliberate exception: its highlight is a `foreground.wash()` fill under a
-   solid `foreground` outline (`crates/zz-ui/src/widget/list/mod.rs`). That outlined look belongs to
-   lists only: `select` builds its own rows rather than reusing `ListItem`, because reusing it is
-   what made dropdown rows read as outlined boxes.
+5. **Menu, picker, and list highlights use the same control treatment.** Rows use
+   `Theme::selection_background()` (opaque accent) with a matching edge, the same
+   `foreground` text and icons as unselected entries, and no shadow. `StyledExt::selection_highlight` applies the
+   solid treatment; secondary text inherits the row color. `ListItem`, popup
+   menu rows, select rows, and file/history picker rows use `Theme::menu_radius()`: the
+   container radius minus 4px, without a fixed cap or Full-mode radius sentinel.
+   Highlights use native row backgrounds and corner rounding. PopupMenu, model picker,
+   and directory/session picker rows use `StyledExt::menu_item_corners`: fixed radii with
+   smoothing 2.5, capped at 40% of their row height. Directory and session rows share
+   26px heights and 12px labels. Custom menu content receives the highlight state so
+   descriptions, counts, and timestamps brighten to the normal foreground.
+   Their requested radius reaches the renderer without adaptive compression; the cap keeps
+   them short of full pills. Menu containers keep the window's adaptive squircle shape. Open submenu parent rows use a dim neutral highlight; leaf selections keep the
+   accent. Selected shortcut labels and icons brighten to the full foreground. The command palette places 13px monospace names above 12px descriptions in 40px
+   rows. It omits the repeated COMMAND badge while retaining history, option, and value badges.
 6. Use one translucent signal instead of competing fills. Sidebar pointer hover, keyboard selection,
    mux focus, Settings navigation, and clickable native status windows use `workspace_row_highlight`, a
    `background.washed(2)` tint that preserves the desktop blur. Neutral buttons (Default, Secondary,
@@ -60,7 +68,11 @@ The browser client in `clients/web` (`just web`) uses the shared GPUI components
    `StyledExt::control_surface` applies it to inputs, number fields, select triggers, dropdown
    surfaces. Settings stacks draw it around the whole group, with flat
    separators between entries. Reserve border width before hover or focus; change only its color
-   between states. Use `Button::flat()` for actions embedded in another control, including tree-row
+   between states. Inputs and number fields reserve a 1px border, using the accent color when focused.
+   Settings value pickers use Button triggers and PopupMenu rows, including font, search engine,
+   and multiplexer options. The shared Select API keeps their values and confirmation events;
+   it has no separate trigger or row styling.
+   The thicker stroke avoids faint diagonal coverage in Full mode. Use `Button::flat()` for actions embedded in another control, including tree-row
    close buttons, browser tab close buttons, input clear buttons, number steppers, and settings
    reset buttons. These retain the keyboard focus indicator without another raised edge. Tree-row
    actions and browser tab close buttons also use `Button::text()` so hover only brightens their
@@ -82,7 +94,7 @@ The browser client in `clients/web` (`just web`) uses the shared GPUI components
    animations show the final strength immediately. The local Metal,
    WGPU, and DirectX renderers dither the fade to reduce banding. Pane content roots paint their own backgrounds using the configured pane opacity.
 
-Settings > Panes keeps a three-pane preview above its scrolling controls. The shared
+Settings > Panes scrolls its three-pane preview with the controls, like the Terminal preview. The shared
 `settings::panes_preview::PanesPreview` uses sample Terminal, Agent, and Browser content inside
 `pane_surface` and `pane_split_surface`, with full-size logical-pixel margins, corners, and borders.
 A neutral backdrop makes pane transparency visible. Clicking a sample changes only the preview
@@ -91,7 +103,7 @@ The Browser sample keeps its page opaque; its toolbar follows pane background op
 Agent sample keeps its composer opaque. Desktop pane edits and resets refresh the saved configuration
 immediately, including valid numeric input while typing; the file watcher still handles external edits.
 
-Settings > Status bar pins a live preview above its scrolling controls. The session switcher uses
+Settings > Status bar scrolls its live preview with the controls. The session switcher uses
 a Layers/name/chevron button. Session and agent buttons share the active window pill’s background,
 theme border, shadow, and 30px height, with widths sized to their contents. Window pills always align left, and the right edge shows an
 agent status dot and summary with a pane-selection menu. Time/date and alignment controls are absent. Window pills share the
@@ -122,6 +134,21 @@ hover and selection fills sit inside the dropdown's 4px padding. Tabs and histor
 stored page favicons, with a globe fallback.
 
 # Control density
+
+Menus, select dropdowns, command palettes, and file/history/tree pickers share
+`StyledExt::popover_style`: an opaque `background.raised(2)` surface, the shared half-pixel edge,
+and a soft outer shadow scaled by the shadow-strength setting. Menus use 4px gutters, 26px
+rows (20px for Small menus), 12px text, and half-pixel separators inset from the surface edge.
+Picker search fields use the shared Input surface. Command palettes use 4px gutters and a
+28px inset search field; row and container radii remain separate so Full mode rounds rows
+without turning the menu or its selections into capsules.
+
+The browser action menu puts the current profile and page zoom together. Its zoom stepper reads
+live page zoom from the browser view, stays open after each click, and preserves the existing
+zoom steps and limits. Its row stays at least 26px high to fit the embedded controls. With that row selected, Left/Right changes zoom and Enter resets it;
+Escape dismisses the menu. Other menu actions retain their existing dismissal behavior.
+`PopupMenuItem::stepper` owns those interactions so nested buttons cannot trigger a parent
+menu dismissal.
 
 Settings uses 13px primary row labels, so `Input::small()` renders its editable value at the same
 13px rather than GPUI's 14px `text_sm`; `NumberInput::small()` inherits that field treatment. The
@@ -235,12 +262,19 @@ within a fraction of a pixel of the request where radii are actually set, bendin
 stopping beyond it, so no component ever changes category *or* stops responding while its neighbours
 keep moving.
 
-Pill is therefore a category a widget declares, never somewhere a number arrives. A switch track and
-thumb, a status dot, an avatar, a scrollbar thumb call `rounded_full()`, which is exempt from the
-curve and resolves to exactly half at every setting including zero. This is the separation Radix
-Themes draws between its radius scale and `--radius-full`, and that SwiftUI spells `.fixed(.infinity)`
-. "as round as it could be". Widgets otherwise just call `.rounded(cx.theme().radius)`; a per-widget
-cap or threshold is the wrong tool and was twice removed from this codebase.
+Settings accepts widget radii from 0 through 25. Values through 24 keep the adaptive
+corners described above. Moving past 24 enables **Full** mode: buttons, single-line fields,
+select triggers, session tree highlights, titlebar chips, pane cards, and browser tabs use
+`Theme::control_radius()` instead of `Theme::radius`. Menu and picker selections use their
+separate inset corner rule.
+The helper returns GPUI's `FULL_CORNER_RADIUS`, the same value as `rounded_full()`, so these
+controls become pills or circles even with adaptive rounding enabled. Desktop settings apply
+changes immediately; desktop and browser settings show “Full” beside the radius label.
+
+Containers, dialogs, menu surfaces, multiline inputs, and pane surfaces retain their existing radius
+rules. Switch tracks, status dots, avatars, and scrollbar thumbs still use `rounded_full()`
+at any widget radius. Explicit button radius overrides remain in effect; the browser site
+controls button opts into Full mode while keeping its existing 12px corner below that threshold.
 
 `MuxClient` refreshes those globals from the initial `ServerHello` and every `AppearanceChanged`
 event. `refresh_current_theme` restores the correct zz-ui base before reapplying the preset and

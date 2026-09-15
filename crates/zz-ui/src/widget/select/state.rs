@@ -1,19 +1,18 @@
 //! The select's entity: what is picked, and whether the menu is open.
 
-use std::ops::Range;
-
-use crate::StyleSized as _;
 use gpui::{
-    AnyElement, App, Bounds, ClickEvent, Context, Div, EventEmitter, FocusHandle, Focusable, Hsla,
-    InteractiveElement as _, IntoElement, Length, ListSizingBehavior, ParentElement as _, Pixels,
-    Render, ScrollStrategy, SharedString, StatefulInteractiveElement as _, StyleRefinement,
-    Styled as _, Subscription, UniformListScrollHandle, Window, anchored, canvas, deferred, div,
-    prelude::FluentBuilder as _, px, rems, uniform_list,
+    Anchor, AnyElement, App, Bounds, Context, DismissEvent, Entity, EventEmitter, FocusHandle,
+    Focusable, InteractiveElement as _, IntoElement, Length, MouseButton, ParentElement as _,
+    Pixels, Render, SharedString, StyleRefinement, Styled as _, Subscription, Window, anchored,
+    canvas, deferred, div, px,
 };
 
 use crate::{
-    ActiveTheme as _, Colorize as _, Icon, IconName, IndexPath, Sizable as _, Size, StyledExt as _,
-    h_flex, scroll::ScrollableElement as _, v_flex,
+    ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, IndexPath, Selectable as _,
+    Sizable as _, Size, StyledExt as _,
+    button::Button,
+    h_flex,
+    menu::{PopupMenu, PopupMenuItem},
 };
 
 use super::{
@@ -22,8 +21,6 @@ use super::{
 };
 
 const WINDOW_MARGIN: Pixels = px(8.);
-
-const CARET_SIZE: Pixels = px(12.);
 
 pub(super) type EmptyBuilder = Box<dyn Fn(&mut Window, &App) -> AnyElement + 'static>;
 
@@ -48,10 +45,8 @@ pub struct SelectState<D: SelectDelegate> {
     focus_handle: FocusHandle,
     delegate: D,
     selected: Option<D::Item>,
-    cursor: Option<usize>,
-    open: bool,
+    menu: Option<Entity<PopupMenu>>,
     trigger_bounds: Bounds<Pixels>,
-    scroll: UniformListScrollHandle,
     options: SelectOptions,
     empty: Option<EmptyBuilder>,
     _subscriptions: Vec<Subscription>,
@@ -64,25 +59,21 @@ impl<D: SelectDelegate> SelectState<D> {
     pub fn new(
         delegate: D,
         selected_index: Option<IndexPath>,
-        window: &mut Window,
+        _: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let focus_handle = cx.focus_handle();
         let selected = selected_index.and_then(|ix| delegate.item(ix.row).cloned());
 
-        let subscriptions = vec![cx.on_blur(&focus_handle, window, Self::on_blur)];
-
         Self {
             focus_handle,
             delegate,
             selected,
-            cursor: None,
-            open: false,
+            menu: None,
             trigger_bounds: Bounds::default(),
-            scroll: UniformListScrollHandle::new(),
             options: SelectOptions::default(),
             empty: None,
-            _subscriptions: subscriptions,
+            _subscriptions: Vec::new(),
         }
     }
 
@@ -106,6 +97,7 @@ impl<D: SelectDelegate> SelectState<D> {
         self.selected = next;
 
         if changed {
+            self.close_menu(cx);
             cx.notify();
         }
     }
@@ -127,8 +119,11 @@ impl<D: SelectDelegate> SelectState<D> {
         options: SelectOptions,
         empty: Option<EmptyBuilder>,
         _: &mut Window,
-        _: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
+        if options.disabled {
+            self.close_menu(cx);
+        }
         self.options = options;
 
         if empty.is_some() {
@@ -137,99 +132,84 @@ impl<D: SelectDelegate> SelectState<D> {
     }
 
     fn open_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.open || self.options.disabled {
+        if self.menu.is_some() || self.options.disabled {
             return;
         }
 
-        self.open = true;
-        self.cursor = self
+        let selected_index = self
             .selected
             .as_ref()
             .and_then(|item| self.delegate.position(item.value()));
-
-        if let Some(ix) = self.cursor {
-            self.scroll.scroll_to_item(ix, ScrollStrategy::Center);
-        }
-
-        self.focus_handle.focus(window, cx);
-
+        let state = cx.entity().downgrade();
+        let menu = PopupMenu::build(window, cx, |menu, window, cx| {
+            let mut menu = menu.scrollable(true).min_w(self.trigger_bounds.size.width);
+            if let Some(Length::Definite(height)) = self.options.menu_max_h {
+                menu = menu.max_h(
+                    height.to_pixels(window.viewport_size().height.into(), window.rem_size()),
+                );
+            }
+            for ix in 0..self.delegate.items_count() {
+                let Some(item) = self.delegate.item(ix) else {
+                    continue;
+                };
+                let state = state.clone();
+                menu = menu.item(
+                    PopupMenuItem::new(item.title())
+                        .checked(selected_index == Some(ix))
+                        .on_click(move |_, window, cx| {
+                            _ = state.update(cx, |state, cx| state.commit(ix, window, cx));
+                        }),
+                );
+            }
+            if self.delegate.items_count() == 0 {
+                menu = menu.item(
+                    PopupMenuItem::element(move |_, window, cx| {
+                        state.upgrade().map_or_else(
+                            || div().into_any_element(),
+                            |state| state.read(cx).render_empty(window, cx),
+                        )
+                    })
+                    .disabled(true),
+                );
+            }
+            menu.set_previous_focus(window.focused(cx), cx);
+            if let Some(ix) = selected_index {
+                menu.set_selected_index(ix, cx);
+            }
+            menu
+        });
+        let focus = menu.focus_handle(cx);
+        self._subscriptions = vec![
+            cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, _, cx| {
+                this.close_menu(cx);
+            }),
+            cx.on_blur(&focus, window, |this, _, cx| this.close_menu(cx)),
+        ];
+        self.menu = Some(menu);
+        focus.focus(window, cx);
         cx.notify();
     }
 
-    fn close_menu(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.open {
-            return;
+    fn close_menu(&mut self, cx: &mut Context<Self>) {
+        if self.menu.take().is_some() {
+            self._subscriptions.clear();
+            cx.notify();
         }
-
-        self.open = false;
-        self.cursor = None;
-
-        cx.notify();
     }
 
-    fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.close_menu(window, cx);
-        self.focus_handle.focus(window, cx);
-    }
-
-    fn move_cursor(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+    fn commit(&mut self, ix: usize, _: &mut Window, cx: &mut Context<Self>) {
         if self.options.disabled {
             return;
         }
-
-        if !self.open {
-            self.open_menu(window, cx);
-            return;
-        }
-
-        let count = self.delegate.items_count();
-        let Some(last) = count.checked_sub(1) else {
-            self.cursor = None;
-            return;
-        };
-
-        let next = match self.cursor {
-            None if forward => 0,
-            Some(ix) if forward => {
-                if ix >= last {
-                    0
-                } else {
-                    ix + 1
-                }
-            }
-            None | Some(0) => last,
-            Some(ix) => ix - 1,
-        };
-
-        self.cursor = Some(next);
-        self.scroll.scroll_to_item(next, ScrollStrategy::Nearest);
-        cx.notify();
-    }
-
-    fn commit(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(item) = self.delegate.item(ix).cloned() else {
             return;
         };
 
         let value = item.value().clone();
         self.selected = Some(item);
-        self.dismiss(window, cx);
+        self.close_menu(cx);
         cx.emit(SelectEvent::Confirm(Some(value)));
         cx.notify();
-    }
-
-    fn on_blur(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.close_menu(window, cx);
-    }
-
-    fn on_trigger_click(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
-        cx.stop_propagation();
-
-        if self.open {
-            self.dismiss(window, cx);
-        } else {
-            self.open_menu(window, cx);
-        }
     }
 
     pub(super) fn on_select_prev(
@@ -238,7 +218,7 @@ impl<D: SelectDelegate> SelectState<D> {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.move_cursor(false, window, cx);
+        self.open_menu(window, cx);
     }
 
     pub(super) fn on_select_next(
@@ -247,7 +227,7 @@ impl<D: SelectDelegate> SelectState<D> {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.move_cursor(true, window, cx);
+        self.open_menu(window, cx);
     }
 
     pub(super) fn on_confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
@@ -256,89 +236,54 @@ impl<D: SelectDelegate> SelectState<D> {
             return;
         }
 
-        if !self.open {
-            self.open_menu(window, cx);
-            return;
-        }
-
-        if let Some(ix) = self.cursor {
-            self.commit(ix, window, cx);
-        }
+        self.open_menu(window, cx);
     }
 
     pub(super) fn on_cancel(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.open {
+        if self.menu.is_none() {
             cx.propagate();
             return;
         }
 
         cx.stop_propagation();
-        self.dismiss(window, cx);
-    }
-}
-
-fn trigger_colors(disabled: bool, cx: &App) -> (Hsla, Hsla) {
-    if disabled {
-        (
-            cx.theme().border().mix_oklab(cx.theme().transparent, 0.8),
-            cx.theme().foreground.muted(),
-        )
-    } else {
-        (
-            cx.theme().background.raised(1).opaque(),
-            cx.theme().foreground,
-        )
+        self.close_menu(cx);
+        self.focus_handle.focus(window, cx);
     }
 }
 
 impl<D: SelectDelegate> SelectState<D> {
-    fn render_trigger(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let disabled = self.options.disabled;
-        let outlined = self.open || (!disabled && self.focus_handle.is_focused(window));
-        let (background, foreground) = trigger_colors(disabled, cx);
+    fn render_trigger(&self, cx: &mut Context<Self>) -> AnyElement {
         let entity = cx.entity();
-
-        div()
-            .id("select-trigger")
-            .relative()
-            .flex()
-            .items_center()
-            .justify_between()
-            .overflow_hidden()
-            .bg(background)
-            .text_color(foreground)
-            .control_surface(cx)
-            .rounded(cx.theme().radius)
-            .when(disabled, |this| this.opacity(0.5).shadow_none())
-            .input_size(self.options.size)
-            .input_text_size(self.options.size)
+        let title = self
+            .selected
+            .as_ref()
+            .map(SelectItem::title)
+            .or_else(|| self.options.placeholder.clone())
+            .unwrap_or_else(|| SharedString::new_static("Select"));
+        let open = self.menu.is_some();
+        let button = Button::new("select-trigger")
+            .tab_stop(false)
+            .w_full()
+            .with_size(self.options.size)
+            .label(title)
+            .dropdown_caret(true)
+            .disabled(self.options.disabled)
+            .selected(self.menu.is_some())
             .refine_style(&self.options.style)
-            .when(outlined, |this| this.border_color(cx.theme().foreground))
-            .when(!self.open && !disabled, |this| {
-                this.on_click(cx.listener(Self::on_trigger_click))
-            })
-            .child(
-                h_flex()
-                    .w_full()
-                    .items_center()
-                    .justify_between()
-                    .gap_1()
-                    .child(div().flex_none().size(CARET_SIZE))
-                    .child(
-                        div()
-                            .w_full()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .truncate()
-                            .text_center()
-                            .child(self.render_title(cx)),
-                    )
-                    .child(
-                        Icon::new(IconName::ChevronDown)
-                            .size(CARET_SIZE)
-                            .text_color(cx.theme().foreground.muted()),
-                    ),
-            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, window, cx| {
+                    cx.stop_propagation();
+                    if open {
+                        this.close_menu(cx);
+                    } else {
+                        this.open_menu(window, cx);
+                    }
+                }),
+            );
+        div()
+            .relative()
+            .child(button)
             .child(
                 canvas(
                     move |bounds, _, cx| {
@@ -347,121 +292,29 @@ impl<D: SelectDelegate> SelectState<D> {
                     |_, (), _, _| {},
                 )
                 .absolute()
+                .top_0()
+                .left_0()
                 .size_full(),
             )
             .into_any_element()
     }
 
-    fn render_title(&self, cx: &App) -> Div {
-        let muted = div().text_color(cx.theme().foreground.muted());
-
-        let Some(item) = self.selected.as_ref() else {
-            return muted.child(
-                self.options
-                    .placeholder
-                    .clone()
-                    .unwrap_or_else(|| SharedString::new_static("Select")),
-            );
-        };
-
-        if self.options.disabled {
-            muted.child(item.title())
-        } else {
-            div().child(item.title())
-        }
-    }
-
-    fn render_menu(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let body = self.render_body(window, cx);
-
-        deferred(
-            anchored().snap_to_window_with_margin(WINDOW_MARGIN).child(
-                div()
-                    .id("select-menu")
-                    .occlude()
-                    .w(self.trigger_bounds.size.width + px(2.))
-                    .child(
-                        v_flex()
-                            .occlude()
-                            .mt_1p5()
-                            .overflow_hidden()
-                            .popover_style(cx)
-                            .rounded(cx.theme().radius)
-                            .child(body),
-                    )
-                    .on_mouse_down_out(cx.listener(|this, _, window, cx| {
-                        this.dismiss(window, cx);
-                    })),
-            ),
-        )
-        .with_priority(1)
-        .into_any_element()
-    }
-
-    fn render_body(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let count = self.delegate.items_count();
-        if count == 0 {
-            return self.render_empty(window, cx);
-        }
-
-        let max_h = self.options.menu_max_h.unwrap_or_else(|| rems(20.).into());
-        let rows = uniform_list(
-            "select-rows",
-            count,
-            cx.processor(|this, range: Range<usize>, _, cx| {
-                range
-                    .filter_map(|ix| this.render_row(ix, cx))
-                    .collect::<Vec<_>>()
-            }),
-        )
-        .w_full()
-        .with_sizing_behavior(ListSizingBehavior::Infer)
-        .track_scroll(&self.scroll);
-
-        v_flex()
-            .relative()
-            .p_1()
-            .max_h(max_h)
-            .child(rows)
-            .vertical_scrollbar(&self.scroll)
-            .into_any_element()
-    }
-
-    fn render_row(&self, ix: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let item = self.delegate.item(ix)?;
-        let title = item.title();
-        let checked = self
-            .selected
-            .as_ref()
-            .is_some_and(|selected| selected.value() == item.value());
-        let highlighted = self.cursor == Some(ix);
-
+    fn render_menu(&self) -> Option<AnyElement> {
+        let menu = self.menu.clone()?;
         Some(
-            h_flex()
-                .id(("select-row", ix))
-                .w_full()
-                .items_center()
-                .justify_between()
-                .gap_x_1()
-                .rounded(cx.theme().radius)
-                .list_size(self.options.size)
-                .text_color(cx.theme().foreground)
-                .when(!highlighted, |this| {
-                    this.hover(|this| this.bg(cx.theme().background.raised(2).opacity(0.7)))
-                })
-                .when(highlighted, |this| this.bg(cx.theme().background.raised(2)))
-                .on_click(cx.listener(move |this, _, window, cx| this.commit(ix, window, cx)))
-                .child(div().truncate().child(title))
-                .child(
-                    Icon::new(IconName::Check)
-                        .xsmall()
-                        .when(!checked, gpui::Styled::invisible),
-                )
-                .into_any_element(),
+            deferred(
+                anchored()
+                    .anchor(Anchor::TopRight)
+                    .position(self.trigger_bounds.bottom_right())
+                    .snap_to_window_with_margin(WINDOW_MARGIN)
+                    .child(div().mt_1().child(menu)),
+            )
+            .with_priority(1)
+            .into_any_element(),
         )
     }
 
-    fn render_empty(&self, window: &mut Window, cx: &mut App) -> AnyElement {
+    fn render_empty(&self, window: &mut Window, cx: &App) -> AnyElement {
         if let Some(empty) = self.empty.as_ref() {
             return empty(window, cx);
         }
@@ -476,10 +329,9 @@ impl<D: SelectDelegate> SelectState<D> {
 }
 
 impl<D: SelectDelegate> Render for SelectState<D> {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let open = self.open;
-        let trigger = self.render_trigger(window, cx);
-        let menu = open.then(|| self.render_menu(window, cx));
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let trigger = self.render_trigger(cx);
+        let menu = self.render_menu();
 
         div().relative().child(trigger).children(menu)
     }
@@ -498,6 +350,164 @@ mod tests {
     use gpui::{AppContext as _, TestAppContext};
 
     use super::{IndexPath, SelectState};
+
+    struct Preview {
+        state: gpui::Entity<SelectState<Vec<String>>>,
+        disabled: bool,
+    }
+
+    impl gpui::Render for Preview {
+        fn render(
+            &mut self,
+            _: &mut gpui::Window,
+            _: &mut gpui::Context<Self>,
+        ) -> impl gpui::IntoElement {
+            use crate::Sizable as _;
+            use gpui::{ParentElement as _, Styled as _};
+            gpui::div().w(gpui::px(200.0)).child(
+                super::super::Select::new(&self.state)
+                    .small()
+                    .disabled(self.disabled),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn popup_picker_preserves_pointer_keyboard_and_disabled_behavior(cx: &mut TestAppContext) {
+        use gpui::Focusable as _;
+        use std::{cell::RefCell, rc::Rc};
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        let (preview, cx) = cx.add_window_view(|window, cx| Preview {
+            state: cx.new(|cx| {
+                SelectState::new(
+                    vec!["vi".into(), "emacs".into()],
+                    Some(IndexPath::new(1)),
+                    window,
+                    cx,
+                )
+            }),
+            disabled: false,
+        });
+        let state = preview.read_with(cx, |preview, _| preview.state.clone());
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let captured = events.clone();
+        let _subscription = cx.update(|window, cx| {
+            window.subscribe(
+                &state,
+                cx,
+                move |_, event: &super::SelectEvent<Vec<String>>, _, _| {
+                    let super::SelectEvent::Confirm(value) = event;
+                    captured.borrow_mut().push(value.clone());
+                },
+            )
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        let bounds = state.read_with(cx, |state, _| state.trigger_bounds);
+        cx.simulate_mouse_move(bounds.center(), None, gpui::Modifiers::default());
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        assert!(state.read_with(cx, |state, _| state.menu.is_some()));
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        assert!(state.read_with(cx, |state, _| state.menu.is_none()));
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.simulate_keystrokes("up enter");
+        assert_eq!(
+            state.read_with(cx, |state, _| state.selected_value().cloned()),
+            Some("vi".into())
+        );
+        assert_eq!(*events.borrow(), vec![Some("vi".into())]);
+        assert!(state.read_with(cx, |state, _| state.menu.is_none()));
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.simulate_keystrokes("down escape");
+        assert_eq!(events.borrow().len(), 1);
+        assert!(state.read_with(cx, |state, _| state.menu.is_none()));
+        cx.update(|window, cx| state.focus_handle(cx).focus(window, cx));
+        cx.simulate_keystrokes("down down enter");
+        assert_eq!(
+            state.read_with(cx, |state, _| state.selected_value().cloned()),
+            Some("emacs".into())
+        );
+        assert_eq!(events.borrow().len(), 2);
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| {
+                state.set_selected_index(Some(IndexPath::new(0)), window, cx);
+            });
+        });
+        assert!(state.read_with(cx, |state, _| state.menu.is_none()));
+        assert_eq!(events.borrow().len(), 2);
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        preview.update(cx, |preview, cx| {
+            preview.disabled = true;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        assert!(state.read_with(cx, |state, _| state.menu.is_none()));
+    }
+
+    #[gpui::test]
+    fn long_popup_picker_reopens_at_the_committed_value(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        let (preview, cx) = cx.add_window_view(|window, cx| Preview {
+            state: cx.new(|cx| {
+                SelectState::new(
+                    (0..1000).map(|ix| format!("Font {ix}")).collect(),
+                    Some(IndexPath::new(999)),
+                    window,
+                    cx,
+                )
+            }),
+            disabled: false,
+        });
+        let state = preview.read_with(cx, |preview, _| preview.state.clone());
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        let bounds = state.read_with(cx, |state, _| state.trigger_bounds);
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            use crate::ActiveTheme as _;
+            _ = window.draw(cx);
+            let quads = window.painted_quads();
+            let selected = quads
+                .iter()
+                .find(|quad| {
+                    quad.background == gpui::solid_background(cx.theme().selection_background())
+                })
+                .expect("selected font row");
+            assert!(
+                selected
+                    .content_mask
+                    .bounds
+                    .contains(&selected.bounds.center())
+            );
+        });
+        cx.simulate_keystrokes("enter");
+        assert_eq!(
+            state.read_with(cx, |state, _| state.selected_value().cloned()),
+            Some("Font 999".into())
+        );
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.simulate_keystrokes("down enter");
+        assert_eq!(
+            state.read_with(cx, |state, _| state.selected_value().cloned()),
+            Some("Font 0".into())
+        );
+    }
 
     #[gpui::test]
     fn initial_index_seeds_the_committed_value(cx: &mut TestAppContext) {

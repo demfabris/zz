@@ -233,7 +233,7 @@ fn pane_card(active: bool, hovered: bool, cx: &App) -> gpui::Div {
         .flex()
         .items_center()
         .justify_center()
-        .rounded(cx.theme().radius)
+        .rounded(cx.theme().control_radius())
         .border(px(0.5))
         .border_color(cx.theme().foreground.opacity(0.16))
         .bg(cx

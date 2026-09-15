@@ -3285,6 +3285,7 @@ impl Render for BrowserChromeView {
             let zoom_in_browser = menu_browser.clone();
             let zoom_out_browser = menu_browser.clone();
             let reset_zoom_browser = menu_browser.clone();
+            let zoom_percent_browser = menu_browser.clone();
             let chrome_import_browser = menu_browser.clone();
             let file_import_browser = menu_browser.clone();
             let clear_browser = menu_browser.clone();
@@ -3318,6 +3319,13 @@ impl Render for BrowserChromeView {
                             });
                         }
                     });
+                })
+                .zoom_percent(move |cx| {
+                    zoom_percent_browser
+                        .upgrade()
+                        .map_or(menu_zoom_percent, |browser| {
+                            browser.read(cx).page_zoom_percent
+                        })
                 })
                 .zoom_in(move |_, cx| {
                     if let Some(browser) = zoom_in_browser.upgrade() {

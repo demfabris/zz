@@ -173,7 +173,7 @@ impl RenderOnce for Switch {
         } else {
             cx.theme().background.raised(3).into()
         };
-        let base_thumb: Background = cx.theme().background.into();
+        let base_thumb: Background = cx.theme().foreground.into();
         let (track, thumb_fill) = if self.disabled {
             let track = if checked {
                 base_track.opacity(0.5)

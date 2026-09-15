@@ -62,17 +62,17 @@ treatment for drag, split, and close controls; the clickable Agent title follows
 | `separator`, `spinner` | trimmed | reduced to the variants the app uses |
 | `tag` | trimmed | Three variants: Primary, Secondary, and Success; theme-driven radius |
 | `kbd` | trimmed | one muted pill: upstream's `appearance(false)` plain-text mode and its outline/primary treatments are dropped, since every hint reads as a caption beside its label. Added `lowercase()` for hints that read as prose (`t`, `b`, `a`) rather than as a keycap legend. |
-| `switch` | trimmed | dropped inline label/`Side`/custom color; kept the animated thumb. The checked track is the `accent` root, the only chromatic fill a neutral control gets |
-| `menu` | close-to-source | item text `text_sm` → **`text_xs`** (the change that started the fork); owns its actions (`zz_menu`), key context (`ZzPopupMenu`) and `init()`; upstream's native `AppMenuBar` not carried over |
+| `switch` | trimmed | dropped inline label/`Side`/custom color; kept the animated thumb. The thumb uses `foreground` for visibility against the track. The checked track is the `accent` root, the only chromatic fill a neutral control gets |
+| `menu` | close-to-source | Owns its actions (`zz_menu`), key context (`ZzPopupMenu`) and `init()`; upstream's native `AppMenuBar` not carried over. Local rows use 12px text, 26px height (20px Small), 4px surface gutters, inset half-pixel separators, and the inset menu radius. Open submenu parents highlight in neutral gray; selected shortcut labels and icons brighten to full foreground. `PopupMenuItem::stepper` supports live values, pointer adjustments and Left/Right/Enter without dismissing; the browser menu uses it for page zoom. |
 | `icon` | trimmed | `IconName` is a **hand-written** enum instead of upstream's build-time proc-macro codegen; SVGs live in `assets/icons` and are embedded by our own `Assets`, replacing `gpui-component-assets`; `Globe` uses Tabler’s round `world` artwork. The dedicated `window-close` glyph extends the Tabler X to the same 18-unit span as maximize, keeping its 2-unit stroke and the general-purpose `xmark` unchanged |
 | `tooltip` | trimmed | hangs off gpui's `.tooltip()` rather than upstream's `Root`-owned overlay; dropped `ComponentTooltip` after nothing adopted it |
 | `popover` | trimmed | owns its `Cancel` action and `ZzPopover` context; `on_dismiss` runs once for every close path, including trigger toggles |
 | `slider` | **zz-original** | `DiscreteSlider` displays compact pills filled through the selected step, per-pill tooltips, a trailing selected value, keyboard navigation, and a slider accessibility value |
-| `list` | trimmed | `ListItem` only; upstream's virtualized delegate `List` is unused |
+| `list` | trimmed | `ListItem` only; upstream's virtualized delegate `List` is unused. Rows use the inset menu radius and solid accent highlight retaining the normal foreground text and icons instead of a foreground outline. |
 | `scroll` | close-to-source | custom-painted scrollbar kept faithful. zz fixes upstream's track-hover ordering bug: it compares the previous axis before storing the new one, so entering a hover-only track requests its repaint. |
-| `button` | close-to-source | reimplements upstream's `pub(crate)` `ButtonIcon` on our `Spinner`; `ButtonRounded` keeps only `Medium` (the theme radius) and `Size(px)`, since a button turns the same corner as everything else; `Button::compact_icon` fixes shared chrome controls at a 24px surface, Small 14px glyph, and 0.5px optical drop. Default, Secondary, and Ghost variants use `background.washed(2)` for hover, pressed, and selected fills, matching sidebar highlights and preserving background blur. Neutral controls use the shared half-pixel edge and soft shadow, with the edge transparent at rest for Ghost buttons. `Button::flat()` keeps nested actions free of extra borders and shadows while retaining their wash and keyboard focus indicator. Local `ButtonVariant::Accent` is Primary's solid shape on the `accent` root instead of `foreground`; upstream's `Info` variant has no counterpart. |
+| `button` | close-to-source | reimplements upstream's `pub(crate)` `ButtonIcon` on our `Spinner`; `ButtonRounded` keeps `Medium` (the theme control radius) and `Size(px)` for explicit overrides; `Button::compact_icon` fixes shared chrome controls at a 24px surface, Small 14px glyph, and 0.5px optical drop. Default, Secondary, and Ghost variants use `background.washed(2)` for hover, pressed, and selected fills, matching sidebar highlights and preserving background blur. Neutral controls use the shared half-pixel edge and soft shadow, with the edge transparent at rest for Ghost buttons. `Button::flat()` keeps nested actions free of extra borders and shadows while retaining their wash and keyboard focus indicator. Local `ButtonVariant::Accent` is Primary's solid shape on the `accent` root instead of `foreground`; upstream's `Info` variant has no counterpart. |
 | `title_bar` | mixed | every `cfg!(target_os)` branch carried verbatim (macOS traffic lights, Linux/Windows client-side controls, WASM). `WindowControls` is public, unlike upstream's: the main window has no bar . its sidebar strip owns the drag region so the panes reach the top edge . and mounts the cluster on its own through `shell::app_titlebar_strip`, the matching strip above the content column that only the platforms drawing their own buttons reserve. `TitleBar` itself is now the Settings window's |
-| `select` | trimmed | **one** entity instead of upstream's three; stores the picked *item*, not an index, so the selection survives filtering. Rows are built in `select` rather than reused from `list::ListItem`, so the highlight is a flat `background.raised(2)` fill like every other menu's, not `ListItem`'s outlined box |
+| `select` | trimmed | Retains value state and confirmation subscriptions, but renders the shared Button and PopupMenu used by pane-split settings. Uses left checkmarks with an 8px label gap, compact menu rows, bounded scrolling, and the same trigger treatment. Dropdown button labels use 13px text, one pixel larger than their menu entries. No separate Select row renderer. |
 | `overlay` | close-to-source | `Root` + dialog + notification + `WindowExt`; dropped the sheet layer, upstream's `FocusTrapManager` (Tab is trapped by walking the top dialog's own focus handle) and the macOS accessibility hit-test forwarder. Toasts default to the top center of the window, with a vertically centered close button in the content row. Dialog shadows use the `overlay` theme token rather than upstream's hardcoded `hsla` (see `clippy.toml`). zz's default dialog is deliberately compact: 400px wide, 12px gutters, 13px/12px title and body, and Small actions. `ROOT_KEY_CONTEXT` is public so the host app can bind root-rem UI scaling below pane-specific browser and terminal zoom. Local addition: `Notification::key` plus `Root::dismiss_notification`/`WindowExt::dismiss_notification`, so a toast raised for a daemon-timed status message can be retired by identity when the daemon clears it (upstream can only clear the whole stack). |
 | `input` | **written fresh** | not a port. Upstream's is ~12k lines because it doubles as a code editor (rope, LSP, tree-sitter, masking, OTP, in-input search); ours is a text field. Plain `String` storage, grapheme-safe indexing via `unicode-segmentation`, gpui's `EntityInputHandler` for IME. Owns `zz_input` actions and the `ZzInput` context. `text_align` is applied by the layout's index↔position math, not just at paint, so a centered field hit-tests correctly . upstream's does not. Small fields use an explicit 13px value size so compact form text matches Settings' primary row labels. |
 | `code_editor/{state,input,element,mode}` | trimmed | ported from upstream `input/` at the revision above as a sibling of zz's small text field. Local `CodeEditor::background_opacity` controls text and gutter base fills without fading text or changing embedded Settings editors. Renamed the public surface to `CodeEditorState`/`CodeEditor`; keeps a rope buffer, line numbers, soft wrap, IME, single-cursor editing and upstream's tab default. Removed the `Root` downcast and mapped all chrome to zz's semantic theme. zz adds a frame-to-frame `ShapedCache` (element.rs): upstream re-shaped the whole buffer every prepaint; zz re-shapes only when content, wrap width, typography, or theme change, keyed by a `layout_generation` counter every content mutation bumps. |
@@ -100,12 +100,34 @@ stopped following the terminal palette. The same coupling ran the other way thro
 focused text field. Both are why `input`, `text`, `overlay` and `foundation`
 landed in a single commit.
 
-The shared Interface settings page includes a font picker using the existing virtualized Select.
+The shared Interface settings page includes a font picker using the shared Button and scrollable PopupMenu.
 Native entrypoints register `AvailableFonts` with their platform text system so the list excludes
 GPUI's hardcoded fallback names. The browser client uses GPUI's font list. The picker includes
 System default and filters internal dot-prefixed font aliases.
 
 ## Conventions
+
+`Theme::control_radius()` returns the configured radius through 24px and GPUI's full-rounding
+value above 24px. Buttons, single-line inputs, number fields, select triggers, navigation
+chips and tree highlights, and browser controls use it so Full mode can produce
+pills and circles under adaptive rounding. Effort-slider pills follow the same rule. Popup menus,
+select and list rows, pane and file/history pickers, URL suggestions, and agent suggestions use `Theme::menu_radius()`: a
+highlight radius equal to the container radius minus 4px, without a fixed cap or Full-mode sentinel. Container surfaces and multiline inputs
+keep `radius`.
+
+`StyledExt::popover_style` shares an opaque raised surface, half-pixel edge, and scaled soft outer
+shadow across menus and picker containers. The shared command palette uses 40px rows with command
+names above descriptions, and keeps badges only for history, options, and values. Menu and picker
+rows use `selection_highlight`: an opaque accent fill and matching edge, the normal foreground
+text and icons, and no shadow. Inputs and number fields reserve a 1px border for clearer circular edges and use the accent when focused.
+Button keyboard focus rings also use the accent.
+
+PopupMenu, model picker, and directory/session picker rows use `StyledExt::menu_item_corners`
+with GPUI's per-element fixed radius mode and smoothing 2.5. Their radius is capped at 40%
+of the row height. Custom menu content receives the highlight state so descriptions brighten
+to the normal foreground. Directory and session rows share 26px heights and 12px labels.
+The menu surface retains the window's adaptive squircle rounding. Fill and border use native
+GPUI painting; no highlight painter or row masks are involved.
 
 Picker, chooser, command palette, popup menu, and dialog surfaces share a 160ms entrance:
 they fade in while settling upward by 6px, using GPUI's reduced-motion behavior.

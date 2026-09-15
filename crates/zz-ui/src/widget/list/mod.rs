@@ -4,7 +4,7 @@ use gpui::{
     AnyElement, App, ClickEvent, Div, ElementId, InteractiveElement as _, IntoElement, MouseButton,
     MouseDownEvent, MouseMoveEvent, ParentElement, RenderOnce, Stateful,
     StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
-    prelude::FluentBuilder as _,
+    prelude::FluentBuilder as _, px,
 };
 
 use crate::Colorize as _;
@@ -135,20 +135,6 @@ impl RenderOnce for ListItem {
 
         let foreground = cx.theme().foreground;
         let muted_foreground = cx.theme().foreground.muted();
-        let hover_bg = cx.theme().background.hover();
-        let active_bg = cx.theme().foreground.wash();
-        let active_border = cx.theme().foreground;
-
-        let mut corner_radii = style.corner_radii.clone();
-        let radius = cx.theme().radius.into();
-        corner_radii.top_left.get_or_insert(radius);
-        corner_radii.top_right.get_or_insert(radius);
-        corner_radii.bottom_left.get_or_insert(radius);
-        corner_radii.bottom_right.get_or_insert(radius);
-        let outline_style = StyleRefinement {
-            corner_radii,
-            ..StyleRefinement::default()
-        };
 
         base.relative()
             .justify_between()
@@ -157,7 +143,10 @@ impl RenderOnce for ListItem {
             .px_3()
             .text_base()
             .text_color(foreground)
-            .rounded(cx.theme().radius)
+            .rounded(cx.theme().menu_radius())
+            .border(px(0.5))
+            .border_color(gpui::transparent_white())
+            .when(highlighted, |this| this.selection_highlight(cx))
             .refine_style(&style)
             .when(interactive, |this| {
                 this.when_some(on_click, |this, on_click| this.on_click(on_click))
@@ -171,22 +160,11 @@ impl RenderOnce for ListItem {
                                 this.on_mouse_down(button, handler)
                             })
                     })
-                    .when(!selected, |this| this.hover(|this| this.bg(hover_bg)))
+                    .when(!selected, |this| {
+                        this.hover(|this| this.selection_highlight(cx))
+                    })
             })
             .when(!interactive, |this| this.text_color(muted_foreground))
             .child(div().w_full().children(children))
-            .when(highlighted, |this| {
-                this.bg(active_bg).child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .right_0()
-                        .bottom_0()
-                        .border_1()
-                        .border_color(active_border)
-                        .refine_style(&outline_style),
-                )
-            })
     }
 }

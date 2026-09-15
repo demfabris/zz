@@ -160,7 +160,7 @@ pub fn workspace_status_window(
         .items_center()
         .gap(px(5.0))
         .px(px(9.0))
-        .rounded(cx.theme().radius)
+        .rounded(cx.theme().control_radius())
         .overflow_hidden()
         .when(cx.theme().shadow, |item| {
             item.border(px(0.5)).border_color(gpui::transparent_white())
@@ -327,7 +327,7 @@ pub fn workspace_tree_row(
         .bottom(px(WORKSPACE_TREE_FILL_VERTICAL_INSET))
         .left(fill_inset)
         .right(fill_inset)
-        .rounded(radius)
+        .rounded(cx.theme().control_radius())
         .when(cx.theme().shadow, |this| {
             this.border(px(0.5)).border_color(gpui::transparent_white())
         })

@@ -1,16 +1,15 @@
 pub mod floating;
 
 use crate::{
-    ActiveTheme as _, CHROME_GAP, Colorize as _, Sizable as _,
+    ActiveTheme as _, CHROME_GAP, Colorize as _, Sizable as _, StyledExt as _,
     input::{Input, InputState},
     kbd::Kbd,
     list::ListItem,
     tag::Tag,
 };
 use gpui::{
-    AnyElement, App, BoxShadow, CursorStyle, ElementId, Entity, IntoElement, Keystroke,
-    ParentElement as _, Pixels, RenderOnce, SharedString, Styled as _, div, point, prelude::*, px,
-    relative,
+    AnyElement, App, CursorStyle, ElementId, Entity, IntoElement, Keystroke, ParentElement as _,
+    Pixels, RenderOnce, SharedString, Styled as _, div, prelude::*, px,
 };
 
 pub const COMMAND_PALETTE_MAX_WIDTH: f32 = 560.0;
@@ -38,7 +37,8 @@ pub fn command_palette_input(
     let font_family = font_family.into();
     Input::new(input)
         .w_full()
-        .appearance(false)
+        .small()
+        .h(px(28.0))
         .px(px(13.0))
         .font_family(font_family.clone())
         .text_size(crate::rems_from_px(12.0))
@@ -57,16 +57,18 @@ pub fn command_palette_row(
     id: impl Into<gpui::ElementId>,
     label: impl Into<SharedString>,
     detail: impl Into<SharedString>,
-    badge: impl IntoElement,
+    badge: Option<AnyElement>,
     selected: bool,
     selection_background: gpui::Hsla,
-    muted_foreground: gpui::Hsla,
     font_family: impl Into<SharedString>,
 ) -> ListItem {
+    let detail = detail.into();
     ListItem::new(id)
         .w_full()
         .h(px(COMMAND_PALETTE_ROW_HEIGHT))
+        .py(px(2.0))
         .cursor(CursorStyle::PointingHand)
+        .selected(selected)
         .when(selected, |row| row.bg(selection_background))
         .child(
             div()
@@ -79,32 +81,35 @@ pub fn command_palette_row(
                     div()
                         .flex_1()
                         .min_w_0()
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .font_family(font_family.into())
-                        .text_size(crate::rems_from_px(12.0))
-                        .child(label.into()),
-                )
-                .child(
-                    div()
-                        .max_w(relative(0.44))
-                        .min_w_0()
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .text_size(crate::rems_from_px(10.0))
-                        .text_color(muted_foreground)
-                        .child(detail.into()),
-                )
-                .child(
-                    div()
-                        .w(px(64.0))
-                        .flex_none()
                         .flex()
-                        .justify_end()
-                        .child(badge),
-                ),
+                        .flex_col()
+                        .gap(px(2.0))
+                        .child(
+                            div()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .font_family(font_family.into())
+                                .text_size(crate::rems_from_px(13.0))
+                                .line_height(px(16.0))
+                                .child(label.into()),
+                        )
+                        .when(!detail.is_empty(), |column| {
+                            column.child(
+                                div()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .text_size(crate::rems_from_px(12.0))
+                                    .line_height(px(16.0))
+                                    .opacity(if selected { 1.0 } else { 0.8 })
+                                    .child(detail),
+                            )
+                        }),
+                )
+                .when_some(badge, |row, badge| {
+                    row.child(div().flex_none().child(badge))
+                }),
         )
 }
 
@@ -161,18 +166,14 @@ impl RenderOnce for CommandPaletteSurface {
             .flex()
             .flex_col()
             .overflow_hidden()
+            .popover_style(cx)
             .rounded(command_palette_radius(cx))
-            .bg(cx.theme().background.raised(1).opaque())
-            .text_color(cx.theme().foreground)
-            .shadow(command_palette_shadow(cx))
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(div().p(px(COMMAND_PALETTE_INSET)).child(self.input))
             .children(self.rows.map(|rows| {
                 div()
-                    .border_t_1()
-                    .border_color(cx.theme().border())
-                    .px(px(5.0))
-                    .py(px(4.0))
+                    .px(px(COMMAND_PALETTE_INSET))
+                    .pb(px(COMMAND_PALETTE_INSET))
                     .child(rows)
             }))
             .child(
@@ -184,8 +185,8 @@ impl RenderOnce for CommandPaletteSurface {
                     .justify_end()
                     .gap(px(12.0))
                     .px(px(10.0))
-                    .border_t_1()
-                    .border_color(cx.theme().border())
+                    .border_t(px(0.5))
+                    .border_color(cx.theme().foreground.opacity(0.1))
                     .text_size(crate::rems_from_px(9.0))
                     .text_color(cx.theme().foreground.muted())
                     .children(self.hints.into_iter().map(palette_hint)),
@@ -220,23 +221,4 @@ pub fn palette_shortcut_hint(
                 .map(|key| Kbd::new(Keystroke::parse(key).expect("static palette keystroke"))),
         )
         .child(label.into())
-}
-
-fn command_palette_shadow(cx: &App) -> Vec<BoxShadow> {
-    vec![
-        BoxShadow {
-            color: cx.theme().border().subtle(),
-            offset: point(px(0.0), px(0.0)),
-            blur_radius: px(0.0),
-            spread_radius: px(1.0),
-            inset: false,
-        },
-        BoxShadow {
-            color: cx.theme().scrim,
-            offset: point(px(0.0), px(12.0)),
-            blur_radius: px(32.0),
-            spread_radius: px(-4.0),
-            inset: false,
-        },
-    ]
 }

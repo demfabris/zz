@@ -6,8 +6,8 @@ use gpui::{
 };
 
 use crate::{
-    ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, Selectable as _,
-    Sizable as _,
+    ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, Sizable as _,
+    StyledExt as _,
     button::{Button, ButtonVariants},
     h_flex,
     menu::{DropdownMenu as _, PopupMenuItem},
@@ -130,7 +130,7 @@ pub fn agent_config_picker(
                 let value = choice.value.clone();
                 let on_select = on_select.clone();
                 menu.item(
-                    PopupMenuItem::element(move |_, cx| {
+                    PopupMenuItem::element(move |highlighted, _, cx| {
                         v_flex()
                             .min_w_0()
                             .ml_1()
@@ -146,7 +146,11 @@ pub fn agent_config_picker(
                                     div()
                                         .max_w(px(300.0))
                                         .text_size(crate::rems_from_px(10.0))
-                                        .text_color(cx.theme().foreground.muted())
+                                        .text_color(if highlighted {
+                                            cx.theme().foreground
+                                        } else {
+                                            cx.theme().foreground.muted()
+                                        })
                                         .child(description),
                                 )
                             })
@@ -174,14 +178,57 @@ impl AgentControlSelection {
     }
 }
 
-fn agent_picker_row(id: impl Into<ElementId>, selected: bool, content: impl IntoElement) -> Button {
-    agent_chrome_button(id)
-        .flat()
-        .h_auto()
+fn agent_picker_row(
+    id: impl Into<ElementId>,
+    selected: bool,
+    parent: bool,
+    enabled: bool,
+    content: impl IntoElement,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui::Stateful<gpui::Div> {
+    let id = id.into();
+    let focus = window
+        .use_keyed_state(format!("{id}:focus"), cx, |_, cx| cx.focus_handle())
+        .read(cx)
+        .clone();
+    let highlight = if parent && selected {
+        gpui::StyleRefinement::default()
+            .bg(cx.theme().background.washed(2))
+            .text_color(cx.theme().foreground)
+    } else {
+        gpui::StyleRefinement::default().selection_highlight(cx)
+    };
+    h_flex()
+        .id(id)
+        .role(Role::Button)
+        .aria_selected(selected)
+        .flex_none()
         .min_h(px(32.0))
         .px_2()
         .py_1()
-        .selected(selected)
+        .border(px(0.5))
+        .border_color(gpui::transparent_white())
+        .menu_item_corners(px(32.0), cx)
+        .text_size(crate::rems_from_px(12.0))
+        .line_height(px(16.0))
+        .text_color(cx.theme().foreground)
+        .when(enabled, |this| {
+            this.track_focus(&focus.tab_stop(true))
+                .when(selected, |this| this.refine_style(&highlight))
+                .hover(move |this| this.refine_style(&highlight))
+        })
+        .when(!enabled, |this| {
+            this.text_color(cx.theme().foreground.muted())
+        })
+        .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
+            if !enabled {
+                cx.stop_propagation();
+                return;
+            }
+            window.prevent_default();
+            crate::text::suppress_text_selection(cx);
+        })
         .child(content)
 }
 
@@ -417,16 +464,22 @@ pub fn agent_model_picker(
                     agent_picker_row(
                         vendor.as_str(),
                         vendor == selected,
+                        true,
+                        enabled,
                         h_flex()
                             .w_full()
                             .min_w_0()
                             .gap_2()
                             .child(Icon::new(agent_provider_icon(vendor)).xsmall().flex_none())
                             .child(div().flex_1().min_w_0().child(vendor.label())),
+                        window,
+                        cx,
                     )
                     .debug_selector(move || vendor.as_str().into())
-                    .disabled(!enabled)
                     .on_click(move |_, window, cx| {
+                        if !enabled {
+                            return;
+                        }
                         let needs_catalog = state.update(cx, |state, _| {
                             if let Some(draft) = &mut state.draft {
                                 draft.provider = vendor;
@@ -461,6 +514,8 @@ pub fn agent_model_picker(
                         agent_picker_row(
                             value.clone(),
                             checked,
+                            false,
+                            enabled,
                             h_flex()
                                 .w_full()
                                 .min_w_0()
@@ -472,10 +527,14 @@ pub fn agent_model_picker(
                                         .flex_none()
                                         .when(!checked, gpui::Styled::invisible),
                                 ),
+                            window,
+                            cx,
                         )
                         .debug_selector(move || selector.clone())
-                        .disabled(!enabled)
                         .on_click(move |_, window, cx| {
+                            if !enabled {
+                                return;
+                            }
                             state.update(cx, |state, _| {
                                 if let Some(draft) = &mut state.draft
                                     && let Some(catalog) = draft
@@ -917,6 +976,54 @@ mod tests {
             .unwrap_or_else(|| panic!("missing {selector}"));
         cx.simulate_click(bounds.center(), Modifiers::default());
         draw(cx);
+    }
+
+    #[gpui::test]
+    fn model_highlights_share_menu_corners_and_keep_the_provider_neutral(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(true);
+            crate::Theme::global_mut(cx).radius = px(25.0);
+        });
+        let (_, cx) = cx.add_window_view(|window, _| {
+            window.set_adaptive_corner_fraction(Some(0.45));
+            window.set_default_corner_smoothing(4.0);
+            ModelPickerTest {
+                provider: AgentProvider::Codex,
+                applied: Vec::new(),
+                catalogs: Vec::new(),
+                loads: Vec::new(),
+                scope: "local:/project".into(),
+            }
+        });
+        click(cx, "agent-model-trigger");
+        let provider = cx.debug_bounds("codex").unwrap();
+        let model = cx.debug_bounds("model-a").unwrap();
+        let hovered = cx.debug_bounds("model-b").unwrap();
+        cx.simulate_mouse_move(hovered.center(), None, Modifiers::default());
+        draw(cx);
+        cx.update(|window, cx| {
+            let scale = window.scale_factor();
+            let quads = window.painted_quads();
+            for (bounds, color) in [
+                (provider, cx.theme().background.washed(2)),
+                (model, cx.theme().selection_background()),
+                (hovered, cx.theme().selection_background()),
+            ] {
+                let quad = quads
+                    .iter()
+                    .find(|quad| {
+                        quad.background == gpui::solid_background(color)
+                            && (quad.bounds.origin.x.0 / scale - f32::from(bounds.origin.x)).abs()
+                                < 1.0
+                            && (quad.bounds.origin.y.0 / scale - f32::from(bounds.origin.y)).abs()
+                                < 1.0
+                    })
+                    .expect("picker row highlight");
+                assert_eq!(quad.corner_smoothing, 2.5);
+                assert!((quad.corner_radii.top_left.0 / scale - 12.8).abs() < 0.001);
+            }
+        });
     }
 
     #[gpui::test]

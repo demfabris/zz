@@ -85,7 +85,6 @@ pub struct Theme {
     pub mono_font_family: SharedString,
     /// The monospace font size for the application, default is 13px.
     pub mono_font_size: Pixels,
-    /// Corner radius, for *every* element that has one.
     pub radius: Pixels,
     pub contrast: f32,
     pub shadow: bool,
@@ -121,6 +120,22 @@ impl DerefMut for Theme {
 impl Global for Theme {}
 
 impl Theme {
+    pub fn control_radius(&self) -> Pixels {
+        if self.radius > px(24.0) {
+            gpui::FULL_CORNER_RADIUS
+        } else {
+            self.radius
+        }
+    }
+
+    pub fn selection_background(&self) -> Hsla {
+        self.accent.opaque()
+    }
+
+    pub fn menu_radius(&self) -> Pixels {
+        (self.radius - px(4.0)).max(px(0.0))
+    }
+
     pub fn set_contrast(&mut self, value: f32) {
         color::set_contrast(value);
         self.contrast = color::contrast();
@@ -251,6 +266,35 @@ impl From<WindowAppearance> for ThemeMode {
         match appearance {
             WindowAppearance::Dark | WindowAppearance::VibrantDark => Self::Dark,
             WindowAppearance::Light | WindowAppearance::VibrantLight => Self::Light,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn full_radius_rounds_controls_after_24_without_changing_surfaces() {
+        for radius in [0.0, 6.0, 24.0, 24.5, 25.0] {
+            let theme = Theme {
+                radius: px(radius),
+                ..Theme::default()
+            };
+            for (width, height) in [(24.0, 24.0), (120.0, 30.0), (360.0, 40.0)] {
+                let size = gpui::size(px(width), px(height));
+                let control = gpui::Corners::all(theme.control_radius())
+                    .resolve_radii_for_quad_size(size, 0.45);
+                let surface =
+                    gpui::Corners::all(theme.radius).resolve_radii_for_quad_size(size, 0.45);
+                if radius > 24.0 {
+                    assert_eq!(control, gpui::Corners::all(px(height / 2.0)));
+                    assert!(surface.top_left < control.top_left);
+                } else {
+                    assert_eq!(control, surface);
+                }
+                assert_eq!(theme.radius, px(radius));
+            }
         }
     }
 }

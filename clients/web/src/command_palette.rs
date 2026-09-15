@@ -22,7 +22,6 @@ use zz_ui::{
 };
 
 use crate::connection::Connection;
-use zz_ui::Colorize as _;
 
 const MAX_VISIBLE_ROWS: usize = 8;
 
@@ -371,7 +370,6 @@ impl CommandPaletteView {
         suggestion: CompletionSuggestion,
         index: usize,
         selected: bool,
-        muted: gpui::Hsla,
         selection_background: gpui::Hsla,
         palette: Entity<Self>,
         font: gpui::SharedString,
@@ -383,10 +381,11 @@ impl CommandPaletteView {
             ("command-palette-suggestion", index),
             suggestion.label,
             suggestion.detail,
-            command_kind_badge(Self::kind_label(kind), font.clone()),
+            (kind != CompletionKind::Command).then(|| {
+                command_kind_badge(Self::kind_label(kind), font.clone()).into_any_element()
+            }),
             selected,
             selection_background,
-            muted,
             font,
         )
         .on_mouse_enter(move |_, _, cx| {
@@ -420,8 +419,7 @@ impl Render for CommandPaletteView {
         } else {
             "apply"
         };
-        let muted = cx.theme().foreground.muted();
-        let selection_background = cx.theme().background.hover();
+        let selection_background = cx.theme().selection_background();
         let suggestions: Arc<[CompletionSuggestion]> = self.suggestions.clone().into();
         let palette = cx.entity();
         let rows_palette = palette.clone();
@@ -437,7 +435,6 @@ impl Render for CommandPaletteView {
                                 suggestion,
                                 index,
                                 selection_visible && selected == Some(index),
-                                muted,
                                 selection_background,
                                 rows_palette.clone(),
                                 font.clone(),

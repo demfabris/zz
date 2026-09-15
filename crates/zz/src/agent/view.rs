@@ -41,7 +41,7 @@ use zz_ui::agent::{
 use zz_ui::command::palette_shortcut_hint;
 use zz_ui::{
     ActiveTheme as _, CHROME_GAP, Colorize as _, Disableable as _, ElementExt as _, IconName,
-    Sizable as _,
+    Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{IndentInline, InputEvent, InputState, MoveDown, MoveUp},
@@ -423,6 +423,7 @@ pub(crate) struct AgentView {
     history_open: bool,
     history_compact: bool,
     project_directory: Option<PathBuf>,
+    project_hovered: Option<PathBuf>,
     project_rows: Arc<[ProjectDirectory]>,
     project_focus: bool,
     project_scroll: UniformListScrollHandle,
@@ -542,6 +543,7 @@ impl AgentView {
             history_open: false,
             history_compact: true,
             project_directory: None,
+            project_hovered: None,
             project_rows: Arc::from([]),
             project_focus: false,
             project_scroll: UniformListScrollHandle::new(),
@@ -993,6 +995,7 @@ impl AgentView {
             return;
         }
         self.history_open = true;
+        self.project_hovered = None;
         self.project_directory = Some(self.pane_state.cwd.clone());
         self.project_focus = false;
         if self.mux.read(cx).attached_host() == HostId::LOCAL {
@@ -1031,6 +1034,7 @@ impl AgentView {
 
     fn close_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.history_open = false;
+        self.project_hovered = None;
         self.directory_catalog = None;
         self.directory_matches.clear();
         self.history_delete_confirmation = None;
@@ -1752,6 +1756,11 @@ impl AgentView {
                             let is_selected = selected == Some(result_index);
                             let is_current =
                                 current_session.as_deref() == Some(session.session_id.as_str());
+                            let detail_color = if is_selected {
+                                cx.theme().foreground
+                            } else {
+                                cx.theme().foreground.muted()
+                            };
                             let pointer_view = rows_view.clone();
                             let click_view = rows_view.clone();
                             let delete_view = rows_view.clone();
@@ -1762,10 +1771,12 @@ impl AgentView {
                                     is_selected,
                                     cx,
                                 )
-                                .h(px(40.0))
+                                .h(px(26.0))
+                                .menu_item_corners(px(26.0), cx)
+                                .px_2()
                                 .debug_selector(move || format!("agent-history-row-{result_index}"))
-                                .text_size(zz_ui::rems_from_px(13.0))
-                                .line_height(px(18.0))
+                                .text_size(zz_ui::rems_from_px(12.0))
+                                .line_height(px(16.0))
                                 .child(
                                     div()
                                         .flex_1()
@@ -1778,8 +1789,8 @@ impl AgentView {
                                 .when(is_current, |row| {
                                     row.child(
                                         zz_ui::Icon::new(IconName::Check)
-                                            .size(px(13.0))
-                                            .text_color(cx.theme().foreground.muted()),
+                                            .size(px(12.0))
+                                            .text_color(detail_color),
                                     )
                                 })
                                 .when(!(can_delete && !is_current && is_selected), |row| {
@@ -1788,7 +1799,7 @@ impl AgentView {
                                             div()
                                                 .flex_none()
                                                 .text_size(zz_ui::rems_from_px(11.0))
-                                                .text_color(cx.theme().foreground.muted())
+                                                .text_color(detail_color)
                                                 .child(timestamp),
                                         )
                                     })
@@ -1977,7 +1988,8 @@ impl AgentView {
                 })
                 .child(
                     agent_chrome_button(("agent-project-new", pane.0))
-                        .primary()
+                        .accent()
+                        .text_color(cx.theme().foreground)
                         .debug_selector(|| "agent-project-new".into())
                         .min_w_0()
                         .max_w_full()
@@ -1990,13 +2002,6 @@ impl AgentView {
                                 .whitespace_nowrap()
                                 .child(new_label),
                         )
-                        .child(div().text_size(zz_ui::rems_from_px(11.0)).child(
-                            if cfg!(target_os = "macos") {
-                                "⌘↵"
-                            } else {
-                                "Ctrl↵"
-                            },
-                        ))
                         .disabled(
                             directory.is_none()
                                 || !directory_picker_enabled(
@@ -2053,13 +2058,16 @@ impl AgentView {
                                     .flex_1()
                                     .min_w_0()
                                     .min_h_0()
+                                    .pt(px(CHROME_GAP))
                                     .child(
                                         h_flex()
-                                            .h(px(40.0))
+                                            .debug_selector(|| "agent-history-header".into())
+                                            .h(px(26.0))
                                             .flex_none()
                                             .gap_2()
                                             .px_3()
-                                            .text_size(zz_ui::rems_from_px(12.0))
+                                            .text_size(zz_ui::rems_from_px(11.0))
+                                            .line_height(px(16.0))
                                             .text_color(cx.theme().foreground.muted())
                                             .child(
                                                 div()
@@ -2095,12 +2103,17 @@ impl AgentView {
                                     )
                                     .child(
                                         zz_ui::picker::picker_list()
+                                            .p(px(CHROME_GAP))
+                                            .pt_0()
+                                            .pr_0()
                                             .child(
                                                 zz_ui::v_flex()
                                                     .relative()
                                                     .debug_selector(|| "agent-history-list".into())
                                                     .flex_1()
                                                     .min_h_0()
+                                                    .overflow_hidden()
+                                                    .pr(zz_ui::scroll::GUTTER_WIDTH)
                                                     .child(rows)
                                                     .vertical_scrollbar(&self.history_scroll),
                                             )
@@ -2128,6 +2141,7 @@ impl AgentView {
     fn render_project_directories(&self, view: &Entity<Self>, cx: &gpui::App) -> impl IntoElement {
         let directories = self.project_rows.clone();
         let selected = self.project_directory.clone();
+        let hovered = self.project_hovered.clone();
         let recent = directories.iter().take_while(|row| row.recent).count();
         let mut entries = Vec::new();
         for index in 0..directories.len() {
@@ -2145,11 +2159,13 @@ impl AgentView {
                     .map(|index| {
                         let Some(directory_index) = entries[index] else {
                             return div()
-                                .h(px(32.0))
+                                .debug_selector(move || format!("agent-project-header-{index}"))
+                                .h(px(26.0))
                                 .flex()
                                 .items_center()
                                 .px_2p5()
                                 .text_size(zz_ui::rems_from_px(11.0))
+                                .line_height(px(16.0))
                                 .text_color(cx.theme().foreground.muted())
                                 .child(if index == 0 && recent > 0 {
                                     "Recent"
@@ -2160,23 +2176,49 @@ impl AgentView {
                         };
                         let directory = &directories[directory_index];
                         let path = directory.path.clone();
+                        let highlighted =
+                            Some(&path) == selected.as_ref() || Some(&path) == hovered.as_ref();
+                        let pointer_path = path.clone();
+                        let pointer_view = view.clone();
                         let view = view.clone();
                         zz_ui::picker::directory_row(
                             ("agent-project-directory", directory_index),
                             directory.label.clone(),
-                            Some(&path) == selected.as_ref(),
+                            highlighted,
                             cx,
                         )
-                        .h(px(32.0))
+                        .h(px(26.0))
+                        .menu_item_corners(px(26.0), cx)
+                        .px_2()
+                        .line_height(px(16.0))
                         .debug_selector(move || format!("agent-project-row-{directory_index}"))
                         .when(directory.sessions > 0, |row| {
                             row.child(
                                 div()
                                     .flex_none()
                                     .text_size(zz_ui::rems_from_px(11.0))
-                                    .text_color(cx.theme().foreground.muted())
+                                    .text_color(if highlighted {
+                                        cx.theme().foreground
+                                    } else {
+                                        cx.theme().foreground.muted()
+                                    })
                                     .child(directory.sessions.to_string()),
                             )
+                        })
+                        .on_hover(move |hovered, _, cx| {
+                            pointer_view.update(cx, |view, cx| {
+                                let next = if *hovered {
+                                    Some(pointer_path.clone())
+                                } else if view.project_hovered.as_ref() == Some(&pointer_path) {
+                                    None
+                                } else {
+                                    return;
+                                };
+                                if view.project_hovered != next {
+                                    view.project_hovered = next;
+                                    cx.notify();
+                                }
+                            });
                         })
                         .on_click(move |_, _, cx| {
                             view.update(cx, |view, cx| view.select_project(path.clone(), cx));
@@ -2206,12 +2248,15 @@ impl AgentView {
             })
             .border_color(cx.theme().border())
             .p(px(CHROME_GAP))
+            .pr_0()
             .child(
                 zz_ui::v_flex()
                     .relative()
                     .debug_selector(|| "agent-project-list".into())
                     .flex_1()
                     .min_h_0()
+                    .overflow_hidden()
+                    .pr(zz_ui::scroll::GUTTER_WIDTH)
                     .child(rows)
                     .vertical_scrollbar(&self.project_scroll),
             )
@@ -3421,6 +3466,18 @@ mod completion_tests {
                 .debug_bounds("agent-project-list")
                 .expect("directory list");
             let sessions = cx.debug_bounds("agent-history-list").expect("session list");
+            let directory_header = cx.debug_bounds("agent-project-header-0").unwrap();
+            let session_header = cx.debug_bounds("agent-history-header").unwrap();
+            assert_eq!(directory_header.size.height, session_header.size.height);
+            for (list, row) in [
+                (directories, "agent-project-row-0"),
+                (sessions, "agent-history-row-0"),
+            ] {
+                assert!(
+                    cx.debug_bounds(row).unwrap().right()
+                        <= list.right() - zz_ui::scroll::GUTTER_WIDTH
+                );
+            }
             assert!(
                 directories.size.height >= px(64.0),
                 "directory height at {width}: {directories:?}"
@@ -3449,12 +3506,27 @@ mod completion_tests {
                 assert!(directories.bottom() <= sessions.origin.y);
             } else {
                 assert!(directories.right() <= sessions.origin.x);
+                assert_eq!(directory_header.origin.y, session_header.origin.y);
+                assert_eq!(
+                    cx.debug_bounds("agent-project-row-0").unwrap().origin.y,
+                    cx.debug_bounds("agent-history-row-0").unwrap().origin.y,
+                );
             }
         }
         let view = cx.update(|_, cx| fixture.read(cx).view.clone());
         let directory = cx
             .debug_bounds("agent-project-row-1")
             .expect("second directory");
+        cx.simulate_mouse_move(directory.center(), None, gpui::Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(
+            cx.update(|_, cx| view.read(cx).project_hovered.clone()),
+            Some("/work/web".into())
+        );
+        assert_eq!(
+            cx.update(|_, cx| view.read(cx).project_directory.clone()),
+            Some("/work/api".into())
+        );
         cx.simulate_click(directory.center(), gpui::Modifiers::default());
         assert_eq!(
             cx.update(|_, cx| view.read(cx).project_directory.clone()),
@@ -3631,6 +3703,7 @@ mod completion_tests {
                 history_open: false,
                 history_compact: true,
                 project_directory: None,
+                project_hovered: None,
                 project_rows: Arc::from([]),
                 project_focus: false,
                 project_scroll: UniformListScrollHandle::new(),
@@ -3733,6 +3806,7 @@ mod completion_tests {
                 history_open: false,
                 history_compact: true,
                 project_directory: None,
+                project_hovered: None,
                 project_rows: Arc::from([]),
                 project_focus: false,
                 project_scroll: UniformListScrollHandle::new(),

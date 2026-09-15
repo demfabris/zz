@@ -841,6 +841,63 @@ mod tests {
     }
 
     #[test]
+    fn full_widget_radius_persists_and_resets() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config");
+        let mut model = SettingsModel::new("System".to_owned(), Some(path.clone()), None);
+        for value in [24.0, 25.0] {
+            model
+                .action(
+                    SettingsAction::Set {
+                        key: "widget-corner-radius".to_owned(),
+                        value: json!(value),
+                    },
+                    &[],
+                )
+                .unwrap();
+            assert_eq!(
+                load_config(&path, "System")
+                    .unwrap()
+                    .config
+                    .widget_corner_radius
+                    .value,
+                value
+            );
+        }
+        assert!(
+            model
+                .action(
+                    SettingsAction::Set {
+                        key: "widget-corner-radius".to_owned(),
+                        value: json!(26),
+                    },
+                    &[]
+                )
+                .is_err()
+        );
+        assert_eq!(
+            load_config(&path, "System")
+                .unwrap()
+                .config
+                .widget_corner_radius
+                .value,
+            25.0
+        );
+        model
+            .action(
+                SettingsAction::Reset {
+                    key: "widget-corner-radius".to_owned(),
+                },
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            model.parsed.config.widget_corner_radius,
+            ConfigValue::from_default(DEFAULT_WIDGET_CORNER_RADIUS)
+        );
+    }
+
+    #[test]
     fn contrast_settings_persist_validate_and_reset_with_provenance() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config");

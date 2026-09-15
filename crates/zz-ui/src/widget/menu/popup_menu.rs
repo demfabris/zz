@@ -1,5 +1,6 @@
 use super::actions::{Cancel, Confirm, SelectDown, SelectLeft, SelectRight, SelectUp};
 use super::menu_item::MenuItemElement;
+use crate::button::{Button, ButtonVariants as _};
 use crate::scroll::ScrollableElement;
 use crate::{ActiveTheme, Icon, IconName, Sizable as _, Size, StyledExt, h_flex, kbd::Kbd, v_flex};
 use crate::{ElementExt, Side};
@@ -30,6 +31,13 @@ pub fn init(cx: &mut App) {
 pub enum PopupMenuItem {
     Separator,
     Label(SharedString),
+    Stepper {
+        label: SharedString,
+        value: Rc<dyn Fn(&App) -> SharedString>,
+        decrement: Rc<dyn Fn(&mut Window, &mut App)>,
+        reset: Rc<dyn Fn(&mut Window, &mut App)>,
+        increment: Rc<dyn Fn(&mut Window, &mut App)>,
+    },
     Item {
         icon: Option<Icon>,
         label: SharedString,
@@ -44,7 +52,7 @@ pub enum PopupMenuItem {
         disabled: bool,
         checked: bool,
         action: Option<Box<dyn Action>>,
-        render: Box<dyn Fn(&mut Window, &mut App) -> AnyElement + 'static>,
+        render: Box<dyn Fn(bool, &mut Window, &mut App) -> AnyElement + 'static>,
         handler: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
     },
     /// Only supported when the parent menu is not `scrollable`.
@@ -74,7 +82,7 @@ impl PopupMenuItem {
     #[inline]
     pub fn element<F, E>(builder: F) -> Self
     where
-        F: Fn(&mut Window, &mut App) -> E + 'static,
+        F: Fn(bool, &mut Window, &mut App) -> E + 'static,
         E: IntoElement,
     {
         PopupMenuItem::ElementItem {
@@ -82,8 +90,26 @@ impl PopupMenuItem {
             disabled: false,
             checked: false,
             action: None,
-            render: Box::new(move |window, cx| builder(window, cx).into_any_element()),
+            render: Box::new(move |highlighted, window, cx| {
+                builder(highlighted, window, cx).into_any_element()
+            }),
             handler: None,
+        }
+    }
+
+    pub fn stepper(
+        label: impl Into<SharedString>,
+        value: impl Fn(&App) -> SharedString + 'static,
+        decrement: impl Fn(&mut Window, &mut App) + 'static,
+        reset: impl Fn(&mut Window, &mut App) + 'static,
+        increment: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        Self::Stepper {
+            label: label.into(),
+            value: Rc::new(value),
+            decrement: Rc::new(decrement),
+            reset: Rc::new(reset),
+            increment: Rc::new(increment),
         }
     }
 
@@ -214,7 +240,7 @@ impl PopupMenuItem {
                 } | PopupMenuItem::Submenu {
                     disabled: false,
                     ..
-                }
+                } | PopupMenuItem::Stepper { .. }
             )
     }
 
@@ -245,10 +271,18 @@ impl PopupMenuItem {
         match self {
             PopupMenuItem::Item { label, .. }
             | PopupMenuItem::Label(label)
-            | PopupMenuItem::Submenu { label, .. } => Some(label.clone()),
+            | PopupMenuItem::Submenu { label, .. }
+            | PopupMenuItem::Stepper { label, .. } => Some(label.clone()),
             PopupMenuItem::Separator | PopupMenuItem::ElementItem { .. } => None,
         }
     }
+}
+
+#[derive(Clone, Copy)]
+enum StepperAction {
+    Decrement,
+    Reset,
+    Increment,
 }
 
 pub struct PopupMenu {
@@ -472,6 +506,9 @@ impl PopupMenu {
     }
 
     fn confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
+        if self.adjust_stepper(StepperAction::Reset, window, cx) {
+            return;
+        }
         match self.selected_index {
             Some(index) => {
                 let item = self.menu_items.get(index);
@@ -504,6 +541,33 @@ impl PopupMenu {
         }
     }
 
+    fn adjust_stepper(
+        &mut self,
+        action: StepperAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(PopupMenuItem::Stepper {
+            decrement,
+            reset,
+            increment,
+            ..
+        }) = self
+            .selected_index
+            .and_then(|index| self.menu_items.get(index))
+        else {
+            return false;
+        };
+        cx.stop_propagation();
+        match action {
+            StepperAction::Decrement => decrement(window, cx),
+            StepperAction::Reset => reset(window, cx),
+            StepperAction::Increment => increment(window, cx),
+        }
+        cx.notify();
+        true
+    }
+
     fn dispatch_confirm_action(
         &self,
         action: &Box<dyn Action>,
@@ -517,7 +581,7 @@ impl PopupMenu {
         window.dispatch_action(action.boxed_clone(), cx);
     }
 
-    fn set_selected_index(&mut self, ix: usize, cx: &mut Context<Self>) {
+    pub(crate) fn set_selected_index(&mut self, ix: usize, cx: &mut Context<Self>) {
         if self.selected_index != Some(ix) {
             self.selected_index = Some(ix);
             self.scroll_handle.scroll_to_item(ix);
@@ -565,6 +629,9 @@ impl PopupMenu {
     }
 
     fn select_left(&mut self, _: &SelectLeft, window: &mut Window, cx: &mut Context<Self>) {
+        if self.adjust_stepper(StepperAction::Decrement, window, cx) {
+            return;
+        }
         let handled = if matches!(self.submenu_anchor.0, Anchor::TopLeft | Anchor::BottomLeft) {
             self._unselect_submenu(window, cx)
         } else {
@@ -585,6 +652,9 @@ impl PopupMenu {
     }
 
     fn select_right(&mut self, _: &SelectRight, window: &mut Window, cx: &mut Context<Self>) {
+        if self.adjust_stepper(StepperAction::Increment, window, cx) {
+            return;
+        }
         let handled = if matches!(self.submenu_anchor.0, Anchor::TopLeft | Anchor::BottomLeft) {
             self._select_submenu(window, cx)
         } else {
@@ -718,8 +788,9 @@ impl PopupMenu {
     fn render_key_binding(
         &self,
         action: Option<Box<dyn Action>>,
+        opacity: f32,
         window: &mut Window,
-        _: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Option<Kbd> {
         let action = action?;
 
@@ -737,6 +808,8 @@ impl PopupMenu {
                 .flex_nowrap()
                 .border_0()
                 .bg(gpui::transparent_white())
+                .text_color(cx.theme().foreground)
+                .opacity(opacity)
         })
     }
 
@@ -744,8 +817,7 @@ impl PopupMenu {
         has_icon: bool,
         checked: bool,
         icon: Option<Icon>,
-        _: &mut Window,
-        _: &mut Context<Self>,
+        opacity: f32,
     ) -> Option<impl IntoElement> {
         if !has_icon {
             return None;
@@ -759,7 +831,13 @@ impl PopupMenu {
             Icon::empty()
         };
 
-        Some(icon.xsmall())
+        Some(
+            div()
+                .relative()
+                .top(px(0.5))
+                .flex_none()
+                .child(icon.size(px(14.0)).opacity(opacity)),
+        )
     }
 
     #[inline]
@@ -796,6 +874,11 @@ impl PopupMenu {
         let is_left_check = item.is_checked();
 
         let selected = self.selected_index == Some(ix);
+        let detail_opacity = if selected && item.is_clickable() {
+            1.0
+        } else {
+            0.8
+        };
         const EDGE_PADDING: Pixels = px(4.);
         const INNER_PADDING: Pixels = px(8.);
 
@@ -806,14 +889,14 @@ impl PopupMenu {
             Size::Small => px(20.),
             _ => px(26.),
         };
-        let radius = options.radius;
 
         let this = MenuItemElement::new(ix, &group_name)
             .relative()
-            .text_xs()
+            .text_size(crate::rems_from_px(12.0))
+            .line_height(px(16.0))
             .py_0()
             .px(INNER_PADDING)
-            .rounded(radius)
+            .menu_item_corners(item_height, cx)
             .items_center()
             .selected(selected)
             .on_hover(cx.listener(move |this, hovered, _, cx| {
@@ -832,19 +915,86 @@ impl PopupMenu {
             PopupMenuItem::Separator => this
                 .h_auto()
                 .p_0()
-                .my_0p5()
-                .mx_neg_1()
-                .border_b(px(2.))
-                .border_color(cx.theme().border())
+                .my(px(2.0))
+                .mx(px(4.0))
+                .rounded(px(0.0))
+                .border_0()
+                .border_b(px(0.5))
+                .border_color(cx.theme().foreground.opacity(0.1))
                 .disabled(true),
-            PopupMenuItem::Label(label) => this.disabled(true).cursor_default().child(
-                h_flex()
-                    .cursor_default()
-                    .items_center()
-                    .gap_x_1()
-                    .children(Self::render_icon(has_left_icon, false, None, window, cx))
-                    .child(div().flex_1().child(label.clone())),
-            ),
+            PopupMenuItem::Label(label) => this
+                .disabled(true)
+                .cursor_default()
+                .py_0()
+                .text_size(crate::rems_from_px(11.0))
+                .child(
+                    h_flex()
+                        .cursor_default()
+                        .items_center()
+                        .gap(px(8.0))
+                        .children(Self::render_icon(
+                            has_left_icon,
+                            false,
+                            None,
+                            detail_opacity,
+                        ))
+                        .child(div().flex_1().child(label.clone())),
+                ),
+            PopupMenuItem::Stepper { label, value, .. } => {
+                let value = value(cx);
+                let label_for = |action| match action {
+                    StepperAction::Decrement => format!("Decrease {label}"),
+                    StepperAction::Reset => format!("Reset {label}"),
+                    StepperAction::Increment => format!("Increase {label}"),
+                };
+                let button = |id, action| {
+                    Button::new((id, ix))
+                        .debug_selector(move || format!("{id}-{ix}"))
+                        .ghost()
+                        .flat()
+                        .xsmall()
+                        .tab_stop(false)
+                        .tooltip(label_for(action))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.selected_index = Some(ix);
+                            this.adjust_stepper(action, window, cx);
+                        }))
+                };
+                this.h(item_height.max(px(26.0)))
+                    .aria_label(format!(
+                        "{label}: {value}; Left and Right adjust, Enter resets"
+                    ))
+                    .gap(px(10.0))
+                    .on_click(cx.listener(move |this, _, window, cx| this.on_click(ix, window, cx)))
+                    .children(Self::render_icon(
+                        has_left_icon,
+                        false,
+                        None,
+                        detail_opacity,
+                    ))
+                    .child(div().flex_1().child(label.clone()))
+                    .child(
+                        h_flex()
+                            .flex_none()
+                            .rounded(cx.theme().control_radius())
+                            .bg(cx.theme().background.raised(2).opaque())
+                            .control_surface(cx)
+                            .child(
+                                button("menu-step-down", StepperAction::Decrement)
+                                    .icon(IconName::Minus),
+                            )
+                            .child(
+                                button("menu-step-reset", StepperAction::Reset)
+                                    .label(value)
+                                    .min_w(px(48.0)),
+                            )
+                            .child(
+                                button("menu-step-up", StepperAction::Increment)
+                                    .icon(IconName::Plus),
+                            ),
+                    )
+            }
             PopupMenuItem::ElementItem {
                 render,
                 icon,
@@ -862,15 +1012,14 @@ impl PopupMenu {
                         .flex_1()
                         .min_h(item_height)
                         .items_center()
-                        .gap_x_1()
+                        .gap(px(8.0))
                         .children(Self::render_icon(
                             has_left_icon,
                             is_left_check,
                             icon.clone(),
-                            window,
-                            cx,
+                            detail_opacity,
                         ))
-                        .child((render)(window, cx)),
+                        .child((render)(selected && !disabled, window, cx)),
                 ),
             PopupMenuItem::Item {
                 icon,
@@ -882,7 +1031,7 @@ impl PopupMenu {
             } => {
                 let show_link_icon = *is_link;
                 let action = action.as_ref().map(|action| action.boxed_clone());
-                let key = self.render_key_binding(action, window, cx);
+                let key = self.render_key_binding(action, detail_opacity, window, cx);
 
                 this.when(!disabled, |this| {
                     this.on_click(
@@ -891,13 +1040,12 @@ impl PopupMenu {
                 })
                 .disabled(*disabled)
                 .h(item_height)
-                .gap_x_1()
+                .gap(px(8.0))
                 .children(Self::render_icon(
                     has_left_icon,
                     is_left_check,
                     icon.clone(),
-                    window,
-                    cx,
+                    detail_opacity,
                 ))
                 .child(
                     h_flex()
@@ -916,7 +1064,7 @@ impl PopupMenu {
                                     .child(
                                         Icon::new(IconName::ExternalLink)
                                             .xsmall()
-                                            .text_color(cx.theme().foreground.muted()),
+                                            .opacity(detail_opacity),
                                     ),
                             )
                         })
@@ -930,6 +1078,7 @@ impl PopupMenu {
                 disabled,
             } => this
                 .selected(selected)
+                .submenu_open(selected)
                 .disabled(*disabled)
                 .items_start()
                 .child(
@@ -937,13 +1086,12 @@ impl PopupMenu {
                         .min_h(item_height)
                         .size_full()
                         .items_center()
-                        .gap_x_1()
+                        .gap(px(8.0))
                         .children(Self::render_icon(
                             has_left_icon,
                             false,
                             icon.clone(),
-                            window,
-                            cx,
+                            detail_opacity,
                         ))
                         .child(
                             h_flex()
@@ -955,7 +1103,7 @@ impl PopupMenu {
                                 .child(
                                     Icon::new(IconName::ChevronRight)
                                         .xsmall()
-                                        .text_color(cx.theme().foreground.muted()),
+                                        .opacity(detail_opacity),
                                 ),
                         ),
                 )
@@ -993,7 +1141,6 @@ impl Focusable for PopupMenu {
 #[derive(Clone, Copy)]
 struct RenderOptions {
     has_left_icon: bool,
-    radius: Pixels,
 }
 
 impl Render for PopupMenu {
@@ -1011,10 +1158,7 @@ impl Render for PopupMenu {
         let has_left_icon = self.menu_items.iter().any(|item| item.has_left_icon());
 
         let max_width = self.max_width();
-        let options = RenderOptions {
-            has_left_icon,
-            radius: cx.theme().radius,
-        };
+        let options = RenderOptions { has_left_icon };
 
         let surface = v_flex()
             .id("popup-menu")
@@ -1035,7 +1179,7 @@ impl Render for PopupMenu {
             .child(
                 v_flex()
                     .id("items")
-                    .p_1()
+                    .p(px(4.0))
                     .gap_y_0p5()
                     .min_w(rems(8.))
                     .when_some(self.min_width, |this, min_width| this.min_w(min_width))
@@ -1052,7 +1196,19 @@ impl Render for PopupMenu {
                             .filter(|(ix, item)| !(*ix + 1 == items_count && item.is_separator()))
                             .map(|(ix, item)| self.render_item(ix, item, options, window, cx)),
                     )
-                    .on_prepaint(move |bounds, _, cx| view.update(cx, |r, _| r.bounds = bounds)),
+                    .on_prepaint(move |bounds, _, cx| {
+                        view.update(cx, |menu, cx| {
+                            let first_layout = menu.bounds.size.height == px(0.0);
+                            menu.bounds = bounds;
+                            if first_layout
+                                && menu.scrollable
+                                && let Some(ix) = menu.selected_index
+                            {
+                                menu.scroll_handle.scroll_to_item(ix);
+                                cx.notify();
+                            }
+                        })
+                    }),
             )
             .when(self.scrollable, |this| {
                 // TODO: When the menu is limited by `overflow_y_scroll`, the sub-menu will cannot be displayed.
@@ -1065,6 +1221,155 @@ impl Render for PopupMenu {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn custom_content_tracks_keyboard_and_pointer_highlights(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        let highlights = Rc::new(std::cell::RefCell::new([false; 2]));
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let mut menu = PopupMenu::new(cx);
+            for index in 0..2 {
+                let highlights = highlights.clone();
+                menu = menu.item(
+                    PopupMenuItem::element(move |highlighted, _, _| {
+                        highlights.borrow_mut()[index] = highlighted;
+                        div()
+                            .id(("custom-content", index))
+                            .debug_selector(move || format!("custom-content-{index}"))
+                            .child("Description")
+                    })
+                    .checked(index == 0),
+                );
+            }
+            menu.focus_handle.focus(window, cx);
+            menu
+        });
+        let draw = |cx: &mut gpui::VisualTestContext| {
+            cx.run_until_parked();
+            cx.update(|window, cx| _ = window.draw(cx));
+        };
+        draw(cx);
+        assert_eq!(*highlights.borrow(), [false, false]);
+        cx.simulate_keystrokes("down");
+        draw(cx);
+        assert_eq!(*highlights.borrow(), [true, false]);
+        let second = cx.debug_bounds("custom-content-1").unwrap();
+        cx.simulate_mouse_move(second.center(), None, gpui::Modifiers::default());
+        draw(cx);
+        assert_eq!(*highlights.borrow(), [false, true]);
+    }
+
+    #[gpui::test]
+    fn popup_highlights_use_exact_tuned_corners_inside_the_surface(cx: &mut gpui::TestAppContext) {
+        struct Preview(Entity<PopupMenu>);
+        impl Render for Preview {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                v_flex().size_full().items_start().child(self.0.clone())
+            }
+        }
+        for (configured, expected) in [(12.0, 8.0), (14.0, 10.0), (25.0, 10.4)] {
+            cx.update(|cx| {
+                crate::init(cx);
+                cx.set_reduce_motion(true);
+                crate::Theme::global_mut(cx).radius = px(configured);
+            });
+            let (_, cx) = cx.add_window_view(|window, cx| {
+                window.set_adaptive_corner_fraction(Some(0.45));
+                window.set_default_corner_smoothing(4.0);
+                Preview(cx.new(|cx| {
+                    let mut menu =
+                        PopupMenu::new(cx).item(PopupMenuItem::new("System default").checked(true));
+                    menu.selected_index = Some(0);
+                    menu
+                }))
+            });
+            cx.update(|window, cx| {
+                _ = window.draw(cx);
+                let quads = window.painted_quads();
+                let surface = quads
+                    .iter()
+                    .find(|quad| {
+                        quad.background
+                            == gpui::solid_background(cx.theme().background.raised(2).opaque())
+                    })
+                    .expect("menu surface");
+                let highlight = quads
+                    .iter()
+                    .find(|quad| {
+                        quad.background == gpui::solid_background(cx.theme().selection_background())
+                    })
+                    .expect("selected menu entry");
+                assert_eq!(highlight.corner_smoothing, 2.5);
+                assert_eq!(surface.corner_smoothing, 4.0);
+                assert!(
+                    (highlight.corner_radii.top_left.0 / window.scale_factor() - expected).abs()
+                        < 0.001
+                );
+                assert!(highlight.corner_radii.top_left.0 < highlight.bounds.size.height.0 / 2.0);
+                assert!(surface.bounds.contains(&highlight.bounds.origin));
+                assert!(surface.bounds.contains(&highlight.bounds.bottom_right()));
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn open_submenu_parent_stays_neutral_while_leaf_stays_accented(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let mut menu = PopupMenu::new(cx).submenu_with_icon(
+                None,
+                "More",
+                window,
+                cx,
+                |mut submenu, _, _| {
+                    submenu = submenu.item(PopupMenuItem::new("Open"));
+                    submenu.selected_index = Some(0);
+                    submenu
+                },
+            );
+            menu.selected_index = Some(0);
+            menu.focus_handle.focus(window, cx);
+            menu
+        });
+        let draw = |cx: &mut gpui::VisualTestContext| {
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                _ = window.draw(cx);
+                let quads = window.painted_quads();
+                let parent = quads
+                    .iter()
+                    .find(|quad| {
+                        quad.background == gpui::solid_background(cx.theme().background.washed(2))
+                    })
+                    .expect("open submenu parent has a neutral background");
+                let child = quads
+                    .iter()
+                    .find(|quad| {
+                        quad.background == gpui::solid_background(cx.theme().selection_background())
+                    })
+                    .expect("selected submenu leaf has an accent background");
+                let position = |quad: &gpui::Quad| {
+                    let center = quad.bounds.center();
+                    gpui::point(
+                        px(center.x.0 / window.scale_factor()),
+                        px(center.y.0 / window.scale_factor()),
+                    )
+                };
+                (position(parent), position(child))
+            })
+        };
+        let (parent, _) = draw(cx);
+        cx.simulate_mouse_move(parent, None, gpui::Modifiers::default());
+        let (_, child) = draw(cx);
+        cx.simulate_mouse_move(child, None, gpui::Modifiers::default());
+        draw(cx);
+    }
 
     #[gpui::test]
     fn dismissal_preserves_focus_moved_by_menu_handler(cx: &mut gpui::TestAppContext) {
@@ -1105,6 +1410,61 @@ mod tests {
     }
 
     #[gpui::test]
+    fn stepper_updates_live_with_keyboard_and_clicks_without_dismissing(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use std::cell::Cell;
+        cx.update(crate::init);
+        let value = Rc::new(Cell::new(100));
+        let read = Rc::clone(&value);
+        let decrement = Rc::clone(&value);
+        let reset = Rc::clone(&value);
+        let increment = Rc::clone(&value);
+        let (menu, cx) = cx.add_window_view(|window, cx| {
+            let mut menu = PopupMenu::new(cx).item(PopupMenuItem::stepper(
+                "Page zoom",
+                move |_| format!("{}%", read.get()).into(),
+                move |_, _| decrement.set(decrement.get() - 10),
+                move |_, _| reset.set(100),
+                move |_, _| increment.set(increment.get() + 10),
+            ));
+            menu.selected_index = Some(0);
+            menu.focus_handle.focus(window, cx);
+            menu
+        });
+        let dismissed = Rc::new(Cell::new(false));
+        let did_dismiss = Rc::clone(&dismissed);
+        let _subscription = cx.update(|window, cx| {
+            window.subscribe(&menu, cx, move |_, _: &DismissEvent, _, _| {
+                did_dismiss.set(true)
+            })
+        });
+        cx.simulate_keystrokes("right");
+        cx.simulate_keystrokes("right");
+        assert_eq!(value.get(), 120);
+        cx.simulate_keystrokes("left");
+        assert_eq!(value.get(), 110);
+        cx.simulate_keystrokes("enter");
+        assert_eq!(value.get(), 100);
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        let bounds = cx.debug_bounds("menu-step-up-0").expect("increment button");
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        assert_eq!(value.get(), 110);
+        assert!(!dismissed.get());
+        menu.read_with(cx, |menu, cx| {
+            let PopupMenuItem::Stepper { value, .. } = &menu.menu_items[0] else {
+                panic!("stepper row")
+            };
+            assert_eq!(value(cx).as_ref(), "110%");
+        });
+        cx.simulate_keystrokes("escape");
+        assert!(dismissed.get());
+    }
+
+    #[gpui::test]
     fn popup_menu_item_a11y_label_uses_visible_label(cx: &mut gpui::TestAppContext) {
         let submenu = cx.update(|cx| cx.new(|cx| PopupMenu::new(cx)));
 
@@ -1122,6 +1482,6 @@ mod tests {
             Some("More".into())
         );
         assert_eq!(PopupMenuItem::separator().a11y_label(), None);
-        assert_eq!(PopupMenuItem::element(|_, _| div()).a11y_label(), None);
+        assert_eq!(PopupMenuItem::element(|_, _, _| div()).a11y_label(), None);
     }
 }

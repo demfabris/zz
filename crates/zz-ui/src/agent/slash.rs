@@ -1,6 +1,6 @@
 use gpui::{App, Div, ElementId, IntoElement, Pixels, SharedString, Stateful, div, prelude::*, px};
 
-use crate::{ActiveTheme as _, Colorize as _, h_flex, v_flex};
+use crate::{ActiveTheme as _, StyledExt as _, h_flex, v_flex};
 
 const ROW_HEIGHT: f32 = 52.0;
 const MAX_VISIBLE_ROWS: u8 = 6;
@@ -27,12 +27,14 @@ pub fn suggestion_row(
         .h(px(ROW_HEIGHT))
         .items_center()
         .gap_3()
-        .rounded(cx.theme().radius)
+        .rounded(cx.theme().menu_radius())
         .px_3()
         .cursor_pointer()
-        .when(selected, |row| row.bg(cx.theme().background.hover()))
+        .border(px(0.5))
+        .border_color(gpui::transparent_white())
+        .when(selected, |row| row.selection_highlight(cx))
         .when(!selected, |row| {
-            row.hover(|row| row.bg(cx.theme().background.hover()))
+            row.hover(|row| row.selection_highlight(cx))
         })
         .child(
             v_flex()
@@ -46,7 +48,7 @@ pub fn suggestion_row(
                         .overflow_hidden()
                         .text_ellipsis()
                         .whitespace_nowrap()
-                        .text_size(crate::rems_from_px(12.0))
+                        .text_size(crate::rems_from_px(13.0))
                         .font_weight(gpui::FontWeight::MEDIUM)
                         .child(format!("/{name}")),
                 )
@@ -58,8 +60,8 @@ pub fn suggestion_row(
                             .overflow_hidden()
                             .text_ellipsis()
                             .whitespace_nowrap()
-                            .text_size(crate::rems_from_px(10.0))
-                            .text_color(cx.theme().foreground.muted())
+                            .text_size(crate::rems_from_px(12.0))
+                            .opacity(if selected { 1.0 } else { 0.8 })
                             .child(description),
                     )
                 }),
@@ -69,12 +71,8 @@ pub fn suggestion_row(
 pub fn suggestion_list(rows: impl IntoElement, cx: &App) -> Div {
     v_flex()
         .w_full()
-        .rounded(cx.theme().radius)
-        .border_1()
-        .border_color(cx.theme().border())
-        .bg(cx.theme().background.raised(1))
-        .p_1()
-        .shadow_md()
+        .popover_style(cx)
+        .p(px(8.0))
         .overflow_hidden()
         .child(rows)
 }

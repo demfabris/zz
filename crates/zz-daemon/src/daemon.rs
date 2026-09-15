@@ -37827,7 +37827,9 @@ fn switch_mode_target(inner: &ServerState, pane: PaneId) -> Option<(String, Exec
             .iter()
             .map(|(window, entry)| (entry.name.clone(), *window, entry.session, entry.index))
             .collect::<Vec<_>>();
-        entries.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.0.cmp(&right.1.0)));
+        entries.sort_by(|left, right| left.0.cmp(&right.0)
+            .then_with(|| state.sessions[&left.2].name.cmp(&state.sessions[&right.2].name))
+            .then(left.3.cmp(&right.3)));
         let (_, window, session, index) = entries.into_iter().next()?;
         let name = state.sessions.get(&session)?.name.clone();
         return Some((format!("={name}:{index}."), ExecutionContext::new(Some(session), Some(window), state.windows.get(&window).map(|entry| entry.active_pane))));

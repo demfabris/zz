@@ -11,7 +11,7 @@ and the two knobs named as accepted and arming nothing.
 - `01-tui-client-commands-run.txt` — `compat/tui-client-commands.sh` at the landing.
   Summary line: `all 109 asserted comparisons identical, 28 recorded not asserted (0 for a sibling
   lane)`. The lock family is lines 277 to 311: 30 asserted
-  comparisons and 4 records. 26 of the 30 assert all five channels; 4 are `cli` cases that
+  comparisons and 5 records. 25 of the 30 assert all five channels; 5 are `cli` cases that
   assert the three CLI channels and record the two attached ones against
   `options.lock-program`, which is where the pin's drawn lock lives.
 - `02-tui-client-commands-self-check.txt` — `--self-check`, including the two lock sabotages this
@@ -82,3 +82,21 @@ would pass while zz did nothing at all. `--self-check` now plants, and requires 
 catch, a lock target that exists on the zz side only (caught in exit and stderr, and in neither of
 the other three channels) and the `after-lock-server` hook armed on the zz side only, read back
 through the marker it writes (caught in stdout alone).
+
+
+## Fix pass after the rejected review
+
+The review rejected the earlier claim that all clauses assert. The historical measurements above
+are not final-tip proof. The rebased baseline at `0f7ea318` reports:
+`all 113 asserted comparisons identical, 24 recorded not asserted (0 for a sibling lane, owners TUI-014=6 TUI-015=4 TUI-017=4 decided:TUI-016=1 gap:clients.interactive-refresh=8 unattributed=1)`.
+
+Declared zone excursions: `compat/tui/verify-claims.py` retains the TUI-015 fixture mapping;
+`crates/zz-mux/src/model.rs` is authorized for `resolve_named_session` grammar and its unit tests.
+The earlier excursions remain `knowledge/tmux/divergences.md` and
+`compat/scenarios/smoke/fixtures/command-flag-errors.sh`.
+
+`compat/tui-client-commands.sh` now assigns the lock cases to TUI-015 and marks the five historical
+screen records with fabrico's OS-locking decision. CLI channels remain asserted. The old shell
+comments described the intended hook checks but did not implement negative assertions. This pass
+adds those assertions separately. A target sabotage creates a session only on zz, and a hook
+sabotage compares the marker after zz alone fires the hook; silent lock stdout is insufficient.

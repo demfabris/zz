@@ -22,8 +22,6 @@ out: capture-pane -pSbogus -E2 -t w:capture.0
 capture-pane -pS0 -Ebogus -t w:capture.0
 out: capture-pane -pS#{?pane_active,1,bogus} -E2 -t w:capture.0
 out: capture-pane -pS0 -E#{?pane_active,1,bogus} -t w:capture.0
-# -C doubles a backslash and -L numbers each row from the history size; with -J
-# the number of every joined row stays inside the joined line.
 send-keys -t w:capture.0 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBB Enter
 run-shell "sleep 0.2"
 out: capture-pane -p -L -S 0 -E 5 -t w:capture.0

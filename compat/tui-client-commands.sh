@@ -996,6 +996,14 @@ client_tool_cases() {
   CASE_CLOCK_FACE=1
   case_run clock-mode-open same '' -- clock-mode -t PANE
   restore_case clock-mode-closed
+  CASE_CLOCK_FACE=1
+  case_run clock-injected-open same '' -- clock-mode -t PANE
+  case_run clock-injected-key same '' -- send-keys -t PANE x
+  case_run clock-injected-shell same '' -- capture-pane -p -t PANE
+  CASE_CLOCK_FACE=1
+  case_run clock-cancel-open same '' -- clock-mode -t PANE
+  case_run clock-cancel-all same '' -- copy-mode -q -t PANE
+  case_run clock-cancel-shell same '' -- capture-pane -p -t PANE
   set_window_on_both clock-mode-colour '#ff00aa'
   set_window_on_both clock-mode-style 12
   CASE_NEEDLE_MODE=1
@@ -1164,6 +1172,21 @@ run_self_check() {
   tmux_outer_command send-keys -t "=$OUTER_SESSION:zz" q ||
     die 'the outer tmux refused send-keys'
   wait_for 'the one-sided clock ended' pane_in_mode zz 0
+
+  run_on_both clock-mode -t PANE
+  run_on_both send-keys -t PANE x
+  zz_command clock-mode -t "$(active_pane zz)" >/dev/null
+  self_check_run injected-clock-sabotage capture-pane -p -t PANE
+  self_check_expect 'injected key bypass leaves a one-sided clock' \
+    exit=0 stdout=0 stderr=0 screen=1 state=1
+  zz_command copy-mode -q -t "$(active_pane zz)" >/dev/null
+  run_on_both clock-mode -t PANE
+  run_on_both copy-mode -q -t PANE
+  zz_command clock-mode -t "$(active_pane zz)" >/dev/null
+  self_check_run cancel-clock-sabotage capture-pane -p -t PANE
+  self_check_expect 'generic cancellation leaves a one-sided clock' \
+    exit=0 stdout=0 stderr=0 screen=1 state=1
+  zz_command copy-mode -q -t "$(active_pane zz)" >/dev/null
 
   # the same for the other pane mode, which is not a clock: window_switch_mode
   # on the zz pane alone, whose rows and prompt are a different surface over the

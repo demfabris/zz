@@ -8146,12 +8146,18 @@ impl MuxEngine {
         reject_positionals("copy-mode", &positional)?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         if options.has("-q") {
-            return Ok(Execution::effect(MuxEffect::TerminalView {
-                pane,
-                action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
-                target_client: None,
-                require_mode: false,
-            }));
+            return Ok(Execution {
+                output: RawText::default(),
+                effects: vec![
+                    MuxEffect::PaneModeChanged { pane, mode: None },
+                    MuxEffect::TerminalView {
+                        pane,
+                        action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
+                        target_client: None,
+                        require_mode: false,
+                    },
+                ],
+            });
         }
         if options.has("-M") {
             let Some(mouse) = context.invoking_mouse() else {

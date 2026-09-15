@@ -190,6 +190,18 @@ A case that a sibling lane's landing fixes is recorded as `SIBLING:<lane>`, and 
 after that lane merges. Every wire append folds into one PROTOCOL_VERSION 101. After cycle 5,
 TUI-008 and TUI-011 unlock, then TUI-012.
 
+## Box facts a fixture must not depend on
+
+Two permanent facts of the ubuntu box, both measured on 2026-09-15 while three fixtures were red
+here and green on the alienware box. `/bin/sh` is dash, so an inner pane started as `/bin/sh` has
+no line editing: a key that a surface consumes and then also delivers to the pane (the key that
+dismisses a `display-message`, a key that leaks under a menu) leaves its literal byte in the input
+line, where it prefixes the next marker's `printf` and the marker never prints; flush the line with
+a bare Enter before the next marker rather than assuming a shell that swallows it. And
+`localhost` resolves to 127.0.0.1 alone (`getent ahosts localhost`) because the stock `/etc/hosts`
+gives `::1` the names `ip6-localhost` and `ip6-loopback`, not `localhost`, so anything that
+resolves the name cannot reach a service bound only on `::1`.
+
 ## Before launching any cycle
 
 ```sh

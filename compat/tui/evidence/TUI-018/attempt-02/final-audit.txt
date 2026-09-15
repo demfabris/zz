@@ -1,0 +1,41 @@
+Only the four permitted TUI-018 fields differ from the fixed base; status review; proof untouched.
+Current origin/main: 1077951108aabe956104ac8de62da319aa06db4b
+Three-dot diff merge base remains: 7e7cb1ee25122a10e7f1d8815241422eb00c4199
+Every evidence file is named in notes.md; no .log files.
+git check-ignore -v exit=1: evidence is not ignored.
+compat/tui/campaign.json is valid and knowledge/tmux/tui-parity.md is current
+Remote branch matches local tip: ff58de8a6f8fc194db0480deb6893ba85e6121e0
+ M compat/tui/evidence/TUI-018/attempt-02/notes.md
+?? compat/tui/evidence/TUI-018/attempt-02/final-audit.py
+?? compat/tui/evidence/TUI-018/attempt-02/final-audit.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-build-identity.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-client-commands.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-client-self-check.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-clippy.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-commands.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-compat-check.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-delta-1.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-delta-2.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-delta-3.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-delta-4.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-delta-list.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-diff-check.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-diff.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-fmt.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-processes-after.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-processes-before.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-push.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-remote-tip.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-runner.sh
+?? compat/tui/evidence/TUI-018/attempt-02/final-scenario-search.py
+?? compat/tui/evidence/TUI-018/attempt-02/final-scenario-strings.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-source-diff-check.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-streams-1.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-streams-2.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-streams-3.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-streams-self-check.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-test-libraries.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-test-zz.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-tracker.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-verify-claims.txt
+?? compat/tui/evidence/TUI-018/attempt-02/final-wire-version.txt

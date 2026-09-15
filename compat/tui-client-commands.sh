@@ -1156,6 +1156,18 @@ client_tool_cases() {
   case_run clock-cancel-open same '' -- clock-mode -t PANE
   case_run clock-cancel-all same '' -- copy-mode -q -t PANE
   case_run clock-cancel-shell same '' -- capture-pane -p -t PANE
+  CASE_CLOCK_FACE=1
+  case_run stack-clock same '' -- clock-mode -t PANE
+  case_run stack-switch same '' -- switch-mode -t PANE
+  case_run stack-depth same '' -- display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+  local side
+  for side in tmux zz; do
+    tmux_outer_command send-keys -t "=$OUTER_SESSION:$side" Escape
+  done
+  CASE_CLOCK_FACE=1
+  case_run stack-restored-clock same '' -- display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+  case_run stack-terminal same '' -- send-keys -t PANE x
+  case_run stack-terminal-shell same '' -- capture-pane -p -t PANE
   set_window_on_both clock-mode-colour '#ff00aa'
   set_window_on_both clock-mode-style 12
   CASE_NEEDLE_MODE=1
@@ -1466,6 +1478,15 @@ run_self_check() {
   self_check_expect 'generic cancellation leaves a one-sided clock' \
     exit=0 stdout=0 stderr=0 screen=1 state=1
   zz_command copy-mode -q -t "$(active_pane zz)" >/dev/null
+
+  run_on_both clock-mode -t PANE
+  run_on_both switch-mode -t PANE
+  tmux_inner_command copy-mode -q -t "$(active_pane tmux)" >/dev/null
+  tmux_inner_command switch-mode -t "$(active_pane tmux)" >/dev/null
+  self_check_run stack-sabotage display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+  self_check_expect 'a missing suspended mode changes the stack count' \
+    exit=0 stdout=1 stderr=0 screen=0 state=1
+  run_on_both copy-mode -q -t PANE
 
   # the same for the other pane mode, which is not a clock: window_switch_mode
   # on the zz pane alone, whose rows and prompt are a different surface over the

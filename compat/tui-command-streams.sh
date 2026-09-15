@@ -535,6 +535,36 @@ bound_cases() {
   case_run source-file-over-the-cap-value decided "$BOUND_DECISION" -- show-options -gqv @zzcs-one
 }
 
+# A `command-alias` whose body is more than one command is the one shape where
+# the caller's stream and the pin part company. Measured on 2026-09-15 at this
+# lane's gate against the pin, with a two-member body and the payload on stdin.
+ALIAS_GROUP_RECORD="protocol.binary-streams, measured 2026-09-15 and not closed here: pinned tmux hands a multi-member command-alias body the caller's descriptor, so the first \`source-file -\` APPLIES the payload and a second answers \`Bad file descriptor: -\` with exit 1, the way \`file_read\` spends one descriptor across the group; zz carries the stream on CommandInvocation.stdin, and MuxEngine::resolve_command_alias rebuilds a multi-member body as a fresh expanded-alias-group invocation that copies \`source\` but not \`stdin\`, so NO member is handed the stream, the first answers \`source-file from standard input is not supported\`, the group aborts on that error and nothing is applied. A single-member alias and a direct invocation are identical on both sides, asserted by the two cases below. The same body with an Argument sink (\`load-buffer -\`) instead diverges in the CLI, which appends the payload to the group invocation's own argument vector and answers \`command load-buffer: too many arguments (need at most 1)\`. Spending the stream once ACROSS a group needs a spent marker the invocation type has no slot for - within one command SourceStream::Spent is derived from a per-invocation \`carried_a_stream\`, which a later member cannot see - so this is one wire-visible field plus a CLI fix, not a gate-sized change. TUI-018 stays at review while this case records rather than asserts."
+
+alias_group_cases() {
+  local body='zzcs-twostream=source-file - ; source-file -'
+  local single='zzcs-onestream=source-file -'
+  side_command zz set -s 'command-alias[77]' "$body" >/dev/null ||
+    die 'zz refused the two-member command-alias'
+  side_command tmux set -s 'command-alias[77]' "$body" >/dev/null ||
+    die 'tmux refused the two-member command-alias'
+  side_command zz set -s 'command-alias[78]' "$single" >/dev/null ||
+    die 'zz refused the single-member command-alias'
+  side_command tmux set -s 'command-alias[78]' "$single" >/dev/null ||
+    die 'tmux refused the single-member command-alias'
+
+  stdin_from 'set -g @zzcs-one kappa'
+  case_run source-file-alias-group-two-members record "$ALIAS_GROUP_RECORD" -- zzcs-twostream
+  case_run source-file-alias-group-two-members-value record "$ALIAS_GROUP_RECORD" \
+    -- show-options -gqv @zzcs-one
+
+  # The control, and the case that puts both sides back on one value: a
+  # single-member alias carries the stream identically, so the group is the
+  # only shape the record covers.
+  stdin_from 'set -g @zzcs-one lambda'
+  case_run source-file-alias-single-member same '' -- zzcs-onestream
+  case_run source-file-alias-single-member-value same '' -- show-options -gqv @zzcs-one
+}
+
 write_payloads() {
   printf 'a\303\251b\377c\000d\n' >"$SCRATCH_DIR/binary.bin"
   # The cap counts bytes, so these are built by size and never by line count.
@@ -564,6 +594,7 @@ run_cases() {
   config_sink_cases
   pane_input_sink_cases
   buffer_stream_cases
+  alias_group_cases
   bound_cases
 
   if [ "$FAILURES" -ne 0 ]; then

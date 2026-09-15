@@ -61,7 +61,8 @@
 # each channel - stdout, stderr with the exit status, the session state and the
 # pane content that carries a PaneInput sink's proof - and requires the
 # comparison to catch each one in that channel, plus two equivalences it must
-# NOT report.
+# NOT report. Alias cases remove one reader or change one byte on the zz side
+# and check the specific exit, stderr, stdout or option-state channel.
 set -eEuo pipefail
 
 usage() {
@@ -545,6 +546,18 @@ install_stream_aliases() {
     die 'zz refused the single-member command-alias'
   side_command tmux set -s 'command-alias[78]' "$single" >/dev/null ||
     die 'tmux refused the single-member command-alias'
+  local side
+  for side in zz tmux; do
+    side_command "$side" set -s 'command-alias[79]' \
+      'zzcs-buffer-source=load-buffer -b zzcsalias - ; source-file -' >/dev/null ||
+      die "$side refused the buffer/source alias"
+    side_command "$side" set -s 'command-alias[80]' \
+      'zzcs-buffer-twice=load-buffer -b zzcsalias - ; load-buffer -b zzcssecond - ; display-message -p after-error' >/dev/null ||
+      die "$side refused the two-buffer alias"
+    side_command "$side" set -s 'command-alias[81]' \
+      'zzcs-buffer-last=display-message -p before ; load-buffer -b zzcsalias -' >/dev/null ||
+      die "$side refused the buffer-last alias"
+  done
 }
 
 alias_group_cases() {
@@ -556,6 +569,18 @@ alias_group_cases() {
   stdin_from 'set -g @zzcs-one lambda'
   case_run source-file-alias-single-member same '' -- zzcs-onestream
   case_run source-file-alias-single-member-value same '' -- show-options -gqv @zzcs-one
+
+  stdin_from_file "$SCRATCH_DIR/binary.bin"
+  case_run load-buffer-alias-group-source-second same '' -- zzcs-buffer-source
+  case_run load-buffer-alias-group-source-second-value same '' -- save-buffer -b zzcsalias -
+  stdin_from_file "$SCRATCH_DIR/binary.bin"
+  case_run load-buffer-alias-group-two-readers same '' -- zzcs-buffer-twice
+  case_run load-buffer-alias-group-two-readers-value same '' -- save-buffer -b zzcsalias -
+  stdin_from_file "$SCRATCH_DIR/binary.bin"
+  case_run load-buffer-alias-group-reader-last same '' -- zzcs-buffer-last
+  case_run load-buffer-alias-group-reader-last-value same '' -- save-buffer -b zzcsalias -
+  zz_command delete-buffer -b zzcsalias >/dev/null || die 'zz refused alias buffer cleanup'
+  tmux_command delete-buffer -b zzcsalias >/dev/null || die 'tmux refused alias buffer cleanup'
 }
 
 write_payloads() {
@@ -644,6 +669,17 @@ zz_pane_shows() {
   pane_shows zz "$1" "$2"
 }
 
+self_check_alias_buffer_value() {
+  local name="$1"
+  LC_ALL=C tr a z <"$SCRATCH_DIR/binary.bin" >"$SCRATCH_DIR/sabotage.bin"
+  zz_command load-buffer -b zzcsalias - <"$SCRATCH_DIR/sabotage.bin" ||
+    die 'zz refused the buffer value sabotage'
+  self_check_run "$name" save-buffer -b zzcsalias -
+  self_check_expect "$name: one byte changed on zz" exit=0 stdout=1 stderr=0 state=0
+  zz_command load-buffer -b zzcsalias - <"$SCRATCH_DIR/binary.bin" ||
+    die 'zz refused to restore the buffer bytes'
+}
+
 run_self_check() {
   printf 'self-check: one deliberate one-sided difference per channel, plus two equivalences\n'
   build_scene
@@ -713,6 +749,34 @@ run_self_check() {
     exit=0 stdout=1 stderr=0 state=1
   zz_command set -gu @zzcs-one >/dev/null || die 'zz refused to restore the option'
   tmux_command set -gu @zzcs-one >/dev/null || die 'tmux refused to restore the option'
+
+  zz_command set -s 'command-alias[79]' 'zzcs-buffer-source=load-buffer -b zzcsalias -' >/dev/null ||
+    die 'zz refused the buffer/source sabotage'
+  stdin_from_file "$SCRATCH_DIR/binary.bin"
+  self_check_run load-buffer-alias-group-source-second zzcs-buffer-source
+  self_check_expect 'load-buffer-alias-group-source-second: source reader removed on zz' \
+    exit=1 stdout=0 stderr=1 state=0
+  self_check_alias_buffer_value load-buffer-alias-group-source-second-value
+
+  zz_command set -s 'command-alias[80]' \
+    'zzcs-buffer-twice=load-buffer -b zzcsalias - ; display-message -p after-error' >/dev/null ||
+    die 'zz refused the second buffer reader sabotage'
+  stdin_from_file "$SCRATCH_DIR/binary.bin"
+  self_check_run load-buffer-alias-group-two-readers zzcs-buffer-twice
+  self_check_expect 'load-buffer-alias-group-two-readers: second reader removed on zz' \
+    exit=1 stdout=0 stderr=1 state=0
+  self_check_alias_buffer_value load-buffer-alias-group-two-readers-value
+
+  zz_command set -s 'command-alias[81]' \
+    'zzcs-buffer-last=display-message -p sabotage ; load-buffer -b zzcsalias -' >/dev/null ||
+    die 'zz refused the buffer-last stdout sabotage'
+  stdin_from_file "$SCRATCH_DIR/binary.bin"
+  self_check_run load-buffer-alias-group-reader-last zzcs-buffer-last
+  self_check_expect 'load-buffer-alias-group-reader-last: first member output changed on zz' \
+    exit=0 stdout=1 stderr=0 state=0
+  self_check_alias_buffer_value load-buffer-alias-group-reader-last-value
+  zz_command delete-buffer -b zzcsalias >/dev/null || die 'zz refused alias buffer cleanup'
+  tmux_command delete-buffer -b zzcsalias >/dev/null || die 'tmux refused alias buffer cleanup'
   install_stream_aliases
 
   # The second equivalence: with every sabotage withdrawn the comparison is

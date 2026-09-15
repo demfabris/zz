@@ -84,8 +84,8 @@ pub use client::{
 pub use client::{CommandClient, CommandOutcome, InteractiveClient, short_device_name};
 #[cfg(feature = "daemon")]
 pub use daemon::{
-    CommandStdinSink, Daemon, agent_send_reads_stdin, command_stdin_sink, load_buffer_reads_stdin,
-    send_text_reads_stdin,
+    CommandStdinSink, Daemon, agent_send_reads_stdin, append_stdin_payload, command_stdin_sink,
+    load_buffer_reads_stdin, send_text_reads_stdin,
 };
 pub use endpoint::{Endpoint, EndpointError, SshEndpoint, run_socket_proxy};
 pub use fleet_hosts::{

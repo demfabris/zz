@@ -231,9 +231,6 @@ pub(crate) struct Renderer {
         zz_protocol::ThemeColours,
     )>,
     mode_tree: chooser::ModeTree,
-    /// Which panes were last painted holding a server-owned mode, so the paint
-    /// that follows the mode ending redraws the pane whole instead of taking
-    /// the incremental path over the mode's own cells.
     pane_modes_painted: HashMap<PaneId, bool>,
     kitty: KittyBridge,
     writer: TerminalWriter,
@@ -2017,9 +2014,6 @@ impl Renderer {
             self.hide_cursor();
             return;
         };
-        // `window_pane_set_mode` gives the mode its own screen, and the pin's
-        // clock clears `MODE_CURSOR` on it, so the cursor sits where the
-        // mode's own writer left it and is not shown.
         if let Some(mode) = model
             .pane_snapshot(pane)
             .and_then(|pane| pane.mode.as_ref())

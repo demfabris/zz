@@ -1264,20 +1264,15 @@ pub enum MuxEffect {
     UserOptionChanged {
         channel: String,
     },
-    /// `window_pane_set_mode` and `window_pane_reset_mode`: the server-owned
-    /// pane mode this pane carries, `None` to end whatever it carries.
     PaneModeChanged {
         pane: PaneId,
         mode: Option<PaneModeRequest>,
     },
 }
 
-/// The pane mode a command asked for, before the daemon resolves the window
-/// options the surface is drawn from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PaneModeRequest {
     Clock,
-    /// `window_switch_mode`, listing sessions or, under `-w`, windows.
     Switch {
         windows: bool,
         format: Option<String>,
@@ -3216,10 +3211,6 @@ impl MuxEngine {
         PaneBorderIndicators::parse(&self.window_knobs(window).pane_border_indicators)
     }
 
-    /// `window_clock_draw_screen` reads `clock-mode-colour` and
-    /// `clock-mode-style` off `w->options` on every redraw, so the surface
-    /// carries the window's current values rather than the ones the mode
-    /// opened with.
     #[must_use]
     pub fn clock_mode_options(&self, window: WindowId) -> (String, u8) {
         let knobs = self.window_knobs(window);
@@ -8433,9 +8424,6 @@ impl MuxEngine {
         }))
     }
 
-    /// `cmd_copy_mode_exec` under `cmd_clock_mode_entry`: the pane takes
-    /// `window_clock_mode` with no client of its own, so a clientless CLI
-    /// opens it the same way an attached one does.
     fn clock_mode(
         &self,
         context: &ExecutionContext,
@@ -8450,9 +8438,6 @@ impl MuxEngine {
         }))
     }
 
-    /// `cmd_switch_mode_exec`: the pane takes `window_switch_mode`, listing
-    /// sessions by default and windows under `-w`. `-s` is the explicit
-    /// session form.
     fn switch_mode(
         &self,
         context: &ExecutionContext,
@@ -8572,12 +8557,12 @@ impl MuxEngine {
         Ok(Execution::effect(MuxEffect::FocusSidebar { pane }))
     }
 
-    /// `cmd_server_access_exec`. zz's daemon socket belongs to the invoking
-    /// user at mode 0600, so the list the pin keeps in `server_acl_entries`
-    /// holds that one owner here: every lookup, every ordering and every
-    /// refusal the pin spells out is answered, and the requests that would
-    /// admit a second identity are refused rather than stored.
-    fn server_access(&self, context: &ExecutionContext, args: &[RawText], hooks: &mut impl StatusHooks) -> Result<Execution, ServerError> {
+    fn server_access(
+        &self,
+        context: &ExecutionContext,
+        args: &[RawText],
+        hooks: &mut impl StatusHooks,
+    ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("server-access", args)?;
         let owner = server_socket_owner();
         if options.has("-l") {
@@ -8588,7 +8573,13 @@ impl MuxEngine {
                 "missing user or group argument".to_owned(),
             ));
         };
-        let argument = self.expand_pane_format(argument, context, context.session, context.target_format_client(), hooks);
+        let argument = self.expand_pane_format(
+            argument,
+            context,
+            context.session,
+            context.target_format_client(),
+            hooks,
+        );
         let group = options.has("-g");
         let kind = if group { "group" } else { "user" };
         let Some((name, owns)) = server_access_identity(&argument, group) else {
@@ -15637,7 +15628,6 @@ fn command_prompt_mode(options: &Options) -> CommandPromptMode {
     }
 }
 
-/// The name `server_acl_init` would hold: the user the daemon socket belongs to.
 #[cfg(unix)]
 fn server_socket_owner() -> String {
     use nix::unistd::{Uid, User};
@@ -15655,9 +15645,6 @@ fn server_socket_owner() -> String {
         .unwrap_or_default()
 }
 
-/// The passwd or group entry `argument` names, beside whether it is the
-/// identity that owns the server: `getpwnam`, `getgrnam` and the
-/// `id == 0 || id == getuid()` test `cmd_server_access_exec` makes for a user.
 #[cfg(unix)]
 fn server_access_identity(argument: &str, group: bool) -> Option<(String, bool)> {
     use nix::unistd::{Group, Uid, User};
@@ -21965,9 +21952,16 @@ mod tests {
                 .tmux_message(),
             format!("{owner} owns the server, can't change access")
         );
-        assert!(engine.execute(&mut context,
-            &command("server-access", &["#{?#{==:1,1},nobody,root}"]))
-            .expect("formatted non-owner without action").output.is_empty());
+        assert!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("server-access", &["#{?#{==:1,1},nobody,root}"])
+                )
+                .expect("formatted non-owner without action")
+                .output
+                .is_empty()
+        );
         let group = primary_group_name().expect("a primary group");
         assert_eq!(
             engine

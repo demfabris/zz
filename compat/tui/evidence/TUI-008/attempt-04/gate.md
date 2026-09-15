@@ -27,12 +27,12 @@ carries and main did not have - `MouseDown3Pane` and `M-MouseDown3Pane` over the
 `DEFAULT_PANE_MENU` - and that menu's Float item is `{ break-pane -W }`. `break-pane -W` is
 `unsupported_flag` in zz's catalog on purpose: the five `break-pane` placement flags are an accepted
 gap under the floating-pane group in compat/tmux-gaps.json, because a floating pane is a mux object
-in the pin and a presentation object in zz. The pin implements `-W`, so the pin is silent. Something
-on zz's config-load path parses the bound menu item's flags, which is exactly what commit 1ab5fdcf
-("Resolve a menu item's command names without parsing its flags") says must not happen until
-`menu_key_cb` runs: "the string is kept as written and menu_key_cb is the first thing that parses
-its flags, which is how the pin's own DEFAULT_PANE_MENU carries move-pane -P". The names are
-resolved correctly; the flags are not being left alone on every path.
+in the pin and a presentation object in zz. The pin implements `-W`, so the pin is silent. On zz's config-load path, callback preparation rejected the bound menu item's
+accepted capability gap. Commit 1ab5fdcf (rebased as ea914281) incorrectly claimed
+that `menu_key_cb` first parses a typed item's flags. The pin parses names, flags
+and arity in typed blocks during config load; only quoted command strings defer
+parsing until selection. The unsupported `-W` refusal is zz's own capability
+check, and must wait until the item executes.
 
 Measured facts the next lane can start from, all on this box at this tip:
 
@@ -140,3 +140,93 @@ Note on the two clippy and rustfmt reds this gate met: both are origin/main's, n
 `-D warnings` errors (duration_suboptimal_units, default_trait_access) from main's 5377ae99;
 `rustfmt --check` on origin/main's own crates/zz-protocol/src/catalog.rs flags the same `-P` line it
 flags here. Neither is charged to a lane.
+
+## Regression fixed on menus-3
+
+2026-09-15, `campaign/tui-mouse-menus-3`, based on origin/main `627e717a`.
+Kept the settled menus commits through `0e31ce05`; replaced attempts `8e0dc652`
+and `68d3549e` with part (1), `8d5c9737`, and part (3), `4caca47d`.
+Part (2), static validation of a split bind-key tail, is omitted.
+
+Oh My Tmux filters `list-keys` for commands including `split-window`, rewrites
+those rows and sources them as cfg.in. The stock pane menu matches that filter,
+so its Float item, `{ break-pane -W }`, returns inside a flat `bind-key` tail.
+In `crates/zz-mux/src/command.rs`, `prepare_expanded_callback_invocation` used
+to prepare that item as a generic bind-key block and reject zz's accepted
+floating-pane capability gap during config load. `bind_key_command_tail` and
+`bind_key_menu_item_blocks` now identify the item's owner and apply menu
+validation. Menu items retain recursive alias preparation and canonical
+printing; `validate_bound_command` applies `validate_menu_item_commands` for
+that internal owner, checking syntax while deferring capability refusal until
+execution. Tests cover the unsupported flag, aliases, unknown names and flags,
+and bad arity in flat and braced bindings.
+
+Part (1) alone passed both requested corpus rows. Part (3) also passed
+`smoke/args-parse-bind-key` with zero divergences. The first delta run then
+found an alias-preparation regression in `smoke/args-parse-display-menu`,
+confirmed by its solo retry: `0 TOPO, 0 GEO, 0 FMT, 1 OUT, 0 WARN` divergences.
+Its output was
+`ARGS_PARSE_DISPLAY_MENU=failed:zz-side-only:bindings,canonical,builtin-alias,builtin-prefix,user-aliases,separator-shifted-action,quoted-action,multiple-items,multiple-separators,incomplete-name-constructed,incomplete-key-constructed`
+instead of `ARGS_PARSE_DISPLAY_MENU=clean:34`. The marked-menu path had skipped
+alias preparation and canonical printing; the final code restores both while
+keeping the menu validation policy. This affected part (1) as well as part (3),
+so dropping part (3) would not fix it. No isolated failure of
+`args-parse-bind-key` occurred. Part (2) remains omitted because it moves
+flat-tail syntax errors across the fixture's parse/execution boundary.
+
+The pin parses typed menu blocks' names, flags and arity during config load
+(`cmd_parse_build_command`, `cmd_display_menu_args_parse`); quoted strings defer
+parsing until selection in `menu_key_cb`. Corrected the earlier explanation in
+this gate record, notes.md, TUI-008's evidence note, and the
+`keys.root-native-mouse` reason and its generated report. Historical commit
+messages remain unchanged. TUI-008 remains `review`.
+
+Proof environment: `ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-gate-9/target/debug/zz`,
+`ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux`,
+`ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins`; fixture positional
+arguments use those same zz and tmux binaries. Cargo uses the shared two-slot
+lock, `MemoryMax=10G`, `MemorySwapMax=4G`, four jobs and four test threads.
+
+Final proofs use code revision `4caca47d`; later edits only update these records
+and their generated documentation. Each command below exited 0.
+
+- `compat/run.sh --strict-geometry smoke/plugin-runtime-oh-my-tmux`, three
+  runs: each `4 step(s), 0 TOPO divergence(s), 0 GEO divergence(s),
+  0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)`.
+- `compat/run.sh --strict-geometry smoke/args-parse-bind-key`, two runs:
+  each `3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s),
+  0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)`.
+- All five final corpus runs passed on their first attempt.
+- `cargo test -p zz-mux --lib --jobs 4 -- --test-threads=4`:
+  `529 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`.
+- `cargo clippy -p zz-mux --all-targets --all-features --jobs 4 -- -D warnings`.
+- `cargo fmt --all -- --check`.
+- `compat/tui-mouse.sh "$ZZ_COMPAT_ZZ" "$ZZ_COMPAT_TMUX"`:
+  `39 asserted checks, 1 recorded checks`, `all 39 asserted checks identical`.
+- `compat/tui-mouse.sh --self-check "$ZZ_COMPAT_ZZ" "$ZZ_COMPAT_TMUX"`:
+  `self-check: every sabotage caught in its own channel`.
+- `compat/tui-stock-keys.sh "$ZZ_COMPAT_ZZ" "$ZZ_COMPAT_TMUX"`:
+  `all 50 cases agree on every channel they assert, 8 recorded a difference elsewhere`.
+- `compat/run.sh --strict-geometry --delta origin/main...HEAD --commands display-menu,bind-key --list`:
+  selected the 12 rows whose names contain menu or bind.
+- `compat/run.sh --strict-geometry smoke/args-parse-bind-key smoke/args-parse-display-menu smoke/copy-mode-prompt-bindings`:
+  all three rows have zero divergences.
+- `compat/run.sh --strict-geometry smoke/display-menu-action-queue smoke/display-menu-cell-layout smoke/display-menu-mouse`:
+  all three rows have zero divergences.
+- `compat/run.sh --strict-geometry smoke/display-menu-paste smoke/display-menu-resize-lifecycle smoke/display-menu-shortcut-grammar`:
+  all three rows have zero divergences.
+- `compat/run.sh --strict-geometry smoke/display-menu-style-refresh smoke/display-popup-menu-policy smoke/display-popup-menu`:
+  all three rows have zero divergences.
+- All four delta chunks finished in under ten minutes; no final row needed a retry.
+- `python3 compat/tui/tracker.py check` and `python3 compat/tmux-tracker.py check`.
+- `TMUX_BIN="$ZZ_COMPAT_TMUX" compat/check.sh`: exit 0, with
+  `HOME=/tmp/zz-emptyhome`, `XDG_CONFIG_HOME=/tmp/zz-emptyhome/config`,
+  `ZZ_TRAY=0`; the whole script inherited one shared lock and capped scope,
+  and its Cargo launcher added `--jobs 4` and `--test-threads=4`.
+- `python3 compat/tui/tracker.py write-report` and both tracker checks keep the
+  generated reports current; OKF validation is conformant (0 errors, one
+  existing research-age warning).
+
+The final proof pass needed no fixture retries and had no load flakes. The
+initial menu-alias regression above was fixed before this pass. No binary was
+copied into /tmp. Proof logs are in `/tmp/zzmenus3-proof/` on this box.

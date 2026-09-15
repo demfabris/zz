@@ -86,13 +86,15 @@ Three recorded checks at the base, none now; two checks were added.
   zz compared the button alone, made the second a `SecondClick` nobody binds
   and swallowed it. Measured on this fixture: whichever of the two gestures
   ran second, its menu was absent on zz and present on the pin.
-- A menu item's command is a string. `cmd_display_menu_get_type` types the
-  slot `ARGS_PARSE_COMMANDS_OR_STRING`, so the parser resolves every command
-  NAME inside it and stops on one it does not know, and `menu_key_cb` is the
-  first thing that parses its flags. zz parsed and prepared every item block
-  when the menu was raised and refused the whole menu over `move-pane -P`, a
-  flag `pane.floating-model` keeps native. Resolving names only is what
-  `smoke/args-parse-display-menu` and the pane menu both need.
+- The pin accepts a menu item's command as either a typed block or a quoted
+  string. `cmd_display_menu_args_parse` types the slot as
+  `ARGS_PARSE_COMMANDS_OR_STRING`; `cmd_parse_build_command` validates a typed
+  block's command names, flags and arity while loading the config. A quoted
+  string defers parsing until `menu_key_cb` handles selection. The earlier
+  names-only explanation, also present in the rebased commits `ea914281` and
+  `de818868`, was incorrect. zz must defer its own unsupported-capability
+  refusal for an item such as `break-pane -W`, which the pin implements,
+  while preserving the pin's load-time syntax diagnostics for typed blocks.
 
 ## The race the two menu cases were losing
 

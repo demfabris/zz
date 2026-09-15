@@ -190,3 +190,104 @@ obligations. No local ledger edit caused that failure. The corrected audit uses
 the fixed starting base and verifies that the three-dot merge base is still
 `7e7cb1ee25122a10e7f1d8815241422eb00c4199`; only the four permitted TUI-018 fields
 differ. This does not change the completed delta selection or final-tip proofs.
+
+## Adversarial review on 2026-09-15
+
+Verdict: **reject**. See `review.md` for three reproduced blockers: lost queue
+continuation after a spent source reader, lost caller stdin during file-based config
+replay, and an added newline on raw buffer output from an alias. No fix or rebase was
+applied. TUI-018 remains at review with no proof block.
+
+The reviewer first preserved the 34 worker evidence files in `57bf163f`, then tested
+the unchanged `ff58de8a` implementation. The full requested delta selection passed
+all 221 rows and 2,637 steps in 37 chunks, each under ten minutes. Both stream fixtures
+and their self-checks, the package tests, clippy, formatting, wire check, and trackers
+passed; the independent failing probes prevent verification despite those green checks.
+The reviewer artifacts below distinguish these results from the worker's earlier outputs.
+The delivery target is `campaign/tui-stream-alias-gated`; main integration was not attempted.
+
+### Reviewer artifact manifest
+
+- `review-build.txt`
+- `review-cargo-wrapper.sh`
+- `review-cleanup.txt`
+- `review-client-commands.txt`
+- `review-client-self-check.txt`
+- `review-clippy.txt`
+- `review-commands.txt`
+- `review-config-probe.py`
+- `review-config-probes.txt`
+- `review-corpus-001-008.txt`
+- `review-corpus-009-012.txt`
+- `review-corpus-013-016.txt`
+- `review-corpus-017-024.txt`
+- `review-corpus-025-032.txt`
+- `review-corpus-033-037.txt`
+- `review-corpus-038-038.txt`
+- `review-corpus-039-048.txt`
+- `review-corpus-049-052.txt`
+- `review-corpus-053-056.txt`
+- `review-corpus-057-064.txt`
+- `review-corpus-065-072.txt`
+- `review-corpus-073-080.txt`
+- `review-corpus-081-088.txt`
+- `review-corpus-089-096.txt`
+- `review-corpus-097-104.txt`
+- `review-corpus-105-112.txt`
+- `review-corpus-113-116.txt`
+- `review-corpus-117-120.txt`
+- `review-corpus-121-124.txt`
+- `review-corpus-125-128.txt`
+- `review-corpus-129-132.txt`
+- `review-corpus-133-136.txt`
+- `review-corpus-137-140.txt`
+- `review-corpus-141-144.txt`
+- `review-corpus-145-152.txt`
+- `review-corpus-153-160.txt`
+- `review-corpus-161-168.txt`
+- `review-corpus-169-176.txt`
+- `review-corpus-177-184.txt`
+- `review-corpus-185-192.txt`
+- `review-corpus-193-200.txt`
+- `review-corpus-201-204.txt`
+- `review-corpus-205-208.txt`
+- `review-corpus-209-212.txt`
+- `review-corpus-213-216.txt`
+- `review-corpus-217-221.txt`
+- `review-corpus-chunk.py`
+- `review-corpus-summary.py`
+- `review-corpus-summary.txt`
+- `review-delta-list.txt`
+- `review-environment.txt`
+- `review-final-tmux-tracker.txt`
+- `review-final-tracker.txt`
+- `review-fmt.txt`
+- `review-okf.txt`
+- `review-order-probe.py`
+- `review-order-probes-state.txt`
+- `review-order-probes.txt`
+- `review-own-sabotage.txt`
+- `review-probe.py`
+- `review-probes.txt`
+- `review-runner.sh`
+- `review-source-audit.txt`
+- `review-stdout-probe.py`
+- `review-stdout-probes.txt`
+- `review-stream-loss-wrapper.sh`
+- `review-streams-1.txt`
+- `review-streams-2.txt`
+- `review-streams-3-repeat.txt`
+- `review-streams-3.txt`
+- `review-streams-self-check.txt`
+- `review-test-libraries.txt`
+- `review-test-zz.txt`
+- `review-text-probe.py`
+- `review-text-probes.txt`
+- `review-tmux-report.txt`
+- `review-tmux-tracker.txt`
+- `review-tracker-tests.txt`
+- `review-tracker.txt`
+- `review-tui-report.txt`
+- `review-verify-tests.txt`
+- `review-wire.txt`
+- `review.md`

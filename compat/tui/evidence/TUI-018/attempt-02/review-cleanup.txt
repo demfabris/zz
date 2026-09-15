@@ -1,0 +1,11 @@
+Requested pgrep sweep returned exit 1 with no matches.
+Own-worktree executable and scratch HOME/config scan found no process candidates.
+Independent-probe scratch directories were removed by the probe drivers.
+No process was killed by the final sweep; no binary was copied into /tmp.
+Verified saved wrapper copies byte-for-byte, then removed:
+/tmp/zz018-review-run
+/tmp/zz018-review-drop
+/tmp/zz018-corpus-chunk.py
+/tmp/zz018-review-tools/cargo
+/tmp/zz018-review-tools (empty directory)
+Shared /tmp/zz-emptyhome was retained.

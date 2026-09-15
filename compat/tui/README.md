@@ -78,134 +78,35 @@ against every obligation mapped to that fixture rather than sliding past one.
 
 ## State
 
-The count is **9/12 baseline verified** (TUI-001 to TUI-007, TUI-009, TUI-010), added scope **1/6**
-with TUI-016 verified on 2026-09-15 and TUI-018 at review on its branch, at wire protocol 103
-(unreleased).
+The count is **11/12 baseline verified** (TUI-001 to TUI-010 and TUI-012; only TUI-011 is open, at
+review), added scope **1/6** with TUI-016 verified, at wire protocol 103 (unreleased). Main is green
+on the ubuntu box: build, workspace clippy, rustfmt, `compat/attached-client.sh` and every fixture
+the day's gates ran.
 
-The 2026-09-14 resume on the ubuntu box (four to five Opus 5 agents through the Agent tool, one per
-lane, prompts adapted from the runners) landed cycle 9's choosers gate (`3ecd4702`, TUI-006
-verified) and mouse gate (`d41b815f`, TUI-008's first half), reviewed the menus second half (one
-blocker: the pane menu asserts only over a blank cell), landed the introspection review fixes on
-its branch, and ran cycle 10's stream lane (TUI-018 at review, unreviewed). It was paused there to
-move machines; `HANDOFF.md` has the gate order, the three fixture reds that are baseline on that box,
-and the lane that closes TUI-008 and TUI-012.
+The 2026-09-15 day on the ubuntu box closed cycle 9 (the introspection landing, `627e717a`) and landed
+cycle 10's stream lane (`7e7cb1ee`, TUI-018 at review), then the menus second half together with the
+mouse-context lane (`10779511`), which verified **TUI-008** (`compat/tui-mouse.sh` 45 asserted, 0
+recorded) and with it **TUI-012** (three fresh `compat/tui-superset.sh` runs). Along the way main got
+its Linux compile back, the three ubuntu-box reds fixed (one a real zz bug in the command-output
+view), a chooser repaint bug fixed, and `compat/tui/verify-claims.py` learned to charge a shared
+fixture's recorded cases to one obligation. From 14:30 the workers were Codex CLI lanes on fabrico's
+instruction; every branch they reviewed was rejected on measured findings, which is the point of the
+review. At the wrap-up three fix passes were in flight (TUI-018's alias groups, TUI-015 and TUI-017's
+capture and lock residues, TUI-014's per-pane mode lifecycle); `HANDOFF.md` has the branch table, the
+three alias-group blockers, and the one decision only fabrico can make: customize-mode and
+suspend-client, which two lanes measured and did not build, and without which TUI-014 and therefore
+TUI-011 cannot verify.
 
-Cycle 8 (2026-09-13 to 14, alienware, three lanes, three agents at a time, 14.1 hours, nine agents,
-no agent errors) verified **TUI-009**, which had been open since cycle 4 and spent three cycles
-blocked on two daemon files no lane held. Giving one lane `client.rs` and `terminal_features.rs`
-closed it in a single 132-minute worker run: `compat/tui-caps.sh` went from 351 asserted with 15
-recorded to **366 asserted with none**, and its reviewer approved outright.
+Cycle 8 (2026-09-13 to 14, alienware) verified TUI-009 after three cycles blocked on two daemon files
+no lane held, and set the rule the campaign has kept since: **a lane's zones are drawn around its
+obligation, across whatever crates it needs.** Two lane claims were caught by review rather than by a
+gate, which is why the campaign re-measures instead of trusting: `verify-claims.py` runs an
+obligation's fixture and reads the tally the fixture prints about itself, `compat/check.sh` runs its
+structural half, and `lint-runner.py` holds one rule per lesson an earlier cycle paid for.
 
-That is the cycle's real lesson, and it is now the campaign's rule: **a lane's zones are drawn
-around its obligation, across whatever crates it needs.** Three cycles in a row an obligation stayed
-open only because its last fix sat outside the lane's zones, and each time it closed in one run once
-a lane held those files.
-
-- **keys** (`9f0a7de7`) landed the pin's border, status-wheel and mouse-context bindings from a
-  pointer and closed nine gap items, and kept **TUI-008 active at ten recorded checks** where its own
-  worker had reported six. Its next_action now names the two unlocks exactly: `send-keys -M` handing
-  the invoking event to the pane, together with `#{mouse_any_flag}` answering the pane's real mode
-  instead of the constant zero it is in `crates/zz-mux/src/formats.rs`, and then a copy-table mouse
-  name reachable from a pointer. The gate also measured `smoke/status-background-jobs` nine times at
-  `origin/main` (2 green, 7 red) and established it as a fifth environmental row on this box rather
-  than paying for it again.
-- **caps** (`adc1a9d0`) verified TUI-009.
-- **commands** (`420264a2`) landed **`choose-client`**, the command zz never had, and flipped the
-  chooser fixture's `client-tree-open`. **TUI-006 still does not verify**: three command-output cases
-  remain inside its own clause 2. TUI-014 stays active on its info preview, and TUI-016 and TUI-017
-  were never reached, because the lane spent its whole budget on `choose-client`.
-
-Two claims were caught by review rather than by a gate, which is why the campaign now re-measures
-instead of trusting: the commands lane reported TUI-014's clause 1 proved when no case ever pressed
-`i` on both sides, and stated in the ledger that the chooser fixture held no recorded case for
-TUI-006 when it held three. `compat/tui/verify-claims.py` runs an obligation's fixture and reads the
-tally the fixture prints about itself; `compat/check.sh` runs its structural half, so every gate gets
-it. `compat/tui/lint-runner.py` holds one rule per lesson an earlier cycle paid for and must pass
-before a cycle launches.
-
-Cycle 9 (`compat/tui/run-9.js`) runs three lanes and can reach 11/12:
-
-- **mouse** takes TUI-008's ten remaining checks behind the two named unlocks. TUI-012's
-  verification waits on it.
-- **choosers** takes TUI-006's three command-output records first, because it closes a baseline id,
-  then TUI-014's info preview and its three mode tools. Its prompt change reaches verified TUI-005,
-  so `compat/tui-copy-mode.sh` staying at zero recorded is a gate blocker.
-- **introspection** takes TUI-016 and TUI-017's three text residues, and its gate, being last,
-  verifies TUI-012 once TUI-008 lands.
-
-After cycle 9 only **TUI-011** should remain, waiting on TUI-015 (a lock surface, which needs a
-product decision about ownership and cancellation before code) and TUI-018 (a bounded caller-stream
-channel, which its own record places on the superset roadmap rather than in parity polish).
-
-Earlier cycles:
-
-- Cycle 1 (`38c22b9e`, plus the same-day deferral records `ccab35ce`): the fixture baseline.
-  TUI-001 and TUI-002 verified on banked, thrice-reproduced proof; the macOS half of TUI-001's
-  clause 2 lives in `TUI-013` (fabrico's 2026-09-09 deferral; `compat/tui/run-2.js` is its ready
-  macbook runner and it blocks nothing).
-- Cycle 3 (`ce74bab7`): TUI-003 verified -- stock split/chooser/rename/selection/zoom/detach
-  bindings produce the pinned result through real stdin (`compat/tui-stock-keys.sh`, 50 cases),
-  the launcher compared on empty and live servers, and chrome no longer consumes root or
-  application keys outside its owning context. TUI-010 verified -- a drop-and-redraw path
-  replaces parking past the 4 MiB writer budget, detach under backlog leaks no queued paint,
-  simultaneous/read-only/reattach clients asserted; `tui.client-output-queue-budget` closed.
-  The sidebar decision landed: width never invokes the sidebar, and the 109/120-column cases of
-  `tui-screen-diff.sh` and `tui-pane-geometry.sh` now assert instead of record. Cursor
-  attributes match the pin (no DECSCUSR or OSC 12 by default) and that channel asserts too.
-- `TUI-004` is `review`, REOPENED at the cycle-3 close-out: the cycle-3 gate promoted it to verified
-  while its own evidence note says clause 3 is open (copy/view/prefix indicators and
-  message/prompt restoration undriven; the three theme status rows still recorded). Clauses 1
-  and 2 keep their whole-screen evidence at `4cd23eb3`. Cycle 4's canvas-close lane finishes
-  clause 3, including the theme landing the gate measured: a 21-name roster (not the 11 the
-  cycle-18 handoff recorded), `TMUX_OPTION_CONSUMERS` 118 to 139, the consumer half closing 21
-  items of the accepted `options.theme-palette` gap (so the lane owns it), the wire half a
-  `TmuxColour` field on `StatusLine` at protocol 99 to 100 -- one landing, never half.
-- Cycle 4 (gated at `2b406cc1`, 2026-09-10, alienware: three lanes, the copy lane rejected once in
-  review and fixed, all three merged): no obligation verified, so the count stays 4/12. TUI-004,
-  TUI-005 and TUI-009 are `review` with every cited fixture green at the tip, and each record's
-  evidence note ends with the gate's reason. TUI-004 is one step away: clause 3's copy-mode and
-  view-surface indicator cells appear only in recorded cases, against the accepted
-  `options.native-mode-styles`, and recorded cases are never counted. The theme landing is whole:
-  `options.theme-palette` and `tui.status-row` closed, and `status-row.sh` asserts 14 of 14.
-- PROTOCOL_VERSION is 100 since cycle 4: `StatusLine` gains `theme: ThemeColours`, ten `TmuxColour`
-  slots in `colour_theme_table` order, a pure append. Cycle 3's upstream note for fabrico still
-  stands: that gate repaired two reds that arrived with the thirteen mid-cycle main commits (the
-  `tools [--skill]` list-commands assertion, and `commands.native-superset` item order) -- revert
-  either if the intent differed.
-- Box facts added: four corpus rows are environmental on alienware (micro-flags %b locale,
-  show-options-hooks and lane2-store through lock-command defaulting to vlock,
-  smoke/plugin-runtime-resurrect-restore), each proved red at origin/main;
-  `compat/tui-stock-keys.sh` root-binding-detaches can flake on a wall-clock second boundary
-  because it compares a row carrying a timestamp -- worth pinning.
-
-Triage at the cycle-4 close-out (orchestrator, 2026-09-10): when an accepted gap keeps a native
-presentation (`options.native-mode-styles`, `options.native-overlay-styles`,
-`choosers.native-presentation`, `presentation.native-status`), the contract still decides the TUI
-portion. The raw TUI renders the pin's cells, the GUI keeps its native surface, and a landing
-closes exactly the items the raw TUI starts honouring (the `options.theme-palette` precedent).
-Cycle 4's gate held TUI-004 over this question, so this decision is what unblocks it
-(`knowledge/designs/tui-parity.md`, Proof and ownership).
-
-Cycle 6 (`compat/tui/run-6.js`, lock front `F-TUI-CYCLE-6-LANES`) reruns the same five lanes as
-punch lists of exactly what cycle 5's reviews and gate left open, all built on
-`campaign/tui-cycle5-gated`. The modes lane first makes `attached-client.sh` green again. The
-gate is now one agent per branch in the order modes, copy, caps, overlays, choosers, each pushing
-main when green, so work lands incrementally. PROTOCOL_VERSION stays 101: 100 and 101 are
-unreleased (zz 0.7.0 shipped 99), so cycle-6 appends fold into 101.
-
-Cycle 5 (`compat/tui/run-5.js`) ran five lanes under one lock front, `F-TUI-CYCLE-5-LANES`:
-- modes (TUI-004): the copy-mode position indicator and selection style inside the pane, the
-  view-mode surface for command output, and message and prompt styles on `StatusLine`.
-- copy (TUI-005): half-page and page placement, the vi rectangle newline, prefix precedence over
-  copy tables, and three copy formats.
-- caps (TUI-009): colour class through the frame and wire, the default foreground, `-2`/`-u`/`-T`,
-  and extended keys.
-- overlays (TUI-007) and choosers (TUI-006): started in the same cycle because TUI-004 verifies in
-  the same gate.
-
-A case that a sibling lane's landing fixes is recorded as `SIBLING:<lane>`, and the gate flips it
-after that lane merges. Every wire append folds into one PROTOCOL_VERSION 101. After cycle 5,
-TUI-008 and TUI-011 unlock, then TUI-012.
+Cycle 9 (`run-9.js`) and cycle 10 (`run-10.js`) are recorded in the runners and in `HANDOFF.md`; the
+day's gate protocol change (intermediate gates re-run only what a rebase can change, the close-out
+gate runs everything once plus the corpus restamp CI needs) is in `HANDOFF.md`'s gate section.
 
 ## Box facts a fixture must not depend on
 

@@ -43218,7 +43218,7 @@ mod tests {
         assert!(rows.contains(&"debug-marker [note ...]"));
         assert!(rows.contains(&"tools [--skill]"));
         assert!(rows.contains(
-            &"capture-pane (capturep) [-aeJMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
+            &"capture-pane (capturep) [-aCeJLMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
         ));
         assert!(
             rows.contains(&"if-shell (if) [-bF] [-t target-pane] shell-command command [command]")
@@ -43236,7 +43236,7 @@ mod tests {
                 .execute(&mut context, &command("list-commands", &["capturep"]))
                 .unwrap()
                 .output,
-            "capture-pane (capturep) [-aeJMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
+            "capture-pane (capturep) [-aCeJLMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
         );
         for name in ["if-shell", "if"] {
             assert_eq!(

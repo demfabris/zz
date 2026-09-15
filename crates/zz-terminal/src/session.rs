@@ -1030,6 +1030,8 @@ pub struct CaptureOptions {
     pub preserve_trailing: bool,
     pub trim_positions: bool,
     pub escape_sequences: bool,
+    pub escape_nonprintable: bool,
+    pub number_lines: bool,
 }
 
 impl Default for CaptureOptions {
@@ -1043,6 +1045,8 @@ impl Default for CaptureOptions {
             preserve_trailing: false,
             trim_positions: false,
             escape_sequences: false,
+            escape_nonprintable: false,
+            number_lines: false,
         }
     }
 }
@@ -8312,50 +8316,58 @@ fn capture_terminal(
     let requested_rows = usize::try_from(end.saturating_sub(start).saturating_add(1)).unwrap_or(1);
 
     let columns = terminal.cols().map_err(capture_failure)?;
-    let start = terminal
+    let head = terminal
         .grid_ref(Point::Screen(PointCoordinate {
             x: 0,
             y: u32::try_from(start).unwrap_or(u32::MAX),
         }))
         .map_err(capture_failure)?;
-    let end = terminal
+    let tail = terminal
         .grid_ref(Point::Screen(PointCoordinate {
             x: columns.saturating_sub(1),
             y: u32::try_from(end).unwrap_or(u32::MAX),
         }))
         .map_err(capture_failure)?;
-    let selection = Selection::new(start, end, false);
+    let selection = Selection::new(head, tail, false);
     let format = if options.escape_sequences {
         Format::Vt
     } else {
         Format::Plain
     };
-    let formatter_options = FormatterOptions::new()
-        .with_format(format)
-        .with_unwrap(options.join_wrapped)
-        .with_trim(!options.preserve_trailing)
-        .with_selection(&selection);
-    let mut formatter = Formatter::new(terminal, formatter_options).map_err(capture_failure)?;
-    let length = match formatter.format_len() {
-        Ok(length) => length,
-        Err(libghostty_vt::Error::InvalidValue) => return Ok(String::new()),
-        Err(error) => return Err(capture_failure(error)),
+    let format_range = |join_wrapped: bool| -> Result<String, TerminalCaptureError> {
+        let formatter_options = FormatterOptions::new()
+            .with_format(format)
+            .with_unwrap(join_wrapped)
+            .with_trim(!options.preserve_trailing)
+            .with_selection(&selection);
+        let mut formatter = Formatter::new(terminal, formatter_options).map_err(capture_failure)?;
+        let length = match formatter.format_len() {
+            Ok(length) => length,
+            Err(libghostty_vt::Error::InvalidValue) => return Ok(String::new()),
+            Err(error) => return Err(capture_failure(error)),
+        };
+        if length > MAX_CAPTURE_BYTES {
+            return Err(TerminalCaptureError::TooLarge);
+        }
+        if length == 0 {
+            return Ok(String::new());
+        }
+        let mut output = vec![0_u8; length];
+        let written = formatter.format_buf(&mut output).map_err(capture_failure)?;
+        output.truncate(written);
+        let output = String::from_utf8(output)
+            .map_err(|error| TerminalCaptureError::Failed(error.to_string()))?;
+        Ok(if options.escape_sequences {
+            output.replace("\r\n", "\n")
+        } else {
+            output
+        })
     };
-    if length > MAX_CAPTURE_BYTES {
-        return Err(TerminalCaptureError::TooLarge);
-    }
-    if length == 0 {
-        return Ok(String::new());
-    }
-    let mut output = vec![0_u8; length];
-    let written = formatter.format_buf(&mut output).map_err(capture_failure)?;
-    output.truncate(written);
-    let output = String::from_utf8(output)
-        .map_err(|error| TerminalCaptureError::Failed(error.to_string()))?;
-    let output = if options.escape_sequences {
-        output.replace("\r\n", "\n")
+    let output = format_range(options.join_wrapped)?;
+    let rows = if options.number_lines && options.join_wrapped {
+        Some(format_range(false)?)
     } else {
-        output
+        None
     };
     let written_rows = if options.join_wrapped || options.escape_sequences {
         measure_written_rows(terminal, &selection)?
@@ -8364,11 +8376,15 @@ fn capture_terminal(
     } else {
         output.split('\n').count()
     };
-    Ok(pad_capture_rows(
-        &output,
-        requested_rows.saturating_sub(written_rows),
-        columns,
+    let trailing_rows = requested_rows.saturating_sub(written_rows);
+    let output = pad_capture_rows(&output, trailing_rows, columns, options);
+    let rows = rows.map(|rows| pad_capture_rows(&rows, trailing_rows, columns, options));
+    Ok(decorate_capture(
+        output,
+        rows.as_deref(),
         options,
+        start,
+        visible_start,
     ))
 }
 
@@ -8442,6 +8458,72 @@ fn pad_capture_rows(
     }
     lines.resize(lines.len().saturating_add(trailing_rows), String::new());
     lines.join("\n")
+}
+
+fn decorate_capture(
+    text: String,
+    rows: Option<&str>,
+    options: CaptureOptions,
+    first_row: u64,
+    history_rows: u64,
+) -> String {
+    let text = if options.number_lines {
+        number_capture(&text, rows, first_row, history_rows)
+    } else {
+        text
+    };
+    if options.escape_nonprintable {
+        text.replace('\\', "\\\\").replace('\u{1b}', "\\033")
+    } else {
+        text
+    }
+}
+
+fn push_capture_line_number(output: &mut String, row: u64, history_rows: u64) {
+    let number = i64::try_from(row)
+        .unwrap_or(i64::MAX)
+        .saturating_sub(i64::try_from(history_rows).unwrap_or(i64::MAX));
+    output.push_str(&number.to_string());
+    output.push(' ');
+}
+
+fn number_capture(text: &str, rows: Option<&str>, first_row: u64, history_rows: u64) -> String {
+    let Some(rows) = rows else {
+        let mut output = String::with_capacity(text.len());
+        for (offset, line) in text.split('\n').enumerate() {
+            if offset > 0 {
+                output.push('\n');
+            }
+            let row = first_row.saturating_add(offset as u64);
+            push_capture_line_number(&mut output, row, history_rows);
+            output.push_str(line);
+        }
+        return output;
+    };
+    let mut pieces = rows.split('\n');
+    let mut offset = 0_u64;
+    let mut output = String::with_capacity(text.len());
+    for (index, joined) in text.split('\n').enumerate() {
+        if index > 0 {
+            output.push('\n');
+        }
+        let mut consumed = 0_usize;
+        loop {
+            let row = first_row.saturating_add(offset);
+            push_capture_line_number(&mut output, row, history_rows);
+            offset = offset.saturating_add(1);
+            let Some(piece) = pieces.next() else {
+                output.push_str(joined.get(consumed..).unwrap_or(""));
+                break;
+            };
+            output.push_str(piece);
+            consumed = consumed.saturating_add(piece.len());
+            if consumed >= joined.len() {
+                break;
+            }
+        }
+    }
+    output
 }
 
 const PANE_RESET_PRELUDE: &[u8] = b"\x1b\\\x1b[m\x1b(B\x1b)B\x1b[r\x1b[?7h\x1b[?25h\x1b[?1l\x1b[4l\x1b[?6l\x1b[20l\x1b>\x1b[?12l\x1b[?2026l\x1b[?2031l\x1b[=0u\x1b[>4;0m\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l\x1b[?1004l\x1b[?2004l\x1b[3g";
@@ -8541,7 +8623,7 @@ fn capture_viewport(
             return Err(TerminalCaptureError::TooLarge);
         }
     }
-    Ok(output)
+    Ok(decorate_capture(output, None, options, start, 0))
 }
 
 fn capture_viewport_row(
@@ -8639,9 +8721,11 @@ fn capture_revision(
     if start > end {
         return Ok(String::new());
     }
+    let head = u32::try_from(start).unwrap_or(u32::MAX);
+    let tail = u32::try_from(end).unwrap_or(u32::MAX);
     let output = revision.capture_rows(
-        u32::try_from(start).unwrap_or(u32::MAX),
-        u32::try_from(end).unwrap_or(u32::MAX),
+        head,
+        tail,
         options.join_wrapped,
         options.preserve_trailing,
         options.escape_sequences,
@@ -8649,7 +8733,22 @@ fn capture_revision(
     if output.len() > MAX_CAPTURE_BYTES {
         return Err(TerminalCaptureError::TooLarge);
     }
-    Ok(output)
+    let rows = (options.number_lines && options.join_wrapped).then(|| {
+        revision.capture_rows(
+            head,
+            tail,
+            false,
+            options.preserve_trailing,
+            options.escape_sequences,
+        )
+    });
+    Ok(decorate_capture(
+        output,
+        rows.as_deref(),
+        options,
+        start,
+        visible_start,
+    ))
 }
 
 fn resolve_capture_boundary(

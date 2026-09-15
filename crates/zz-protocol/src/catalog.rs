@@ -630,6 +630,10 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
     ("select-pane", "[-DdeLlMmRUZ] [-T title] [-t target-pane]"),
     ("show-options", "[-AgHpqsvw] [-t target-pane] [option]"),
     (
+        "server-access",
+        "[-adglrw] [-t target-pane] [user|group]",
+    ),
+    (
         "split-window",
         "[-bdefhIklPvWZ] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",
     ),
@@ -722,7 +726,6 @@ pub static POSITIONAL_MINIMUMS: &[(&str, usize)] = &[
 pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
     "new-pane",
     "newp",
-    "server-access",
     "customize-mode",
     "clock-mode",
     "suspend-client",
@@ -814,22 +817,6 @@ static UNIMPLEMENTED_TMUX_COMMAND_SPECS: &[CommandSpec] = &[
         ],
         positionals: &[],
         variadic: Some(FreeForm),
-    },
-    CommandSpec {
-        name: "server-access",
-        aliases: &[],
-        description: "Unsupported tmux command",
-        usage: "[-adglrw] [-t target-pane] [user|group]",
-        options: &[
-            CommandOptionSpec::unsupported_flag("-a"),
-            CommandOptionSpec::unsupported_flag("-d"),
-            CommandOptionSpec::unsupported_flag("-g"),
-            CommandOptionSpec::unsupported_flag("-l"),
-            CommandOptionSpec::unsupported_flag("-r"),
-            CommandOptionSpec::unsupported_flag("-w"),
-        ],
-        positionals: &[FreeForm],
-        variadic: None,
     },
     CommandSpec {
         name: "suspend-client",
@@ -2730,6 +2717,22 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         variadic: None,
     },
     CommandSpec {
+        name: "server-access",
+        aliases: &[],
+        description: "Show or change who may use the server socket",
+        usage: "[-adglrw] [user|group]",
+        options: &[
+            CommandOptionSpec::flag("-a", "add the user or group"),
+            CommandOptionSpec::flag("-d", "remove the user or group"),
+            CommandOptionSpec::flag("-g", "the argument names a group"),
+            CommandOptionSpec::flag("-l", "list the access list"),
+            CommandOptionSpec::flag("-r", "make the entry read-only"),
+            CommandOptionSpec::flag("-w", "give the entry write access"),
+        ],
+        positionals: &[FreeForm],
+        variadic: None,
+    },
+    CommandSpec {
         name: "kill-server",
         aliases: &[],
         description: "Stop the zz daemon",
@@ -3126,15 +3129,15 @@ mod tests {
                 usage_overrides.insert(spec.name);
             }
         }
-        assert_eq!(implemented, 84);
+        assert_eq!(implemented, 85);
         assert_eq!(aliases, 74);
-        assert_eq!(flag_shapes.values().sum::<usize>(), 515);
+        assert_eq!(flag_shapes.values().sum::<usize>(), 521);
         assert_eq!(
             flag_shapes,
-            BTreeMap::from([("none", 287), ("optional", 8), ("required", 220)])
+            BTreeMap::from([("none", 293), ("optional", 8), ("required", 220)])
         );
-        assert_eq!((supported, unsupported), (490, 25));
-        assert_eq!(usage_overrides.len(), 20);
+        assert_eq!((supported, unsupported), (496, 25));
+        assert_eq!(usage_overrides.len(), 21);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES
@@ -3153,7 +3156,7 @@ mod tests {
             .into_iter()
             .map(|command| (command.name.clone(), command))
             .collect::<BTreeMap<_, _>>();
-        assert_eq!(UNIMPLEMENTED_TMUX_COMMAND_SPECS.len(), 8);
+        assert_eq!(UNIMPLEMENTED_TMUX_COMMAND_SPECS.len(), 7);
         for spec in UNIMPLEMENTED_TMUX_COMMAND_SPECS {
             let command = &oracle[spec.name];
             assert_eq!(spec.aliases, command.aliases, "aliases for {}", spec.name);
@@ -4425,6 +4428,7 @@ mod tests {
             "reload-config",
             "import-tmux-config",
             "start-server",
+            "server-access",
             "kill-server",
         ]);
         let catalog = COMMAND_SPECS

@@ -559,7 +559,8 @@ impl Styles<'_> {
 /// expanded through `WINDOW_SWITCH_DEFAULT_FORMAT` in its own format tree.
 /// `sort_get_sessions` and `sort_get_winlinks` both run with `SORT_NAME` and no
 /// reversal, which is the order here.
-pub(super) fn switch_rows(inner: &ServerState, windows: bool) -> Vec<String> {
+pub(super) fn switch_rows(inner: &ServerState, windows: bool, format: Option<&str>) -> Vec<String> {
+    let format = format.unwrap_or(WINDOW_SWITCH_DEFAULT_FORMAT);
     let engine = &inner.engine;
     let facts = format_hook_facts(inner);
     let attached = None;
@@ -576,7 +577,7 @@ pub(super) fn switch_rows(inner: &ServerState, windows: bool) -> Vec<String> {
             .map(|(_, window, session)| {
                 expand_row(
                     engine,
-                    WINDOW_SWITCH_DEFAULT_FORMAT,
+                    format,
                     &ExecutionContext::new(Some(session), Some(window), None),
                     &scope_variables(false, true, false),
                     attached,
@@ -597,7 +598,7 @@ pub(super) fn switch_rows(inner: &ServerState, windows: bool) -> Vec<String> {
         .map(|(_, session)| {
             expand_row(
                 engine,
-                WINDOW_SWITCH_DEFAULT_FORMAT,
+                format,
                 &ExecutionContext::new(Some(session), None, None),
                 &scope_variables(true, false, false),
                 attached,

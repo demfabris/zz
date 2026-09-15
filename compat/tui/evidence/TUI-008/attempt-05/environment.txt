@@ -1,14 +1,17 @@
-# Environment for TUI-008 attempt-05, the mouse-context lane
+# Environment for TUI-008 attempt-05, the mouse-context lane, restamped by the
+# cycle 10 gate at its final pre-records tip.
 
 Linux ubuntu 7.0.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 04:26:38 UTC 2026 x86_64 GNU/Linux
 PRETTY_NAME="Ubuntu 26.04.1 LTS"
 NAME="Ubuntu"
 
-date: Tue Sep 15 02:16:11 PM UTC 2026
+date: Tue Sep 15 06:22:22 PM -03 2026
 worktree: /home/demfabris/dev/zz-tui-context-10
-branch: campaign/tui-mouse-context
-base: 6fbdf4c3 (tip of campaign/tui-mouse-menus-2)
-head at the time of writing: 902fcf542a6cea5a6f2c8ca45f1a3341cca04e6e
+branch: gate-context (campaign/tui-mouse-context, review applied)
+base: origin/campaign/tui-mouse-menus-3 0babde8c0ebfdc79c2b6f62ca0e485ba9c5e0225
+  (the menus lane rebased onto origin/main 627e717a with its plugin-runtime
+  regression fixed; this lane's twelve commits replay on top of it)
+head at the time of writing: 996a31ae4c0ec136001c78b456f4c36fcb6f1523
 pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux d77c9dc6 (next-3.8)
 tmux next-3.8
 zz build: target/debug/zz tmux 3.8-zz
@@ -17,7 +20,19 @@ cargo: cargo 1.97.0 (c980f4866 2026-06-30)
 bash: 5.3.9(1)-release
 python: Python 3.14.4
 locale: en_US.UTF-8
+cores: 8, memory: 30Gi
 
 RUN_ENV used on every compat invocation:
   ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
   ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins
+  TMUX_BIN=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux (verify-claims.py
+  prefers TMUX_BIN over ZZ_COMPAT_TMUX and exits 1 without it)
+  ZZ_COMPAT_ZZ=<this worktree>/target/debug/zz on every corpus invocation, so
+  compat/run.sh invoked cargo zero times
+
+A cargo debug build is not bit-reproducible here, so the attestation is the
+revision plus a clean worktree, not a hash. Every server started was a
+throwaway (tmux -L zz*-$$ -f /dev/null, zz --socket /tmp/zz*.sock) inside a
+scrubbed HOME and XDG_CONFIG_HOME with ZZ_TRAY=0, so the box's own
+~/.tmux.conf and ~/.config/zz/mux.conf were never read and the user's own
+servers were never touched.

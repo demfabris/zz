@@ -1,0 +1,8 @@
+# display-menu with no invoking mouse event, 2026-09-15T13:28:21Z
+# zz  /home/demfabris/dev/zz-gate-9/target/debug/zz
+# pin /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+
+mouse          -x M  -y M   zz box row/col: 1 0         pin box row/col: 1 0         rows differing: 0
+window-status  -x W  -y W   zz box row/col: 1 0         pin box row/col: 20 1        rows differing: 8
+centre         -x C  -y C   zz box row/col: 10 33       pin box row/col: 10 33       rows differing: 0
+status-line    -x C  -y S   zz box row/col: 20 33       pin box row/col: 20 33       rows differing: 0

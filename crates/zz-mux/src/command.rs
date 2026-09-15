@@ -4472,8 +4472,6 @@ impl MuxEngine {
         if let Some(commands) = parse_command_alias_group(command)? {
             validate_static_command_chain(&commands)?;
             let mut combined = Execution::default();
-            // A group carries the caller's stream for whichever member has a
-            // sink for it; a member without one never looks at it.
             let stream = command.stdin();
             for mut command in commands {
                 if let Some(stream) = stream {
@@ -8506,9 +8504,6 @@ impl MuxEngine {
         let target = self.resolve_display_message_context(context, &options)?;
         let pane = target.as_ref().and_then(|target| target.pane);
         if options.has("-I") {
-            // `cmd_display_message_exec` takes this branch before it looks at
-            // `-F` or the message, and a target it could not find leaves the
-            // command with nothing to write to rather than an error.
             let Some(pane) = pane else {
                 return Ok(Execution::default());
             };

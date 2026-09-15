@@ -1,5 +1,8 @@
 # TUI-014 attempt-04, cycle 10, modes lane 2
 
+The original lane account below describes f4b74b7d. The fix-pass section supersedes
+its lifecycle, argument coverage, footprint and proof counts.
+
 The batch was clause 2's four remaining commands: clock-mode, switch-mode,
 customize-mode and suspend-client. **Two of the four landed — clock-mode and
 switch-mode** — on a piece attempt-03 said was missing and named exactly: a
@@ -106,7 +109,8 @@ current row, and every other key is swallowed into the prompt the way
 keystroke the pin keeps it through.
 
 `switch-mode -w`'s window rows are the one cell-run residue, recorded as the
-fixture case `switch-mode-windows` with its measurement: every cell matches, but
+fixture case `switch-mode-windows` with its original single-session measurement: the later review also found
+duplicate-name row ordering differences, fixed in the fix pass below. Separately,
 the pin leaves the columns past a window row carrying the cell that drew its last
 column while zz leaves them at the default cell, so `capture-pane -e` prints the
 same reset one line later. The session rows `switch-mode` opens by default are
@@ -254,3 +258,148 @@ zz-mux and zz-protocol's own hunt_claims.
 - `mod pane_mode;` beside `mod chooser;`.
 
 Nothing else in render.rs moved, and no code was reflowed or reordered.
+
+## Fix pass: campaign/tui-modes-12
+
+Started 2026-09-15 23:17 UTC with a 150-minute wall-clock budget. Rebased onto
+1077951108aabe956104ac8de62da319aa06db4b before building and measuring. Main's
+stream cases, live-job case, client-info mask and wire additions remain present.
+
+### Lifecycle and arguments
+
+The daemon now stores a Vec<PaneModeRequest> per pane, with the top last. Opening
+an existing kind promotes its stored entry; reopening the top leaves it alone.
+Teardown pops one entry and republishes the previous surface. Format facts carry
+the stack length and top name. The count also includes a live client copy view.
+
+SendKeys intercepts the top pane mode before copy-table routing or PTY delivery.
+The deferred handler splits literal tokens into individual characters, so x can
+close a clock while the following y reaches the newly exposed pane. send-prefix
+shares that route; -K keeps the existing client key-table route. Mouse delivery
+consumes the pane mode before the terminal, closing a clock and retaining switch
+mode's recorded mouse limitation. copy-mode -q clears the pane stack before
+cancelling client copy views; clear-history and respawn also clear pane modes.
+
+Copy mode still belongs to clients. The fixture measures clock over copy, the
+next raw key, and copy over clock, and records these variants under TUI-014's
+interactive-refresh gap. This pass does not claim copy-mode ordering parity.
+
+Switch row formats now use -F in each row's context. Enter substitutes the chosen
+item into the positional command and runs it in that item's context through the
+existing chooser executor. -k and -Z now return an explicit unbuilt error; the
+fixture records the pin's accepted entry, kill-on-exit and zoom behavior. The
+pin's flag is lowercase -k, not -K. Navigation, filtering and mouse selection
+remain recorded vocabulary limitations. Tied window rows use window name, then
+session name, then window index, both for rendering and Enter's selected target.
+The duplicate-name fixture asserts the order with a plain custom format and
+records the remaining default window-row trailing-style capture difference.
+
+server-access expands its identity in the command format context before passwd
+or group lookup. The fixture asserts the formatted nobody conditional and its
+three CLI channels; its one-sided sabotage changes the formatted identity.
+
+Removed all 160 added Rust comment/doc-comment lines from the inherited diff.
+The source analysis lives here and in the original implementation account above.
+The noattr test now supplies noattr. With base_cell's clearing disabled, it fails
+with "the row lost its dim runs" (exit 101); restoring the fix passes.
+
+### Authorized zone excursions
+
+The original 104-path footprint exactly matched the review inventory before the
+rebase. Its snapshot companions are fifteen test literals and one production
+literal, not sixteen test helpers. These 24 paths extend the original run-10
+zone; the fix request authorizes them for the reasons below.
+
+- `compat/scenarios/smoke/fixtures/command-flag-errors.sh`: Mechanical command/probe totals and sentinel for three implemented commands.
+- `compat/scenarios/smoke/fixtures/command-flag-errors.tsv`: Forced flag-error inventory entries for clock-mode, switch-mode and server-access.
+- `compat/scenarios/smoke/fixtures/config-discovery-import.sh`: Mechanical unsupported sentinel now uses customize-mode.
+- `crates/zz-client-ffi/src/ffi.rs`: Mechanical mode: None in one test snapshot.
+- `crates/zz-client/src/completion.rs`: Mechanical mode: None in one test snapshot.
+- `crates/zz-client/src/status_bar.rs`: Mechanical mode: None in one test snapshot.
+- `crates/zz-daemon/src/status.rs`: Forced mode-name and stack-depth facts for clientless formats.
+- `crates/zz-mux/src/compat_manifest_tests.rs`: Mechanical command counts and consumed clock-option partition.
+- `crates/zz-mux/src/lib.rs`: Forced PaneModeRequest export for the daemon.
+- `crates/zz-mux/src/model.rs`: Mechanical mode: None in the production snapshot constructor, before daemon stamping.
+- `crates/zz-mux/tests/hunt_claims.rs`: Mechanical COMMAND_SPECS count and existing copy-mode cancellation expectations extended with the required reset-all effect.
+- `crates/zz-protocol/src/lib.rs`: Forced PaneMode export for producer and consumer.
+- `crates/zz-protocol/src/snapshot.rs`: Forced trailing defaulted PaneSnapshot.mode and payload enum for attach/resize snapshots.
+- `crates/zz-protocol/tests/hunt_claims.rs`: Mechanical mode: None in two test snapshots; all three wire pins remain 103.
+- `crates/zz-tui/src/sidebar.rs`: Mechanical mode: None in one test snapshot.
+- `crates/zz/src/control_mode.rs`: Mechanical mode: None in one GUI/control test snapshot.
+- `crates/zz/src/mux/client.rs`: Mechanical mode: None in one desktop test snapshot.
+- `crates/zz/src/workspace/sidebar.rs`: Mechanical mode: None in four GUI test snapshots.
+- `crates/zz/src/workspace/view.rs`: Mechanical mode: None in two GUI test snapshots.
+- `knowledge/designs/tmux-superset-roadmap.md`: Forced correction of the obsolete wholly-unimplemented server-access claim.
+- `knowledge/protocol/wire-protocol.md`: Required mode-field append documentation in the single unreleased v103 entry.
+- `knowledge/tmux/divergences.md`: Forced implemented-command and remaining mode/ACL scope corrections.
+- `knowledge/tmux/gaps.md`: Mechanical tmux tracker report generation.
+- `knowledge/tmux/tui-parity.md`: Mechanical TUI tracker report generation.
+
+The already-authorized command.rs now also changes copy-mode cancellation and
+the lifecycle reached by send-keys/send-prefix, as the fix request requires.
+The options.native-mode-styles record closes the two consumed clock options;
+this is an inherited record-level excursion in an authorized file. attempt-03's
+38 artifacts remain historical; attempt-04 is authorized for this pass's proof
+outputs. No GUI presentation code consumes PaneSnapshot.mode.
+
+### Fix-pass measurements
+
+The fix-prefixed .txt artifacts record each command, revision, exit status and
+result. Failed iterations and deliberate sabotage results remain alongside the
+closing runs. Final counts and any incomplete proofs are recorded below at
+close-out; the proof block in the ledger remains untouched and TUI-014 active.
+
+The first full client-roster iteration stopped on a driver error: run_on_both
+does not expand the PANE placeholder. The setup calls now use run_both, which
+does. The focused mode rerun then passed 48 assertions with eleven recorded
+cases, and the self-check passed its mode/input/access sabotages. The first
+core test run found two existing copy-mode flag tests whose expected effects
+needed the new reset-all effect; their four-test focused rerun passed after
+updating those expectations. These failed iterations are preserved.
+
+The injected-key probe also covers xy in a single token (only y reaches the
+shell), a hexadecimal ff byte, send-prefix, and a hexadecimal Escape closing
+switch mode. A separate sabotage plants x in only one underlying shell and
+requires both capture stdout and the attached screen to differ.
+
+All five core packages passed on the second full run. The daemon suite passed
+919 tests with HOME and XDG_CONFIG_HOME scrubbed. The desktop package passed,
+including all 125 CLI integration tests. Clippy first requested map_or_else and
+a boolean return from the mode-key handler; both simplifications are applied,
+and the second seven-package all-target/all-feature run passed with -D warnings.
+
+A separate headless probe found that the pin consumes send-keys while retaining
+the clock when no attached client exists. The injection path now resolves the
+callback client before dispatch, honors an explicit -c, and consumes the batch
+without a callback if no client resolves. This follows window_pane_key's c !=
+NULL test. Mouse motion without a held button is consumed without dismissing
+the clock, matching its early KEYC_TYPE_MOUSEMOVE branch.
+
+Main advanced to 0b0d2953139340c2cc69c071c44452de5362f42a with documentation only
+during the preliminary runs; the closing candidate rebases onto that revision.
+
+### Added fix-pass artifacts
+
+- `fix-build-rebased-2.txt`: the named command output or audit transcript from this pass.
+- `fix-build-rebased.txt`: the named command output or audit transcript from this pass.
+- `fix-client-focused.txt`: the named command output or audit transcript from this pass.
+- `fix-client-iteration.txt`: the named command output or audit transcript from this pass.
+- `fix-client-self-iteration.txt`: the named command output or audit transcript from this pass.
+- `fix-clippy-iteration-2.txt`: the named command output or audit transcript from this pass.
+- `fix-clippy-iteration.txt`: the named command output or audit transcript from this pass.
+- `fix-delta-list.txt`: the named command output or audit transcript from this pass.
+- `fix-fmt-after-rebase.txt`: the named command output or audit transcript from this pass.
+- `fix-fmt-iteration-2.txt`: the named command output or audit transcript from this pass.
+- `fix-fmt-iteration-3.txt`: the named command output or audit transcript from this pass.
+- `fix-fmt-iteration-4.txt`: the named command output or audit transcript from this pass.
+- `fix-fmt-iteration.txt`: the named command output or audit transcript from this pass.
+- `fix-noattr-green.txt`: the named command output or audit transcript from this pass.
+- `fix-noattr-sabotage.txt`: the named command output or audit transcript from this pass.
+- `fix-okf.txt`: the named command output or audit transcript from this pass.
+- `fix-scenario-string-hits.txt`: the named command output or audit transcript from this pass.
+- `fix-tests-copy-flag-iteration.txt`: the named command output or audit transcript from this pass.
+- `fix-tests-core-iteration-2.txt`: the named command output or audit transcript from this pass.
+- `fix-tests-core-iteration.txt`: the named command output or audit transcript from this pass.
+- `fix-tests-daemon-iteration.txt`: the named command output or audit transcript from this pass.
+- `fix-tests-zz-iteration.txt`: the named command output or audit transcript from this pass.
+- `fix-command-runner.txt`: the named command output or audit transcript from this pass.

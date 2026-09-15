@@ -1,0 +1,1 @@
+cargo runner: systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=4G flock -w 540 /tmp/zz-cargo-slot-1.lock /home/demfabris/.cargo/bin/cargo fmt --all

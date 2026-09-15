@@ -832,7 +832,7 @@ LOCK_PROGRAM='options.lock-program, accepted: the pin spawns lock-command on the
 RICH_CAPTURE='capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser'
 LOG_IDENTITY='DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. Measured 2026-09-14 on both sides: the pin names ANY tty-bearing client by that tty, including the attached terminal client whose attach-session row reads /dev/pts/<n>, and zz named none of them - it spelled every row by the device name the client sent, which for an interactive client is the hostname. That half is closed: the server log now names a client by its tty whenever it has one. What stays is the clientless CLI, which names a process that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked'
 SERVER_ACCESS='protocol.socket-acl, accepted as a permanent exclusion: the daemon socket is the invoking user at mode 0600, so zz keeps no peer identity and every other form of the command - the list, the lookups, the owner test, the flag conflicts, the deny of an entry that is not there and the no-action form - answers exactly as the pin does, measured 2026-09-15. Only admitting a second identity diverges - semantic:multi-user-socket-acl, the permanent exclusion this gap exists for: the pin stores the entry and exits 0, zz refuses it'
-SWITCH_MODE_WINDOW_ROWS='clients.interactive-refresh, TUI-014: the window rows of switch-mode -w. Every cell matches; what differs is which cell the row run ends on. The pin leaves the cells past a window row carrying the run that drew its last column - `#[dim]#{pane_title}#[default]` ends the row and the columns after it keep that cell - so capture-pane -e prints no reset after `ptitle` and prints `#[0m` at the head of the prompt row instead. zz leaves those columns at the default cell, so the reset lands at the end of the window row. Measured 2026-09-15 at 80x24; the session rows switch-mode opens by default are identical on all five channels and are asserted above as switch-mode'
+SWITCH_MODE_WINDOW_ROWS='clients.interactive-refresh, TUI-014: the window rows of switch-mode -w. The default window-row capture retains a style-tail difference; duplicate-name ordering is asserted separately with a plain format. The pin leaves the cells past a window row carrying the run that drew its last column - `#[dim]#{pane_title}#[default]` ends the row and the columns after it keep that cell - so capture-pane -e prints no reset after `ptitle` and prints `#[0m` at the head of the prompt row instead. zz leaves those columns at the default cell, so the reset lands at the end of the window row. Measured 2026-09-15 at 80x24; the session rows switch-mode opens by default are identical on all five channels and are asserted above as switch-mode'
 CLIENT_TREE_CLIENTLESS='clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer, while the pin exits 0 with no output and, alone among the three, opens no mode either: cmd_choose_tree_exec returns CMD_RETURN_NORMAL before window_pane_set_mode when server_client_how_many() == 0 (cmd-choose-tree.c), so the exit status and the error text are what diverge here, measured 2026-09-14. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open'
 
 refresh_client_cases() {
@@ -1047,6 +1047,15 @@ client_tool_cases() {
   CASE_NEEDLE_MODE=1
   case_run switch-mode-windows record "$SWITCH_MODE_WINDOW_ROWS" -- switch-mode -w -t PANE
   restore_case switch-mode-windows-closed
+  run_on_both new-session -d -s alpha -n "$WINDOW_NAME" -x 80 -y 24 "$INNER_SHELL"
+  run_on_both new-session -d -s zulu -n "$WINDOW_NAME" -x 80 -y 24 "$INNER_SHELL"
+  case_run switch-mode-duplicate-windows record "$SWITCH_MODE_WINDOW_ROWS" -- switch-mode -w -t PANE
+  restore_case switch-mode-duplicate-windows-closed
+  case_run switch-mode-window-order same '' -- switch-mode -w -F '#{session_name}:#{window_name}' -t PANE
+  restore_case switch-mode-window-order-closed
+  run_on_both kill-session -t '=alpha'
+  run_on_both kill-session -t '=zulu'
+  restore_case switch-mode-window-order-restored
   case_run server-access-bare same '' -- server-access
   case_run server-access-formatted same '' -- server-access '#{?#{==:1,1},nobody,root}'
   case_run server-access-user same '' -- server-access -w zzcc-nobody

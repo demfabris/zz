@@ -1396,12 +1396,15 @@ fn copy_mode_stock_flags_preserve_tmux_branch_order_and_scroll_exit() {
     let quit_with_dead_flag = engine
         .execute(&mut context, &command("copy-mode", &["-qu"]))
         .unwrap();
-    let cancel = [MuxEffect::TerminalView {
-        pane,
-        action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
-        target_client: None,
-        require_mode: false,
-    }];
+    let cancel = [
+        MuxEffect::PaneModeChanged { pane, mode: None },
+        MuxEffect::TerminalView {
+            pane,
+            action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
+            target_client: None,
+            require_mode: false,
+        },
+    ];
     assert_eq!(quit.effects, cancel);
     assert_eq!(quit_with_dead_flag.effects, cancel);
 
@@ -1415,12 +1418,15 @@ fn copy_mode_stock_flags_preserve_tmux_branch_order_and_scroll_exit() {
         .unwrap();
     assert_eq!(
         quit_mouse.effects,
-        [MuxEffect::TerminalView {
-            pane,
-            action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
-            target_client: None,
-            require_mode: false,
-        }]
+        [
+            MuxEffect::PaneModeChanged { pane, mode: None },
+            MuxEffect::TerminalView {
+                pane,
+                action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
+                target_client: None,
+                require_mode: false,
+            }
+        ]
     );
 }
 
@@ -1507,12 +1513,15 @@ fn copy_mode_composes_hide_position_with_scroll_exit() {
     );
     assert_eq!(
         enter(&mut engine, &mut context, &["-qH"]),
-        [MuxEffect::TerminalView {
-            pane,
-            action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
-            target_client: None,
-            require_mode: false,
-        }]
+        [
+            MuxEffect::PaneModeChanged { pane, mode: None },
+            MuxEffect::TerminalView {
+                pane,
+                action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
+                target_client: None,
+                require_mode: false,
+            }
+        ]
     );
 }
 

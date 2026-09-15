@@ -1,0 +1,34 @@
+   Compiling zz-terminal v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-terminal)
+   Compiling zz-protocol v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-protocol)
+   Compiling zz-client v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-client)
+   Compiling zz-mux v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-mux)
+   Compiling zz-browser v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-browser)
+   Compiling zz-ui v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-ui)
+   Compiling zz-daemon v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-daemon)
+error[E0433]: cannot find type `TerminalViewAction` in this scope
+    --> crates/zz-daemon/src/daemon.rs:8468:45
+     |
+8468 |                         if matches!(action, TerminalViewAction::ClearHistory)
+     |                                             ^^^^^^^^^^^^^^^^^^ use of undeclared type `TerminalViewAction`
+     |
+help: a struct with a similar name exists
+     |
+8468 -                         if matches!(action, TerminalViewAction::ClearHistory)
+8468 +                         if matches!(action, TerminalGeneration::ClearHistory)
+     |
+
+error[E0433]: cannot find type `TerminalViewAction` in this scope
+    --> crates/zz-daemon/src/daemon.rs:8519:33
+     |
+8519 | ...                   TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::Cancel)
+     |                       ^^^^^^^^^^^^^^^^^^ use of undeclared type `TerminalViewAction`
+     |
+help: a struct with a similar name exists
+     |
+8519 -                                 TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::Cancel)
+8519 +                                 TerminalGeneration::CopyMode(zz_terminal::CopyModeAction::Cancel)
+     |
+
+For more information about this error, try `rustc --explain E0433`.
+error: could not compile `zz-daemon` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...

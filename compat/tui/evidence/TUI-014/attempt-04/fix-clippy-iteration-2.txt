@@ -1,0 +1,14 @@
+tip=8dc210d953480714b42a669f6643998276b86caf
+command=cargo clippy -p zz-protocol -p zz-mux -p zz-tui -p zz-client -p zz-client-ffi -p zz-daemon -p zz --all-targets --all-features -- -D warnings 
+cargo runner: systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=4G flock -w 540 /tmp/zz-cargo-slot-0.lock /home/demfabris/.cargo/bin/cargo clippy -p zz-protocol -p zz-mux -p zz-tui -p zz-client -p zz-client-ffi -p zz-daemon -p zz --all-targets --all-features --jobs 3 -- -D warnings
+    Checking zz-daemon v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-daemon)
+    Checking zz-mux v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-mux)
+    Checking zz-protocol v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-protocol)
+    Checking zz-config v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-config)
+    Checking zz-tui v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-tui)
+    Checking zz-client-ffi v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-client-ffi)
+    Checking zz v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz)
+    Checking zz-client v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-client)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 15.10s
+
+exit=0 elapsed=16s

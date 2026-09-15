@@ -1,0 +1,40 @@
+   Compiling collections v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling zz-protocol v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-protocol)
+   Compiling zlog v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling wait-timeout v0.2.1
+   Compiling rusty-fork v0.3.1
+   Compiling ztracing v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling logos-codegen v0.14.4
+   Compiling proptest-macro v0.5.0 (https://github.com/proptest-rs/proptest?rev=3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b#3dca198a)
+   Compiling gpui v0.2.2 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling perf v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling rand_xorshift v0.4.0
+   Compiling http_client v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling proptest v1.10.0 (https://github.com/proptest-rs/proptest?rev=3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b#3dca198a)
+   Compiling util_macros v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling logos-derive v0.14.4
+   Compiling sum_tree v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling zz-client v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-client)
+   Compiling logos v0.14.4
+   Compiling merman-core v0.6.2
+   Compiling zz-mux v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-mux)
+   Compiling zz-daemon v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-daemon)
+   Compiling gpui_wgpu v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling merman-render v0.6.2
+   Compiling zz-browser v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-browser)
+   Compiling gpui_linux v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling merman v0.6.2
+   Compiling zz-ui v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-ui)
+   Compiling zz-chrome-import v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-chrome-import)
+   Compiling zz-config v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-config)
+   Compiling gpui_platform v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling zz-tui v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-tui)
+   Compiling zz v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 51s
+     Running tests/cli_binary.rs (target/debug/deps/cli_binary-b8e484229b10a514)
+
+running 1 test
+test daemon_autostart::caller_stream_source_alias_group_applies_once_and_reports_the_spent_reader ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 125 filtered out; finished in 0.99s
+

@@ -52,7 +52,7 @@ sink, and both the CLI and the daemon ask it rather than matching on names of th
 
 | sink | commands | what the payload becomes | bytes |
 |---|---|---|---|
-| `Argument` | `load-buffer -`, `send-text -`, `agent-send -` | the command's own text argument, appended by the caller after the argument boundary | `load-buffer` binary, the other two UTF-8 |
+| `Argument` | `load-buffer -`, `send-text -`, `agent-send -` | the command's own text argument, appended after the argument boundary | `load-buffer` binary, the other two UTF-8 |
 | `Config` | `source-file -` | a configuration file named `-`, parsed and applied in place, its diagnostics spelled against `-` | UTF-8 |
 | `PaneInput` | `display-message -I`, `split-window -I` | bytes written into a PTY-free pane's parser, as if a child had printed them | binary |
 
@@ -95,13 +95,16 @@ server started.
 
 # What the existing three become
 
-Nothing about `load-buffer -`, `send-text -` and `agent-send -` changes for a user: they are the
-`Argument` sink, named by the one resolver instead of by three copies of a `match` in the CLI. Their
-payload is still appended to the command's arguments by the caller, because for those three commands
-the stream *is* the argument the command would otherwise have been given on the command line, and an
-argument that is already correct does not become more correct by travelling in a second field. The
-resolver is what makes this one channel rather than two: there is one place that decides a command
-reads the caller's stdin, one cap, and one carrier type.
+Direct `load-buffer -`, `send-text -` and `agent-send -` calls still append their payload to the
+command arguments. The CLI resolves an alias group's first stream sink in member order and keeps
+its payload on the group's stdin carrier. After preparing the members, the daemon appends raw
+Argument bytes to the first reader's arguments with the same `append_stdin_payload` helper the
+CLI uses. It does not format those bytes into the command body: arbitrary bytes and the member's
+argument boundary must survive preparation.
+
+A later `load-buffer -` reports `Bad file descriptor: -` and raises the caller's exit status to 1,
+while following members still run, matching the pin's asynchronous read completion. A later
+`source-file -` receives `SourceStream::Spent` through the mux's existing source-file effect.
 
 # What this does not do
 

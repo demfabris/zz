@@ -6686,6 +6686,21 @@ impl Shared {
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         let canonical = canonical_command(&command.name);
+        let argument_sink =
+            command_stdin_sink(canonical, &command.args).is_some_and(CommandStdinSink::is_argument);
+        if argument_sink && command.stdin_was_spent() {
+            self.route_source_error(client, kind, context.pane, &spent_source_stream_error());
+            return Err(DaemonError::CommandExit {
+                output: RawText::default(),
+                exit_code: 1,
+            });
+        }
+        let streamed_command = command.stdin().filter(|_| argument_sink).map(|stdin| {
+            let mut command = command.clone();
+            append_stdin_payload(canonical, &mut command.args, stdin.clone());
+            command
+        });
+        let command = streamed_command.as_ref().unwrap_or(command);
         if (daemon_command_dispatch(canonical).is_some() || canonical == "display-panes")
             && let Some(spec) = zz_protocol::catalog_command_spec(canonical)
             && spec.uses_tmux_option_grammar()
@@ -12131,8 +12146,7 @@ impl Shared {
                 failed_group = None;
             }
             if carried_a_stream
-                && command_stdin_sink(canonical_command(&command.name), &command.args)
-                    .is_some_and(|sink| !sink.is_argument())
+                && command_stdin_sink(canonical_command(&command.name), &command.args).is_some()
             {
                 if let Some(stdin) = stdin.take() {
                     command.set_stdin(stdin);
@@ -38916,6 +38930,40 @@ pub fn command_stdin_sink(canonical_name: &str, args: &[RawText]) -> Option<Comm
         }
         _ => None,
     }
+}
+
+fn stdin_payload_has_argument_boundary(canonical_name: &str, arguments: &[RawText]) -> bool {
+    if canonical_name == "load-buffer" {
+        return true;
+    }
+    let Some(spec) = zz_protocol::catalog_command_spec(canonical_name) else {
+        return false;
+    };
+    let mut index = 0;
+    while let Some(argument) = arguments.get(index) {
+        if argument == "--" {
+            return true;
+        }
+        if !argument.starts_with('-') || argument == "-" {
+            return false;
+        }
+        let consumes_next = spec
+            .option(argument)
+            .is_some_and(|option| option.value.is_some());
+        index += if consumes_next { 2 } else { 1 };
+    }
+    false
+}
+
+pub fn append_stdin_payload(
+    canonical_name: &str,
+    arguments: &mut Vec<RawText>,
+    payload: impl Into<RawText>,
+) {
+    if !stdin_payload_has_argument_boundary(canonical_name, arguments) {
+        arguments.push("--".into());
+    }
+    arguments.push(payload.into());
 }
 
 fn source_file_reads_stdin(args: &[RawText]) -> bool {

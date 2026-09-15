@@ -98,7 +98,7 @@ pub(super) struct ModeTree {
 }
 
 #[derive(Clone, PartialEq)]
-enum Paint {
+pub(super) enum Paint {
     Style(TmuxStyle),
     Pane {
         style: PackedStyle,
@@ -109,19 +109,19 @@ enum Paint {
 }
 
 #[derive(Clone)]
-struct Cell {
+pub(super) struct Cell {
     glyph: String,
     width: u8,
     paint: Paint,
 }
 
-struct Grid {
+pub(super) struct Grid {
     width: u16,
     height: u16,
     cells: Vec<Cell>,
 }
 
-fn plain() -> TmuxStyle {
+pub(super) fn plain() -> TmuxStyle {
     TmuxStyle {
         fg: Some(TmuxColour::Default),
         bg: Some(TmuxColour::Default),
@@ -141,7 +141,7 @@ fn theme(name: &str) -> Option<TmuxColour> {
     parse_style(&format!("fg={name}")).and_then(|style| style.fg)
 }
 
-fn resolved(style: &TmuxStyle, theme: &ThemeColours) -> TmuxStyle {
+pub(super) fn resolved(style: &TmuxStyle, theme: &ThemeColours) -> TmuxStyle {
     let mut style = style.clone();
     for slot in [&mut style.fg, &mut style.bg, &mut style.us] {
         if let Some(TmuxColour::Theme(index)) = slot
@@ -220,7 +220,7 @@ fn narrow(value: usize) -> u16 {
 }
 
 impl Grid {
-    fn new(width: u16, height: u16) -> Self {
+    pub(super) fn new(width: u16, height: u16) -> Self {
         let blank = Cell {
             glyph: " ".to_owned(),
             width: 1,
@@ -282,7 +282,7 @@ impl Grid {
         }
     }
 
-    fn text(&mut self, x: u16, y: u16, text: &str, paint: &Paint, limit: u16) -> u16 {
+    pub(super) fn text(&mut self, x: u16, y: u16, text: &str, paint: &Paint, limit: u16) -> u16 {
         let mut used = 0_u16;
         for character in text.chars() {
             let Some(width) = character.width().filter(|width| *width > 0) else {
@@ -305,13 +305,13 @@ impl Grid {
         used
     }
 
-    fn fill(&mut self, x: u16, y: u16, count: u16, paint: &Paint) {
+    pub(super) fn fill(&mut self, x: u16, y: u16, count: u16, paint: &Paint) {
         for offset in 0..count {
             self.set(x.saturating_add(offset), y, " ", 1, paint);
         }
     }
 
-    fn markup(
+    pub(super) fn markup(
         &mut self,
         x: u16,
         y: u16,
@@ -474,14 +474,32 @@ impl Grid {
         theme: &ThemeColours,
         appearance: &TerminalAppearance,
     ) {
+        self.emit_into(output, x, y, theme, appearance, Trailing::Client);
+    }
+
+    /// `erase_row` is the full-width form, which ends a row with `EL` the way a
+    /// mode drawn over the whole client can. A grid drawn inside a pane's rect
+    /// pads with spaces instead, because `EL` would clear cells past the rect.
+    pub(super) fn emit_into(
+        &self,
+        output: &mut Vec<u8>,
+        x: u16,
+        y: u16,
+        theme: &ThemeColours,
+        appearance: &TerminalAppearance,
+        trailing: Trailing,
+    ) {
         let width = usize::from(self.width);
         for row in 0..self.height {
             write_cursor_position(output, x, y + row);
             let line = &self.cells[usize::from(row) * width..(usize::from(row) + 1) * width];
-            let used = line
-                .iter()
-                .rposition(|cell| !erasable(cell))
-                .map_or(0, |index| index + 1);
+            let used = match trailing {
+                Trailing::Client => line
+                    .iter()
+                    .rposition(|cell| !erasable(cell))
+                    .map_or(0, |index| index + 1),
+                Trailing::Pane { .. } => clearable_from(line),
+            };
             let mut current: Option<&Paint> = None;
             for cell in &line[..used] {
                 if cell.width == 0 {
@@ -514,12 +532,88 @@ impl Grid {
                 }
                 output.extend_from_slice(cell.glyph.as_bytes());
             }
-            output.extend_from_slice(b"\x1b[0m");
-            if used < width {
-                output.extend_from_slice(b"\x1b[K");
+            if used == width {
+                output.extend_from_slice(b"\x1b[0m");
+                continue;
+            }
+            match trailing {
+                Trailing::Client => {
+                    output.extend_from_slice(b"\x1b[0m");
+                    output.extend_from_slice(b"\x1b[K");
+                }
+                Trailing::Pane { reaches_edge } => {
+                    // `screen_write_clearendofline` carries only a background,
+                    // so the tail is written the way the pin writes it: its own
+                    // paint, then `EL` when the rect owns the rest of the row
+                    // and explicit cells when it does not.
+                    match &line[used].paint {
+                        Paint::Style(style) => write_tmux_sgr(
+                            output,
+                            &resolved(style, theme),
+                            appearance.foreground,
+                            appearance.background,
+                            appearance,
+                        ),
+                        Paint::Pane {
+                            style,
+                            reverse,
+                            foreground,
+                            background,
+                        } => write_sgr(
+                            output,
+                            *style,
+                            *reverse,
+                            *foreground,
+                            *background,
+                            &TmuxStyle::default(),
+                        ),
+                    }
+                    if reaches_edge {
+                        output.extend_from_slice(b"\x1b[K");
+                    } else {
+                        output.extend(std::iter::repeat_n(b' ', width - used));
+                    }
+                    output.extend_from_slice(b"\x1b[0m");
+                }
             }
         }
     }
+}
+
+/// How a grid's trailing blank cells are written.
+#[derive(Clone, Copy)]
+pub(super) enum Trailing {
+    /// The mode tree owns the whole client, so a blank tail is `EL` over the
+    /// terminal's own background.
+    Client,
+    /// A pane's rect. `reaches_edge` is whether the rect ends at the
+    /// terminal's right edge, which is the only case `EL` may be used in.
+    Pane { reaches_edge: bool },
+}
+
+/// The first cell of the trailing run `screen_write_clearendofline` could have
+/// left: blank cells with no attributes and no foreground of their own, all
+/// carrying the same paint, since a clear carries only a background.
+fn clearable_from(line: &[Cell]) -> usize {
+    let mut used = line.len();
+    while used > 0 {
+        let cell = &line[used - 1];
+        if !clearable(cell) {
+            break;
+        }
+        if used < line.len() && line[used].paint != cell.paint {
+            break;
+        }
+        used -= 1;
+    }
+    used
+}
+
+fn clearable(cell: &Cell) -> bool {
+    blank_style(cell).is_some_and(|style| {
+        matches!(style.fg, None | Some(TmuxColour::Default))
+            && style.attributes == plain().attributes
+    })
 }
 
 fn blank_style(cell: &Cell) -> Option<&TmuxStyle> {

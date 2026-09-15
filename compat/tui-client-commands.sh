@@ -26,8 +26,12 @@
 #                                                               four clock-mode-style faces
 # customize-mode [-kNZ]     customize mode on the pane        hard-rejected                  CHILD TUI-014
 #   [-F -f -t]
-# switch-mode [-kswZ]       switches an open mode in place    hard-rejected                  CHILD TUI-014
-#   [-F -t] [command]
+# switch-mode [-kswZ]       window_switch_mode on the target  the same pane mode, its rows   PROVED (the mode it
+#   [-F -t] [command]         pane: one row per session or       expanded from the same         opens and its Escape
+#                             window over a (search) prompt      default format, over the       teardown) + DECLARED
+#                                                                same prompt                    (the mode's own
+#                                                                                               movement, Enter target
+#                                                                                               and incremental filter)
 # suspend-client [-t]       SIGTSTP to the client process     hard-rejected                  CHILD TUI-014
 # server-access [-adglrw]   socket access control list, and    every lookup, ordering and     PROVED (-l and every
 #   [-t] [user|group]         the lookups, orderings and         refusal; the socket admits     refusal) + DECLARED
@@ -810,6 +814,7 @@ LOCK_PROGRAM='options.lock-program, accepted: the pin spawns lock-command on the
 RICH_CAPTURE='capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser'
 LOG_IDENTITY='DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. Measured 2026-09-14 on both sides: the pin names ANY tty-bearing client by that tty, including the attached terminal client whose attach-session row reads /dev/pts/<n>, and zz named none of them - it spelled every row by the device name the client sent, which for an interactive client is the hostname. That half is closed: the server log now names a client by its tty whenever it has one. What stays is the clientless CLI, which names a process that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked'
 SERVER_ACCESS='protocol.socket-acl, accepted as a permanent exclusion: the daemon socket is the invoking user at mode 0600, so zz keeps no peer identity and every other form of the command - the list, the lookups, the owner test, the flag conflicts, the deny of an entry that is not there and the no-action form - answers exactly as the pin does, measured 2026-09-15. Only admitting a second identity diverges - semantic:multi-user-socket-acl, the permanent exclusion this gap exists for: the pin stores the entry and exits 0, zz refuses it'
+SWITCH_MODE_WINDOW_ROWS='clients.interactive-refresh, TUI-014: the window rows of switch-mode -w. Every cell matches; what differs is which cell the row run ends on. The pin leaves the cells past a window row carrying the run that drew its last column - `#[dim]#{pane_title}#[default]` ends the row and the columns after it keep that cell - so capture-pane -e prints no reset after `ptitle` and prints `#[0m` at the head of the prompt row instead. zz leaves those columns at the default cell, so the reset lands at the end of the window row. Measured 2026-09-15 at 80x24; the session rows switch-mode opens by default are identical on all five channels and are asserted above as switch-mode'
 CLIENT_TREE_CLIENTLESS='clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer, while the pin exits 0 with no output and, alone among the three, opens no mode either: cmd_choose_tree_exec returns CMD_RETURN_NORMAL before window_pane_set_mode when server_client_how_many() == 0 (cmd-choose-tree.c), so the exit status and the error text are what diverge here, measured 2026-09-14. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open'
 
 refresh_client_cases() {
@@ -988,8 +993,12 @@ client_tool_cases() {
   CASE_NEEDLE_MODE=1
   case_run customize-mode-open record "$NATIVE_CLIENT_TOOLS" -- customize-mode -t PANE
   restore_case customize-mode-closed
-  case_run switch-mode record "$NATIVE_CLIENT_TOOLS" -- switch-mode -t PANE
+  CASE_NEEDLE_MODE=1
+  case_run switch-mode same '' -- switch-mode -t PANE
   restore_case switch-mode-closed
+  CASE_NEEDLE_MODE=1
+  case_run switch-mode-windows record "$SWITCH_MODE_WINDOW_ROWS" -- switch-mode -w -t PANE
+  restore_case switch-mode-windows-closed
   case_run server-access-bare same '' -- server-access
   case_run server-access-user same '' -- server-access -w zzcc-nobody
   case_run server-access-list same '' -- server-access -l
@@ -1231,6 +1240,19 @@ run_self_check() {
   tmux_outer_command send-keys -t "=$OUTER_SESSION:zz" q ||
     die 'the outer tmux refused send-keys'
   wait_for 'the one-sided clock ended' pane_in_mode zz 0
+
+  # the same for the other pane mode, which is not a clock: window_switch_mode
+  # on the zz pane alone, whose rows and prompt are a different surface over the
+  # same per-pane state. Escape ends it, which is the one key window_switch_key
+  # answers with window_pane_reset_mode rather than swallowing into its prompt.
+  zz_command switch-mode -t "$(active_pane zz)" >/dev/null || die 'zz refused switch-mode'
+  wait_for 'the one-sided switch mode' pane_in_mode zz 1
+  self_check_run switch-sabotage display-message -p -t PANE '#{window_index}.#{pane_index}'
+  self_check_expect 'screen and state, a switch mode on one side only' \
+    exit=0 stdout=0 stderr=0 screen=1 state=1
+  tmux_outer_command send-keys -t "=$OUTER_SESSION:zz" Escape ||
+    die 'the outer tmux refused send-keys'
+  wait_for 'the one-sided switch mode ended' pane_in_mode zz 0
 
   # the attached screen: one space typed at the zz client's prompt. capture-pane
   # trims trailing blanks, so this reaches the comparison through the cursor,

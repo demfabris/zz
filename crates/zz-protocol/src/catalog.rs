@@ -551,6 +551,10 @@ pub static COMMAND_ARGS_PARSE_SPECS: &[CommandArgsParseSpec] = &[
         name: "set-window-option",
         rule: CommandArgsParseRule::SetOptionValue,
     },
+    CommandArgsParseSpec {
+        name: "switch-mode",
+        rule: CommandArgsParseRule::CommandsOrString,
+    },
 ];
 
 pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] = &[
@@ -567,6 +571,7 @@ pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] = &[
     "set-hook",
     "set-option",
     "set-window-option",
+    "switch-mode",
 ];
 
 use CommandValueKind::{
@@ -733,7 +738,6 @@ pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
     "linkw",
     "unlink-window",
     "unlinkw",
-    "switch-mode",
 ];
 
 static UNIMPLEMENTED_TMUX_COMMAND_SPECS: &[CommandSpec] = &[
@@ -815,22 +819,6 @@ static UNIMPLEMENTED_TMUX_COMMAND_SPECS: &[CommandSpec] = &[
         usage: "[-t target-client]",
         options: &[CommandOptionSpec::unsupported_value("-t")],
         positionals: &[],
-        variadic: None,
-    },
-    CommandSpec {
-        name: "switch-mode",
-        aliases: &[],
-        description: "Unsupported tmux command",
-        usage: "[-kswZ] [-F format] [-t target-pane] [command]",
-        options: &[
-            CommandOptionSpec::unsupported_value("-F"),
-            CommandOptionSpec::unsupported_flag("-Z"),
-            CommandOptionSpec::unsupported_flag("-k"),
-            CommandOptionSpec::unsupported_flag("-s"),
-            CommandOptionSpec::unsupported_value("-t"),
-            CommandOptionSpec::unsupported_flag("-w"),
-        ],
-        positionals: &[FreeForm],
         variadic: None,
     },
     CommandSpec {
@@ -2485,6 +2473,22 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         variadic: None,
     },
     CommandSpec {
+        name: "switch-mode",
+        aliases: &[],
+        description: "Open the switch mode in a pane",
+        usage: "[-kswZ] [-F format] [-t target-pane] [command]",
+        options: &[
+            CommandOptionSpec::value("-F", FreeForm, "row format"),
+            CommandOptionSpec::flag("-Z", "zoom the pane while the mode is open"),
+            CommandOptionSpec::flag("-k", "kill the pane when the mode ends"),
+            CommandOptionSpec::flag("-s", "list sessions"),
+            CommandOptionSpec::value("-t", Pane, "target pane"),
+            CommandOptionSpec::flag("-w", "list windows"),
+        ],
+        positionals: &[FreeForm],
+        variadic: None,
+    },
+    CommandSpec {
         name: "bind-key",
         aliases: &["bind"],
         description: "Bind a key to a command",
@@ -3128,14 +3132,14 @@ mod tests {
                 usage_overrides.insert(spec.name);
             }
         }
-        assert_eq!(implemented, 86);
+        assert_eq!(implemented, 87);
         assert_eq!(aliases, 74);
-        assert_eq!(flag_shapes.values().sum::<usize>(), 522);
+        assert_eq!(flag_shapes.values().sum::<usize>(), 528);
         assert_eq!(
             flag_shapes,
-            BTreeMap::from([("none", 293), ("optional", 8), ("required", 221)])
+            BTreeMap::from([("none", 297), ("optional", 8), ("required", 223)])
         );
-        assert_eq!((supported, unsupported), (497, 25));
+        assert_eq!((supported, unsupported), (503, 25));
         assert_eq!(usage_overrides.len(), 21);
         assert_eq!(
             usage_overrides,
@@ -3155,7 +3159,7 @@ mod tests {
             .into_iter()
             .map(|command| (command.name.clone(), command))
             .collect::<BTreeMap<_, _>>();
-        assert_eq!(UNIMPLEMENTED_TMUX_COMMAND_SPECS.len(), 6);
+        assert_eq!(UNIMPLEMENTED_TMUX_COMMAND_SPECS.len(), 5);
         for spec in UNIMPLEMENTED_TMUX_COMMAND_SPECS {
             let command = &oracle[spec.name];
             assert_eq!(spec.aliases, command.aliases, "aliases for {}", spec.name);
@@ -4412,6 +4416,7 @@ mod tests {
             "display-panes",
             "clear-history",
             "clock-mode",
+            "switch-mode",
             "bind-key",
             "unbind-key",
             "list-keys",

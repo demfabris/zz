@@ -82,5 +82,6 @@ start-server	start	-	@EMPTY@
 swap-pane	swapp	-s	[-dDUZ] [-s src-pane] [-t dst-pane]
 swap-window	swapw	-s	[-d] [-s src-window] [-t dst-window]
 switch-client	switchc	-O	[-ElnprZ] [-c target-client] [-t target-session] [-T key-table] [-O order]
+switch-mode	-	-F	[-kswZ] [-F format] [-t target-pane] [command]
 unbind-key	unbind	-T	[-anq] [-T key-table] key
 wait-for	wait	-	[-L|-S|-U] channel

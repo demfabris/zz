@@ -634,10 +634,7 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
     ),
     ("select-pane", "[-DdeLlMmRUZ] [-T title] [-t target-pane]"),
     ("show-options", "[-AgHpqsvw] [-t target-pane] [option]"),
-    (
-        "server-access",
-        "[-adglrw] [-t target-pane] [user|group]",
-    ),
+    ("server-access", "[-adglrw] [-t target-pane] [user|group]"),
     (
         "split-window",
         "[-bdefhIklPvWZ] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",

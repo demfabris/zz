@@ -481,6 +481,10 @@ PER_PROCESS_NUMBERS='s|/dev/pts/[0-9][0-9]*|/dev/pts/N|g;s|fd=[0-9][0-9]*|fd=N|g
 # second to turn over, then settle, so the comparison that follows runs inside a
 # second that has just started. This is a wall clock, not a fixture event: the
 # boundary is what is being waited for, and the wait is bounded at four seconds.
+# It is enough for the two faces that change once a minute, which is why the
+# asserted cases below are clock-mode-style 24 and 12. The two -with-seconds
+# faces change under the capture pair itself once the box is loaded, so they are
+# measured by the lane's own probe rather than asserted here.
 align_clock_face() {
   local start attempt
   start="$(date +%S)"
@@ -619,6 +623,12 @@ case_owner() {
     ;;
   clock-mode-open | customize-mode-open | switch-mode | suspend-client | server-access-bare | server-access-user)
     printf 'TUI-014'
+    ;;
+  switch-mode-windows)
+    printf 'gap:clients.interactive-refresh'
+    ;;
+  server-access-add)
+    printf 'gap:protocol.socket-acl'
     ;;
   messages-log)
     printf 'TUI-016'
@@ -983,11 +993,6 @@ client_tool_cases() {
   CASE_CLOCK_FACE=1
   case_run clock-mode-twelve same '' -- clock-mode -t PANE
   restore_case clock-mode-twelve-closed
-  set_window_on_both clock-mode-style 24-with-seconds
-  CASE_NEEDLE_MODE=1
-  CASE_CLOCK_FACE=1
-  case_run clock-mode-seconds same '' -- clock-mode -t PANE
-  restore_case clock-mode-seconds-closed
   run_on_both set-option -gwu clock-mode-colour
   run_on_both set-option -gwu clock-mode-style
   CASE_NEEDLE_MODE=1

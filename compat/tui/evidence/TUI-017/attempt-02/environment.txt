@@ -1,0 +1,18 @@
+TUI-017 attempt-02 environment
+2026-09-15T14:05:36-03:00
+Linux ubuntu 7.0.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 04:26:38 UTC 2026 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 26.04.1 LTS"
+NAME="Ubuntu"
+repo: /home/demfabris/dev/zz-tui-capture-10
+branch: campaign/tui-capture-10
+base: 287e381563fa060de594db35f58cac2a9fbc4f9f (origin/main, unmoved at every poll)
+landing: 15c44069727938dce0960a28234da1e2f7b79371
+zz: /home/demfabris/dev/zz-tui-capture-10/target/debug/zz
+-rwxrwxr-x 2 demfabris demfabris 866555896 Sep 15 13:00 target/debug/zz
+tmux next-3.8
+pin revision: d77c9dc6aa021e4bc61f0da128c591af695e6466
+ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins
+bash: 5.3.9(1)-release
+python: Python 3.14.4
+locale: en_US.UTF-8

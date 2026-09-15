@@ -390,10 +390,6 @@ impl Renderer {
             }
             self.last_title.clone_from(&model.status.title);
         }
-        if force {
-            clear_screen(&mut self.output, model.appearance.background);
-        }
-
         if model.choose_tree.is_some() || model.choose_buffer.is_some() {
             match self.paint_mode_tree(model) {
                 chooser::ModeTreePaint::Painted(cursor) => {
@@ -413,6 +409,9 @@ impl Renderer {
                 }
             }
         } else {
+            if force {
+                clear_screen(&mut self.output, model.appearance.background);
+            }
             self.paint_workspace(model, force);
             if model.sidebar_visible() {
                 self.paint_sidebar(model, force);
@@ -4574,6 +4573,96 @@ mod tests {
         assert_eq!(chooser_key_cell("", 6), "      ");
         assert_eq!(chooser_key_cell("", 0), "");
         assert_eq!(chooser_key_cell("0", 0), "");
+    }
+
+    #[test]
+    fn forced_repaints_preserve_a_chooser_until_its_presentation_arrives() {
+        let mut model = block_model(60, 12);
+        model.status.rows = vec!["CHOOSER-STATUS".to_owned()];
+        model.status.customized = true;
+        model.choose_tree = Some(zz_protocol::ChooseTreeState {
+            items: ["alpha", "beta"]
+                .into_iter()
+                .enumerate()
+                .map(|(index, name)| zz_protocol::ChooseTreeItem {
+                    label: name.to_owned(),
+                    detail: String::new(),
+                    target: zz_protocol::ChooseTreeTarget::Session(zz_protocol::SessionId(
+                        index as u64,
+                    )),
+                    depth: 0,
+                    flags: 0,
+                    pane_kind: None,
+                    key: index.to_string(),
+                    text: String::new(),
+                })
+                .collect(),
+            search: None,
+            selected: 1,
+            kind: zz_protocol::ChooseTreeKind::Windows,
+            filter_no_matches: false,
+            prompt: String::new(),
+            help: false,
+        });
+        let presentation = zz_protocol::ChooserPresentation {
+            selected: 1,
+            rows: ["alpha", "beta"]
+                .into_iter()
+                .map(|name| zz_protocol::ChooserRow {
+                    name: name.to_owned(),
+                    ..Default::default()
+                })
+                .collect(),
+            sort: "index".to_owned(),
+            view: "preview".to_owned(),
+            filter: false,
+            selection_style: String::new(),
+            border_style: String::new(),
+            prompt_style: String::new(),
+            preview_size: zz_protocol::ChooserPreviewSize::Off,
+            preview: None,
+        };
+        let (send, receive) = std::sync::mpsc::channel();
+        let mut renderer = Renderer::with_sink(Box::new(move |bytes| {
+            send.send(bytes.to_vec()).unwrap();
+            Ok(())
+        }));
+        let read_paint = || {
+            String::from_utf8(
+                receive
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        for missing in [false, true] {
+            model.chooser_presentation = Some(presentation.clone());
+            renderer.paint(&model, true).unwrap();
+            let complete = read_paint();
+            assert!(complete.contains("alpha"), "{complete:?}");
+            assert!(complete.contains("beta"), "{complete:?}");
+            assert!(complete.contains("CHOOSER-STATUS"), "{complete:?}");
+
+            if missing {
+                model.chooser_presentation = None;
+            } else {
+                model.chooser_presentation.as_mut().unwrap().selected = 0;
+            }
+            renderer.paint(&model, true).unwrap();
+            let pending = read_paint();
+            assert!(!pending.contains("\x1b[2J"), "{pending:?}");
+            assert!(pending.contains("\x1b[2;1H\x1b[?25l"), "{pending:?}");
+        }
+        model.chooser_presentation = Some(presentation);
+        renderer.paint(&model, true).unwrap();
+        let restored = read_paint();
+        assert!(restored.contains("alpha"), "{restored:?}");
+        assert!(restored.contains("beta"), "{restored:?}");
+        assert!(restored.contains("CHOOSER-STATUS"), "{restored:?}");
+        model.choose_tree = None;
+        model.chooser_presentation = None;
+        renderer.paint(&model, true).unwrap();
+        assert!(read_paint().contains("\x1b[2J"));
     }
 
     #[test]

@@ -1,0 +1,982 @@
+=== environment.txt ===
+2e5094d8e74c3de2917a15ce249c723f2211b3e1
+4a314f15980b1be639115ec67288142577ca212bef3ae1cc7a79f2a277d3e10f  target/debug/zz
+fe82462af83f515034c25bb8576eef8a11a0ad3a5c1029af70b0973b028aed5d  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+d77c9dc6aa021e4bc61f0da128c591af695e6466
+Linux ubuntu 7.0.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 04:26:38 UTC 2026 x86_64 GNU/Linux
+LANG=en_US.UTF-8
+LANGUAGE=
+LC_CTYPE="C.UTF-8"
+5.55 6.34 7.37 4/1593 89391
+=== baseline-1.txt ===
+chooser and command-output differential at 80x24 (pin tmux)
+ok    baseline
+ok    session-tree-open
+ok    session-tree-next
+ok    session-tree-expanded
+ok    session-tree-closed
+ok    window-tree-open
+ok    window-tree-tagged
+ok    window-tree-untagged
+ok    window-tree-sorted
+ok    window-tree-sort-wrapped
+ok    window-tree-unfit-help-then-search
+ok    window-tree-searched
+ok    window-tree-preview-off
+ok    window-tree-preview-big
+ok    window-tree-preview-normal
+ok    window-tree-closed
+ok    filter-prompt
+ok    filter-typed
+ok    filter-applied
+ok    filter-cleared
+ok    filter-closed
+ok    tree-scrolled-bottom
+ok    tree-scrolled-top
+ok    tree-scroll-closed
+ok    buffer-tree-open
+ok    buffer-tree-next
+ok    buffer-tree-tagged
+ok    buffer-tree-closed
+ok    buffer-filter-prompt
+ok    buffer-filter-typed
+ok    buffer-filter-applied
+ok    buffer-filter-cleared
+ok    buffer-filter-closed
+ok    find-window-prompt
+ok    find-window-typed
+ok    find-window-tree
+ok    find-window-closed
+ok    output-shown
+ok    output-search-prompt
+ok    output-search-typed
+ok    output-searched
+ok    output-selected
+ok    output-closed
+note  output-copied: the copied selection is the same text on both sides
+ok    client-tree-open
+ok    client-sort-size
+ok    client-sort-creation
+ok    client-sort-activity
+ok    client-sort-name
+ok    client-sort-reversed
+ok    client-sort-forward
+ok    client-tagged
+ok    client-untagged
+ok    client-tag-all
+ok    client-tag-all-cleared
+ok    client-info-view
+ok    client-info-view-off
+ok    client-filter-prompt
+ok    client-filter-cancelled
+ok    client-tree-closed
+ok    client-run-open
+ok    client-run-chosen
+ok    client-run-dismissed
+ok    zoom-tree-open
+ok    zoom-tree-closed
+ok    zoom-manual
+ok    zoom-prezoomed-open
+ok    zoom-prezoomed-closed
+ok    zoom-manual-released
+ok    tall-window-tree-open
+ok    tall-window-tree-help
+ok    tall-window-tree-help-closed
+ok    tall-buffer-tree-open
+ok    tall-buffer-tree-help
+ok    tall-buffer-tree-help-closed
+ok    tall-client-tree-open
+ok    tall-client-tree-help
+ok    tall-client-tree-help-closed
+ok    tall-closed
+all 78 asserted comparisons identical, 0 recorded not asserted (0 for a sibling lane)
+=== baseline-2.txt ===
+chooser and command-output differential at 80x24 (pin tmux)
+ok    baseline
+ok    session-tree-open
+ok    session-tree-next
+ok    session-tree-expanded
+ok    session-tree-closed
+ok    window-tree-open
+ok    window-tree-tagged
+ok    window-tree-untagged
+ok    window-tree-sorted
+ok    window-tree-sort-wrapped
+ok    window-tree-unfit-help-then-search
+ok    window-tree-searched
+ok    window-tree-preview-off
+ok    window-tree-preview-big
+ok    window-tree-preview-normal
+ok    window-tree-closed
+ok    filter-prompt
+ok    filter-typed
+ok    filter-applied
+ok    filter-cleared
+ok    filter-closed
+ok    tree-scrolled-bottom
+ok    tree-scrolled-top
+ok    tree-scroll-closed
+ok    buffer-tree-open
+ok    buffer-tree-next
+ok    buffer-tree-tagged
+ok    buffer-tree-closed
+ok    buffer-filter-prompt
+ok    buffer-filter-typed
+ok    buffer-filter-applied
+ok    buffer-filter-cleared
+ok    buffer-filter-closed
+ok    find-window-prompt
+ok    find-window-typed
+ok    find-window-tree
+ok    find-window-closed
+ok    output-shown
+ok    output-search-prompt
+ok    output-search-typed
+ok    output-searched
+ok    output-selected
+ok    output-closed
+note  output-copied: the copied selection is the same text on both sides
+ok    client-tree-open
+ok    client-sort-size
+ok    client-sort-creation
+ok    client-sort-activity
+ok    client-sort-name
+ok    client-sort-reversed
+ok    client-sort-forward
+ok    client-tagged
+ok    client-untagged
+ok    client-tag-all
+ok    client-tag-all-cleared
+ok    client-info-view
+ok    client-info-view-off
+ok    client-filter-prompt
+ok    client-filter-cancelled
+ok    client-tree-closed
+ok    client-run-open
+ok    client-run-chosen
+ok    client-run-dismissed
+ok    zoom-tree-open
+ok    zoom-tree-closed
+ok    zoom-manual
+ok    zoom-prezoomed-open
+ok    zoom-prezoomed-closed
+ok    zoom-manual-released
+ok    tall-window-tree-open
+ok    tall-window-tree-help
+ok    tall-window-tree-help-closed
+ok    tall-buffer-tree-open
+ok    tall-buffer-tree-help
+ok    tall-buffer-tree-help-closed
+ok    tall-client-tree-open
+ok    tall-client-tree-help
+ok    tall-client-tree-help-closed
+ok    tall-closed
+all 78 asserted comparisons identical, 0 recorded not asserted (0 for a sibling lane)
+=== baseline-3.txt ===
+chooser and command-output differential at 80x24 (pin tmux)
+ok    baseline
+ok    session-tree-open
+ok    session-tree-next
+ok    session-tree-expanded
+ok    session-tree-closed
+ok    window-tree-open
+ok    window-tree-tagged
+ok    window-tree-untagged
+ok    window-tree-sorted
+ok    window-tree-sort-wrapped
+ok    window-tree-unfit-help-then-search
+ok    window-tree-searched
+ok    window-tree-preview-off
+ok    window-tree-preview-big
+ok    window-tree-preview-normal
+ok    window-tree-closed
+ok    filter-prompt
+ok    filter-typed
+ok    filter-applied
+ok    filter-cleared
+ok    filter-closed
+ok    tree-scrolled-bottom
+ok    tree-scrolled-top
+ok    tree-scroll-closed
+ok    buffer-tree-open
+ok    buffer-tree-next
+ok    buffer-tree-tagged
+ok    buffer-tree-closed
+ok    buffer-filter-prompt
+ok    buffer-filter-typed
+ok    buffer-filter-applied
+ok    buffer-filter-cleared
+ok    buffer-filter-closed
+ok    find-window-prompt
+ok    find-window-typed
+ok    find-window-tree
+ok    find-window-closed
+ok    output-shown
+ok    output-search-prompt
+ok    output-search-typed
+ok    output-searched
+ok    output-selected
+ok    output-closed
+note  output-copied: the copied selection is the same text on both sides
+ok    client-tree-open
+ok    client-sort-size
+ok    client-sort-creation
+ok    client-sort-activity
+ok    client-sort-name
+ok    client-sort-reversed
+ok    client-sort-forward
+ok    client-tagged
+ok    client-untagged
+ok    client-tag-all
+ok    client-tag-all-cleared
+      case client-info-view
+      1 of 24 rows differ, first differing row 19
+        19 tmux: M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mBytes Written ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m NNNN ^[[38;2;179;179;179m(NN discarded)^[[39m                                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        19 zz:   M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mBytes Written ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m NNNN ^[[38;2;179;179;179m(NN discarded)^[[39m                                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+      cursor tmux: 0,0 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,0 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+DIFF  client-info-view
+ok    client-info-view-off
+ok    client-filter-prompt
+ok    client-filter-cancelled
+ok    client-tree-closed
+ok    client-run-open
+ok    client-run-chosen
+ok    client-run-dismissed
+ok    zoom-tree-open
+ok    zoom-tree-closed
+ok    zoom-manual
+ok    zoom-prezoomed-open
+ok    zoom-prezoomed-closed
+ok    zoom-manual-released
+ok    tall-window-tree-open
+ok    tall-window-tree-help
+ok    tall-window-tree-help-closed
+ok    tall-buffer-tree-open
+ok    tall-buffer-tree-help
+ok    tall-buffer-tree-help-closed
+ok    tall-client-tree-open
+ok    tall-client-tree-help
+ok    tall-client-tree-help-closed
+ok    tall-closed
+1 of 78 asserted comparisons differ, 0 recorded (0 for a sibling lane)
+=== mask-before.txt ===
+FAIL styled dynamic width equivalence
+PASS plain dynamic width equivalence
+PASS colour sabotage
+PASS label alignment sabotage
+PASS label text sabotage
+PASS border sabotage
+PASS extra reset sabotage
+=== mask-after.txt ===
+PASS styled dynamic width equivalence
+PASS plain dynamic width equivalence
+PASS colour sabotage
+PASS label alignment sabotage
+PASS label text sabotage
+PASS border sabotage
+PASS extra reset sabotage
+=== hand-1.txt ===
+ok    baseline
+ok    session-tree-open
+ok    session-tree-next
+ok    session-tree-expanded
+ok    session-tree-closed
+ok    window-tree-open
+ok    window-tree-tagged
+ok    window-tree-untagged
+ok    window-tree-sorted
+ok    window-tree-sort-wrapped
+ok    window-tree-unfit-help-then-search
+ok    window-tree-searched
+ok    window-tree-preview-off
+ok    window-tree-preview-big
+ok    window-tree-preview-normal
+ok    window-tree-closed
+ok    filter-prompt
+ok    filter-typed
+ok    filter-applied
+ok    filter-cleared
+ok    filter-closed
+ok    tree-scrolled-bottom
+ok    tree-scrolled-top
+ok    tree-scroll-closed
+ok    buffer-tree-open
+ok    buffer-tree-next
+ok    buffer-tree-tagged
+ok    buffer-tree-closed
+ok    buffer-filter-prompt
+ok    buffer-filter-typed
+ok    buffer-filter-applied
+ok    buffer-filter-cleared
+ok    buffer-filter-closed
+ok    find-window-prompt
+ok    find-window-typed
+ok    find-window-tree
+ok    find-window-closed
+ok    output-shown
+ok    output-search-prompt
+ok    output-search-typed
+ok    output-searched
+ok    output-selected
+ok    output-closed
+note  output-copied: the copied selection is the same text on both sides
+ok    client-tree-open
+ok    client-sort-size
+ok    client-sort-creation
+ok    client-sort-activity
+ok    client-sort-name
+ok    client-sort-reversed
+ok    client-sort-forward
+ok    client-tagged
+ok    client-untagged
+ok    client-tag-all
+ok    client-tag-all-cleared
+ok    client-info-view
+ok    client-info-view-off
+ok    client-filter-prompt
+ok    client-filter-cancelled
+ok    client-tree-closed
+ok    client-run-open
+ok    client-run-chosen
+ok    client-run-dismissed
+ok    zoom-tree-open
+ok    zoom-tree-closed
+ok    zoom-manual
+ok    zoom-prezoomed-open
+ok    zoom-prezoomed-closed
+ok    zoom-manual-released
+hand-probe failures=0 checks=68
+=== pre-renderer-fix green-1.txt ===
+chooser and command-output differential at 80x24 (pin tmux)
+ok    baseline
+ok    session-tree-open
+ok    session-tree-next
+ok    session-tree-expanded
+ok    session-tree-closed
+ok    window-tree-open
+ok    window-tree-tagged
+ok    window-tree-untagged
+ok    window-tree-sorted
+ok    window-tree-sort-wrapped
+ok    window-tree-unfit-help-then-search
+ok    window-tree-searched
+ok    window-tree-preview-off
+ok    window-tree-preview-big
+ok    window-tree-preview-normal
+ok    window-tree-closed
+ok    filter-prompt
+ok    filter-typed
+ok    filter-applied
+ok    filter-cleared
+ok    filter-closed
+ok    tree-scrolled-bottom
+ok    tree-scrolled-top
+ok    tree-scroll-closed
+ok    buffer-tree-open
+ok    buffer-tree-next
+ok    buffer-tree-tagged
+ok    buffer-tree-closed
+ok    buffer-filter-prompt
+ok    buffer-filter-typed
+ok    buffer-filter-applied
+ok    buffer-filter-cleared
+ok    buffer-filter-closed
+ok    find-window-prompt
+ok    find-window-typed
+ok    find-window-tree
+ok    find-window-closed
+ok    output-shown
+ok    output-search-prompt
+ok    output-search-typed
+ok    output-searched
+ok    output-selected
+ok    output-closed
+note  output-copied: the copied selection is the same text on both sides
+ok    client-tree-open
+ok    client-sort-size
+ok    client-sort-creation
+ok    client-sort-activity
+ok    client-sort-name
+ok    client-sort-reversed
+ok    client-sort-forward
+ok    client-tagged
+ok    client-untagged
+ok    client-tag-all
+ok    client-tag-all-cleared
+ok    client-info-view
+ok    client-info-view-off
+ok    client-filter-prompt
+ok    client-filter-cancelled
+ok    client-tree-closed
+ok    client-run-open
+ok    client-run-chosen
+ok    client-run-dismissed
+ok    zoom-tree-open
+ok    zoom-tree-closed
+ok    zoom-manual
+ok    zoom-prezoomed-open
+ok    zoom-prezoomed-closed
+ok    zoom-manual-released
+ok    tall-window-tree-open
+ok    tall-window-tree-help
+ok    tall-window-tree-help-closed
+ok    tall-buffer-tree-open
+ok    tall-buffer-tree-help
+ok    tall-buffer-tree-help-closed
+ok    tall-client-tree-open
+ok    tall-client-tree-help
+ok    tall-client-tree-help-closed
+ok    tall-closed
+all 78 asserted comparisons identical, 0 recorded not asserted (0 for a sibling lane)
+=== pre-renderer-fix green-2.txt ===
+chooser and command-output differential at 80x24 (pin tmux)
+ok    baseline
+ok    session-tree-open
+ok    session-tree-next
+ok    session-tree-expanded
+ok    session-tree-closed
+ok    window-tree-open
+ok    window-tree-tagged
+ok    window-tree-untagged
+ok    window-tree-sorted
+ok    window-tree-sort-wrapped
+ok    window-tree-unfit-help-then-search
+ok    window-tree-searched
+ok    window-tree-preview-off
+ok    window-tree-preview-big
+ok    window-tree-preview-normal
+ok    window-tree-closed
+ok    filter-prompt
+ok    filter-typed
+ok    filter-applied
+ok    filter-cleared
+ok    filter-closed
+ok    tree-scrolled-bottom
+ok    tree-scrolled-top
+ok    tree-scroll-closed
+ok    buffer-tree-open
+ok    buffer-tree-next
+ok    buffer-tree-tagged
+ok    buffer-tree-closed
+ok    buffer-filter-prompt
+ok    buffer-filter-typed
+ok    buffer-filter-applied
+ok    buffer-filter-cleared
+ok    buffer-filter-closed
+ok    find-window-prompt
+ok    find-window-typed
+ok    find-window-tree
+ok    find-window-closed
+ok    output-shown
+ok    output-search-prompt
+ok    output-search-typed
+ok    output-searched
+ok    output-selected
+ok    output-closed
+note  output-copied: the copied selection is the same text on both sides
+ok    client-tree-open
+ok    client-sort-size
+ok    client-sort-creation
+ok    client-sort-activity
+ok    client-sort-name
+ok    client-sort-reversed
+ok    client-sort-forward
+ok    client-tagged
+ok    client-untagged
+ok    client-tag-all
+ok    client-tag-all-cleared
+ok    client-info-view
+ok    client-info-view-off
+ok    client-filter-prompt
+ok    client-filter-cancelled
+ok    client-tree-closed
+ok    client-run-open
+ok    client-run-chosen
+ok    client-run-dismissed
+ok    zoom-tree-open
+ok    zoom-tree-closed
+ok    zoom-manual
+ok    zoom-prezoomed-open
+ok    zoom-prezoomed-closed
+ok    zoom-manual-released
+ok    tall-window-tree-open
+ok    tall-window-tree-help
+ok    tall-window-tree-help-closed
+ok    tall-buffer-tree-open
+ok    tall-buffer-tree-help
+ok    tall-buffer-tree-help-closed
+ok    tall-client-tree-open
+ok    tall-client-tree-help
+ok    tall-client-tree-help-closed
+ok    tall-closed
+all 78 asserted comparisons identical, 0 recorded not asserted (0 for a sibling lane)
+=== pre-renderer-fix green-3.txt ===
+chooser and command-output differential at 80x24 (pin tmux)
+ok    baseline
+ok    session-tree-open
+ok    session-tree-next
+ok    session-tree-expanded
+ok    session-tree-closed
+ok    window-tree-open
+ok    window-tree-tagged
+ok    window-tree-untagged
+ok    window-tree-sorted
+ok    window-tree-sort-wrapped
+ok    window-tree-unfit-help-then-search
+ok    window-tree-searched
+ok    window-tree-preview-off
+ok    window-tree-preview-big
+ok    window-tree-preview-normal
+ok    window-tree-closed
+ok    filter-prompt
+ok    filter-typed
+ok    filter-applied
+ok    filter-cleared
+ok    filter-closed
+ok    tree-scrolled-bottom
+ok    tree-scrolled-top
+ok    tree-scroll-closed
+ok    buffer-tree-open
+ok    buffer-tree-next
+ok    buffer-tree-tagged
+ok    buffer-tree-closed
+ok    buffer-filter-prompt
+ok    buffer-filter-typed
+ok    buffer-filter-applied
+ok    buffer-filter-cleared
+ok    buffer-filter-closed
+ok    find-window-prompt
+ok    find-window-typed
+ok    find-window-tree
+ok    find-window-closed
+ok    output-shown
+ok    output-search-prompt
+ok    output-search-typed
+ok    output-searched
+ok    output-selected
+ok    output-closed
+note  output-copied: the copied selection is the same text on both sides
+ok    client-tree-open
+ok    client-sort-size
+ok    client-sort-creation
+ok    client-sort-activity
+ok    client-sort-name
+ok    client-sort-reversed
+ok    client-sort-forward
+ok    client-tagged
+ok    client-untagged
+ok    client-tag-all
+ok    client-tag-all-cleared
+ok    client-info-view
+ok    client-info-view-off
+ok    client-filter-prompt
+ok    client-filter-cancelled
+ok    client-tree-closed
+ok    client-run-open
+ok    client-run-chosen
+ok    client-run-dismissed
+      case zoom-tree-open
+      24 of 24 rows differ, first differing row 0
+         0 tmux: ^[[38;2;179;179;179m(0)   ^[[38;2;205;92;92m-^[[38;2;179;179;179m ^[[39mcho^[[38;2;179;179;179m: 2 windows (attached)^[[39m
+         0 zz:   ^[[48;2;16;19;24m
+         1 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(1)   M-bM-^TM-^\M-bM-^TM-^@> +  0: win*Z^[[39m
+         1 zz:   
+         2 tmux: ^[[38;2;179;179;179m^[[49m(2)   M-bM-^TM-^TM-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  1^[[38;2;179;179;179m: ^[[39mtwo
+         2 zz:   
+         3 tmux: ^[[38;2;179;179;179m(3)   ^[[38;2;205;92;92m-^[[38;2;179;179;179m ^[[39mmany^[[38;2;179;179;179m: 12 windows^[[39m
+         3 zz:   
+         4 tmux: ^[[38;2;179;179;179m(4)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  0^[[38;2;179;179;179m: ^[[39mm00^[[38;2;179;179;179m*: "ptitle"^[[39m
+         4 zz:   
+         5 tmux: ^[[38;2;179;179;179m(5)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  1^[[38;2;179;179;179m: ^[[39mm01^[[38;2;179;179;179m: "ptitle"^[[39m
+         5 zz:   
+         6 tmux: ^[[38;2;179;179;179m(6)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  2^[[38;2;179;179;179m: ^[[39mm02^[[38;2;179;179;179m: "ptitle"^[[39m
+         6 zz:   
+         7 tmux: ^[[38;2;179;179;179m(7)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  3^[[38;2;179;179;179m: ^[[39mm03^[[38;2;179;179;179m: "ptitle"^[[39m
+         7 zz:   
+         8 tmux: ^[[38;2;179;179;179m(8)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  4^[[38;2;179;179;179m: ^[[39mm04^[[38;2;179;179;179m: "ptitle"^[[39m
+         8 zz:   
+         9 tmux: ^[[38;2;179;179;179m(9)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  5^[[38;2;179;179;179m: ^[[39mm05^[[38;2;179;179;179m: "ptitle"^[[39m
+         9 zz:   
+        10 tmux: ^[[38;2;179;179;179m(M-a) M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  6^[[38;2;179;179;179m: ^[[39mm06^[[38;2;179;179;179m: "ptitle"^[[39m
+        10 zz:   
+        11 tmux: ^[[38;2;179;179;179m(M-b) M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  7^[[38;2;179;179;179m: ^[[39mm07^[[38;2;179;179;179m: "ptitle"^[[39m
+        11 zz:   
+        12 tmux: ^[[38;2;179;179;179m(M-c) M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  8^[[38;2;179;179;179m: ^[[39mm08^[[38;2;179;179;179m: "ptitle"^[[39m
+        12 zz:   
+        13 tmux: ^[[38;2;179;179;179m(M-d) M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  9^[[38;2;179;179;179m: ^[[39mm09^[[38;2;179;179;179m: "ptitle"^[[39m
+        13 zz:   
+        14 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L 0 (sort: index) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        14 zz:   
+        15 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-output                          ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m$ printf 'ZOOM-SCENE\n'                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        15 zz:   
+        16 tmux: M-bM-^TM-^B^[[39m^[[49m $ printf 'MARK-%s\n' clients         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49mZOOM-SCENE                             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        16 zz:   
+        17 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-clients                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m$ ^[[7m ^[[0m                                    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        17 zz:   
+        18 tmux: M-bM-^TM-^B^[[39m^[[49m $ ^C         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        18 zz:   
+        19 tmux: M-bM-^TM-^B^[[39m^[[49m $ printf 'MAR^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m ^[[38;2;205;92;92m0:ptitle^[[39m ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m ^[[38;2;108;166;205m1:ptitle^[[39m ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        19 zz:   
+        20 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-zoom    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        20 zz:   
+        21 tmux: M-bM-^TM-^B^[[39m^[[49m $ ^[[7m ^[[0m                                  ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        21 zz:   
+        22 tmux: M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        22 zz:   
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*Z^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        23 zz:   
+      cursor tmux: 0,1 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,1 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+DIFF  zoom-tree-open
+ok    zoom-tree-closed
+ok    zoom-manual
+ok    zoom-prezoomed-open
+ok    zoom-prezoomed-closed
+ok    zoom-manual-released
+ok    tall-window-tree-open
+ok    tall-window-tree-help
+ok    tall-window-tree-help-closed
+ok    tall-buffer-tree-open
+ok    tall-buffer-tree-help
+ok    tall-buffer-tree-help-closed
+ok    tall-client-tree-open
+ok    tall-client-tree-help
+ok    tall-client-tree-help-closed
+ok    tall-closed
+1 of 78 asserted comparisons differ, 0 recorded (0 for a sibling lane)
+=== pre-renderer-fix zoom-repeat.txt ===
+ok    baseline
+ok    session-tree-open
+ok    session-tree-next
+ok    session-tree-expanded
+ok    session-tree-closed
+ok    window-tree-open
+ok    window-tree-tagged
+ok    window-tree-untagged
+ok    window-tree-sorted
+ok    window-tree-sort-wrapped
+ok    window-tree-unfit-help-then-search
+ok    window-tree-searched
+ok    window-tree-preview-off
+ok    window-tree-preview-big
+ok    window-tree-preview-normal
+ok    window-tree-closed
+ok    filter-prompt
+ok    filter-typed
+ok    filter-applied
+ok    filter-cleared
+ok    filter-closed
+ok    tree-scrolled-bottom
+ok    tree-scrolled-top
+ok    tree-scroll-closed
+ok    buffer-tree-open
+ok    buffer-tree-next
+ok    buffer-tree-tagged
+ok    buffer-tree-closed
+ok    buffer-filter-prompt
+ok    buffer-filter-typed
+ok    buffer-filter-applied
+ok    buffer-filter-cleared
+ok    buffer-filter-closed
+ok    find-window-prompt
+ok    find-window-typed
+ok    find-window-tree
+ok    find-window-closed
+ok    output-shown
+ok    output-search-prompt
+ok    output-search-typed
+ok    output-searched
+ok    output-selected
+ok    output-closed
+note  output-copied: the copied selection is the same text on both sides
+ok    client-tree-open
+ok    client-sort-size
+ok    client-sort-creation
+ok    client-sort-activity
+ok    client-sort-name
+ok    client-sort-reversed
+ok    client-sort-forward
+ok    client-tagged
+ok    client-untagged
+ok    client-tag-all
+ok    client-tag-all-cleared
+ok    client-info-view
+ok    client-info-view-off
+ok    client-filter-prompt
+ok    client-filter-cancelled
+ok    client-tree-closed
+ok    client-run-open
+ok    client-run-chosen
+ok    client-run-dismissed
+      case zoom-tree-open
+      24 of 24 rows differ, first differing row 0
+         0 tmux: ^[[38;2;179;179;179m(0)   ^[[38;2;205;92;92m-^[[38;2;179;179;179m ^[[39mcho^[[38;2;179;179;179m: 2 windows (attached)^[[39m
+         0 zz:   ^[[48;2;16;19;24m
+         1 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(1)   M-bM-^TM-^\M-bM-^TM-^@> +  0: win*Z^[[39m
+         1 zz:   
+         2 tmux: ^[[38;2;179;179;179m^[[49m(2)   M-bM-^TM-^TM-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  1^[[38;2;179;179;179m: ^[[39mtwo
+         2 zz:   
+         3 tmux: ^[[38;2;179;179;179m(3)   ^[[38;2;205;92;92m-^[[38;2;179;179;179m ^[[39mmany^[[38;2;179;179;179m: 12 windows^[[39m
+         3 zz:   
+         4 tmux: ^[[38;2;179;179;179m(4)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  0^[[38;2;179;179;179m: ^[[39mm00^[[38;2;179;179;179m*: "ptitle"^[[39m
+         4 zz:   
+         5 tmux: ^[[38;2;179;179;179m(5)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  1^[[38;2;179;179;179m: ^[[39mm01^[[38;2;179;179;179m: "ptitle"^[[39m
+         5 zz:   
+         6 tmux: ^[[38;2;179;179;179m(6)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  2^[[38;2;179;179;179m: ^[[39mm02^[[38;2;179;179;179m: "ptitle"^[[39m
+         6 zz:   
+         7 tmux: ^[[38;2;179;179;179m(7)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  3^[[38;2;179;179;179m: ^[[39mm03^[[38;2;179;179;179m: "ptitle"^[[39m
+         7 zz:   
+         8 tmux: ^[[38;2;179;179;179m(8)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  4^[[38;2;179;179;179m: ^[[39mm04^[[38;2;179;179;179m: "ptitle"^[[39m
+         8 zz:   
+         9 tmux: ^[[38;2;179;179;179m(9)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  5^[[38;2;179;179;179m: ^[[39mm05^[[38;2;179;179;179m: "ptitle"^[[39m
+         9 zz:   
+        10 tmux: ^[[38;2;179;179;179m(M-a) M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  6^[[38;2;179;179;179m: ^[[39mm06^[[38;2;179;179;179m: "ptitle"^[[39m
+        10 zz:   
+        11 tmux: ^[[38;2;179;179;179m(M-b) M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  7^[[38;2;179;179;179m: ^[[39mm07^[[38;2;179;179;179m: "ptitle"^[[39m
+        11 zz:   
+        12 tmux: ^[[38;2;179;179;179m(M-c) M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  8^[[38;2;179;179;179m: ^[[39mm08^[[38;2;179;179;179m: "ptitle"^[[39m
+        12 zz:   
+        13 tmux: ^[[38;2;179;179;179m(M-d) M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  9^[[38;2;179;179;179m: ^[[39mm09^[[38;2;179;179;179m: "ptitle"^[[39m
+        13 zz:   
+        14 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L 0 (sort: index) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        14 zz:   
+        15 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-output                          ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m$ printf 'ZOOM-SCENE\n'                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        15 zz:   
+        16 tmux: M-bM-^TM-^B^[[39m^[[49m $ printf 'MARK-%s\n' clients         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49mZOOM-SCENE                             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        16 zz:   
+        17 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-clients                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m$ ^[[7m ^[[0m                                    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        17 zz:   
+        18 tmux: M-bM-^TM-^B^[[39m^[[49m $ ^C         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        18 zz:   
+        19 tmux: M-bM-^TM-^B^[[39m^[[49m $ printf 'MAR^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m ^[[38;2;205;92;92m0:ptitle^[[39m ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m ^[[38;2;108;166;205m1:ptitle^[[39m ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        19 zz:   
+        20 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-zoom    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        20 zz:   
+        21 tmux: M-bM-^TM-^B^[[39m^[[49m $ ^[[7m ^[[0m                                  ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        21 zz:   
+        22 tmux: M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        22 zz:   
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*Z^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        23 zz:   
+      cursor tmux: 0,1 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,1 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+DIFF  zoom-tree-open
+ok    zoom-tree-closed
+ok    zoom-manual
+ok    zoom-prezoomed-open
+ok    zoom-prezoomed-closed
+ok    zoom-manual-released
+ok    zoom-repeat-1-open
+ok    zoom-repeat-1-closed
+ok    zoom-repeat-2-open
+ok    zoom-repeat-2-closed
+ok    zoom-repeat-3-open
+ok    zoom-repeat-3-closed
+ok    zoom-repeat-4-open
+ok    zoom-repeat-4-closed
+ok    zoom-repeat-5-open
+ok    zoom-repeat-5-closed
+ok    zoom-repeat-6-open
+ok    zoom-repeat-6-closed
+ok    zoom-repeat-7-open
+ok    zoom-repeat-7-closed
+      case zoom-repeat-8-open
+      24 of 24 rows differ, first differing row 0
+         0 tmux: ^[[38;2;179;179;179m(0)   ^[[38;2;205;92;92m-^[[38;2;179;179;179m ^[[39mcho^[[38;2;179;179;179m: 2 windows (attached)^[[39m
+         0 zz:   ^[[48;2;16;19;24m
+         1 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(1)   M-bM-^TM-^\M-bM-^TM-^@> +  0: win*Z^[[39m
+         1 zz:   
+         2 tmux: ^[[38;2;179;179;179m^[[49m(2)   M-bM-^TM-^TM-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  1^[[38;2;179;179;179m: ^[[39mtwo
+         2 zz:   
+         3 tmux: ^[[38;2;179;179;179m(3)   ^[[38;2;205;92;92m-^[[38;2;179;179;179m ^[[39mmany^[[38;2;179;179;179m: 12 windows^[[39m
+         3 zz:   
+         4 tmux: ^[[38;2;179;179;179m(4)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  0^[[38;2;179;179;179m: ^[[39mm00^[[38;2;179;179;179m*: "ptitle"^[[39m
+         4 zz:   
+         5 tmux: ^[[38;2;179;179;179m(5)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  1^[[38;2;179;179;179m: ^[[39mm01^[[38;2;179;179;179m: "ptitle"^[[39m
+         5 zz:   
+         6 tmux: ^[[38;2;179;179;179m(6)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  2^[[38;2;179;179;179m: ^[[39mm02^[[38;2;179;179;179m: "ptitle"^[[39m
+         6 zz:   
+         7 tmux: ^[[38;2;179;179;179m(7)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  3^[[38;2;179;179;179m: ^[[39mm03^[[38;2;179;179;179m: "ptitle"^[[39m
+         7 zz:   
+         8 tmux: ^[[38;2;179;179;179m(8)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  4^[[38;2;179;179;179m: ^[[39mm04^[[38;2;179;179;179m: "ptitle"^[[39m
+         8 zz:   
+         9 tmux: ^[[38;2;179;179;179m(9)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  5^[[38;2;179;179;179m: ^[[39mm05^[[38;2;179;179;179m: "ptitle"^[[39m
+         9 zz:   
+        10 tmux: ^[[38;2;179;179;179m(M-a) M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  6^[[38;2;179;179;179m: ^[[39mm06^[[38;2;179;179;179m: "ptitle"^[[39m
+        10 zz:   
+        11 tmux: ^[[38;2;179;179;179m(M-b) M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  7^[[38;2;179;179;179m: ^[[39mm07^[[38;2;179;179;179m: "ptitle"^[[39m
+        11 zz:   
+        12 tmux: ^[[38;2;179;179;179m(M-c) M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  8^[[38;2;179;179;179m: ^[[39mm08^[[38;2;179;179;179m: "ptitle"^[[39m
+        12 zz:   
+        13 tmux: ^[[38;2;179;179;179m(M-d) M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  9^[[38;2;179;179;179m: ^[[39mm09^[[38;2;179;179;179m: "ptitle"^[[39m
+        13 zz:   
+        14 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L 0 (sort: index) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        14 zz:   
+        15 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-output                          ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m$ printf 'ZOOM-SCENE\n'                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        15 zz:   
+        16 tmux: M-bM-^TM-^B^[[39m^[[49m $ printf 'MARK-%s\n' clients         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49mZOOM-SCENE                             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        16 zz:   
+        17 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-clients                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m$ ^[[7m ^[[0m                                    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        17 zz:   
+        18 tmux: M-bM-^TM-^B^[[39m^[[49m $ ^C         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        18 zz:   
+        19 tmux: M-bM-^TM-^B^[[39m^[[49m $ printf 'MAR^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m ^[[38;2;205;92;92m0:ptitle^[[39m ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m ^[[38;2;108;166;205m1:ptitle^[[39m ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        19 zz:   
+        20 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-zoom    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        20 zz:   
+        21 tmux: M-bM-^TM-^B^[[39m^[[49m $ ^[[7m ^[[0m                                  ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        21 zz:   
+        22 tmux: M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        22 zz:   
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*Z^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        23 zz:   
+      cursor tmux: 0,1 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,1 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+DIFF  zoom-repeat-8-open
+red-observed 1789497573.154042
+ok    zoom-repeat-8-after-wait
+red-rechecked 1789497573.268610
+ok    zoom-repeat-8-closed
+ok    zoom-repeat-9-open
+ok    zoom-repeat-9-closed
+ok    zoom-repeat-10-open
+ok    zoom-repeat-10-closed
+      case zoom-repeat-11-open
+      24 of 24 rows differ, first differing row 0
+         0 tmux: ^[[38;2;179;179;179m(0)   ^[[38;2;205;92;92m-^[[38;2;179;179;179m ^[[39mcho^[[38;2;179;179;179m: 2 windows (attached)^[[39m
+         0 zz:   ^[[48;2;16;19;24m
+         1 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(1)   M-bM-^TM-^\M-bM-^TM-^@> +  0: win*Z^[[39m
+         1 zz:   
+         2 tmux: ^[[38;2;179;179;179m^[[49m(2)   M-bM-^TM-^TM-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  1^[[38;2;179;179;179m: ^[[39mtwo
+         2 zz:   
+         3 tmux: ^[[38;2;179;179;179m(3)   ^[[38;2;205;92;92m-^[[38;2;179;179;179m ^[[39mmany^[[38;2;179;179;179m: 12 windows^[[39m
+         3 zz:   
+         4 tmux: ^[[38;2;179;179;179m(4)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  0^[[38;2;179;179;179m: ^[[39mm00^[[38;2;179;179;179m*: "ptitle"^[[39m
+         4 zz:   
+         5 tmux: ^[[38;2;179;179;179m(5)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  1^[[38;2;179;179;179m: ^[[39mm01^[[38;2;179;179;179m: "ptitle"^[[39m
+         5 zz:   
+         6 tmux: ^[[38;2;179;179;179m(6)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  2^[[38;2;179;179;179m: ^[[39mm02^[[38;2;179;179;179m: "ptitle"^[[39m
+         6 zz:   
+         7 tmux: ^[[38;2;179;179;179m(7)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  3^[[38;2;179;179;179m: ^[[39mm03^[[38;2;179;179;179m: "ptitle"^[[39m
+         7 zz:   
+         8 tmux: ^[[38;2;179;179;179m(8)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  4^[[38;2;179;179;179m: ^[[39mm04^[[38;2;179;179;179m: "ptitle"^[[39m
+         8 zz:   
+         9 tmux: ^[[38;2;179;179;179m(9)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  5^[[38;2;179;179;179m: ^[[39mm05^[[38;2;179;179;179m: "ptitle"^[[39m
+         9 zz:   
+        10 tmux: ^[[38;2;179;179;179m(M-a) M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  6^[[38;2;179;179;179m: ^[[39mm06^[[38;2;179;179;179m: "ptitle"^[[39m
+        10 zz:   
+        11 tmux: ^[[38;2;179;179;179m(M-b) M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  7^[[38;2;179;179;179m: ^[[39mm07^[[38;2;179;179;179m: "ptitle"^[[39m
+        11 zz:   
+        12 tmux: ^[[38;2;179;179;179m(M-c) M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  8^[[38;2;179;179;179m: ^[[39mm08^[[38;2;179;179;179m: "ptitle"^[[39m
+        12 zz:   
+        13 tmux: ^[[38;2;179;179;179m(M-d) M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  9^[[38;2;179;179;179m: ^[[39mm09^[[38;2;179;179;179m: "ptitle"^[[39m
+        13 zz:   
+        14 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L 0 (sort: index) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        14 zz:   
+        15 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-output                          ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m$ printf 'ZOOM-SCENE\n'                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        15 zz:   
+        16 tmux: M-bM-^TM-^B^[[39m^[[49m $ printf 'MARK-%s\n' clients         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49mZOOM-SCENE                             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        16 zz:   
+        17 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-clients                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m$ ^[[7m ^[[0m                                    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        17 zz:   
+        18 tmux: M-bM-^TM-^B^[[39m^[[49m $ ^C         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        18 zz:   
+        19 tmux: M-bM-^TM-^B^[[39m^[[49m $ printf 'MAR^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m ^[[38;2;205;92;92m0:ptitle^[[39m ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m ^[[38;2;108;166;205m1:ptitle^[[39m ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        19 zz:   
+        20 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-zoom    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        20 zz:   
+        21 tmux: M-bM-^TM-^B^[[39m^[[49m $ ^[[7m ^[[0m                                  ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        21 zz:   
+        22 tmux: M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        22 zz:   
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*Z^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        23 zz:   
+      cursor tmux: 0,1 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,1 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+DIFF  zoom-repeat-11-open
+red-observed 1789497581.776103
+ok    zoom-repeat-11-after-wait
+red-rechecked 1789497581.873404
+ok    zoom-repeat-11-closed
+ok    zoom-repeat-12-open
+ok    zoom-repeat-12-closed
+ok    zoom-repeat-13-open
+ok    zoom-repeat-13-closed
+ok    zoom-repeat-14-open
+ok    zoom-repeat-14-closed
+ok    zoom-repeat-15-open
+ok    zoom-repeat-15-closed
+ok    zoom-repeat-16-open
+ok    zoom-repeat-16-closed
+ok    zoom-repeat-17-open
+ok    zoom-repeat-17-closed
+ok    zoom-repeat-18-open
+ok    zoom-repeat-18-closed
+ok    zoom-repeat-19-open
+ok    zoom-repeat-19-closed
+ok    zoom-repeat-20-open
+ok    zoom-repeat-20-closed
+zoom-repeat failures=3 checks=110
+=== renderer regression before fix: exit 101 ===
+   Compiling syn v2.0.119
+   Compiling smallvec v1.16.1
+   Compiling concurrent-queue v2.5.0
+   Compiling once_cell v1.21.4
+   Compiling parking_lot_core v0.9.12
+   Compiling tempfile v3.27.0
+   Compiling parking_lot v0.12.5
+   Compiling async-io v2.6.0
+   Compiling miniz_oxide v0.9.1
+   Compiling async-signal v0.2.14
+   Compiling synstructure v0.13.2
+   Compiling zerofrom-derive v0.1.7
+   Compiling yoke-derive v0.8.2
+   Compiling phf_macros v0.13.1
+   Compiling phf v0.13.1
+   Compiling csscolorparser v0.8.4
+   Compiling zz-terminal v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-terminal)
+   Compiling derive_more-impl v2.1.1
+   Compiling strum_macros v0.28.0
+   Compiling zerofrom v0.1.8
+   Compiling yoke v0.8.3
+   Compiling zerovec v0.11.8
+   Compiling tinystr v0.8.4
+   Compiling icu_locale_core v2.3.0
+   Compiling potential_utf v0.1.6
+   Compiling zerotrie v0.2.5
+   Compiling icu_provider v2.3.1
+   Compiling icu_collections v2.3.0
+   Compiling icu_properties v2.3.0
+   Compiling icu_normalizer v2.3.0
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling derive_more v2.1.1
+   Compiling zz-protocol v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-protocol)
+   Compiling url v2.5.8
+   Compiling strum v0.28.0
+   Compiling agent-client-protocol-schema v1.7.0
+   Compiling zz-daemon v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-daemon)
+   Compiling zz-client v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-client)
+   Compiling zz-tui v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-tui)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 34.41s
+     Running unittests src/lib.rs (target/debug/deps/zz_tui-276920be81937313)
+
+running 1 test
+test render::tests::forced_repaints_preserve_a_chooser_until_its_presentation_arrives ... FAILED
+
+failures:
+
+---- render::tests::forced_repaints_preserve_a_chooser_until_its_presentation_arrives stdout ----
+
+thread 'render::tests::forced_repaints_preserve_a_chooser_until_its_presentation_arrives' (864570) panicked at crates/zz-tui/src/render.rs:4654:13:
+"\u{1b}[?2026h\u{1b}[?25l\u{1b}[0;48;2;16;19;24m\u{1b}[2J\u{1b}[2;1H\u{1b}[?25l\u{1b}[?2026l"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    render::tests::forced_repaints_preserve_a_chooser_until_its_presentation_arrives
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 208 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p zz-tui --lib`

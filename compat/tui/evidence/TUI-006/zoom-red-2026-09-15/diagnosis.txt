@@ -1,0 +1,126 @@
+Chooser red diagnosis, Ubuntu, 2026-09-15
+Base: 2e5094d8e74c3de2917a15ce249c723f2211b3e1
+Pin: d77c9dc6aa021e4bc61f0da128c591af695e6466
+
+The first three complete chooser runs returned 0, 0, 1. The failed run named
+client-info-view, not zoom-tree-open. Row 19 retained 41 filler spaces on tmux
+and 37 on zz after (NN discarded) and ESC[39m. The cursor matched. TOKEN_FILL
+required spaces immediately after its token, so the reset prevented the mask
+from consuming the filler. The change keeps intervening SGR in the retained
+capture group and normalizes only the existing masked-value filler.
+
+The seven mask checks exercise styled and plain counter-width equivalence,
+then colour, label alignment, label text, border and extra-reset sabotages.
+The original mask fails the styled equivalence. The patched mask passes it.
+The regular fixture still asserts 78 complete screen/cursor comparisons.
+
+Zoom cause: (a), an older zz renderer bug. The third post-mask full run
+reproduced zoom-tree-open, and a separate hand driver reproduced the same
+screen three times (the initial zoom-tree-open and repetitions 8 and 11).
+Each failure had 24 of 24 rows blank on zz, background RGB 16,19,24, with the
+same hidden cursor at 0,1 as tmux. Repetitions 8 and 11 recovered without input
+in 115 ms and 97 ms respectively. The original nine-step manual replay had
+passed; the repeated probe supplied the missing failure signature.
+
+Renderer::paint(force=true) clears the screen before paint_mode_tree can
+return Pending. Pending restores only the prior cursor. ClientCore clears
+chooser_presentation on ChooseTree/ChooseBuffer events and restores it on a
+separate ChooserPresentation event, so a normal split event delivery can
+reach this branch. The clear's background and retained cursor match the
+captured failures. The fix moves the forced clear into the workspace branch.
+A complete chooser paints all its rows and status; its fallback already
+clears its own screen. Pending chooser updates preserve existing cells.
+
+Sources: crates/zz-tui/src/render.rs Renderer::paint and paint_chooser;
+crates/zz-tui/src/render/chooser.rs paint_mode_tree and draw_mode_tree;
+crates/zz-client/src/core.rs ChooseTree/ChooseBuffer/ChooserPresentation
+reduction; crates/zz-tui/src/app.rs CoreEvent::ChooseTreeChanged handling.
+
+The command below returns 0, excluding a source regression introduced between
+the two reported gate revisions:
+  git diff --quiet 627e717a 2e5094d8 -- crates compat/tui-choosers.sh
+
+The echoed ZOOM-SCENE needle and asynchronous preview viewport capture were
+initial hypotheses. Their signatures do not explain the measured whole-screen
+erase. The zoom wait and its assertion remain unchanged.
+
+The hand driver sourced the fixture prefix before its first top-level
+write_attach call, with explicit binary arguments, then used fresh servers
+and the fixture's isolated HOME/XDG settings. The driver follows below.
+
+#!/usr/bin/env bash
+source /tmp/zoom-red-evidence/probe-library.sh "$@"
+write_attach zz "$SCRATCH_DIR/attach-zz.sh"
+write_attach tmux "$SCRATCH_DIR/attach-tmux.sh"
+attach_both_at 80 24
+CASE_LABEL=hand-baseline
+mark_both baseline
+verdict baseline same
+session_tree_case
+window_tree_case
+filter_case
+scroll_case
+buffer_case
+buffer_filter_case
+find_window_case
+command_output_case
+client_case
+snapshot() {
+  local phase="$1" side
+  for side in zz tmux; do
+    capture_screen "$side" >"$ZZ_CHOOSER_CAPTURE_DIR/$phase.$side.styled.txt"
+    capture_plain "$side" >"$ZZ_CHOOSER_CAPTURE_DIR/$phase.$side.plain.txt"
+    cursor_tuple "$side" >"$ZZ_CHOOSER_CAPTURE_DIR/$phase.$side.cursor.txt"
+    side_command "$side" list-panes -t "=$INNER_SESSION:$WINDOW_NAME" -F '#{pane_id} #{pane_active} #{pane_width}x#{pane_height} #{cursor_x},#{cursor_y}' >"$ZZ_CHOOSER_CAPTURE_DIR/$phase.$side.panes.txt"
+  done
+}
+CASE_LABEL=hand-zoom
+snapshot before-split
+for side in zz tmux; do
+  side_command "$side" split-window -d -h -t "=$INNER_SESSION:$WINDOW_NAME" "$INNER_SHELL"
+  pane="$(side_command "$side" list-panes -t "=$INNER_SESSION:$WINDOW_NAME" -F '#{pane_active} #{pane_id}' | awk '$1 == 0 { print $2; exit }')"
+  side_command "$side" select-pane -t "$pane" -T "$PANE_TITLE"
+  side_command "$side" send-keys -t "$pane" "printf 'ZOOM-SCENE\n'" Enter
+  snapshot "sent-$side"
+done
+wait_screen tmux hard 'the split pane on the tmux screen' '' 'ZOOM-SCENE'
+wait_screen zz hard 'the split pane on the zz screen' '' 'ZOOM-SCENE'
+snapshot split-settled
+mark_both zoom
+snapshot marked
+prefix_step "$ZOOMED_STATUS" w
+snapshot tree-open
+verdict zoom-tree-open same
+step "$UNZOOMED_STATUS" q
+snapshot tree-closed
+verdict zoom-tree-closed same
+prefix_step "$ZOOMED_STATUS" z
+snapshot manual-zoom
+verdict zoom-manual same
+prefix_step '┌ 0 (sort: index)' w
+snapshot prezoomed-open
+verdict zoom-prezoomed-open same
+step 'MARK-zoom' q
+snapshot prezoomed-closed
+verdict zoom-prezoomed-closed same
+prefix_step "$UNZOOMED_STATUS" z
+snapshot manual-released
+verdict zoom-manual-released same
+printf 'hand-probe failures=%s checks=%s\n' "$FAILURES" "$CHECKS"
+[ "$FAILURES" -eq 0 ]
+
+GUI scope: this change is confined to the raw TUI. The private render module
+is declared in crates/zz-tui/src/lib.rs and instantiated by app::run. It writes
+terminal escape sequences through writer::stdout_sink. The native GPUI chooser
+uses crates/zz/src/chooser/mod.rs and tree.rs, mounted by workspace/view.rs.
+No shared daemon, protocol, client-core or native GUI renderer changed.
+
+The regression test failed before the renderer fix (exit 101, ESC[2J in the
+pending paint). After the fix all 209 zz-tui library tests passed, the zz build
+and clippy passed, and formatting and tracker checks passed. Exact commands
+and outputs are retained in rust-validation.txt.
+
+Final chooser proof: three consecutive whole-fixture runs each passed all 78
+assertions with zero recorded differences (exits 0, 0, 0). The final self-check
+returned 0: all existing sabotages and all seven added info-mask checks passed.
+Exact fixture commands and complete output are in fixture-validation.txt.

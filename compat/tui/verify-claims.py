@@ -41,6 +41,8 @@ FIXTURES = {
     "TUI-011": ["compat/tui-client-commands.sh"],
     "TUI-012": ["compat/tui-superset.sh"],
     "TUI-014": ["compat/tui-client-commands.sh", "compat/tui-choosers.sh"],
+    "TUI-016": ["compat/tui-client-commands.sh"],
+    "TUI-017": ["compat/tui-client-commands.sh"],
 }
 
 TALLY = re.compile(r"(\d+)\s+recorded not asserted|(\d+)\s+assert none and are recorded in full")

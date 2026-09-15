@@ -1,0 +1,21 @@
+# TUI-016/TUI-017 gate environment, 2026-09-15T17:08:41Z
+Linux ubuntu 7.0.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 04:26:38 UTC 2026 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 26.04.1 LTS"
+NAME="Ubuntu"
+cores: 8
+bash: 5.3.9(1)-release
+/bin/sh -> /usr/bin/dash
+locale: LANG=en_US.UTF-8
+python: Python 3.14.4
+worktree: /home/demfabris/dev/zz-gate-9
+revision: 51c858e2af2e1f3dfb2505618e5739cdcb8cf717
+tree: 1 modified paths
+base: origin/main 287e381563fa060de594db35f58cac2a9fbc4f9f
+zz: 442da26a4a4991ce14400a73042c63294690eaf159ce0b5f23d06983a322f06b  target/debug/zz
+zz_cli: b71fc0fbe45f72ac46747683bc34b05ab27ec1766f4b0808c4d6970503711da4  target/debug/zz_cli
+pin: fe82462af83f515034c25bb8576eef8a11a0ad3a5c1029af70b0973b028aed5d  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+pin -V: tmux next-3.8
+pin commit: d77c9dc6aa021e4bc61f0da128c591af695e6466 (next-3.8)
+RUN_ENV: ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins
+cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)

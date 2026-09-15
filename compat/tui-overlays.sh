@@ -120,6 +120,14 @@
 # holds the prompt, confirm and *-under-message cases to the whole row now that
 # no row is left out. A fixture that only passes has proved nothing.
 #
+# A KEY THAT CLEARS A MESSAGE ALSO REACHES THE PANE, on both binaries. The two
+# self-check cases that leave something in the inner pane's input line - the
+# deliberately leaked `z` under the menu, and the C-l that dismisses the styled
+# message - flush it with a bare Enter before the next marker is typed, because
+# the inner shell is /bin/sh and on a box where that is dash there is no line
+# editing to swallow the stray byte: it would prefix the next printf and the
+# marker would never print.
+#
 # A divergence is a finding: the script exits 1 so a caller can gate on it, and
 # prints both sides so the next lane has the measurement. It reaps every server
 # and daemon it starts.
@@ -1132,6 +1140,7 @@ run_self_check() {
   self_check_case 'message, a message-style only one side sets' "rows:$((ROWS_UNDER_TEST - 1))"
   type_on_both C-l
   both_last_row_lacks OVERLAY-MESSAGE 'the styled message cleared'
+  send_both ''
   side_command zz set-option -gu message-style || die 'zz refused set-option -gu'
 
   CASE_LABEL='self-check equivalence'

@@ -13,12 +13,12 @@ locale: en_US.UTF-8
 
 worktree: /home/demfabris/dev/zz-tui-stream-10
 branch: campaign/tui-stream
-based on origin/main: 45481a72b9ef300365eec484a0c293552dd8acfe
+based on origin/main: 3ecd4702f06afe6586d845acae34be7c02f10ec5 (the merge-base of campaign/tui-stream with origin/main; an earlier draft of this file named 45481a72, an older ancestor)
 
 pin: commit=d77c9dc6aa021e4bc61f0da128c591af695e6466 version=tmux next-3.8 script-cksum=3074239735 4232 binary-cksum=4253032590 7455240 
-pin binary used by the fixtures: compat/.cache/tmux-src/tmux (this worktree's copy of the same commit; the shared checkout's copy was being rebuilt by another lane at 19:42 and a run that raced it is not a result)
+pin binary used by the recorded runs: /home/demfabris/dev/zz-tui-stream-10/compat/.cache/tmux-src/tmux, this lane worktree's own build of the pinned commit (binary-cksum 4253032590, 7455240 bytes) and NOT the shared /home/demfabris/dev/zz copy named in the RUN_ENV block below (binary-cksum 2524377659, 7455232 bytes). Same tmux commit d77c9dc6, different build: the shared checkout's copy was being rebuilt by another lane at 19:42 and a run that raced it is not a result. The gate reran both fixtures against the shared pin and got identical summary lines.
 zz binary: target/debug/zz, debug profile, not bit-reproducible: the revision plus a clean worktree attests it
 
-RUN_ENV for every compat invocation:
+RUN_ENV for every compat invocation (the ZZ_COMPAT_TMUX value below is the campaign's standard one; see the pin note above for which binary the recorded runs actually ran):
   ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
   ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins

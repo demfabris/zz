@@ -625,7 +625,7 @@ case_owner() {
   clock-mode-open | customize-mode-open | switch-mode | suspend-client | server-access-bare | server-access-user)
     printf 'TUI-014'
     ;;
-  switch-mode-windows | switch-mode-duplicate-windows | switch-mode-kill | switch-mode-kill-exit | switch-mode-zoom | copy-over-clock | clock-over-copy)
+  switch-mode-windows | switch-mode-duplicate-windows | switch-mode-kill | switch-mode-kill-exit | switch-mode-zoom | copy-over-clock* | clock-over-copy*)
     printf 'gap:clients.interactive-refresh'
     ;;
   server-access-add)
@@ -1153,6 +1153,17 @@ client_tool_cases() {
   case_run clock-injected-key same '' -- send-keys -t PANE x
   case_run clock-injected-shell same '' -- capture-pane -p -t PANE
   CASE_CLOCK_FACE=1
+  case_run clock-injected-pair-open same '' -- clock-mode -t PANE
+  case_run clock-injected-pair same '' -- send-keys -t PANE xy
+  case_run clock-injected-pair-shell same '' -- capture-pane -p -t PANE
+  case_run clock-injected-pair-clear same '' -- send-keys -t PANE C-u
+  run_both clock-mode -t PANE
+  case_run clock-injected-byte same '' -- send-keys -H -t PANE ff
+  run_both clock-mode -t PANE
+  case_run clock-injected-prefix same '' -- send-prefix -t PANE
+  run_both switch-mode -t PANE
+  case_run switch-injected-escape same '' -- send-keys -H -t PANE 1b
+  CASE_CLOCK_FACE=1
   case_run clock-cancel-open same '' -- clock-mode -t PANE
   case_run clock-cancel-all same '' -- copy-mode -q -t PANE
   case_run clock-cancel-shell same '' -- capture-pane -p -t PANE
@@ -1168,6 +1179,19 @@ client_tool_cases() {
   case_run stack-restored-clock same '' -- display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
   case_run stack-terminal same '' -- send-keys -t PANE x
   case_run stack-terminal-shell same '' -- capture-pane -p -t PANE
+  run_both copy-mode -t PANE
+  CASE_CLOCK_FACE=1
+  case_run clock-over-copy record 'TUI-014: copy sessions remain per client; the pin stacks clock over copy and temporarily suspends the copy key table' -- clock-mode -t PANE
+  for side in tmux zz; do
+    tmux_outer_command send-keys -t "=$OUTER_SESSION:$side" x
+  done
+  case_run clock-over-copy-key record 'TUI-014: the pin consumes x in the top clock and restores copy; zz retains the client copy key table under its clock' -- display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+  run_both copy-mode -q -t PANE
+  restore_case clock-over-copy-restored
+  run_both clock-mode -t PANE
+  case_run copy-over-clock record 'TUI-014: the pin displays copy above the suspended clock; zz keeps its pane clock above the per-client frozen copy view' -- copy-mode -t PANE
+  run_both copy-mode -q -t PANE
+  restore_case copy-over-clock-restored
   set_window_on_both clock-mode-colour '#ff00aa'
   set_window_on_both clock-mode-style 12
   CASE_NEEDLE_MODE=1
@@ -1496,29 +1520,35 @@ run_self_check() {
     die 'the outer tmux refused send-keys'
   wait_for 'the one-sided clock ended' pane_in_mode zz 0
 
-  run_on_both clock-mode -t PANE
-  run_on_both send-keys -t PANE x
+  run_both clock-mode -t PANE
+  run_both send-keys -t PANE x
   zz_command clock-mode -t "$(active_pane zz)" >/dev/null
   self_check_run injected-clock-sabotage capture-pane -p -t PANE
   self_check_expect 'injected key bypass leaves a one-sided clock' \
     exit=0 stdout=0 stderr=0 screen=1 state=1
   zz_command copy-mode -q -t "$(active_pane zz)" >/dev/null
-  run_on_both clock-mode -t PANE
-  run_on_both copy-mode -q -t PANE
+  zz_command send-keys -t "$(active_pane zz)" x >/dev/null
+  self_check_run injected-shell-sabotage capture-pane -p -t PANE
+  self_check_expect 'a one-sided leaked key reaches shell bytes and screen' \
+    exit=0 stdout=1 stderr=0 screen=1 state=0
+  tmux_inner_command send-keys -t "$(active_pane tmux)" x >/dev/null
+  run_both send-keys -t PANE C-u
+  run_both clock-mode -t PANE
+  run_both copy-mode -q -t PANE
   zz_command clock-mode -t "$(active_pane zz)" >/dev/null
   self_check_run cancel-clock-sabotage capture-pane -p -t PANE
   self_check_expect 'generic cancellation leaves a one-sided clock' \
     exit=0 stdout=0 stderr=0 screen=1 state=1
   zz_command copy-mode -q -t "$(active_pane zz)" >/dev/null
 
-  run_on_both clock-mode -t PANE
-  run_on_both switch-mode -t PANE
+  run_both clock-mode -t PANE
+  run_both switch-mode -t PANE
   tmux_inner_command copy-mode -q -t "$(active_pane tmux)" >/dev/null
   tmux_inner_command switch-mode -t "$(active_pane tmux)" >/dev/null
   self_check_run stack-sabotage display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
   self_check_expect 'a missing suspended mode changes the stack count' \
     exit=0 stdout=1 stderr=0 screen=0 state=1
-  run_on_both copy-mode -q -t PANE
+  run_both copy-mode -q -t PANE
 
   # the same for the other pane mode, which is not a clock: window_switch_mode
   # on the zz pane alone, whose rows and prompt are a different surface over the

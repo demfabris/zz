@@ -35,7 +35,9 @@ Current forks and why:
      element so one global setting cannot turn a component into a pill.
      Shadows and the corner mask (4) trace the same exponent — a mask left
      circular around a squircle frame cuts the frame's own border off over the
-     arc. Fully rounded quads stay true circles. GPU-facing structs must stay a
+     arc. Native per-element `CornerRadiusMode::Fixed` bypasses adaptive compression,
+     while `Styled::corner_smoothing` overrides only the element's own fill, border,
+     and both shadow passes. Descendants retain the window policy. Fully rounded quads stay true circles. GPU-facing structs must stay a
      multiple of 8 bytes (const-asserted in `scene.rs`) or every draw fails
      wgpu's binding-size check while Metal silently reads at a skew.
 

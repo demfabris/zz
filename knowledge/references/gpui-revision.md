@@ -4,7 +4,7 @@ title: GPUI revision pin
 description: Where the patched Zed revision zz builds against is defined, how to read it, and what the carried GPUI patches do. gpui-component is not a dependency.
 resource: Cargo.toml
 tags: [gpui, zed, pin, reference, git-dependency]
-timestamp: 2026-09-12T00:00:00Z
+timestamp: 2026-09-14T00:00:00Z
 ---
 
 # Overview
@@ -99,9 +99,13 @@ Each is upstream-able as a small Zed PR; if Zed merges an equivalent, drop it. I
 21. `Window::set_adaptive_corner_fraction`: resolve an ordinary corner radius against the element
     it rounds, in `Style::paint` where requested radii meet laid-out bounds. Approaches a fraction
     of the shorter side along `cap * tanh(radius / cap)` instead of being clamped at half, so one
-    global radius setting cannot make a component change shape category . or stop responding . at
-    a value that differs per component. `FULL_CORNER_RADIUS` (what `rounded_full` sets) is exempt
+    global radius setting keeps ordinary corners below that fraction. At high requested values,
+    small radius changes become visually compressed. `FULL_CORNER_RADIUS` (what `rounded_full` sets) is exempt
     and still resolves to exactly half, making a pill something a widget declares.
+    Per-element `CornerRadiusMode::Fixed` bypasses adaptive compression and uses the normal
+    geometric clamp. `Styled::corner_smoothing` overrides the contour for an element's fill,
+    border, and shadows without changing descendants. PopupMenu rows use these native
+    controls for circular corners with a separate non-pill radius cap.
 22. Building the wgpu renderer against wgpu 30: `Queue::present()` replaces
     `SurfaceTexture::present()`, and `SurfaceConfiguration` gains `color_space:
     SurfaceColorSpace::Auto` (wgpu 29's behaviour). Carried because the `cef` crate moved its

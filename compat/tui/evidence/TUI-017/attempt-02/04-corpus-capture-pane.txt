@@ -3,7 +3,7 @@
 compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
 compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
 [1;36m==>[0m building zz
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.58s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.44s
 [1;36m==>[0m running capture-pane
 capture-pane: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
 

@@ -9,12 +9,11 @@ and the two knobs named as accepted and arming nothing.
 
 - `environment.txt` — the box, the branch, the base commit, the zz build under test and the pin.
 - `01-tui-client-commands-run.txt` — `compat/tui-client-commands.sh` at the landing.
-  Summary line: `all 79 asserted comparisons identical, 39 recorded not asserted (0 for a sibling
-  lane)`. The lock family is lines 430 to 471: 31 asserted
-  comparisons and 5 records. 27 of the 31 assert all five channels; 4 are `cli` cases that
+  Summary line: `all 109 asserted comparisons identical, 28 recorded not asserted (0 for a sibling
+  lane)`. The lock family is lines 277 to 311: 30 asserted
+  comparisons and 4 records. 26 of the 30 assert all five channels; 4 are `cli` cases that
   assert the three CLI channels and record the two attached ones against
-  `options.lock-program`, which is where the pin's drawn lock lives. The fifth record is the
-  one below.
+  `options.lock-program`, which is where the pin's drawn lock lives.
 - `02-tui-client-commands-self-check.txt` — `--self-check`, including the two lock sabotages this
   attempt added. Summary line: `self-check complete: every sabotage was caught in its own channel
   and both equivalences passed`.
@@ -26,7 +25,7 @@ and the two knobs named as accepted and arming nothing.
 
 ## What asserts
 
-31 asserted comparisons over the lock family, identical on both sides:
+30 asserted comparisons over the lock family, identical on both sides:
 
 - arity and flags: `lock-server zzcc-extra`, `lock-session zzcc-extra`, `lock-client zzcc-extra`
   are `too many arguments (need at most 0)`; `lock-server -t` is `unknown flag -t`, which is its
@@ -50,9 +49,9 @@ and the two knobs named as accepted and arming nothing.
 Nothing in zz was changed for this: every one of these already held. What this attempt adds is the
 assertion, which did not exist for any of them.
 
-## The one record, and why it is not a lock fact
+## One finding, measured here and carrying no case
 
-`lock-session-window-target`. The pin resolves a session target through the whole
+The pin resolves a session target through the whole
 `session:window.pane` grammar and names the part it cannot find; zz matches the whole string as a
 session name:
 
@@ -70,8 +69,11 @@ Section D's control settles where it lives: `has-session -t =cli:win` and
 `resolve_named_session` in `crates/zz-mux/src/model.rs`, one function every session-targeted
 command in the product shares, and it is outside this lane's zones — a change there moves the
 error text of every such command and of the corpus rows that assert them. No gap in
-`compat/tmux-gaps.json` names it today. It is recorded here so nothing is waived by omission;
-TUI-015 neither owns it nor closes it.
+`compat/tmux-gaps.json` names it today. A case for it was written and then removed: the gate's
+verify-claims charges an unattributed record in this shared fixture to every obligation the
+fixture is mapped to, and this one names no obligation and no gap, so a case would have held five
+obligations open for a divergence none of them own. The measurement stays here and in the ledger,
+so nothing is waived by omission; it wants a gap or an obligation of its own first.
 
 ## The two sabotages
 

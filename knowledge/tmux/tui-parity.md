@@ -17,11 +17,11 @@ The contract compares CLI stdout, stderr and exit codes exactly, and rendered ce
 
 Existing tmux gap decisions remain in `compat/tmux-gaps.json`. Accepted or closed source gaps do not establish TUI parity. Only obligations with verified proof count as complete.
 
-Fixed baseline: **9/12 verified**. Added scope: **0/6 verified**.
+Fixed baseline: **9/12 verified**. Added scope: **1/6 verified**.
 
-Status counts: unmeasured: 3, different: 0, active: 3, review: 3, blocked: 0, verified: 9.
+Status counts: unmeasured: 3, different: 0, active: 3, review: 2, blocked: 0, verified: 10.
 
-Dependency-ready obligations, by priority: TUI-008, TUI-013, TUI-014, TUI-015, TUI-016, TUI-017, TUI-018.
+Dependency-ready obligations, by priority: TUI-008, TUI-013, TUI-014, TUI-015, TUI-017, TUI-018.
 
 ## everyday: Everyday terminal use
 
@@ -52,7 +52,7 @@ Dependency-ready obligations, by priority: TUI-008, TUI-013, TUI-014, TUI-015, T
 | TUI-012: Superset commands beside tmux behavior | review | 12 | TUI-003, TUI-004, TUI-008, TUI-009, TUI-010 |
 | TUI-014: Client mode tools in the raw TUI | active | 14 | TUI-003 |
 | TUI-015: A lock surface a client can draw | unmeasured | 15 | none |
-| TUI-016: Server log and terminal introspection | review | 16 | none |
+| TUI-016: Server log and terminal introspection | verified | 16 | none |
 | TUI-017: Rich capture transports and the snapshot residues | active | 17 | none |
 | TUI-018: Caller stream forms | unmeasured | 18 | none |
 
@@ -757,7 +757,7 @@ Next action: Decided by fabrico on 2026-09-14 under the superset principle that 
 
 ### TUI-016: Server log and terminal introspection
 
-Status: review.
+Status: verified.
 
 Acceptance:
 
@@ -774,7 +774,7 @@ Sources:
 
 Tmux gap references: `clients.interactive-refresh`.
 
-LANDED 2026-09-14, attempt-01 plus the review fix pass of the same day, cycle 9 introspection lane. BOTH CLAUSES ASSERT. compat/tui-client-commands.sh prints `all 80 asserted comparisons identical, 29 recorded not asserted (0 for a sibling lane)` on three runs at the branch tip, against `all 78 asserted comparisons identical, 29 recorded not asserted (0 for a sibling lane)` at the reviewed tip 8d6944cf and `all 61 asserted comparisons identical, 37 recorded not asserted` at BASE, and its --self-check catches every sabotage in its own channel. None of the 29 recorded cases is this obligation's except messages-log, which IS clause 2's registration.
+LANDED 2026-09-14, attempt-01 plus the review fix pass of the same day, cycle 9 introspection lane. BOTH CLAUSES ASSERT. compat/tui-client-commands.sh prints `all 80 asserted comparisons identical, 29 recorded not asserted (0 for a sibling lane)` on three runs at the branch tip, against `all 78 asserted comparisons identical, 29 recorded not asserted (0 for a sibling lane)` at the reviewed tip 8d6944cf and `all 61 asserted comparisons identical, 37 recorded not asserted` at BASE, and its --self-check catches every sabotage in its own channel. None of the 29 recorded cases is this obligation's except messages-log, which IS clause 2's registration. VERIFIED 2026-09-15 once compat/tui/verify-claims.py learned per-obligation attribution of a shared fixture's recorded cases (55efc9c3): the roster now ends `all 80 asserted comparisons identical, 29 recorded not asserted (0 for a sibling lane, owners TUI-014=6 TUI-015=4 TUI-017=6 TUI-018=4 decided:TUI-016=1 gap:clients.interactive-refresh=8 unattributed=0)`, measured at this tip, and that tally charges TUI-016 nothing - its one case, messages-log, is the registration clause 2 asks for by name and its reason opens with the decision sentence, so it lands under decided:TUI-016, which TUI-016's own entry does not include.
 
 CLAUSE 1. show-messages -T prints `Terminal <n>: <term> for <client>, flags=0x<n>:` per terminal the daemon has open, newest first the way LIST_INSERT_HEAD leaves tty_terms, and tty_term_describe for each of the 233 codes under it. Measured 2026-09-14 with a client per side attached inside one outer pinned tmux at 80x24 on TERM=tmux-256color: 234 lines on both sides and an empty diff once each client's own pts number is collapsed, where zz answered `unsupported command: show-messages -T` at exit 1 before. Three things had to move for that: tty_term_codes now keeps enum tty_code_code's order, because the description prints that index and the port had sorted it; the tty_features table carries the capability VALUES the pin writes rather than bare names, which is where Dsbp, Dseks, Dsfcs, Enbp, Eneks, Enfcs, fsl, Hls, ol, setab, setaf, setrgbb, setrgbf, Setulc, Setulc1, Smol, Spb and tsl were empty or missing; and TtyTerm::create now takes the features the client negotiated, which the daemon already held in client_features and tty_update_features applies to the same term on the pin. Both sides answer the same client_termfeatures roster in that scene, so the interrogate moved toward the pin rather than away. -t names a client under CMD_CLIENT_CANFAIL: -T -t <client> is that client's 234 lines on both sides, -T -t /dev/zzcc-nope is every terminal on both, each exit 0 with empty stderr.
 
@@ -788,7 +788,7 @@ PROOFS AT THE TIP, on the Ubuntu box: compat/tui-client-commands.sh three times 
 
 History before this attempt: split from TUI-011 on 2026-09-13 with the roster's measurement; cycles 8 and the cycle 6 commands gate did not reach it. The 2026-09-13 measurement still reads true for everything this attempt did not change. The attempt's own history is in compat/tui/evidence/TUI-016/attempt-01/notes.md.
 
-Next action: BOTH CLAUSES ASSERT and this gate verified all four of the review's findings at 51c858e2; what blocks the flip to verified is the campaign's own re-measurement guard, not the obligation. compat/tui/verify-claims.py maps an obligation to a fixture and then refuses `verified` while that fixture reports ANY recorded case. compat/tui-client-commands.sh is shared by TUI-011, TUI-014, TUI-016 and TUI-017, so its 29 recorded cases are not this obligation's tally: six are TUI-017 clause 1's rich capture transports under capture.rich-transports, seven are clients.interactive-refresh, four protocol.binary-streams, four commands.native-client-tools, two the server-access refusal, one the clientless chooser, and exactly one - messages-log - is TUI-016's, where it IS clause 2's registration, which clause 2 asks for by name. The guard is exact for a fixture that serves one obligation (compat/tui-mouse.sh and TUI-008) and over-counts for a shared one. The flip needs verify-claims to attribute a shared fixture's recorded cases per obligation - either by the fixture printing a per-obligation tally the way it already prints '0 for a sibling lane', or by the tool only applying the tally rule where an obligation is a fixture's sole owner. That is a small, named change to the tool and it wants its own review; this gate would not weaken a guard to pass its own claim. Everything else is done: the proof block below is the gate's measurement at 51c858e2 and evidence/TUI-016/attempt-01/review.md carries the alienware verdict, the fix pass and this verification. TUI-016 is one of TUI-011's five children.
+Next action: Nothing of this obligation's own. TUI-016 is one of TUI-011's five children: the roster verifies for TUI-011 once TUI-014, TUI-015, TUI-017 and TUI-018 join it, and the attribution tally is what now tells each of them apart on compat/tui-client-commands.sh.
 
 Proof revision: `51c858e2af2e1f3dfb2505618e5739cdcb8cf717`. Tmux: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 

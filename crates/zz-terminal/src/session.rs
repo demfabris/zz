@@ -66,6 +66,8 @@ const INITIAL_CELL_WIDTH: u32 = 8;
 const INITIAL_CELL_HEIGHT: u32 = 18;
 const MAX_LINK_URI_BYTES: usize = 16 * 1024;
 const LINK_URI_SCRATCH_BYTES: usize = 256;
+const GRAPHEME_CLUSTER_SCRATCH: usize = 32;
+const MAX_GRAPHEME_CLUSTER_CODEPOINTS: usize = 256;
 /// The `(prefix, suffix)` an agent CLI wraps around its own attachment number.
 /// Current Claude Code and Codex both print `[Image #2]`.
 const IMAGE_PLACEHOLDERS: [(&str, &str); 1] = [("[Image #", "]")];
@@ -2068,6 +2070,38 @@ impl TerminalSession {
 
     /// Captures canonical terminal content on the pane actor. Blocks only the
     /// calling command or client thread.
+    /// The three formats the pin reads off the grid under a pointer cell,
+    /// answered synchronously by the worker that owns that grid. `column` and
+    /// `row` are the event's cell inside the pane, which is what
+    /// `cmd_mouse_at` hands `format_cb_mouse_word` and its two neighbours.
+    pub fn pointer_context(
+        &self,
+        column: u16,
+        row: u16,
+    ) -> Result<PointerContext, TerminalCaptureError> {
+        let (reply, response) = crossbeam_channel::bounded(1);
+        let started = Instant::now();
+        self.commands
+            .send_timeout(
+                Command::PointerContext(Box::new(PointerContextRequest { column, row, reply })),
+                CAPTURE_TIMEOUT,
+            )
+            .map_err(|error| match error {
+                crossbeam_channel::SendTimeoutError::Timeout(_) => TerminalCaptureError::TimedOut,
+                crossbeam_channel::SendTimeoutError::Disconnected(_) => {
+                    TerminalCaptureError::ActorStopped
+                }
+            })?;
+        response
+            .recv_timeout(CAPTURE_TIMEOUT.saturating_sub(started.elapsed()))
+            .map_err(|error| match error {
+                crossbeam_channel::RecvTimeoutError::Timeout => TerminalCaptureError::TimedOut,
+                crossbeam_channel::RecvTimeoutError::Disconnected => {
+                    TerminalCaptureError::ActorStopped
+                }
+            })
+    }
+
     pub fn capture(&self, options: CaptureOptions) -> Result<String, TerminalCaptureError> {
         let (reply, response) = crossbeam_channel::bounded(1);
         let started = Instant::now();
@@ -2300,6 +2334,24 @@ struct CaptureRequest {
 }
 
 #[derive(Debug)]
+struct PointerContextRequest {
+    column: u16,
+    row: u16,
+    reply: Sender<PointerContext>,
+}
+
+/// What `format_cb_mouse_word`, `format_cb_mouse_line` and
+/// `format_cb_mouse_hyperlink` answer for one cell of one pane. Each of the
+/// three answers NULL on the pin where there is nothing under the pointer,
+/// and NULL expands empty.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PointerContext {
+    pub word: String,
+    pub line: String,
+    pub hyperlink: String,
+}
+
+#[derive(Debug)]
 struct LastCommandRequest {
     reply: Sender<Result<LastCommandCapture, TerminalCaptureError>>,
 }
@@ -2377,6 +2429,7 @@ enum Command {
         reply: Sender<()>,
     },
     Capture(Box<CaptureRequest>),
+    PointerContext(Box<PointerContextRequest>),
     SemanticCapture(Box<LastCommandRequest>),
     History(Box<HistoryCommand>),
     KittyImage(Box<KittyImageRequest>),
@@ -2415,6 +2468,7 @@ impl Command {
             Self::ArmRawOutputTap { .. } => "arm-raw-output-tap",
             Self::DisarmRawOutputTap { .. } => "disarm-raw-output-tap",
             Self::Capture(_) => "capture",
+            Self::PointerContext(_) => "pointer-context",
             Self::SemanticCapture(_) => "semantic-capture",
             Self::History(_) => "history",
             Self::KittyImage(_) => "kitty-image",
@@ -4597,6 +4651,20 @@ fn run_output_view(
                     };
                     let _ = reply.send(capture_terminal(&terminal, mode, options));
                 }
+                Ok(Command::PointerContext(request)) => {
+                    let PointerContextRequest { column, row, reply } = *request;
+                    let mut copy_modes = active_views
+                        .values()
+                        .filter_map(|view| view.copy_mode.as_deref());
+                    let mode = match (copy_modes.next(), copy_modes.next()) {
+                        (Some(mode), None) => Some(mode),
+                        _ => None,
+                    };
+                    let _ = reply.send(
+                        pointer_context(&terminal, mode, column, row, &word_separators)
+                            .unwrap_or_default(),
+                    );
+                }
                 Ok(Command::SemanticCapture(request)) => {
                     let _ = request.reply.send(capture_last_command(&terminal));
                 }
@@ -5819,6 +5887,19 @@ fn run_terminal(
                         _ => None,
                     };
                     let result = capture_terminal(&terminal, mode, options);
+                    let _ = reply.send(result);
+                }
+                Command::PointerContext(request) => {
+                    let PointerContextRequest { column, row, reply } = *request;
+                    let mut copy_modes = active_views
+                        .values()
+                        .filter_map(|view| view.copy_mode.as_deref());
+                    let mode = match (copy_modes.next(), copy_modes.next()) {
+                        (Some(mode), None) => Some(mode),
+                        _ => None,
+                    };
+                    let result = pointer_context(&terminal, mode, column, row, &word_separators)
+                        .unwrap_or_default();
                     let _ = reply.send(result);
                 }
                 Command::SemanticCapture(request) => {
@@ -8061,13 +8142,25 @@ fn hyperlink_uri_bytes(
     column: u16,
     scratch: &mut Vec<u8>,
 ) -> Result<Option<usize>, WorkerError> {
+    hyperlink_uri_bytes_at(
+        terminal,
+        Point::Viewport(PointCoordinate {
+            x: column,
+            y: u32::from(row),
+        }),
+        scratch,
+    )
+}
+
+fn hyperlink_uri_bytes_at(
+    terminal: &Terminal<'_, '_>,
+    point: Point,
+    scratch: &mut Vec<u8>,
+) -> Result<Option<usize>, WorkerError> {
     if scratch.len() < LINK_URI_SCRATCH_BYTES {
         scratch.resize(LINK_URI_SCRATCH_BYTES, 0);
     }
-    let grid_ref = terminal.grid_ref(Point::Viewport(PointCoordinate {
-        x: column,
-        y: u32::from(row),
-    }))?;
+    let grid_ref = terminal.grid_ref(point)?;
     match grid_ref.hyperlink_uri(scratch) {
         Ok(0) => Ok(None),
         Ok(length) => Ok(Some(length)),
@@ -12735,8 +12828,8 @@ fn copy_mode_facts(
         view_mode: mode.kind == FrozenModeKind::View,
         cursor_x: u32::from(cursor.x),
         cursor_y: cursor.y.saturating_sub(mode.viewport_offset),
-        cursor_line: mode_format_line(&mode.revision, cursor.y),
-        cursor_word: mode_format_word(&mode.revision, cursor, word_separators),
+        cursor_line: format_grid_line(mode.revision.as_ref(), cursor.y),
+        cursor_word: format_grid_word(mode.revision.as_ref(), cursor, word_separators),
         scroll_position: mode
             .revision
             .maximum_offset()
@@ -12810,28 +12903,67 @@ fn copy_mode_search_match(
     text
 }
 
+/// The grid a `format_grid_*` reader walks. The pin reads the three pointer
+/// formats off `wp->base.grid` for a live pane and off the copy mode's own
+/// backing for a pane in one, so the readers take rows and cells and nothing
+/// else and both grids answer them.
+trait FormatGrid {
+    fn grid_columns(&self) -> u16;
+    fn grid_rows(&self) -> u32;
+    fn grid_row_wrapped(&self, row: u32) -> bool;
+    fn grid_cell_width(&self, point: PointCoordinate) -> CellWidth;
+    fn grid_first_char(&self, point: PointCoordinate) -> Option<char>;
+    fn grid_push_text(&self, point: PointCoordinate, output: &mut String);
+}
+
+impl FormatGrid for ModeRevision {
+    fn grid_columns(&self) -> u16 {
+        self.columns
+    }
+
+    fn grid_rows(&self) -> u32 {
+        self.total_rows()
+    }
+
+    fn grid_row_wrapped(&self, row: u32) -> bool {
+        self.row(row).wrapped()
+    }
+
+    fn grid_cell_width(&self, point: PointCoordinate) -> CellWidth {
+        self.cell(point).width()
+    }
+
+    fn grid_first_char(&self, point: PointCoordinate) -> Option<char> {
+        self.first_char(point)
+    }
+
+    fn grid_push_text(&self, point: PointCoordinate, output: &mut String) {
+        self.push_cell_text(self.cell(point), output);
+    }
+}
+
 /// `grid_line_length`: the row's width with trailing blank cells trimmed. An
 /// unwritten cell reads as a space in the pin's grid, so it trims too.
-fn mode_format_line_length(revision: &ModeRevision, row: u32) -> u32 {
-    (0..revision.columns)
+fn format_grid_line_length<G: FormatGrid + ?Sized>(grid: &G, row: u32) -> u32 {
+    (0..grid.grid_columns())
         .rev()
         .find(|column| {
             let point = PointCoordinate { x: *column, y: row };
-            !matches!(revision.first_char(point), None | Some(' '))
+            !matches!(grid.grid_first_char(point), None | Some(' '))
         })
         .map_or(0, |column| u32::from(column).saturating_add(1))
 }
 
 /// `format_grid_line`: one row's text, trailing blanks trimmed, wraps not
 /// followed. An empty row answers NULL on the pin, which expands empty.
-fn mode_format_line(revision: &ModeRevision, row: u32) -> String {
+fn format_grid_line<G: FormatGrid + ?Sized>(grid: &G, row: u32) -> String {
     let mut text = String::new();
-    for column in 0..mode_format_line_length(revision, row) {
+    for column in 0..format_grid_line_length(grid, row) {
         let point = PointCoordinate {
             x: u16::try_from(column).unwrap_or(u16::MAX),
             y: row,
         };
-        revision.push_cell_text(revision.cell(point), &mut text);
+        grid.grid_push_text(point, &mut text);
     }
     text
 }
@@ -12839,18 +12971,18 @@ fn mode_format_line(revision: &ModeRevision, row: u32) -> String {
 /// `format_is_word_separator`: the configured set, plus tab and space, plus
 /// the unwritten cell the pin reads back as a space. Padding halves are never
 /// separators; the pin skips them before the test.
-fn mode_format_is_word_separator(
-    revision: &ModeRevision,
+fn format_grid_is_word_separator<G: FormatGrid + ?Sized>(
+    grid: &G,
     point: PointCoordinate,
     word_separators: &WordSeparators,
 ) -> bool {
     if matches!(
-        revision.cell(point).width(),
+        grid.grid_cell_width(point),
         CellWidth::SpacerTail | CellWidth::SpacerHead
     ) {
         return false;
     }
-    match revision.first_char(point) {
+    match grid.grid_first_char(point) {
         None => true,
         Some(character) => {
             character == ' ' || character == '\t' || word_separators.contains_separator(character)
@@ -12862,8 +12994,8 @@ fn mode_format_is_word_separator(
 /// crossing a wrap, then collect forward to the next separator. A cursor on a
 /// separator collects the word that follows it, and answers empty when the
 /// next cell is a separator too.
-fn mode_format_word(
-    revision: &ModeRevision,
+fn format_grid_word<G: FormatGrid + ?Sized>(
+    grid: &G,
     cursor: PointCoordinate,
     word_separators: &WordSeparators,
 ) -> String {
@@ -12871,7 +13003,7 @@ fn mode_format_word(
     let mut y = cursor.y;
     let mut found = false;
     loop {
-        if mode_format_is_word_separator(revision, PointCoordinate { x, y }, word_separators) {
+        if format_grid_is_word_separator(grid, PointCoordinate { x, y }, word_separators) {
             found = true;
             break;
         }
@@ -12879,11 +13011,11 @@ fn mode_format_word(
             if y == 0 {
                 break;
             }
-            if !revision.row(y.saturating_sub(1)).wrapped() {
+            if !grid.grid_row_wrapped(y.saturating_sub(1)) {
                 break;
             }
             y -= 1;
-            let length = mode_format_line_length(revision, y);
+            let length = format_grid_line_length(grid, y);
             if length == 0 {
                 break;
             }
@@ -12892,12 +13024,12 @@ fn mode_format_word(
         x -= 1;
     }
     let mut text = String::new();
-    let last_row = revision.total_rows().saturating_sub(1);
+    let last_row = grid.grid_rows().saturating_sub(1);
     loop {
         if found {
-            let end = mode_format_line_length(revision, y);
+            let end = format_grid_line_length(grid, y);
             if end == 0 || u32::from(x) == end.saturating_sub(1) {
-                if y == last_row || !revision.row(y).wrapped() {
+                if y == last_row || !grid.grid_row_wrapped(y) {
                     break;
                 }
                 y += 1;
@@ -12908,16 +13040,181 @@ fn mode_format_word(
         }
         found = true;
         let point = PointCoordinate { x, y };
-        let cell = revision.cell(point);
-        if matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
+        if matches!(
+            grid.grid_cell_width(point),
+            CellWidth::SpacerTail | CellWidth::SpacerHead
+        ) {
             continue;
         }
-        if mode_format_is_word_separator(revision, point, word_separators) {
+        if format_grid_is_word_separator(grid, point, word_separators) {
             break;
         }
-        revision.push_cell_text(cell, &mut text);
+        grid.grid_push_text(point, &mut text);
     }
     text
+}
+
+/// The live pane grid the three pointer formats read. `wp->base.grid` is
+/// indexed from the top of the history, so the event's pane row `y` is
+/// `gd->hsize + y` and a word walk crosses out of the active area into the
+/// scrollback from there. A read that the engine refuses answers the way an
+/// unwritten cell does, which is what the pin's NULL expands to.
+struct LiveGrid<'terminal, 'alloc: 'callbacks, 'callbacks> {
+    terminal: &'terminal Terminal<'alloc, 'callbacks>,
+    columns: u16,
+    rows: u32,
+}
+
+impl<'terminal, 'alloc: 'callbacks, 'callbacks> LiveGrid<'terminal, 'alloc, 'callbacks> {
+    fn new(terminal: &'terminal Terminal<'alloc, 'callbacks>) -> Result<Self, WorkerError> {
+        Ok(Self {
+            terminal,
+            columns: terminal.cols()?.max(1),
+            rows: u32::try_from(terminal.total_rows()?)
+                .unwrap_or(u32::MAX)
+                .max(1),
+        })
+    }
+
+    /// `gd->hsize`: the first row of the active area, which is where a live
+    /// pane's own row 0 sits.
+    fn active_base(&self) -> Result<u32, WorkerError> {
+        Ok(self
+            .rows
+            .saturating_sub(u32::from(self.terminal.rows()?.max(1))))
+    }
+
+    fn reference(&self, point: PointCoordinate) -> Option<libghostty_vt::screen::GridRef<'_>> {
+        if point.x >= self.columns || point.y >= self.rows {
+            return None;
+        }
+        self.terminal.grid_ref(Point::Screen(point)).ok()
+    }
+}
+
+impl FormatGrid for LiveGrid<'_, '_, '_> {
+    fn grid_columns(&self) -> u16 {
+        self.columns
+    }
+
+    fn grid_rows(&self) -> u32 {
+        self.rows
+    }
+
+    fn grid_row_wrapped(&self, row: u32) -> bool {
+        self.reference(PointCoordinate { x: 0, y: row })
+            .and_then(|reference| reference.row().ok())
+            .and_then(|row| row.is_wrapped().ok())
+            .unwrap_or(false)
+    }
+
+    fn grid_cell_width(&self, point: PointCoordinate) -> CellWidth {
+        self.reference(point)
+            .and_then(|reference| reference.cell().ok())
+            .and_then(|cell| cell.wide().ok())
+            .map_or(CellWidth::Narrow, |wide| match wide {
+                CellWide::Narrow => CellWidth::Narrow,
+                CellWide::Wide => CellWidth::Wide,
+                CellWide::SpacerTail => CellWidth::SpacerTail,
+                CellWide::SpacerHead => CellWidth::SpacerHead,
+            })
+    }
+
+    fn grid_first_char(&self, point: PointCoordinate) -> Option<char> {
+        let codepoint = self.reference(point)?.cell().ok()?.codepoint().ok()?;
+        char::from_u32(codepoint).filter(|character| *character != '\0')
+    }
+
+    fn grid_push_text(&self, point: PointCoordinate, output: &mut String) {
+        if matches!(
+            self.grid_cell_width(point),
+            CellWidth::SpacerTail | CellWidth::SpacerHead
+        ) {
+            return;
+        }
+        let Some(reference) = self.reference(point) else {
+            return;
+        };
+        let mut cluster = ['\0'; GRAPHEME_CLUSTER_SCRATCH];
+        match reference.graphemes(&mut cluster) {
+            Ok(length) => output.extend(cluster.iter().take(length)),
+            Err(libghostty_vt::Error::OutOfSpace { required })
+                if required > 0 && required <= MAX_GRAPHEME_CLUSTER_CODEPOINTS =>
+            {
+                let mut cluster = vec!['\0'; required];
+                if let Ok(length) = reference.graphemes(&mut cluster) {
+                    output.extend(cluster.iter().take(length));
+                }
+            }
+            Err(_) => {}
+        }
+    }
+}
+
+/// `format_cb_mouse_word`, `format_cb_mouse_line` and
+/// `format_cb_mouse_hyperlink` read the pane's CURRENT grid under the event's
+/// cell. A pane with a mode up answers off the copy mode's own backing
+/// instead, which `window_copy_get_word` and `window_copy_get_line` index at
+/// `gd->hsize + y - data->oy`: the retained revision's own absolute row.
+fn pointer_context(
+    terminal: &Terminal<'_, '_>,
+    mode: Option<&CopyModeState>,
+    column: u16,
+    row: u16,
+    word_separators: &WordSeparators,
+) -> Result<PointerContext, WorkerError> {
+    let grid = LiveGrid::new(terminal)?;
+    let row = u32::from(row);
+    let point = PointCoordinate {
+        x: column,
+        y: grid.active_base()?.saturating_add(row),
+    };
+    let (word, line) = match mode {
+        Some(mode) => {
+            let frozen = PointCoordinate {
+                x: column,
+                y: mode.viewport_offset.saturating_add(row),
+            };
+            (
+                format_grid_word(mode.revision.as_ref(), frozen, word_separators),
+                format_grid_line(mode.revision.as_ref(), frozen.y),
+            )
+        }
+        None => (
+            format_grid_word(&grid, point, word_separators),
+            format_grid_line(&grid, point.y),
+        ),
+    };
+    Ok(PointerContext {
+        word,
+        line,
+        hyperlink: pointer_hyperlink(&grid, point, &mut Vec::new())?,
+    })
+}
+
+/// `format_grid_hyperlink`: step left off a padding half onto the cell that
+/// owns it, then answer that cell's OSC 8 URI, or nothing when it carries no
+/// link id.
+fn pointer_hyperlink(
+    grid: &LiveGrid<'_, '_, '_>,
+    mut point: PointCoordinate,
+    scratch: &mut Vec<u8>,
+) -> Result<String, WorkerError> {
+    while matches!(
+        grid.grid_cell_width(point),
+        CellWidth::SpacerTail | CellWidth::SpacerHead
+    ) {
+        if point.x == 0 {
+            return Ok(String::new());
+        }
+        point.x -= 1;
+    }
+    let Some(length) = hyperlink_uri_bytes_at(grid.terminal, Point::Screen(point), scratch)? else {
+        return Ok(String::new());
+    };
+    Ok(std::str::from_utf8(&scratch[..length])
+        .unwrap_or_default()
+        .to_owned())
 }
 
 fn snapshot<'alloc: 'callbacks, 'callbacks>(
@@ -13655,6 +13952,138 @@ mod tests {
                 }
             );
         }
+    }
+
+    /// The sample the pointer-format tests read, one row per line, written to
+    /// a live 80x24 pane. Every row here is a row of the pin's own measured
+    /// table in compat/tui/evidence/TUI-008/attempt-05/notes.md.
+    fn pointer_sample() -> Vec<u8> {
+        let long_word = format!("WRAPPEDHEAD{}LONGTAIL", "x".repeat(120));
+        let mut bytes = Vec::new();
+        write!(bytes, "alpha beta gamma\r\n").expect("sample");
+        write!(bytes, "{long_word}\r\n").expect("sample");
+        write!(
+            bytes,
+            "\x1b]8;;https://example.com/page\x1b\\LINKTEXT\x1b]8;;\x1b\\\r\n"
+        )
+        .expect("sample");
+        write!(bytes, "pre\there post\r\n").expect("sample");
+        write!(bytes, "wide CJK\u{65e5}\u{672c}\u{8a9e} tail\r\n").expect("sample");
+        write!(bytes, "\r\n").expect("sample");
+        write!(bytes, "{}ENDWORD\r\n", " ".repeat(73)).expect("sample");
+        write!(bytes, "dash-joined_word end\r\n").expect("sample");
+        bytes
+    }
+
+    fn pointer_sample_context(
+        column: u16,
+        row: u16,
+        word_separators: &WordSeparators,
+    ) -> PointerContext {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 80,
+            rows: 24,
+            max_scrollback: 2000,
+        })
+        .expect("terminal");
+        let mut filter = EngineFilter::default();
+        let mut renames = Vec::new();
+        let mut bar = None;
+        filter.write(
+            &pointer_sample(),
+            EngineKnobs::default(),
+            &mut terminal,
+            &mut renames,
+            &mut bar,
+        );
+        pointer_context(&terminal, None, column, row, word_separators).expect("pointer context")
+    }
+
+    #[test]
+    fn pointer_formats_read_the_word_and_the_row_under_the_cell() {
+        let separators = WordSeparators::default();
+        let beta = pointer_sample_context(7, 0, &separators);
+        assert_eq!(beta.word, "beta");
+        assert_eq!(beta.line, "alpha beta gamma");
+        assert_eq!(beta.hyperlink, "");
+        assert_eq!(pointer_sample_context(0, 0, &separators).word, "alpha");
+        let separator_cell = pointer_sample_context(5, 0, &separators);
+        assert_eq!(separator_cell.word, "beta");
+        assert_eq!(separator_cell.line, "alpha beta gamma");
+    }
+
+    #[test]
+    fn pointer_formats_answer_nothing_past_a_row_and_on_a_blank_row() {
+        let separators = WordSeparators::default();
+        let past_the_end = pointer_sample_context(79, 0, &separators);
+        assert_eq!(past_the_end.word, "");
+        assert_eq!(past_the_end.line, "alpha beta gamma");
+        let blank = pointer_sample_context(9, 6, &separators);
+        assert_eq!(blank.word, "");
+        assert_eq!(blank.line, "");
+        assert_eq!(blank.hyperlink, "");
+    }
+
+    #[test]
+    fn pointer_word_crosses_a_wrap_where_the_line_does_not() {
+        let separators = WordSeparators::default();
+        let whole = format!("WRAPPEDHEAD{}LONGTAIL", "x".repeat(120));
+        let head = pointer_sample_context(2, 1, &separators);
+        assert_eq!(head.word, whole);
+        assert_eq!(head.line, whole[..80]);
+        let head_last_column = pointer_sample_context(79, 1, &separators);
+        assert_eq!(head_last_column.word, whole);
+        let tail = pointer_sample_context(4, 2, &separators);
+        assert_eq!(tail.word, whole);
+        assert_eq!(tail.line, whole[80..]);
+    }
+
+    #[test]
+    fn pointer_hyperlink_answers_the_osc_8_uri_of_the_cell() {
+        let separators = WordSeparators::default();
+        let link = pointer_sample_context(3, 3, &separators);
+        assert_eq!(link.word, "LINKTEXT");
+        assert_eq!(link.line, "LINKTEXT");
+        assert_eq!(link.hyperlink, "https://example.com/page");
+        let past_the_link = pointer_sample_context(19, 3, &separators);
+        assert_eq!(past_the_link.word, "");
+        assert_eq!(past_the_link.line, "LINKTEXT");
+        assert_eq!(past_the_link.hyperlink, "");
+    }
+
+    #[test]
+    fn pointer_word_reads_the_same_text_from_both_halves_of_a_wide_cell() {
+        let separators = WordSeparators::default();
+        let expected = "CJK\u{65e5}\u{672c}\u{8a9e}";
+        assert_eq!(pointer_sample_context(10, 5, &separators).word, expected);
+        assert_eq!(pointer_sample_context(11, 5, &separators).word, expected);
+        assert_eq!(
+            pointer_sample_context(10, 5, &separators).line,
+            "wide CJK\u{65e5}\u{672c}\u{8a9e} tail"
+        );
+    }
+
+    #[test]
+    fn pointer_line_keeps_leading_blanks_and_trims_trailing_ones() {
+        let separators = WordSeparators::default();
+        let end = pointer_sample_context(77, 7, &separators);
+        assert_eq!(end.word, "ENDWORD");
+        assert_eq!(end.line, format!("{}ENDWORD", " ".repeat(73)));
+    }
+
+    #[test]
+    fn pointer_word_honours_the_word_separators_option() {
+        let separators = WordSeparators::default();
+        assert_eq!(pointer_sample_context(2, 8, &separators).word, "dash");
+        assert_eq!(
+            pointer_sample_context(11, 8, &separators).word,
+            "joined_word"
+        );
+        let rebound = WordSeparators::new("_x");
+        assert_eq!(pointer_sample_context(2, 8, &rebound).word, "dash-joined");
+        assert_eq!(pointer_sample_context(11, 8, &rebound).word, "word");
+        assert_eq!(pointer_sample_context(2, 1, &rebound).word, "WRAPPEDHEAD");
+        assert_eq!(pointer_sample_context(4, 2, &rebound).word, "");
     }
 
     fn engine_filter_screen(knobs: EngineKnobs, chunks: &[&[u8]]) -> (String, Vec<String>) {

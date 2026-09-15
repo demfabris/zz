@@ -1,0 +1,45 @@
+# revision   5585cd6a97a933c212a68f78f0233c382da096d4
+# command    compat/run.sh --strict-geometry args-parse-choosers args-parse-set-option config-grammar config-chain-parse-abort cli-output-bytes lane2-store
+# zz         /home/demfabris/dev/zz-tui-modes-10/target/debug/zz (sha256 472406e384818d67c5c586a68ed63aac47e8a3c8edbca3d13a0c096830be6c76)
+# pin        /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+# started    2026-09-15T12:44:59-03:00
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-tui-modes-10/target/debug/zz
+[1;36m==>[0m running smoke/args-parse-choosers
+smoke/args-parse-choosers: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/args-parse-set-option
+smoke/args-parse-set-option: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/config-grammar
+smoke/config-grammar: 17 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/config-chain-parse-abort
+smoke/config-chain-parse-abort: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/cli-output-bytes
+smoke/cli-output-bytes: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running lane2-store
+lane2-store: 193 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| smoke/args-parse-choosers | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-set-option | 3 | yes | 0 | yes | yes | yes |
+| smoke/config-grammar | 17 | yes | 0 | yes | yes | yes |
+| smoke/config-chain-parse-abort | 2 | yes | 0 | yes | yes | yes |
+| smoke/cli-output-bytes | 2 | yes | 0 | yes | yes | yes |
+| lane2-store | 193 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+[1;36m==>[0m partial run complete; full summary left unchanged
+# finished   2026-09-15T12:47:56-03:00
+# exit       0

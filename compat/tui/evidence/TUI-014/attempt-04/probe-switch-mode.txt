@@ -1,0 +1,356 @@
+=== BEFORE
+--- tmux plain
+$ printf 'SCENE-%s\n' %0$
+SCENE-%0$
+$$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+L0:win* 1:two$
+--- tmux styled
+$ printf 'SCENE-%s\n' %0
+SCENE-%0
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+--- tmux state
+P cli:0.0 mode=0/ 80x23
+P cli:1.0 mode=0/ 80x24
+--- zz plain
+$ printf 'SCENE-%s\n' %0$
+SCENE-%0$
+$$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+L0:win* 1:two$
+--- zz styled
+$ printf 'SCENE-%s\n' %0
+SCENE-%0
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+--- zz state
+P cli:0.0 mode=0/ 80x23
+P cli:1.0 mode=0/ 80x24
+--- styled diff (tmux vs zz)
+STYLED SCREENS IDENTICAL
+--- state diff (tmux vs zz)
+STATE IDENTICAL
+--- cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+--- cursor zz:   2,2 flag=1 pane=80x24 shape=default
+### tmux rc=0
+### tmux stdout
+### tmux stderr
+### zz rc=0
+### zz stdout
+### zz stderr
+=== AFTER
+--- tmux plain
+cli 2 windows attached win$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+(search)$
+L0:win* 1:two$
+--- tmux styled
+^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m2 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mwin^[[0m^[[48;2;184;134;11m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+^[[38;2;13;13;13m(search) ^[[39m^[[49m
+^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+--- tmux state
+P cli:0.0 mode=1/switch-mode 80x23
+P cli:1.0 mode=0/ 80x24
+--- zz plain
+cli 2 windows attached win$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+(search)$
+L0:win* 1:two$
+--- zz styled
+^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m2 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mwin^[[0m^[[48;2;184;134;11m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+^[[38;2;13;13;13m(search) ^[[39m^[[49m
+^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+--- zz state
+P cli:0.0 mode=1/switch-mode 80x23
+P cli:1.0 mode=0/ 80x24
+--- styled diff (tmux vs zz)
+STYLED SCREENS IDENTICAL
+--- state diff (tmux vs zz)
+STATE IDENTICAL
+--- cursor tmux: 9,22 flag=1 pane=80x24 shape=default
+--- cursor zz:   9,22 flag=1 pane=80x24 shape=default
+=== RESTORED
+--- tmux plain
+cli 2 windows attached win$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+(search)$
+L0:win* 1:two$
+--- tmux styled
+^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m2 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mwin^[[0m^[[48;2;184;134;11m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+^[[38;2;13;13;13m(search) ^[[39m^[[49m
+^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+--- tmux state
+P cli:0.0 mode=1/switch-mode 80x23
+P cli:1.0 mode=0/ 80x24
+--- zz plain
+$ printf 'SCENE-%s\n' %0$
+SCENE-%0$
+$$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+L0:win* 1:two$
+--- zz styled
+$ printf 'SCENE-%s\n' %0
+SCENE-%0
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+--- zz state
+P cli:0.0 mode=0/ 80x23
+P cli:1.0 mode=0/ 80x24
+--- styled diff (tmux vs zz)
+1c1,3
+< ^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m2 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mwin^[[0m^[[48;2;184;134;11m
+---
+> $ printf 'SCENE-%s\n' %0
+> SCENE-%0
+> $
+22,23d23
+< 
+< ^[[38;2;13;13;13m(search) ^[[39m^[[49m
+--- state diff (tmux vs zz)
+1c1
+< P cli:0.0 mode=1/switch-mode 80x23
+---
+> P cli:0.0 mode=0/ 80x23
+--- cursor tmux: 9,22 flag=1 pane=80x24 shape=default
+--- cursor zz:   2,2 flag=1 pane=80x24 shape=default

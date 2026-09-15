@@ -479,10 +479,18 @@ PER_PROCESS_NUMBERS='s|/dev/pts/[0-9][0-9]*|/dev/pts/N|g;s|fd=[0-9][0-9]*|fd=N|g
 # faces change under the capture pair itself once the box is loaded, so they are
 # measured by the lane's own probe rather than asserted here.
 align_clock_face() {
-  local start attempt
+  local start now attempt
   start="$(date +%S)"
-  for ((attempt = 0; attempt < 200; attempt++)); do
-    [ "$(date +%S)" != "$start" ] && break
+  for ((attempt = 0; attempt < 400; attempt++)); do
+    now="$(date +%S)"
+    # A fresh second, and one far enough from the minute that the whole
+    # comparison finishes inside it: the two faces change once a minute, and
+    # reading five formats and four screens off two servers under load takes
+    # longer than the tail of a second.
+    if [ "$now" != "$start" ] && [ "$((10#$now))" -le 55 ]; then
+      break
+    fi
+    start="$now"
     sleep 0.02
   done
   settle_screen tmux ''

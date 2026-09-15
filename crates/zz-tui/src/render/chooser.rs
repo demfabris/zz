@@ -477,9 +477,6 @@ impl Grid {
         self.emit_into(output, x, y, theme, appearance, Trailing::Client);
     }
 
-    /// `erase_row` is the full-width form, which ends a row with `EL` the way a
-    /// mode drawn over the whole client can. A grid drawn inside a pane's rect
-    /// pads with spaces instead, because `EL` would clear cells past the rect.
     pub(super) fn emit_into(
         &self,
         output: &mut Vec<u8>,
@@ -542,10 +539,6 @@ impl Grid {
                     output.extend_from_slice(b"\x1b[K");
                 }
                 Trailing::Pane { reaches_edge } => {
-                    // `screen_write_clearendofline` carries only a background,
-                    // so the tail is written the way the pin writes it: its own
-                    // paint, then `EL` when the rect owns the rest of the row
-                    // and explicit cells when it does not.
                     match &line[used].paint {
                         Paint::Style(style) => write_tmux_sgr(
                             output,
@@ -580,20 +573,12 @@ impl Grid {
     }
 }
 
-/// How a grid's trailing blank cells are written.
 #[derive(Clone, Copy)]
 pub(super) enum Trailing {
-    /// The mode tree owns the whole client, so a blank tail is `EL` over the
-    /// terminal's own background.
     Client,
-    /// A pane's rect. `reaches_edge` is whether the rect ends at the
-    /// terminal's right edge, which is the only case `EL` may be used in.
     Pane { reaches_edge: bool },
 }
 
-/// The first cell of the trailing run `screen_write_clearendofline` could have
-/// left: blank cells with no attributes and no foreground of their own, all
-/// carrying the same paint, since a clear carries only a background.
 fn clearable_from(line: &[Cell]) -> usize {
     let mut used = line.len();
     while used > 0 {

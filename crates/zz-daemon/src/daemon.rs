@@ -8539,7 +8539,10 @@ impl Shared {
                                 .unwrap_or_default(),
                         };
                         if targets.is_empty() {
-                            if matches!(action, TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::Cancel)) {
+                            if matches!(
+                                action,
+                                TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::Cancel)
+                            ) {
                                 continue;
                             }
                             return Err(ServerError::PaneNotAttached(*pane).into());
@@ -9377,12 +9380,14 @@ impl Shared {
                         let changed = match mode {
                             Some(mode) => {
                                 let modes = inner.pane_modes.entry(*pane).or_default();
-                                let existing = modes.iter().position(|entry|
-                                    std::mem::discriminant(entry) == std::mem::discriminant(mode));
+                                let existing = modes.iter().position(|entry| {
+                                    std::mem::discriminant(entry) == std::mem::discriminant(mode)
+                                });
                                 if existing == modes.len().checked_sub(1) && existing.is_some() {
                                     false
                                 } else {
-                                    let mode = existing.map(|index| modes.remove(index))
+                                    let mode = existing
+                                        .map(|index| modes.remove(index))
                                         .unwrap_or_else(|| mode.clone());
                                     modes.push(mode);
                                     true
@@ -18771,11 +18776,6 @@ impl Shared {
                     }
                     return Ok(());
                 }
-                // `server_client_key_callback` hands a key no table claimed to
-                // `window_pane_key`, and `window_clock_key` answers it with
-                // `window_pane_reset_mode`: a bound key runs its command and
-                // leaves the mode up, an unbound one ends it and reaches the
-                // pane no further.
                 if input.action != zz_terminal::KeyAction::Release
                     && self.pane_mode_key(client, kind, context, pane, &input, text_follows)?
                 {
@@ -18805,11 +18805,6 @@ impl Shared {
         result
     }
 
-    /// `window_pane_key` for a pane holding a server-owned mode: the mode
-    /// answers the key itself and the pane never sees it. `window_clock_key`
-    /// ends on any key; `window_switch_key` ends on Escape, `C-[`, `C-c` and
-    /// `C-g`, runs its command on Enter and swallows everything else. Returns
-    /// whether the key was spent here.
     fn pane_mode_key(
         self: &Arc<Self>,
         client: ClientId,
@@ -18819,7 +18814,14 @@ impl Shared {
         input: &zz_terminal::KeyInput,
         text_follows: bool,
     ) -> Result<bool, DaemonError> {
-        let Some(mode) = self.inner.lock().pane_modes.get(&pane).and_then(|modes| modes.last()).cloned() else {
+        let Some(mode) = self
+            .inner
+            .lock()
+            .pane_modes
+            .get(&pane)
+            .and_then(|modes| modes.last())
+            .cloned()
+        else {
             return Ok(false);
         };
         self.suppress_committed_character(
@@ -18832,16 +18834,11 @@ impl Shared {
         let key = input_key_name(input);
         let activate = match &mode {
             PaneModeRequest::Clock => None,
-            PaneModeRequest::Switch { .. } => {
-                match key.as_str() {
-                    "Escape" | "C-[" | "C-c" | "C-g" => None,
-                    "Enter" => switch_mode_target(&self.inner.lock(), pane),
-                    // `prompt_key` swallows every other key into the mode's own
-                    // `(search)` prompt, so the pane never sees it and the mode
-                    // stays up.
-                    _ => return Ok(true),
-                }
-            }
+            PaneModeRequest::Switch { .. } => match key.as_str() {
+                "Escape" | "C-[" | "C-c" | "C-g" => None,
+                "Enter" => switch_mode_target(&self.inner.lock(), pane),
+                _ => return Ok(true),
+            },
         };
         {
             let mut inner = self.inner.lock();
@@ -18857,11 +18854,18 @@ impl Shared {
             let template = match &mode {
                 PaneModeRequest::Switch { template, .. } => template.as_deref(),
                 PaneModeRequest::Clock => None,
-            }.unwrap_or("switch-client -Zt '%%'");
+            }
+            .unwrap_or("switch-client -Zt '%%'");
             let target_client = current_format_client(&self.inner.lock(), client).unwrap_or(client);
             let mut selected_context = context.clone();
             selected_context.retarget(&selected);
-            self.execute_chooser_command(target_client, &mut selected_context, template, &target, "switch-mode");
+            self.execute_chooser_command(
+                target_client,
+                &mut selected_context,
+                template,
+                &target,
+                "switch-mode",
+            );
         }
         Ok(true)
     }
@@ -20028,11 +20032,6 @@ impl Shared {
         }
     }
 
-    /// `window_clock_start_timer` wakes on the next whole second and
-    /// `window_clock_timer_callback` redraws the pane when the second moved,
-    /// so every attached client's face turns over together. zz formats the
-    /// time into the pane snapshot, so the tick is one republish, and the
-    /// thread lives only while some pane still holds a clock.
     fn arm_pane_mode_clock(self: &Arc<Self>) {
         if self.clock_refresh_running.swap(true, Ordering::AcqRel) {
             return;
@@ -20052,9 +20051,6 @@ impl Shared {
                     }
                     if !clock_modes_are_open(&shared.inner.lock()) {
                         shared.clock_refresh_running.store(false, Ordering::Release);
-                        // An arm that raced the store above found the thread
-                        // still running and skipped its own spawn, so look
-                        // once more before letting the thread go.
                         if !clock_modes_are_open(&shared.inner.lock())
                             || shared.clock_refresh_running.swap(true, Ordering::AcqRel)
                         {
@@ -20186,12 +20182,16 @@ impl Shared {
         keys: &[zz_protocol::KeyToken],
         repeat: u32,
     ) -> Result<(), DaemonError> {
-        let keys = keys.iter().flat_map(|key| match key {
-            zz_protocol::KeyToken::Literal(text) => text.chars()
-                .map(|character| zz_protocol::KeyToken::Literal(character.to_string()))
-                .collect::<Vec<_>>(),
-            key => vec![key.clone()],
-        }).collect::<Vec<_>>();
+        let keys = keys
+            .iter()
+            .flat_map(|key| match key {
+                zz_protocol::KeyToken::Literal(text) => text
+                    .chars()
+                    .map(|character| zz_protocol::KeyToken::Literal(character.to_string()))
+                    .collect::<Vec<_>>(),
+                key => vec![key.clone()],
+            })
+            .collect::<Vec<_>>();
         for _ in 0..repeat {
             for key in &keys {
                 let input = client_key_inputs(key).into_iter().next();
@@ -20213,13 +20213,16 @@ impl Shared {
                                 terminals: vec![terminal],
                                 keys: vec![key.clone()],
                                 repeat: 1,
-                            }.run();
+                            }
+                            .run();
                         }
-                        PaneSink::Browser(target) => self.publish_for_pane(target,
+                        PaneSink::Browser(target) => self.publish_for_pane(
+                            target,
                             &EventPayload::BrowserCommand {
                                 pane: target,
                                 command: BrowserCommand::SendKeys(vec![key.clone()]),
-                            }),
+                            },
+                        ),
                     }
                 }
             }
@@ -29117,9 +29120,6 @@ struct ServerState {
     /// Panes whose `copy-mode -k` session has ended, waiting for the kill that
     /// `window_pane_reset_mode` runs.
     copy_kill_panes: Vec<PaneId>,
-    /// `wp->modes`: the server-owned mode each pane carries. It belongs to the
-    /// pane rather than to a client, so a clientless `list-panes` reads it and
-    /// every client attached to the window draws it.
     pane_modes: BTreeMap<PaneId, Vec<PaneModeRequest>>,
     display_panes: BTreeMap<ClientId, DisplayPanesSession>,
     silence_deadlines: BTreeMap<WindowId, SilenceDeadline>,
@@ -35171,8 +35171,6 @@ fn stamp_snapshot_for_client(
     stamp_pane_modes(inner, &facts, snapshot);
 }
 
-/// Carries each pane's server-owned mode to the client, resolved from the
-/// window options the pin's own draw reads on every redraw.
 fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut MuxSnapshot) {
     if inner.pane_modes.is_empty() {
         return;
@@ -35181,31 +35179,40 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
     for session in &mut snapshot.sessions {
         for window in &mut session.windows {
             for (pane, pane_snapshot) in &mut window.panes {
-                pane_snapshot.mode = inner.pane_modes.get(pane).and_then(|modes| modes.last()).map(|mode| match mode {
-                    PaneModeRequest::Clock => {
-                        let (colour, style) = engine.clock_mode_options(window.id);
-                        PaneMode::Clock {
-                            time: clock_mode_time(facts, style),
-                            colour,
+                pane_snapshot.mode = inner
+                    .pane_modes
+                    .get(pane)
+                    .and_then(|modes| modes.last())
+                    .map(|mode| match mode {
+                        PaneModeRequest::Clock => {
+                            let (colour, style) = engine.clock_mode_options(window.id);
+                            PaneMode::Clock {
+                                time: clock_mode_time(facts, style),
+                                colour,
+                            }
                         }
-                    }
-                    PaneModeRequest::Switch { windows, format, .. } => PaneMode::Switch {
-                        rows: chooser_presentation::switch_rows(inner, *windows, format.as_deref()),
-                        selected: 0,
-                        offset: 0,
-                        selection_style: chooser_presentation::mode_style_for_pane(inner, *pane),
-                        prompt: "(search) ".to_owned(),
-                        prompt_style: chooser_presentation::prompt_style(),
-                    },
-                });
+                        PaneModeRequest::Switch {
+                            windows, format, ..
+                        } => PaneMode::Switch {
+                            rows: chooser_presentation::switch_rows(
+                                inner,
+                                *windows,
+                                format.as_deref(),
+                            ),
+                            selected: 0,
+                            offset: 0,
+                            selection_style: chooser_presentation::mode_style_for_pane(
+                                inner, *pane,
+                            ),
+                            prompt: "(search) ".to_owned(),
+                            prompt_style: chooser_presentation::prompt_style(),
+                        },
+                    });
             }
         }
     }
 }
 
-/// `window_clock_draw_screen`'s own `tim`: `clock-mode-style` picks the
-/// strftime literal, and the twelve-hour faces carry the `AM` or `PM` the pin
-/// appends from `tm_hour` rather than from a locale's `%p`.
 fn clock_mode_time(facts: &FormatHookFacts, style: u8) -> String {
     let mut hooks = DaemonFormatHooks::command(facts);
     let mut time = hooks.strftime(match style {
@@ -37811,10 +37818,6 @@ fn buffer_format_facts(buffer: &PasteBuffer) -> BufferFormatFacts {
     }
 }
 
-/// `window_switch_run_command`'s `target` for the current row, which is
-/// `=<session>:` for a session row and `=<session>:<index>.` for a window one.
-/// The current row is the first, because the mode's own movement keys are the
-/// residue this lane records rather than closes.
 fn switch_mode_target(inner: &ServerState, pane: PaneId) -> Option<(String, ExecutionContext)> {
     let windows = matches!(
         inner.pane_modes.get(&pane).and_then(|modes| modes.last()),
@@ -37827,12 +37830,26 @@ fn switch_mode_target(inner: &ServerState, pane: PaneId) -> Option<(String, Exec
             .iter()
             .map(|(window, entry)| (entry.name.clone(), *window, entry.session, entry.index))
             .collect::<Vec<_>>();
-        entries.sort_by(|left, right| left.0.cmp(&right.0)
-            .then_with(|| state.sessions[&left.2].name.cmp(&state.sessions[&right.2].name))
-            .then(left.3.cmp(&right.3)));
+        entries.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| {
+                    state.sessions[&left.2]
+                        .name
+                        .cmp(&state.sessions[&right.2].name)
+                })
+                .then(left.3.cmp(&right.3))
+        });
         let (_, window, session, index) = entries.into_iter().next()?;
         let name = state.sessions.get(&session)?.name.clone();
-        return Some((format!("={name}:{index}."), ExecutionContext::new(Some(session), Some(window), state.windows.get(&window).map(|entry| entry.active_pane))));
+        return Some((
+            format!("={name}:{index}."),
+            ExecutionContext::new(
+                Some(session),
+                Some(window),
+                state.windows.get(&window).map(|entry| entry.active_pane),
+            ),
+        ));
     }
     let mut names = state
         .sessions
@@ -37843,20 +37860,24 @@ fn switch_mode_target(inner: &ServerState, pane: PaneId) -> Option<(String, Exec
     let name = names.into_iter().next()?;
     let session = state.sessions.values().find(|entry| entry.name == name)?;
     let window = session.active_window;
-    Some((format!("={name}:"), ExecutionContext::new(Some(session.id), Some(window), state.windows.get(&window).map(|entry| entry.active_pane))))
+    Some((
+        format!("={name}:"),
+        ExecutionContext::new(
+            Some(session.id),
+            Some(window),
+            state.windows.get(&window).map(|entry| entry.active_pane),
+        ),
+    ))
 }
 
-/// Whether any pane still holds `window_clock_mode`, which is what keeps the
-/// redraw timer alive.
 fn clock_modes_are_open(inner: &ServerState) -> bool {
-    inner
-        .pane_modes
-        .values()
-        .any(|modes| modes.iter().any(|mode| matches!(mode, PaneModeRequest::Clock)))
+    inner.pane_modes.values().any(|modes| {
+        modes
+            .iter()
+            .any(|mode| matches!(mode, PaneModeRequest::Clock))
+    })
 }
 
-/// `window_clock_start_timer`: the delay to the next whole second, so the face
-/// turns over on the boundary rather than a second after the mode opened.
 fn duration_to_next_second() -> Duration {
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -37864,8 +37885,6 @@ fn duration_to_next_second() -> Duration {
     Duration::from_nanos(u64::from(1_000_000_000 - now.subsec_nanos()))
 }
 
-/// `wp->modes` for every pane holding a server-owned mode, named the way
-/// `#{pane_mode}` spells it.
 fn pane_mode_format_facts(inner: &ServerState) -> BTreeMap<PaneId, (usize, &'static str)> {
     inner
         .pane_modes
@@ -37873,10 +37892,13 @@ fn pane_mode_format_facts(inner: &ServerState) -> BTreeMap<PaneId, (usize, &'sta
         .filter_map(|(pane, modes)| {
             Some((
                 *pane,
-                (modes.len(), match modes.last()? {
-                    PaneModeRequest::Clock => "clock-mode",
-                    PaneModeRequest::Switch { .. } => "switch-mode",
-                }),
+                (
+                    modes.len(),
+                    match modes.last()? {
+                        PaneModeRequest::Clock => "clock-mode",
+                        PaneModeRequest::Switch { .. } => "switch-mode",
+                    },
+                ),
             ))
         })
         .collect()

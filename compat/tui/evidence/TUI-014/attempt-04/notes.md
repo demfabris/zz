@@ -403,3 +403,13 @@ during the preliminary runs; the closing candidate rebases onto that revision.
 - `fix-tests-daemon-iteration.txt`: the named command output or audit transcript from this pass.
 - `fix-tests-zz-iteration.txt`: the named command output or audit transcript from this pass.
 - `fix-command-runner.txt`: the named command output or audit transcript from this pass.
+
+A final source audit caught two additional injected-key edges. Pane-mode
+callbacks now accept key names directly, so supported tokens such as BTab and
+KPEnter cannot bypass the clock merely because the terminal KeyInput converter
+has no representation for them. The fixture asserts both. Ctrl-J and a raw
+linefeed no longer activate switch mode: the pin interprets them as movement.
+The one-row template case asserts that both leave the mode open. Multi-row
+movement remains recorded as unbuilt. Headless clear-history still has the
+inherited PaneNotAttached result after resetting the new stack; no complete
+headless clear-history parity is claimed.

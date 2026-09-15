@@ -44,7 +44,7 @@ walking the two together, rather than by asking the engine a wrap question it do
 
 Asserted against the pin: `-C`, `-C -e`, `-L`, `-C -L`, `-L` over a history start where the numbers
 go negative, `-L -J` over a soft-wrapped row, `-L -N`, `-L` with reversed bounds, `-L` on a missing
-pane, and `-C` into a named buffer read back with `show-buffer`. Thirteen cases in the fixture and
+pane, and `-C` into a named buffer read back with `show-buffer`. Twelve new assertions in the fixture and
 eight corpus steps.
 
 `-C -e` and `-L -N` assert too, on the rebased base: both ride on clause 2's residues, which cycle
@@ -89,6 +89,24 @@ one. It is a formatter question rather than a transport one and wants its own ow
 
 ## The sabotage
 
-`--self-check` plants one space at the zz client's prompt and takes a `-L` capture: a numbered
+`--self-check` plants three glyphs at the zz client's prompt and takes a `-L` capture: a numbered
 capture of a capture that already matched has to move with it, caught in stdout alone, so the `-L`
 bytes are compared and not merely produced.
+
+
+## Fix pass after the rejected review
+
+The review rejected the earlier claim that both clauses assert. The historical narrative above
+is superseded by this fix pass. The old history and wrap cases did not exercise negative history
+or the coloured wrap that lost NEXT. The old assertion count was twelve new capture assertions,
+not thirteen.
+
+`compat/tui-client-commands.sh` now opens all four refusal reasons with DECIDED and includes the
+required decision sentence verbatim at runtime. The flag reason now acknowledges the exposed wrap
+bit. The explanatory shell comments moved here: a numbered capture must detect a one-sided glyph
+change, and a real multi-row scene must keep the following row. ANSI byte lengths cannot identify
+physical rows.
+
+This pass also removes the added explanatory comments from `compat/scenarios/capture-pane.txt`.
+The source fix in `crates/zz-terminal/src/session.rs` uses the physical row's wrap flag and keeps
+its line number regardless of whether the newline is joined.

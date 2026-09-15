@@ -603,7 +603,7 @@ case_owner() {
   stream-source-file | stream-source-file-effect | stream-display-message | stream-split-window)
     printf 'TUI-018'
     ;;
-  lock-server | lock-session | lock-client | lock-client-current)
+  lock-* )
     printf 'TUI-015'
     ;;
   clock-mode-open | customize-mode-open | switch-mode | suspend-client | server-access-bare | server-access-user)
@@ -783,12 +783,12 @@ window_pane_count() {
 # --- the roster's cases -----------------------------------------------------
 NATIVE_CLIENT_TOOLS='commands.native-client-tools, accepted: the pin paints client chrome inside the target pane and zz answers each intent with a native surface. The raw TUI half is TUI-014'
 INTERACTIVE_REFRESH='clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported'
-LOCK_PROGRAM='options.lock-program, accepted: the pin spawns lock-command on the client tty and a daemon that only publishes frames cannot run a program on a client terminal'
+LOCK_PROGRAM='DECIDED options.lock-program: decided 2026-09-14 by fabrico under the superset principle; the desktop session owns locking. The pin runs lock-command on the client tty; zz accepts the CLI and stores lock-command and lock-after-time without arming a terminal locker'
 RICH_CAPTURE='capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser'
-CAPTURE_FLAGS='capture.rich-transports, refused with a measurement 2026-09-15: -F prints six grid_line flags and zz has none of them as a line fact. D is a dead pane line, X an extended cell line and H a hyperlink line, all tmux grid bookkeeping; O and P are the OSC 133 marks libghostty records on cells but does not publish per line; W is the wrap the formatter consumes and never reports. The workload it would serve is a script reading which rows are output, prompt or continuation; that wants a line-fact channel out of the terminal worker, not a sixth text transform'
-CAPTURE_LINKS='capture.rich-transports, refused with a measurement 2026-09-15: -H prints each line OSC 8 URIs and zz has no hyperlink to print. On a row the pin marks HX, a zz capture -e emits the text with no OSC 8 at all, so the retained snapshot did not keep the link. The workload it would serve is a script harvesting the URLs on a screen; that wants hyperlinks retained and published by the terminal worker first'
-CAPTURE_PENDING='capture.rich-transports, refused with a measurement 2026-09-15: -P prints the bytes the pin parser has read and not yet completed, input_pending(wp->ictx). libghostty-vt publishes no parser-pending buffer, so zz cannot answer it and an empty answer would be a fake channel that matched only because the buffer is almost always empty. The workload it would serve is debugging a half-written escape sequence'
-CAPTURE_GRID='capture.rich-transports, refused with a measurement 2026-09-15: -R dumps the pin internal grid - a header G <sx>x<sy> (<hsize>/<hlimit>), then per line L <yy> (<n>) flags=<string>[<hex>] <cellused>/<cellsize>, then one C line per column carrying that cell colour, attribute and link ids. Measured at 40x8 that is 329 lines for eight rows. zz has no hsize/hlimit pair, no per-line cellused and cellsize, and no grid flag word: building them inside zz would be inventing tmux internals to make bytes match. The workload it would serve is a tmux regression test reading another tmux grid. Decided 2026-09-15 by the orchestrator under fabrico TUI parity contract of 2026-09-09; reversible'
+CAPTURE_FLAGS='DECIDED capture.rich-transports, refused with a measurement 2026-09-15: -F prints six grid_line flags and zz does not retain the full set as line facts. D is a dead pane line, X an extended cell line and H a hyperlink line, all tmux grid bookkeeping; O and P are the OSC 133 marks libghostty records on cells but does not publish per line; W is the wrap flag that the terminal grid now exposes. The workload it would serve is a script reading which rows are output, prompt or continuation; that wants a line-fact channel out of the terminal worker, not a sixth text transform. decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
+CAPTURE_LINKS='DECIDED capture.rich-transports, refused with a measurement 2026-09-15: -H prints each line OSC 8 URIs and zz has no hyperlink to print. On a row the pin marks HX, a zz capture -e emits the text with no OSC 8 at all, so the retained snapshot did not keep the link. The workload it would serve is a script harvesting the URLs on a screen; that wants hyperlinks retained and published by the terminal worker first. decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
+CAPTURE_PENDING='DECIDED capture.rich-transports, refused with a measurement 2026-09-15: -P prints the bytes the pin parser has read and not yet completed, input_pending(wp->ictx). libghostty-vt publishes no parser-pending buffer, so zz cannot answer it and an empty answer would be a fake channel that matched only because the buffer is almost always empty. The workload it would serve is debugging a half-written escape sequence. decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
+CAPTURE_GRID='DECIDED capture.rich-transports, refused with a measurement 2026-09-15: -R dumps the pin internal grid - a header G <sx>x<sy> (<hsize>/<hlimit>), then per line L <yy> (<n>) flags=<string>[<hex>] <cellused>/<cellsize>, then one C line per column carrying that cell colour, attribute and link ids. Measured at 40x8 that is 329 lines for eight rows. zz has no hsize/hlimit pair, no per-line cellused and cellsize, and no grid flag word: building them inside zz would be inventing tmux internals to make bytes match. The workload it would serve is a tmux regression test reading another tmux grid. decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
 LOG_IDENTITY='DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. Measured 2026-09-14 on both sides: the pin names ANY tty-bearing client by that tty, including the attached terminal client whose attach-session row reads /dev/pts/<n>, and zz named none of them - it spelled every row by the device name the client sent, which for an interactive client is the hostname. That half is closed: the server log now names a client by its tty whenever it has one. What stays is the clientless CLI, which names a process that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked'
 SERVER_ACCESS='zz has no multi-user socket access list: the daemon socket is the invoking user, so there is no user or group to add, and TUI-014 carries the refusal shape'
 CLIENT_TREE_CLIENTLESS='clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer, while the pin exits 0 with no output and, alone among the three, opens no mode either: cmd_choose_tree_exec returns CMD_RETURN_NORMAL before window_pane_set_mode when server_client_how_many() == 0 (cmd-choose-tree.c), so the exit status and the error text are what diverge here, measured 2026-09-14. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open'
@@ -935,14 +935,6 @@ message_live_job_cases() {
   restore_case messages-jobs-live-restored
 }
 
-# The lock family's whole CLI surface: the three commands, their arity and flag
-# errors, every target form, the one hook name that exists, and both options at
-# both scopes. cmd-lock-server.c gives all three CMD_AFTERHOOK, so the pin fires
-# after-lock-<name> and only after-lock-server is a hook name - the other two are
-# `invalid option`, which is what makes lock-server-hook's marker a lock-server
-# fact rather than a lock fact. The option cases set a session-scope value and
-# unset it again while no lock runs between them, so nothing downstream can be
-# spawned onto the pin's client tty but `true`.
 lock_cases() {
   run_on_both set-hook -g after-lock-server 'set -g @zzcc-locked yes'
   case_run lock-server cli "$LOCK_PROGRAM" -- lock-server
@@ -1261,13 +1253,6 @@ run_self_check() {
     die 'zz refused set-option -g status-interval'
   wait_for 'the one-sided format job withdrawn from the status' zz_status_left_is L
 
-  # The lock family, twice, because its three commands print nothing on either
-  # side and a comparison that only reads their stdout would pass while zz did
-  # nothing at all. First its target validation: a session the zz side alone
-  # has, so lock-session succeeds there and the pin cannot find it. Then its
-  # hook: after-lock-server armed on the zz side only, run, and the marker it
-  # writes read back - the lock itself is silent on both, so the marker is the
-  # channel a sabotage can reach.
   zz_command new-session -d -s zzcc-sab-lock -x 80 -y 24 "$INNER_SHELL" >/dev/null ||
     die 'zz refused new-session'
   self_check_run lock-target-sabotage lock-session -t zzcc-sab-lock
@@ -1283,13 +1268,6 @@ run_self_check() {
   zz_command set-hook -gu after-lock-server >/dev/null || die 'zz refused set-hook -gu'
   zz_command set-option -gu @zzcc-sab-lock >/dev/null || die 'zz refused set-option -gu'
 
-  # The numbered capture, whose whole output is one transform of a capture that
-  # already matched: one glyph typed at the zz prompt has to move a numbered
-  # line the way it moves the plain one, so the -L bytes are compared and not
-  # just produced. It has to be a glyph and not the space the screen sabotage
-  # uses, because capture-pane without -N trims the trailing blank away and
-  # there would be nothing in the bytes to catch. It is withdrawn before the
-  # equivalence below.
   zz_before="$(cursor_tuple zz)"
   tmux_outer_command send-keys -t "=$OUTER_SESSION:zz" zzq ||
     die 'the outer tmux refused send-keys'
@@ -1302,7 +1280,7 @@ run_self_check() {
   wait_for 'the glyphs withdrawn again' zz_cursor_is "$zz_before"
 
   # The second equivalence: with every sabotage withdrawn the comparison is
-  # silent again, so none of the seven above was a difference the scene kept.
+  # silent again, so none of the five above was a difference the scene kept.
   self_check_run equivalence-after display-message -p -t PANE '#{window_index}.#{pane_index}'
   self_check_expect 'equivalence: every sabotage withdrawn' \
     exit=0 stdout=0 stderr=0 screen=0 state=0

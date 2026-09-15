@@ -72,7 +72,10 @@ impl AsyncSshPrompts {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex, mpsc};
+    use std::{
+        path::PathBuf,
+        sync::{Arc, Mutex, mpsc},
+    };
 
     use tokio::{sync::oneshot, time::advance};
 
@@ -81,7 +84,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn slow_prompts_keep_runtime_running_and_preserve_network_budget() {
-        let deadline = Arc::new(HandshakeDeadline::new(Duration::from_secs(60)));
+        let deadline = Arc::new(HandshakeDeadline::new(Duration::from_mins(1)));
         let timer = {
             let deadline = Arc::clone(&deadline);
             tokio::spawn(async move { deadline.expired().await })
@@ -92,7 +95,7 @@ mod tests {
             let entered_tx = Mutex::new(Some(entered_tx));
             let (answer_tx, answer_rx) = mpsc::channel();
             let answer_rx = Mutex::new(answer_rx);
-            let prompts = deadline.prompts(SshPrompts::new(Default::default(), move |_| {
+            let prompts = deadline.prompts(SshPrompts::new(PathBuf::default(), move |_| {
                 entered_tx.lock().unwrap().take().unwrap().send(()).unwrap();
                 answer_rx.lock().unwrap().recv().unwrap()
             }));
@@ -117,16 +120,16 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn stalled_handshake_without_prompts_still_times_out() {
-        let deadline = HandshakeDeadline::new(Duration::from_secs(60));
+        let deadline = HandshakeDeadline::new(Duration::from_mins(1));
         let started = Instant::now();
         deadline.expired().await;
-        assert_eq!(started.elapsed(), Duration::from_secs(60));
+        assert_eq!(started.elapsed(), Duration::from_mins(1));
     }
 
     #[tokio::test(start_paused = true)]
     async fn cancelled_prompt_resumes_the_deadline() {
-        let deadline = HandshakeDeadline::new(Duration::from_secs(60));
-        let prompts = deadline.prompts(SshPrompts::new(Default::default(), |_| {
+        let deadline = HandshakeDeadline::new(Duration::from_mins(1));
+        let prompts = deadline.prompts(SshPrompts::new(PathBuf::default(), |_| {
             AskpassReply::Cancel
         }));
         assert!(matches!(
@@ -137,6 +140,6 @@ mod tests {
         ));
         let resumed = Instant::now();
         deadline.expired().await;
-        assert_eq!(resumed.elapsed(), Duration::from_secs(60));
+        assert_eq!(resumed.elapsed(), Duration::from_mins(1));
     }
 }

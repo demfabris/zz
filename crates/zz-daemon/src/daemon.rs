@@ -18375,9 +18375,13 @@ impl Shared {
             window,
             ..mouse.clone()
         };
-        context
-            .format_variables
-            .extend(mouse_format_variables(&self.inner.lock(), &mouse));
+        let (variables, probe) = mouse_format_variables(&self.inner.lock(), &mouse);
+        context.format_variables.extend(variables);
+        if let Some(probe) = probe {
+            context
+                .format_variables
+                .extend(pointer_format_variables(&probe));
+        }
         context.set_invoking_key(Some(key.to_owned()));
         context.set_invoking_mouse(Some(mouse));
         let result =
@@ -32987,32 +32991,85 @@ fn client_format_facts(
     }
 }
 
+/// The pane worker to ask for the screen under a pointer cell, and the cell
+/// inside that pane, which is what `cmd_mouse_at` hands the three grid-reading
+/// mouse formats.
+struct PointerProbe {
+    terminal: Arc<TerminalSession>,
+    column: u16,
+    row: u16,
+}
+
 /// The `mouse_*` formats the pin fills from `ft->m`. `format_cb_mouse_x` and
 /// `format_cb_mouse_y` answer the event's cell inside the pane it landed on,
 /// `format_cb_mouse_pane` the pane id, and each of them answers NULL, which
-/// expands empty, when the event has no pane. The five that read the screen
-/// under the pointer or the status range it landed in stay unanswered.
+/// expands empty, when the event has no pane. The three that read the screen
+/// under the pointer come off the pane's own grid, which only the worker that
+/// owns it can read, so the probe travels back for a read taken outside this
+/// lock. `cmd_mouse_at` fails for an event outside the pane's own rectangle
+/// and the three then answer NULL, so no probe leaves here for one. The two
+/// that name the status range it landed in stay unanswered.
 fn mouse_format_variables(
     inner: &ServerState,
     mouse: &MouseEventTarget,
-) -> BTreeMap<String, String> {
+) -> (BTreeMap<String, String>, Option<PointerProbe>) {
     let mut variables = BTreeMap::new();
     let Some(pane) = mouse.pane else {
-        return variables;
+        return (variables, None);
     };
     variables.insert("mouse_pane".to_owned(), pane.to_string());
     let Some(window) = inner.engine.state.window_for_pane(pane) else {
-        return variables;
+        return (variables, None);
     };
     let session = inner.engine.state.windows[&window].session;
     let geometry = inner
         .engine
         .format_status_context(Some(session), Some(window), Some(pane));
+    let mut probe = None;
     if let (Some(left), Some(top)) = (geometry.pane_left, geometry.pane_top)
         && let (Some(x), Some(y)) = (mouse.column.checked_sub(left), mouse.row.checked_sub(top))
     {
         variables.insert("mouse_x".to_owned(), x.to_string());
         variables.insert("mouse_y".to_owned(), y.to_string());
+        if geometry
+            .pane_right
+            .is_some_and(|right| mouse.column <= right)
+            && geometry
+                .pane_bottom
+                .is_some_and(|bottom| mouse.row <= bottom)
+        {
+            probe = inner
+                .terminals
+                .get(&pane)
+                .cloned()
+                .map(|terminal| PointerProbe {
+                    terminal,
+                    column: x,
+                    row: y,
+                });
+        }
+    }
+    (variables, probe)
+}
+
+/// `format_cb_mouse_word`, `format_cb_mouse_line` and
+/// `format_cb_mouse_hyperlink` read the pane's own grid at the event's cell.
+/// Each answers NULL where there is nothing under the pointer, and a name the
+/// tree never carries expands the same empty a NULL does, so a read that finds
+/// nothing publishes nothing.
+fn pointer_format_variables(probe: &PointerProbe) -> BTreeMap<String, String> {
+    let mut variables = BTreeMap::new();
+    let Ok(context) = probe.terminal.pointer_context(probe.column, probe.row) else {
+        return variables;
+    };
+    for (name, value) in [
+        ("mouse_word", context.word),
+        ("mouse_line", context.line),
+        ("mouse_hyperlink", context.hyperlink),
+    ] {
+        if !value.is_empty() {
+            variables.insert(name.to_owned(), value);
+        }
     }
     variables
 }

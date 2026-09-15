@@ -4612,6 +4612,7 @@ impl MuxEngine {
                 reject_positionals("start-server", &positional)?;
                 Execution::default()
             }
+            "server-access" => self.server_access(&command.args)?,
             "kill-server" => {
                 parse_command_options("kill-server", &command.args)?;
                 Execution::effect(MuxEffect::KillServer)
@@ -8422,6 +8423,58 @@ impl MuxEngine {
         }
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         Ok(Execution::effect(MuxEffect::FocusSidebar { pane }))
+    }
+
+    /// `cmd_server_access_exec`. zz's daemon socket belongs to the invoking
+    /// user at mode 0600, so the list the pin keeps in `server_acl_entries`
+    /// holds that one owner here: every lookup, every ordering and every
+    /// refusal the pin spells out is answered, and the requests that would
+    /// admit a second identity are refused rather than stored.
+    fn server_access(&self, args: &[RawText]) -> Result<Execution, ServerError> {
+        let (options, positional) = parse_command_options("server-access", args)?;
+        let owner = server_socket_owner();
+        if options.has("-l") {
+            return Ok(Execution::output(format!("{owner} (U,W)")));
+        }
+        let Some(argument) = positional.first() else {
+            return Err(ServerError::InvalidCommand(
+                "missing user or group argument".to_owned(),
+            ));
+        };
+        let argument = argument.to_string();
+        let group = options.has("-g");
+        let kind = if group { "group" } else { "user" };
+        let Some((name, owns)) = server_access_identity(&argument, group) else {
+            return Err(ServerError::InvalidCommand(format!(
+                "unknown {kind}: {argument}"
+            )));
+        };
+        if owns {
+            return Err(ServerError::InvalidCommand(format!(
+                "{name} owns the server, can't change access"
+            )));
+        }
+        if options.has("-a") && options.has("-d") {
+            return Err(ServerError::InvalidCommand(
+                "-a and -d cannot be used together".to_owned(),
+            ));
+        }
+        if options.has("-w") && options.has("-r") {
+            return Err(ServerError::InvalidCommand(
+                "-r and -w cannot be used together".to_owned(),
+            ));
+        }
+        if options.has("-d") {
+            return Err(ServerError::InvalidCommand(format!(
+                "{kind} {name} not found"
+            )));
+        }
+        if options.has("-a") || options.has("-r") || options.has("-w") {
+            return Err(ServerError::InvalidCommand(format!(
+                "zz has no socket access list: the daemon socket admits {owner} alone"
+            )));
+        }
+        Ok(Execution::default())
     }
 
     fn choose_buffer(
@@ -15395,6 +15448,45 @@ fn command_prompt_mode(options: &Options) -> CommandPromptMode {
     }
 }
 
+/// The name `server_acl_init` would hold: the user the daemon socket belongs to.
+#[cfg(unix)]
+fn server_socket_owner() -> String {
+    use nix::unistd::{Uid, User};
+
+    User::from_uid(Uid::current())
+        .ok()
+        .flatten()
+        .map_or_else(|| Uid::current().to_string(), |user| user.name)
+}
+
+#[cfg(not(unix))]
+fn server_socket_owner() -> String {
+    std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_default()
+}
+
+/// The passwd or group entry `argument` names, beside whether it is the
+/// identity that owns the server: `getpwnam`, `getgrnam` and the
+/// `id == 0 || id == getuid()` test `cmd_server_access_exec` makes for a user.
+#[cfg(unix)]
+fn server_access_identity(argument: &str, group: bool) -> Option<(String, bool)> {
+    use nix::unistd::{Group, Uid, User};
+
+    if group {
+        let entry = Group::from_name(argument).ok().flatten()?;
+        return Some((entry.name, false));
+    }
+    let entry = User::from_name(argument).ok().flatten()?;
+    let owns = entry.uid.is_root() || entry.uid == Uid::current();
+    Some((entry.name, owns))
+}
+
+#[cfg(not(unix))]
+fn server_access_identity(_argument: &str, _group: bool) -> Option<(String, bool)> {
+    None
+}
+
 fn parse_command_options(
     command: &str,
     args: &[RawText],
@@ -21456,6 +21548,130 @@ mod tests {
             ),
             Err(ServerError::InvalidCommand(message)) if message == "invalid sort order"
         ));
+    }
+
+    #[test]
+    fn server_access_answers_the_pins_lookups_and_refuses_a_second_identity() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        let owner = server_socket_owner();
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("server-access", &["-l"]))
+                .expect("access list")
+                .output
+                .to_string(),
+            format!("{owner} (U,W)")
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("server-access", &[]))
+                .expect_err("no argument")
+                .tmux_message(),
+            "missing user or group argument"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("server-access", &["-w", "zzcc-nobody"])
+                )
+                .expect_err("unknown user")
+                .tmux_message(),
+            "unknown user: zzcc-nobody"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("server-access", &["-g", "zzcc-nogroup"])
+                )
+                .expect_err("unknown group")
+                .tmux_message(),
+            "unknown group: zzcc-nogroup"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("server-access", &["-a", "-d", "zzcc-nobody"])
+                )
+                .expect_err("lookup runs before the flag conflict")
+                .tmux_message(),
+            "unknown user: zzcc-nobody"
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("server-access", &["-a", &owner]))
+                .expect_err("the owner")
+                .tmux_message(),
+            format!("{owner} owns the server, can't change access")
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("server-access", &["-d", &owner]))
+                .expect_err("the owner")
+                .tmux_message(),
+            format!("{owner} owns the server, can't change access")
+        );
+        let group = primary_group_name().expect("a primary group");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("server-access", &["-g", "-a", "-d", &group])
+                )
+                .expect_err("both actions")
+                .tmux_message(),
+            "-a and -d cannot be used together"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("server-access", &["-g", "-r", "-w", &group])
+                )
+                .expect_err("both rights")
+                .tmux_message(),
+            "-r and -w cannot be used together"
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("server-access", &["-g", "-d", &group]))
+                .expect_err("not in the list")
+                .tmux_message(),
+            format!("group {group} not found")
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("server-access", &["-g", "-a", &group]))
+                .expect_err("no access list")
+                .tmux_message(),
+            format!("zz has no socket access list: the daemon socket admits {owner} alone")
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("server-access", &["-g", &group]))
+                .expect("no action flag changes nothing")
+                .output
+                .to_string(),
+            ""
+        );
+    }
+
+    #[cfg(unix)]
+    fn primary_group_name() -> Option<String> {
+        use nix::unistd::{Gid, Group};
+
+        Group::from_gid(Gid::current())
+            .ok()
+            .flatten()
+            .map(|group| group.name)
+    }
+
+    #[cfg(not(unix))]
+    fn primary_group_name() -> Option<String> {
+        None
     }
 
     #[test]

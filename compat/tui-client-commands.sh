@@ -26,8 +26,11 @@
 # switch-mode [-kswZ]       switches an open mode in place    hard-rejected                  CHILD TUI-014
 #   [-F -t] [command]
 # suspend-client [-t]       SIGTSTP to the client process     hard-rejected                  CHILD TUI-014
-# server-access [-adglrw]   socket access control list        hard-rejected                  CHILD TUI-014, zz
-#   [-t] [user|group]                                                                         has no socket ACL
+# server-access [-adglrw]   socket access control list, and    every lookup, ordering and     PROVED (-l and every
+#   [-t] [user|group]         the lookups, orderings and         refusal; the socket admits     refusal) + DECLARED
+#                             refusals around it                 its owner alone, so adding     (admitting a second
+#                                                                a second identity is           identity),
+#                                                                refused                        protocol.socket-acl
 # lock-server               locks every client, runs          validates, empty execution,    PROVED (CLI) +
 #                             lock-command on each tty          after-lock-server fires       DECLARED (screen),
 #                                                                                             CHILD TUI-015
@@ -182,6 +185,8 @@ LAST_STDERR_DIFFERED=0
 LAST_SCREEN_DIFFERED=0
 LAST_STATE_DIFFERED=0
 INNER_SHELL="ENV= PS1='\$ ' exec /bin/sh"
+SERVER_OWNER="$(id -un)"
+SERVER_GROUP="$(id -gn)"
 mkdir -p "$ZZ_HOME" "$TMUX_HOME" "$OUTER_HOME" "$ZZ_LOG_DIR"
 
 scrubbed() {
@@ -646,6 +651,14 @@ restore_case() {
   fi
 }
 
+# `server-access -g -a` is the one form zz refuses, so the pin alone came away
+# with an access entry. It is dropped on the pin before anything reads the list
+# again, and the restore then asserts both sides back in the same place.
+drop_pin_access_entry() {
+  tmux_inner_command server-access -g -d "$SERVER_GROUP" >/dev/null 2>&1 || true
+  restore_case "$1"
+}
+
 # `split-window -I` builds a pane on the pin and is refused on zz, so the pin's
 # extra pane is killed before the next case reads the state.
 restore_pin_pane() {
@@ -675,7 +688,7 @@ LOCK_PROGRAM='options.lock-program, accepted: the pin spawns lock-command on the
 RICH_CAPTURE='capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser'
 BINARY_STREAMS='protocol.binary-streams, accepted: typed UTF-8 arguments are the contract and the remaining - forms stay loudly refused rather than pretending the daemon process is the caller'
 LOG_IDENTITY='the server log names the client that ran each command - client-<pid> on the pin, device-<n> on zz - and the pin reprints the command through its own argument printer'
-SERVER_ACCESS='zz has no multi-user socket access list: the daemon socket is the invoking user, so there is no user or group to add, and TUI-014 carries the refusal shape'
+SERVER_ACCESS='protocol.socket-acl, accepted as a permanent exclusion: the daemon socket is the invoking user at mode 0600, so zz keeps no peer identity and every other form of the command - the list, the lookups, the owner test, the flag conflicts, the deny of an entry that is not there and the no-action form - answers exactly as the pin does, measured 2026-09-15. Only admitting a second identity diverges - semantic:multi-user-socket-acl, the permanent exclusion this gap exists for: the pin stores the entry and exits 0, zz refuses it'
 ESCAPE_TRIM='capture.rich-transports, owner terminal: the -e transform runs through the vendored formatter in crates/zz-terminal/src/session.rs, whose Vt format keeps one trailing cell the pin trims, and that file is outside this lane'
 MESSAGES_CHILD='TUI-016: show-messages -J lists the running format jobs and -T the known terminals, neither of which zz publishes yet'
 CLIENT_TREE_CLIENTLESS='clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer, while the pin exits 0 with no output and, alone among the three, opens no mode either: cmd_choose_tree_exec returns CMD_RETURN_NORMAL before window_pane_set_mode when server_client_how_many() == 0 (cmd-choose-tree.c), so the exit status and the error text are what diverge here, measured 2026-09-14. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open'
@@ -794,8 +807,17 @@ client_tool_cases() {
   restore_case customize-mode-closed
   case_run switch-mode record "$NATIVE_CLIENT_TOOLS" -- switch-mode -t PANE
   restore_case switch-mode-closed
-  case_run server-access-bare record "$SERVER_ACCESS" -- server-access
-  case_run server-access-user record "$SERVER_ACCESS" -- server-access -w zzcc-nobody
+  case_run server-access-bare same '' -- server-access
+  case_run server-access-user same '' -- server-access -w zzcc-nobody
+  case_run server-access-list same '' -- server-access -l
+  case_run server-access-owner same '' -- server-access -a "$SERVER_OWNER"
+  case_run server-access-unknown-group same '' -- server-access -g zzcc-nogroup
+  case_run server-access-both-actions same '' -- server-access -g -a -d "$SERVER_GROUP"
+  case_run server-access-both-rights same '' -- server-access -g -r -w "$SERVER_GROUP"
+  case_run server-access-deny same '' -- server-access -g -d "$SERVER_GROUP"
+  case_run server-access-no-action same '' -- server-access -g "$SERVER_GROUP"
+  case_run server-access-add record "$SERVER_ACCESS" -- server-access -g -a "$SERVER_GROUP"
+  drop_pin_access_entry server-access-restored
   restore_case client-tools-restored
 }
 
@@ -893,6 +915,17 @@ run_self_check() {
   # exit status and stderr: showing that same buffer, which one side does not
   # have. stdout differs too - that is what an error instead of a payload
   # means - and the two channels under test have to be reported by themselves.
+  # stdout again, with no buffer behind it: an access entry the pin alone holds,
+  # listed by server-access -l. Adding one is the single form zz refuses, so the
+  # entry can only be planted on the pin, and a zz -l that answered the wrong
+  # owner would be caught here rather than by the buffer sabotage above.
+  tmux_inner_command server-access -g -a "$SERVER_GROUP" >/dev/null ||
+    die 'the pin refused server-access -a'
+  self_check_run access-sabotage server-access -l
+  self_check_expect 'stdout, an access entry on the pin only' exit=0 stdout=1 stderr=0
+  tmux_inner_command server-access -g -d "$SERVER_GROUP" >/dev/null ||
+    die 'the pin refused server-access -d'
+
   self_check_run exit-sabotage show-buffer -b zzcc-sabotage
   self_check_expect 'exit and stderr, a buffer missing on one side' exit=1 stderr=1
   zz_command delete-buffer -b zzcc-sabotage >/dev/null || die 'zz refused delete-buffer'

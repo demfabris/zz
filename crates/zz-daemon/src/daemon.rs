@@ -43522,7 +43522,7 @@ mod tests {
     fn tmux_import_comments_unsupported_constructs_without_running_commands() {
         let engine = MuxEngine::default();
         let source =
-            "clock-mode\nserver-access \\\n -a user\nrun-shell 'exit 1'\nset -g prefix C-a\n";
+            "clock-mode\nlink-window \\\n -a user\nrun-shell 'exit 1'\nset -g prefix C-a\n";
         let (text, copied, unsupported) = prepare_tmux_import(&engine, Path::new("/donor"), source);
         assert!(text.starts_with("# zz-unsupported: clock-mode\n"));
         assert!(text.contains("# zz-unsupported:  -a user\n"));
@@ -66194,7 +66194,7 @@ set-option -g @alias-mixed-next yes
         let specs = zz_protocol::command_specs()
             .filter(|spec| spec.uses_tmux_option_grammar())
             .collect::<Vec<_>>();
-        assert_eq!(specs.len(), 84);
+        assert_eq!(specs.len(), 85);
         assert_eq!(
             specs.iter().map(|spec| spec.aliases.len()).sum::<usize>(),
             74
@@ -66252,8 +66252,8 @@ set-option -g @alias-mixed-next yes
                 }
             }
         }
-        assert_eq!(spellings, 158);
-        assert_eq!(diagnostic_cases, 632);
+        assert_eq!(spellings, 159);
+        assert_eq!(diagnostic_cases, 636);
         assert_eq!(required_cases, 413);
 
         let mut prefix_cases = 0;
@@ -66276,7 +66276,7 @@ set-option -g @alias-mixed-next yes
                 );
             }
         }
-        assert_eq!(prefix_cases, 522);
+        assert_eq!(prefix_cases, 532);
 
         for spec in &specs {
             let unknown = ('0'..='9')
@@ -66338,7 +66338,7 @@ set-option -g @alias-mixed-next yes
             .filter(|spec| !zz_protocol::NATIVE_COMMAND_NAMES.contains(&spec.name))
             .filter(|spec| spec.positional_maximum().is_some())
             .collect::<Vec<_>>();
-        assert_eq!(specs.len(), 73);
+        assert_eq!(specs.len(), 74);
         for spec in specs {
             let maximum = spec.positional_maximum().expect("finite maximum");
             let arguments = vec![argument.clone(); maximum.saturating_add(1)];

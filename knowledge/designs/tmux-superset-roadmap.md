@@ -1284,8 +1284,9 @@ probe evidence. Imported tmux commands still keep their tmux semantics.
 
 `server-access` and multi-user socket ACLs are a recorded permanent exclusion: `protocol.socket-acl`
 in `compat/tmux-gaps.json` carries decision `never` with status `accepted`, so the daemon socket
-stays single-user at mode 0600, `server-access` stays recognized and unimplemented, and no peer
-authorization model is added.
+stays single-user at mode 0600 and no peer authorization model is added. Since 2026-09-15 the
+command answers the pin's own list, lookups, orderings and refusals, and refuses only the forms
+that would admit a second identity.
 
 # Decision log
 

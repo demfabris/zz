@@ -969,7 +969,7 @@ fn command_flag_fixture_matches_the_pin() {
         rows += 1;
     }
 
-    assert_eq!((rows, aliases, required), (84, 74, 80));
+    assert_eq!((rows, aliases, required), (85, 74, 80));
     assert_eq!(
         fs::read_to_string(root().join("compat/scenarios/smoke/fixtures/command-flag-errors.tsv"))
             .expect("command flag fixture corpus"),
@@ -1020,8 +1020,8 @@ fn positional_maximum_runtime_inventory_matches_the_pin() {
         }
     }
 
-    assert_eq!(implemented.len(), 73);
-    assert_eq!(unimplemented.len(), 7);
+    assert_eq!(implemented.len(), 74);
+    assert_eq!(unimplemented.len(), 6);
     assert_eq!(implemented.len() + unimplemented.len(), 80);
 }
 

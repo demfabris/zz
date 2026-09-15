@@ -7694,6 +7694,7 @@ impl Shared {
         let mut deferred_terminal_commands = Vec::new();
         let mut injected_client_keys = Vec::new();
         let mut mode_table_keys = Vec::new();
+        let mut pane_mode_keys = Vec::new();
         let mut refresh_armed = false;
         let mut unfocused_copy_mode_exits = Vec::new();
         let mut pipes_to_close = Vec::new();
@@ -8145,6 +8146,7 @@ impl Shared {
                         environment,
                         empty,
                     } => {
+                        inner.pane_modes.remove(pane);
                         let previous = inner.terminal_spawns.get(pane).cloned().unwrap_or_default();
                         let history_limit = inner.engine.history_limit_for_pane(*pane)?;
                         let word_separators =
@@ -8507,6 +8509,10 @@ impl Shared {
                         }
                     }
                     MuxEffect::SendKeys { pane, keys, repeat } => {
+                        if inner.pane_modes.contains_key(pane) {
+                            pane_mode_keys.push((*pane, keys.clone(), *repeat));
+                            continue;
+                        }
                         let owners = copy_mode_key_owners(&inner, client, *pane);
                         if !owners.is_empty() {
                             mode_table_keys.push((owners, *pane, keys.clone(), *repeat));
@@ -8628,6 +8634,11 @@ impl Shared {
                         target_client,
                         require_mode,
                     } => {
+                        if matches!(action, TerminalViewAction::ClearHistory)
+                            && inner.pane_modes.remove(pane).is_some()
+                        {
+                            snapshot_changed = true;
+                        }
                         let armed_copy_kill = inner.pending_copy_kill.take();
                         let armed_copy_source = inner.pending_copy_source.take();
                         if *require_mode && !pane_carries_a_mode_command(&inner, client, *pane) {
@@ -8672,6 +8683,9 @@ impl Shared {
                                 .unwrap_or_default(),
                         };
                         if targets.is_empty() {
+                            if matches!(action, TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::Cancel)) {
+                                continue;
+                            }
                             return Err(ServerError::PaneNotAttached(*pane).into());
                         }
                         inner.pending_copy_kill = armed_copy_kill;
@@ -9699,6 +9713,9 @@ impl Shared {
             if let Some(enabled) = wrap_search {
                 self.delivered_wrap_search_commands.lock().push(enabled);
             }
+        }
+        for (pane, keys, repeat) in pane_mode_keys {
+            self.inject_pane_mode_keys(client, kind, context, pane, &keys, repeat)?;
         }
         for (target, keys, repeat) in injected_client_keys {
             self.inject_client_keys(target, &keys, repeat);
@@ -20752,6 +20769,55 @@ impl Shared {
             }
         }
         CLIENT_KEY_INJECTION_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+    }
+
+    fn inject_pane_mode_keys(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        pane: PaneId,
+        keys: &[zz_protocol::KeyToken],
+        repeat: u32,
+    ) -> Result<(), DaemonError> {
+        let keys = keys.iter().flat_map(|key| match key {
+            zz_protocol::KeyToken::Literal(text) => text.chars()
+                .map(|character| zz_protocol::KeyToken::Literal(character.to_string()))
+                .collect::<Vec<_>>(),
+            key => vec![key.clone()],
+        }).collect::<Vec<_>>();
+        for _ in 0..repeat {
+            for key in &keys {
+                let input = client_key_inputs(key).into_iter().next();
+                if let Some(input) = input
+                    && self.pane_mode_key(client, kind, context, pane, &input, false)?
+                {
+                    continue;
+                }
+                let owners = copy_mode_key_owners(&self.inner.lock(), client, pane);
+                if !owners.is_empty() {
+                    self.inject_mode_table_keys(&owners, pane, std::slice::from_ref(key), 1);
+                    continue;
+                }
+                for sink in resolve_input_sinks(&self.inner.lock(), pane)? {
+                    match sink {
+                        PaneSink::Terminal(terminal) => {
+                            DeferredTerminalCommand::SendTokens {
+                                terminals: vec![terminal],
+                                keys: vec![key.clone()],
+                                repeat: 1,
+                            }.run();
+                        }
+                        PaneSink::Browser(target) => self.publish_for_pane(target,
+                            &EventPayload::BrowserCommand {
+                                pane: target,
+                                command: BrowserCommand::SendKeys(vec![key.clone()]),
+                            }),
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn inject_mode_table_keys(

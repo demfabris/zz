@@ -105,3 +105,88 @@ The full zz package passed with exit 0: 642 library tests (one existing ignored)
 127 CLI tests, and all additional integration targets. The final-tip proof outputs
 will be written after the closing commit as `final-*.txt` in this directory;
 those files are local artifacts so recording them cannot invalidate their tip.
+
+## Final tip
+
+Both commits are pushed on `campaign/tui-stream-alias`. The final tip is
+`ff58de8a6f8fc194db0480deb6893ba85e6121e0`, based on
+`7e7cb1ee25122a10e7f1d8815241422eb00c4199`. Every required closing proof was run
+after the final commit. No subsequent code or ledger change was made.
+
+All final commands used ZZ_COMPAT_TMUX and TMUX_BIN pointing to the pinned
+`/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux`, ZZ_COMPAT_CORPUS pointing to
+`/home/demfabris/dev/zz/compat/.cache/plugins`, and ZZ_TRAY=0. The exact command,
+start tip, timestamps and exit codes are in `final-commands.txt`; the environment
+and capture wrapper are in `final-runner.sh`. Cargo used `cargo-wrapper.sh`
+through its identical `/tmp/zz018-cargo.sh` copy. compat/check.sh used
+`check-cargo-wrapper.sh` through the `/tmp/zz018-tools/cargo` PATH shim. HOME was
+`/tmp/zz-emptyhome`, XDG_CONFIG_HOME was its config subdirectory, and CARGO_HOME
+and RUSTUP_HOME were explicitly retained for the toolchain. Fixtures installed
+their own isolated per-side HOME and configuration underneath this environment.
+
+All required proofs returned 0. The three stream runs each report
+`all 43 asserted comparisons identical, 0 recorded not asserted, 4 decided (0 for a sibling lane)`.
+Both fixture self-checks passed. The shared client fixture reports 84 asserted
+comparisons and 25 recorded cases, all owned by other obligations or accepted
+gaps, with none unattributed. verify-claims independently reran both and found
+no recorded case owned by TUI-018. All 24 selected corpus scenarios passed with
+zero divergences and no retries; every six-row chunk finished in under three
+minutes. The full zz suite and mux, daemon and protocol libraries passed without
+reruns; clippy, formatting, tracker and compat/check.sh also passed.
+
+The optional unrestricted `git diff --check origin/main...HEAD` returned 2 solely
+for whitespace retained in real test output files. The same check excluding
+`compat/tui/evidence` returned 0. Raw output was not rewritten. No final test
+flake occurred. The stream fixture retained its existing null-byte command
+substitution warning; the new binary alias cases use file stdin.
+
+The required process sweep found only the sweep's own shell command, with no
+leftover zz-cli, zz-user, zzprobe or zzcs servers to kill. No binary was copied
+to /tmp. No other checkout, user server, GitHub issue or board was changed.
+
+Final-tip outputs and this final appendix are intentionally local and uncommitted:
+committing them would move the tip after the proofs. The pushed commits contain
+the complete implementation, fixture assertions, ledger/report and real precommit
+evidence. The following files hold the final-tip run:
+
+- `final-build-identity.txt`
+- `final-client-commands.txt`
+- `final-client-self-check.txt`
+- `final-clippy.txt`
+- `final-commands.txt`
+- `final-compat-check.txt`
+- `final-delta-1.txt`
+- `final-delta-2.txt`
+- `final-delta-3.txt`
+- `final-delta-4.txt`
+- `final-delta-list.txt`
+- `final-diff-check.txt`
+- `final-diff.txt`
+- `final-fmt.txt`
+- `final-processes-after.txt`
+- `final-processes-before.txt`
+- `final-push.txt`
+- `final-remote-tip.txt`
+- `final-runner.sh`
+- `final-scenario-search.py`
+- `final-scenario-strings.txt`
+- `final-source-diff-check.txt`
+- `final-streams-1.txt`
+- `final-streams-2.txt`
+- `final-streams-3.txt`
+- `final-streams-self-check.txt`
+- `final-test-libraries.txt`
+- `final-test-zz.txt`
+- `final-tracker.txt`
+- `final-verify-claims.txt`
+- `final-wire-version.txt`
+- `final-audit.txt`
+- `final-audit.py`
+
+The first final audit compared the complete ledger directly to the moving
+origin/main ref and failed its equality assertion: another worktree had advanced
+that shared ref to `1077951108aabe956104ac8de62da319aa06db4b`, landing other
+obligations. No local ledger edit caused that failure. The corrected audit uses
+the fixed starting base and verifies that the three-dot merge base is still
+`7e7cb1ee25122a10e7f1d8815241422eb00c4199`; only the four permitted TUI-018 fields
+differ. This does not change the completed delta selection or final-tip proofs.

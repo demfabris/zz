@@ -1277,6 +1277,10 @@ pub enum MuxEffect {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PaneModeRequest {
     Clock,
+    /// `window_switch_mode`, listing sessions or, under `-w`, windows.
+    Switch {
+        windows: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -4619,6 +4623,7 @@ impl MuxEngine {
             "send-prefix" => self.send_prefix(context, &command.args)?,
             "copy-mode" => self.copy_mode(context, &command.args)?,
             "clock-mode" => self.clock_mode(context, &command.args)?,
+            "switch-mode" => self.switch_mode(context, command)?,
             "copy-mode-search-prompt" => self.copy_mode_search_prompt(context, &command.args)?,
             "command-prompt" => self.command_prompt(context, command)?,
             "focus-sidebar" => self.focus_sidebar(context, &command.args)?,
@@ -8434,6 +8439,28 @@ impl MuxEngine {
         Ok(Execution::effect(MuxEffect::PaneModeChanged {
             pane,
             mode: Some(PaneModeRequest::Clock),
+        }))
+    }
+
+    /// `cmd_switch_mode_exec`: the pane takes `window_switch_mode`, listing
+    /// sessions by default and windows under `-w`. `-s` is the explicit
+    /// session form.
+    fn switch_mode(
+        &self,
+        context: &ExecutionContext,
+        invocation: &CommandInvocation,
+    ) -> Result<Execution, ServerError> {
+        let args = &invocation.args;
+        let spec = command_spec("switch-mode").expect("executable command has catalog metadata");
+        parse_tmux_command_options(spec, invocation)?;
+        let (options, positional) = parse_command_options("switch-mode", args)?;
+        spec.validate_positional_maximum(positional.len())?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+        Ok(Execution::effect(MuxEffect::PaneModeChanged {
+            pane,
+            mode: Some(PaneModeRequest::Switch {
+                windows: options.has("-w"),
+            }),
         }))
     }
 

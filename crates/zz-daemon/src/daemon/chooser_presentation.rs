@@ -20,6 +20,20 @@ const WINDOW_TREE_DEFAULT_FORMAT: &str = concat!(
     "}"
 );
 const WINDOW_BUFFER_DEFAULT_FORMAT: &str = "#{t/p:buffer_created}: #{buffer_sample}";
+/// `WINDOW_SWITCH_DEFAULT_FORMAT`, verbatim.
+const WINDOW_SWITCH_DEFAULT_FORMAT: &str = concat!(
+    "#{?window_format,",
+    "#{window_name} ",
+    "#[dim]#{session_name}:#{window_index}#{window_flags}#[default] ",
+    "#[dim]#{pane_current_command}#[default] ",
+    "#[dim]#{?#{!=:#{pane_title},#{host_short}},#{pane_title},}#[default]",
+    ",",
+    "#{session_name} ",
+    "#[dim]#{session_windows} windows#[default] ",
+    "#{?session_attached,attached,#[dim]detached#[default]} ",
+    "#[dim]#{window_name}#[default]",
+    "}"
+);
 /// `WINDOW_CLIENT_DEFAULT_FORMAT`.
 const WINDOW_CLIENT_DEFAULT_FORMAT: &str =
     "#[fg=themelightgrey]#{t/p:client_activity}: session #[default]#{session_name}";
@@ -539,6 +553,70 @@ impl Styles<'_> {
             viewport: pane_viewport(self.inner, shown),
         }
     }
+}
+
+/// `window_switch_build`: one row per session, or per window under `-w`, each
+/// expanded through `WINDOW_SWITCH_DEFAULT_FORMAT` in its own format tree.
+/// `sort_get_sessions` and `sort_get_winlinks` both run with `SORT_NAME` and no
+/// reversal, which is the order here.
+pub(super) fn switch_rows(inner: &ServerState, windows: bool) -> Vec<String> {
+    let engine = &inner.engine;
+    let facts = format_hook_facts(inner);
+    let attached = None;
+    if windows {
+        let mut entries = engine
+            .state
+            .windows
+            .iter()
+            .map(|(window, entry)| (entry.name.clone(), *window, entry.session))
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.0.cmp(&right.1.0)));
+        return entries
+            .into_iter()
+            .map(|(_, window, session)| {
+                expand_row(
+                    engine,
+                    WINDOW_SWITCH_DEFAULT_FORMAT,
+                    &ExecutionContext::new(Some(session), Some(window), None),
+                    &scope_variables(false, true, false),
+                    attached,
+                    &facts,
+                )
+            })
+            .collect();
+    }
+    let mut entries = engine
+        .state
+        .sessions
+        .iter()
+        .map(|(session, entry)| (entry.name.clone(), *session))
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.0.cmp(&right.1.0)));
+    entries
+        .into_iter()
+        .map(|(_, session)| {
+            expand_row(
+                engine,
+                WINDOW_SWITCH_DEFAULT_FORMAT,
+                &ExecutionContext::new(Some(session), None, None),
+                &scope_variables(true, false, false),
+                attached,
+                &facts,
+            )
+        })
+        .collect()
+}
+
+/// `style_apply(&sgc, oo, "mode-style", NULL)` for the pane's own window, which
+/// is the style `window_switch_draw_screen` clears the current row to.
+pub(super) fn mode_style_for_pane(inner: &ServerState, pane: PaneId) -> String {
+    Styles { inner }.selection(pane)
+}
+
+/// `pr->style`: `prompt_set_options` takes `message-style` off the session,
+/// and `prompt_draw` gives the prompt's own cells that style.
+pub(super) fn prompt_style() -> String {
+    MESSAGE_STYLE.to_owned()
 }
 
 fn pane_viewport(inner: &ServerState, pane: PaneId) -> Option<TerminalViewport> {

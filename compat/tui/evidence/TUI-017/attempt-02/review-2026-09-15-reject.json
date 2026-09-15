@@ -1,0 +1,93 @@
+{
+  "lane": "capture",
+  "branch": "campaign/tui-capture-10",
+  "tip": "edd593bb",
+  "verdict": "reject",
+  "confirmed_defects": [
+    {
+      "obligation": "TUI-017",
+      "severity": "blocker",
+      "description": "capture-pane -p -L -e -J -S 0 -E 3 loses following text. At 80x24, print ESC[31m, 170 A bytes, ESC[0m, CRLF, NEXT. The pin returns all three numbered wrapped rows followed by row 3 NEXT; zz drops NEXT and splits the wrapped text incorrectly. number_capture sums ANSI-formatted byte lengths to infer row grouping (crates/zz-terminal/src/session.rs:8503-8523). Exact outputs: /tmp/zz-review-capture/oracle3/colourwrap-LeJ.{tmux,zz}.out. The existing corpus join case captures only alpha/alpha/beta/beta/gamma/gamma, and its history case returns only 0 alpha, so the claimed wrapped/negative-history coverage is vacuous. Final control confirms -e -J retains NEXT and adding -L loses it.",
+      "suggested_fix": "Assign numbers using actual row boundaries rather than ANSI byte lengths, or retain an explicitly decided refusal if the required row facts are unavailable. Add an asserted coloured multirow wrap followed by NEXT, plus real negative-history and wrapped-row fixture cases and sabotages."
+    },
+    {
+      "obligation": "TUI-015",
+      "severity": "blocker",
+      "description": "Clause 2 target validation does not match. lock-session -t =cli:win returns exit 0 and empty channels on the pin, but zz returns exit 1 and stderr can't find session: cli:win\\n. =cli:nosuchwin yields can't find window: nosuchwin on the pin versus can't find session: cli:nosuchwin on zz; %0 and %99 also differ. Reproduced in oracle3/lock-9 through lock-12. crates/zz-mux/src/model.rs:2308 resolves the whole target as a session name. Removing the fixture case (TUI-015/attempt-01/notes.md:54-76) does not remove this explicit acceptance requirement.",
+      "suggested_fix": "Restore an owned failing target case, keep clause 2 unverified, and obtain the needed resolver zone before fixing the shared session target grammar."
+    },
+    {
+      "obligation": "TUI-017",
+      "severity": "blocker",
+      "description": "The newly accepted -C -e does not answer the pin's bytes on coloured or charset rows. For RED the pin emits literal \\033[31mRED\\033[39m, while zz emits \\033[0m\\033[38;5;1mRED\\033[0m. For ESC(0qqqESC(B the pin emits \\016qqq\\017, while zz emits three UTF-8 box-drawing characters. Pin grid.c:1130-1138 explicitly handles escaped SO/SI; the worker's claim that history -C only doubles backslash and escapes ESC is incomplete. session.rs:8475; oracle3/charset-Ce and rich-Ce outputs.",
+      "suggested_fix": "Cover nonempty -e attributes and charset controls in the asserted transport fixture, and satisfy the exact-byte clause or retain an explicitly authorized measured refusal; the plain-colourless -C -e case cannot prove this claim."
+    },
+    {
+      "obligation": "TUI-017",
+      "severity": "blocker",
+      "description": "None of the four recorded refusal reasons carries the required decision sentence verbatim. CAPTURE_FLAGS, CAPTURE_LINKS and CAPTURE_PENDING omit it; CAPTURE_GRID uses uppercase Decided and omits the possessive in fabrico's (compat/tui-client-commands.sh:737-740). The four named workloads are real, and the refusal exit/stderr bytes were measured, but these records do not meet the supplied second-arm contract.",
+      "suggested_fix": "Include in each measured reason: decided 2026-09-15 by the orchestrator under fabrico's TUI parity contract of 2026-09-09; reversible. Preserve each workload and make the actual decision recognizable by main's DECIDED owner accounting."
+    },
+    {
+      "obligation": "TUI-015",
+      "severity": "blocker",
+      "description": "The promised negative hook assertions are absent. lock_cases first sets after-lock-server and reads yes, then executes lock-session and lock-client without clearing or re-reading that marker (compat/tui-client-commands.sh:886-917). The standalone evidence script merely prints comparisons, and its lock-client call fails with no current client. The fixture would not detect after-lock-server incorrectly firing for successful session/client locks.",
+      "suggested_fix": "Clear the marker before each successful lock-session and targeted lock-client, assert that it stays empty on both sides, and add a sabotage that causes an inappropriate hook effect."
+    },
+    {
+      "obligation": "TUI-015",
+      "severity": "blocker",
+      "description": "There is a third undeclared zone excursion: compat/tui/verify-claims.py:44 adds the TUI-015 fixture mapping. The supplied zones permit only the two attempt directories under compat/tui/, and the declared excursions were divergences.md and command-flag-errors.sh.",
+      "suggested_fix": "Have the gate explicitly own this supporting mapping change or authorize the additional zone before merge; do not report only the two declared excursions."
+    },
+    {
+      "obligation": "TUI-015",
+      "severity": "must-fix",
+      "description": "The automatic merge with main's case_owner table leaves new lock-session-current unattributed. The checker charges that record to every obligation sharing the fixture. The five lock screen records also retain accepted-gap reasons rather than the recorded OS-locking decision.",
+      "suggested_fix": "Add lock-session-current to the TUI-015 case_owner pattern. Attribute the genuinely decided screen channels to fabrico's 2026-09-14 OS-locking decision while retaining all CLI assertions."
+    },
+    {
+      "obligation": "TUI-017",
+      "severity": "must-fix",
+      "description": "New explanatory shell code comments were added at compat/tui-client-commands.sh:878-885,1107-1113,1129-1135 despite the no-added-code-comments instruction. No Rust comments were added.",
+      "suggested_fix": "Move the explanations into the attempt notes and remove the added shell code comments."
+    }
+  ],
+  "checks_run": [
+    "Fetched requested refs; detached edd593bb; initial and final worktree status clean.",
+    "Wrapped cargo build -p zz --jobs 3 PASS at 19:19:25 UTC. All external proofs use SHA256 e6ccf03c21b9e02276a8cac30ce925f965b64238deb8a61f43b16f749b711d6f; the exact cached executable was restored after cargo test rebuilt the CLI.",
+    "compat/tui-client-commands.sh: three PASS runs, each 109 asserted comparisons and 28 recorded; --self-check PASS with eight sabotages and two equivalences.",
+    "Reviewer mutation run: all 28 new/flipped asserted cases detected their stdout/stderr mutation; numbered captures included an off-by-one prefix. Exactly 28 expected failures, no unexpected failures.",
+    "Pinned source cmd-capture-pane.c/grid.c inspected; isolated 80x24 probes compared stdout, stderr and exit status, with raw files and od -c under /tmp/zz-review-capture. Plain -C, -L, -C -L, real negative history and plain -L -J match; coloured/charset capture and compound lock targets reproduce the reported defects. Pending -P/-C and -P -H precedence measured.",
+    "compat/run.sh --strict-geometry capture-pane: PASS, 34 steps, zero divergences; smoke/command-flag-errors: PASS. Old/new capture usage and unsupported-flag strings searched across compat/scenarios.",
+    "compat/attached-client.sh: PASS using the reviewed executable and pinned tmux.",
+    "Wrapped cargo test -p zz-terminal -p zz-protocol -p zz-mux: PASS.",
+    "Wrapped cargo test -p zz-daemon: PASS, all 918 library tests plus integrations, HOME=/tmp/zz-emptyhome and isolated XDG_CONFIG_HOME.",
+    "Wrapped cargo test -p zz: PASS, including all 125 CLI integration tests.",
+    "Wrapped clippy on zz-terminal, zz-protocol, zz-mux and zz-daemon --all-targets --all-features -- -D warnings: PASS. Wrapped cargo fmt --all -- --check: PASS.",
+    "compat/check.sh: PASS on retry. First attempt waited 540 seconds for a cargo slot and exited before the filtered test ran; this was not a test failure.",
+    "verify-claims.py --run TUI-015 and --run TUI-017: both PASS, each reports review with 28 records as consistent; neither establishes verification.",
+    "Both trackers PASS; generated reports current. Ledger changes confined to status/evidence_note/next_action/sources of TUI-015 and TUI-017. TUI-011/proof blocks untouched. No wire change, attribution trailers or added ASCII Unicode escapes. Evidence directories contain no .log files and git check-ignore -v --no-index is clean.",
+    "Delta selection: 154 rows. 106 completed successfully; 48 remain unproved in this bounded review. Exact completed/remaining lists: /tmp/zz-review-capture/completed-corpus.txt and remaining-corpus.txt. smoke/status-background-jobs initially had 1 OUT and 1 WARN divergence, then passed the runner's isolated retry (known timing flake).",
+    "Deadline-interrupted scenario attempts, not test results: [{'row': 80, 'exit_code': 124}]",
+    "Final cleanup: pgrep -fa zz-cli-|zz-user|zzprobe returned no processes; final git status --short empty. No temporary binary copies were made."
+  ],
+  "touched_commands": [
+    "capture-pane",
+    "lock-client",
+    "lock-server",
+    "lock-session",
+    "list-commands (capture usage metadata)"
+  ],
+  "touched_packages": [
+    "zz-terminal",
+    "zz-daemon",
+    "zz-mux",
+    "zz-protocol"
+  ],
+  "every_clause_asserted": "TUI-015 clause 1: yes, the existing OS-session locking decision and inert accepted lock-after-time/lock-command knobs are recorded. Clause 2: no, target validation demonstrably differs and negative hook assertions are missing. TUI-017 clause 1: no, -L -e -J drops text, -C -e bytes differ, and all four refusal reasons miss the required sentence. Clause 2: yes for its specifically enumerated cycle-9 text residues; default range, -N, -M fallback, -a wording and the named -e trailing-cell cases pass on all three fixture runs. Do not verify TUI-011 through these children.",
+  "attribution": "Of 28 records, TUI-015 owns FIVE: lock-server, lock-session, lock-session-current, lock-client, lock-client-current. They assert CLI channels but record the screen/state channels using LOCK_PROGRAM, an accepted-gap reason without a decision sentence. TUI-017 owns FOUR: capture-flags, capture-hyperlinks, capture-pending, capture-grid; the first three omit the required sentence and the fourth misspells it. The other 19 are TUI-018=4, TUI-014=6, decided:TUI-016=1, gap:clients.interactive-refresh=8. Main already owns all four remaining capture records; its merge needs lock-session-current -> TUI-015. Main promotes only reasons starting DECIDED to decided:<owner>, so none of the current capture/lock reasons qualifies. A review-state result of 'consistent' from this tip's older verify-claims is not verification.",
+  "gui_reach": "cargo build -p zz passed. No files under crates/zz and no GUI presentation code changed. The Rust changes are confined to terminal capture, capture argument parsing, command metadata and corresponding expectations. message.rs is untouched; protocol remains v103.",
+  "expected_gate_conflicts": "git merge-tree --write-tree origin/main HEAD against main 2e5094d8 returned exactly one content conflict: knowledge/tmux/tui-parity.md. Regenerate it after resolving ledger changes. Fixture, campaign.json and verify-claims.py auto-merge. Merge tree: 23829a661d522ad655f5c062e0f66eae4c7d70d7.",
+  "notes": "REVIEW VALIDATION LIMIT: the full 154-row delta corpus did not finish within the 110-minute post-build bound; 48 rows still require execution. This is not a full-regression approval. All other listed gates completed. Final cleanup and report serialization ran just beyond the 21:09:25 UTC bound; no further heavy checks were started. A temporary reviewer runner edit caused an unintended restart of one corpus chunk; it was stopped and the interrupted command-prompt rows were rerun successfully. Worker evidence count corrections: five lock CLI/screen records, not four; 30 lock assertions, not the next_action claim of 31; twelve new capture assertions, not thirteen. Environment artifacts still name the pre-rebase base/landing and should be refreshed before a gate records proof. Considered and dismissed: plain numbered/joined/history capture passes the independent rich scene; colourless fixture passes do not refute the coloured data-loss probe. Initial 40x8 detached probes were excluded because actual zz PTY geometry differed; reported capture findings use matching 80x24 geometry. No evidence fabrication is alleged. Review artifacts are under /tmp/zz-review-capture. No source edits, commits, pushes, board/issue changes or temporary binary copies. Cleanup results are recorded in cleanup.txt."
+}

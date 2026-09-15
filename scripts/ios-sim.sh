@@ -24,6 +24,26 @@ marketing_version="${workspace_version%%[-+]*}"
 
 [[ "$simulator_family" == "iPhone" || "$simulator_family" == "iPad" ]] || die "ZZ_IOS_SIMULATOR_FAMILY must be iPhone or iPad"
 
+if [[ "$mode" == "run" ]]; then
+    socket="${ZZ_DEV_SOCKET:-}"
+    if [[ -z "$socket" ]]; then
+        darwin_tmp="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)"
+        darwin_tmp="${darwin_tmp:-/tmp}"
+        if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
+            socket="$XDG_RUNTIME_DIR/zz-dev/default.sock"
+        else
+            socket="${TMPDIR:-$darwin_tmp}/zz-dev-${USER:-user}/default.sock"
+        fi
+        for temp_dir in "$darwin_tmp" /tmp; do
+            [[ -S "$socket" ]] && break
+            candidate="${temp_dir%/}/zz-dev-${USER:-user}/default.sock"
+            [[ ! -S "$candidate" ]] || socket="$candidate"
+        done
+    fi
+    [[ -S "$socket" ]] || die "no dev daemon socket at $socket; run just run mac first or set ZZ_DEV_SOCKET"
+    echo "Using dev daemon socket: $socket"
+fi
+
 simulator_udid() {
     local udid
     udid="$(xcrun simctl list devices available --json | python3 -c '
@@ -85,16 +105,6 @@ if [[ -d "$device_hub" ]]; then
 else
     open -a Simulator
 fi
-
-socket="${ZZ_DEV_SOCKET:-}"
-if [[ -z "$socket" ]]; then
-    if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
-        socket="$XDG_RUNTIME_DIR/zz-dev/default.sock"
-    else
-        socket="${TMPDIR:-/tmp}/zz-dev-${USER}/default.sock"
-    fi
-fi
-[[ -S "$socket" ]] || echo "warning: no daemon socket at $socket; run just run mac first" >&2
 
 xcrun simctl terminate "$udid" "$bundle_id" 2>/dev/null || true
 xcrun simctl install "$udid" "$app"

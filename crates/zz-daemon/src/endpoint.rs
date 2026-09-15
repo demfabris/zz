@@ -57,9 +57,15 @@ macro_rules! remote_path_fallback {
 // Runs under `sh -lc` so `zz` resolves through the login shell's PATH; the sentinel prefixes
 // let the parser skip whatever a login profile prints around the probe's own output.
 pub(crate) fn remote_socket_probe() -> String {
+    let desktop_dev_socket = if zz_protocol::app_identity::DEVELOPMENT {
+        "elif [ \"$(uname -s)\" = Darwin ] && [ -S \"/tmp/zz-dev-$USER/default.sock\" ]; \
+         then zz_dir=\"/tmp/zz-dev-$USER\"; "
+    } else {
+        ""
+    };
     shell_quote(&format!(
         "{fallback}if [ -n \"$XDG_RUNTIME_DIR\" ]; then zz_dir=\"$XDG_RUNTIME_DIR/{name}\"; \
-         else zz_tmp=\"$TMPDIR\"; \
+         {desktop_dev_socket}else zz_tmp=\"$TMPDIR\"; \
          if [ -z \"$zz_tmp\" ]; then zz_tmp=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null); fi; \
          case \"$zz_tmp\" in /*) ;; *) zz_tmp=/tmp ;; esac; \
          zz_dir=\"${{zz_tmp%/}}/{name}-$USER\"; fi; \
@@ -2153,6 +2159,65 @@ mod tests {
                 "{expected_root}/{}-ada/default.sock",
                 zz_protocol::app_identity::DIRECTORY
             )
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_socket_probe_dev_prefers_existing_macos_desktop_socket() {
+        let name = zz_protocol::app_identity::DIRECTORY;
+        let desktop = tempfile::Builder::new()
+            .prefix(&format!("{name}-"))
+            .tempdir_in("/tmp")
+            .expect("desktop directory");
+        let desktop_name = desktop.path().file_name().unwrap().to_str().unwrap();
+        let user = desktop_name.strip_prefix(&format!("{name}-")).unwrap();
+        let desktop_socket = desktop.path().join("default.sock");
+        let listener =
+            std::os::unix::net::UnixListener::bind(&desktop_socket).expect("desktop socket");
+        let temporary = tempfile::tempdir_in("/tmp").expect("SSH temporary directory");
+        let ssh_directory = temporary.path().join(desktop_name);
+        fs::create_dir(&ssh_directory).expect("SSH socket directory");
+        let ssh_socket = ssh_directory.join("default.sock");
+        let _ssh_listener =
+            std::os::unix::net::UnixListener::bind(&ssh_socket).expect("SSH socket");
+        let uname = temporary.path().join("uname");
+        fs::write(&uname, "#!/bin/sh\nprintf 'Darwin\\n'\n").expect("uname stub");
+        fs::set_permissions(&uname, fs::Permissions::from_mode(0o755)).expect("stub permissions");
+        let path = format!(
+            "{}:{}",
+            temporary.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let mut environment = [
+            ("XDG_RUNTIME_DIR", None),
+            ("TMPDIR", temporary.path().to_str()),
+            ("USER", Some(user)),
+            ("PATH", Some(path.as_str())),
+        ];
+        let expected = if zz_protocol::app_identity::DEVELOPMENT {
+            &desktop_socket
+        } else {
+            &ssh_socket
+        };
+        assert_eq!(probe_socket_path(&environment), expected.to_str().unwrap());
+        environment[0].1 = Some("/run/zz-test-runtime");
+        assert_eq!(
+            probe_socket_path(&environment),
+            format!("/run/zz-test-runtime/{name}/default.sock")
+        );
+        environment[0].1 = None;
+        fs::write(&uname, "#!/bin/sh\nprintf 'Linux\\n'\n").expect("Linux uname stub");
+        assert_eq!(
+            probe_socket_path(&environment),
+            ssh_socket.to_str().unwrap()
+        );
+        fs::write(&uname, "#!/bin/sh\nprintf 'Darwin\\n'\n").expect("Darwin uname stub");
+        drop(listener);
+        fs::remove_file(desktop_socket).expect("remove desktop socket");
+        assert_eq!(
+            probe_socket_path(&environment),
+            ssh_socket.to_str().unwrap()
         );
     }
 

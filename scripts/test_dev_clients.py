@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,8 @@ with (root / "calls.jsonl").open("a") as log:
     log.write(json.dumps({"tool": name, "args": args, "env": dict(os.environ)}) + "\n")
 if name == "uname":
     print("Darwin")
+elif name == "getconf":
+    print(root / "darwin")
 elif name == "xcrun" and args[:3] == ["simctl", "list", "devices"]:
     print(json.dumps({"devices": {"com.apple.CoreSimulator.SimRuntime.iOS-27-0": [
         {"name": "iPhone Test", "state": "Booted", "udid": "phone"},
@@ -47,7 +50,7 @@ elif name == "wasm-bindgen" and args == ["--version"]:
 
 class DevelopmentClientTests(unittest.TestCase):
     def setUp(self):
-        self.directory = tempfile.TemporaryDirectory(prefix="zz dev clients ")
+        self.directory = tempfile.TemporaryDirectory(prefix="zz dev clients ", dir="/tmp")
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
         (self.root / "scripts").mkdir()
@@ -63,14 +66,22 @@ class DevelopmentClientTests(unittest.TestCase):
         (self.root / "products").mkdir()
         tools = self.root / "tools"
         tools.mkdir()
-        for name in ("uname", "xcrun", "xcodebuild", "xcodegen", "open", "cargo", "cargo-watch", "rustup", "wasm-bindgen"):
+        for name in ("uname", "getconf", "xcrun", "xcodebuild", "xcodegen", "open", "cargo", "cargo-watch", "rustup", "wasm-bindgen"):
             path = tools / name
             path.write_text(TOOL.replace("#!/usr/bin/env python3", f"#!{sys.executable}", 1))
             path.chmod(0o755)
         self.environment = dict(os.environ, TEST_ROOT=str(self.root), PATH=f"{tools}:{os.environ['PATH']}",
                                 ZZ_SOCKET="/stable/default.sock", ZZ_DEV_BUILD="inherited", ZZ_PANE="stable-pane",
-                                DEVELOPER_DIR=subprocess.check_output(["xcode-select", "-p"], text=True).strip() if shutil.which("xcode-select") else "/Xcode", XDG_RUNTIME_DIR="/runtime", USER="tester",
+                                DEVELOPER_DIR=subprocess.check_output(["xcode-select", "-p"], text=True).strip() if shutil.which("xcode-select") else "/Xcode", XDG_RUNTIME_DIR=str(self.root / "runtime"), USER=f"tester-{self.root.name[-8:]}",
                                 BUILT_PRODUCTS_DIR=str(self.root / "products"), ZZ_IOS_REUSE_CLIENT_CORE="0")
+        self.runtime_socket = self.make_socket(self.root / "runtime/zz-dev/default.sock")
+
+    def make_socket(self, path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        server = socket.socket(socket.AF_UNIX)
+        self.addCleanup(server.close)
+        server.bind(str(path))
+        return str(path)
 
     def run_script(self, script, *arguments, **environment):
         return subprocess.run(["bash", str(self.root / "scripts" / script), *arguments],
@@ -93,14 +104,36 @@ class DevelopmentClientTests(unittest.TestCase):
             self.assert_dev_build(self.calls("xcodebuild")[-1])
             launch = self.calls("xcrun")[-1]
             self.assertEqual(launch["args"], ["simctl", "launch", "--console-pty", device, "dev.zz.ios.dev"])
-            self.assertEqual(launch["env"]["SIMCTL_CHILD_ZZ_SOCKET"], "/runtime/zz-dev/default.sock")
+            self.assertEqual(launch["env"]["SIMCTL_CHILD_ZZ_SOCKET"], self.runtime_socket)
         terminations = [call["args"][-1] for call in self.calls("xcrun") if "terminate" in call["args"]]
         self.assertEqual(terminations, ["dev.zz.ios.dev", "dev.zz.ios.dev"])
 
     def test_simulator_preserves_explicit_dev_socket(self):
-        result = self.run_script("ios-sim.sh", ZZ_DEV_SOCKET="/tmp/explicit.sock")
+        explicit = self.make_socket(self.root / "explicit.sock")
+        result = self.run_script("ios-sim.sh", ZZ_DEV_SOCKET=explicit)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.calls("xcrun")[-1]["env"]["SIMCTL_CHILD_ZZ_SOCKET"], "/tmp/explicit.sock")
+        self.assertEqual(self.calls("xcrun")[-1]["env"]["SIMCTL_CHILD_ZZ_SOCKET"], explicit)
+
+    def test_simulator_finds_daemon_outside_shell_temporary_directory(self):
+        live = self.make_socket(self.root / f"darwin/zz-dev-{self.environment['USER']}/default.sock")
+        for shell_tmp in (str(self.root / "other-temp"), ""):
+            result = self.run_script("ios-sim.sh", XDG_RUNTIME_DIR="", TMPDIR=shell_tmp)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(self.calls("xcrun")[-1]["env"]["SIMCTL_CHILD_ZZ_SOCKET"], live)
+
+    def test_simulator_finds_desktop_daemon_under_tmp(self):
+        live = self.make_socket(Path("/tmp") / f"zz-dev-{self.environment['USER']}/default.sock")
+        self.addCleanup(shutil.rmtree, Path(live).parent)
+        result = self.run_script("ios-sim.sh", XDG_RUNTIME_DIR="", TMPDIR=str(self.root / "other-temp"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.calls("xcrun")[-1]["env"]["SIMCTL_CHILD_ZZ_SOCKET"], live)
+
+    def test_simulator_rejects_missing_explicit_socket_before_build_or_launch(self):
+        result = self.run_script("ios-sim.sh", ZZ_DEV_SOCKET=str(self.root / "missing.sock"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no dev daemon socket", result.stderr)
+        self.assertEqual(self.calls("xcodebuild"), [])
+        self.assertEqual(self.calls("xcrun"), [])
 
     def test_device_optimization_does_not_change_identity(self):
         for configuration in ("Debug", "Release"):

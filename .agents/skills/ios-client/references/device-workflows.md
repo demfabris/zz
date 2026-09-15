@@ -72,15 +72,18 @@ startup. Rebuilding a simulator does not rule it out.
 `scripts/ios-sim.sh` starts or selects a simulator, builds the same universal app, installs bundle
 `dev.zz.ios.dev`, and launches it with `SIMCTL_CHILD_ZZ_SOCKET`. `ZZStore.start` sees `ZZ_SOCKET` and
 bypasses host setup and SSH. The recipe selects the desktop dev socket, ignores inherited
-`ZZ_SOCKET`, and accepts `ZZ_DEV_SOCKET` as an explicit override.
+`ZZ_SOCKET`, and accepts `ZZ_DEV_SOCKET` as an explicit override. Without an override it prefers the
+environment-derived socket, then checks per-user dev defaults under `getconf DARWIN_USER_TEMP_DIR`
+and `/tmp`. This handles desktop and terminal launches with different `TMPDIR` values. The selected
+socket is printed before the build; a missing socket stops the run before building or replacing the app.
 
 The recipe selects the newest installed iOS runtime with a device in the requested family,
 preferring a booted device within that runtime. It waits for boot completion before installing.
 Xcode 27 uses `Contents/Applications/DeviceHub.app` instead of Simulator; the script opens Device
 Hub from the selected Xcode installation and uses Simulator on older Xcode versions.
 
-A missing local socket can still produce an installed and launched app with no daemon connection.
-Read the script warning and verify a real session, window, pane, and terminal frame.
+Socket existence does not establish attachment. Verify a real session, window, pane, and terminal
+frame after launch. Start the desktop dev daemon with `just run mac` when no dev socket exists.
 
 ## Physical-device behavior
 
@@ -91,6 +94,12 @@ endpoint, reaches SSH over the LAN, and uses its Keychain-backed identity. See
 Local recipes install the separate `zz Dev` app. Its SSH transport uses the host’s `zz-dev`
 executable and socket namespace; desktop dev runs create the executable link in `~/.local/bin`.
 `just ios-preview` retains the production identity.
+
+When probing a macOS dev host without `XDG_RUNTIME_DIR`, SSH prefers an existing
+`/tmp/zz-dev-$USER/default.sock` before the login shell's temporary-directory default. This keeps
+desktop launches using `/private/tmp` and SSH shells using Darwin's user temp directory on the same
+dev socket. Explicit socket paths in SSH URLs still win. Production and Linux keep their existing
+temporary-directory selection.
 
 Physical Debug builds are the default. The recipe requires a paired device with Developer Mode,
 valid signing, and an unlocked screen for launch.
@@ -104,6 +113,12 @@ Treat these as separate checkpoints:
 5. The UI rendered a real daemon session and live pane content.
 
 Do not call step 2 or 3 a connected client.
+
+If installation fails after `BUILD SUCCEEDED` with CoreDevice error 4000 and connection reset by
+peer, check device details and lock state first. On 2026-09-14 the paired iPad's local-network
+connection recovered and retrying `devicectl device install app` with the completed `.app` succeeded;
+another Rust build was unnecessary. Launch afterward and verify app state separately. A fresh
+`zz Dev` installation can open at host setup because its saved endpoint is separate from `zz`.
 
 ## CoreDevice checks
 

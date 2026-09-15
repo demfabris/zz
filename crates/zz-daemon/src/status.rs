@@ -1671,7 +1671,8 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             return self.copy_mode_variable(name, context);
         }
         match name {
-            "mouse_pane" | "mouse_x" | "mouse_y" => Some(String::new()),
+            "mouse_pane" | "mouse_x" | "mouse_y" | "mouse_word" | "mouse_line"
+            | "mouse_hyperlink" => Some(String::new()),
             "pane_in_mode" => Some(
                 if self.copy_mode_rows(context).is_some() {
                     "1"
@@ -2424,7 +2425,7 @@ mod tests {
     #[test]
     fn daemon_delegated_format_consumers_match_mux_inventory() {
         let delegated = zz_mux::delegated_format_variable_names().collect::<Vec<_>>();
-        assert_eq!(delegated.len(), 53);
+        assert_eq!(delegated.len(), 56);
 
         let session = SessionId(1);
         let pane = PaneId(1);

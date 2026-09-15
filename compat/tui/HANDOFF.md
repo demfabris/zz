@@ -1,194 +1,182 @@
-# TUI parity handoff: cycle 9 stopped before its gates (2026-09-14, alienware)
+# TUI parity handoff: cycle 9 resumed on the ubuntu box, paused mid-flight to move again (2026-09-14)
 
-Cycle 9 ran its three lanes on the alienware box and was stopped deliberately before any gate, so
-fabrico could move machines. Nothing is merged and every lane's work is pushed to a campaign branch.
-
-The resume point is not simply "run the gates". Two of the three reviews finished and one of them
-rejected its branch, so the order is:
-
-1. **Fix `campaign/tui-mouse`.** Its review found two regressions that the lane's own fixture cannot
-   see, plus the wire bump. One fallthrough fixes both regressions. Then re-review it.
-2. **Review `campaign/tui-choosers-3`.** Its reviewer never finished. TUI-006 is a baseline id
-   sitting at `review` on the worker's own account, unchecked.
-3. **Then gate**, in the order mouse, choosers, introspection, and treat
-   `campaign/tui-mouse-menus` as scratch to read rather than work to merge.
-
-`run-9.js`'s own reject path is the shape to reuse: a fresh agent takes the branch, fixes every
-blocker on it, pushes, and a re-review verifies each blocker at the new tip.
+Cycle 9 was stopped on alienware before its gates. The ubuntu box picked it up the same evening,
+ran the fix passes, the missing review and the first two gates through the Agent tool (one Opus 5
+agent per lane, prompts adapted from `run-9.js`, `run-9b.js` and `run-10.js`), and was paused on
+fabrico's word ("pause as the agents come in, we'll take this to another machine") once the choosers
+gate had pushed main. Nothing was killed: every agent that was running finished and its result is
+below. The resume point is a gate order, not a lane: two branches landed on main, one is reviewed
+and waiting with a blocker, one has its review fixes landed and waits for its gate, and one cycle 10
+lane has pushed unreviewed.
 
 | Fact | Value |
 | --- | --- |
-| `origin/main` | the wire guard and this handoff, under fabrico's `v0.9.1` release at `416c0b4d` |
-| Ledger | 8/12 baseline verified (TUI-001 to 005, 007, 009, 010); added scope 0/6 |
-| Merged this cycle | nothing; no gate ran. One review rejected, one approved with fixes, one never finished |
-| `PROTOCOL_VERSION` | 102, and **102 is released**: zz 0.9.0 and 0.9.1 both shipped it. The first wire change to land opens 103 |
-| Board | `F-TUI-CYCLE-9-LANES` claimed by `alienware/orchestrator`; MAIN and TRIAGE free |
-| Runners | `run-9.js` (this cycle), `run-9b.js` (its second half), `run-10.js` (ready, and the last cycle) |
-| Deferred | TUI-013 still waits for a macOS box; `compat/tui/run-2.js` is its ready runner |
+| `origin/main` | `d41b815f`, the mouse gate's push (the choosers gate pushed `3ecd4702` before it) |
+| Ledger | **9/12 baseline verified** (TUI-001 to 007, 009, 010); TUI-008 active, TUI-011 and TUI-012 at review; added scope 0/6 (TUI-016 at review on its branch) |
+| `PROTOCOL_VERSION` | **103 on main, unreleased** (0.9.1 shipped 102; the choosers gate opened 103). Every later append folds into 103; `compat/wire-version.py` enforces it inside `compat/check.sh` |
+| Board | `F-TUI-CYCLE-9-LANES` RELEASED at the pause (cycle 10's stream lane ran under it too); MAIN and TRIAGE free. Issue 7 carries every gate note |
+| Runners | `run-10.js` (cycle 10, lint-clean, modes batch now names the right gap groups, wire rule pinned at 103); `run-2.js` (the deferred macOS TUI-013 run) |
+| Landed this resume | main `45481a72` (restores the zz cdylib that `6515adcd` removed; Windows loads `zz.dll`), main `3ecd4702` (choosers gate: TUI-006 verified), main `d41b815f` (mouse gate: TUI-008's first half, 22 mouse gap items closed, one v103 entry carrying both lanes' appends; TUI-008 stays active) |
 
-## The four branches waiting for a gate
+## The branches, in gate order
 
-| Branch | Tip | What it carries |
-| --- | --- | --- |
-| `campaign/tui-mouse` | `142139fd` | **REJECTED by its review. Do not gate as it stands.** TUI-008 at `active`. Both unlocks landed (`send-keys -M` re-encoding the invoking event, and `#{mouse_any_flag}` answering the pane's own tracking) plus the pin's multi-click sequence, but the landing regresses two channels. See below |
-| `campaign/tui-choosers-3` | `5f06595b` | TUI-006 at `review` with **all three clauses proved**, which is a baseline id ready to verify. TUI-014 at `active`: clause 1 done including the info preview, clauses 2 and 3 untouched |
-| `campaign/tui-introspection` | `8d6944cf` | TUI-016 at `review`, TUI-017 clause 2 closed and clause 1 open by design |
-| `campaign/tui-mouse-menus` | `b29fddd3` | **Unfinished, unverified, and built on the rejected branch.** The second-half lane stopped 30 minutes into a 240 minute budget when the session ended. 201 insertions across 9 files, part way through the window menu. Nothing was built or run against it and the ledger is untouched |
+| Branch | Tip | State | What its gate does |
+| --- | --- | --- | --- |
+| `campaign/tui-mouse` | `bad0261f` | **GATED, on main at `d41b815f`.** Re-review approve-with-fixes after the reject (three blockers verified fixed by the reviewer's own probes); the must-fix and nit applied at the gate; TUI-008 active with proof null, three checks record, `next_action` corrected | Nothing. The menus branch rebases onto this: its eight commits sit on `bad0261f`, whose commits are on main under new shas, so `git rebase origin/main` skips the patch-identical ones; expect conflicts in `compat/tui-mouse.sh` (PASTE_MENU_REASON) and TUI-008's record, where the menus branch wins |
+| `campaign/tui-mouse-menus-2` | `6fbdf4c3` on `bad0261f` | Reviewed: **approve-with-fixes with ONE BLOCKER**. TUI-008 claims review at `39 asserted, 0 recorded`, but right-click-pane/screen asserts only because it aims at a blank cell; one row up, over text, 12 of 24 rows differ (zz answers empty for `mouse_word`, `mouse_line`, `mouse_hyperlink`). The verdict is in `compat/tui/evidence/TUI-008/attempt-04/review.md` | Rebase onto main; add the recorded check `right-click-pane/over-a-word` (MODE=record, reason naming formats.mouse-context's three formats), which puts the fixture at 1 recorded and keeps TUI-008 at **review**; apply the must-fix (display-menu `-x M`/`-y M`/`-x W`/`-y W` with no invoking event answer the screen centre where the pin answers 0 and the window's status range) and the four nits; do NOT verify TUI-008, do NOT flip TUI-012 |
+| `campaign/tui-introspection` | `ec813757` | Fix pass landed all four alienware review findings (one format job per attached client like the pin; the server log names tty-bearing clients by tty; 58 comment lines stripped; evidence shas corrected). TUI-016 at review on both clauses (`all 80 asserted comparisons identical, 29 recorded`), TUI-017 active with clause 1 open | Verify the four fixes with their probes, verify TUI-016, run the keys and status corpus sets plus `smoke/tui-client-input-backpressure` (it is cycle 9's last gate), leave TUI-012 held unless TUI-008 verified earlier |
+| `campaign/tui-stream` | `aa65960f` on `3ecd4702` | Cycle 10's stream lane, finished, UNREVIEWED. TUI-018 at review: one bounded stdin channel (`CommandInvocation.stdin`, a 103 tail append, one reader bounded by MAX_AGENT_SEND_BYTES, one resolver `zz_daemon::command_stdin_sink`, three sinks: Argument, Config, PaneInput) carries `source-file -`, `display-message -I` and `split-window -I`; `compat/tui-command-streams.sh` (new, registered in verify-claims) ends `all 33 asserted comparisons identical, 0 recorded not asserted, 4 decided`; `compat/tui-client-commands.sh` flips four stream cases (`65 asserted, 33 recorded`). Four items of `protocol.binary-streams` closed with dated measurements; the 1 MiB cap is a recorded decision (the pin streams 16 KiB chunks with no limit). Zone excursion: six lines in `crates/zz-tui/src/render.rs` `place_viewport_cursor` (an empty pane now carries the pin's screen mode, MODE_CRLF on and cursor off, so `-E` panes match too) | Adversarial review first (`run-10.js` REVIEW_EXTRA.stream), then its gate; `verify-claims.py` needs its FIXTURES entry |
 
-## What the three reviews said
+Every branch above merges cleanly or with the conflicts named under "What each gate must know".
+Predict again at your own tip with `git merge-tree --write-tree origin/main <tip>`.
 
-**introspection: approve-with-fixes.** One blocker (`show-messages -J` prints two rows to the pin's
-one as soon as a format job is live, so the `-J` half of TUI-016 clause 1 has asserted evidence only
-for the empty table), one must-fix (the recorded client-naming decision describes the server log
-wrongly: the pin names any tty-bearing client by its tty, zz names none and spells one row by
-hostname), two nits (two `notes.md` files cite a commit reachable from no ref; the diff adds 60
-comment lines against this repo's rule against comments in code).
+## What closes TUI-008 and TUI-012
 
-**mouse: REJECT.** Three blockers. Its fix pass had just started when the session stopped, so the
-branch still carries all three.
-
-1. *The wire.* Appends to `InputMessage::MouseKey` while `PROTOCOL_VERSION` stays at a released 102.
-   The reviewer found this by running `compat/wire-version.py` itself.
-2. *A drag loses its release under button-event tracking.* With a pane running `\033[?1002h` and
-   `\033[?1006h`, press `\e[<0;2;3M`, motion `\e[<32;8;3M`, release `\e[<0;8;3m`: the pin's pane
-   prints all three, the tip's prints the first two and drops the release. Three runs of three, and
-   green against a zz built at `origin/main`, so it is a regression this landing introduced.
-3. *A double click reports out of order under application tracking.* Pin gives press, release,
-   press, release; the tip gives press, release, release, press. Two runs of two, green at base.
-
-   Blockers 2 and 3 have **one** fix: give a mouse key that matched no binding the pin's own
-   fallthrough, handing it to the pane the event landed on the way `server_client_handle_key` does
-   for `KEYC_IS_MOUSE` with no binding, rather than consuming it. Then add the two `tui-mouse.sh`
-   cases that drive these gestures with tracking armed, each with a one-sided sabotage.
-
-   There is also a must-fix on honesty: the worker's `evidence_note` says of clause 1 that "every
-   channel it names asserts now except the right click", and two channels it names are divergent.
-   `compat/tui-mouse.sh` cannot see either, because `case_app_mouse` drives a single click only and
-   `case_drag_selects` and `case_multi_click` both run with no application mouse armed. The status
-   at `active` is right; the sentence overstates.
-
-**choosers: no verdict.** Its reviewer was 25 minutes in when the session stopped. TUI-006 sits at
-`review` with all three clauses proved on the worker's own account, and nobody has checked that.
-Re-review `campaign/tui-choosers-3` before gating it: this campaign has had two lanes claim a clause
-their own fixture contradicted, and the mouse review above is the third time an independent reader
-found something the lane did not.
+The menus gate leaves TUI-008 at review with one recorded check. Closing it is a worker item, not a
+gate item: the daemon needs a synchronous read of the live grid under a pointer cell to answer
+`mouse_word`, `mouse_line` and `mouse_hyperlink` (zz-terminal already answers the same three for a
+frozen copy-mode revision in `mode_format_word` and `mode_format_line`; the shape is named in
+TUI-008's `next_action`). One lane, zones around crates/zz-terminal/src/session.rs and
+interaction.rs, crates/zz-daemon/src/daemon.rs (the mouse and popup paths), crates/zz-mux/src/formats.rs,
+compat/tui-mouse.sh and the TUI-008 record; it flips `over-a-word`, closes the five
+formats.mouse-context items with dated SGR measurements, and its gate verifies TUI-008 and then
+TUI-012 (a fresh three-run `compat/tui-superset.sh` plus `--self-check` at its own tip, appended to
+TUI-012's proof; its revision `e9199e38` is far behind). That takes the baseline to 11/12.
 
 ## What each gate must know
 
-The gate order is mouse, choosers, introspection, then the menus branch. Each rebases onto the main
-the previous one pushed.
+1. **Wire.** Main is at 103 with one v103 entry in `knowledge/protocol/wire-protocol.md` carrying
+   the choosers appends (`CommandPromptState.pane`, `ProtocolMessage::ClientTerminalType`) and, once
+   the mouse gate lands, the mouse appends (`view_action`, `press_action` on `InputMessage::MouseKey`).
+   The menus branch appends `status_range_start: Option<u16>` at the tail of `MouseKey` with its own
+   v103 line; the introspection branch has no wire change (`catalog.rs` only); the stream branch
+   likely appends. On every rebase: keep ONE v103 entry with every line, keep the constant at 103,
+   and remember `crates/zz-protocol/tests/hunt_claims.rs` pins the number THREE times (the named
+   test, the assertion, and the hello frame where the version appears twice as bytes).
+2. **Conflicts.** `knowledge/tmux/gaps.md` and `knowledge/tmux/tui-parity.md` are generated: take
+   either side and run `python3 compat/tmux-tracker.py write-report` and `python3
+   compat/tui/tracker.py write-report`. `compat/tui/campaign.json` and `compat/tmux-gaps.json` merge
+   by record and by item; serialise with `ensure_ascii=False` so no other record's bytes move (two
+   lanes re-serialised the whole file with escapes this cycle). `knowledge/index.md` and
+   `knowledge/protocol/index.md` carry the wire version in one word each.
+3. **The menus branch supersedes the mouse record.** The mouse gate corrects TUI-008's
+   `evidence_note` and `PASTE_MENU_REASON` (the paste-under-menu divergence the first half described
+   never reproduced: seven of seven runs identical, and the menus review proved it independently
+   with a tail carrying a second menu key). The menus branch rewrites the same record and flips the
+   case; where they conflict, the menus branch's `compat/tui-mouse.sh` and TUI-008 record win.
+4. **Cycle 9's last gate runs the shared corpus sets** (every keys and status scenario and
+   `smoke/tui-client-input-backpressure`), which is the introspection gate. Earlier gates run the
+   delta for their own touched commands only.
+5. **TUI-014's five commands live in three gaps**, not one: clock-mode, customize-mode and
+   suspend-client in `commands.native-client-tools`, `command:switch-mode` in
+   `clients.interactive-refresh`, `command:server-access` in `protocol.socket-acl`. `run-10.js`'s
+   modes batch now says so; the cycle 9 punch list did not, which is one reason that lane closed
+   nothing there.
 
-Every branch here is based on `879b68fc` and main has moved a long way past it: fabrico's two
-releases, a GPUI and CEF refresh, a third-party notice, and a clippy and test pass that touched
-`compat/tmux-gaps.json`, `crates/zz-daemon/src/daemon.rs` and `crates/zz-daemon/src/client.rs`,
-which are campaign zones.
+## Reds at origin/main on the ubuntu box that alienware never saw
 
-Predicted against `origin/main` at `e04bb980` with `git merge-tree --write-tree`, and the answer is
-better than the drift suggests:
+The choosers gate built zz at `origin/main` (`45481a72`) in its own worktree and reproduced three
+reds there, so none was charged to a lane. Every earlier gate on alienware had all three green.
+**The next box measures these before it charges anyone**: red there too means a main regression
+that needs its own lane; green there means an ubuntu box difference to record in this file.
 
-| Branch | Prediction |
-| --- | --- |
-| `campaign/tui-choosers-3` | clean |
-| `campaign/tui-mouse` | conflicts in `knowledge/tmux/gaps.md` only |
-| `campaign/tui-introspection` | conflicts in `knowledge/tmux/gaps.md` only |
+- `compat/attached-client.sh` fails in `probe_command_output_navigation`: `n` does not advance to
+  the next match in retained command output (`zz current screen did not show ATTACHED_NAV_65
+  ATTACHED_NAV_MATCH within 10 seconds`). That probe rebinds `/` to zz's native
+  copy-mode-search-prompt on the zz side, so it drives the replacement binding TUI-006's clause 2
+  excludes by its own words; the stock-binding half is asserted in `compat/tui-choosers.sh`. The
+  reasoning is in TUI-006's proof block so it can be overruled with full information. The fixture is
+  a declared source of six verified obligations, and the menus review and the mouse fix pass BOTH
+  saw it PASS on this box the same day, so it is at least intermittent here.
+- `compat/tui-overlays.sh --self-check` never settles on its closing equivalence (`equal settled on
+  the zz screen did not settle within 10 seconds`), five tries, all seven sabotages caught. The
+  mouse gate found the cause: the control's C-l reaches the pane instead of dismissing the
+  display-message on BOTH binaries, and the pane's `/bin/sh` has no line editing, so the literal
+  `^L` prefixes the next mark's printf and MARK-equal never prints. `/bin/sh` is dash on Ubuntu and
+  bash on CachyOS, which is the likeliest box difference; the fixture should not depend on it.
+- Three zz-daemon `russh_socks` loopback tests fail with ConnectionReset (module and Cargo.lock
+  byte-identical to main), deterministic solo and at origin/main; both gates ran `cargo test -p
+  zz-daemon -- --skip russh_socks::tests`. They belong to main's SSH work and want an owner.
+- Note from the mouse gate: nobody had run the whole fixture tree at main for a while;
+  `tui-launch-diff.sh` reports 4 recorded where it reported 3 before the choosers merge, exit 0.
 
-`knowledge/tmux/gaps.md` is generated. Never hand-merge it: take either side, then
-`python3 compat/tmux-tracker.py write-report` and commit what it produces. The file it is generated
-from, `compat/tmux-gaps.json`, auto-merges on both branches, as do
-`crates/zz-daemon/src/daemon.rs`, `crates/zz-protocol/src/message.rs`, `catalog.rs` and
-`crates/zz-terminal/src/session.rs`. Re-predict at your own tip anyway, since each gate pushes main
-under the next one.
+## Residuals, none charged to a lane, all in the board notes
 
-1. **The wire version moved under this cycle.** zz 0.9.0 shipped `PROTOCOL_VERSION` 102 while three
-   lanes were appending to 102. The mouse branch adds `view_action` and `press_action` to
-   `InputMessage::MouseKey`; the choosers branch adds `CommandPromptState.pane` and
-   `ProtocolMessage::ClientTerminalType`. All three still say 102 and all three name the v102 entry
-   in the version history. The first gate to land a wire change sets the constant to 103, opens a
-   v103 entry, and moves the two assertions that pin the number
-   (`crates/zz-protocol/src/message.rs` and `crates/zz-protocol/tests/hunt_claims.rs`); later gates
-   fold into 103 and move any v102 line their lane wrote. `compat/wire-version.py` runs inside
-   `compat/check.sh` and fails a gate that forgets.
-2. **The introspection review returned approve-with-fixes with a real blocker.** `show-messages -J`
-   prints two rows where the pin prints one as soon as a format job is live, so TUI-016 clause 1's
-   `-J` half has asserted evidence only for the empty table. Its must-fix: the recorded client
-   naming decision describes the server log wrongly (the pin names any tty-bearing client by its
-   tty, zz names none and spells one row by hostname). Its nits: two `notes.md` files cite a commit
-   that is not reachable from any ref, and the diff adds 60 comment lines against this repo's rule
-   against comments in code.
-3. **Cycle 9's gates never run five fixtures.** Their stage 3 list predates `tui-mouse.sh`,
-   `tui-client-commands.sh`, `tui-superset.sh`, `tui-launch-diff.sh` and
-   `tui-output-backpressure.sh`. `lint-runner.py`'s `every-fixture` rule catches this for later
-   runners, and `run-10.js` already names all fifteen, but a gate launched from `run-9.js` will not.
-   Run those five by hand at the pushed tip, or take the close-out's rule: build zz at the final
-   `origin/main` and run every fixture in the tree with its `--self-check`.
-4. **TUI-012 is held on TUI-008.** Its proof block is filled and its status is `review`. Whichever
-   gate verifies TUI-008 flips it.
+- Stale `(N results)` in the copy-mode position indicator on TUI-005's surface: the daemon
+  re-expands the indicator only when its memo key moves, and `viewport.search` in
+  `crates/zz-terminal/src/session.rs` `copy_mode_facts` is built from `view.search` unconditionally.
+  One-line fix suggested by the choosers reviewer: `.filter(|_| mode.search_marks)` on that field,
+  plus a fixture case (no fixture can see it today: `tui-copy-mode.sh` pins
+  `copy-mode-position-format` to empty and `tui-choosers.sh` to a form with no results clause).
+- The backward emacs word selection (pin copies `beta`, zz copies `bet`), parked in TUI-008's
+  `next_action` with the pin's measurement; no fixture or corpus row drives it.
+- A triple click and a wheel under application tracking are driven by no fixture case (both agree
+  in the mouse reviewer's own probe).
+- `display-menu -x M/-y M/-x W/-y W` without an invoking event (the menus must-fix above).
+- The select-word change in `crates/zz-terminal/src/session.rs` (emacs cursor one cell past the
+  word) reaches every client including the GUI; declared in TUI-008's record and reversible.
+- `command:switch-mode` and `command:server-access` group attribution (fixed in `run-10.js`).
+- `cli_binary daemon_autostart::nested_attach_inside_a_pane_prints_the_pinned_refusal` and the
+  application-reader `#{pane_current_command}` record in `tui-stock-keys.sh` are load-dependent
+  (the latter reads 7, 8 or 9 recorded depending on load).
 
-## Cycle 10, written and ready
+## CI
 
-`run-10.js` passes all fifteen lint rules and its dry run is clean. Three lanes, gated in the order
-stream, modes, capture:
+Main has had no green CI run since 2026-08-14. `45481a72` fixed the Windows leg (the cdylib the
+launcher loads had been deleted). The Linux leg fails `compat/run.sh --check-summary` because
+`compat/results/summary.md` was last stamped at `996a8d0d` and the scenarios and
+`compat/attached-client.sh` have moved since; only a full `compat/run.sh` with `--attached-client`
+at a commit reachable from HEAD restamps it (about 90 minutes). That belongs to the close-out, after
+the last gate, together with running every fixture in the tree with `--self-check`.
 
-- **stream**, TUI-018's bounded command-stream channel, designed before it is built because the
-  clause asks for one channel rather than four flag fixes;
-- **modes**, TUI-014's clauses 2 and 3, which cycle 9's choosers lane left untouched: clock-mode,
-  switch-mode, customize-mode, suspend-client and server-access, in the order that lane worked out;
-- **capture**, TUI-017's six rich capture transports beside TUI-015's lock decision. Its batch
-  carries the pin's semantics for each of `-C`, `-F`, `-H`, `-L`, `-P` and `-R` read out of
-  `cmd-capture-pane.c`, and says which one to weigh rather than imitate: `-R` prints tmux's internal
-  grid, its history limit and its per-line `cellused` and `cellsize`, none of which zz's terminal
-  engine has in that shape, and the clause allows a measured refusal.
+## How this resume ran, and what to copy
 
-Before launching it, pre-position the six worktrees the runner expects, because each lane's prompt
-says the orchestrator already made one and a lane that finds nothing will improvise:
-
-```sh
-for w in stream modes capture; do
-  git -C <checkout> worktree add --detach ../zz-tui-$w-10 origin/main
-  git -C <checkout> worktree add --detach ../zz-tui-$w-10-review origin/main
-done
-```
-
-Each lane builds into its own worktree's `target/`, which is a cold build of about 30 minutes and
-150 GB apiece on this workspace. Point a lane at a finished lane's warm target instead where one
-exists; `run-9b.js` shows the wording. The gates make their own worktree.
-
-TUI-011 rides on the last gate. It is a baseline id whose clause 2 holds 37 recorded roster entries
-that flip as TUI-014 through TUI-018 land, so that gate is what takes the baseline to 12/12.
+- **Agent tool, not the Workflow tool**, on fabrico's ask ("use opus 5 subagents"). One
+  general-purpose agent per lane with `model: opus`, prompts lifted from the runners with a box note
+  for this machine. What changed from the runner shape and is worth keeping: a gate does its rebase,
+  tests and fixtures WITHOUT waiting for MAIN and claims MAIN only for the final fetch, rebase and
+  push (the choosers gate held MAIN for four hours doing work that needed no lock); each gate gets
+  its own worktree (the finished lane's, with its warm target), never a shared gate worktree; a fix
+  pass commits on top of the rejected tip and never rebases, so the second-half lane sitting on the
+  same tip can rebase onto it; a second-half lane pushes a NEW branch name rather than force-pushing.
+- **Warm targets by reflink.** Each worktree got `cp -a --reflink=always ~/dev/zz/target
+  <worktree>/target` (instant on btrfs, deps warm, workspace crates rebuild once in 5 to 15
+  minutes). The cost: every rebuild diverges the copy by 15 to 20 GB, four lanes filled the disk in
+  two hours, and the fix was deleting a stale 98 GB cache, each finished lane's target, and
+  `target/release`, `target/ui-showcase` (deleted from the repo in `8ba0dbf1`) from every copy.
+  Delete a lane's target the moment its agent finishes and its next consumer builds elsewhere.
+- **Never symlink `compat/.cache` into a worktree.** The menus lane did, `compat/check.sh` called
+  `compat/fetch-tmux.sh`, the stamp did not match through the link and it REBUILT the shared pin
+  under three other agents (same commit, one corpus chunk and one fixture run died and were
+  re-run). Export `ZZ_COMPAT_TMUX` and `ZZ_COMPAT_CORPUS` for `compat/check.sh` in a worktree, or
+  run it from the shared checkout read-only.
+- **The ubuntu box**: Ubuntu 26.04.1, 8 cores, 30 GB plus 16 GB swapfile and 7.5 GB zram, btrfs,
+  bash 5.3, python 3.14, en_US.UTF-8. Cargo wrapper: `S=$((RANDOM % 2)); systemd-run --user --scope
+  -q -p MemoryMax=8G -p MemorySwapMax=4G flock -w 540 /tmp/zz-cargo-slot-$S.lock cargo <args>
+  --jobs 3` (10G and `--jobs 4` for a gate). Four agents at a time was the ceiling that held; a gate
+  here takes three to four hours because it runs every fixture plus a corpus delta on half
+  alienware's cores. `daemon::tests::explicit_boot_configs_replace_default_discovery_and_load_in_order`
+  needs `HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config`. Worktrees left in
+  `~/dev`: `zz-tui-mouse` (mouse gate), `zz-tui-menus-9`, `zz-tui-introspection` (no target),
+  `zz-tui-stream-10`, `zz-gate-tui9`; all caches, branches are on origin.
 
 ## Resuming on another machine
 
-**The runner is parameterised, and its defaults describe alienware.** `run-10.js` reads `args` for
-`machine`, `boxNote`, `dev`, `holder`, `date`, `workerJobs` and `gateJobs`, and every default is
-this Linux box. Pass your own or the lanes will be told the wrong things, and one of them does not
-merely mislead: **the cargo memory wrapper is `systemd-run --user --scope`, which does not exist on
-macOS.** Every cargo command in every prompt goes through it. On a mac, replace that wrapper in the
-box note with something local, or drop the cap and keep the two-slot `flock`, which is what the
-concurrency limit actually needs. The locale note, the five environmental corpus rows and the known
-flakes are also measurements of this box, not of yours: re-measure them rather than inherit them.
-
-```js
-Workflow({ scriptPath: '<checkout>/compat/tui/run-10.js', args: {
-  root: '<checkout>', dev: '<worktree parent>', holder: '<box>/orchestrator',
-  machine: '<cores, RAM, OS>', date: '<today>', boxNote: '<your box, measured>',
-} })
-```
-
 The campaign resumes from the repo and the board, not from a session. On a fresh box:
 
-1. `compat/fetch-tmux.sh` and `compat/fetch-corpus.sh` populate the caches; `compat/check.sh` proves
-   the checkout is sound and now also proves the wire version is honest.
+1. `compat/fetch-tmux.sh` and `compat/fetch-corpus.sh` populate the caches; `compat/check.sh`
+   proves the checkout is sound and the wire version honest (103, unreleased).
 2. `python3 compat/tui/tracker.py check` and `ready` read the real ledger state. Do not trust a
    remembered count.
-3. Re-point the board holder: `export ZZ_BOARD_HOLDER=<box>/orchestrator`. `F-TUI-CYCLE-9-LANES`
-   was released when the session stopped. If `compat/board.py status` shows it CLAIMED by
-   `alienware/orchestrator` anyway, that is the hourly lease renewer this session left running
-   getting one last tick in before the session closed: release it and claim it yourself. Its lease
-   lapses on its own regardless.
-4. `knowledge/playbooks/tui-parity-campaign.md` carries every rule the cycles paid for, including
-   the second-half lane and the close-out that runs every fixture.
-5. A macOS box also unblocks TUI-013, which has been waiting on one since cycle 2. Its runner and
-   its board recipe are in `compat/tui/README.md`.
-
-Nothing on the alienware box is needed to continue: the worktrees under `~/dev/zz-tui-*` and their
-build targets (about 900 GB across six of them) are local caches, not state.
+3. `export ZZ_BOARD_HOLDER=<box>/orchestrator`; `python3 compat/board.py status`; claim
+   `F-TUI-CYCLE-9-LANES` (released at the pause) or mint a cycle 10 front under TRIAGE once cycle 9's
+   branches have landed.
+4. Measure the three ubuntu-box reds above at `origin/main` before any gate runs.
+5. Gate in the order this file's table gives: mouse (if still waiting), menus, introspection; review
+   and gate stream; then `run-10.js` for modes and capture with `args` for your box (`root`, `dev`,
+   `holder`, `machine`, `date`, `boxNote`; on macOS replace the `systemd-run` wrapper, which does not
+   exist there, with a plain two-slot `flock`). Pre-position the worktrees the runner expects.
+6. The TUI-008 closing lane described above, then its gate for TUI-008 and TUI-012; the cycle 10
+   capture gate for TUI-011 and the twelve-item baseline; the close-out with every fixture and the
+   corpus restamp.
+7. A macOS box also unblocks TUI-013 (`run-2.js`, recipe in `compat/tui/README.md`).

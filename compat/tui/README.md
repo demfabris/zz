@@ -62,8 +62,16 @@ RGB) stays part of the cell, as `tui.status-row` in `compat/tmux-gaps.json` esta
 
 ## State
 
-The count is **8/12 baseline verified** (TUI-001 to TUI-005, TUI-007, TUI-009, TUI-010), added scope
-0/6, at wire protocol 102.
+The count is **9/12 baseline verified** (TUI-001 to TUI-007, TUI-009, TUI-010), added scope 0/6
+with TUI-016 and TUI-018 at review on their branches, at wire protocol 103 (unreleased).
+
+The 2026-09-14 resume on the ubuntu box (four to five Opus 5 agents through the Agent tool, one per
+lane, prompts adapted from the runners) landed cycle 9's choosers gate (`3ecd4702`, TUI-006
+verified) and mouse gate (`d41b815f`, TUI-008's first half), reviewed the menus second half (one
+blocker: the pane menu asserts only over a blank cell), landed the introspection review fixes on
+its branch, and ran cycle 10's stream lane (TUI-018 at review, unreviewed). It was paused there to
+move machines; `HANDOFF.md` has the gate order, the three fixture reds that are baseline on that box,
+and the lane that closes TUI-008 and TUI-012.
 
 Cycle 8 (2026-09-13 to 14, alienware, three lanes, three agents at a time, 14.1 hours, nine agents,
 no agent errors) verified **TUI-009**, which had been open since cycle 4 and spent three cycles

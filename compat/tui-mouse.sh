@@ -914,6 +914,14 @@ case_right_click_pane() {
   send_bytes tmux $'\033'
   both_screen_lacks 'Kill' 'the pane menu closed'
   send_mouse_both 2 "$((left + 6))" "$((top + 4))" m
+  send_mouse_both 2 "$((left + 2))" "$((top + 1))" M
+  both_screen_has 'Kill' 'the pane menu over a word'
+  settle_both Kill 'the right click over a word'
+  check_screen RIGHT_CLICK_WORD right-click-pane/over-a-word
+  send_bytes zz $'\033'
+  send_bytes tmux $'\033'
+  both_screen_lacks 'Kill' 'the pane menu over a word closed'
+  send_mouse_both 2 "$((left + 2))" "$((top + 1))" m
   respawn_shell_both
 }
 
@@ -1363,7 +1371,9 @@ FOCUS_OFF_REASON=""
 PASTE_COPY_MODE=same
 PASTE_COPY_REASON=""
 RIGHT_CLICK_MODE=same
-RIGHT_CLICK_REASON="MouseDown3Pane raises the pin's pane menu through a root binding over DEFAULT_PANE_MENU's twenty-eight items, positioned with -x M -y M, over #{m/r:}, #{=/9/...:}, buffer_sample, mouse_word, mouse_line, mouse_hyperlink, pane_floating_flag and a nested display-menu; the three screen-reading mouse formats are still unanswered (formats.mouse-context) and the row is not installed (keys.root-native-mouse)"
+RIGHT_CLICK_REASON=""
+RIGHT_CLICK_WORD_MODE=record
+RIGHT_CLICK_WORD_REASON="formats.mouse-context: the same MouseDown3Pane gesture over a cell whose row carries text. DEFAULT_PANE_MENU renders three of its items off format:mouse_word, format:mouse_line and format:mouse_hyperlink, which the daemon answers empty on zz because it has no synchronous read of the live grid under a cell, so the pin raises a 14-row menu carrying Copy Line where zz raises a 12-row menu without it. Over the blank cell right-click-pane/screen aims at, the three names are empty on the pin too and the menus agree"
 
 run_cases() {
   start_both

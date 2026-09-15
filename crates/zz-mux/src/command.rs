@@ -1280,6 +1280,8 @@ pub enum PaneModeRequest {
     /// `window_switch_mode`, listing sessions or, under `-w`, windows.
     Switch {
         windows: bool,
+        format: Option<String>,
+        template: Option<String>,
     },
 }
 
@@ -8498,14 +8500,22 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let args = &invocation.args;
         let spec = command_spec("switch-mode").expect("executable command has catalog metadata");
-        parse_tmux_command_options(spec, invocation)?;
+        let parsed_options = parse_tmux_command_options(spec, invocation)?;
+        let positional_start = args.len().saturating_sub(parsed_options.positionals.len());
         let (options, positional) = parse_command_options("switch-mode", args)?;
         spec.validate_positional_maximum(positional.len())?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+        if options.has("-k") || options.has("-Z") {
+            return Err(ServerError::InvalidCommand(
+                "switch-mode -k and -Z are not implemented (TUI-014)".to_owned(),
+            ));
+        }
         Ok(Execution::effect(MuxEffect::PaneModeChanged {
             pane,
             mode: Some(PaneModeRequest::Switch {
                 windows: options.has("-w"),
+                format: options.value("-F").map(str::to_owned),
+                template: chooser_command_template(invocation, positional_start, &positional),
             }),
         }))
     }

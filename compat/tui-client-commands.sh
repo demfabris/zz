@@ -1049,6 +1049,7 @@ client_tool_cases() {
   case_run switch-mode-windows record "$SWITCH_MODE_WINDOW_ROWS" -- switch-mode -w -t PANE
   restore_case switch-mode-windows-closed
   case_run server-access-bare same '' -- server-access
+  case_run server-access-formatted same '' -- server-access '#{?#{==:1,1},nobody,root}'
   case_run server-access-user same '' -- server-access -w zzcc-nobody
   case_run server-access-list same '' -- server-access -l
   case_run server-access-owner same '' -- server-access -a "$SERVER_OWNER"
@@ -1170,6 +1171,13 @@ run_self_check() {
   self_check_expect 'stdout, an access entry on the pin only' exit=0 stdout=1 stderr=0
   tmux_inner_command server-access -g -d "$SERVER_GROUP" >/dev/null ||
     die 'the pin refused server-access -d'
+
+  self_check_run access-format-equivalence server-access '#{?#{==:1,1},nobody,root}'
+  self_check_expect 'formatted identity resolves before lookup' exit=0 stdout=0 stderr=0
+  zz_command server-access '#{?#{==:1,1},zzcc-missing,root}' >"$SCRATCH_DIR/zz.out" 2>"$SCRATCH_DIR/zz.err" && rc=0 || rc=$?
+  printf '%s\n' "$rc" >"$SCRATCH_DIR/zz.rc"
+  compare_channels access-format-sabotage || true
+  self_check_expect 'one-sided formatted identity failure changes stderr and status' exit=1 stdout=0 stderr=1
 
   self_check_run exit-sabotage show-buffer -b zzcc-sabotage
   self_check_expect 'exit and stderr, a buffer missing on one side' exit=1 stderr=1

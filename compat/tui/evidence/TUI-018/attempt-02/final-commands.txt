@@ -1,0 +1,48 @@
+2026-09-15T21:03:48Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 /tmp/zz018-cargo.sh clippy -p zz-protocol -p zz-mux -p zz-daemon -p zz --all-targets --all-features --jobs 3 -- -D warnings 
+2026-09-15T21:04:19Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 python3 /tmp/zz018-strings.py 
+2026-09-15T21:04:19Z END exit=0 python3 /tmp/zz018-strings.py 
+2026-09-15T21:04:19Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 compat/run.sh --strict-geometry --delta origin/main...HEAD --commands source-file\,load-buffer\,save-buffer\,command-alias --list 
+2026-09-15T21:04:20Z END exit=0 compat/run.sh --strict-geometry --delta origin/main...HEAD --commands source-file\,load-buffer\,save-buffer\,command-alias --list 
+2026-09-15T21:07:08Z END exit=0 /tmp/zz018-cargo.sh clippy -p zz-protocol -p zz-mux -p zz-daemon -p zz --all-targets --all-features --jobs 3 -- -D warnings 
+2026-09-15T21:07:20Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 /tmp/zz018-cargo.sh fmt --all -- --check 
+2026-09-15T21:07:23Z END exit=0 /tmp/zz018-cargo.sh fmt --all -- --check 
+2026-09-15T21:07:34Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 /tmp/zz018-cargo.sh test -p zz --jobs 3 -- --test-threads=3 
+2026-09-15T21:08:48Z END exit=0 /tmp/zz018-cargo.sh test -p zz --jobs 3 -- --test-threads=3 
+2026-09-15T21:08:58Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 /tmp/zz018-cargo.sh test -p zz-mux -p zz-daemon -p zz-protocol --lib --jobs 3 -- --test-threads=3 
+2026-09-15T21:11:06Z END exit=0 /tmp/zz018-cargo.sh test -p zz-mux -p zz-daemon -p zz-protocol --lib --jobs 3 -- --test-threads=3 
+2026-09-15T21:11:10Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 compat/tui-command-streams.sh /home/demfabris/dev/zz-box-reds/target/debug/zz /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux 
+2026-09-15T21:13:46Z END exit=0 compat/tui-command-streams.sh /home/demfabris/dev/zz-box-reds/target/debug/zz /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux 
+2026-09-15T21:13:50Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 compat/tui-command-streams.sh /home/demfabris/dev/zz-box-reds/target/debug/zz /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux 
+2026-09-15T21:16:28Z END exit=0 compat/tui-command-streams.sh /home/demfabris/dev/zz-box-reds/target/debug/zz /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux 
+2026-09-15T21:16:32Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 compat/run.sh --strict-geometry aliases-multi-body.txt buffer-missing-target-error.txt buffer-path-format.txt command-alias.txt smoke/alias-group-forgery.txt smoke/buffer-clipboard-write.txt 
+2026-09-15T21:17:35Z END exit=0 compat/run.sh --strict-geometry aliases-multi-body.txt buffer-missing-target-error.txt buffer-path-format.txt command-alias.txt smoke/alias-group-forgery.txt smoke/buffer-clipboard-write.txt 
+2026-09-15T21:17:44Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 compat/run.sh --strict-geometry smoke/buffer-standard-streams.txt smoke/chooser-buffer-confirm-flag.txt smoke/chooser-buffer-vocabulary.txt smoke/config-alias-parse-unit.txt smoke/control-alias-prepare.txt smoke/copy-mode-source-pane.txt 
+2026-09-15T21:20:04Z END exit=0 compat/run.sh --strict-geometry smoke/buffer-standard-streams.txt smoke/chooser-buffer-confirm-flag.txt smoke/chooser-buffer-vocabulary.txt smoke/config-alias-parse-unit.txt smoke/control-alias-prepare.txt smoke/copy-mode-source-pane.txt 
+2026-09-15T21:20:21Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 compat/run.sh --strict-geometry smoke/display-message-client-aliases.txt smoke/source-file-byte-name.txt smoke/source-file-control.txt smoke/source-file-depth.txt smoke/source-file-diagnostics.txt smoke/source-file-tilde.txt 
+2026-09-15T21:21:35Z END exit=0 compat/run.sh --strict-geometry smoke/display-message-client-aliases.txt smoke/source-file-byte-name.txt smoke/source-file-control.txt smoke/source-file-depth.txt smoke/source-file-diagnostics.txt smoke/source-file-tilde.txt 
+2026-09-15T21:22:04Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 compat/run.sh --strict-geometry smoke/source-replay-diagnostics.txt source-file-current-file.txt source-file-format.txt source-file-output.txt smoke/cli-output-bytes.txt smoke/config-grammar.txt 
+2026-09-15T21:24:34Z END exit=0 compat/run.sh --strict-geometry smoke/source-replay-diagnostics.txt source-file-current-file.txt source-file-format.txt source-file-output.txt smoke/cli-output-bytes.txt smoke/config-grammar.txt 
+2026-09-15T21:24:39Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 compat/tui-command-streams.sh /home/demfabris/dev/zz-box-reds/target/debug/zz /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux 
+2026-09-15T21:27:22Z END exit=0 compat/tui-command-streams.sh /home/demfabris/dev/zz-box-reds/target/debug/zz /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux 
+2026-09-15T21:27:28Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 compat/tui-command-streams.sh --self-check /home/demfabris/dev/zz-box-reds/target/debug/zz /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux 
+2026-09-15T21:28:29Z END exit=0 compat/tui-command-streams.sh --self-check /home/demfabris/dev/zz-box-reds/target/debug/zz /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux 
+2026-09-15T21:28:33Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 compat/tui-client-commands.sh /home/demfabris/dev/zz-box-reds/target/debug/zz /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux 
+2026-09-15T21:28:44Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 python3 compat/wire-version.py 
+2026-09-15T21:28:44Z END exit=0 python3 compat/wire-version.py 
+2026-09-15T21:28:44Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 python3 compat/tui/tracker.py check 
+2026-09-15T21:28:44Z END exit=0 python3 compat/tui/tracker.py check 
+2026-09-15T21:30:42Z END exit=0 compat/tui-client-commands.sh /home/demfabris/dev/zz-box-reds/target/debug/zz /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux 
+2026-09-15T21:30:49Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 compat/tui-client-commands.sh --self-check /home/demfabris/dev/zz-box-reds/target/debug/zz /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux 
+2026-09-15T21:31:10Z END exit=0 compat/tui-client-commands.sh --self-check /home/demfabris/dev/zz-box-reds/target/debug/zz /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux 
+2026-09-15T21:31:18Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 compat/check.sh 
+2026-09-15T21:31:25Z END exit=0 compat/check.sh 
+2026-09-15T21:31:39Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 python3 compat/tui/verify-claims.py --run TUI-018 --zz /home/demfabris/dev/zz-box-reds/target/debug/zz 
+2026-09-15T21:31:53Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 git diff origin/main...HEAD 
+2026-09-15T21:31:53Z END exit=0 git diff origin/main...HEAD 
+2026-09-15T21:31:53Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 git diff --check origin/main...HEAD 
+2026-09-15T21:31:53Z END exit=2 git diff --check origin/main...HEAD 
+2026-09-15T21:31:53Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 sha256sum target/debug/zz /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux 
+2026-09-15T21:31:55Z END exit=0 sha256sum target/debug/zz /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux 
+2026-09-15T21:32:01Z START tip=ff58de8a6f8fc194db0480deb6893ba85e6121e0 git diff --check origin/main...HEAD -- . :\!compat/tui/evidence 
+2026-09-15T21:32:01Z END exit=0 git diff --check origin/main...HEAD -- . :\!compat/tui/evidence 
+2026-09-15T21:36:25Z END exit=0 python3 compat/tui/verify-claims.py --run TUI-018 --zz /home/demfabris/dev/zz-box-reds/target/debug/zz 

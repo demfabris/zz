@@ -1,0 +1,86 @@
+# pin      /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux (d77c9dc6, next-3.8)
+# driver   /home/demfabris/dev/zz-tui-modes-10/compat/tui/evidence/TUI-014/attempt-03/pin-probe.sh
+# command  /home/demfabris/dev/zz-tui-modes-10/compat/tui/evidence/TUI-014/attempt-03/pin-probe.sh switch-mode -t PANE
+# taken    2026-09-15T12:51:35-03:00
+### pane=%0 client=/dev/pts/11
+### BEFORE (plain)
+$ printf 'SCENE-%s\n' %0$
+SCENE-%0$
+$$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+L0:win* 1:two$
+### rc=0
+### stdout
+### stderr
+### pane_in_mode: 1 switch-mode
+### AFTER (plain)
+cli 2 windows attached win$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+(search)$
+L0:win* 1:two$
+### AFTER (styled)
+[38;2;13;13;13m[48;2;184;134;11mcli [2m2 windows[0m[38;2;13;13;13m[48;2;184;134;11m attached [2mwin[0m[48;2;184;134;11m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[38;2;13;13;13m(search) [39m[49m
+[38;2;13;13;13m[48;2;154;205;50mL[4m0:win*[0m[38;2;13;13;13m[48;2;154;205;50m 1:two
+### cursor: 9,22 flag=1 shape=default
+# exit     0

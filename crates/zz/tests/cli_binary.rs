@@ -2889,6 +2889,39 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn caller_stream_source_alias_group_applies_once_and_reports_the_spent_reader() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "stream"])
+                .status
+                .success()
+        );
+        assert!(
+            fixture
+                .run(&[
+                    "set-option",
+                    "-s",
+                    "command-alias[40]",
+                    "stream=display-message -p before ; source-file - ; source-file -",
+                ])
+                .status
+                .success()
+        );
+        let output = fixture.run_with_stdin(&["stream"], b"set -ag @stream once\n");
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.stdout, b"before\n");
+        assert_eq!(output.stderr, b"Bad file descriptor: -\n");
+        assert_eq!(
+            fixture.run(&["show-options", "-gqv", "@stream"]).stdout,
+            b"once\n"
+        );
+    }
+
+    #[test]
     fn live_agent_send_aliases_control_stdin_capture() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {

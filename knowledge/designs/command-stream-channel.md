@@ -40,6 +40,12 @@ so every consumer that already receives the invocation - the mux, the daemon, a 
 group - receives the stream with it and nothing has to be threaded. `format_command` does not print
 it: a stream is not an argument, and the server log records the command the caller typed.
 
+An expanded command alias keeps this carrier on its group invocation. Each member shares one
+caller stream: the first reader consumes the bytes and a later reader receives the in-process
+`CommandInvocation.stdin_spent` marker. Serde skips that marker; the wire remains at protocol 103
+with no new field. The mux group executor accounts for emitted stream effects, and the daemon's
+prepared group queue routes the carrier after parsing the members. A nonreader leaves it available.
+
 **The sinks** are what the payload is for. `command_stdin_sink` in `crates/zz-daemon/src/daemon.rs`
 is the one resolver; it takes a canonical command name and its arguments and answers at most one
 sink, and both the CLI and the daemon ask it rather than matching on names of their own.

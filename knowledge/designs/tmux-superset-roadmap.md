@@ -1237,6 +1237,16 @@ processes. If required, design one bounded command-stream channel for `display-m
 `split-window -I`, `load-buffer -`, `save-buffer -`, and `source-file -`. Do not build five bespoke
 transports.
 
+**Complete:** the demand was measured and the channel was designed and built on 2026-09-14 under
+TUI-018. `knowledge/designs/command-stream-channel.md` is the design: one reader, one cap, one
+carrier on the invocation, and three named sinks, so all five commands share a transport instead of
+owning five. All five carry the caller's bytes and none is left refused. The one decided difference
+from the pin is the bound: pinned tmux streams a caller payload in acknowledged 16 KiB chunks with
+no total limit, and zz refuses one larger than 1 MiB at the reader before the daemon sees a byte,
+because bulk file transfer through a command client is a workload zz does not serve and an unbounded
+stream lets one caller grow daemon memory without limit. Payloads at and below the cap are
+differentially identical; the bound is reversible.
+
 # Native GUI command direction
 
 The current surface already has the right shape. Improve it by composition:

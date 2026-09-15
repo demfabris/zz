@@ -21609,6 +21609,7 @@ impl Shared {
         });
         let events = terminal.events();
         terminal.set_wrap_search(terminal_options.wrap_search);
+        terminal.set_engine_knobs(terminal_options.knobs);
         let view = TerminalViewId(client.0);
 
         let (

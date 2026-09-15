@@ -2317,6 +2317,35 @@ impl MuxState {
                 .or_else(|| self.sessions.keys().next().copied())
                 .ok_or_else(|| ServerError::SessionNotFound("current session".to_owned()));
         };
+        if slot == TargetSlot::Classified {
+            let window_target = target.split_once(':').map_or(target, |(_, window)| window);
+            let current_window = current
+                .and_then(|session| self.sessions.get(&session))
+                .map(|session| session.active_window);
+            if let Some((session_target, pane_target)) = target.split_once(":.")
+                && pane_target.starts_with('%')
+            {
+                let session = self.resolve_named_session(Some(session_target), current, slot)?;
+                let pane = self.resolve_pane(Some(pane_target), current_window, None)?;
+                let window = self
+                    .window_for_pane(pane)
+                    .ok_or_else(|| ServerError::PaneNotFound(pane_target.to_owned()))?;
+                return (self.windows[&window].session == session)
+                    .then_some(session)
+                    .ok_or_else(|| ServerError::PaneNotFound(pane_target.to_owned()));
+            }
+            if window_target.contains('.') {
+                let pane = self.resolve_pane(Some(target), current_window, None)?;
+                let window = self
+                    .window_for_pane(pane)
+                    .ok_or_else(|| ServerError::PaneNotFound(target.to_owned()))?;
+                return Ok(self.windows[&window].session);
+            }
+            if target.contains(':') || target.starts_with(['%', '@']) {
+                let window = self.resolve_window(Some(target), current, current_window)?;
+                return Ok(self.windows[&window].session);
+            }
+        }
         let (target, exact) = if slot == TargetSlot::PaneFallback {
             (target, false)
         } else {
@@ -2324,22 +2353,6 @@ impl MuxState {
                 .strip_prefix('=')
                 .map_or((target, false), |target| (target, true))
         };
-        if target.starts_with('%') {
-            let pane = target
-                .parse::<PaneId>()
-                .ok()
-                .and_then(|pane| self.window_for_pane(pane))
-                .ok_or_else(|| ServerError::PaneNotFound(target.to_owned()))?;
-            return Ok(self.windows[&pane].session);
-        }
-        if target.starts_with('@') {
-            return target
-                .parse::<WindowId>()
-                .ok()
-                .and_then(|window| self.windows.get(&window))
-                .map(|window| window.session)
-                .ok_or_else(|| ServerError::WindowNotFound(target.to_owned()));
-        }
         if target.starts_with('$') {
             let id = target
                 .parse::<SessionId>()
@@ -4942,6 +4955,69 @@ mod tests {
         assert!(matches!(missing_window, ServerError::WindowNotFound(target) if target == "@99"));
         let malformed = state.resolve_session(Some("%x"), None).unwrap_err();
         assert!(matches!(malformed, ServerError::PaneNotFound(target) if target == "%x"));
+    }
+
+    #[test]
+    fn session_targets_validate_window_and_pane_components() {
+        let mut state = MuxState::default();
+        let (session, window, pane) = state.create_session("cli").unwrap();
+        state.rename_window(window, "win").unwrap();
+        let (_, other_pane) = state
+            .create_window(session, Some("other".to_owned()), PaneKind::Terminal)
+            .unwrap();
+        state.select_window(session, window).unwrap();
+        for target in [
+            "cli",
+            "=cli:win",
+            "cli:win.0",
+            "cli:.0",
+            ":win.0",
+            "win.0",
+            "%0",
+            "@0",
+            "=cli:=win",
+            "cli:win.",
+        ] {
+            assert_eq!(
+                state.resolve_session(Some(target), Some(session)),
+                Ok(session),
+                "{target}"
+            );
+        }
+        assert_eq!(
+            state.resolve_session(Some(&format!("cli:.{other_pane}")), None),
+            Ok(session)
+        );
+        for (target, error) in [
+            (
+                "=cli:nosuchwin",
+                ServerError::WindowNotFound("nosuchwin".to_owned()),
+            ),
+            (
+                "=nosuch:win",
+                ServerError::SessionNotFound("nosuch".to_owned()),
+            ),
+            ("cli:win.9", ServerError::PaneNotFound("9".to_owned())),
+            (
+                "cli:nosuchwin.9",
+                ServerError::WindowNotFound("nosuchwin".to_owned()),
+            ),
+            ("%99", ServerError::PaneNotFound("%99".to_owned())),
+            ("@99", ServerError::WindowNotFound("@99".to_owned())),
+            ("=%0", ServerError::SessionNotFound("%0".to_owned())),
+            ("=cl:win", ServerError::SessionNotFound("cl".to_owned())),
+        ] {
+            assert_eq!(
+                state.resolve_session(Some(target), Some(session)),
+                Err(error),
+                "{target}"
+            );
+        }
+        assert_eq!(pane, PaneId(0));
+        assert_eq!(
+            state.resolve_session(Some(&format!("cli:win.{other_pane}")), None),
+            Err(ServerError::PaneNotFound(other_pane.to_string()))
+        );
     }
 
     #[test]

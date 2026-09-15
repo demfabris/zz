@@ -1,0 +1,122 @@
+2026-09-15T21:43:45Z 57bf163f8dc5dbe3547ed9a039485e08f5c46eff cargo build -p zz --jobs 4 exit=0
+2026-09-15T21:44:57Z 57bf163f8dc5dbe3547ed9a039485e08f5c46eff python3 compat/tui/evidence/TUI-018/attempt-02/review-probe.py exit=0
+2026-09-15T21:45:21Z 57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/tui-command-streams.sh 2026-09-15T21:46:30Z 57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry --delta 7e7cb1ee...HEAD --commands source-file\,load-buffer\,save-buffer\,command-alias\,send-keys\,display-message\,split-window --list exit=0
+exit=0
+2026-09-15T21:48:24Z 57bf163f8dc5dbe3547ed9a039485e08f5c46eff python3 compat/tui/evidence/TUI-018/attempt-02/review-config-probe.py exit=0
+2026-09-15T21:48:46Z 57bf163f8dc5dbe3547ed9a039485e08f5c46eff python3 compat/tui/evidence/TUI-018/attempt-02/review-order-probe.py exit=0
+2026-09-15T21:49:20Z 57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/tui-command-streams.sh 2026-09-15T21:51:10Z 57bf163f8dc5dbe3547ed9a039485e08f5c46eff python3 compat/tui/tracker.py check exit=0
+2026-09-15T21:51:10Z 57bf163f8dc5dbe3547ed9a039485e08f5c46eff python3 compat/tmux-tracker.py check exit=0
+2026-09-15T21:51:10Z 57bf163f8dc5dbe3547ed9a039485e08f5c46eff python3 compat/wire-version.py exit=0
+2026-09-15T21:51:10Z 57bf163f8dc5dbe3547ed9a039485e08f5c46eff python3 .agents/skills/okf/scripts/okf.py validate knowledge exit=0
+2026-09-15T21:51:10Z 57bf163f8dc5dbe3547ed9a039485e08f5c46eff python3 -B compat/tui/tracker_test.py exit=0
+2026-09-15T21:51:10Z 57bf163f8dc5dbe3547ed9a039485e08f5c46eff python3 -B compat/tui/verify_claims_test.py exit=0
+exit=0
+2026-09-15T21:52:26Z 57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/tui-command-streams.sh 
+Logging correction: earlier START records lacked trailing newlines and completion labels, so light checks interleaved with stream fixture runs. Tool-returned completions: build=0 probes=0 streams-1=0 delta-list=0 config-probes=0 order-probes=0 streams-2=0 tracker=0 tmux-tracker=0 wire=0 okf=0 tracker-tests=0 verify-tests=0. Stream run 3 is in progress. Subsequent entries include labels at both boundaries. Probe-driver exit 0 means completed measurement, not parity.
+Run streams-3 printed the complete 43/0/4 summary, but its wrapper exited 2 after I updated the logging script while it was still running. The child exit was not reliably captured. This is a review-wrapper error; streams-3-repeat will replace it for the required third clean run.
+2026-09-15T21:55:29Z START label=order-probes-state tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff python3 compat/tui/evidence/TUI-018/attempt-02/review-order-probe.py 
+2026-09-15T21:55:32Z END label=order-probes-state exit=0
+2026-09-15T21:55:32Z START label=text-probes tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff python3 compat/tui/evidence/TUI-018/attempt-02/review-text-probe.py 
+2026-09-15T21:55:33Z END label=text-probes exit=0
+2026-09-15T21:55:33Z START label=stdout-probes tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff python3 compat/tui/evidence/TUI-018/attempt-02/review-stdout-probe.py 
+2026-09-15T21:55:35Z END label=stdout-probes exit=0
+2026-09-15T21:56:01Z START label=streams-self-check tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/tui-command-streams.sh --self-check 
+2026-09-15T21:56:51Z START label=tui-report tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff python3 compat/tui/tracker.py write-report 
+2026-09-15T21:56:51Z END label=tui-report exit=0
+2026-09-15T21:56:51Z START label=tmux-report tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff python3 compat/tmux-tracker.py write-report 
+2026-09-15T21:56:51Z END label=tmux-report exit=0
+2026-09-15T21:57:00Z END label=streams-self-check exit=0
+2026-09-15T21:57:07Z START label=streams-3-repeat tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/tui-command-streams.sh 
+2026-09-15T21:59:42Z END label=streams-3-repeat exit=0
+2026-09-15T21:59:55Z START label=own-sabotage tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/tui-command-streams.sh /tmp/zz018-review-drop /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux 
+2026-09-15T22:02:35Z END label=own-sabotage exit=1
+2026-09-15T22:02:44Z START label=client-commands tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/tui-client-commands.sh 
+2026-09-15T22:04:56Z END label=client-commands exit=0
+2026-09-15T22:05:09Z START label=client-self-check tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/tui-client-commands.sh --self-check 
+2026-09-15T22:05:29Z END label=client-self-check exit=0
+2026-09-15T22:05:35Z START label=test-libraries tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff cargo test -p zz-mux -p zz-daemon -p zz-protocol --lib --jobs 4 -- --test-threads=4 
+2026-09-15T22:06:56Z END label=test-libraries exit=0
+2026-09-15T22:07:19Z START label=test-zz tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff cargo test -p zz --jobs 4 -- --test-threads=4 
+2026-09-15T22:09:51Z END label=test-zz exit=0
+2026-09-15T22:09:57Z START label=clippy tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff cargo clippy -p zz-mux -p zz-daemon -p zz-protocol -p zz --all-targets --all-features --jobs 4 -- -D warnings 
+2026-09-15T22:12:57Z END label=clippy exit=0
+2026-09-15T22:13:03Z START label=fmt tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff cargo fmt --all -- --check 
+2026-09-15T22:13:06Z END label=fmt exit=0
+2026-09-15T22:13:22Z START label=corpus-001-008 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry alerts.txt aliases-multi-body.txt bare-targets.txt base-index.txt behavior-options.txt break-pane.txt buffer-missing-target-error.txt buffer-path-format.txt 
+2026-09-15T22:17:12Z END label=corpus-001-008 exit=0
+2026-09-15T22:17:39Z START label=corpus-009-012 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry capture-pane.txt census-formats.txt census-hooks.txt collapse.txt 
+2026-09-15T22:20:54Z END label=corpus-009-012 exit=0
+2026-09-15T22:21:07Z START label=corpus-013-016 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry command-alias.txt command-item-format.txt copy-mode-cursor-view.txt copy-mode-goto-line.txt 
+2026-09-15T22:28:10Z END label=corpus-013-016 exit=0
+2026-09-15T22:28:27Z START label=corpus-017-024 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry copy-mode-previous-bracket.txt copy-mode-recentre.txt copy-mode-scroll-exit.txt copy-mode-selection-lifecycle.txt copy-mode-stock-action-keys.txt daemon-command-item-format.txt display-message.txt format-environment-fallback.txt 
+2026-09-15T22:30:22Z END label=corpus-017-024 exit=0
+2026-09-15T22:30:28Z START label=corpus-025-032 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry format-flags.txt format-modifier-option-loop.txt format-option-loop-context.txt format-window-cell-metrics.txt format-window-neighbour-user-options.txt formats-values.txt formats.txt honest-knobs-c1-layout.txt 
+2026-09-15T22:33:16Z END label=corpus-025-032 exit=0
+2026-09-15T22:33:21Z START label=corpus-033-037 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry honest-knobs-c1-readback.txt join-pane-size.txt known/known-main-preset-two-panes.txt known/known-pane-scrollbar-columns.txt known/known-spread-mixed.txt 
+2026-09-15T22:34:02Z END label=corpus-033-037 exit=0
+2026-09-15T22:34:08Z START label=corpus-038-038 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry lane2-store.txt 
+2026-09-15T22:36:10Z END label=corpus-038-038 exit=0
+2026-09-15T22:36:41Z START label=corpus-039-048 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry last-pane-input-off.txt layout-strings.txt list-keys-padding.txt list-sort-filter.txt manual-window-size-transition.txt micro-flags.txt mru-activity.txt native-prefix-isolation.txt nested-splits.txt new-session-cwd.txt 
+2026-09-15T22:39:16Z END label=corpus-039-048 exit=0
+2026-09-15T22:39:28Z START label=corpus-049-052 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry new-session-environment.txt option-name-formats.txt pane-border-span-owner.txt pane-dead-time.txt 
+2026-09-15T22:41:25Z END label=corpus-049-052 exit=0
+2026-09-15T22:41:40Z START label=corpus-053-056 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry pane-exact-target-prefix.txt pane-selection-input-style.txt pane-selection-marked.txt pane-spawn-options.txt 
+2026-09-15T22:45:19Z END label=corpus-053-056 exit=0
+2026-09-15T22:45:24Z START label=corpus-057-064 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry pane-spawn-retain.txt pane-spawn-style-title-v2.txt pane-target-grammar.txt panes.txt presets-mirrored.txt presets.txt resize-directions.txt resize-window.txt 
+2026-09-15T22:48:40Z END label=corpus-057-064 exit=0
+2026-09-15T22:48:51Z START label=corpus-065-072 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry resize.txt send-keys-repeat.txt send-keys-reset.txt show-options-hooks.txt smoke/alias-group-forgery.txt smoke/args-parse-bind-key.txt smoke/args-parse-choosers.txt smoke/args-parse-command-prompt.txt 
+2026-09-15T22:50:36Z END label=corpus-065-072 exit=0
+2026-09-15T22:51:00Z START label=corpus-073-080 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/args-parse-confirm-before.txt smoke/args-parse-display-menu.txt smoke/args-parse-display-panes.txt smoke/args-parse-if-shell.txt smoke/args-parse-run-shell.txt smoke/args-parse-set-hook.txt smoke/args-parse-set-option.txt smoke/buffer-clipboard-write.txt 
+2026-09-15T22:51:54Z END label=corpus-073-080 exit=0
+2026-09-15T22:51:59Z START label=corpus-081-088 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/buffer-standard-streams.txt smoke/cheap-flags.txt smoke/chooser-buffer-confirm-flag.txt smoke/chooser-buffer-vocabulary.txt smoke/chooser-kill-keys.txt smoke/chooser-kill-on-exit.txt smoke/chooser-row-flags.txt smoke/chooser-tree-vocabulary.txt 
+2026-09-15T23:00:36Z END label=corpus-081-088 exit=0
+2026-09-15T23:00:54Z START label=corpus-089-096 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/clear-history-hyperlinks.txt smoke/cli-chain-parse-abort.txt smoke/cli-output-bytes.txt smoke/client-exit-actions.txt smoke/client-non-utf8-cwd.txt smoke/client-resized-context.txt smoke/client-utf8-sanitizer.txt smoke/command-flag-errors.txt 
+2026-09-15T23:03:00Z END label=corpus-089-096 exit=0
+2026-09-15T23:05:14Z START label=corpus-097-104 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/command-prompt-chain.txt smoke/command-prompt-editing.txt smoke/command-prompt-target.txt smoke/config-alias-parse-unit.txt smoke/config-chain-parse-abort.txt smoke/config-discovery-explicit.txt smoke/config-discovery-launcher.txt smoke/config-discovery.txt 
+2026-09-15T23:11:25Z END label=corpus-097-104 exit=0
+2026-09-15T23:11:29Z START label=corpus-105-112 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/config-grammar.txt smoke/config-non-utf8-byte-matrix.txt smoke/config-non-utf8-file-bytes.txt smoke/continuum-init.txt smoke/control-alias-prepare.txt smoke/control-eof-drain.txt smoke/control-hard-loss.txt smoke/control-notify.txt 
+2026-09-15T23:13:15Z END label=corpus-105-112 exit=0
+2026-09-15T23:13:20Z START label=corpus-113-116 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/control-tilde-environment.txt smoke/copy-mode-command-errors.txt smoke/copy-mode-copy-line.txt smoke/copy-mode-formats.txt 
+2026-09-15T23:13:55Z END label=corpus-113-116 exit=0
+2026-09-15T23:14:02Z START label=corpus-117-120 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/copy-mode-kill-on-exit.txt smoke/copy-mode-mode-keys-tail.txt smoke/copy-mode-mode-keys.txt smoke/copy-mode-prompt-bindings.txt 
+2026-09-15T23:16:12Z END label=corpus-117-120 exit=0
+2026-09-15T23:16:18Z START label=corpus-121-124 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/copy-mode-refresh.txt smoke/copy-mode-search.txt smoke/copy-mode-source-pane.txt smoke/copy-selection-clipboard-bytes.txt 
+2026-09-15T23:17:57Z END label=corpus-121-124 exit=0
+2026-09-15T23:18:01Z START label=corpus-125-128 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/daemon-invalid-flags.txt smoke/default-client-command.txt smoke/display-menu-action-queue.txt smoke/display-menu-cell-layout.txt 
+2026-09-15T23:19:09Z END label=corpus-125-128 exit=0
+2026-09-15T23:19:15Z START label=corpus-129-132 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/display-menu-mouse.txt smoke/display-menu-paste.txt smoke/display-menu-resize-lifecycle.txt smoke/display-menu-shortcut-grammar.txt 
+2026-09-15T23:21:25Z END label=corpus-129-132 exit=0
+2026-09-15T23:21:28Z START label=corpus-133-136 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/display-menu-style-refresh.txt smoke/display-message-client-aliases.txt smoke/display-panes-template.txt smoke/display-popup-drag.txt 
+2026-09-15T23:22:58Z END label=corpus-133-136 exit=0
+2026-09-15T23:23:05Z START label=corpus-137-140 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/display-popup-kitty-noresize.txt smoke/display-popup-kitty.txt smoke/display-popup-menu-policy.txt smoke/display-popup-menu.txt 
+2026-09-15T23:25:33Z END label=corpus-137-140 exit=0
+2026-09-15T23:25:37Z START label=corpus-141-144 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/display-popup-resize-lifecycle.txt smoke/display-popup-style-refresh.txt smoke/display-popup-to-pane.txt smoke/environment-bytes.txt 
+2026-09-15T23:26:30Z END label=corpus-141-144 exit=0
+2026-09-15T23:26:36Z START label=corpus-145-152 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/fixture-conf.txt smoke/focus-follows-mouse.txt smoke/format-client-loop-context.txt smoke/format-environment-loop-context.txt smoke/format-listing.txt smoke/format-modifier-client-loop.txt smoke/format-modifier-environment-loop.txt smoke/format-modifier-interrogate.txt 
+2026-09-15T23:28:10Z END label=corpus-145-152 exit=0
+2026-09-15T23:28:13Z START label=corpus-153-160 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/format-monitor-hooks.txt smoke/format-pane-process.txt smoke/format-pane-progress.txt smoke/format-trace.txt smoke/format-window-bigger.txt smoke/fpp-init.txt smoke/hooks-pane-focus-clients.txt smoke/hooks-pane-focus.txt 
+2026-09-15T23:30:42Z END label=corpus-153-160 exit=0
+2026-09-15T23:30:46Z START label=corpus-161-168 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/jobs-command-environment.txt smoke/jobs-display-popup-environment.txt smoke/jobs-shell-job-cwd.txt smoke/keys-prefix-attached.txt smoke/keys-prefix-remainder.txt smoke/keys-prefix-stock.txt smoke/keys-shift-attached.txt smoke/keys-table-lifecycle.txt 
+2026-09-15T23:34:02Z END label=corpus-161-168 exit=0
+2026-09-15T23:34:06Z START label=corpus-169-176 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/kill-filters.txt smoke/launcher-installed-layout.txt smoke/oh-my-tmux.txt smoke/own-conf.txt smoke/pane-border-indicators.txt smoke/pane-border-lines.txt smoke/pane-border-status.txt smoke/pane-border-zorder.txt 
+2026-09-15T23:36:49Z END label=corpus-169-176 exit=0
+2026-09-15T23:36:54Z START label=corpus-177-184 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/pane-colours-palette.txt smoke/pane-engine-knobs-input.txt smoke/pane-engine-knobs.txt smoke/pane-runtime-facts.txt smoke/pane-tmux-path.txt smoke/plugin-runtime-continuum.txt smoke/plugin-runtime-fpp.txt smoke/plugin-runtime-oh-my-tmux.txt 
+2026-09-15T23:39:27Z END label=corpus-177-184 exit=0
+2026-09-15T23:39:31Z START label=corpus-185-192 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/plugin-runtime-resurrect-restore.txt smoke/plugin-runtime-tpm-install.txt smoke/plugin-runtime-vim-tmux-navigator.txt smoke/plugin-runtime-yank.txt smoke/positional-maximums.txt smoke/positional-minimums.txt smoke/refresh-status.txt smoke/remain-on-exit-format.txt 
+2026-09-15T23:41:11Z END label=corpus-185-192 exit=0
+2026-09-15T23:41:14Z START label=corpus-193-200 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/resurrect-init.txt smoke/resurrect-save.txt smoke/send-keys-client-selection.txt smoke/send-keys-control.txt smoke/send-keys-inject.txt smoke/sensible.txt smoke/source-file-byte-name.txt smoke/source-file-control.txt 
+2026-09-15T23:42:36Z END label=corpus-193-200 exit=0
+2026-09-15T23:42:39Z START label=corpus-201-204 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/source-file-depth.txt smoke/source-file-diagnostics.txt smoke/source-file-tilde.txt smoke/source-replay-diagnostics.txt 
+2026-09-15T23:44:09Z END label=corpus-201-204 exit=0
+2026-09-15T23:44:12Z START label=corpus-205-208 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/split-window-wait.txt smoke/status-background-jobs.txt smoke/status-keys-editor-default.txt smoke/terminal-facts.txt 
+2026-09-15T23:45:33Z END label=corpus-205-208 exit=0
+2026-09-15T23:45:40Z START label=corpus-209-212 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry smoke/tpm-init.txt smoke/tui-client-input-backpressure.txt smoke/vim-tmux-navigator.txt smoke/yank.txt 
+2026-09-15T23:46:10Z END label=corpus-209-212 exit=0
+2026-09-15T23:46:14Z START label=corpus-213-216 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry source-file-current-file.txt source-file-format.txt source-file-output.txt split-window-zoom-hidden-width.txt 
+2026-09-15T23:47:39Z END label=corpus-213-216 exit=0
+2026-09-15T23:47:43Z START label=corpus-217-221 tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff compat/run.sh --strict-geometry split-window-zoom.txt splits-sized.txt stderr-parity.txt strict-key-validation.txt zoom.txt 
+2026-09-15T23:49:02Z END label=corpus-217-221 exit=0
+2026-09-15T23:50:23Z START label=final-tracker tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff python3 compat/tui/tracker.py check 
+2026-09-15T23:50:23Z START label=final-tmux-tracker tip=57bf163f8dc5dbe3547ed9a039485e08f5c46eff python3 compat/tmux-tracker.py check 
+2026-09-15T23:50:23Z END label=final-tracker exit=0
+2026-09-15T23:50:23Z END label=final-tmux-tracker exit=0

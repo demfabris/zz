@@ -1,0 +1,6 @@
+   Compiling cef-dll-sys v152.2.0+152.0.6
+    Checking cef v152.2.0+152.0.6
+    Checking zz-browser v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-browser)
+    Checking zz-chrome-import v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-chrome-import)
+    Checking zz v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.08s

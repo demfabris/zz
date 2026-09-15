@@ -1,0 +1,44 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-box-reds/target/debug/zz
+[1;36m==>[0m running alerts
+alerts: 62 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running aliases-multi-body
+aliases-multi-body: 8 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running bare-targets
+bare-targets: 8 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running base-index
+base-index: 11 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running behavior-options
+behavior-options: 12 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running break-pane
+break-pane: 30 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running buffer-missing-target-error
+buffer-missing-target-error: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running buffer-path-format
+buffer-path-format: 36 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| alerts | 62 | yes | 0 | yes | yes | yes |
+| aliases-multi-body | 8 | yes | 0 | yes | yes | yes |
+| bare-targets | 8 | yes | 0 | yes | yes | yes |
+| base-index | 11 | yes | 0 | yes | yes | yes |
+| behavior-options | 12 | yes | 0 | yes | yes | yes |
+| break-pane | 30 | yes | 0 | yes | yes | yes |
+| buffer-missing-target-error | 2 | yes | 0 | yes | yes | yes |
+| buffer-path-format | 36 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+[1;36m==>[0m partial run complete; full summary left unchanged

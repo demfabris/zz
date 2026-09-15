@@ -1,0 +1,44 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-box-reds/target/debug/zz
+[1;36m==>[0m running format-flags
+format-flags: 8 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running format-modifier-option-loop
+format-modifier-option-loop: 17 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running format-option-loop-context
+format-option-loop-context: 14 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running format-window-cell-metrics
+format-window-cell-metrics: 8 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running format-window-neighbour-user-options
+format-window-neighbour-user-options: 26 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running formats-values
+formats-values: 45 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running formats
+formats: 16 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running honest-knobs-c1-layout
+honest-knobs-c1-layout: 9 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| format-flags | 8 | yes | 0 | yes | yes | yes |
+| format-modifier-option-loop | 17 | yes | 0 | yes | yes | yes |
+| format-option-loop-context | 14 | yes | 0 | yes | yes | yes |
+| format-window-cell-metrics | 8 | yes | 0 | yes | yes | yes |
+| format-window-neighbour-user-options | 26 | yes | 0 | yes | yes | yes |
+| formats-values | 45 | yes | 0 | yes | yes | yes |
+| formats | 16 | yes | 0 | yes | yes | yes |
+| honest-knobs-c1-layout | 9 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+[1;36m==>[0m partial run complete; full summary left unchanged

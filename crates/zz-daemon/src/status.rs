@@ -347,9 +347,6 @@ pub(crate) struct FormatHookFacts {
     /// Every pane some client holds a live copy session on, with that client's
     /// name beside the facts, ordered by client id.
     pub(crate) copy_modes: Arc<BTreeMap<PaneId, Vec<(String, Arc<CopyModeFacts>)>>>,
-    /// `wp->modes`: the server-owned mode each pane carries, named the way
-    /// `#{pane_mode}` spells it. It belongs to the pane, so a clientless
-    /// expansion answers from it.
     pub(crate) pane_modes: Arc<BTreeMap<PaneId, (usize, &'static str)>>,
 }
 
@@ -1442,10 +1439,6 @@ impl DaemonFormatHooks<'_> {
             .map(|(_, facts)| facts.as_ref())
     }
 
-    /// `wp->modes` head: the server-owned mode this context's pane carries.
-    /// tmux keeps one mode list per pane and answers `#{pane_mode}` from its
-    /// head, so a server-owned mode outranks the per-client copy session the
-    /// way `window_pane_set_mode` pushes ahead of it.
     fn pane_mode_name(&self, context: &StatusContext) -> Option<&'static str> {
         self.facts
             .pane_modes
@@ -1689,10 +1682,14 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             "mouse_pane" | "mouse_x" | "mouse_y" | "mouse_word" | "mouse_line"
             | "mouse_hyperlink" => Some(String::new()),
             "pane_in_mode" => Some(
-                (context.pane_id.parse().ok()
+                (context
+                    .pane_id
+                    .parse()
+                    .ok()
                     .and_then(|pane| self.facts.pane_modes.get(&pane))
                     .map_or(0, |(count, _)| *count)
-                    + usize::from(self.copy_mode_rows(context).is_some())).to_string(),
+                    + usize::from(self.copy_mode_rows(context).is_some()))
+                .to_string(),
             ),
             "pane_search_string" => Some(
                 context

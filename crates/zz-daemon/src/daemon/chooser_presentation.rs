@@ -20,7 +20,6 @@ const WINDOW_TREE_DEFAULT_FORMAT: &str = concat!(
     "}"
 );
 const WINDOW_BUFFER_DEFAULT_FORMAT: &str = "#{t/p:buffer_created}: #{buffer_sample}";
-/// `WINDOW_SWITCH_DEFAULT_FORMAT`, verbatim.
 const WINDOW_SWITCH_DEFAULT_FORMAT: &str = concat!(
     "#{?window_format,",
     "#{window_name} ",
@@ -555,10 +554,6 @@ impl Styles<'_> {
     }
 }
 
-/// `window_switch_build`: one row per session, or per window under `-w`, each
-/// expanded through `WINDOW_SWITCH_DEFAULT_FORMAT` in its own format tree.
-/// `sort_get_sessions` and `sort_get_winlinks` both run with `SORT_NAME` and no
-/// reversal, which is the order here.
 pub(super) fn switch_rows(inner: &ServerState, windows: bool, format: Option<&str>) -> Vec<String> {
     let format = format.unwrap_or(WINDOW_SWITCH_DEFAULT_FORMAT);
     let engine = &inner.engine;
@@ -571,9 +566,20 @@ pub(super) fn switch_rows(inner: &ServerState, windows: bool, format: Option<&st
             .iter()
             .map(|(window, entry)| (entry.name.clone(), *window, entry.session))
             .collect::<Vec<_>>();
-        entries.sort_by(|left, right| left.0.cmp(&right.0)
-            .then_with(|| engine.state.sessions[&left.2].name.cmp(&engine.state.sessions[&right.2].name))
-            .then_with(|| engine.state.windows[&left.1].index.cmp(&engine.state.windows[&right.1].index)));
+        entries.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| {
+                    engine.state.sessions[&left.2]
+                        .name
+                        .cmp(&engine.state.sessions[&right.2].name)
+                })
+                .then_with(|| {
+                    engine.state.windows[&left.1]
+                        .index
+                        .cmp(&engine.state.windows[&right.1].index)
+                })
+        });
         return entries
             .into_iter()
             .map(|(_, window, session)| {
@@ -610,14 +616,10 @@ pub(super) fn switch_rows(inner: &ServerState, windows: bool, format: Option<&st
         .collect()
 }
 
-/// `style_apply(&sgc, oo, "mode-style", NULL)` for the pane's own window, which
-/// is the style `window_switch_draw_screen` clears the current row to.
 pub(super) fn mode_style_for_pane(inner: &ServerState, pane: PaneId) -> String {
     Styles { inner }.selection(pane)
 }
 
-/// `pr->style`: `prompt_set_options` takes `message-style` off the session,
-/// and `prompt_draw` gives the prompt's own cells that style.
 pub(super) fn prompt_style() -> String {
     MESSAGE_STYLE.to_owned()
 }

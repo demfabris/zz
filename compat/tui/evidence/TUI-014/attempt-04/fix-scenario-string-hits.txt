@@ -1,0 +1,17 @@
+compat/scenarios/lane2-store.txt:20:out: show-options -gwv clock-mode-colour
+compat/scenarios/lane2-store.txt:21:out: show-options -gwv clock-mode-style
+compat/scenarios/lane2-store.txt:57:set-option -gw clock-mode-colour green
+compat/scenarios/lane2-store.txt:58:set-option -gw clock-mode-style 24-with-seconds
+compat/scenarios/lane2-store.txt:89:out: show-options -gwv clock-mode-colour
+compat/scenarios/lane2-store.txt:90:out: show-options -gwv clock-mode-style
+compat/scenarios/lane2-store.txt:115:set-option -gw clock-mode-style 13
+compat/scenarios/smoke/fixtures/command-flag-errors.tsv:10:clock-mode	-	-t	[-t target-pane]
+compat/scenarios/smoke/fixtures/command-flag-errors.tsv:66:server-access	-	-	[-adglrw] [-t target-pane] [user|group]
+compat/scenarios/smoke/fixtures/command-flag-errors.tsv:85:switch-mode	-	-F	[-kswZ] [-F format] [-t target-pane] [command]
+compat/scenarios/smoke/fixtures/config-discovery-import.sh:17:printf '\ncustomize-mode\n' >> "$HOME/chosen donor.conf"
+compat/scenarios/smoke/fixtures/config-discovery-import.sh:20:grep -q '^# zz-unsupported: customize-mode' "$target"
+compat/scenarios/smoke/fixtures/copy-mode-kill-on-exit.sh:154:# bind-key parses the flag where zz used to answer `unsupported command`.
+compat/scenarios/smoke/fixtures/control-notify.py:96:            until = "unsupported command:"
+compat/scenarios/smoke/fixtures/control-notify.json:401:      "unsupported command: link-window",
+compat/scenarios/smoke/fixtures/control-notify.json:406:      "unsupported command: unlink-window",
+compat/scenarios/smoke/fixtures/cli-chain-parse-abort.sh:92:probe_cold new-session -d -s before ';' clock-mode -Z

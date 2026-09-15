@@ -17,17 +17,17 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **41**. Classified items: **378**.
+Tracked gap groups: **41**. Classified items: **377**.
 
 - Status: open: 1, accepted: 40.
 - Decision: adopt: 1, native: 31, never: 9.
 - Priority: now: 1, none: 40.
 - Closed history entries: 207.
-- Surface: command: 8, flag: 23, extension-flag: 5, native-command: 32, option: 34, format: 43, key: 47, binding: 37, native-key: 91, semantic: 49, presentation: 8, protocol: 1.
+- Surface: command: 7, flag: 23, extension-flag: 5, native-command: 32, option: 34, format: 43, key: 47, binding: 37, native-key: 91, semantic: 49, presentation: 8, protocol: 1.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 84 of those commands. The registry classifies 23 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 5 zz-only flags on tmux command names, 32 native command names, 34 options absent from `BEHAVES`, 43 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 0 currently documented hook-producer gaps, 47 omitted default keys, 37 divergent shared default bindings, 91 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 85 of those commands. The registry classifies 23 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 5 zz-only flags on tmux command names, 32 native command names, 34 options absent from `BEHAVES`, 43 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 0 currently documented hook-producer gaps, 47 omitted default keys, 37 divergent shared default bindings, 91 zz-only default keys.
 
 ## Enforcement boundary
 
@@ -844,21 +844,21 @@ Five pinned forms move raw bytes between the invoking client's standard streams 
 
 ### `protocol.socket-acl`: Keep the daemon socket single-user
 
-`server-access` grants other Unix users read or write access to a shared tmux server socket, with a per-user ACL the server enforces on every connection. zz's daemon is single-user by construction: it creates its socket and identity at mode 0600, keeps no peer identity, and holds live PTYs, ssh sessions, browser profiles with imported cookies, and agent sessions inside one account, so admitting a second user would hand over all of it. The pin's same-uid check when re-marking a read-only client is already skipped for the same reason. This joins linked windows and tmux's private socket protocol as a permanent exclusion; a multi-user deployment would be a different product with its own identity, authorization, revocation, and audit design.
+`server-access` grants other Unix users read or write access to a shared tmux server socket, with a per-user ACL the server enforces on every connection. zz's daemon is single-user by construction: it creates its socket and identity at mode 0600, keeps no peer identity, and holds live PTYs, ssh sessions, browser profiles with imported cookies, and agent sessions inside one account, so admitting a second user would hand over all of it. The pin's same-uid check when re-marking a read-only client is already skipped for the same reason. This joins linked windows and tmux's private socket protocol as a permanent exclusion; a multi-user deployment would be a different product with its own identity, authorization, revocation, and audit design. Closed 2026-09-15 for the raw TUI: command:server-access. The TUI parity contract decides the TUI portion of this gap (knowledge/designs/tui-parity.md; decided 2026-09-15 by the orchestrator under fabrico's TUI parity contract of 2026-09-09; reversible). The old behaviour: every form of the command answered `unsupported command: server-access` on stderr at status 1. The pin's measured behaviour, 2026-09-15 on a throwaway server at /dev/null config: `server-access` alone writes `missing user or group argument` to stderr at status 1; `server-access -l` writes `demfabris (U,W)` to stdout at status 0, which is server_acl_init's own list - root is skipped by server_acl_display and the owner carries no SERVER_ACL_READONLY; `server-access -w zzcc-nobody` and `server-access nosuchuser` write `unknown user: <name>`, `server-access -g nosuchgroup` writes `unknown group: nosuchgroup`, each at status 1; `server-access demfabris` and `server-access root` write `<name> owns the server, can't change access` at status 1, and that test runs before the flag conflicts, so `server-access -a -d audio` answers `unknown user: audio` while `server-access -g -a -d audio` answers `-a and -d cannot be used together`; `server-access -w -r nobody` answers `-r and -w cannot be used together`; `server-access -d nobody` answers `user nobody not found`; `server-access -g <group>` with no action flag exits 0, writes nothing and changes nothing; and `server-access -t %0` answers `command server-access: unknown flag -t`, because cmd_server_access_entry's args string is `adglrw` and its usage line advertises a target it does not take. zz answers every one of those identically now, from the same order cmd_server_access_exec walks: -l, then the missing argument, then getpwnam or getgrnam, then the owner test, then the two flag conflicts, then -d. The one form that still diverges is the one this gap exists for: `server-access -a`, `-r` or `-w` naming a second identity stores an entry on the pin and exits 0, and zz refuses it with `zz has no socket access list: the daemon socket admits <owner> alone` at status 1, because there is no peer to admit. That residue is semantic:multi-user-socket-acl, which stays open as the permanent exclusion, and compat/tui-client-commands.sh records it as server-access-add beside nine asserted cases.
 
 - Decision: `never`
 - Status: `accepted`
 - Priority and ease: `none` / `none`
 - Owner: `daemon`
 - User impact: admin, remote
-- Items: `command:server-access`, `semantic:multi-user-socket-acl`
+- Items: `semantic:multi-user-socket-acl`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-daemon/src/lifecycle.rs`
   - `resource:crates/zz-protocol/src/catalog.rs`
   - `resource:knowledge/designs/tmux-superset-roadmap.md`
 - Acceptance:
-  - ``server-access` stays recognized and unimplemented, the daemon socket stays single-user at mode 0600, and no peer authorization model is added.`
+  - ``server-access` answers the pin's own list, lookups, orderings and refusals, the daemon socket stays single-user at mode 0600, and no peer authorization model is added: admitting a second identity is refused.`
   - `The divergence matrix keeps the single-user socket decision visible as a permanent exclusion.`
 
 ### `protocol.socket-interop`: Do not speak tmux private protocol

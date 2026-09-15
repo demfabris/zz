@@ -30,6 +30,7 @@ use crate::{
 };
 
 mod chooser;
+mod pane_mode;
 
 pub(crate) use zz_client::ViewportDamage as FrameDamage;
 
@@ -230,6 +231,10 @@ pub(crate) struct Renderer {
         zz_protocol::ThemeColours,
     )>,
     mode_tree: chooser::ModeTree,
+    /// Which panes were last painted holding a server-owned mode, so the paint
+    /// that follows the mode ending redraws the pane whole instead of taking
+    /// the incremental path over the mode's own cells.
+    pane_modes_painted: HashMap<PaneId, bool>,
     kitty: KittyBridge,
     writer: TerminalWriter,
     control_replay: Vec<u8>,
@@ -264,6 +269,7 @@ impl Renderer {
             last_title: String::new(),
             border_chrome: None,
             mode_tree: chooser::ModeTree::default(),
+            pane_modes_painted: HashMap::new(),
             kitty: KittyBridge::default(),
             writer: TerminalWriter::spawn(sink),
             control_replay: Vec::new(),
@@ -665,6 +671,17 @@ impl Renderer {
             match &pane.kind {
                 PaneKindSnapshot::Terminal => {
                     self.picker_cards.remove(&entry.pane);
+                    let pane_mode_changed = self
+                        .pane_modes_painted
+                        .insert(entry.pane, pane.mode.is_some())
+                        != Some(pane.mode.is_some());
+                    if let Some(pane_mode) = pane.mode.as_ref() {
+                        self.damage.remove(&entry.pane);
+                        self.painted.remove(&entry.pane);
+                        self.paint_pane_mode(pane_mode, content, model);
+                        continue;
+                    }
+                    let force = force || pane_mode_changed;
                     if let Some(viewport) = model.pane_viewport(entry.pane) {
                         let damage = self.damage.remove(&entry.pane);
                         let mode = crate::mode_view::presentation(model, entry.pane, viewport);
@@ -730,6 +747,8 @@ impl Renderer {
         self.picker_cards
             .retain(|pane, _| model.layout.panes.iter().any(|entry| entry.pane == *pane));
         self.browser_painted
+            .retain(|pane, _| model.layout.panes.iter().any(|entry| entry.pane == *pane));
+        self.pane_modes_painted
             .retain(|pane, _| model.layout.panes.iter().any(|entry| entry.pane == *pane));
 
         if let Some(display) = &model.display_panes {
@@ -1994,11 +2013,28 @@ impl Renderer {
             self.hide_cursor();
             return;
         };
-        let Some(viewport) = model.pane_viewport(pane) else {
+        let Some(entry) = model.pane_rect(pane) else {
             self.hide_cursor();
             return;
         };
-        let Some(entry) = model.pane_rect(pane) else {
+        // `window_pane_set_mode` gives the mode its own screen, and the pin's
+        // clock clears `MODE_CURSOR` on it, so the cursor sits where the
+        // mode's own writer left it and is not shown.
+        if let Some(mode) = model
+            .pane_snapshot(pane)
+            .and_then(|pane| pane.mode.as_ref())
+        {
+            let content = entry.content();
+            let (column, row) = pane_mode::surface(mode, content, &model.status.theme).cursor;
+            write_cursor_position(
+                &mut self.output,
+                content.x.saturating_add(column),
+                content.y.saturating_add(row),
+            );
+            self.hide_cursor();
+            return;
+        }
+        let Some(viewport) = model.pane_viewport(pane) else {
             self.hide_cursor();
             return;
         };

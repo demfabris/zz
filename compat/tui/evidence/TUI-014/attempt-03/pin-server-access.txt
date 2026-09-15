@@ -1,0 +1,41 @@
+# pin      /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux (d77c9dc6, next-3.8)
+# driver   pin-server-access-probe.sh, a throwaway server at -f /dev/null with a scrubbed HOME
+# taken    2026-09-15T12:51:53-03:00
+### server-access
+rc=1 out=[] err=[missing user or group argument]
+### server-access -t %0
+rc=1 out=[] err=[command server-access: unknown flag -t]
+### server-access -l
+rc=0 out=[demfabris (U,W)] err=[]
+### server-access -l extra
+rc=0 out=[demfabris (U,W)] err=[]
+### server-access demfabris
+rc=1 out=[] err=[demfabris owns the server, can't change access]
+### server-access -a demfabris
+rc=1 out=[] err=[demfabris owns the server, can't change access]
+### server-access root
+rc=1 out=[] err=[root owns the server, can't change access]
+### server-access -g demfabris
+rc=0 out=[] err=[]
+### server-access -a -g demfabris
+rc=0 out=[] err=[]
+### server-access -l
+rc=0 out=[demfabris (U,W)
+demfabris (G,W)] err=[]
+### server-access -a -d demfabris
+rc=1 out=[] err=[demfabris owns the server, can't change access]
+### server-access -w -r nobody
+rc=1 out=[] err=[-r and -w cannot be used together]
+### server-access -d nobody
+rc=1 out=[] err=[user nobody not found]
+### server-access -g -a -d demfabris
+rc=1 out=[] err=[-a and -d cannot be used together]
+### server-access nosuchuser
+rc=1 out=[] err=[unknown user: nosuchuser]
+### server-access -g nosuchgroup
+rc=1 out=[] err=[unknown group: nosuchgroup]
+### server-access -a -g nosuchgroup
+rc=1 out=[] err=[unknown group: nosuchgroup]
+### server-access one two
+rc=1 out=[] err=[command server-access: too many arguments (need at most 1)]
+# exit     0

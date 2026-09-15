@@ -462,50 +462,27 @@ pub struct PaneSnapshot {
     /// `pane-border-status` is off.
     #[serde(default)]
     pub border_status_text: String,
-    /// `wp->modes`: the pane mode the server owns, drawn over the pane by
-    /// every client attached to the window. Copy mode is not here; it lives on
-    /// each client's own terminal view.
     #[serde(default)]
     pub mode: Option<PaneMode>,
 }
 
-/// A server-owned pane mode, named the way `#{pane_mode}` spells it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PaneMode {
-    /// `window_clock_mode`. `window_clock_draw_screen` formats the time on the
-    /// server and redraws the pane every second, so the string travels rather
-    /// than the `clock-mode-style` that made it and every client attached to
-    /// the window shows the same face.
     Clock {
-        /// `tim`: `%H:%M`, `%H:%M:%S`, or `%l:%M ` / `%l:%M:%S ` with `AM` or
-        /// `PM` appended, per `clock-mode-style`.
         time: String,
-        /// The `clock-mode-colour` option value, which the client resolves the
-        /// way `style_parse_colour` resolves it into `gc.fg`.
         colour: String,
     },
-    /// `window_switch_mode`. The server expands one row per session or window
-    /// through `WINDOW_SWITCH_DEFAULT_FORMAT` and the client draws each with
-    /// `format_draw`, the current one over a line cleared to `mode-style`'s
-    /// background, above the `(search)` prompt on the pane's last row.
     Switch {
-        /// `data->matches`, each already expanded, with its `#[...]` markup.
         rows: Vec<String>,
-        /// `data->current`, the row drawn in `mode-style`.
         selected: u32,
-        /// `data->offset`, the first row drawn.
         offset: u32,
-        /// The resolved `mode-style`, which is `sgc`.
         selection_style: String,
-        /// The prompt and its input, `(search) ` plus `data->filter`.
         prompt: String,
-        /// The resolved `message-style`, which is `pr->style`.
         prompt_style: String,
     },
 }
 
 impl PaneMode {
-    /// `wme->mode->name`, which `#{pane_mode}` answers with.
     #[must_use]
     pub const fn name(&self) -> &'static str {
         match self {

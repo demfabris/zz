@@ -8,8 +8,6 @@ use super::{
 };
 use crate::{layout::Rect, mode_view::resolved_style, state::Model};
 
-/// `window_clock_table`: five rows of five columns per glyph, digits first,
-/// then `:`, `A`, `P` and `M`.
 const CLOCK_TABLE: [[[bool; 5]; 5]; 14] = {
     const O: bool = false;
     const X: bool = true;
@@ -118,18 +116,12 @@ const CLOCK_TABLE: [[[bool; 5]; 5]; 14] = {
 const GLYPH: u16 = 5;
 const PITCH: u16 = 6;
 
-/// What a client draws for a pane holding a server-owned mode: the mode's own
-/// screen over the pane's rect, and where the pin's writer left the cursor.
 pub(super) struct ModeSurface {
     grid: Grid,
-    /// `s->cx`/`s->cy` after `screen_write_stop`, in the pane's coordinates.
     pub(super) cursor: (u16, u16),
-    /// `MODE_CURSOR` on the mode's own screen.
     pub(super) cursor_visible: bool,
 }
 
-/// The index of a character in `window_clock_table`, or `None` for one
-/// `window_clock_draw_screen` skips while still advancing a glyph.
 fn clock_index(character: char) -> Option<usize> {
     match character {
         '0'..='9' => Some(character as usize - '0' as usize),
@@ -157,8 +149,6 @@ fn foreground(colour: TmuxColour) -> TmuxStyle {
     }
 }
 
-/// `style_parse_colour` on the `clock-mode-colour` option, with a theme slot
-/// resolved through the theme the daemon published.
 fn resolve(colour: &str, theme: &ThemeColours) -> TmuxColour {
     let parsed = parse_tmux_colour(colour).unwrap_or(TmuxColour::Default);
     match parsed {
@@ -167,8 +157,6 @@ fn resolve(colour: &str, theme: &ThemeColours) -> TmuxColour {
     }
 }
 
-/// `screen_write_clearendofline(&ctx, sgc.bg)`: only the background of the
-/// selection style reaches the cells the row's text does not cover.
 fn cleared_to(style: &TmuxStyle) -> TmuxStyle {
     TmuxStyle {
         fg: Some(TmuxColour::Default),
@@ -177,22 +165,12 @@ fn cleared_to(style: &TmuxStyle) -> TmuxStyle {
     }
 }
 
-/// `style_apply` leaves a `grid_cell`, and `format_draw` layers each `#[...]`
-/// over that cell. The daemon sends the style string it expanded, and an
-/// expanded `mode-style` carries `noattr`, which says the cell has no
-/// attributes rather than that a row's own `#[dim]` may not add one: as a base
-/// cell it is the same as carrying none, so it is dropped before the row's
-/// markup layers over it.
 fn base_cell(style: &TmuxStyle) -> TmuxStyle {
     let mut style = style.clone();
     style.attributes.noattr = TmuxAttributeState::Unset;
     style
 }
 
-/// `window_clock_draw_screen`. The clock is centred in the pane and drawn from
-/// `window_clock_table` with the foreground and the background both the
-/// resolved colour, which is what turns a `#` into a block. A pane too small
-/// for the big face falls back to the plain string on one row.
 fn clock_surface(time: &str, colour: &str, rect: Rect, theme: &ThemeColours) -> ModeSurface {
     let colour = resolve(colour, theme);
     let length = u16::try_from(time.chars().count()).unwrap_or(u16::MAX);
@@ -228,9 +206,6 @@ fn clock_surface(time: &str, colour: &str, rect: Rect, theme: &ThemeColours) -> 
             for across in 0..GLYPH {
                 let x = column.saturating_add(across);
                 let y = row.saturating_add(down);
-                // `screen_write_cursormove` runs for every cell of the glyph
-                // and `screen_write_putc` only for the set ones, so the cursor
-                // lands past the last set cell of the last glyph.
                 cursor = (x, y);
                 if CLOCK_TABLE[index][usize::from(down)][usize::from(across)] {
                     cursor = (x.saturating_add(1), y);
@@ -247,11 +222,6 @@ fn clock_surface(time: &str, colour: &str, rect: Rect, theme: &ThemeColours) -> 
     }
 }
 
-/// `window_switch_draw_screen`. `window_switch_visible` leaves the pane's last
-/// row to the prompt; every row above it is one match drawn with `format_draw`,
-/// the current one over a line cleared to `mode-style`'s background and with
-/// `mode-style` as its base cell. `prompt_draw` then writes the prompt on the
-/// last row and puts the cursor at its end, with `MODE_CURSOR` set.
 fn switch_surface(
     rows: &[String],
     selected: u32,
@@ -294,7 +264,6 @@ fn switch_surface(
     }
 }
 
-/// The surface a pane's mode draws over its rect.
 pub(super) fn surface(mode: &PaneMode, rect: Rect, theme: &ThemeColours) -> ModeSurface {
     match mode {
         PaneMode::Clock { time, colour } => clock_surface(time, colour, rect, theme),
@@ -319,10 +288,6 @@ pub(super) fn surface(mode: &PaneMode, rect: Rect, theme: &ThemeColours) -> Mode
 }
 
 impl Renderer {
-    /// Draws a pane's server-owned mode over its rect. `window_pane_set_mode`
-    /// gives the mode its own screen, so the pane's own content is gone for as
-    /// long as the mode is up and the rect starts cleared to the default cell
-    /// the way `screen_write_clearscreen(&ctx, 8)` clears it.
     pub(super) fn paint_pane_mode(&mut self, mode: &PaneMode, rect: Rect, model: &Model) {
         if rect.width == 0 || rect.height == 0 {
             return;
@@ -346,15 +311,13 @@ mod tests {
     use zz_protocol::{PaneMode, ThemeColours};
     use zz_terminal::TerminalAppearance;
 
-    /// `format_draw` layers a row's `#[dim]` over `sgc`, and an expanded
-    /// `mode-style` carries `noattr`, which must not swallow it.
     #[test]
     fn a_switch_row_keeps_its_dim_runs_over_the_selection_style() {
         let mode = PaneMode::Switch {
             rows: vec!["cli #[dim]2 windows#[default] attached #[dim]win#[default]".to_owned()],
             selected: 0,
             offset: 0,
-            selection_style: "bg=themeyellow,fg=themeblack".to_owned(),
+            selection_style: "noattr,bg=themeyellow,fg=themeblack".to_owned(),
             prompt: "(search) ".to_owned(),
             prompt_style: "bg=themeyellow,fg=themeblack".to_owned(),
         };

@@ -2800,6 +2800,97 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn caller_stream_buffer_alias_groups_preserve_bytes_and_continue_after_a_spent_reader() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "stream"])
+                .status
+                .success()
+        );
+        let payload = b"a\xff\0z\n";
+        for (body, stdout, stderr, status) in [
+            ("load-buffer -b alias -", &b""[..], &b""[..], 0),
+            (
+                "load-buffer -b alias - ; source-file -",
+                &b""[..],
+                &b"Bad file descriptor: -\n"[..],
+                1,
+            ),
+            (
+                "load-buffer -b alias - ; load-buffer -b second - ; display-message -p after-error",
+                &b"after-error\n"[..],
+                &b"Bad file descriptor: -\n"[..],
+                1,
+            ),
+            (
+                "load-buffer -b alias - ; display-message -p after",
+                &b"after\n"[..],
+                &b""[..],
+                0,
+            ),
+            (
+                "display-message -p before ; load-buffer -b alias -",
+                &b"before\n"[..],
+                &b""[..],
+                0,
+            ),
+        ] {
+            assert!(
+                fixture
+                    .run(&[
+                        "set-option",
+                        "-s",
+                        "command-alias[40]",
+                        &format!("stream={body}")
+                    ])
+                    .status
+                    .success()
+            );
+            let output = fixture.run_with_stdin(&["stream"], payload);
+            assert_eq!(output.status.code(), Some(status), "{body}: {output:?}");
+            assert_eq!(output.stdout, stdout, "{body}");
+            assert_eq!(output.stderr, stderr, "{body}");
+            let saved = fixture.run(&["save-buffer", "-b", "alias", "-"]);
+            assert!(saved.status.success());
+            assert_eq!(saved.stdout, payload, "{body}");
+            assert!(saved.stderr.is_empty());
+            assert_eq!(
+                fixture
+                    .run(&["list-buffers", "-F", "#{buffer_name}"])
+                    .stdout,
+                b"alias\n"
+            );
+            assert!(
+                fixture
+                    .run(&["delete-buffer", "-b", "alias"])
+                    .status
+                    .success()
+            );
+        }
+        assert!(fixture.run(&["set-option", "-s", "command-alias[40]",
+            "stream=source-file - ; load-buffer -b second - ; display-message -p after-error",
+        ]).status.success());
+        let output = fixture.run_with_stdin(&["stream"], b"set -g @stream source-first\n");
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.stdout, b"after-error\n");
+        assert_eq!(output.stderr, b"Bad file descriptor: -\n");
+        assert_eq!(
+            fixture.run(&["show-options", "-gqv", "@stream"]).stdout,
+            b"source-first\n"
+        );
+        assert!(
+            fixture
+                .run(&["list-buffers", "-F", "#{buffer_name}"])
+                .stdout
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn live_agent_send_aliases_control_stdin_capture() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {

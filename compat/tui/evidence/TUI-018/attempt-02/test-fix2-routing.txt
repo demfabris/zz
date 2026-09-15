@@ -1,0 +1,13 @@
+   Compiling zz-daemon v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-daemon)
+   Compiling zz-config v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-config)
+   Compiling zz-tui v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz-tui)
+   Compiling zz v0.9.1 (/home/demfabris/dev/zz-box-reds/crates/zz)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 24.22s
+     Running unittests src/lib.rs (target/debug/deps/zz-e98a24e2b7ccc9b2)
+
+running 2 tests
+test tests::prepared_cli_routing_uses_canonical_identity_and_alias_match ... ok
+test tests::prepared_cli_routing_uses_the_first_stream_sink_in_alias_groups ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 641 filtered out; finished in 0.04s
+

@@ -1,0 +1,22 @@
+commit 57bf163f8dc5dbe3547ed9a039485e08f5c46eff
+Author: Fabricio Dematte <demfabris@gmail.com>
+Commit: Fabricio Dematte <demfabris@gmail.com>
+
+    Add the alias lane's final-tip evidence
+
+commit ff58de8a6f8fc194db0480deb6893ba85e6121e0
+Author: Fabricio Dematte <demfabris@gmail.com>
+Commit: Fabricio Dematte <demfabris@gmail.com>
+
+    Route alias stdin to the first command stream sink
+
+commit 87591cbb96cecce8822de48b5a1390881dc7b72f
+Author: Fabricio Dematte <demfabris@gmail.com>
+Commit: Fabricio Dematte <demfabris@gmail.com>
+
+    Preserve and spend caller streams across command alias groups
+COMMAND ['git', 'diff', '--check', '7e7cb1ee...HEAD', '--', '.', ':!compat/tui/evidence'] EXIT 0
+COMMAND ['git', 'log', '7e7cb1ee..HEAD', '--format=full'] EXIT 0
+COMMAND ['git', 'diff', '7e7cb1ee...HEAD', '--', 'crates/zz-protocol/tests/hunt_claims.rs'] EXIT 0
+TUI-018 ['sources', 'evidence_note', 'next_action']
+Added code comments: []

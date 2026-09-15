@@ -1,0 +1,45 @@
+# revision a82bd0f51359809a818d64e87a2a162f3892c4ce
+# pin tmux next-3.8 d77c9dc6aa021e4bc61f0da128c591af695e6466
+# command compat/tui-client-commands.sh --self-check
+# started 2026-09-14T20:18:14-03:00, finished 2026-09-14T20:18:25-03:00, 11s
+# exit 0
+#
+self-check: one deliberate one-sided difference per channel, plus two equivalences
+ok    self-check equivalence: the same command on both sides
+      case stdout-sabotage
+      stdout differs
+        0a1
+        > zzcc-sabotage
+      state differs
+        5a6
+        > B zzcc-sabotage 8
+ok    self-check stdout, a buffer on one side only
+      case exit-sabotage
+      exit tmux: 1  zz: 0
+      stdout differs
+        0a1
+        > SABOTAGE
+        \ No newline at end of file
+      stderr differs
+        1d0
+        < no buffer zzcc-sabotage
+      state differs
+        5a6
+        > B zzcc-sabotage 8
+ok    self-check exit and stderr, a buffer missing on one side
+      case state-sabotage
+      state differs
+        1a2
+        > S zzcc-sab 1 0
+        3a5
+        > W zzcc-sab:0 0 * 1
+        5a8
+        > P zzcc-sab:0.0 mode=0/ 80x24 ubuntu
+ok    self-check state, a session on one side only
+      case screen-sabotage
+      screen differs
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   3,2 flag=1 pane=80x24 shape=default
+ok    self-check screen, one column at one prompt
+ok    self-check equivalence: every sabotage withdrawn
+self-check complete: every sabotage was caught in its own channel and both equivalences passed

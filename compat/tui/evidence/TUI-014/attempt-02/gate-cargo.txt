@@ -1,0 +1,39 @@
+# cargo at a82bd0f51359809a818d64e87a2a162f3892c4ce, every command through the shared two-slot lock
+# systemd-run --user --scope -p MemoryMax=10G -p MemorySwapMax=4G flock ... cargo <args> --jobs 4
+#
+cargo test -p zz-protocol -p zz-mux -p zz-terminal -p zz-client -p zz-tui -- --test-threads=4
+  exit 0, 1449 passed, 0 failed, across 26 binaries
+
+HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config cargo test -p zz-daemon -- --test-threads=4 --skip russh_socks::tests
+  exit 0, 936 passed, 0 failed
+  russh_socks::tests is skipped because three of its twelve tests are RED AT origin/main
+  on this box: loopback_forwards_http_and_tcp_in_both_families_with_original_port,
+  loopback_shutdown_closes_connections_and_reconnect_rebinds_same_port and
+  ssh_inventory_prepares_page_and_api_ports_then_refreshes_without_dropping_streams, all
+  with ConnectionReset by peer. Reproduced 4/4 at this tip and 2/2 at origin/main 45481a72
+  in this same worktree, with 246G free after the disk event and no sibling cargo running.
+  crates/zz-daemon/src/russh_socks.rs and russh_socks_tests.rs are byte-identical to
+  origin/main on this branch and Cargo.lock is untouched, so nothing this lane carries
+  can reach them.
+
+cargo test -p zz -- --test-threads=4
+  exit 0, 780 passed, 0 failed, 1 ignored
+  (an earlier attempt died in the linker with 'No space left on device' while the root
+  filesystem was full; that is not a test result and this run replaces it)
+
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+  exit 0, 0 errors or warnings, finished in in 2m 51s
+
+python3 compat/tui/verify-claims.py --run TUI-006 TUI-014 --zz target/debug/zz
+  verified: TUI-001, TUI-002, TUI-003, TUI-004, TUI-005, TUI-007, TUI-009, TUI-010
+  re-measuring: TUI-006, TUI-014
+    comparing /home/demfabris/dev/zz-gate-tui9/target/debug/zz
+    running compat/tui-choosers.sh for TUI-006 ...
+      all 78 asserted comparisons identical, 0 recorded not asserted (0 for a sibling lane)
+    running compat/tui-client-commands.sh for TUI-014 ...
+      all 61 asserted comparisons identical, 37 recorded not asserted (0 for a sibling lane)
+      (active, 37 recorded, which is consistent)
+    running compat/tui-choosers.sh for TUI-014 ...
+      all 78 asserted comparisons identical, 0 recorded not asserted (0 for a sibling lane)
+  
+  every verified obligation holds up

@@ -1,3 +1,9 @@
+# revision a82bd0f51359809a818d64e87a2a162f3892c4ce
+# pin tmux next-3.8 d77c9dc6aa021e4bc61f0da128c591af695e6466
+# command compat/tui-choosers.sh
+# started 2026-09-14T20:05:59-03:00, finished 2026-09-14T20:08:12-03:00, 133s
+# exit 0
+#
 chooser and command-output differential at 80x24 (pin tmux)
 ok    baseline
 ok    session-tree-open

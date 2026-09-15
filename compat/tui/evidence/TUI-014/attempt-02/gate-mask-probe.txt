@@ -1,0 +1,29 @@
+# revision a82bd0f51359809a818d64e87a2a162f3892c4ce
+# the reviewer's two mask probes, re-run against the fixed masks
+# the mask bodies are extracted verbatim from compat/tui-choosers.sh
+#
+=== client_info_mask: the label column shifted four cells ===
+pin -> 'Client Name      │ /dev/CLIENT (PID NNNN)'
+zz  -> 'Client Name  │ /dev/CLIENT (PID NNNN)'
+MASK IDENTICAL: False
+
+=== client_info_mask: the box fill after the token still collapses ===
+pin -> '│ Client Name │ /dev/CLIENT (PID NNNN) │'
+zz  -> '│ Client Name │ /dev/CLIENT (PID NNNN) │'
+MASK IDENTICAL: True
+
+=== client_row_mask: an ordinary client row followed by a box edge ===
+pin -> '(0) /dev/CLIENT: 3 windows (attached) │ preview'
+zz  -> '(0) /dev/CLIENT: 9 windows (detached) │ preview'
+MASK IDENTICAL: False
+
+=== client_row_mask: the tree title row the help box cuts (the measured row) ===
+pin -> '┌ /dev/CLIENT (sort: name)│          N │ Repeat search backward   │─┐'
+zz  -> '┌ /dev/CLIENT (sort: name)│          N │ Repeat search backward   │─┐'
+MASK IDENTICAL: True (must be True: two names of different widths)
+
+=== client_row_mask: the same title row with the sort label changed ===
+pin  -> '┌ /dev/CLIENT (sort: name)│          N │ Repeat search backward   │─┐'
+zz'  -> '┌ /dev/CLIENT (sort: size)│          N │ Repeat search backward   │─┐'
+MASK IDENTICAL: False (must be False: the sabotage inside the cut span)
+PROBE_EXIT=0

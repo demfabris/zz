@@ -1,0 +1,47 @@
+gate environment, cycle 9 choosers lane, captured 2026-09-14T21:29:53-03:00
+
+Linux ubuntu 7.0.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 04:26:38 UTC 2026 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 26.04.1 LTS" NAME="Ubuntu" 
+cores: 8   ram: 30G + 23G swap/zram
+bash: 5.3.9(1)-release
+locale: LANG=en_US.UTF-8 LC_TIME=unset (compat/status-row.sh was run under LC_ALL=C LC_TIME=C)
+filesystem: btrfs
+python: Python 3.14.4
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+
+gate worktree: /home/demfabris/dev/zz-gate-tui9
+revision: a82bd0f51359809a818d64e87a2a162f3892c4ce
+branch: gate-choosers, campaign/tui-choosers-3 rebased onto origin/main 45481a72
+worktree state: 0 modified path(s) at capture time
+merge-base with origin/main before the rebase: 879b68fcbba93d04a56926c4719108e553fdf910
+
+zz binary: /home/demfabris/dev/zz-gate-tui9/target/debug/zz
+  built in this worktree with its own target (no CARGO_TARGET_DIR), cargo build -p zz --jobs 4
+  sha256 31a6ed0bd039145ebd4ade5d43d93cfd865e9231a3fc5358ef63a89bb20ada07
+pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+  commit d77c9dc6aa021e4bc61f0da128c591af695e6466
+  version tmux next-3.8
+  sha256 fe82462af83f515034c25bb8576eef8a11a0ad3a5c1029af70b0973b028aed5d
+
+A cargo debug build of zz is not bit-reproducible, so the hash identifies the
+artifact and cannot attest it; the attestation is the revision above plus a
+clean worktree, and the provenance is reproduction: this gate re-ran every
+proof itself rather than trusting the lane's or the reviewer's numbers.
+
+Every cargo command went through the shared two-slot lock with MemoryMax=10G
+and MemorySwapMax=4G, --jobs 4 and --test-threads=4, because three sibling
+lanes were working on this 8-core box at the same time. zz-daemon tests ran
+under HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config so the
+box's real ~/.tmux.conf and ~/.config/zz/mux.conf were never read; every
+server the fixtures started was a throwaway on a short /tmp socket under the
+fixtures' own scrubbed homes, and every probe used -f /dev/null.
+
+Box conditions worth naming, both outside this lane:
+  - the root filesystem filled to 100% around 18:35 local and was freed by the
+    coordinator; one cargo test -p zz link died with "No space left on device"
+    and was re-run to completion afterwards. Nothing else in this gate's record
+    comes from that window.
+  - the shared pin under /home/demfabris/dev/zz/compat/.cache was rebuilt by
+    another lane at 19:42 local, which failed one corpus chunk with
+    "tmux binary not found" and one with a provenance-stamp mismatch. Both
+    chunks were re-run against the settled pin and are green.

@@ -1,0 +1,74 @@
+# every fixture in the tree, run at a82bd0f51359809a818d64e87a2a162f3892c4ce against the pin
+# each line: exit code, then the fixture's own last line
+#
+exit 0  compat/tui-caps.sh
+          all 366 asserted rows identical
+exit 0  compat/tui-caps.sh --self-check
+          self-check: every sabotage caught in its own channel
+exit 0  compat/tui-choosers.sh (run 1)
+          all 78 asserted comparisons identical, 0 recorded not asserted (0 for a sibling lane)
+exit 0  compat/tui-choosers.sh (run 2)
+          all 78 asserted comparisons identical, 0 recorded not asserted (0 for a sibling lane)
+exit 0  compat/tui-choosers.sh (run 3)
+          all 78 asserted comparisons identical, 0 recorded not asserted (0 for a sibling lane)
+exit 1  compat/tui-choosers.sh (discarded flake, kept)
+          1 of 78 asserted comparisons differ, 0 recorded (0 for a sibling lane)
+exit 0  compat/tui-choosers.sh --self-check
+          self-check complete: every sabotage was caught and both equivalences passed
+exit 0  compat/tui-client-commands.sh
+          all 61 asserted comparisons identical, 37 recorded not asserted (0 for a sibling lane)
+exit 0  compat/tui-client-commands.sh --self-check
+          self-check complete: every sabotage was caught in its own channel and both equivalences passed
+exit 0  compat/tui-copy-mode.sh
+          147 of those cases assert at least one channel; 0 assert none and are recorded in full
+exit 0  compat/tui-copy-mode.sh --self-check
+          self-check complete: every sabotage was caught in its own channel and every equivalence passed
+exit 0  compat/tui-indicators.sh
+          all 23 asserted comparisons identical, 0 recorded not asserted
+exit 0  compat/tui-indicators.sh --self-check (2nd try)
+          self-check complete: every sabotage was caught and the equivalence passed
+exit 0  compat/tui-launch-diff.sh
+          all 30 comparisons agree where they assert, 3 recorded not asserted
+exit 0  compat/tui-launch-diff.sh --self-check
+          self-check complete: every sabotage was caught in its own channel and the equivalence passed
+exit 0  compat/tui-mouse.sh
+          all 26 asserted checks identical
+exit 0  compat/tui-mouse.sh --self-check
+          self-check: every sabotage caught in its own channel
+exit 0  compat/tui-output-backpressure.sh
+          all 9 assertions passed, 3 recorded
+exit 0  compat/tui-output-backpressure.sh --self-check
+          self-check complete: every sabotage was caught in its own assertion
+exit 0  compat/tui-overlays.sh
+          all 48 asserted comparisons identical, 0 recorded not asserted
+exit 2  compat/tui-overlays.sh --self-check  <-- RED, 5 tries
+          error: equal settled on the zz screen did not settle within 10 seconds
+exit 2  compat/tui-overlays.sh --self-check AT origin/main  <-- RED the same way
+          error: equal settled on the zz screen did not settle within 10 seconds
+exit 0  compat/tui-pane-geometry.sh (no --self-check)
+          all 6 asserted measurements identical
+exit 0  compat/tui-screen-diff.sh
+          all 147 asserted checkpoints identical, 6 recorded not asserted
+exit 0  compat/tui-screen-diff.sh --self-check
+          self-check complete: every sabotage was caught in its own channel and every equivalence passed
+exit 0  compat/tui-stock-keys.sh
+          all 50 cases agree on every channel they assert, 9 recorded a difference elsewhere
+exit 0  compat/tui-stock-keys.sh --self-check
+          self-check complete: every sabotage was caught in its own channel and every equivalence passed
+exit 0  compat/tui-superset.sh
+          all 190 asserted cases hold, 0 recorded not asserted
+exit 0  compat/tui-superset.sh --self-check
+          self-check complete: every fault was reported by the channel that owns it
+exit 0  compat/status-row.sh (LC_ALL=C LC_TIME=C)
+          all 14 comparisons identical, none recorded
+exit 1  compat/attached-client.sh  <-- RED
+              [2026-09-14T23:46:36Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=n table=copy-mode-vi decision=Commands([CommandInvocation {
+exit 1  compat/attached-client.sh (second try)  <-- RED
+              [2026-09-14T23:51:05Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=n table=copy-mode-vi decision=Commands([CommandInvocation {
+exit 1  compat/attached-client.sh AT origin/main  <-- RED the same way
+              [2026-09-15T00:10:47Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=n table=copy-mode-vi decision=Commands([CommandInvocation {
+
+The two reds are identical at origin/main on this box and are recorded as
+this box's baseline, not as this lane's. See gate-attached-client-origin-main.txt
+and gate-overlays-self-check-origin-main.txt, both captured from a build of
+origin/main 45481a72 in this same worktree.

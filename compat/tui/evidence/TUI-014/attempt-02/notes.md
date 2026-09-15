@@ -78,3 +78,50 @@ commands.native-client-tools closed here.
 - client-commands-self-check.txt - `--self-check`, exit 0.
 - copy-mode.txt, screen-diff.txt, attached-client.txt, corpus.txt, cargo-crates.txt,
   cargo-zz.txt, clippy.txt - the shared proof set, listed in TUI-006/attempt-03/notes.md.
+
+## Gate addendum, 2026-09-14 (cycle 9 choosers gate, revision a82bd0f51359809a818d64e87a2a162f3892c4ce)
+
+TUI-014 stays **active**: clause 1 asserts whole, clauses 2 and 3 are untouched.
+What changed here is the evidence under clause 1, not its scope.
+
+The four pre-mask chooser files this directory carried (choosers-run-1/2/3/4.txt,
+all one md5, captured before 65d98e0a edited compat/tui-choosers.sh) are replaced
+by the gate's own runs at a82bd0f51359809a818d64e87a2a162f3892c4ce:
+
+- **choosers-run-1.txt, -2.txt, -3.txt** - three runs, each
+  `all 78 asserted comparisons identical, 0 recorded not asserted (0 for a sibling lane)`
+  at exit 0, each stamped with the revision, the pin, the command, the wall clock
+  and the exit code.
+- **choosers-run-0-flake-zoom-tree-open.txt** - the one red of the four runs
+  taken, kept rather than dropped: a blank zz capture on `zoom-tree-open` with
+  both cursors agreeing.
+- **choosers-self-check.txt** - exit 0, thirteen ok lines, including the
+  `title cut` sabotage this gate added.
+
+**Both masks clause 1 rides on were defective and are fixed at this gate.**
+`client_info_mask` collapsed every run of two or more spaces on any row it
+touched, so a client info view whose label column sat four cells off masked
+identical; it now collapses only the fill that follows one of its own
+substituted tokens. `client_row_mask` replaced everything between the client
+name and the next box edge with one token on every row carrying the name; it now
+truncates only the tree title row another box cuts, and only to a fixed 13
+columns, so the sort label inside that span is still compared. The zz-side
+info-view sabotage runs under `client_info_mask` now, which is the mask the
+client-info-view checkpoints assert under - clause 1's evidence has a sabotage of
+its own for the first time. **gate-mask-probe.txt** is the reviewer's own probe
+re-run verbatim against both fixed masks.
+
+- **gate-client-commands.txt / gate-client-commands-self-check.txt** -
+  compat/tui-client-commands.sh re-run by the gate at this revision:
+  `all 61 asserted comparisons identical, 37 recorded not asserted (0 for a sibling lane)`,
+  exit 0, and the self-check green. Unchanged from what the lane recorded, which
+  is the point: this attempt still adds nothing to clause 3.
+- **gate-fixtures.txt, gate-corpus.txt, gate-cargo.txt, gate-environment.txt** -
+  the gate's full proof set, shared with TUI-006/attempt-03.
+- **review.md** - the reviewer's verdict verbatim, plus what this gate verified
+  of clause 1 and what it did not, and the group-attribution correction clause 2's
+  dispatch needs (`command:switch-mode` is in `clients.interactive-refresh` and
+  `server-access` in a third group, not in `commands.native-client-tools`).
+
+The lane's own client-commands-run-1/2/3.txt, client-commands-run-2-server-exit.txt
+and client-commands-self-check.txt are left exactly as the worker took them.

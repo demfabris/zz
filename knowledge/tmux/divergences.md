@@ -129,11 +129,9 @@ never spawns a lock program over GUI surfaces (a locked GPUI window running
 `lock -np` is meaningless; revisit with the TUI client), and `lock-after-time`
 drives no timer. **silent**, deliberate.
 
-Still unimplemented and skipped from config:
-
-| Command | What it does in tmux |
-| --- | --- |
-| `server-access` | Per-user ACLs for a shared server socket. |
+Still unimplemented and skipped from config: nothing in this group. `server-access`
+left it on 2026-09-15 - zz answers the pin's list, lookups, orderings and refusals,
+and refuses only the one form that would admit a second identity.
 
 ## Superseded by native GUI chrome (4)
 
@@ -1282,7 +1280,11 @@ nobody intends to drain. `accepted` plus `native` means zz's own surface serves 
   replace all five at once, so this is the reversible reading rather than an exclusion.
 - `protocol.socket-acl` (never): `server-access` hands other Unix users a shared server socket,
   while zz's daemon binds at 0600, keeps no peer identity, and holds one account's PTYs, ssh
-  sessions, browser profiles, and agent sessions.
+  sessions, browser profiles, and agent sessions. The command itself is answered since
+  2026-09-15 - `-l` lists the socket's owner, and every lookup, ordering and refusal
+  `cmd_server_access_exec` makes is reproduced - so only `semantic:multi-user-socket-acl`
+  is still open: `-a`, `-r` and `-w` naming a second identity are refused where the pin
+  stores an entry.
 
 The fifteenth group, `display-panes.command-template`, is deliberately not settled. Its selection
 template is ordinary undone work rather than a model difference: the chooser template execution path

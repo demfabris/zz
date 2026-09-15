@@ -1,0 +1,18 @@
+tip=8dc210d953480714b42a669f6643998276b86caf
+command=cargo test -p zz-mux --test hunt_claims copy_mode_ 
+   Compiling zz-terminal v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-terminal)
+   Compiling zz-protocol v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-protocol)
+   Compiling zz-mux v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-mux)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.75s
+     Running tests/hunt_claims.rs (target/debug/deps/hunt_claims-66024d1507037273)
+
+running 4 tests
+test copy_mode_combines_dash_u_and_dash_d_like_tmux ... ok
+test copy_mode_stock_flags_preserve_tmux_branch_order_and_scroll_exit ... ok
+test copy_mode_composes_hide_position_with_scroll_exit ... ok
+test send_keys_dash_n_without_keys_arms_the_copy_mode_repeat ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 56 filtered out; finished in 0.01s
+
+
+exit=0 elapsed=8s

@@ -632,7 +632,7 @@ case_owner() {
   clock-mode-open | customize-mode-open | switch-mode | suspend-client | server-access-bare | server-access-user)
     printf 'TUI-014'
     ;;
-  switch-mode-windows)
+  switch-mode-windows | switch-mode-duplicate-windows | switch-mode-kill | switch-mode-kill-exit | switch-mode-zoom | copy-over-clock | clock-over-copy)
     printf 'gap:clients.interactive-refresh'
     ;;
   server-access-add)
@@ -1029,6 +1029,21 @@ client_tool_cases() {
   CASE_NEEDLE_MODE=1
   case_run switch-mode same '' -- switch-mode -t PANE
   restore_case switch-mode-closed
+  case_run switch-mode-format same '' -- switch-mode -F 'REVIEW-#{session_name}' -t PANE
+  restore_case switch-mode-format-closed
+  case_run switch-mode-template same '' -- switch-mode -t PANE 'set-option -g @review-command "%%"'
+  for side in tmux zz; do
+    tmux_outer_command send-keys -t "=$OUTER_SESSION:$side" Enter
+  done
+  case_run switch-mode-template-result same '' -- show-options -gv @review-command
+  run_on_both set-option -gu @review-command
+  run_on_both new-session -d -s zzcc-k -x 80 -y 24 "$INNER_SHELL"
+  case_run switch-mode-kill record 'TUI-014: -k kills the source pane when the pin mode exits; zz rejects this unbuilt lifecycle variant' -- switch-mode -k -t '=zzcc-k:'
+  case_run switch-mode-kill-exit record 'TUI-014: copy-mode -q closes the pin switch and kills zzcc-k; zz rejected -k and retains that session' -- copy-mode -q -t '=zzcc-k:'
+  zz_command kill-session -t '=zzcc-k' >/dev/null
+  restore_case switch-mode-kill-restored
+  case_run switch-mode-zoom record 'TUI-014: -Z opens a zoom-restoring switch mode on the pin; zz rejects this unbuilt lifecycle variant' -- switch-mode -Z -t PANE
+  restore_case switch-mode-zoom-restored
   CASE_NEEDLE_MODE=1
   case_run switch-mode-windows record "$SWITCH_MODE_WINDOW_ROWS" -- switch-mode -w -t PANE
   restore_case switch-mode-windows-closed

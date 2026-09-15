@@ -19429,7 +19429,7 @@ impl Shared {
     fn pane_mode_key(
         self: &Arc<Self>,
         client: ClientId,
-        kind: ClientKind,
+        _kind: ClientKind,
         context: &mut ExecutionContext,
         pane: PaneId,
         input: &zz_terminal::KeyInput,
@@ -19469,14 +19469,15 @@ impl Shared {
             }
         }
         self.publish_mux_snapshots();
-        if let Some(target) = activate {
-            self.execute_gesture(
-                client,
-                kind,
-                context,
-                "switch_mode_activate",
-                &CommandInvocation::new("switch-client", ["-Z", "-t", target.as_str()]),
-            )?;
+        if let Some((target, selected)) = activate {
+            let template = match &mode {
+                PaneModeRequest::Switch { template, .. } => template.as_deref(),
+                PaneModeRequest::Clock => None,
+            }.unwrap_or("switch-client -Zt '%%'");
+            let target_client = current_format_client(&self.inner.lock(), client).unwrap_or(client);
+            let mut selected_context = context.clone();
+            selected_context.retarget(&selected);
+            self.execute_chooser_command(target_client, &mut selected_context, template, &target, "switch-mode");
         }
         Ok(true)
     }
@@ -35925,8 +35926,8 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                             colour,
                         }
                     }
-                    PaneModeRequest::Switch { windows } => PaneMode::Switch {
-                        rows: chooser_presentation::switch_rows(inner, *windows),
+                    PaneModeRequest::Switch { windows, format, .. } => PaneMode::Switch {
+                        rows: chooser_presentation::switch_rows(inner, *windows, format.as_deref()),
                         selected: 0,
                         offset: 0,
                         selection_style: chooser_presentation::mode_style_for_pane(inner, *pane),
@@ -38551,10 +38552,10 @@ fn buffer_format_facts(buffer: &PasteBuffer) -> BufferFormatFacts {
 /// `=<session>:` for a session row and `=<session>:<index>.` for a window one.
 /// The current row is the first, because the mode's own movement keys are the
 /// residue this lane records rather than closes.
-fn switch_mode_target(inner: &ServerState, pane: PaneId) -> Option<String> {
+fn switch_mode_target(inner: &ServerState, pane: PaneId) -> Option<(String, ExecutionContext)> {
     let windows = matches!(
         inner.pane_modes.get(&pane).and_then(|modes| modes.last()),
-        Some(PaneModeRequest::Switch { windows: true })
+        Some(PaneModeRequest::Switch { windows: true, .. })
     );
     let state = &inner.engine.state;
     if windows {
@@ -38564,9 +38565,9 @@ fn switch_mode_target(inner: &ServerState, pane: PaneId) -> Option<String> {
             .map(|(window, entry)| (entry.name.clone(), *window, entry.session, entry.index))
             .collect::<Vec<_>>();
         entries.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.0.cmp(&right.1.0)));
-        let (_, _, session, index) = entries.into_iter().next()?;
+        let (_, window, session, index) = entries.into_iter().next()?;
         let name = state.sessions.get(&session)?.name.clone();
-        return Some(format!("={name}:{index}."));
+        return Some((format!("={name}:{index}."), ExecutionContext::new(Some(session), Some(window), state.windows.get(&window).map(|entry| entry.active_pane))));
     }
     let mut names = state
         .sessions
@@ -38574,7 +38575,10 @@ fn switch_mode_target(inner: &ServerState, pane: PaneId) -> Option<String> {
         .map(|entry| entry.name.clone())
         .collect::<Vec<_>>();
     names.sort();
-    names.into_iter().next().map(|name| format!("={name}:"))
+    let name = names.into_iter().next()?;
+    let session = state.sessions.values().find(|entry| entry.name == name)?;
+    let window = session.active_window;
+    Some((format!("={name}:"), ExecutionContext::new(Some(session.id), Some(window), state.windows.get(&window).map(|entry| entry.active_pane))))
 }
 
 /// Whether any pane still holds `window_clock_mode`, which is what keeps the

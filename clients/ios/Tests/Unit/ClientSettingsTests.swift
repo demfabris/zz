@@ -158,6 +158,42 @@ final class ClientSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testMobilePaddingClampsImportedValuesAndKeepsOpacityPrecision() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let settings = ZZClientSettings(configDirectory: directory)
+        let shared = try XCTUnwrap(settings.shared)
+        XCTAssertTrue(shared.action("save-terminal", [
+            "source": "window-padding-x = 22\nwindow-padding-y = 64\nbackground-opacity = 0.53\n",
+        ]))
+        let paneOpacity = try XCTUnwrap(shared.snapshot?.settings.first { $0.key == "pane-background-opacity" })
+        shared.set(paneOpacity, .number(1))
+        XCTAssertEqual(settings.terminalPresentation.paddingX, 16)
+        XCTAssertEqual(settings.terminalPresentation.paddingY, 16)
+        XCTAssertEqual(settings.terminalPresentation.backgroundOpacity, 0.53, accuracy: 0.001)
+        let opacity = try XCTUnwrap(shared.snapshot?.settings.first { $0.key == "background-opacity" })
+        shared.set(opacity, .number(0.54))
+        XCTAssertNil(shared.error)
+        XCTAssertEqual(settings.terminalPresentation.backgroundOpacity, 0.54, accuracy: 0.001)
+        XCTAssertTrue(try String(contentsOf: directory.appending(path: "config"), encoding: .utf8).contains("0.54"))
+    }
+
+    @MainActor
+    func testMobilePaneRadiusUsesThreeSizes() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let settings = ZZClientSettings(configDirectory: directory)
+        let shared = try XCTUnwrap(settings.shared)
+        let radius = try XCTUnwrap(shared.snapshot?.settings.first { $0.key == "pane-corner-radius" })
+        for value in ZZClientSettings.paneCornerRadii {
+            shared.set(radius, .number(value))
+            XCTAssertEqual(settings.paneCornerRadius, value)
+        }
+        shared.set(radius, .number(16))
+        XCTAssertEqual(settings.paneCornerRadius, 13.5)
+    }
+
+    @MainActor
     func testExplicitCursorPolicyOverridesMigratedPreference() {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

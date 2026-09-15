@@ -202,6 +202,8 @@ extension EnvironmentValues {
 final class ZZClientSettings {
     static let terminalFontSizeRange = 9...23
     static let defaultTerminalFontSize = 13
+    static let terminalPaddingRange = 0.0...16.0
+    static let paneCornerRadii = [0.0, 13.5, 24.0]
 
     var appearance: ZZAppAppearance {
         didSet {
@@ -282,6 +284,10 @@ final class ZZClientSettings {
     var chromeContrast: Double { shared?.number("chrome-contrast", fallback: 1) ?? 1 }
     var widgetCornerRadius: CGFloat { CGFloat(shared?.number("widget-corner-radius", fallback: 8) ?? 8) }
     var shadowOpacity: Double { min(1, max(0, (shared?.number("shadow-strength", fallback: 1) ?? 1) * 0.2)) }
+    var paneCornerRadius: CGFloat {
+        let saved = shared?.number("pane-corner-radius", fallback: 13.5) ?? 13.5
+        return CGFloat(Self.paneCornerRadii.min { abs($0 - saved) < abs($1 - saved) } ?? 13.5)
+    }
 
     var interfaceFont: Font {
         let family = shared?.text("ui-font-family") ?? ""
@@ -303,8 +309,8 @@ final class ZZClientSettings {
             pointSize: CGFloat(terminalFontSize),
             cursorBlinking: cursorBlinking,
             backgroundOpacity: (shared?.mobileAppearance?.background_opacity ?? 1) * (shared?.number("pane-background-opacity", fallback: 1) ?? 1),
-            paddingX: CGFloat(shared?.mobileAppearance?.padding.dropFirst().first ?? 0),
-            paddingY: CGFloat(shared?.mobileAppearance?.padding.first ?? 0),
+            paddingX: CGFloat(min(Self.terminalPaddingRange.upperBound, max(0, shared?.mobileAppearance?.padding.dropFirst().first ?? 0))),
+            paddingY: CGFloat(min(Self.terminalPaddingRange.upperBound, max(0, shared?.mobileAppearance?.padding.first ?? 0))),
             cursorStyle: shared?.mobileAppearance?.cursor_style,
             blinkInterval: Double(shared?.mobileAppearance?.cursor_blink_ms ?? 600) / 1_000,
             fontWeight: Int(shared?.mobileAppearance?.font_weight ?? 400),

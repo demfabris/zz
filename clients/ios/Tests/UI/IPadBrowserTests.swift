@@ -18,9 +18,7 @@ final class IPadBrowserTests: XCTestCase {
         let closePanorama = app.buttons["ipad-panorama-close"]
         XCTAssertTrue(closePanorama.waitForExistence(timeout: 20))
         closePanorama.tap()
-        if !app.buttons["ipad-new-pane-menu"].waitForExistence(timeout: 2) {
-            app.navigationBars.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'sidebar'")).firstMatch.tap()
-        }
+        XCTAssertTrue(app.buttons["ipad-new-pane-menu"].waitForExistence(timeout: 5))
         app.buttons["ipad-new-pane-menu"].tap()
         app.buttons["Choose Pane Type"].tap()
         let choice = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "pane-kind-2-")).firstMatch

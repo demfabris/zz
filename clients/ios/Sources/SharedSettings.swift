@@ -25,7 +25,7 @@ enum ZZSettingValue: Codable, Equatable {
     var text: String {
         switch self {
         case .string(let text): text
-        case .number(let number): number.formatted(.number.grouping(.never))
+        case .number(let number): Int64(exactly: number).map(String.init) ?? String(number)
         case .boolean(let bool): bool ? "true" : "false"
         case .null: ""
         }

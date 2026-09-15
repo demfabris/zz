@@ -1,8 +1,8 @@
 ---
 type: Design Plan
 title: Native Apple client
-description: Adaptive native iPhone and iPad client over zz-client-ffi, with device-owned settings, pane controls, Agent conversations, and WebKit browser panes through SSH with automatic localhost service forwarding.
-status: Native settings and tmux controls verified 2026-09-12; WebKit browser panes with original localhost origins verified on physical iPad 2026-09-13; Editor panes remain future work
+description: Adaptive native iPhone and iPad client over zz-client-ffi, with floating iPad controls, a settings sidebar, Agent conversations, and WebKit browser panes through SSH with automatic localhost service forwarding.
+status: Floating iPad controls and annotated settings changes implemented 2026-09-14 with simulator verification and a connected physical iPad launch; WebKit localhost forwarding verified on physical iPad 2026-09-13; Editor panes remain future work
 tags:
 - ios
 - iphone
@@ -12,7 +12,7 @@ tags:
 - uikit
 - client
 - ffi
-timestamp: 2026-09-13T00:00:00-03:00
+timestamp: 2026-09-14T00:00:00-03:00
 ---
 
 # Overview
@@ -23,9 +23,9 @@ and UIKit owns the terminal view and input bridge. The deleted `crates/zz-ios` a
 backend remains in the workspace.
 
 Compact widths keep the phone interaction: one session at a time, uniform pane cards, one pane
-fullscreen, and a horizontally scrollable session selector. Regular widths use an adaptive
-`NavigationSplitView`: the native sidebar presents the full session, window, and pane tree while the
-detail column mounts every visible pane at the daemon's split ratios. Both modes share one bundle,
+fullscreen, and a horizontally scrollable session selector. Regular widths use a
+workspace with a collapsible session, window, and pane tree beside live panes at the daemon's split
+ratios. A floating pill carries navigation and workspace actions. Both modes share one bundle,
 store, FFI connection, terminal renderer, and input owner.
 
 # Experience
@@ -46,11 +46,22 @@ Authentication tries the app identity first, then drives the server's keyboard-i
 batches and password method. Password, passphrase, verification-code, and other OTP prompts keep the
 server's own wording and echo policy. Cancelling any prompt stops that connection attempt.
 
+Native prompt callbacks run on Tokio's blocking pool so they cannot stall the SSH driver. The
+one-minute establishment budget counts network work and pauses during host trust, password, and
+keyboard-interactive input; each answer resumes the remaining budget. SSH server login deadlines
+still apply. Transport errors retain the underlying disconnect reason when russh provides it.
+
 After authentication, the client probes the remote socket, starts the remote daemon when necessary,
 then carries the normal zz protocol through `zz proxy`. The host must have a compatible `zz` in its
 login-shell `PATH`, `$HOME/.local/bin`, `/opt/homebrew/bin`, or `/usr/local/bin`; the remote scripts
 append those standard install locations before lookup. SSH establishment runs away from the main
 actor, so the native connection screen remains responsive during DNS, authentication, and startup.
+
+Dev builds use the host's `zz-dev` executable. On macOS, with no `XDG_RUNTIME_DIR`, their probe
+prefers an existing `/tmp/zz-dev-$USER/default.sock` before the SSH shell's temporary-directory
+default. This avoids attaching a second dev daemon when the desktop uses `/private/tmp` but SSH
+receives Darwin's user temp directory. Explicit socket paths in SSH URLs still win; production and
+Linux retain their existing selection.
 
 An established connection that drops retains the immutable terminal frames and selected session and
 pane while a quiet reconnect banner counts through a 1, 2, 4, 8, 16-second retry ladder that falls
@@ -96,9 +107,9 @@ expose `import-tmux-config [path]` to copy a donor into the host's `zz/mux.conf`
 
 ## iPad workspace
 
-The regular-width workspace uses system navigation and toolbar surfaces so the current iPad design,
-sidebar material, resizing behavior, and Liquid Glass appearance come from SwiftUI rather than a
-copy of the desktop chrome. The sidebar expands sessions into all of their windows and panes. Tapping
+The regular-width workspace has no titlebar. `IPadWorkspace` places the session tree beside
+`IPadPaneWorkspace` and provides explicit sidebar visibility controls. The sidebar expands sessions
+into all of their windows and panes. Tapping
 a pane attaches its session when necessary, selects its window and pane through daemon commands, and
 waits for the next reduced snapshot as confirmation.
 
@@ -109,14 +120,13 @@ expand animation. Pane labels sit next to their icons and do not use state dots.
 window or pane row offers Close Window or Close Pane through a context menu, each confirmed by a
 destructive alert because closing stops the running processes. Only the selected pane
 receives the Playgrounds-matched full-width source-list capsule; the attached session's active pane
-is the visual fallback before an explicit pane selection exists. The balanced split-view style keeps
-the material sidebar beside the workspace at regular widths while retaining the native visibility
-control.
+is the visual fallback before an explicit pane selection exists. The tree stays beside the workspace
+at regular widths. Its header contains a neutral Hide Sidebar button. New Session stays in More.
 
-The detail header appears only when the sidebar is retracted. With the sidebar open, panes use
-the header's space and the sidebar retains its native visibility control. Retracting the sidebar
-restores the session menu, window picker, and header buttons. Panorama keeps its header hidden
-and restores it on exit only when the sidebar remains retracted.
+With the sidebar open, a floating pill below the tree provides Panorama, New Pane, Settings, and More,
+with connection status above it. Retracting the sidebar moves the pill to the bottom center of the
+workspace and adds Show Sidebar, the session menu, window tabs, and New Window. The system status
+area remains visible above the panes. Both modes keep their controls available during Panorama.
 
 The C ABI projects every window and pane from `MuxSnapshot` and returns each visible pane's normalized
 rectangle. The rectangle solver lives in `zz-client`; Swift multiplies those values by the detail
@@ -133,46 +143,63 @@ leaves the other panes live but non-keyboard-owning. When a prefix binding chang
 active pane, the next snapshot transfers that existing selection and input ownership. Panorama's
 empty selection remains unchanged. Removing the selected pane transfers input to the replacement
 active pane chosen by the daemon.
-Standard toolbars provide New Session, New Pane, reconnect, and host actions. The iPad New Pane menu
-offers Terminal, Agent, and Choose Pane Type. `PaneKindPicker` materializes an existing picker with
+The floating pill provides New Pane, Settings, reconnect, and host actions. Its More menu also
+provides New Session in both sidebar modes. The New Pane menu offers Terminal, Browser, Agent,
+and Choose Pane Type. `PaneKindPicker` materializes an existing picker with
 `select-pane-kind -t %pane terminal|agent`; the daemon preserves the pane ID and inherited working
 directory. Agent creation requires `experimental-agent-pane` on the host. Browser panes use native
 WebKit; Editor panes retain desktop-only placeholders.
 
-Each live iPad tile has a title button and a 44-point actions menu. The menu sends `split-picker -h`
-or `-v`, `resize-pane -Z`, the five standard `select-layout` presets, and directional `resize-pane`
+Each live iPad tile has a flat header with a muted title, then Split Down, Split Right, Pane Actions,
+and Close. Controls retain 44-point touch targets and use the desktop's dimmed icon treatment. Narrow
+tiles keep Pane Actions and Close, with both split actions available in the menu. The menu sends
+`split-picker -h` or `-v`, `resize-pane -Z`, the five standard `select-layout` presets, and directional `resize-pane`
 adjustments. The resize sheet lets the user choose a 1 through 50 cell step and watch the workspace
 change beneath it. Swift forwards intent and renders the next normalized layout; Rust owns split
 geometry. Close Pane requires confirmation. Terminal actions also expose Prefix, the daemon's key
 bindings, Copy Mode, and Paste Buffer. These controls live in
 `clients/ios/Sources/PaneControls.swift` (`PaneActionsMenu`, `PaneResizeSheet`).
 
-The principal toolbar item uses a native session menu and a segmented window picker around the
-active window. Device preferences control session visibility, bell and Agent indicators, alignment,
-the host label, an Agent pane menu, and a 12-hour, 24-hour, or date-and-time clock. Swift derives pane
-and window state from snapshots and the host from the current connection. It does not expand custom
+Terminal headers and padding use the current frame's background color and the same combined opacity
+as the terminal grid. The padding fill excludes the grid bounds to avoid applying transparency
+twice. Background observation stays local to each pane.
+
+The collapsed-sidebar pill uses a session menu and scrollable window capsules around the active
+window, plus an overflow menu for other windows. Device preferences control session visibility, bell
+and Agent indicators, the optional host label, and an Agent pane menu. Swift derives pane and window
+state from snapshots and the host from the current connection. It does not expand custom
 `status-left` or `status-right` formats. Navigation uses the attachment and exact-pane paths.
 
 ### Client settings
 
-`ClientSettingsView` presents Appearance, Terminal, Panes, Status Bar, and Multiplexer sections. On
-regular-width iPad, a sidebar selects the page inside the settings sheet; compact widths use a
-navigation list. The sheet stays outside the workspace size-class branch. A regular-width host
-requests a fitted 900 by 700 point sheet so the settings sidebar has room to remain visible.
+Settings presents Appearance, Terminal, Panes, Status Bar, and Multiplexer sections. At regular
+widths, `ClientSettingsSidebar` overlays the right edge without resizing or replacing the live panes.
+A capsule of five icon buttons selects sections, and Done closes the panel. Each section retains native
+forms and detail navigation; switching sections returns to that section's root. Appearance includes
+a terminal preview. At compact widths, `ClientSettingsView` keeps the navigation-list sheet.
+`ContentView` owns presentation outside the workspace size-class branch and releases terminal input
+when opening settings.
 
 `ZZClientSettings` retains native appearance, terminal font and base size, cursor blinking, and the
 home-indicator option in `UserDefaults`. `ZZSharedSettings` uses the shared Rust settings model with
 Application Support `zz/config` and `zz/mux.conf`. The device has the same bundled terminal theme
-catalog as desktop, separate light and dark theme choices, chrome presets and custom colors, an
-interface font, terminal palette and cursor controls, padding, and font weight. Chrome contrast
-uses native SwiftUI contrast on chrome groups without filtering terminal cells. Widget corner radius
-and shadow strength affect picker cards, pane action buttons, and custom shortcut controls; native
-system menus keep their platform treatment. Font choices include
+catalog as desktop, separate light and dark theme choices, custom chrome colors, terminal palette
+and cursor controls, padding, and font weight. Appearance uses capsule choices for System, Dark,
+and Light, followed by animations and background, foreground, and accent colors. Desktop chrome
+presets, interface font, contrast, widget radius, and shadow controls are omitted from the mobile
+form. Font choices include
 System Mono, Menlo, Courier New, and bundled Fira Code, Geist Mono, and 0xProto. Per-pane pinch zoom
 remains an in-memory offset from the base font size.
 
-The pane settings control gaps, margins, corner radius, border width, background opacity, and inactive
-pane dimming. Status settings control the native toolbar presentation described above. The animation
+The pane settings control gaps, margins, corner radius, background opacity, selected-pane glow, and
+inactive pane dimming. Corner radius has three choices: 0, 13.5, and 24 points. Gaps enable a fixed
+1-point border; the selected pane's glow also works without gaps. Four broad elliptical gradients
+spread it unevenly along the edges and fade at the corners. Their combined opacity is capped at
+5% at default strength. Opacity and glow use whole
+percentages with 1-percent steps, direct numeric entry, and steppers. Terminal horizontal and vertical
+padding are capped at 16 points in both the form and rendering, including imported config values.
+Numeric config serialization always uses a dot, independent of the device locale.
+Status settings control the pill navigation described above. The animation
 preference disables workspace animations and uses Panorama's reduced-motion path. Platform-only
 settings such as desktop update indicators do not appear in the mobile pages.
 
@@ -207,14 +234,12 @@ The outer scroller and each window stack use view-aligned targets with one-targe
 drag, nearby columns and cards recede by four percent, then return to full size at rest. Entering
 Panorama waits for the first real window snapshot instead of completing while the app is still
 connecting. The active window is captured as one fixed-size passive workspace surface at the detail
-column's settled bounds. Entering removes the detail navigation bar without animation, waits for the
-resulting geometry, then flies that surface into the measured window rectangle on an ease-out
-curve while the session columns cascade in with a short stagger and the scroll surface fades up
+column's settled bounds. Entering flies that surface into the measured window rectangle on an
+ease-out curve while the session columns cascade in with a short stagger and the scroll surface fades up
 behind them; the grid itself does not scale, so the measured card rectangle stays valid through the
 flight. Leaving fades the surrounding content out fast and grows the fixed surface back to
-fullscreen on an ease-in-out curve after the destination geometry settles. The detail navigation bar
-returns first when the sidebar is retracted; it stays hidden with the sidebar open.
-The target rectangle is locked before movement starts, and the live workspace
+fullscreen on an ease-in-out curve after the destination geometry settles. No navigation bar changes
+participate in either transition. The target rectangle is locked before movement starts, and the live workspace
 mounts after the exit completes. Reduce Motion fades the Panorama layer before swapping view
 branches and performs no transform animation.
 
@@ -545,7 +570,10 @@ just ios-preview [build-number]
 
 `just ios` builds, boots an available iPhone simulator, installs `zz Dev` (`dev.zz.ios.dev`), injects the dev daemon path as `ZZ_SOCKET`,
 and launches it against the dev daemon on the same Mac. `ZZ_DEV_SOCKET` overrides that path;
-the recipe ignores an inherited stable `ZZ_SOCKET`. The matching `just ipad` recipes select an iPad
+the recipe ignores an inherited stable `ZZ_SOCKET`. Without an override it prefers the
+environment-derived socket, then checks per-user dev defaults under the macOS user temporary
+directory and `/tmp`, since desktop and terminal launches can have different `TMPDIR` values.
+A missing socket stops the run before building or replacing the app. The matching `just ipad` recipes select an iPad
 simulator while building the same universal application. `just ios-device` signs, installs, and
 launches the separate dev app on a named Apple device; the app then asks for one SSH host and can copy its generated
 public key or use a one-shot password. Physical-device development builds use Debug by default;
@@ -601,6 +629,42 @@ terminal pane, renders styled content, types through the raw-key path, exercises
 clipboard, and Agent symbols, kills the attached session, reattaches a survivor and recovers its
 viewport, then frees and reconnects against a real daemon. Rust unit tests cover Agent attention
 edges and SSH prompt and failure classification.
+
+iPad shell verification completed on 2026-09-14:
+
+- `env -u ZZ_IOS_REUSE_CLIENT_CORE just ipad-build` passed; a fresh `just ipad-test` rebuilt
+  the Rust archive and passed all 86 unit tests, including imported padding limits, fractional
+  terminal settings persistence, and the three mobile corner sizes.
+- Both `IPadAcceptanceTests` cases passed against isolated daemons on the iPad Pro 13-inch
+  simulator. They cover sidebar collapse and expansion, floating controls, window creation and
+  switching, Panorama, right-side settings without a pane resize, fonts and themes, splits in both
+  directions, close cancellation and confirmation, resize, copy/search, and keyboard bindings.
+- The later `testAnnotatedSettingsAndPaneAppearance` flow passed: simplified appearance controls,
+  percentage increments, the 16-point padding cap, gapless glow controls, and all three corner
+  choices. Exported screenshots confirm header, padding, and terminal backgrounds agree within one
+  RGB level at partial opacity. The softer glow changes the edge colors while leaving the sampled
+  corner and terminal center unchanged.
+- `IPadBrowserTests` passed with the HTTP fixture: pane creation, navigation, back, tabs, and a
+  retained draft across Panorama. The final two-flow rerun used a fresh isolated daemon after the
+  previous test socket disappeared before attachment.
+- Landscape and portrait simulator screenshots were inspected. An earlier device install recovered
+  after an Xcode wireless connection reset. After the annotated settings changes, a fresh
+  `just ios-device ipad` built, installed, and launched successfully. Physical screenshots show the
+  saved macbook SSH connection, the session tree, live terminal content, neutral sidebar toggle,
+  matching terminal surfaces, and selected-pane glow. Hardware-keyboard behavior remains outside
+  this verification.
+
+SSH reconnect verification on 2026-09-14:
+
+- Four socket-probe tests passed in both dev and production identities, including macOS dev socket
+  preference, explicit XDG selection, and Linux and missing-socket fallbacks.
+- Fifteen prompt and forwarding tests passed. Virtual-time prompt coverage waits 90 and 80 seconds
+  across two prompts while the single-thread runtime continues running, preserves the cumulative
+  network budget, and checks cancellation and a stalled handshake without prompts.
+- All 33 FFI tests passed. A fresh physical Rust build installed and launched successfully. The Mac
+  accepted the iPad's keyboard-interactive login at 21:37, and its live proxy selected
+  `/tmp/zz-dev-demfabris/default.sock`. The desktop daemon reported the additional attached client;
+  the iPad screenshot showed its terminal, browser, and Agent panes with green SSH status.
 
 Verification completed on 2026-09-12:
 
@@ -691,6 +755,7 @@ global font size plus per-pane zoom, and cursor blink policy.
 | `clients/ios/Tests/Unit/BrowserPaneTests.swift` | Real WebKit proxy, reconnect, storage, and retained-page regressions. |
 | `clients/ios/Tests/UI/IPadBrowserTests.swift` | Isolated-daemon browser interaction and Panorama acceptance. |
 | `crates/zz-daemon/src/russh_socks.rs` | SOCKS5 and same-port localhost listeners over authenticated SSH direct-tcpip channels. |
+| `crates/zz-daemon/src/russh_prompt.rs` | Native SSH prompt dispatch and an establishment deadline that excludes user input time. |
 | `crates/zz-client-ffi/tests/mobile.rs` | Daemon-backed local settings, prefix reset, and tmux interaction checks. |
 | `crates/zz-client-ffi/include/zz-client.h` | Stable C boundary consumed by Swift. |
 | `scripts/ios-sim.sh` | Simulator build, install, socket injection, and launch. |

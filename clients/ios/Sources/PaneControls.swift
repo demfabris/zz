@@ -128,6 +128,7 @@ struct PaneActionsMenu: View {
     @EnvironmentObject private var store: ZZStore
     @Environment(ZZClientSettings.self) private var settings
     let pane: ZZPane
+    var headerStyle = false
     @State private var showsBindings = false
     @State private var showsResize = false
     @State private var confirmsClose = false
@@ -184,16 +185,22 @@ struct PaneActionsMenu: View {
                 confirmsClose = true
             }
         } label: {
-            Image(systemName: "ellipsis")
-                .frame(width: 32, height: 32)
-                .background(settings.chromeSurface, in: .rect(cornerRadius: settings.widgetCornerRadius))
-                .overlay {
-                    RoundedRectangle(cornerRadius: settings.widgetCornerRadius)
-                        .stroke(settings.chromeBorder, lineWidth: 1)
-                }
-                .shadow(color: .black.opacity(settings.shadowOpacity), radius: 3, y: 1)
-                .frame(width: 44, height: 44)
-                .contentShape(.rect)
+            if headerStyle {
+                Image(systemName: "ellipsis")
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
+            } else {
+                Image(systemName: "ellipsis")
+                    .frame(width: 32, height: 32)
+                    .background(settings.chromeSurface, in: .rect(cornerRadius: settings.widgetCornerRadius))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: settings.widgetCornerRadius)
+                            .stroke(settings.chromeBorder, lineWidth: 1)
+                    }
+                    .shadow(color: .black.opacity(settings.shadowOpacity), radius: 3, y: 1)
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
+            }
         }
         .disabled(!store.isConnected)
         .accessibilityLabel("Pane Actions")

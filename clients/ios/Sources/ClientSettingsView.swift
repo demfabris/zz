@@ -26,49 +26,27 @@ private enum ZZSettingsSection: String, CaseIterable, Identifiable {
 struct ClientSettingsView: View {
     @Environment(ZZClientSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.horizontalSizeClass) private var sizeClass
-    @State private var section: ZZSettingsSection? = .appearance
     @State private var restoring = false
 
     var body: some View {
-        Group {
-            if sizeClass == .regular {
-                NavigationSplitView {
-                    List(ZZSettingsSection.allCases, selection: $section) { item in
-                        NavigationLink(value: item) {
-                            Label(item.title, systemImage: item.symbol)
-                        }
-                        .accessibilityIdentifier("settings-section-\(item.rawValue)")
+        NavigationStack {
+            List {
+                ForEach(ZZSettingsSection.allCases) { item in
+                    NavigationLink {
+                        SettingsSectionPage(section: item)
+                    } label: {
+                        Label(item.title, systemImage: item.symbol)
                     }
-                    .navigationTitle("Settings")
-                    .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 260)
-                } detail: {
-                    NavigationStack {
-                        SettingsSectionPage(section: section ?? .appearance)
-                            .toolbar { doneButton }
-                    }
+                    .accessibilityIdentifier("settings-section-\(item.rawValue)")
                 }
-            } else {
-                NavigationStack {
-                    List {
-                        ForEach(ZZSettingsSection.allCases) { item in
-                            NavigationLink {
-                                SettingsSectionPage(section: item)
-                            } label: {
-                                Label(item.title, systemImage: item.symbol)
-                            }
-                            .accessibilityIdentifier("settings-section-\(item.rawValue)")
-                        }
-                        Section {
-                            Button("Restore Defaults", systemImage: "arrow.counterclockwise") {
-                                restoring = true
-                            }
-                        }
+                Section {
+                    Button("Restore Defaults", systemImage: "arrow.counterclockwise") {
+                        restoring = true
                     }
-                    .navigationTitle("Settings")
-                    .toolbar { doneButton }
                 }
             }
+            .navigationTitle("Settings")
+            .toolbar { doneButton }
         }
         .confirmationDialog("Restore device preferences?", isPresented: $restoring) {
             Button("Restore Defaults", role: .destructive) { settings.restoreDefaults() }
@@ -83,8 +61,62 @@ struct ClientSettingsView: View {
     }
 }
 
+struct ClientSettingsSidebar: View {
+    @Environment(ZZClientSettings.self) private var settings
+    @Binding var isPresented: Bool
+    @State private var section: ZZSettingsSection = .appearance
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Settings").font(.title3.bold())
+                Spacer()
+                Button("Done") { isPresented = false }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(settings.chromeTint)
+                    .frame(minHeight: 44)
+                    .padding(.horizontal, 16)
+                    .background(settings.chromeForeground.opacity(0.08), in: Capsule())
+                    .accessibilityIdentifier("settings-done")
+            }
+            .padding(16)
+            HStack(spacing: 2) {
+                ForEach(ZZSettingsSection.allCases) { item in
+                    Button {
+                        section = item
+                    } label: {
+                        Image(systemName: item.symbol)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(settings.chromeForeground.opacity(section == item ? 0.16 : 0), in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(item.title)
+                    .accessibilityAddTraits(section == item ? .isSelected : [])
+                    .accessibilityIdentifier("settings-section-\(item.rawValue)")
+                }
+            }
+            .padding(4)
+            .background(settings.chromeForeground.opacity(0.06), in: Capsule())
+            .padding(.horizontal, 12)
+            NavigationStack {
+                SettingsSectionPage(section: section, sidebar: true)
+            }
+            .id(section)
+        }
+        .foregroundStyle(settings.chromeForeground)
+        .background(settings.chromeSurface.overlay(settings.chromeForeground.opacity(0.07)))
+        .clipShape(.rect(cornerRadius: 22))
+        .overlay { RoundedRectangle(cornerRadius: 22).stroke(settings.chromeBorder, lineWidth: 1) }
+        .shadow(color: .black.opacity(settings.shadowOpacity), radius: 20, x: -4, y: 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("ipad-settings-sidebar")
+    }
+}
+
 private struct SettingsSectionPage: View {
     let section: ZZSettingsSection
+    var sidebar = false
     @Environment(ZZClientSettings.self) private var settings
     @State private var restoring = false
 
@@ -93,12 +125,28 @@ private struct SettingsSectionPage: View {
         Form {
             if section == .appearance {
                 Section("App Appearance") {
-                    Picker("Appearance", selection: $settings.appearance) {
+                    HStack(spacing: 2) {
                         ForEach(ZZAppAppearance.allCases) { appearance in
-                            Text(appearance.label).tag(appearance)
+                            Button {
+                                settings.appearance = appearance
+                            } label: {
+                                Text(appearance.label)
+                                    .font(.subheadline.weight(.medium))
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                    .background(settings.chromeForeground.opacity(settings.appearance == appearance ? 0.16 : 0), in: Capsule())
+                                    .contentShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(settings.appearance == appearance ? .isSelected : [])
+                            .accessibilityIdentifier("settings-appearance-\(appearance.rawValue)")
                         }
                     }
-                    .pickerStyle(.segmented)
+                    .padding(4)
+                    .background(settings.chromeForeground.opacity(0.06), in: Capsule())
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Appearance")
                 }
             }
             if section == .terminal {
@@ -163,13 +211,25 @@ private struct SettingsSectionPage: View {
                 }
             }
             if section == .appearance {
+                Section("Live Preview") {
+                    TerminalSettingsPreview()
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
                 Section {
                     Button("Restore Defaults", systemImage: "arrow.counterclockwise") { restoring = true }
                 }
             }
         }
+        .scrollContentBackground(sidebar ? .hidden : .automatic)
+        .background {
+            if sidebar {
+                settings.chromeSurface.overlay(settings.chromeForeground.opacity(0.07))
+            }
+        }
         .contrast(settings.chromeContrast)
-        .navigationTitle(section.title)
+        .navigationTitle(sidebar ? "" : section.title)
+        .toolbarVisibility(sidebar ? .hidden : .automatic, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog("Restore device preferences?", isPresented: $restoring) {
             Button("Restore Defaults", role: .destructive) { settings.restoreDefaults() }
@@ -184,18 +244,16 @@ private struct SharedSettingsSection: View {
     private var rows: [ZZSetting] {
         (shared.snapshot?.settings ?? []).filter { row in
             if section == .appearance {
-                return ["animations", "ui-font-family", "chrome-preset-dark", "chrome-preset-light",
-                        "chrome-background", "chrome-foreground", "chrome-accent",
-                        "chrome-contrast", "widget-corner-radius", "shadow-strength"].contains(row.key)
+                return ["animations", "chrome-background", "chrome-foreground", "chrome-accent"].contains(row.key)
             }
             guard row.section == section.rawValue || (section == .mux && row.section == "multiplexer") else { return false }
-            return !["theme", "font-family", "font-size", "status-update"].contains(row.key)
+            return !["theme", "font-family", "font-size", "status-update", "pane-border-width"].contains(row.key)
         }
     }
 
     var body: some View {
         if !rows.isEmpty {
-            Section(section.title) {
+            Section {
                 ForEach(rows) { row in
                     SharedSettingRow(shared: shared, setting: row)
                 }
@@ -232,17 +290,7 @@ private struct SharedSettingRow: View {
     }
 
     @ViewBuilder private var control: some View {
-        if setting.key == "ui-font-family" {
-            Picker(setting.title, selection: Binding(
-                get: { setting.value.text.isEmpty ? "System" : setting.value.text },
-                set: { shared.set(setting, .string($0)) }
-            )) {
-                Text("System").tag("System")
-                ForEach(UIFont.familyNames.sorted(), id: \.self) { family in
-                    Text(family).font(.custom(family, size: 17)).tag(family)
-                }
-            }
-        } else if setting.control == "color" {
+        if setting.control == "color" {
             ColorPicker(setting.title, selection: Binding(
                 get: { resolvedColor },
                 set: { shared.set(setting, .string($0.zzHex)) }
@@ -260,21 +308,79 @@ private struct SharedSettingRow: View {
                 Text("Default").tag("")
                 ForEach(setting.choices) { choice in Text(choice.title).tag(choice.value) }
             }
-        } else if setting.control == "number", let bounds = setting.range, bounds.count == 2, bounds[1] <= 100 {
-            let fractional = bounds[1] <= 1
-            VStack(alignment: .leading) {
-                LabeledContent(setting.title, value: setting.value.number?.formatted(.number.precision(.fractionLength(0...2))) ?? setting.value.text)
-                Slider(value: Binding(
-                    get: { setting.value.number ?? bounds[0] },
+        } else if setting.key == "pane-corner-radius" {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(setting.title)
+                Picker(setting.title, selection: Binding(
+                    get: { Double(settings.paneCornerRadius) },
                     set: { shared.set(setting, .number($0)) }
-                ), in: bounds[0]...bounds[1], step: fractional ? 0.05 : 1)
-                .accessibilityLabel(setting.title)
+                )) {
+                    ForEach(ZZClientSettings.paneCornerRadii, id: \.self) { radius in
+                        Text(radius.formatted()).tag(radius)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("setting-pane-corner-radius")
             }
+        } else if setting.control == "number", let bounds = setting.range, bounds.count == 2, bounds[1] <= 100 {
+            SettingsNumberRow(shared: shared, setting: setting, bounds: bounds[0]...bounds[1])
         } else {
             NavigationLink {
                 SettingsValueEditor(shared: shared, setting: setting)
             } label: {
                 LabeledContent(setting.title, value: setting.value.text.isEmpty ? "Default" : setting.value.text)
+            }
+        }
+    }
+}
+
+private struct SettingsNumberRow: View {
+    let shared: ZZSharedSettings
+    let setting: ZZSetting
+    let bounds: ClosedRange<Double>
+
+    private var percentage: Bool {
+        setting.key.hasSuffix("opacity") || setting.key == "pane-glow-strength"
+    }
+
+    private var scale: Double { percentage ? 100 : 1 }
+
+    private var range: ClosedRange<Double> {
+        if ["window-padding-x", "window-padding-y"].contains(setting.key) {
+            return ZZClientSettings.terminalPaddingRange
+        }
+        return (bounds.lowerBound * scale)...(bounds.upperBound * scale)
+    }
+
+    private var value: Binding<Double> {
+        Binding(
+            get: { min(range.upperBound, max(range.lowerBound, (setting.value.number ?? bounds.lowerBound) * scale)) },
+            set: { shared.set(setting, .number(min(range.upperBound, max(range.lowerBound, $0.rounded())) / scale)) }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(setting.title)
+                Spacer(minLength: 8)
+                TextField(setting.title, value: value, format: .number.precision(.fractionLength(0)))
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 60)
+                    .accessibilityIdentifier("setting-value-\(setting.key)")
+                if percentage { Text("%").foregroundStyle(.secondary) }
+            }
+            HStack(spacing: 12) {
+                Slider(value: value, in: range, step: 1)
+                    .accessibilityLabel(setting.title)
+                    .accessibilityValue("\(Int(value.wrappedValue))\(percentage ? " percent" : "")")
+                    .accessibilityIdentifier("setting-slider-\(setting.key)")
+                Stepper(setting.title, value: value, in: range, step: 1)
+                    .labelsHidden()
+                    .fixedSize()
+                    .accessibilityIdentifier("setting-stepper-\(setting.key)")
             }
         }
     }

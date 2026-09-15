@@ -10,9 +10,9 @@ Agent panes, settings, reconnect presentation, or accessibility.
 - `ZZMobileApp` owns `ZZStore` and `ZZClientSettings`. The device owns its presentation config.
   The Rust FFI applies the local terminal theme to acquired viewport cells before UIKit draws them;
   it does not change other clients' terminal palettes.
-- Keep the Settings sheet outside the size-class branch. Presenting it must not replace or resize the
-  iPad detail hierarchy. The regular-width host requests fitted presentation with a 900 by 700 point
-  ideal size so the sheet can show its native section sidebar; compact hosts keep native sizing.
+- Keep Settings presentation outside the size-class branch. Regular widths use a right-side overlay
+  with section icons; compact widths use a navigation-list sheet. Opening Settings releases terminal
+  input and must not replace or resize the iPad pane hierarchy.
 
 ## Compact phone shell
 
@@ -40,8 +40,10 @@ Agent panes, settings, reconnect presentation, or accessibility.
 
 ## Regular iPad workspace
 
-- `IPadWorkspace` uses a balanced `NavigationSplitView`. Preserve the sidebar hierarchy as session,
-  every window in that session, then every pane in that window. Do not flatten it.
+- `IPadWorkspace` places a collapsible tree beside the pane workspace without a titlebar. Preserve
+  the sidebar hierarchy as session, every window in that session, then every pane in that window.
+  The sidebar header owns a neutral Hide Sidebar control; the collapsed pill owns Show Sidebar.
+  New Session remains in the pill's More menu in both modes.
 - A row in another session or inactive window routes through `ZZNavigationTarget`. The store issues
   attach/window/pane commands and waits for reduced snapshots; a local selection highlight cannot
   replace that convergence.
@@ -56,16 +58,24 @@ Agent panes, settings, reconnect presentation, or accessibility.
 - Every visible terminal tile in the regular split workspace may stay live. `ZZStore.terminalInput`
   still owns at most one pane, and tapping a tile transfers both UIKit first responder and daemon
   pane focus through the store.
-- `IPadStatusBar` uses snapshot state around the active window, plus the connected host and device
-  clock. Local status preferences control session, badges, agents, host, clock, and alignment.
+- `IPadStatusBar` provides the collapsed pill's session menu and window tabs from snapshot state.
+  Local status preferences control session, badges, agents, and the optional host label.
   Do not imitate daemon-expanded custom status text until the FFI exports that payload.
 - `PaneActionsMenu` sends daemon commands for picker splits, zoom, named layouts, and directional
   cell-based resizing. Keep the actions reachable when pane gaps are disabled. Closing requires
   confirmation; a successful write still needs snapshot convergence.
-- Apply the device's pane gaps, margin, radius, border, opacity, and dimming preferences to native
-  tiles. Chrome presets and custom foreground/background colors affect native shell surfaces.
-- Show the detail header only while the sidebar is retracted. Keep the sidebar's native visibility
-  control available and preserve Panorama's hidden header.
+- Apply the device's pane gaps, margin, opacity, and dimming preferences to native tiles. Pane
+  corners use 0, 13.5, or 24 points with a fixed 1-point border when gaps are enabled. Selected-pane
+  glow uses broad, asymmetric elliptical gradients along the edges, capped at 5% opacity at default
+  strength, with faded corners. It remains visible without gaps.
+- Keep the detail titlebar absent in both modes. The pill sits below the sidebar tree when expanded
+  and at the workspace's bottom center when collapsed. Panorama, New Pane, Settings, and More remain
+  reachable in both modes; collapsed mode adds session/window navigation and New Window.
+- Pane headers use flat, dimmed Split Down, Split Right, Pane Actions, and Close controls. Keep
+  44-point targets and the menu fallback for narrow tiles. Close requires confirmation.
+- Terminal headers and padding use the acquired frame's background and the same combined opacity
+  as the grid. Observe frames locally; do not publish their colors through the workspace store.
+  Paint the padding outside the grid only, so translucent backgrounds are not applied twice.
 
 ## Panorama
 
@@ -92,9 +102,7 @@ Agent panes, settings, reconnect presentation, or accessibility.
 - Wait for the first real window snapshot before starting the entrance transition.
 - Entrance and exit transform one fixed-size passive capture of the selected window instead of
   resizing live pane views. Lock the destination card rectangle before movement starts. During exit,
-  restore the detail navigation bar before the reverse transform only when the sidebar is retracted,
-  and mount the live workspace only after it completes. Changing that order recreates the visible
-  navigation-bar jump.
+  mount the live workspace only after it completes. Neither transition changes a navigation bar.
 - Preserve Reduce Motion with target alignment and a short crossfade without scale or blur movement.
   The device's disabled-animation preference uses the same path and disables workspace animations.
 
@@ -187,6 +195,12 @@ Agent panes, settings, reconnect presentation, or accessibility.
   automatic reconnect.
 - `ZZSharedSettings` owns Application Support `zz/config` and `zz/mux.conf` through the shared Rust
   settings model. Use desktop metadata and the bundled theme catalog for supported knobs.
+- Appearance exposes System/Dark/Light, animations, and custom background/foreground/accent colors.
+  The iPad section selector and appearance choices use capsules. Desktop chrome presets, interface
+  font, contrast, widget radius, and shadow controls stay out of the mobile form.
+- Opacity and glow use whole percentages with 1-percent steps, direct numeric entry, and steppers.
+  Clamp terminal padding to 0 through 16 points in controls and rendering, including imported config.
+  Serialize numeric config values with a dot regardless of the device locale.
 - Local terminal and chrome settings affect this device. Apply parsed mux preferences through
   `zz_settings_model_mobile_apply` after attachment and edits; this does not upload the local file.
   Daemon/session-scoped mux commands affect other attached clients, so do not describe them as

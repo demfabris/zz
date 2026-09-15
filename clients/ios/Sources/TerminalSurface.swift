@@ -1127,11 +1127,18 @@ struct LiveTerminalSurface: View {
         .padding(.horizontal, preview ? 0 : terminalPresentation.paddingX)
         .padding(.vertical, preview ? 0 : terminalPresentation.paddingY)
         .background {
-            if let frame = frameSlot.frame {
-                Color(red: Double(frame.background >> 16 & 255) / 255,
-                      green: Double(frame.background >> 8 & 255) / 255,
-                      blue: Double(frame.background & 255) / 255)
-                    .opacity(terminalPresentation.backgroundOpacity)
+            if !preview, let frame = frameSlot.frame {
+                GeometryReader { geometry in
+                    Path { path in
+                        let bounds = CGRect(origin: .zero, size: geometry.size)
+                        path.addRect(bounds)
+                        path.addRect(bounds.insetBy(
+                            dx: min(terminalPresentation.paddingX, bounds.width / 2),
+                            dy: min(terminalPresentation.paddingY, bounds.height / 2)
+                        ))
+                    }
+                    .fill(Color(zzRGB: frame.background).opacity(terminalPresentation.backgroundOpacity), style: FillStyle(eoFill: true))
+                }
             }
         }
     }

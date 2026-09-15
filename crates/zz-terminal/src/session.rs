@@ -8368,7 +8368,7 @@ fn capture_terminal(
                             y: u32::try_from(row).unwrap_or(u32::MAX),
                         }))
                         .and_then(|grid| grid.row())
-                        .and_then(|row| row.is_wrapped())
+                        .and_then(libghostty_vt::screen::Row::is_wrapped)
                         .map_err(capture_failure)
                 })
                 .collect::<Result<Vec<_>, _>>()?,
@@ -8415,6 +8415,10 @@ fn capture_styled_terminal(
                 .map_err(capture_failure)?;
             if cell.has_text().map_err(capture_failure)?
                 || cell.has_styling().map_err(capture_failure)?
+                || matches!(
+                    cell.content_tag().map_err(capture_failure)?,
+                    CellContentTag::BgColorPalette | CellContentTag::BgColorRgb
+                )
             {
                 used = x + 1;
             }
@@ -8478,7 +8482,7 @@ fn capture_styled_terminal(
         let wrapped = terminal
             .grid_ref(Point::Screen(PointCoordinate { x: 0, y }))
             .and_then(|grid| grid.row())
-            .and_then(|row| row.is_wrapped())
+            .and_then(libghostty_vt::screen::Row::is_wrapped)
             .map_err(capture_failure)?;
         if row < end && !(options.join_wrapped && wrapped) {
             output.push('\n');
@@ -8680,7 +8684,7 @@ fn push_capture_line_number(output: &mut String, row: u64, history_rows: u64) {
 fn number_capture(text: &str, rows: Option<&[bool]>, first_row: u64, history_rows: u64) -> String {
     let mut output = String::with_capacity(text.len());
     for (offset, line) in text.split('\n').enumerate() {
-        if offset > 0 && !rows.is_some_and(|rows| rows.get(offset - 1) == Some(&true)) {
+        if offset > 0 && rows.is_none_or(|rows| rows.get(offset - 1) != Some(&true)) {
             output.push('\n');
         }
         push_capture_line_number(
@@ -17531,6 +17535,8 @@ mod tests {
             ("\x1b[38;2;1;2;3mRGB\x1b[0m", "\x1b[38;2;1;2;3mRGB\x1b[39m"),
             ("\x1b[1mBOLD\x1b[0m", "\x1b[1mBOLD\x1b[0m"),
             ("\x1b[4mUNDER\x1b[0m", "\x1b[4mUNDER\x1b[0m"),
+            ("\x1b[41m\x1b[2K\x1b[0m", "\x1b[41m"),
+            ("\x1b[48;2;4;5;6m\x1b[2K\x1b[0m", "\x1b[48;2;4;5;6m"),
             (
                 "\x1b[1;4;31mONE\x1b[22mTWO\x1b[0m",
                 "\x1b[1;4m\x1b[31mONE\x1b[0;4m\x1b[31mTWO\x1b[0m",

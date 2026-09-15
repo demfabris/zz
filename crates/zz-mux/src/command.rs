@@ -16698,12 +16698,22 @@ fn prepare_expanded_callback_invocation(
         }
         return validate_bound_command(command, owner);
     }
+    let menu_items = bind_key_menu_item_blocks(command);
     for index in 0..command.args.len() {
         if !command.argument_is_command_block(index) {
             continue;
         }
         let value = &command.args[index];
         let body = crate::parser::command_block_body(value).unwrap_or(value);
+        if menu_items.contains(&index) {
+            let parsed =
+                crate::parser::parse_config_without_variable_expansion("<menu-item>", body);
+            if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
+                return Err(ServerError::CommandParse(diagnostic.message));
+            }
+            validate_menu_item_command_names(&parsed.commands)?;
+            continue;
+        }
         let commands = prepare_callback_commands_with_aliases(
             engine,
             body,
@@ -16985,13 +16995,46 @@ fn validate_static_command(command: &CommandInvocation) -> Result<(), ServerErro
     Ok(())
 }
 
-/// `cmd_display_menu_get_type` types a menu item's command slot as
-/// `ARGS_PARSE_COMMANDS_OR_STRING`, so the pin's parser resolves the name of
-/// every command inside it and stops on one it does not know. It goes no
-/// further than that: the string is kept as written and `menu_key_cb` is the
-/// first thing that parses its flags, when the item is chosen. That is why the
-/// pin's own `DEFAULT_PANE_MENU` can carry `move-pane -P` on a build whose
-/// floating panes are somebody else's decision.
+fn bind_key_command_tail(command: &CommandInvocation) -> Option<usize> {
+    if canonical_command(&command.name) != "bind-key" {
+        return None;
+    }
+    let spec = catalog_command_spec("bind-key")?;
+    let parsed = parse_tmux_command_options(spec, command).ok()?;
+    if parsed.positionals.len() < 2 {
+        return None;
+    }
+    let tail = command
+        .args
+        .len()
+        .saturating_sub(parsed.positionals.len())
+        .saturating_add(1);
+    (!command.argument_is_command_block(tail)).then_some(tail)
+}
+
+fn bind_key_menu_item_blocks(command: &CommandInvocation) -> Vec<usize> {
+    let Some(tail) = bind_key_command_tail(command) else {
+        return Vec::new();
+    };
+    let mut blocks = Vec::new();
+    let mut inside_menu = false;
+    let mut at_command_start = true;
+    for index in tail..command.args.len() {
+        let is_block = command.argument_is_command_block(index);
+        if at_command_start {
+            inside_menu = !is_block && canonical_command(&command.args[index]) == "display-menu";
+            at_command_start = false;
+        } else if is_block && inside_menu {
+            blocks.push(index);
+        }
+        let word = command.args[index].to_string();
+        if !is_block && word.ends_with(';') && !word.ends_with("\\;") {
+            at_command_start = true;
+        }
+    }
+    blocks
+}
+
 fn validate_menu_item_command_names(commands: &[CommandInvocation]) -> Result<(), ServerError> {
     for command in commands {
         if let Some(commands) = parse_command_alias_group(command)? {
@@ -17519,6 +17562,40 @@ mod tests {
         assert!(matches!(
             validate_static_command_chain(&[command]),
             Err(ServerError::CommandParse(message)) if message.contains("unknown flag -Q")
+        ));
+    }
+
+    #[test]
+    fn a_bound_menu_item_s_unsupported_flag_loads_silently_and_refuses_on_selection() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let parsed = crate::parse_config(
+            "cfg.in",
+            "bind-key -T root MouseDown3Pane display-menu Float f { break-pane -W }",
+        );
+        assert!(parsed.diagnostics.is_empty());
+
+        engine
+            .execute(&mut context, &parsed.commands[0])
+            .expect("a menu item's accepted gap is not a config error");
+        let bound = engine
+            .keys
+            .get("root", "MouseDown3Pane")
+            .expect("root binding")
+            .commands
+            .clone();
+        assert!(
+            format_callback_commands(&bound).contains("break-pane -W"),
+            "the item is kept as written: {}",
+            format_callback_commands(&bound)
+        );
+
+        assert!(matches!(
+            engine.execute(&mut context, &command("break-pane", &["-W"])),
+            Err(ServerError::UnsupportedCommand(message)) if message == "break-pane -W"
         ));
     }
 

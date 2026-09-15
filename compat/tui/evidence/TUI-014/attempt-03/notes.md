@@ -66,10 +66,31 @@ The one trap worth repeating here: **`capture-pane -M` does not show the clock.*
 `wp->base`. The only comparison surface is the attached client's screen through the
 outer pinned tmux.
 
+## One divergence found in clause 1's evidence, and fixed
+
+`compat/tui-choosers.sh`'s `client-info-view` went red twice at this tip after four
+green runs, always on row 19: `Bytes Written │ NNNN (NN discarded)` followed by four
+more fill columns on the pin than on zz. Not a zz divergence and not load.
+`client_info_mask` collapses the fill that follows one of its own substituted
+tokens, but `TOKEN_FILL` required the spaces to touch the token, and
+`(NN discarded)` is followed by an SGR reset before its fill — so whenever the two
+servers' byte counts had different digit widths, the row's remaining fill differed
+and nothing collapsed it. `TOKEN_FILL` now allows any run of SGR sequences between
+the token and the fill and puts them back unchanged, so the fill collapses and every
+cell past it is compared exactly as before.
+
+`choosers-mask-fix-run-1/2/3.txt` and `choosers-mask-fix-self-check.txt` are the runs
+after the fix: three times `all 78 asserted comparisons identical, 0 recorded not
+asserted (0 for a sibling lane)` at exit 0, and the self-check green over thirteen
+sabotages, including the zz-side info-view sabotage that guards this mask.
+`choosers-run-1/2/3.txt` and `verify-claims.txt` are the earlier green runs;
+`choosers-red-at-tip.txt` is the red, kept because it names its own cause.
+
 ## Which tip the runs sit at
 
-Every run below was taken at **5585cd6a**, the last commit that changes a source, a
-fixture, a registry or a generated report byte. The commit that carries this
+Every run below was taken at **5585cd6a** or, for the four `choosers-mask-fix-*`
+files, at that tree plus the one-line `client_info_mask` repair above, which is the
+last commit that changes a source, a fixture, a registry or a generated report byte. The commit that carries this
 directory adds only evidence and the two generated reports, so no run here is stale
 against anything it measures. `verify-claims.py` and `compat/check.sh` were re-run
 once more at the final tip after that commit and both exited 0; their committed

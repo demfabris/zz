@@ -78,8 +78,9 @@ against every obligation mapped to that fixture rather than sliding past one.
 
 ## State
 
-The count is **9/12 baseline verified** (TUI-001 to TUI-007, TUI-009, TUI-010), added scope 0/6
-with TUI-016 and TUI-018 at review on their branches, at wire protocol 103 (unreleased).
+The count is **9/12 baseline verified** (TUI-001 to TUI-007, TUI-009, TUI-010), added scope **1/6**
+with TUI-016 verified on 2026-09-15 and TUI-018 at review on its branch, at wire protocol 103
+(unreleased).
 
 The 2026-09-14 resume on the ubuntu box (four to five Opus 5 agents through the Agent tool, one per
 lane, prompts adapted from the runners) landed cycle 9's choosers gate (`3ecd4702`, TUI-006

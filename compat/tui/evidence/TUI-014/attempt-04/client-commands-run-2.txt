@@ -237,45 +237,45 @@ ok    hooks-show-target
       case messages-log
       stdout differs
         1,586c1,601
-        < 16:19: client-1466214 command: show-messages
-        < 16:19: client-1466209 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
-        < 16:19: client-1466205 command: list-clients -F "#{client_name}"
-        < 16:19: client-1465989 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
-        < 16:19: client-1465988 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
-        < 16:19: client-1465985 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
-        < 16:19: client-1465984 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
-        < 16:19: client-1465983 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
-        < 16:19: client-1465701 command: show-hooks -t "%0"
-        < 16:19: client-1465700 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
-        < 16:19: client-1465695 command: list-clients -F "#{client_name}"
-        < 16:19: client-1465587 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
-        < 16:19: client-1465586 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
-        < 16:19: client-1465585 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
-        < 16:19: client-1465584 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
-        < 16:19: client-1465583 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
-        < 16:19: client-1465173 message: invalid option: no-such-hook
-        < 16:19: client-1465173 command: show-hooks -g no-such-hook
-        < 16:19: client-1465171 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
-        < 16:19: client-1465166 command: list-clients -F "#{client_name}"
-        < 16:19: client-1465045 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
-        < 16:19: client-1465044 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
-        < 16:19: client-1465043 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
-        < 16:19: client-1465042 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
-        < 16:19: client-1465041 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
-        < 16:19: client-1464868 command: show-hooks -g after-lock-server
-        < 16:19: client-1464867 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
-        < 16:19: client-1464863 command: list-clients -F "#{client_name}"
-        < 16:19: client-1464755 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
-        < 16:19: client-1464753 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
-        < 16:19: client-1464752 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
-        < 16:19: client-1464751 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
-        < 16:19: client-1464750 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
-        < 16:19: client-1464502 command: show-hooks -B
-        < 16:19: client-1464501 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
-        < 16:19: client-1464497 command: list-clients -F "#{client_name}"
-        < 16:19: client-1464378 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
-        < 16:19: client-1464375 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
-        < 16:19: client-1464372 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 17:37: client-2635209 command: show-messages
+        < 17:37: client-2635207 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 17:37: client-2635203 command: list-clients -F "#{client_name}"
+        < 17:37: client-2635085 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 17:37: client-2635084 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 17:37: client-2635083 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 17:37: client-2635082 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 17:37: client-2635080 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 17:37: client-2634920 command: show-hooks -t "%0"
+        < 17:37: client-2634919 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 17:37: client-2634915 command: list-clients -F "#{client_name}"
+        < 17:37: client-2634813 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 17:37: client-2634812 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 17:37: client-2634811 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 17:37: client-2634810 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 17:37: client-2634808 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 17:37: client-2634546 message: invalid option: no-such-hook
+        < 17:37: client-2634546 command: show-hooks -g no-such-hook
+        < 17:37: client-2634541 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 17:37: client-2634529 command: list-clients -F "#{client_name}"
+        < 17:37: client-2634096 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 17:37: client-2634094 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 17:37: client-2634090 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 17:37: client-2634085 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 17:37: client-2634083 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 17:37: client-2633593 command: show-hooks -g after-lock-server
+        < 17:37: client-2633590 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 17:37: client-2633586 command: list-clients -F "#{client_name}"
+        < 17:37: client-2633487 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 17:37: client-2633486 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 17:37: client-2633485 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 17:37: client-2633484 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 17:37: client-2633483 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 17:37: client-2633275 command: show-hooks -B
+        < 17:37: client-2633274 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 17:37: client-2633270 command: list-clients -F "#{client_name}"
+        < 17:37: client-2633150 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 17:37: client-2633149 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 17:37: client-2633148 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
 note  messages-log recorded, not asserted: DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. Measured 2026-09-14 on both sides: the pin names ANY tty-bearing client by that tty, including the attached terminal client whose attach-session row reads /dev/pts/<n>, and zz named none of them - it spelled every row by the device name the client sent, which for an interactive client is the hostname. That half is closed: the server log now names a client by its tty whenever it has one. What stays is the clientless CLI, which names a process that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked
 ok    messages-jobs
 ok    messages-terminals
@@ -308,7 +308,7 @@ ok    lock-command-store
         > choose-client requires an interactive client
       screen differs
         1c1,13
-        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) /dev/pts/29: 16:19: session cli^[[39m
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) /dev/pts/28: 17:37: session cli^[[39m
         ---
         > $ printf 'SCENE-%s\n' %0
         > SCENE-%0
@@ -324,7 +324,7 @@ ok    lock-command-store
         > 
         > 
         12,23d23
-        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L /dev/pts/29 (sort: name) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L /dev/pts/28 (sort: name) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
         < M-bM-^TM-^B^[[39m^[[49m $ printf 'SCENE-%s\n' %0                                                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
         < M-bM-^TM-^B^[[39m^[[49m SCENE-%0                                                                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
         < M-bM-^TM-^B^[[39m^[[49m $ ^[[7m ^[[0m                                                                          ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B

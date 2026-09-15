@@ -16775,7 +16775,7 @@ fn prepare_expanded_callback_invocation(
             if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
                 return Err(ServerError::CommandParse(diagnostic.message));
             }
-            validate_menu_item_command_names(&parsed.commands)?;
+            validate_menu_item_commands(&parsed.commands)?;
         }
         return validate_bound_command(command, owner);
     }
@@ -16786,20 +16786,16 @@ fn prepare_expanded_callback_invocation(
         }
         let value = &command.args[index];
         let body = crate::parser::command_block_body(value).unwrap_or(value);
-        if menu_items.contains(&index) {
-            let parsed =
-                crate::parser::parse_config_without_variable_expansion("<menu-item>", body);
-            if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
-                return Err(ServerError::CommandParse(diagnostic.message));
-            }
-            validate_menu_item_command_names(&parsed.commands)?;
-            continue;
-        }
+        let item_owner = if menu_items.contains(&index) {
+            "<menu-item>"
+        } else {
+            owner
+        };
         let commands = prepare_callback_commands_with_aliases(
             engine,
             body,
             true,
-            owner,
+            item_owner,
             aliases_available,
             aliases_available,
         )?;
@@ -17068,7 +17064,7 @@ fn validate_static_command(command: &CommandInvocation) -> Result<(), ServerErro
             return Err(ServerError::CommandParse(diagnostic.message));
         }
         if name == "display-menu" {
-            validate_menu_item_command_names(&parsed.commands)?;
+            validate_menu_item_commands(&parsed.commands)?;
         } else {
             validate_static_command_chain(&parsed.commands)?;
         }
@@ -17116,42 +17112,17 @@ fn bind_key_menu_item_blocks(command: &CommandInvocation) -> Vec<usize> {
     blocks
 }
 
-fn validate_menu_item_command_names(commands: &[CommandInvocation]) -> Result<(), ServerError> {
-    for command in commands {
-        if let Some(commands) = parse_command_alias_group(command)? {
-            validate_menu_item_command_names(&commands)?;
-            continue;
-        }
-        match resolve_command(&command.name) {
-            CommandResolution::Ambiguous(message) => {
-                return Err(ServerError::CommandParse(message));
-            }
-            CommandResolution::Unknown => {
-                return Err(ServerError::CommandParse(format!(
-                    "unknown command: {}",
-                    command.name
-                )));
-            }
-            CommandResolution::Canonical(_) | CommandResolution::Unimplemented(_) => {}
-        }
-        for index in 0..command.args.len() {
-            if !command.argument_is_command_block(index) {
-                continue;
-            }
-            let argument = &command.args[index];
-            let body = crate::parser::command_block_body(argument).unwrap_or(argument);
-            let parsed =
-                crate::parser::parse_config_without_variable_expansion("<menu-item>", body);
-            if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
-                return Err(ServerError::CommandParse(diagnostic.message));
-            }
-            validate_menu_item_command_names(&parsed.commands)?;
-        }
+fn validate_menu_item_commands(commands: &[CommandInvocation]) -> Result<(), ServerError> {
+    match validate_static_command_chain(commands) {
+        Err(ServerError::UnsupportedCommand(_)) => Ok(()),
+        result => result,
     }
-    Ok(())
 }
 
 fn validate_bound_command(command: &CommandInvocation, owner: &str) -> Result<(), ServerError> {
+    if owner == "<menu-item>" {
+        return validate_menu_item_commands(std::slice::from_ref(command));
+    }
     let name = canonical_command(&command.name);
     if let Some(spec) = catalog_command_spec(name) {
         if spec.uses_tmux_option_grammar() {
@@ -17678,6 +17649,58 @@ mod tests {
             engine.execute(&mut context, &command("break-pane", &["-W"])),
             Err(ServerError::UnsupportedCommand(message)) if message == "break-pane -W"
         ));
+    }
+
+    #[test]
+    fn bound_menu_items_keep_alias_preparation_and_canonical_printing() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-s", "command-alias[90]", "menu-child=break-pane -W"],
+                ),
+            )
+            .unwrap();
+        let parsed = crate::parse_config(
+            "cfg.in",
+            "bind-key -T root F1 display-menu Float f { menu-child } Show s { display -p shown }",
+        );
+        assert!(parsed.diagnostics.is_empty());
+        engine.execute(&mut context, &parsed.commands[0]).unwrap();
+        let bound = &engine.keys.get("root", "F1").unwrap().commands;
+        assert_eq!(
+            format_callback_commands(bound),
+            "display-menu Float f { break-pane -W } Show s { display-message -p shown }"
+        );
+    }
+
+    #[test]
+    fn bound_menu_items_validate_names_flags_and_arity_at_load() {
+        for (item, expected) in [
+            ("break-pane -Q", "unknown flag -Q"),
+            ("break-pane extra", "too many arguments (need at most 0)"),
+            ("does-not-exist", "unknown command: does-not-exist"),
+        ] {
+            for tail in [
+                format!("display-menu Float f {{ {item} }}"),
+                format!("{{ display-menu Float f {{ {item} }} }}"),
+            ] {
+                let mut engine = MuxEngine::default();
+                let mut context = ExecutionContext::default();
+                let parsed = crate::parse_config(
+                    "cfg.in",
+                    &format!("bind-key -T root MouseDown3Pane {tail}"),
+                );
+                assert!(parsed.diagnostics.is_empty());
+                let refused = engine
+                    .execute(&mut context, &parsed.commands[0])
+                    .expect_err("typed menu items validate syntax while loading");
+                assert!(refused.tmux_message().contains(expected), "{refused:?}");
+            }
+        }
     }
 
     #[test]

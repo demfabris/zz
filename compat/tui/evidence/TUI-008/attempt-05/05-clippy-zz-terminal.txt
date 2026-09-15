@@ -1,0 +1,2 @@
+    Checking zz-terminal v0.8.0 (/home/demfabris/dev/zz-tui-context-10/crates/zz-terminal)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.71s

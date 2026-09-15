@@ -1,0 +1,5 @@
+    Checking zz-terminal v0.8.0 (/home/demfabris/dev/zz-tui-context-10/crates/zz-terminal)
+    Checking zz-protocol v0.8.0 (/home/demfabris/dev/zz-tui-context-10/crates/zz-protocol)
+    Checking zz-mux v0.8.0 (/home/demfabris/dev/zz-tui-context-10/crates/zz-mux)
+    Checking zz-daemon v0.8.0 (/home/demfabris/dev/zz-tui-context-10/crates/zz-daemon)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.53s

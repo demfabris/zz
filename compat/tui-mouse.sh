@@ -53,13 +53,14 @@
 #   triple-click-line           the paste buffer the gesture leaves
 #   right-click-pane            the decoded screen (a menu, or nothing), at a
 #                               blank cell and at a cell whose row carries
-#                               text, where the pin's own menu renders three
-#                               of its items off the screen under the pointer
+#                               text, where the pin's own menu renders four
+#                               of its items off the three names that read
+#                               the screen under the pointer
 #   mouse-context               `#{mouse_word}`, `#{mouse_line}` and
 #                               `#{mouse_hyperlink}` as a user's own
-#                               `bind -n MouseDown3Pane` expands them, over a
-#                               plain word, a wrapped line's head and tail, an
-#                               OSC 8 hyperlink and a blank cell
+#                               `bind -n C-MouseDown3Pane` expands them, over
+#                               a plain word, a wrapped line's head and tail,
+#                               an OSC 8 hyperlink and a blank cell
 #   border-click                `#{pane_marked_set}` and the active pane
 #                               index
 #   border-drag-resize          `#{pane_width}` of the pane left of the border
@@ -951,14 +952,6 @@ case_right_click_pane() {
   send_bytes tmux $'\033'
   both_screen_lacks 'Kill' 'the pane menu closed'
   send_mouse_both 2 "$((left + 6))" "$((top + 4))" m
-  send_mouse_both 2 "$((left + 2))" "$((top + 1))" M
-  both_screen_has 'Kill' 'the pane menu over a word'
-  settle_both Kill 'the right click over a word'
-  check_screen RIGHT_CLICK_WORD right-click-pane/over-a-word
-  send_bytes zz $'\033'
-  send_bytes tmux $'\033'
-  both_screen_lacks 'Kill' 'the pane menu over a word closed'
-  send_mouse_both 2 "$((left + 2))" "$((top + 1))" m
   respawn_shell_both
 }
 
@@ -993,10 +986,11 @@ context_sample_both() {
 }
 
 # The same stock gesture as right-click-pane/screen, at a cell whose row
-# carries text. `DEFAULT_PANE_MENU` renders three of its items off
-# `#{mouse_word}`, `#{mouse_line}` and `#{mouse_hyperlink}`, so over a written
-# cell the menu the pin draws is taller than the one it draws over a blank one
-# and a side that answers none of the three draws neither. Channel: the decoded
+# carries text. `DEFAULT_PANE_MENU` renders four of its items off
+# `#{mouse_word}`, `#{mouse_line}` and `#{mouse_hyperlink}` - Search For, Type
+# and Copy over the word, and Copy Line over the row - so over a written cell
+# the menu the pin draws is taller than the one it draws over a blank one and
+# a side that answers none of the three draws neither. Channel: the decoded
 # screen, the same as the blank-cell case beside it.
 case_right_click_pane_over_a_word() {
   CASE_LABEL=right-click-pane-over-a-word
@@ -1038,6 +1032,9 @@ context_probe() {
     send_mouse "$side" 18 "$aimed" "$aimed_row" m
   done
   wait_for "the pin published $name" pin_option_set @mousectx
+  if [ "$name" != blank-cell ]; then
+    wait_for "the pin read the $name cell" pin_option_answered @mousectx
+  fi
   wait_at_most option_nonempty zz @mousectx || true
   settle_both MOUSECTXEND "the $name probe"
   check_value CONTEXT_FORMAT "mouse-context/$name" \
@@ -1045,6 +1042,14 @@ context_probe() {
 }
 option_nonempty() {
   [ -n "$(option_value "$1" "$2")" ]
+}
+# The brackets keep the value non-empty whatever the three names answer, so a
+# run where BOTH sides read nothing would compare equal and pass. Every cell
+# but blank-cell carries text, so the pin answering `[][][]` there is the
+# fixture failing to aim, not a difference: hold the run to the pin's own
+# answer before the two sides are compared.
+pin_option_answered() {
+  [ "$(option_value tmux "$1")" != '[][][]' ]
 }
 case_mouse_context_formats() {
   CASE_LABEL=mouse-context
@@ -1524,8 +1529,6 @@ CONTEXT_FORMAT_MODE=same
 CONTEXT_FORMAT_REASON=""
 RIGHT_CLICK_MODE=same
 RIGHT_CLICK_REASON=""
-RIGHT_CLICK_WORD_MODE=record
-RIGHT_CLICK_WORD_REASON="formats.mouse-context: the same MouseDown3Pane gesture over a cell whose row carries text. DEFAULT_PANE_MENU renders three of its items off format:mouse_word, format:mouse_line and format:mouse_hyperlink, which the daemon answers empty on zz because it has no synchronous read of the live grid under a cell, so the pin raises a 14-row menu carrying Copy Line where zz raises a 12-row menu without it. Over the blank cell right-click-pane/screen aims at, the three names are empty on the pin too and the menus agree"
 
 run_cases() {
   start_both

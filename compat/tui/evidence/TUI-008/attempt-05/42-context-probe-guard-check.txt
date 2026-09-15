@@ -1,0 +1,26 @@
+# The guard attempt-05's review asked for in context_probe is LIVE.
+# Temporarily widened from the four written cells to blank-cell, which
+# legitimately answers [][][], the run dies rather than comparing two
+# empty answers. Restored immediately; the committed fixture exempts
+# blank-cell and is exit 0 in 40-tui-mouse-review-fixes.txt.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+L0:win*
+--- tmux panes ---
+%0 active=1 0,0 80x23 mode=0
+error: the pin read the blank-cell cell did not happen within 10 seconds

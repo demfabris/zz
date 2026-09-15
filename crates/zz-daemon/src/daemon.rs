@@ -26,9 +26,9 @@ use zz_mux::{
     CellLayout, CommandAliasResolution, CommandPromptStep, CommandPromptTemplate, ConfigDiagnostic,
     CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
     FormatClient, FormatMonitorScope, FormatMonitorTarget, KeyDecision, KeyEngine, KeyTables,
-    MouseEventTarget, MuxEffect, MuxEngine, PaneKind, PaneModeRequest, PaneRuntimeFacts, ParsedConfig,
-    ParsedConfigBytes, RetainedJobEnvironment, SourceStream, StatusHooks, TmuxColour, TmuxSort,
-    TmuxSortOrder, WindowSize, canonical_command, command_block_body,
+    MouseEventTarget, MuxEffect, MuxEngine, PaneKind, PaneModeRequest, PaneRuntimeFacts,
+    ParsedConfig, ParsedConfigBytes, RetainedJobEnvironment, SourceStream, StatusHooks, TmuxColour,
+    TmuxSort, TmuxSortOrder, WindowSize, canonical_command, command_block_body,
     copy_mode_action_is_read_only_safe, expand_format_bytes, expand_format_values, expand_status,
     format_command, format_true, hook_format_variables, if_shell_truthy, parse_tmux_colour,
     sanitize_client_output, send_keys_is_read_only_safe, send_keys_target_client,
@@ -8366,7 +8366,20 @@ impl Shared {
                     }
                     MuxEffect::SendKeys { pane, keys, repeat } => {
                         if inner.pane_modes.contains_key(pane) {
-                            pane_mode_keys.push((*pane, keys.clone(), *repeat));
+                            let target = if command_name == "send-keys" {
+                                send_keys_target_client(&command.args)?
+                            } else {
+                                None
+                            };
+                            let selected = match target {
+                                Some(target) => {
+                                    find_attached_client_with_aliases(&inner, &target, true)
+                                }
+                                None => current_format_client(&inner, client),
+                            };
+                            if let Some(selected) = selected {
+                                pane_mode_keys.push((selected, *pane, keys.clone(), *repeat));
+                            }
                             continue;
                         }
                         let owners = copy_mode_key_owners(&inner, client, *pane);
@@ -8490,7 +8503,15 @@ impl Shared {
                         target_client,
                         require_mode,
                     } => {
-                        if matches!(action, TerminalViewAction::ClearHistory)
+                        if command_name == "send-keys"
+                            && context.invoking_mouse().is_some()
+                            && !require_mode
+                            && consume_pane_mode_mouse(&mut inner, *pane, Some(action))
+                        {
+                            snapshot_changed = true;
+                            continue;
+                        }
+                        if matches!(action, zz_terminal::TerminalViewAction::ClearHistory)
                             && inner.pane_modes.remove(pane).is_some()
                         {
                             snapshot_changed = true;
@@ -8541,7 +8562,9 @@ impl Shared {
                         if targets.is_empty() {
                             if matches!(
                                 action,
-                                TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::Cancel)
+                                zz_terminal::TerminalViewAction::CopyMode(
+                                    zz_terminal::CopyModeAction::Cancel
+                                )
                             ) {
                                 continue;
                             }
@@ -9387,8 +9410,7 @@ impl Shared {
                                     false
                                 } else {
                                     let mode = existing
-                                        .map(|index| modes.remove(index))
-                                        .unwrap_or_else(|| mode.clone());
+                                        .map_or_else(|| mode.clone(), |index| modes.remove(index));
                                     modes.push(mode);
                                     true
                                 }
@@ -9587,8 +9609,8 @@ impl Shared {
                 self.delivered_wrap_search_commands.lock().push(enabled);
             }
         }
-        for (pane, keys, repeat) in pane_mode_keys {
-            self.inject_pane_mode_keys(client, kind, context, pane, &keys, repeat)?;
+        for (selected, pane, keys, repeat) in pane_mode_keys {
+            self.inject_pane_mode_keys(selected, context, pane, &keys, repeat)?;
         }
         for (target, keys, repeat) in injected_client_keys {
             self.inject_client_keys(target, &keys, repeat);
@@ -18777,7 +18799,7 @@ impl Shared {
                     return Ok(());
                 }
                 if input.action != zz_terminal::KeyAction::Release
-                    && self.pane_mode_key(client, kind, context, pane, &input, text_follows)?
+                    && self.pane_mode_key(client, context, pane, &input, text_follows)
                 {
                     self.sync_prefix_armed(client);
                     return Ok(());
@@ -18808,12 +18830,11 @@ impl Shared {
     fn pane_mode_key(
         self: &Arc<Self>,
         client: ClientId,
-        _kind: ClientKind,
         context: &mut ExecutionContext,
         pane: PaneId,
         input: &zz_terminal::KeyInput,
         text_follows: bool,
-    ) -> Result<bool, DaemonError> {
+    ) -> bool {
         let Some(mode) = self
             .inner
             .lock()
@@ -18822,7 +18843,7 @@ impl Shared {
             .and_then(|modes| modes.last())
             .cloned()
         else {
-            return Ok(false);
+            return false;
         };
         self.suppress_committed_character(
             client,
@@ -18835,9 +18856,11 @@ impl Shared {
         let activate = match &mode {
             PaneModeRequest::Clock => None,
             PaneModeRequest::Switch { .. } => match key.as_str() {
-                "Escape" | "C-[" | "C-c" | "C-g" => None,
-                "Enter" => switch_mode_target(&self.inner.lock(), pane),
-                _ => return Ok(true),
+                "Escape" | "C-[" | "C-c" | "C-g" | "\u{1b}" | "\u{3}" | "\u{7}" => None,
+                "Enter" | "C-m" | "C-j" | "\r" | "\n" => {
+                    switch_mode_target(&self.inner.lock(), pane)
+                }
+                _ => return true,
             },
         };
         {
@@ -18867,7 +18890,7 @@ impl Shared {
                 "switch-mode",
             );
         }
-        Ok(true)
+        true
     }
 
     /// `server_client_key_callback`'s mouse half. A decoded pointer event the
@@ -18981,10 +19004,6 @@ impl Shared {
         let Some(pane) = mouse.pane else {
             return;
         };
-        let Some(action @ zz_terminal::TerminalViewAction::Mouse(_)) = mouse.view_action.clone()
-        else {
-            return;
-        };
         let terminal = {
             let inner = self.inner.lock();
             if inner.client_flags.contains(client)
@@ -18996,6 +19015,14 @@ impl Shared {
             }
         };
         let Some(terminal) = terminal else {
+            return;
+        };
+        if consume_pane_mode_mouse(&mut self.inner.lock(), pane, mouse.view_action.as_ref()) {
+            self.publish_mux_snapshots();
+            return;
+        }
+        let Some(action @ zz_terminal::TerminalViewAction::Mouse(_)) = mouse.view_action.clone()
+        else {
             return;
         };
         self.note_terminal_input(client, pane);
@@ -20176,7 +20203,6 @@ impl Shared {
     fn inject_pane_mode_keys(
         self: &Arc<Self>,
         client: ClientId,
-        kind: ClientKind,
         context: &mut ExecutionContext,
         pane: PaneId,
         keys: &[zz_protocol::KeyToken],
@@ -20194,9 +20220,16 @@ impl Shared {
             .collect::<Vec<_>>();
         for _ in 0..repeat {
             for key in &keys {
-                let input = client_key_inputs(key).into_iter().next();
+                let input = match key {
+                    zz_protocol::KeyToken::Raw(byte) => client_key_inputs(
+                        &zz_protocol::KeyToken::Literal(char::from(*byte).to_string()),
+                    ),
+                    key => client_key_inputs(key),
+                }
+                .into_iter()
+                .next();
                 if let Some(input) = input
-                    && self.pane_mode_key(client, kind, context, pane, &input, false)?
+                    && self.pane_mode_key(client, context, pane, &input, false)
                 {
                     continue;
                 }
@@ -37868,6 +37901,28 @@ fn switch_mode_target(inner: &ServerState, pane: PaneId) -> Option<(String, Exec
             state.windows.get(&window).map(|entry| entry.active_pane),
         ),
     ))
+}
+
+fn consume_pane_mode_mouse(
+    inner: &mut ServerState,
+    pane: PaneId,
+    action: Option<&zz_terminal::TerminalViewAction>,
+) -> bool {
+    let Some(modes) = inner.pane_modes.get_mut(&pane) else {
+        return false;
+    };
+    if matches!(action, Some(zz_terminal::TerminalViewAction::Mouse(input))
+        if input.phase() == zz_terminal::TerminalMousePhase::Motion && input.button().is_none())
+    {
+        return true;
+    }
+    if matches!(modes.last(), Some(PaneModeRequest::Clock)) {
+        modes.pop();
+        if modes.is_empty() {
+            inner.pane_modes.remove(&pane);
+        }
+    }
+    true
 }
 
 fn clock_modes_are_open(inner: &ServerState) -> bool {

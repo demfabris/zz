@@ -18589,6 +18589,26 @@ impl Shared {
         input: &zz_terminal::KeyInput,
         text_follows: bool,
     ) -> bool {
+        if !self.pane_mode_key_name(client, context, pane, &input_key_name(input)) {
+            return false;
+        }
+        self.suppress_committed_character(
+            client,
+            pane,
+            CommittedTextLane::Terminal,
+            input,
+            text_follows,
+        );
+        true
+    }
+
+    fn pane_mode_key_name(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &mut ExecutionContext,
+        pane: PaneId,
+        key: &str,
+    ) -> bool {
         let Some(mode) = self
             .inner
             .lock()
@@ -18599,21 +18619,12 @@ impl Shared {
         else {
             return false;
         };
-        self.suppress_committed_character(
-            client,
-            pane,
-            CommittedTextLane::Terminal,
-            input,
-            text_follows,
-        );
-        let key = input_key_name(input);
         let activate = match &mode {
             PaneModeRequest::Clock => None,
-            PaneModeRequest::Switch { .. } => match key.as_str() {
-                "Escape" | "C-[" | "C-c" | "C-g" | "\u{1b}" | "\u{3}" | "\u{7}" => None,
-                "Enter" | "C-m" | "C-j" | "\r" | "\n" => {
-                    switch_mode_target(&self.inner.lock(), pane)
-                }
+            PaneModeRequest::Switch { .. } => match key {
+                "Escape" | "C-[" | "C-c" | "C-g" | "[ETX]" | "[BEL]" | "\u{1b}" | "\u{3}"
+                | "\u{7}" => None,
+                "Enter" | "C-m" | "\r" => switch_mode_target(&self.inner.lock(), pane),
                 _ => return true,
             },
         };
@@ -19974,17 +19985,13 @@ impl Shared {
             .collect::<Vec<_>>();
         for _ in 0..repeat {
             for key in &keys {
-                let input = match key {
-                    zz_protocol::KeyToken::Raw(byte) => client_key_inputs(
-                        &zz_protocol::KeyToken::Literal(char::from(*byte).to_string()),
-                    ),
-                    key => client_key_inputs(key),
-                }
-                .into_iter()
-                .next();
-                if let Some(input) = input
-                    && self.pane_mode_key(client, context, pane, &input, false)
-                {
+                let name = match key {
+                    zz_protocol::KeyToken::Named(name) | zz_protocol::KeyToken::Literal(name) => {
+                        name.clone()
+                    }
+                    zz_protocol::KeyToken::Raw(byte) => char::from(*byte).to_string(),
+                };
+                if self.pane_mode_key_name(client, context, pane, &name) {
                     continue;
                 }
                 let owners = copy_mode_key_owners(&self.inner.lock(), client, pane);

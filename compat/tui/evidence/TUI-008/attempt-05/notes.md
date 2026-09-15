@@ -111,12 +111,33 @@ Two cells in the table do NOT agree and neither is owned by these formats:
   the same commit as the gap items.
 - The GUI is untouched: no hunk under crates/zz, and `cargo test -p zz` is green.
 
-Seven unit tests in zz-terminal cover the oracle table's nineteen rows: `pointer_formats_*`,
+Nine unit tests in zz-terminal cover the oracle table's nineteen rows: `pointer_formats_*`,
 `pointer_word_crosses_a_wrap_where_the_line_does_not`,
 `pointer_hyperlink_answers_the_osc_8_uri_of_the_cell`,
 `pointer_word_reads_the_same_text_from_both_halves_of_a_wide_cell`,
 `pointer_line_keeps_leading_blanks_and_trims_trailing_ones`,
-`pointer_word_honours_the_word_separators_option`.
+`pointer_word_honours_the_word_separators_option`,
+`pointer_word_crosses_a_wrap_back_into_the_scrollback` and
+`pointer_formats_read_the_frozen_mode_at_its_own_viewport_offset`.
+
+The last two close the two holes attempt-05's review named, both of which ran only against an
+empty scrollback and a live grid before. Both read the same sample: thirty `FILLER%03d` rows, the
+139-cell wrapping word, then twenty-two `TAIL%03d` rows, so the word's head row is the LAST HISTORY
+ROW and its tail is screen row 0.
+
+- `pointer_word_crosses_a_wrap_back_into_the_scrollback` asserts `LiveGrid::active_base()` is 31,
+  not 0, then reads the tail at screen row 0: `mouse_word` answers the whole 139-cell word, walked
+  backward across the wrap into the history, and `mouse_line` answers the tail's own 59 cells.
+  Screen row 1 answers `TAIL000`, so a constant-0 `active_base()` cannot pass.
+- `pointer_formats_read_the_frozen_mode_at_its_own_viewport_offset` enters copy mode and applies
+  three `ScrollUp` actions, which is `data->oy = 3`. `viewport_offset` is then 28 where the live
+  grid's base is 31, and screen row 1 answers `FILLER029` off the revision where the live grid
+  answers `TAIL000` - the same contrast the pin shows between a pane in copy mode and the same pane
+  after `send -X cancel`.
+
+Each catches its own mutation and only its own: stubbing `active_base()` to `Ok(0)` fails the first
+(left 0, right 31) with the second green, and rewriting the `Some(mode)` arm to read the live grid
+fails the second (left `TAIL000`, right `FILLER029`) with the first green.
 
 ## The fixture (punch-list item 4)
 

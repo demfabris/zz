@@ -14201,6 +14201,88 @@ mod tests {
         assert_eq!(pointer_sample_context(4, 2, &rebound).word, "");
     }
 
+    /// The sample the scrollback-addressed pointer tests read: labelled rows,
+    /// then the 139-cell word, then enough rows to push the word's head off
+    /// the active area and leave its tail on screen row 0.
+    fn pointer_scrollback_sample(word: &str) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for index in 0..30u16 {
+            write!(bytes, "FILLER{index:03}\r\n").expect("sample");
+        }
+        write!(bytes, "{word}\r\n").expect("sample");
+        for index in 0..22u16 {
+            write!(bytes, "TAIL{index:03}\r\n").expect("sample");
+        }
+        bytes
+    }
+
+    fn pointer_scrollback_terminal<'alloc>(word: &str) -> Terminal<'alloc, 'static> {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 80,
+            rows: 24,
+            max_scrollback: 2000,
+        })
+        .expect("terminal");
+        terminal.vt_write(&pointer_scrollback_sample(word));
+        terminal
+    }
+
+    #[test]
+    fn pointer_word_crosses_a_wrap_back_into_the_scrollback() {
+        let separators = WordSeparators::default();
+        let whole = format!("WRAPPEDHEAD{}LONGTAIL", "x".repeat(120));
+        let terminal = pointer_scrollback_terminal(&whole);
+        let grid = LiveGrid::new(&terminal).expect("live grid");
+        assert_eq!(grid.active_base().expect("active base"), 31);
+        let tail = pointer_context(&terminal, None, 4, 0, &separators).expect("pointer context");
+        assert_eq!(tail.word, whole);
+        assert_eq!(tail.line, whole[80..]);
+        let below = pointer_context(&terminal, None, 0, 1, &separators).expect("pointer context");
+        assert_eq!(below.word, "TAIL000");
+        assert_eq!(below.line, "TAIL000");
+    }
+
+    #[test]
+    fn pointer_formats_read_the_frozen_mode_at_its_own_viewport_offset() {
+        let separators = WordSeparators::default();
+        let whole = format!("WRAPPEDHEAD{}LONGTAIL", "x".repeat(120));
+        let mut terminal = pointer_scrollback_terminal(&whole);
+        let mut selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(
+            &mut terminal,
+            &mut selection,
+            &mut copy_mode,
+            false,
+            false,
+            None,
+            true,
+        )
+        .expect("copy mode");
+        let mut unseen_output = 0;
+        for _ in 0..3 {
+            apply_copy_mode_action(
+                &mut terminal,
+                &mut selection,
+                &mut copy_mode,
+                &mut unseen_output,
+                CopyModeAction::ScrollUp,
+                &separators,
+                false,
+            )
+            .expect("scroll up");
+        }
+        let mode = copy_mode.as_deref().expect("mode survives the scroll");
+        assert_eq!(mode.viewport_offset, 28);
+        let frozen =
+            pointer_context(&terminal, Some(mode), 2, 1, &separators).expect("pointer context");
+        assert_eq!(frozen.word, "FILLER029");
+        assert_eq!(frozen.line, "FILLER029");
+        let live = pointer_context(&terminal, None, 2, 1, &separators).expect("pointer context");
+        assert_eq!(live.word, "TAIL000");
+        assert_eq!(live.line, "TAIL000");
+    }
+
     fn engine_filter_screen(knobs: EngineKnobs, chunks: &[&[u8]]) -> (String, Vec<String>) {
         let (text, renames, _) = engine_filter_run(knobs, chunks);
         (text, renames)

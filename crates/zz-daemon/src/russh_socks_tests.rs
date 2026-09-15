@@ -98,7 +98,15 @@ impl server::Handler for TestServer {
         } else {
             u16::try_from(port).unwrap()
         };
-        match TcpStream::connect((destination, port)).await {
+        let connected = if destination == "localhost" {
+            match TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await {
+                Ok(remote) => Ok(remote),
+                Err(_) => TcpStream::connect((Ipv6Addr::LOCALHOST, port)).await,
+            }
+        } else {
+            TcpStream::connect((destination, port)).await
+        };
+        match connected {
             Ok(mut remote) => {
                 reply.accept().await;
                 tokio::spawn(async move {

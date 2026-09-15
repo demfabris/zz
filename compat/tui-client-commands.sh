@@ -30,13 +30,23 @@
 #   [-t] [user|group]                                                                         has no socket ACL
 # lock-server               locks every client, runs          validates, empty execution,    PROVED (CLI) +
 #                             lock-command on each tty          after-lock-server fires       DECLARED (screen),
-#                                                                                             CHILD TUI-015
+#                                                                                             TUI-015
 # lock-session [-t]         locks that session's clients      same                           PROVED + DECLARED
 # lock-client [-t]          locks that one client             same                           PROVED + DECLARED
-# lock-after-time           arms a per-client server timer    store-only                     DECLARED, CHILD TUI-015
-# lock-command              spawned on the client tty         store-only; the pin's own      DECLARED, the pin's
-#                                                               default is a build-time        default is whatever
-#                                                               choice                         configure found
+# lock-server/-session/     too many arguments, unknown       same                           PROVED
+#   -client arity and -t     flag, -t without an argument
+# lock-session -t with a    resolves the session through      matches the whole string as a  RECORDED, and not a
+#   window or pane suffix     the whole session:window.pane     session name                   lock fact: the same
+#                             grammar                                                          bytes come back from
+#                                                                                              has-session
+# after-lock-session        neither is a hook name: the pin   same                           PROVED
+# after-lock-client           answers `invalid option`
+# lock-after-time           arms a per-client server timer    store-only at both scopes,     DECLARED, TUI-015
+#                                                               and an invalid value is
+#                                                               refused the pin's way
+# lock-command              spawned on the client tty         store-only at both scopes;     DECLARED, the pin's
+#                                                               the pin's own default is a     default is whatever
+#                                                               build-time choice              configure found
 # refresh-client            status jobs rerun, redraw         status render published        PROVED
 # refresh-client -S         status jobs rerun, status redraw  status render published        PROVED
 # refresh-client -f -F      client flags set                  client flags set               PROVED
@@ -711,6 +721,7 @@ pin_window_pane_count() {
 NATIVE_CLIENT_TOOLS='commands.native-client-tools, accepted: the pin paints client chrome inside the target pane and zz answers each intent with a native surface. The raw TUI half is TUI-014'
 INTERACTIVE_REFRESH='clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported'
 LOCK_PROGRAM='options.lock-program, accepted: the pin spawns lock-command on the client tty and a daemon that only publishes frames cannot run a program on a client terminal'
+SESSION_TARGET_GRAMMAR='NOT A LOCK FACT, measured 2026-09-15: the pin resolves a session target through the whole session:window.pane grammar and names the part it cannot find - `=cli:nosuchwin` is `can'"'"'t find window: nosuchwin` and `%99` is `can'"'"'t find pane: %99` - while zz matches the whole string as a session name and answers `can'"'"'t find session: cli:win`. has-session -t =cli:win and list-windows -t =cli:win return those same bytes, so this is the shared session-target grammar in resolve_named_session (crates/zz-mux/src/model.rs), not the lock surface: no gap names it yet and TUI-015 neither owns nor closes it'
 RICH_CAPTURE='capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser'
 BINARY_STREAMS='protocol.binary-streams, accepted: typed UTF-8 arguments are the contract and the remaining - forms stay loudly refused rather than pretending the daemon process is the caller'
 LOG_IDENTITY='DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. Measured 2026-09-14 on both sides: the pin names ANY tty-bearing client by that tty, including the attached terminal client whose attach-session row reads /dev/pts/<n>, and zz named none of them - it spelled every row by the device name the client sent, which for an interactive client is the hostname. That half is closed: the server log now names a client by its tty whenever it has one. What stays is the clientless CLI, which names a process that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked'
@@ -839,21 +850,49 @@ message_live_job_cases() {
   restore_case messages-jobs-live-restored
 }
 
+# The lock family's whole CLI surface: the three commands, their arity and flag
+# errors, every target form, the one hook name that exists, and both options at
+# both scopes. cmd-lock-server.c gives all three CMD_AFTERHOOK, so the pin fires
+# after-lock-<name> and only after-lock-server is a hook name - the other two are
+# `invalid option`, which is what makes lock-server-hook's marker a lock-server
+# fact rather than a lock fact. The option cases set a session-scope value and
+# unset it again while no lock runs between them, so nothing downstream can be
+# spawned onto the pin's client tty but `true`.
 lock_cases() {
   run_on_both set-hook -g after-lock-server 'set -g @zzcc-locked yes'
   case_run lock-server cli "$LOCK_PROGRAM" -- lock-server
   restore_case lock-server-restored
   case_run lock-server-hook same '' -- show-options -gv @zzcc-locked
+  case_run lock-server-arity same '' -- lock-server zzcc-extra
+  case_run lock-server-unknown-flag same '' -- lock-server -t zzcc-nope
   case_run lock-session cli "$LOCK_PROGRAM" -- lock-session -t "=$INNER_SESSION"
   restore_case lock-session-restored
+  case_run lock-session-current cli "$LOCK_PROGRAM" -- lock-session
+  restore_case lock-session-current-restored
   case_run lock-session-missing same '' -- lock-session -t zzcc-nope
+  case_run lock-session-arity same '' -- lock-session zzcc-extra
+  case_run lock-session-window-target record "$SESSION_TARGET_GRAMMAR" -- \
+    lock-session -t "=$INNER_SESSION:$WINDOW_NAME"
+  restore_case lock-session-window-target-restored
   case_run lock-client cli "$LOCK_PROGRAM" -- lock-client -t CLIENT
   restore_case lock-client-restored
   case_run lock-client-current cli "$LOCK_PROGRAM" -- lock-client
   restore_case lock-client-current-restored
   case_run lock-client-missing same '' -- lock-client -t /dev/zzcc-nope
+  case_run lock-client-arity same '' -- lock-client zzcc-extra
+  case_run lock-client-missing-argument same '' -- lock-client -t
+  case_run lock-hook-session-name same '' -- set-hook -g after-lock-session 'set -g @zzcc-locked no'
+  case_run lock-hook-client-name same '' -- set-hook -g after-lock-client 'set -g @zzcc-locked no'
   case_run lock-after-time-store same '' -- show-options -g lock-after-time
   case_run lock-command-store same '' -- show-options -g lock-command
+  case_run lock-after-time-invalid same '' -- set-option -g lock-after-time zzcc-nope
+  case_run lock-command-session-set same '' -- set-option -t "$INNER_SESSION" lock-command zzcc-locker
+  case_run lock-command-session-store same '' -- show-options -t "$INNER_SESSION" lock-command
+  case_run lock-after-time-session-set same '' -- set-option -t "$INNER_SESSION" lock-after-time 45
+  case_run lock-after-time-session-store same '' -- show-options -t "$INNER_SESSION" lock-after-time
+  case_run lock-command-session-unset same '' -- set-option -t "$INNER_SESSION" -u lock-command
+  case_run lock-after-time-session-unset same '' -- set-option -t "$INNER_SESSION" -u lock-after-time
+  case_run lock-session-options-restored same '' -- show-options -t "$INNER_SESSION" lock-command
 }
 
 client_tool_cases() {
@@ -1043,8 +1082,30 @@ run_self_check() {
     die 'zz refused set-option -g status-left'
   wait_for 'the one-sided format job withdrawn from the status' zz_status_left_is L
 
+  # The lock family, twice, because its three commands print nothing on either
+  # side and a comparison that only reads their stdout would pass while zz did
+  # nothing at all. First its target validation: a session the zz side alone
+  # has, so lock-session succeeds there and the pin cannot find it. Then its
+  # hook: after-lock-server armed on the zz side only, run, and the marker it
+  # writes read back - the lock itself is silent on both, so the marker is the
+  # channel a sabotage can reach.
+  zz_command new-session -d -s zzcc-sab-lock -x 80 -y 24 "$INNER_SHELL" >/dev/null ||
+    die 'zz refused new-session'
+  self_check_run lock-target-sabotage lock-session -t zzcc-sab-lock
+  self_check_expect 'the lock target on one side only' exit=1 stdout=0 stderr=1
+  zz_command kill-session -t zzcc-sab-lock >/dev/null || die 'zz refused kill-session'
+
+  zz_command set-hook -g after-lock-server 'set -g @zzcc-sab-lock yes' >/dev/null ||
+    die 'zz refused set-hook'
+  self_check_run lock-hook-sabotage-fire lock-server
+  self_check_run lock-hook-sabotage show-options -gqv @zzcc-sab-lock
+  self_check_expect 'the after-lock-server hook armed on one side only' \
+    exit=0 stdout=1 stderr=0
+  zz_command set-hook -gu after-lock-server >/dev/null || die 'zz refused set-hook -gu'
+  zz_command set-option -gu @zzcc-sab-lock >/dev/null || die 'zz refused set-option -gu'
+
   # The second equivalence: with every sabotage withdrawn the comparison is
-  # silent again, so none of the five above was a difference the scene kept.
+  # silent again, so none of the seven above was a difference the scene kept.
   self_check_run equivalence-after display-message -p -t PANE '#{window_index}.#{pane_index}'
   self_check_expect 'equivalence: every sabotage withdrawn' \
     exit=0 stdout=0 stderr=0 screen=0 state=0

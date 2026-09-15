@@ -19,7 +19,7 @@ Existing tmux gap decisions remain in `compat/tmux-gaps.json`. Accepted or close
 
 Fixed baseline: **9/12 verified**. Added scope: **0/6 verified**.
 
-Status counts: unmeasured: 3, different: 0, active: 3, review: 3, blocked: 0, verified: 9.
+Status counts: unmeasured: 2, different: 0, active: 3, review: 4, blocked: 0, verified: 9.
 
 Dependency-ready obligations, by priority: TUI-008, TUI-013, TUI-014, TUI-015, TUI-016, TUI-017, TUI-018.
 
@@ -51,7 +51,7 @@ Dependency-ready obligations, by priority: TUI-008, TUI-013, TUI-014, TUI-015, T
 | TUI-011: Remaining stock client command inventory | review | 11 | TUI-003, TUI-006, TUI-007, TUI-014, TUI-015, TUI-016, TUI-017, TUI-018 |
 | TUI-012: Superset commands beside tmux behavior | review | 12 | TUI-003, TUI-004, TUI-008, TUI-009, TUI-010 |
 | TUI-014: Client mode tools in the raw TUI | active | 14 | TUI-003 |
-| TUI-015: A lock surface a client can draw | unmeasured | 15 | none |
+| TUI-015: A lock surface a client can draw | review | 15 | none |
 | TUI-016: Server log and terminal introspection | review | 16 | none |
 | TUI-017: Rich capture transports and the snapshot residues | active | 17 | none |
 | TUI-018: Caller stream forms | unmeasured | 18 | none |
@@ -735,7 +735,7 @@ Next action: Clause 2, in this order and on the same mode surface choose-client 
 
 ### TUI-015: A lock surface a client can draw
 
-Status: unmeasured.
+Status: review.
 
 Acceptance:
 
@@ -747,13 +747,17 @@ Sources:
 - `compat/tui-client-commands.sh`
 - `crates/zz-daemon/src/daemon.rs`
 - `crates/zz-mux/src/tmux_options.rs`
+- `knowledge/designs/tui-parity.md`
+- `compat/tmux-gaps.json`
 - `knowledge/tmux/divergences.md`
 
 Tmux gap references: `options.lock-program`.
 
 SPLIT FROM TUI-011 on 2026-09-13. THE MEASUREMENT: lock-server, lock-session and lock-client validate their target and return an empty execution, and compat/tui-client-commands.sh asserts on 2026-09-13 that their exit status, stdout and stderr match the pin for lock-server, lock-session, lock-client with -t and with no target at all, both missing-target errors, that after-lock-server fires on both, and that lock-after-time and lock-command read back the same way. What differs is only what the pin draws: server_lock spawns lock-command on each attached client's tty and that program owns the client's screen until it exits, while zz spawns nothing. Under lock-command true the pin's client returns at once and even the screen and state are identical, which is why the fixture can hold the lock cases at all. The pin's own default is TMUX_LOCK_CMD, whatever configure found on the machine that built the oracle - vlock here - so the default value is not a parity target. The product decision recorded in TUI-011 puts the pin's cells in the raw TUI and keeps the GUI native. DECIDED 2026-09-14 by fabrico: zz delegates locking to the OS session and builds no lock surface; the acceptance clauses above were amended to that decision the way TUI-001's macOS clause was amended on 2026-09-09. The three commands' parity is unchanged and already asserted.
 
-Next action: Decided by fabrico on 2026-09-14 under the superset principle that a niche or non-performant tmux behaviour is dropped rather than imitated: zz does not build a lock surface. Terminal locking is a convenience from shared multi-user machines and offers no protection to anyone holding the machine; the desktop session owns it. What remains is recording the decision and keeping the three commands' existing parity asserted, both of which compat/tui-client-commands.sh already covers.
+CYCLE 10 CAPTURE LANE, 2026-09-15. CLAUSE 1 WAS ALREADY RECORDED and this attempt did not touch it: fabrico's amendment of 2026-09-14 sits in knowledge/designs/tui-parity.md and in the options.lock-program gap, both re-read at this tip, and zz builds no lock surface. CLAUSE 2 NOW ASSERTS. It did not before: the roster's thirteen lock checks covered lock-server, lock-session with -t, lock-client with and without -t, two missing targets, the after-lock-server marker and the two global option values, and nothing asserted the family's arity, its flag errors, lock-session with no -t, which hook names exist, or either knob anywhere but global scope. compat/tui-client-commands.sh now holds 31 asserted comparisons over the lock family, all identical, 27 of them on all five channels and 4 `cli` cases that assert the three CLI channels and record the pin's drawn lock against options.lock-program. Its summary line on three consecutive runs is `all 79 asserted comparisons identical, 39 recorded not asserted (0 for a sibling lane)`, up from 58 and 37, and --self-check is `self-check complete: every sabotage was caught in its own channel and both equivalences passed`. WHAT WAS ADDED, each measured first and in the evidence: arity, `too many arguments (need at most 0)` for all three, which is also lock-server's whole target validation because cmd-lock-server.c gives it `.args = { "", 0, 0, NULL }`, so `-t` is `unknown flag -t`; `lock-client -t` with nothing after it is `-t expects an argument`; `lock-session` with no -t resolves the one session and exits 0 on both; the hook fan-out, since all three commands carry CMD_AFTERHOOK and the pin therefore fires after-lock-<command name>, so after-lock-session and after-lock-client are `invalid option` on both sides and lock-session and lock-client leave the after-lock-server marker empty while lock-server sets it; and both knobs at session scope - set, read back, unset, and `value is invalid: zzcc-nope` for a bad lock-after-time - which is what `named as such rather than silently ignored` means in the product: the two names are option: items of options.lock-program, and crates/zz-mux/src/compat_manifest_tests.rs asserts that the tracked option names and TMUX_OPTION_CONSUMERS partition the pin's 180-option catalog, so an option zz silently swallowed could not stay unnamed. NO zz CODE CHANGED FOR THIS OBLIGATION; every one of these already held and what was missing was the assertion. TWO SABOTAGES were added because the three commands print nothing on either side and a comparison reading only their stdout would pass while zz did nothing at all: a lock target that exists on the zz side only, caught in exit and stderr alone, and after-lock-server armed on the zz side only, read back through its marker and caught in stdout alone. ONE RECORD, AND IT IS NOT A LOCK FACT. lock-session-window-target: the pin resolves a session target through the whole session:window.pane grammar and names the part it cannot find (`=cli:nosuchwin` is `can't find window: nosuchwin`, `%99` is `can't find pane: %99`, `=cli:win.9` is `can't find pane: 9`), while zz matches the whole string as a session name and answers `can't find session: cli:win`. The control in the evidence settles where it lives: has-session -t =cli:win and list-windows -t =cli:win return those same bytes with no lock in them at all. It is resolve_named_session in crates/zz-mux/src/model.rs, one function every session-targeted command shares, outside this lane's zones and outside every gap in compat/tmux-gaps.json today; it is recorded so nothing is waived by omission and TUI-015 neither owns nor closes it. compat/tui/verify-claims.py now maps TUI-015 to its fixture so the claim can be re-measured. EVIDENCE compat/tui/evidence/TUI-015/attempt-01/, notes.md names every file.
+
+Next action: Clause 1 is recorded and clause 2 asserts, so this is a review, not a landing: nothing in zz changed and the fixture now carries 31 asserted lock comparisons where it carried 13. A reviewer should re-run compat/tui-client-commands.sh and its --self-check, check that the four `cli` lock cases are still the pin's drawn lock and nothing else, and decide where lock-session-window-target goes: it is the shared session-target grammar in resolve_named_session, it is not TUI-015's, and it has no gap item, so it wants either a gap of its own or a target-resolution obligation. TUI-015 verifies when a gate re-measures this.
 
 ### TUI-016: Server log and terminal introspection
 

@@ -41,6 +41,7 @@ FIXTURES = {
     "TUI-011": ["compat/tui-client-commands.sh"],
     "TUI-012": ["compat/tui-superset.sh"],
     "TUI-014": ["compat/tui-client-commands.sh", "compat/tui-choosers.sh"],
+    "TUI-015": ["compat/tui-client-commands.sh"],
     "TUI-016": ["compat/tui-client-commands.sh"],
     "TUI-017": ["compat/tui-client-commands.sh"],
 }

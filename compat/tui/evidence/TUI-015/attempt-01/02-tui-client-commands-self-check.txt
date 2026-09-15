@@ -1,0 +1,57 @@
+self-check: one deliberate one-sided difference per channel, plus two equivalences
+ok    self-check equivalence: the same command on both sides
+      case stdout-sabotage
+      stdout differs
+        0a1
+        > zzcc-sabotage
+      state differs
+        5a6
+        > B zzcc-sabotage 8
+ok    self-check stdout, a buffer on one side only
+      case exit-sabotage
+      exit tmux: 1  zz: 0
+      stdout differs
+        0a1
+        > SABOTAGE
+        \ No newline at end of file
+      stderr differs
+        1d0
+        < no buffer zzcc-sabotage
+      state differs
+        5a6
+        > B zzcc-sabotage 8
+ok    self-check exit and stderr, a buffer missing on one side
+      case state-sabotage
+      state differs
+        1a2
+        > S zzcc-sab 1 0
+        3a5
+        > W zzcc-sab:0 0 * 1
+        5a8
+        > P zzcc-sab:0.0 mode=0/ 80x24 ubuntu
+ok    self-check state, a session on one side only
+      case screen-sabotage
+      screen differs
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   3,2 flag=1 pane=80x24 shape=default
+ok    self-check screen, one column at one prompt
+      case lock-target-sabotage
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < can't find session: zzcc-sab-lock
+      state differs
+        1a2
+        > S zzcc-sab-lock 1 0
+        3a5
+        > W zzcc-sab-lock:0 0 * 1
+        5a8
+        > P zzcc-sab-lock:0.0 mode=0/ 80x24 ubuntu
+ok    self-check the lock target on one side only
+      case lock-hook-sabotage
+      stdout differs
+        0a1
+        > yes
+ok    self-check the after-lock-server hook armed on one side only
+ok    self-check equivalence: every sabotage withdrawn
+self-check complete: every sabotage was caught in its own channel and both equivalences passed

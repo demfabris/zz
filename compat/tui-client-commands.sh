@@ -35,10 +35,13 @@
 # lock-client [-t]          locks that one client             same                           PROVED + DECLARED
 # lock-server/-session/     too many arguments, unknown       same                           PROVED
 #   -client arity and -t     flag, -t without an argument
-# lock-session -t with a    resolves the session through      matches the whole string as a  RECORDED, and not a
-#   window or pane suffix     the whole session:window.pane     session name                   lock fact: the same
+# lock-session -t with a    resolves the session through      matches the whole string as a  NOT A LOCK FACT and no
+#   window or pane suffix     the whole session:window.pane     session name                   case here: the same
 #                             grammar                                                          bytes come back from
-#                                                                                              has-session
+#                                                                                              has-session, so it is
+#                                                                                              the shared target
+#                                                                                              grammar. Measured in
+#                                                                                              TUI-015's evidence
 # after-lock-session        neither is a hook name: the pin   same                           PROVED
 # after-lock-client           answers `invalid option`
 # lock-after-time           arms a per-client server timer    store-only at both scopes,     DECLARED, TUI-015
@@ -71,8 +74,17 @@
 #                             there is no mode
 # capture-pane -a           `no alternate screen`, and one    same                           PROVED
 #                             empty line under -q
-# capture-pane -C -F -H     grid internals and the pending    loudly unsupported             DECLARED, CHILD TUI-017
-#   -L -P -R                  input parser state                                              capture.rich-transports
+# capture-pane -C           backslashes doubled, and with     same                           PROVED
+#                             -e every escape written \033
+# capture-pane -L           each line numbered from the       same                           PROVED
+#                             history size, negative in
+#                             history, and with -J the
+#                             number of every joined row
+#                             inside the joined line
+# capture-pane -F -H -P -R  line flags, the line OSC 8        loudly unsupported             DECLARED, TUI-017
+#                             URIs, the pending input                                         capture.rich-transports,
+#                             buffer and the whole internal                                   each with the workload
+#                             grid                                                            its refusal names
 # load-buffer -             caller stdin into a buffer        adopted, same                  PROVED
 # save-buffer - / -a -      buffer bytes to caller stdout     adopted, same                  PROVED
 # show-buffer [-b]          buffer bytes to stdout            same                           PROVED
@@ -772,8 +784,13 @@ window_pane_count() {
 NATIVE_CLIENT_TOOLS='commands.native-client-tools, accepted: the pin paints client chrome inside the target pane and zz answers each intent with a native surface. The raw TUI half is TUI-014'
 INTERACTIVE_REFRESH='clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported'
 LOCK_PROGRAM='options.lock-program, accepted: the pin spawns lock-command on the client tty and a daemon that only publishes frames cannot run a program on a client terminal'
-SESSION_TARGET_GRAMMAR='NOT A LOCK FACT, measured 2026-09-15: the pin resolves a session target through the whole session:window.pane grammar and names the part it cannot find - `=cli:nosuchwin` is `can'"'"'t find window: nosuchwin` and `%99` is `can'"'"'t find pane: %99` - while zz matches the whole string as a session name and answers `can'"'"'t find session: cli:win`. has-session -t =cli:win and list-windows -t =cli:win return those same bytes, so this is the shared session-target grammar in resolve_named_session (crates/zz-mux/src/model.rs), not the lock surface: no gap names it yet and TUI-015 neither owns nor closes it'
 RICH_CAPTURE='capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser'
+CONTROL_ESCAPE='capture.rich-transports: -C answers the pin over the plain snapshot, and -C -e rides on -e, whose vendored formatter in crates/zz-terminal/src/session.rs spells a colour 38;5;1 where the pin spells it 31 and keeps one trailing cell the pin trims. That residue is this obligation clause 2, not the transport'
+NUMBERED_TRAILING='the numbers are identical and the rows are not: -L over -N rides on the -N residue this obligation clause 2 owns, where the pin pads to the pane edge and zz stops at the last written cell. Measured 2026-09-15 at 80x24, the three numbered rows differ only in their trailing spaces. The case flips to same when clause 2 lands'
+CAPTURE_FLAGS='capture.rich-transports, refused with a measurement 2026-09-15: -F prints six grid_line flags and zz has none of them as a line fact. D is a dead pane line, X an extended cell line and H a hyperlink line, all tmux grid bookkeeping; O and P are the OSC 133 marks libghostty records on cells but does not publish per line; W is the wrap the formatter consumes and never reports. The workload it would serve is a script reading which rows are output, prompt or continuation; that wants a line-fact channel out of the terminal worker, not a sixth text transform'
+CAPTURE_LINKS='capture.rich-transports, refused with a measurement 2026-09-15: -H prints each line OSC 8 URIs and zz has no hyperlink to print. On a row the pin marks HX, a zz capture -e emits the text with no OSC 8 at all, so the retained snapshot did not keep the link. The workload it would serve is a script harvesting the URLs on a screen; that wants hyperlinks retained and published by the terminal worker first'
+CAPTURE_PENDING='capture.rich-transports, refused with a measurement 2026-09-15: -P prints the bytes the pin parser has read and not yet completed, input_pending(wp->ictx). libghostty-vt publishes no parser-pending buffer, so zz cannot answer it and an empty answer would be a fake channel that matched only because the buffer is almost always empty. The workload it would serve is debugging a half-written escape sequence'
+CAPTURE_GRID='capture.rich-transports, refused with a measurement 2026-09-15: -R dumps the pin internal grid - a header G <sx>x<sy> (<hsize>/<hlimit>), then per line L <yy> (<n>) flags=<string>[<hex>] <cellused>/<cellsize>, then one C line per column carrying that cell colour, attribute and link ids. Measured at 40x8 that is 329 lines for eight rows. zz has no hsize/hlimit pair, no per-line cellused and cellsize, and no grid flag word: building them inside zz would be inventing tmux internals to make bytes match. The workload it would serve is a tmux regression test reading another tmux grid. Decided 2026-09-15 by the orchestrator under fabrico TUI parity contract of 2026-09-09; reversible'
 LOG_IDENTITY='DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. Measured 2026-09-14 on both sides: the pin names ANY tty-bearing client by that tty, including the attached terminal client whose attach-session row reads /dev/pts/<n>, and zz named none of them - it spelled every row by the device name the client sent, which for an interactive client is the hostname. That half is closed: the server log now names a client by its tty whenever it has one. What stays is the clientless CLI, which names a process that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked'
 SERVER_ACCESS='zz has no multi-user socket access list: the daemon socket is the invoking user, so there is no user or group to add, and TUI-014 carries the refusal shape'
 CLIENT_TREE_CLIENTLESS='clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer, while the pin exits 0 with no output and, alone among the three, opens no mode either: cmd_choose_tree_exec returns CMD_RETURN_NORMAL before window_pane_set_mode when server_client_how_many() == 0 (cmd-choose-tree.c), so the exit status and the error text are what diverge here, measured 2026-09-14. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open'
@@ -823,12 +840,22 @@ capture_pane_cases() {
   case_run capture-mode-default same '' -- capture-pane -p -M -t PANE
   case_run capture-alternate same '' -- capture-pane -p -a -t PANE
   case_run capture-alternate-quiet same '' -- capture-pane -p -a -q -t PANE
-  case_run capture-control record "$RICH_CAPTURE" -- capture-pane -p -C -t PANE -S 0 -E 2
-  case_run capture-flags record "$RICH_CAPTURE" -- capture-pane -p -F -t PANE -S 0 -E 2
-  case_run capture-hyperlinks record "$RICH_CAPTURE" -- capture-pane -p -H -t PANE -S 0 -E 2
-  case_run capture-line-numbers record "$RICH_CAPTURE" -- capture-pane -p -L -t PANE -S 0 -E 2
-  case_run capture-pending record "$RICH_CAPTURE" -- capture-pane -p -P -t PANE
-  case_run capture-grid record "$RICH_CAPTURE" -- capture-pane -p -R -t PANE
+  case_run capture-control same '' -- capture-pane -p -C -t PANE -S 0 -E 2
+  case_run capture-control-escape same '' -- capture-pane -p -C -e -t PANE -S 0 -E 2
+  case_run capture-control-buffer same '' -- capture-pane -C -b zzcap -t PANE -S 0 -E 2
+  case_run capture-control-buffer-shown same '' -- show-buffer -b zzcap
+  case_run capture-control-buffer-deleted same '' -- delete-buffer -b zzcap
+  case_run capture-line-numbers same '' -- capture-pane -p -L -t PANE -S 0 -E 2
+  case_run capture-line-numbers-history same '' -- capture-pane -p -L -t PANE -S - -E 0
+  case_run capture-line-numbers-join same '' -- capture-pane -p -L -J -t PANE -S 0 -E 2
+  case_run capture-line-numbers-trailing same '' -- capture-pane -p -L -N -t PANE -S 0 -E 2
+  case_run capture-line-numbers-reversed same '' -- capture-pane -p -L -t PANE -S 2 -E 0
+  case_run capture-control-line-numbers same '' -- capture-pane -p -C -L -t PANE -S 0 -E 2
+  case_run capture-line-numbers-missing same '' -- capture-pane -p -L -t %99
+  case_run capture-flags record "$CAPTURE_FLAGS" -- capture-pane -p -F -t PANE -S 0 -E 2
+  case_run capture-hyperlinks record "$CAPTURE_LINKS" -- capture-pane -p -H -t PANE -S 0 -E 2
+  case_run capture-pending record "$CAPTURE_PENDING" -- capture-pane -p -P -t PANE
+  case_run capture-grid record "$CAPTURE_GRID" -- capture-pane -p -R -t PANE
   restore_case capture-restored
 }
 
@@ -931,9 +958,6 @@ lock_cases() {
   restore_case lock-session-current-restored
   case_run lock-session-missing same '' -- lock-session -t zzcc-nope
   case_run lock-session-arity same '' -- lock-session zzcc-extra
-  case_run lock-session-window-target record "$SESSION_TARGET_GRAMMAR" -- \
-    lock-session -t "=$INNER_SESSION:$WINDOW_NAME"
-  restore_case lock-session-window-target-restored
   case_run lock-client cli "$LOCK_PROGRAM" -- lock-client -t CLIENT
   restore_case lock-client-restored
   case_run lock-client-current cli "$LOCK_PROGRAM" -- lock-client
@@ -1260,6 +1284,21 @@ run_self_check() {
     exit=0 stdout=1 stderr=0
   zz_command set-hook -gu after-lock-server >/dev/null || die 'zz refused set-hook -gu'
   zz_command set-option -gu @zzcc-sab-lock >/dev/null || die 'zz refused set-option -gu'
+
+  # The numbered capture, whose whole output is one transform of a capture that
+  # already matched: one space typed at the zz prompt moves a numbered line the
+  # same way it moves the plain one, so the -L bytes are compared and not just
+  # produced. The space is withdrawn before the equivalence below.
+  zz_before="$(cursor_tuple zz)"
+  tmux_outer_command send-keys -t "=$OUTER_SESSION:zz" Space ||
+    die 'the outer tmux refused send-keys'
+  wait_for 'the one-sided space for the numbered capture' zz_cursor_is_not "$zz_before"
+  self_check_run capture-line-numbers-sabotage capture-pane -p -L -t PANE -S 0 -E 2
+  self_check_expect 'a numbered capture of one column on one side only' \
+    exit=0 stdout=1 stderr=0
+  tmux_outer_command send-keys -t "=$OUTER_SESSION:zz" BSpace ||
+    die 'the outer tmux refused send-keys'
+  wait_for 'the space withdrawn again' zz_cursor_is "$zz_before"
 
   # The second equivalence: with every sabotage withdrawn the comparison is
   # silent again, so none of the seven above was a difference the scene kept.

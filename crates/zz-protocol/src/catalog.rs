@@ -1026,11 +1026,13 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         name: "capture-pane",
         aliases: &["capturep"],
         description: "Capture the contents of a pane",
-        usage: "[-aeJMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]",
+        usage: "[-aCeJLMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]",
         options: &[
             CommandOptionSpec::flag("-a", "capture the alternate screen"),
+            CommandOptionSpec::flag("-C", "escape backslashes and escape sequences"),
             CommandOptionSpec::flag("-e", "include escape sequences"),
             CommandOptionSpec::flag("-J", "join wrapped lines"),
+            CommandOptionSpec::flag("-L", "number each line"),
             CommandOptionSpec::flag("-M", "trailing spaces"),
             CommandOptionSpec::flag("-N", "preserve trailing spaces"),
             CommandOptionSpec::flag("-p", "print to stdout"),
@@ -1040,10 +1042,8 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::value("-E", FreeForm, "end line"),
             CommandOptionSpec::value("-S", FreeForm, "start line"),
             CommandOptionSpec::value("-t", Pane, "target pane"),
-            CommandOptionSpec::unsupported_flag("-C"),
             CommandOptionSpec::unsupported_flag("-F"),
             CommandOptionSpec::unsupported_flag("-H"),
-            CommandOptionSpec::unsupported_flag("-L"),
             CommandOptionSpec::unsupported_flag("-P"),
             CommandOptionSpec::unsupported_flag("-R"),
         ],
@@ -3133,7 +3133,7 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 287), ("optional", 8), ("required", 220)])
         );
-        assert_eq!((supported, unsupported), (490, 25));
+        assert_eq!((supported, unsupported), (492, 23));
         assert_eq!(usage_overrides.len(), 20);
         assert_eq!(
             usage_overrides,

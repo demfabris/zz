@@ -1,0 +1,39 @@
+self-check: one deliberate one-sided difference per channel, plus two equivalences
+ok    self-check equivalence: the same command on both sides
+      case stdout-sabotage
+      stdout differs (tmux 0 bytes, zz 9 bytes)
+        0a1
+        > SABOTAGE
+ok    self-check stdout, an option on one side only
+ok    self-check exit and stderr, a buffer missing on both sides
+      case exit-sabotage-present
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 8 bytes)
+        0a1
+        > SABOTAGE
+        \ No newline at end of file
+      stderr differs
+        1d0
+        < no buffer zzcs-sabotage
+      state differs
+        2a3
+        > B zzcs-sabotage 8
+ok    self-check exit and stderr, a buffer one side does not have
+      case state-sabotage
+      state differs
+        1a2
+        > S zzcs-sab 1
+        2a4
+        > P zzcs-sab:0.0 dead=0 process=yes 80x24
+        7a10
+        > C 0 $|
+ok    self-check state, a session on one side only
+      case content-sabotage
+      state differs
+        10c10
+        < C 1 
+        ---
+        > C 1 ONE-SIDED|
+ok    self-check pane content, bytes written into one side only
+ok    self-check equivalence: every sabotage withdrawn
+self-check complete: every sabotage was caught in its own channel and both equivalences passed

@@ -648,7 +648,7 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   family `-c -D -L -R -U -l -r` and optional adjustment positional remain refused.
   `-A -B -C -f -F -t` behave.
 - `load-buffer -` reads up to 1 MiB from a command client's stdin, and `save-buffer -` writes
-  raw stdout bytes. `source-file -` still rejects stdin.
+  raw stdout bytes. `source-file -` reads configuration from caller stdin.
 - Relative `load-buffer` and `save-buffer` paths use the invoking command client's cwd or
   attached session cwd. Unattached command clients perform file IO on their own host; attached
   clients retain daemon-side IO, as recorded in the closed `buffers.client-file-context` group.
@@ -659,15 +659,20 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   tmux: a value option consumes the rest of its cluster. Numeric `-S`/`-E`, raw `-`, inclusive and
   reversed bounds, target-scoped format expansion, and tmux's silent invalid/out-of-range fallback
   match.
-  One text residue remains: when `-E` falls back to visible end and the viewport has trailing blank
-  rows, tmux emits those rows as newlines while zz stops after the last retained content row. `-T`
-  is inert. `-C` and `-L` answer the pin over that text since 2026-09-15: `-C` doubles a backslash
-  in cell data and, with `-e`, writes every escape introducer as a literal `\033`, which is all
-  `GRID_STRING_ESCAPE_SEQUENCES` does in tmux's history path, and `-L` numbers each line from the
-  history size, negative in history, keeping the number of every joined row inside a `-J` line.
-  Capture otherwise stays UTF-8 text/VT output; there is no retained saved-alternate grid, pending
-  raw-byte stream, raw-grid dump, hyperlink list, or line-flag prefix, so `-P`/`-R`/`-H`/`-F` stay
-  loudly rejected rather than approximated.
+  The default range includes trailing blank rows. `-N` pads to the inferred grid allocation,
+  while `-T` stops at used cells. `-C` doubles backslashes and writes escape introducers as literal
+  `\033`. The pin also escapes retained charset shifts as `\016` and `\017`; Ghostty converts
+  those cells to Unicode and loses their charset provenance, so this channel remains a measured
+  decision in TUI-017. `-L` numbers physical rows from the history size and uses each row's wrap
+  flag when joining, preserving the number of each continuation row.
+  Live `-e` captures retain style state across rows and emit the pin's named, indexed and RGB
+  colour codes and attribute resets. Explicit indexed colours 0 through 15 remain a TUI-017
+  divergence: Ghostty merges them with named colours in the stored cell. Styled frozen mode
+  captures still use the existing snapshot formatter; the mode-fallback text cases do not prove
+  their SGR bytes.
+  Capture has no retained saved-alternate grid, pending raw-byte stream, raw-grid dump,
+  hyperlink list, or complete line-flag prefix, so `-P`/`-R`/`-H`/`-F` remain refused with measured
+  workload-specific decisions in the fixture.
 - `copy-mode` (every flag, including bare) exits 1 with `pane is not attached: %N` when no
   client is attached to the target pane, where the pin sets the mode regardless — the mode
   lives on the pane in tmux and on the per-client terminal view in zz

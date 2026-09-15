@@ -9351,7 +9351,17 @@ impl Shared {
                     MuxEffect::PaneModeChanged { pane, mode } => {
                         let changed = match mode {
                             Some(mode) => {
-                                inner.pane_modes.insert(*pane, mode.clone()) != Some(mode.clone())
+                                let modes = inner.pane_modes.entry(*pane).or_default();
+                                let existing = modes.iter().position(|entry|
+                                    std::mem::discriminant(entry) == std::mem::discriminant(mode));
+                                if existing == modes.len().checked_sub(1) && existing.is_some() {
+                                    false
+                                } else {
+                                    let mode = existing.map(|index| modes.remove(index))
+                                        .unwrap_or_else(|| mode.clone());
+                                    modes.push(mode);
+                                    true
+                                }
                             }
                             None => inner.pane_modes.remove(pane).is_some(),
                         };
@@ -18563,7 +18573,7 @@ impl Shared {
         input: &zz_terminal::KeyInput,
         text_follows: bool,
     ) -> Result<bool, DaemonError> {
-        let Some(mode) = self.inner.lock().pane_modes.get(&pane).cloned() else {
+        let Some(mode) = self.inner.lock().pane_modes.get(&pane).and_then(|modes| modes.last()).cloned() else {
             return Ok(false);
         };
         self.suppress_committed_character(
@@ -18587,7 +18597,15 @@ impl Shared {
                 }
             }
         };
-        self.inner.lock().pane_modes.remove(&pane);
+        {
+            let mut inner = self.inner.lock();
+            if let Some(modes) = inner.pane_modes.get_mut(&pane) {
+                modes.pop();
+                if modes.is_empty() {
+                    inner.pane_modes.remove(&pane);
+                }
+            }
+        }
         self.publish_mux_snapshots();
         if let Some(target) = activate {
             self.execute_gesture(
@@ -19940,7 +19958,8 @@ impl Shared {
                     self.inject_mode_table_keys(&owners, pane, std::slice::from_ref(key), 1);
                     continue;
                 }
-                for sink in resolve_input_sinks(&self.inner.lock(), pane)? {
+                let sinks = resolve_input_sinks(&self.inner.lock(), pane)?;
+                for sink in sinks {
                     match sink {
                         PaneSink::Terminal(terminal) => {
                             DeferredTerminalCommand::SendTokens {
@@ -28666,7 +28685,7 @@ struct ServerState {
     /// `wp->modes`: the server-owned mode each pane carries. It belongs to the
     /// pane rather than to a client, so a clientless `list-panes` reads it and
     /// every client attached to the window draws it.
-    pane_modes: BTreeMap<PaneId, PaneModeRequest>,
+    pane_modes: BTreeMap<PaneId, Vec<PaneModeRequest>>,
     display_panes: BTreeMap<ClientId, DisplayPanesSession>,
     silence_deadlines: BTreeMap<WindowId, SilenceDeadline>,
     next_silence_token: u64,
@@ -34727,7 +34746,7 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
     for session in &mut snapshot.sessions {
         for window in &mut session.windows {
             for (pane, pane_snapshot) in &mut window.panes {
-                pane_snapshot.mode = inner.pane_modes.get(pane).map(|mode| match mode {
+                pane_snapshot.mode = inner.pane_modes.get(pane).and_then(|modes| modes.last()).map(|mode| match mode {
                     PaneModeRequest::Clock => {
                         let (colour, style) = engine.clock_mode_options(window.id);
                         PaneMode::Clock {
@@ -37363,7 +37382,7 @@ fn buffer_format_facts(buffer: &PasteBuffer) -> BufferFormatFacts {
 /// residue this lane records rather than closes.
 fn switch_mode_target(inner: &ServerState, pane: PaneId) -> Option<String> {
     let windows = matches!(
-        inner.pane_modes.get(&pane),
+        inner.pane_modes.get(&pane).and_then(|modes| modes.last()),
         Some(PaneModeRequest::Switch { windows: true })
     );
     let state = &inner.engine.state;
@@ -37393,7 +37412,7 @@ fn clock_modes_are_open(inner: &ServerState) -> bool {
     inner
         .pane_modes
         .values()
-        .any(|mode| matches!(mode, PaneModeRequest::Clock))
+        .any(|modes| modes.iter().any(|mode| matches!(mode, PaneModeRequest::Clock)))
 }
 
 /// `window_clock_start_timer`: the delay to the next whole second, so the face
@@ -37407,18 +37426,18 @@ fn duration_to_next_second() -> Duration {
 
 /// `wp->modes` for every pane holding a server-owned mode, named the way
 /// `#{pane_mode}` spells it.
-fn pane_mode_format_facts(inner: &ServerState) -> BTreeMap<PaneId, &'static str> {
+fn pane_mode_format_facts(inner: &ServerState) -> BTreeMap<PaneId, (usize, &'static str)> {
     inner
         .pane_modes
         .iter()
-        .map(|(pane, mode)| {
-            (
+        .filter_map(|(pane, modes)| {
+            Some((
                 *pane,
-                match mode {
+                (modes.len(), match modes.last()? {
                     PaneModeRequest::Clock => "clock-mode",
                     PaneModeRequest::Switch { .. } => "switch-mode",
-                },
-            )
+                }),
+            ))
         })
         .collect()
 }

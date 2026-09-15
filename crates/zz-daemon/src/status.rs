@@ -350,7 +350,7 @@ pub(crate) struct FormatHookFacts {
     /// `wp->modes`: the server-owned mode each pane carries, named the way
     /// `#{pane_mode}` spells it. It belongs to the pane, so a clientless
     /// expansion answers from it.
-    pub(crate) pane_modes: Arc<BTreeMap<PaneId, &'static str>>,
+    pub(crate) pane_modes: Arc<BTreeMap<PaneId, (usize, &'static str)>>,
 }
 
 #[derive(Clone)]
@@ -1450,7 +1450,7 @@ impl DaemonFormatHooks<'_> {
         self.facts
             .pane_modes
             .get(&context.pane_id.parse().ok()?)
-            .copied()
+            .map(|(_, name)| *name)
     }
 
     fn copy_mode_variable(&self, name: &str, context: &StatusContext) -> Option<String> {
@@ -1689,13 +1689,10 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             "mouse_pane" | "mouse_x" | "mouse_y" | "mouse_word" | "mouse_line"
             | "mouse_hyperlink" => Some(String::new()),
             "pane_in_mode" => Some(
-                if self.copy_mode_rows(context).is_some() || self.pane_mode_name(context).is_some()
-                {
-                    "1"
-                } else {
-                    "0"
-                }
-                .to_owned(),
+                (context.pane_id.parse().ok()
+                    .and_then(|pane| self.facts.pane_modes.get(&pane))
+                    .map_or(0, |(count, _)| *count)
+                    + usize::from(self.copy_mode_rows(context).is_some())).to_string(),
             ),
             "pane_search_string" => Some(
                 context

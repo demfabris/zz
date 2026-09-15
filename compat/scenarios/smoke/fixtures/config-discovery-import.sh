@@ -14,10 +14,10 @@ head -n 1 "$target" | grep -q '^# zz-import-tmux-begin: '
 sed '1,/^# zz-import-tmux-end: /d' "$target" > "$HOME/mux-after-import"
 cmp "$HOME/mux-before-import" "$HOME/mux-after-import"
 cp "$HOME/.tmux.conf" "$HOME/chosen donor.conf"
-printf '\nclock-mode\n' >> "$HOME/chosen donor.conf"
+printf '\ncustomize-mode\n' >> "$HOME/chosen donor.conf"
 tmux import-tmux-config "$HOME/chosen donor.conf" > "$HOME/reimport-message"
 test "$(grep -c '^# zz-import-tmux-begin: ' "$target")" = 1
-grep -q '^# zz-unsupported: clock-mode' "$target"
+grep -q '^# zz-unsupported: customize-mode' "$target"
 sed '1,/^# zz-import-tmux-end: /d' "$target" > "$HOME/mux-after-import"
 cmp "$HOME/mux-before-import" "$HOME/mux-after-import"
 if test "$mode" = explicit; then

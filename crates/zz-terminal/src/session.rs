@@ -8600,9 +8600,22 @@ fn capture_terminal(
             output
         })
     };
-    let output = format_range(options.join_wrapped)?;
+    let output = format_range(options.join_wrapped && !options.number_lines)?;
     let rows = if options.number_lines && options.join_wrapped {
-        Some(format_range(false)?)
+        Some(
+            (start..=end)
+                .map(|row| {
+                    terminal
+                        .grid_ref(Point::Screen(PointCoordinate {
+                            x: 0,
+                            y: u32::try_from(row).unwrap_or(u32::MAX),
+                        }))
+                        .and_then(|grid| grid.row())
+                        .and_then(|row| row.is_wrapped())
+                        .map_err(capture_failure)
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        )
     } else {
         None
     };
@@ -8615,7 +8628,6 @@ fn capture_terminal(
     };
     let trailing_rows = requested_rows.saturating_sub(written_rows);
     let output = pad_capture_rows(&output, trailing_rows, columns, options);
-    let rows = rows.map(|rows| pad_capture_rows(&rows, trailing_rows, columns, options));
     Ok(decorate_capture(
         output,
         rows.as_deref(),
@@ -8699,7 +8711,7 @@ fn pad_capture_rows(
 
 fn decorate_capture(
     text: String,
-    rows: Option<&str>,
+    rows: Option<&[bool]>,
     options: CaptureOptions,
     first_row: u64,
     history_rows: u64,
@@ -8724,41 +8736,18 @@ fn push_capture_line_number(output: &mut String, row: u64, history_rows: u64) {
     output.push(' ');
 }
 
-fn number_capture(text: &str, rows: Option<&str>, first_row: u64, history_rows: u64) -> String {
-    let Some(rows) = rows else {
-        let mut output = String::with_capacity(text.len());
-        for (offset, line) in text.split('\n').enumerate() {
-            if offset > 0 {
-                output.push('\n');
-            }
-            let row = first_row.saturating_add(offset as u64);
-            push_capture_line_number(&mut output, row, history_rows);
-            output.push_str(line);
-        }
-        return output;
-    };
-    let mut pieces = rows.split('\n');
-    let mut offset = 0_u64;
+fn number_capture(text: &str, rows: Option<&[bool]>, first_row: u64, history_rows: u64) -> String {
     let mut output = String::with_capacity(text.len());
-    for (index, joined) in text.split('\n').enumerate() {
-        if index > 0 {
+    for (offset, line) in text.split('\n').enumerate() {
+        if offset > 0 && !rows.is_some_and(|rows| rows.get(offset - 1) == Some(&true)) {
             output.push('\n');
         }
-        let mut consumed = 0_usize;
-        loop {
-            let row = first_row.saturating_add(offset);
-            push_capture_line_number(&mut output, row, history_rows);
-            offset = offset.saturating_add(1);
-            let Some(piece) = pieces.next() else {
-                output.push_str(joined.get(consumed..).unwrap_or(""));
-                break;
-            };
-            output.push_str(piece);
-            consumed = consumed.saturating_add(piece.len());
-            if consumed >= joined.len() {
-                break;
-            }
-        }
+        push_capture_line_number(
+            &mut output,
+            first_row.saturating_add(offset as u64),
+            history_rows,
+        );
+        output.push_str(line);
     }
     output
 }
@@ -8963,22 +8952,15 @@ fn capture_revision(
     let output = revision.capture_rows(
         head,
         tail,
-        options.join_wrapped,
+        options.join_wrapped && !options.number_lines,
         options.preserve_trailing,
         options.escape_sequences,
     );
     if output.len() > MAX_CAPTURE_BYTES {
         return Err(TerminalCaptureError::TooLarge);
     }
-    let rows = (options.number_lines && options.join_wrapped).then(|| {
-        revision.capture_rows(
-            head,
-            tail,
-            false,
-            options.preserve_trailing,
-            options.escape_sequences,
-        )
-    });
+    let rows = (options.number_lines && options.join_wrapped)
+        .then(|| (head..=tail).map(|row| revision.row(row).wrapped()).collect::<Vec<_>>());
     Ok(decorate_capture(
         output,
         rows.as_deref(),
@@ -18169,6 +18151,16 @@ mod tests {
         )
         .expect("joined capture");
         assert_eq!(output, "abcdefgh");
+    }
+
+    #[test]
+    fn numbered_capture_uses_physical_rows_for_styled_wraps() {
+        let rows = "\x1b[31mAAAA\x1b[0m\n\x1b[31mAAAA\x1b[0m\n\x1b[31mAA\x1b[0m\nNEXT";
+        assert_eq!(
+            number_capture(rows, Some(&[true, true, false, false]), 0, 0),
+            "0 \x1b[31mAAAA\x1b[0m1 \x1b[31mAAAA\x1b[0m2 \x1b[31mAA\x1b[0m\n3 NEXT"
+        );
+        assert_eq!(number_capture("old\nnew", None, 2, 3), "-1 old\n0 new");
     }
 
     #[test]

@@ -1,0 +1,6 @@
+remote: 
+remote: Create a pull request for 'campaign/tui-stream-alias' on GitHub by visiting:        
+remote:      https://github.com/demfabris/zz/pull/new/campaign/tui-stream-alias        
+remote: 
+To github.com:demfabris/zz.git
+ * [new branch]        HEAD -> campaign/tui-stream-alias

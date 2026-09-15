@@ -35,13 +35,9 @@
 # lock-client [-t]          locks that one client             same                           PROVED + DECLARED
 # lock-server/-session/     too many arguments, unknown       same                           PROVED
 #   -client arity and -t     flag, -t without an argument
-# lock-session -t with a    resolves the session through      matches the whole string as a  NOT A LOCK FACT and no
-#   window or pane suffix     the whole session:window.pane     session name                   case here: the same
-#                             grammar                                                          bytes come back from
-#                                                                                              has-session, so it is
-#                                                                                              the shared target
-#                                                                                              grammar. Measured in
-#                                                                                              TUI-015's evidence
+# lock-session -t with a    validates session, window and    same at the default pane       PROVED, with configured
+#   window or pane suffix     pane components                   base index                     pane-base-index recorded
+#                                                                                              under TUI-015
 # after-lock-session        neither is a hook name: the pin   same                           PROVED
 # after-lock-client           answers `invalid option`
 # lock-after-time           arms a per-client server timer    store-only at both scopes,     DECLARED, TUI-015
@@ -74,8 +70,9 @@
 #                             there is no mode
 # capture-pane -a           `no alternate screen`, and one    same                           PROVED
 #                             empty line under -q
-# capture-pane -C           backslashes doubled, and with     same                           PROVED
-#                             -e every escape written \033
+# capture-pane -C           backslashes doubled, and with     same for retained cell facts   PROVED; DEC charset and
+#                             -e escaped style controls                                       low indexed colour
+#                                                                                              provenance recorded
 # capture-pane -L           each line numbered from the       same                           PROVED
 #                             history size, negative in
 #                             history, and with -J the
@@ -598,7 +595,7 @@ case_owner() {
   refresh-pan-* | refresh-clipboard | refresh-adjustment | client-tree-open)
     printf 'gap:clients.interactive-refresh'
     ;;
-  capture-control | capture-flags | capture-hyperlinks | capture-line-numbers | capture-pending | capture-grid)
+  capture-* )
     printf 'TUI-017'
     ;;
   stream-source-file | stream-source-file-effect | stream-display-message | stream-split-window)
@@ -785,11 +782,14 @@ window_pane_count() {
 NATIVE_CLIENT_TOOLS='commands.native-client-tools, accepted: the pin paints client chrome inside the target pane and zz answers each intent with a native surface. The raw TUI half is TUI-014'
 INTERACTIVE_REFRESH='clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported'
 LOCK_PROGRAM='DECIDED options.lock-program: decided 2026-09-14 by fabrico under the superset principle; the desktop session owns locking. The pin runs lock-command on the client tty; zz accepts the CLI and stores lock-command and lock-after-time without arming a terminal locker'
+LOCK_BASE_INDEX='TUI-015 divergence with pane-base-index=1: the pin resolves =cli:win.1 and zz reports cannot find pane 1. resolve_named_session in MuxState has no access to CommandEngine pane-base-index options; plumbing configured indices crosses the authorized single-function grammar excursion. lock-session, has-session and list-windows each retain this owned measurement, without a decision waiver'
 RICH_CAPTURE='capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser'
 CAPTURE_FLAGS='DECIDED capture.rich-transports, refused with a measurement 2026-09-15: -F prints six grid_line flags and zz does not retain the full set as line facts. D is a dead pane line, X an extended cell line and H a hyperlink line, all tmux grid bookkeeping; O and P are the OSC 133 marks libghostty records on cells but does not publish per line; W is the wrap flag that the terminal grid now exposes. The workload it would serve is a script reading which rows are output, prompt or continuation; that wants a line-fact channel out of the terminal worker, not a sixth text transform. decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
 CAPTURE_LINKS='DECIDED capture.rich-transports, refused with a measurement 2026-09-15: -H prints each line OSC 8 URIs and zz has no hyperlink to print. On a row the pin marks HX, a zz capture -e emits the text with no OSC 8 at all, so the retained snapshot did not keep the link. The workload it would serve is a script harvesting the URLs on a screen; that wants hyperlinks retained and published by the terminal worker first. decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
 CAPTURE_PENDING='DECIDED capture.rich-transports, refused with a measurement 2026-09-15: -P prints the bytes the pin parser has read and not yet completed, input_pending(wp->ictx). libghostty-vt publishes no parser-pending buffer, so zz cannot answer it and an empty answer would be a fake channel that matched only because the buffer is almost always empty. The workload it would serve is debugging a half-written escape sequence. decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
 CAPTURE_GRID='DECIDED capture.rich-transports, refused with a measurement 2026-09-15: -R dumps the pin internal grid - a header G <sx>x<sy> (<hsize>/<hlimit>), then per line L <yy> (<n>) flags=<string>[<hex>] <cellused>/<cellsize>, then one C line per column carrying that cell colour, attribute and link ids. Measured at 40x8 that is 329 lines for eight rows. zz has no hsize/hlimit pair, no per-line cellused and cellsize, and no grid flag word: building them inside zz would be inventing tmux internals to make bytes match. The workload it would serve is a tmux regression test reading another tmux grid. decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
+CAPTURE_CHARSET='DECIDED capture charset provenance: decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible. At 80x24 ESC(0qqqESC(B gives literal \016qqq\017 under -C -e on the pin and UTF-8 box drawing on zz; without -e the pin emits qqq while zz still emits box drawing. Ghostty maps the source charset byte to Unicode before storing the cell and retains no charset bit. The workload is replaying original DEC line drawing bytes; ordinary Unicode text capture remains asserted'
+CAPTURE_LOW_INDEX='TUI-017 divergence measured at 80x24: explicit 38;5;1 produces literal \033[38;5;1mRED\033[39m on the pin, while zz produces \033[31mRED\033[39m. Ghostty stores both named 31 and indexed 38;5;1 as Palette(1), so the capture cannot distinguish their original colour class. Indices 16 through 255 and RGB retain their class'
 LOG_IDENTITY='DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. Measured 2026-09-14 on both sides: the pin names ANY tty-bearing client by that tty, including the attached terminal client whose attach-session row reads /dev/pts/<n>, and zz named none of them - it spelled every row by the device name the client sent, which for an interactive client is the hostname. That half is closed: the server log now names a client by its tty whenever it has one. What stays is the clientless CLI, which names a process that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked'
 SERVER_ACCESS='zz has no multi-user socket access list: the daemon socket is the invoking user, so there is no user or group to add, and TUI-014 carries the refusal shape'
 CLIENT_TREE_CLIENTLESS='clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer, while the pin exits 0 with no output and, alone among the three, opens no mode either: cmd_choose_tree_exec returns CMD_RETURN_NORMAL before window_pane_set_mode when server_client_how_many() == 0 (cmd-choose-tree.c), so the exit status and the error text are what diverge here, measured 2026-09-14. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open'
@@ -856,6 +856,73 @@ capture_pane_cases() {
   case_run capture-pending record "$CAPTURE_PENDING" -- capture-pane -p -P -t PANE
   case_run capture-grid record "$CAPTURE_GRID" -- capture-pane -p -R -t PANE
   restore_case capture-restored
+}
+
+capture_scene_ready() {
+  side_command "$1" capture-pane -p -t '=zzcap-rich:win' | grep -Fq NEXT
+}
+
+capture_scene_changed() {
+  capture_scene_ready zz &&
+    [ "$(zz_command capture-pane -p -t '=zzcap-rich:win')" != "$(tmux_inner_command capture-pane -p -t '=zzcap-rich:win')" ]
+}
+
+rich_capture_case() {
+  local name="$1" payload="$2" disposition="$3" reason="$4"
+  shift 4
+  local command side changed
+  printf -v command 'printf %%b %q; exec sleep 600' "$payload"
+  run_on_both new-session -d -s zzcap-rich -n win -x 80 -y 24 "$command"
+  run_on_both select-pane -t '=zzcap-rich:win' -T "$PANE_TITLE"
+  for side in tmux zz; do
+    wait_for "$side printed $name" capture_scene_ready "$side"
+    [ "$(side_command "$side" display-message -p -t '=zzcap-rich:win' '#{pane_width}x#{pane_height}')" = 80x24 ] ||
+      die "$side capture scene is not 80x24"
+  done
+  if [ "$SELF_CHECK" -eq 1 ]; then
+    self_check_run "$name-equivalence" capture-pane -p -t '=zzcap-rich:win' "$@"
+    self_check_expect "$name exact bytes before sabotage" exit=0 stdout=0 stderr=0
+    if [ "$name" = capture-real-history ]; then
+      changed="${payload//H/Z}"
+    else
+      changed="X$payload"
+    fi
+    printf -v command 'printf %%b %q; exec sleep 600' "$changed"
+    zz_command respawn-pane -k -t '=zzcap-rich:win' "$command" >/dev/null ||
+      die 'zz refused capture scene sabotage'
+    wait_for "zz printed $name sabotage" capture_scene_changed
+    self_check_run "$name-sabotage" capture-pane -p -t '=zzcap-rich:win' "$@"
+    self_check_expect "$name one-sided scene change" exit=0 stdout=1 stderr=0
+  else
+    case_run "$name" "$disposition" "$reason" -- capture-pane -p -t '=zzcap-rich:win' "$@"
+  fi
+  run_on_both kill-session -t '=zzcap-rich'
+}
+
+rich_capture_cases() {
+  local wrap history='' row
+  printf -v wrap '%*s' 170 ''
+  wrap="${wrap// /A}"
+  rich_capture_case capture-colour-wrap "\033[31m${wrap}\033[0m\r\nNEXT" same '' -L -e -J -S 0 -E 3
+  rich_capture_case capture-real-wrap "${wrap}\r\nNEXT" same '' -L -J -S 0 -E 3
+  for ((row = 0; row < 35; row++)); do
+    printf -v history '%sH%02d\\r\\n' "$history" "$row"
+  done
+  rich_capture_case capture-real-history "${history}NEXT" same '' -L -S -3 -E 0
+  rich_capture_case capture-named-colour '\033[31mRED\033[0m\r\nNEXT' same '' -C -e -S 0 -E 0
+  rich_capture_case capture-named-background '\033[32;44mCOLOUR\033[0m\r\nNEXT' same '' -C -e -S 0 -E 0
+  rich_capture_case capture-bright-colours '\033[91;104mBRIGHT\033[0m\r\nNEXT' same '' -C -e -S 0 -E 0
+  rich_capture_case capture-indexed-colour '\033[38;5;196mINDEX\033[0m\r\nNEXT' same '' -C -e -S 0 -E 0
+  rich_capture_case capture-rgb-colour '\033[38;2;1;2;3mRGB\033[0m\r\nNEXT' same '' -C -e -S 0 -E 0
+  rich_capture_case capture-bold '\033[1mBOLD\033[0m\r\nNEXT' same '' -C -e -S 0 -E 0
+  rich_capture_case capture-underline '\033[4mUNDER\033[0m\r\nNEXT' same '' -C -e -S 0 -E 0
+  rich_capture_case capture-attribute-reset '\033[1;4;31mONE\033[22mTWO\033[0m\r\nNEXT' same '' -C -e -S 0 -E 0
+  rich_capture_case capture-unicode-lines '───\r\nNEXT' same '' -C -S 0 -E 0
+  if [ "$SELF_CHECK" -eq 0 ]; then
+    rich_capture_case capture-charset-text '\033(0qqq\033(B\r\nNEXT' record "$CAPTURE_CHARSET" -C -S 0 -E 0
+    rich_capture_case capture-charset-escape '\033(0qqq\033(B\r\nNEXT' record "$CAPTURE_CHARSET" -C -e -S 0 -E 0
+    rich_capture_case capture-low-indexed-colour '\033[38;5;1mRED\033[0m\r\nNEXT' record "$CAPTURE_LOW_INDEX" -C -e -S 0 -E 0
+  fi
 }
 
 buffer_stream_cases() {
@@ -936,6 +1003,27 @@ message_live_job_cases() {
   restore_case messages-jobs-live-restored
 }
 
+lock_target_cases() {
+  local spec name target
+  for spec in 'window|=cli:win' 'pane|=cli:win.0' 'pane-id|%0' \
+    'missing-window|=cli:nosuchwin' 'missing-pane-id|%99' 'missing-pane|=cli:win.9' \
+    'missing-session|=nosuch:win' 'exact-pane-name|=%0' 'exact-session|=cl:win' \
+    'session-pane-id|cli:.%1'; do
+    name="${spec%%|*}"
+    target="${spec#*|}"
+    run_on_both set-option -gu @zzcc-locked
+    case_run "lock-target-session-$name" same '' -- lock-session -t "$target"
+    case_run "lock-target-hook-$name" same '' -- show-options -gqv @zzcc-locked
+    case_run "lock-target-has-session-$name" same '' -- has-session -t "$target"
+    case_run "lock-target-list-windows-$name" same '' -- list-windows -t "$target" -F '#{window_index}:#{window_name}'
+  done
+  run_on_both set-option -gw pane-base-index 1
+  case_run lock-target-base-index-lock-session record "$LOCK_BASE_INDEX" -- lock-session -t '=cli:win.1'
+  case_run lock-target-base-index-has-session record "$LOCK_BASE_INDEX" -- has-session -t '=cli:win.1'
+  case_run lock-target-base-index-list-windows record "$LOCK_BASE_INDEX" -- list-windows -t '=cli:win.1'
+  run_on_both set-option -gw pane-base-index 0
+}
+
 lock_cases() {
   run_on_both set-hook -g after-lock-server 'set -g @zzcc-locked yes'
   case_run lock-server cli "$LOCK_PROGRAM" -- lock-server
@@ -943,14 +1031,20 @@ lock_cases() {
   case_run lock-server-hook same '' -- show-options -gv @zzcc-locked
   case_run lock-server-arity same '' -- lock-server zzcc-extra
   case_run lock-server-unknown-flag same '' -- lock-server -t zzcc-nope
+  run_on_both set-option -gu @zzcc-locked
   case_run lock-session cli "$LOCK_PROGRAM" -- lock-session -t "=$INNER_SESSION"
   restore_case lock-session-restored
+  case_run lock-session-no-server-hook same '' -- show-options -gqv @zzcc-locked
+  run_on_both set-option -gu @zzcc-locked
   case_run lock-session-current cli "$LOCK_PROGRAM" -- lock-session
   restore_case lock-session-current-restored
+  case_run lock-session-current-no-server-hook same '' -- show-options -gqv @zzcc-locked
   case_run lock-session-missing same '' -- lock-session -t zzcc-nope
   case_run lock-session-arity same '' -- lock-session zzcc-extra
+  run_on_both set-option -gu @zzcc-locked
   case_run lock-client cli "$LOCK_PROGRAM" -- lock-client -t CLIENT
   restore_case lock-client-restored
+  case_run lock-client-no-server-hook same '' -- show-options -gqv @zzcc-locked
   case_run lock-client-current cli "$LOCK_PROGRAM" -- lock-client
   restore_case lock-client-current-restored
   case_run lock-client-missing same '' -- lock-client -t /dev/zzcc-nope
@@ -968,6 +1062,7 @@ lock_cases() {
   case_run lock-command-session-unset same '' -- set-option -t "$INNER_SESSION" -u lock-command
   case_run lock-after-time-session-unset same '' -- set-option -t "$INNER_SESSION" -u lock-after-time
   case_run lock-session-options-restored same '' -- show-options -t "$INNER_SESSION" lock-command
+  lock_target_cases
 }
 
 client_tool_cases() {
@@ -997,6 +1092,7 @@ run_cases() {
   case_run baseline same '' -- display-message -p -t PANE '#{window_index}.#{pane_index}'
   refresh_client_cases
   capture_pane_cases
+  rich_capture_cases
   buffer_stream_cases
   message_hook_cases
   lock_cases
@@ -1066,6 +1162,32 @@ zz_cursor_is() {
 }
 zz_cursor_is_not() {
   [ "$(cursor_tuple zz)" != "$1" ]
+}
+
+lock_target_sabotages() {
+  local command pane target expected_stdout
+  zz_command new-window -d -t "=$INNER_SESSION" -n zzcc-target "$INNER_SHELL" >/dev/null ||
+    die 'zz refused the one-sided window target'
+  pane="$(zz_command display-message -p -t "=$INNER_SESSION:zzcc-target" '#{pane_id}')"
+  for target in "=$INNER_SESSION:zzcc-target" "$pane"; do
+    for command in lock-session has-session list-windows; do
+      self_check_run "$command-$target-sabotage" "$command" -t "$target"
+      expected_stdout=0
+      [ "$command" != list-windows ] || expected_stdout=1
+      self_check_expect "$command target $target exists on zz only" exit=1 "stdout=$expected_stdout" stderr=1
+    done
+  done
+  zz_command kill-window -t "=$INNER_SESSION:zzcc-target" >/dev/null || die 'zz refused kill-window'
+  zz_command split-window -d -t "=$INNER_SESSION:$WINDOW_NAME" "$INNER_SHELL" >/dev/null ||
+    die 'zz refused the one-sided pane index'
+  for command in lock-session has-session list-windows; do
+    self_check_run "$command-pane-component-sabotage" "$command" -t "=$INNER_SESSION:$WINDOW_NAME.1"
+    expected_stdout=0
+    [ "$command" != list-windows ] || expected_stdout=1
+    self_check_expect "$command pane index exists on zz only" exit=1 "stdout=$expected_stdout" stderr=1
+  done
+  zz_command kill-pane -t "=$INNER_SESSION:$WINDOW_NAME.1" >/dev/null || die 'zz refused kill-pane'
+  settle_screen zz ''
 }
 
 run_self_check() {
@@ -1166,7 +1288,7 @@ run_self_check() {
 
   zz_command new-session -d -s zzcc-sab-lock -x 80 -y 24 "$INNER_SHELL" >/dev/null ||
     die 'zz refused new-session'
-  self_check_run lock-target-sabotage lock-session -t zzcc-sab-lock
+  self_check_run lock-target-sabotage lock-session -t =zzcc-sab-lock:0
   self_check_expect 'the lock target on one side only' exit=1 stdout=0 stderr=1
   zz_command kill-session -t zzcc-sab-lock >/dev/null || die 'zz refused kill-session'
 
@@ -1177,6 +1299,23 @@ run_self_check() {
   self_check_expect 'the after-lock-server hook armed on one side only' \
     exit=0 stdout=1 stderr=0
   zz_command set-hook -gu after-lock-server >/dev/null || die 'zz refused set-hook -gu'
+  local lock_command
+  run_on_both set-hook -g after-lock-server 'set -g @zzcc-sab-negative yes'
+  for lock_command in lock-session lock-client; do
+    run_on_both set-option -gu @zzcc-sab-negative
+    if [ "$lock_command" = lock-session ]; then
+      self_check_run "$lock_command-negative-fire" lock-session -t "=$INNER_SESSION:$WINDOW_NAME"
+    else
+      self_check_run "$lock_command-negative-fire" lock-client -t CLIENT
+    fi
+    self_check_run "$lock_command-negative-before" show-options -gqv @zzcc-sab-negative
+    self_check_expect "$lock_command does not fire the server hook" exit=0 stdout=0 stderr=0
+    zz_command lock-server >/dev/null || die 'zz refused inappropriate hook sabotage'
+    self_check_run "$lock_command-negative-sabotage" show-options -gqv @zzcc-sab-negative
+    self_check_expect "$lock_command inappropriate server hook on zz only" exit=0 stdout=1 stderr=0
+  done
+  run_on_both set-hook -gu after-lock-server
+  run_on_both set-option -gu @zzcc-sab-negative
   zz_command set-option -gu @zzcc-sab-lock >/dev/null || die 'zz refused set-option -gu'
 
   zz_before="$(cursor_tuple zz)"
@@ -1190,8 +1329,9 @@ run_self_check() {
     die 'the outer tmux refused send-keys'
   wait_for 'the glyphs withdrawn again' zz_cursor_is "$zz_before"
 
-  # The second equivalence: with every sabotage withdrawn the comparison is
-  # silent again, so none of the five above was a difference the scene kept.
+  rich_capture_cases
+  lock_target_sabotages
+
   self_check_run equivalence-after display-message -p -t PANE '#{window_index}.#{pane_index}'
   self_check_expect 'equivalence: every sabotage withdrawn' \
     exit=0 stdout=0 stderr=0 screen=0 state=0

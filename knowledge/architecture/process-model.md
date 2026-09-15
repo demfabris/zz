@@ -65,9 +65,11 @@ half-loaded config to other clients.
 `crates/zz/src/tray/host.rs` runs the native tray loop in a separate invocation of the zz executable,
 before GPUI or CEF starts. The daemon starts it after becoming ready and holds its stdin pipe open;
 EOF ends the helper, including after a daemon crash. A blocking supervisor restarts a crashed helper.
-A daemon started without a desktop session skips this step. A later GUI attach can start the helper
-with its desktop environment and a passive command connection to observe daemon shutdown. That
-connection does not keep an empty daemon alive.
+A daemon started without a desktop session skips this step, and so does one started with
+`ZZ_TRAY=0`, which the test fixtures and the compat harness set so throwaway daemons put no icon
+in the menu bar. A later GUI attach can start the helper with its desktop environment and a
+passive command connection to observe daemon shutdown. That connection does not keep an empty
+daemon alive.
 
 `tray/settings.rs` watches config paths through native filesystem notifications and uses the normal
 config parser and precedence. The helper remains idle with the icon disabled so file edits can turn

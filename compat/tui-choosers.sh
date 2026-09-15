@@ -151,6 +151,7 @@
 # it must NOT report. A fixture that only
 # passes has proved nothing.
 set -eEuo pipefail
+export ZZ_TRAY=0
 
 usage() {
   printf 'usage: compat/tui-choosers.sh [--self-check] [ZZ_BIN [TMUX_BIN]]\n' >&2

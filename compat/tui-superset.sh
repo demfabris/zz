@@ -82,6 +82,7 @@
 # that runs out dumps diagnostics into ZZ_SUPERSET_DIAGNOSTICS_DIR or a fresh
 # /tmp directory it names.
 set -eEuo pipefail
+export ZZ_TRAY=0
 
 usage() {
   printf 'usage: compat/tui-superset.sh [--self-check] [ZZ_BIN [TMUX_BIN]]\n' >&2

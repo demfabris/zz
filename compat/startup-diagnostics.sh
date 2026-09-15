@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -eEuo pipefail
+export ZZ_TRAY=0
 set +B
 
 PIN="d77c9dc6aa021e4bc61f0da128c591af695e6466"

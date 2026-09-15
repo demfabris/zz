@@ -41,6 +41,7 @@
 # requires the comparison to catch it in that channel, plus one difference it
 # must NOT report. A fixture that only passes has proved nothing.
 set -eEuo pipefail
+export ZZ_TRAY=0
 
 usage() {
   printf 'usage: compat/tui-launch-diff.sh [--self-check] [ZZ_BIN [TMUX_BIN]]\n' >&2

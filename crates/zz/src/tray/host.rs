@@ -25,6 +25,7 @@ use super::{
 
 const HELPER_ARGUMENT: &str = "--bootstrap-tray";
 const OBSERVER_ARGUMENT: &str = "--bootstrap-tray-observer";
+const OPT_OUT_VARIABLE: &str = "ZZ_TRAY";
 
 pub(super) enum HostEvent {
     Action(TrayEvent),
@@ -53,7 +54,7 @@ impl Drop for DaemonTray {
 }
 
 pub(crate) fn start_daemon_helper(socket: &Path, server_id: u64) -> Option<DaemonTray> {
-    if !has_desktop_session() {
+    if opted_out() || !has_desktop_session() {
         return None;
     }
     let executable = std::env::current_exe().ok()?;
@@ -125,6 +126,10 @@ fn spawn_helper(
     Ok((child, stdin))
 }
 
+fn opted_out() -> bool {
+    std::env::var_os(OPT_OUT_VARIABLE).is_some_and(|value| value == "0")
+}
+
 fn has_desktop_session() -> bool {
     #[cfg(target_os = "linux")]
     {
@@ -168,6 +173,9 @@ pub(crate) fn run_if_requested() -> Option<ExitCode> {
 }
 
 pub(super) fn start_desktop_helper(socket: &Path, server_id: u64) {
+    if opted_out() {
+        return;
+    }
     let result = Command::new(std::env::current_exe().unwrap_or_default())
         .arg(OBSERVER_ARGUMENT)
         .arg(socket)

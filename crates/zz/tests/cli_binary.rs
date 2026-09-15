@@ -12,7 +12,8 @@ fn isolated_zz() -> (tempfile::TempDir, Command) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_zz"));
     command
         .env("HOME", directory.path())
-        .env("XDG_CONFIG_HOME", directory.path());
+        .env("XDG_CONFIG_HOME", directory.path())
+        .env("ZZ_TRAY", "0");
     (directory, command)
 }
 
@@ -118,6 +119,7 @@ mod daemon_autostart {
             command
                 .env("HOME", &self.home)
                 .env("XDG_CONFIG_HOME", &self.home)
+                .env("ZZ_TRAY", "0")
                 .arg("-f")
                 .arg(&self.config)
                 .arg("-S")
@@ -140,7 +142,8 @@ mod daemon_autostart {
             let mut command = Command::new(Path::new(env!("CARGO_BIN_EXE_zz")));
             command
                 .env("HOME", &self.home)
-                .env("XDG_CONFIG_HOME", &self.home);
+                .env("XDG_CONFIG_HOME", &self.home)
+                .env("ZZ_TRAY", "0");
             for config in configs {
                 command.arg("-f").arg(config);
             }
@@ -230,6 +233,7 @@ mod daemon_autostart {
             command
                 .env("ZZ_SOCKET", &fixture.socket)
                 .env("XDG_CONFIG_HOME", &fixture.home)
+                .env("ZZ_TRAY", "0")
                 .env("HOME", &fixture.home);
             command
         }
@@ -3471,6 +3475,7 @@ mod daemon_autostart {
             ))
             .env("HOME", &fixture.home)
             .env("XDG_CONFIG_HOME", &fixture.home)
+            .env("ZZ_TRAY", "0")
             .env("ZZ_BIN", env!("CARGO_BIN_EXE_zz"))
             .env("ZZ_CONF", &fixture.config)
             .env("ZZ_TEST_SOCKET", &fixture.socket);
@@ -3934,6 +3939,7 @@ mod daemon_autostart {
         let output = Command::new("/bin/sh")
             .env("HOME", &fixture.home)
             .env("XDG_CONFIG_HOME", &fixture.home)
+            .env("ZZ_TRAY", "0")
             .arg("-c")
             .arg(r#""$1" -f "$2" -S "$3" ls || "$1" -f "$2" -S "$3" new-session -d"#)
             .arg("zz-ls-or-new")
@@ -3984,6 +3990,7 @@ mod daemon_autostart {
             Command::new(env!("CARGO_BIN_EXE_zz"))
                 .env("HOME", directory.path())
                 .env("XDG_CONFIG_HOME", directory.path())
+                .env("ZZ_TRAY", "0")
                 .env("TMUX_TMPDIR", directory.path())
                 .arg("-f")
                 .arg(&config)

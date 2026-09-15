@@ -9,6 +9,7 @@
 #
 # Read bench/README.md before trusting any number this prints.
 set -uo pipefail
+export ZZ_TRAY=0
 
 BENCH_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "$BENCH_DIR/.." && pwd)"

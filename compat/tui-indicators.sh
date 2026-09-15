@@ -87,6 +87,7 @@
 # caller can gate on it, and prints both sides so the next lane has the
 # measurement.
 set -eEuo pipefail
+export ZZ_TRAY=0
 
 usage() {
   printf 'usage: compat/tui-indicators.sh [--self-check] [ZZ_BIN [TMUX_BIN]]\n' >&2

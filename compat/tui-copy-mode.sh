@@ -113,6 +113,7 @@
 # and buffer as text. A bounded wait that runs out dumps diagnostics into
 # ZZ_COPY_DIAGNOSTICS_DIR or a fresh /tmp directory it names.
 set -eEuo pipefail
+export ZZ_TRAY=0
 
 usage() {
   printf 'usage: compat/tui-copy-mode.sh [--self-check] [ZZ_BIN [TMUX_BIN]]\n' >&2

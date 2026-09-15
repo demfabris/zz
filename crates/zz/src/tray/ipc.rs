@@ -108,13 +108,18 @@ pub(super) fn endpoint(socket: &Path, server_id: u64) -> PathBuf {
 pub(super) struct ListenerGuard {
     #[cfg(unix)]
     path: PathBuf,
+    #[cfg(unix)]
+    lock_path: PathBuf,
     _lock: std::fs::File,
 }
 
 impl Drop for ListenerGuard {
     fn drop(&mut self) {
         #[cfg(unix)]
-        let _ = std::fs::remove_file(&self.path);
+        {
+            let _ = std::fs::remove_file(&self.path);
+            let _ = std::fs::remove_file(&self.lock_path);
+        }
     }
 }
 
@@ -141,7 +146,7 @@ pub(super) fn listen(path: PathBuf, events: Sender<HostEvent>) -> io::Result<Lis
         use std::os::unix::fs::OpenOptionsExt as _;
         options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
-    let lock = options.open(lock_path)?;
+    let lock = options.open(&lock_path)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt as _;
@@ -176,6 +181,8 @@ pub(super) fn listen(path: PathBuf, events: Sender<HostEvent>) -> io::Result<Lis
     let guard = ListenerGuard {
         #[cfg(unix)]
         path,
+        #[cfg(unix)]
+        lock_path,
         _lock: lock,
     };
     #[cfg(unix)]

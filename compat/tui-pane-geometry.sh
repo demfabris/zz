@@ -22,6 +22,7 @@
 # each client's stderr, and each server's client and pane lists. The directory
 # is printed on stderr; ZZ_GEO_DIAGNOSTICS_DIR names it instead.
 set -eEuo pipefail
+export ZZ_TRAY=0
 
 usage() {
   printf 'usage: compat/tui-pane-geometry.sh [ZZ_BIN [TMUX_BIN]]\n' >&2

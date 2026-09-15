@@ -20,7 +20,10 @@
 #   [-F -f -K -O -t] [tmpl]   mode on the target pane           the attached client, and a     PROVED (CLI errors)
 #                                                               clientless CLI answers the     + DECLARED (the
 #                                                               attached-client error          clientless entry)
-# clock-mode [-t]           clock mode on the target pane     hard-rejected                  CHILD TUI-014
+# clock-mode [-t]           window_clock_mode on the target   the same pane mode, drawn by   PROVED
+#                             pane, redrawn every second        every attached client, with
+#                                                               clock-mode-colour and the
+#                                                               four clock-mode-style faces
 # customize-mode [-kNZ]     customize mode on the pane        hard-rejected                  CHILD TUI-014
 #   [-F -f -t]
 # switch-mode [-kswZ]       switches an open mode in place    hard-rejected                  CHILD TUI-014
@@ -352,6 +355,10 @@ set_on_both() {
   side_command zz set-option -g "$1" "$2" || die "zz refused set-option -g $1"
   side_command tmux set-option -g "$1" "$2" || die "tmux refused set-option -g $1"
 }
+set_window_on_both() {
+  side_command zz set-option -gw "$1" "$2" || die "zz refused set-option -gw $1"
+  side_command tmux set-option -gw "$1" "$2" || die "tmux refused set-option -gw $1"
+}
 run_on_both() {
   side_command zz "$@" >/dev/null || die "zz refused $1"
   side_command tmux "$@" >/dev/null || die "tmux refused $1"
@@ -446,6 +453,7 @@ settle_screen() {
 }
 
 CASE_NEEDLE_MODE=0
+CASE_CLOCK_FACE=0
 CASE_STDIN=''
 
 # Two spellings a command prints belong to the process that printed them and no
@@ -456,6 +464,22 @@ CASE_STDIN=''
 # byte, which the self-check's normalized-stdout sabotage proves.
 CASE_NORMALIZE=''
 PER_PROCESS_NUMBERS='s|/dev/pts/[0-9][0-9]*|/dev/pts/N|g;s|fd=[0-9][0-9]*|fd=N|g;s|pid=[0-9][0-9]*|pid=N|g'
+# window_clock_timer_callback redraws the face on the whole second and both
+# servers wake on the same boundary, so a capture pair taken across one would
+# compare two faces rather than two renderings of the same face. Wait for the
+# second to turn over, then settle, so the comparison that follows runs inside a
+# second that has just started. This is a wall clock, not a fixture event: the
+# boundary is what is being waited for, and the wait is bounded at four seconds.
+align_clock_face() {
+  local start attempt
+  start="$(date +%S)"
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    [ "$(date +%S)" != "$start" ] && break
+    sleep 0.02
+  done
+  settle_screen tmux ''
+  settle_screen zz ''
+}
 
 # Run the same clientless invocation against both servers and read all five
 # channels. CLIENT and PANE stand for each side's own attached client and
@@ -640,6 +664,9 @@ case_run() {
     settle_screen zz ''
     settle_screen tmux ''
   fi
+  if [ "$CASE_CLOCK_FACE" -eq 1 ]; then
+    align_clock_face
+  fi
   local same=0
   compare_channels "$name" || same=1
   case "$mode" in
@@ -681,41 +708,46 @@ case_run() {
   esac
   CASE_NEEDLE_MODE=0
   CASE_NORMALIZE=''
+  CASE_CLOCK_FACE=0
 }
 
-# The pin's mode commands leave a mode open on the pane, and its lock draws over
-# the client. q ends a mode, and the screen both sides show once everything has
-# settled is asserted: the pin has to give the pane back exactly, and zz, which
-# opened nothing, has to be where it already was.
+# A mode command leaves a mode open on the pane, and the lock draws over the
+# client. q ends a mode, and the screen both sides show once everything has
+# settled is asserted: whichever side opened one has to give the pane back
+# exactly, and a side that opened nothing has to be where it already was.
 # Escape first and q only if the mode is still up: mode_tree_key answers q and
 # a prompt inside a mode answers Escape, and a q typed at a shell prompt that
-# already came back would be a change of its own.
-end_pin_mode() {
+# already came back would be a change of its own. Either side can be the one
+# holding a mode now that clock-mode opens the pin's own pane mode on zz too.
+end_mode() {
+  local side="$1"
   local attempt poll key
   for ((attempt = 0; attempt < 3; attempt++)); do
     for key in Escape q; do
-      pane_in_mode tmux 0 && return 0
-      tmux_outer_command send-keys -t "=$OUTER_SESSION:tmux" "$key" ||
+      pane_in_mode "$side" 0 && return 0
+      tmux_outer_command send-keys -t "=$OUTER_SESSION:$side" "$key" ||
         die 'the outer tmux refused send-keys'
       for ((poll = 0; poll < 20; poll++)); do
-        pane_in_mode tmux 0 && return 0
+        pane_in_mode "$side" 0 && return 0
         sleep 0.05
       done
     done
   done
-  pane_in_mode tmux 0
+  pane_in_mode "$side" 0
 }
 
 restore_case() {
   local name="$1"
+  local side before
   CASE_LABEL="$name"
-  if pane_in_mode tmux 1; then
-    local before_tmux
-    before_tmux="$(styled_screen_of tmux)"
-    end_pin_mode || true
-    wait_for "the pin mode ended for $name" pane_in_mode tmux 0
-    settle_screen tmux "$before_tmux"
-  fi
+  for side in tmux zz; do
+    if pane_in_mode "$side" 1; then
+      before="$(styled_screen_of "$side")"
+      end_mode "$side" || true
+      wait_for "the $side mode ended for $name" pane_in_mode "$side" 0
+      settle_screen "$side" "$before"
+    fi
+  done
   settle_screen zz ''
   printf '0\n' >"$SCRATCH_DIR/zz.rc"
   printf '0\n' >"$SCRATCH_DIR/tmux.rc"
@@ -1150,8 +1182,22 @@ client_tool_cases() {
   case_run client-tree-bad-sort same '' -- choose-client -O zzcc-nope -t PANE
   case_run client-tree-usage same '' -- choose-client -t PANE one two
   CASE_NEEDLE_MODE=1
-  case_run clock-mode-open record "$NATIVE_CLIENT_TOOLS" -- clock-mode -t PANE
+  CASE_CLOCK_FACE=1
+  case_run clock-mode-open same '' -- clock-mode -t PANE
   restore_case clock-mode-closed
+  set_window_on_both clock-mode-colour '#ff00aa'
+  set_window_on_both clock-mode-style 12
+  CASE_NEEDLE_MODE=1
+  CASE_CLOCK_FACE=1
+  case_run clock-mode-twelve same '' -- clock-mode -t PANE
+  restore_case clock-mode-twelve-closed
+  set_window_on_both clock-mode-style 24-with-seconds
+  CASE_NEEDLE_MODE=1
+  CASE_CLOCK_FACE=1
+  case_run clock-mode-seconds same '' -- clock-mode -t PANE
+  restore_case clock-mode-seconds-closed
+  run_on_both set-option -gwu clock-mode-colour
+  run_on_both set-option -gwu clock-mode-style
   CASE_NEEDLE_MODE=1
   case_run customize-mode-open record "$NATIVE_CLIENT_TOOLS" -- customize-mode -t PANE
   restore_case customize-mode-closed
@@ -1432,6 +1478,21 @@ run_self_check() {
   self_check_expect 'state, a session on one side only' \
     exit=0 stdout=0 stderr=0 screen=0 state=1
   zz_command kill-session -t zzcc-sab >/dev/null || die 'zz refused kill-session'
+
+  # the attached screen and the session state together: window_clock_mode open
+  # on the zz pane alone. The pin's pane stays live, so the mode surface has to
+  # be reported through the screen and `#{pane_in_mode}`/`#{pane_mode}` through
+  # the state, while the three CLI channels of an unrelated command stay still.
+  # Ending it with one key is `window_clock_key`, so the same sabotage proves
+  # the key route the mode is torn down by.
+  zz_command clock-mode -t "$(active_pane zz)" >/dev/null || die 'zz refused clock-mode'
+  wait_for 'the one-sided clock' pane_in_mode zz 1
+  self_check_run clock-sabotage display-message -p -t PANE '#{window_index}.#{pane_index}'
+  self_check_expect 'screen and state, a clock on one side only' \
+    exit=0 stdout=0 stderr=0 screen=1 state=1
+  tmux_outer_command send-keys -t "=$OUTER_SESSION:zz" q ||
+    die 'the outer tmux refused send-keys'
+  wait_for 'the one-sided clock ended' pane_in_mode zz 0
 
   # the attached screen: one space typed at the zz client's prompt. capture-pane
   # trims trailing blanks, so this reaches the comparison through the cursor,

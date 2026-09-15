@@ -7,6 +7,7 @@ choose-client	-	-F	[-hikNrZ] [-F format] [-f filter] [-K key-format] [-O sort-or
 choose-tree	-	-F	[-GhkNrswZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]
 clear-history	clearhist	-t	[-H] [-t target-pane]
 clear-prompt-history	clearphist	-T	[-T prompt-type]
+clock-mode	-	-t	[-t target-pane]
 command-prompt	-	-I	[-1CbeFiklNP] [-I inputs] [-p prompts] [-t target-client] [-T prompt-type] [template]
 confirm-before	confirm	-c	[-by] [-c confirm-key] [-p prompt] [-t target-client] command
 copy-mode	-	-s	[-dekHMqSu] [-s src-pane] [-t target-pane]

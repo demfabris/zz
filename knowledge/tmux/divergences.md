@@ -133,7 +133,7 @@ Still unimplemented and skipped from config: nothing in this group. `server-acce
 left it on 2026-09-15 - zz answers the pin's list, lookups, orderings and refusals,
 and refuses only the one form that would admit a second identity.
 
-## Superseded by native GUI chrome (4)
+## Superseded by native GUI chrome (3)
 
 `display-popup`, `display-menu`, and `confirm-before` left this table in waves
 5d-1/5d-2 for the GPUI client: daemon state and GPUI behavior are pinned, but the
@@ -184,8 +184,14 @@ six resize, style, context-menu, border-drag, popup-to-pane, and Kitty-image con
 | --- | --- |
 | `customize-mode` | Interactive options browser. |
 | `choose-client` | Chooser listing attached clients. |
-| `clock-mode` | Full-pane clock. |
 | `suspend-client` | Ctrl-Z the attaching client. |
+
+`clock-mode` left this table on 2026-09-15. The daemon owns a per-pane mode, publishes it
+on the pane snapshot, answers `#{pane_in_mode}` and `#{pane_mode}` from it for a clientless
+CLI, redraws on the whole second the way `window_clock_timer_callback` does, and ends the
+mode on the first key no table claimed, the way `window_clock_key` does. The raw TUI draws
+`window_clock_table`'s big face over the pane; the GUI reads the new snapshot field for
+nothing and keeps its own presentation.
 
 ## Parked by decision or by model (4)
 
@@ -1135,14 +1141,16 @@ the DEL strict-key differential pass.
 
 **Store-only (75):**
 
-- Typed storage that nothing reads (31): `lock-after-time`,
+- Typed storage that nothing reads (29): `lock-after-time`,
   `lock-command` (the lock commands are no-ops); `allow-rename`, `alternate-screen`,
   `scroll-on-clear`, `extended-keys`, `extended-keys-format`, `xterm-keys`, `backspace`,
   `editor`, `assume-paste-time`, `input-buffer-size`, `get-clipboard`,
   `default-client-command`, `fill-character`, `variation-selector-always-wide`;
   `message-style`, `message-command-style`, `message-format`;
   `pane-border-lines`, `pane-border-indicators`, the four `pane-scrollbars*`; the four
-  `prompt-*cursor-*`; `clock-mode-colour`, `clock-mode-style`.
+  `prompt-*cursor-*`. `clock-mode-colour` and `clock-mode-style` left this list on
+  2026-09-15: `window_clock_draw_screen`'s own reads are reproduced, so the colour and the
+  four faces are honoured in the raw TUI.
 - Generic scalar storage (39 of the 63 scalar-backed names) plus five of the eight
   arrays: everything else in the table,
   including `status-keys`,

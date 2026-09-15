@@ -1,0 +1,13 @@
+2026-09-15T20:19:10Z
+Linux ubuntu 7.0.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 04:26:38 UTC 2026 x86_64 GNU/Linux
+7e7cb1ee25122a10e7f1d8815241422eb00c4199
+7e7cb1ee25122a10e7f1d8815241422eb00c4199
+?? compat/tui/evidence/TUI-018/attempt-02/
+tmux next-3.8
+d77c9dc6aa021e4bc61f0da128c591af695e6466
+baseline build exit=0
+f6848183ef6f8f560f2ebec2b05983c9e8039274afb102fcd038715a4a7a5c86  target/debug/zz
+fe82462af83f515034c25bb8576eef8a11a0ad3a5c1029af70b0973b028aed5d  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+rustc 1.97.0 (2d8144b78 2026-07-07)
+GNU bash, version 5.3.9(1)-release (x86_64-pc-linux-gnu)
+TERM=xterm-256color

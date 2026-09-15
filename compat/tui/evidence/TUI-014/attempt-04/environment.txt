@@ -1,0 +1,27 @@
+# TUI-014 attempt-04, cycle 10, modes lane 2
+
+## box
+Linux ubuntu 7.0.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 04:26:38 UTC 2026 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 26.04.1 LTS"
+NAME="Ubuntu"
+cores: 8  load: 4.55 6.37 7.47
+bash: 5.3.9(1)-release  python: Python 3.14.4
+
+## revision
+97d8ed96 Open the pin's switch mode on the target pane
+base: 2e5094d8e74c3de2917a15ce249c723f2211b3e1 2e5094d8 Count TUI-016 as verified in the campaign state line
+worktree: 1 uncommitted paths
+
+## binaries
+zz:   /home/demfabris/dev/zz-tui-modes-10/target/debug/zz
+cfceda8bcc431ae30263c3f5201c80f3810c484a1d7b634550244b6571deb01e  target/debug/zz
+pin:  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+tmux next-3.8
+fe82462af83f515034c25bb8576eef8a11a0ad3a5c1029af70b0973b028aed5d  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+
+## RUN_ENV
+ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins
+
+## taken
+2026-09-15T16:03:03-03:00

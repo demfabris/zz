@@ -347,6 +347,10 @@ pub(crate) struct FormatHookFacts {
     /// Every pane some client holds a live copy session on, with that client's
     /// name beside the facts, ordered by client id.
     pub(crate) copy_modes: Arc<BTreeMap<PaneId, Vec<(String, Arc<CopyModeFacts>)>>>,
+    /// `wp->modes`: the server-owned mode each pane carries, named the way
+    /// `#{pane_mode}` spells it. It belongs to the pane, so a clientless
+    /// expansion answers from it.
+    pub(crate) pane_modes: Arc<BTreeMap<PaneId, &'static str>>,
 }
 
 #[derive(Clone)]
@@ -1438,6 +1442,17 @@ impl DaemonFormatHooks<'_> {
             .map(|(_, facts)| facts.as_ref())
     }
 
+    /// `wp->modes` head: the server-owned mode this context's pane carries.
+    /// tmux keeps one mode list per pane and answers `#{pane_mode}` from its
+    /// head, so a server-owned mode outranks the per-client copy session the
+    /// way `window_pane_set_mode` pushes ahead of it.
+    fn pane_mode_name(&self, context: &StatusContext) -> Option<&'static str> {
+        self.facts
+            .pane_modes
+            .get(&context.pane_id.parse().ok()?)
+            .copied()
+    }
+
     fn copy_mode_variable(&self, name: &str, context: &StatusContext) -> Option<String> {
         let view = self.copy_mode_view(context)?;
         let [
@@ -1674,7 +1689,8 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             "mouse_pane" | "mouse_x" | "mouse_y" | "mouse_word" | "mouse_line"
             | "mouse_hyperlink" => Some(String::new()),
             "pane_in_mode" => Some(
-                if self.copy_mode_rows(context).is_some() {
+                if self.copy_mode_rows(context).is_some() || self.pane_mode_name(context).is_some()
+                {
                     "1"
                 } else {
                     "0"
@@ -1690,14 +1706,13 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                     .map(|terminal| terminal.pane_search_string())
                     .unwrap_or_default(),
             ),
-            "pane_mode" => Some(
-                if self.copy_mode_view(context)?.view_mode {
-                    "view-mode"
-                } else {
-                    "copy-mode"
-                }
-                .to_owned(),
-            ),
+            "pane_mode" => Some(if let Some(name) = self.pane_mode_name(context) {
+                name.to_owned()
+            } else if self.copy_mode_view(context)?.view_mode {
+                "view-mode".to_owned()
+            } else {
+                "copy-mode".to_owned()
+            }),
             "agent_state" | "agent_pending_permission" => {
                 if self.facts.mux.pane_kind(&context.pane_id) != Some("agent") {
                     return Some(String::new());

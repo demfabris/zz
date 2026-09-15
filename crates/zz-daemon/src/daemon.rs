@@ -26,7 +26,7 @@ use zz_mux::{
     CellLayout, CommandAliasResolution, CommandPromptStep, CommandPromptTemplate, ConfigDiagnostic,
     CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
     FormatClient, FormatMonitorScope, FormatMonitorTarget, KeyDecision, KeyEngine, KeyTables,
-    MouseEventTarget, MuxEffect, MuxEngine, PaneKind, PaneRuntimeFacts, ParsedConfig,
+    MouseEventTarget, MuxEffect, MuxEngine, PaneKind, PaneModeRequest, PaneRuntimeFacts, ParsedConfig,
     ParsedConfigBytes, RetainedJobEnvironment, SourceStream, StatusHooks, TmuxColour, TmuxSort,
     TmuxSortOrder, WindowSize, canonical_command, command_block_body,
     copy_mode_action_is_read_only_safe, expand_format_bytes, expand_format_values, expand_status,
@@ -50,10 +50,10 @@ use zz_protocol::{
     MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES,
     MENU_ROW_MARGIN, MenuAction, MenuItem, MenuState, MuxOptionKey, MuxOptionSource, MuxOptions,
     MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator,
-    PaneKindSnapshot, PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines,
-    PopupPointer, PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult,
-    ProtocolError, ProtocolMessage, RawText, SPLIT_RATIO_BASIS, ServerError, ServerHello,
-    SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId,
+    PaneKindSnapshot, PaneMode, PasteUploadPurpose, PastedImageFormat, PopupAction,
+    PopupBorderLines, PopupPointer, PopupPointerButton, PopupState, PreparedCommand,
+    PreparedCommandResult, ProtocolError, ProtocolMessage, RawText, SPLIT_RATIO_BASIS, ServerError,
+    ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId,
     canonical_key, encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
     layout_menu_row, menu_row_cells, menu_row_width, read_protocol_message_into, resolve_command,
     terminal_patch_frame_len, terminal_viewport_frame_len,
@@ -3223,6 +3223,7 @@ struct Shared {
         Mutex<Option<crossbeam_channel::Receiver<ClientMessageDeadlineCommand>>>,
     stopping: AtomicBool,
     copy_refresh_running: AtomicBool,
+    clock_refresh_running: AtomicBool,
     shutdown_pending: AtomicBool,
     shutdown_forced: AtomicBool,
     shutdown_announced: AtomicBool,
@@ -4306,6 +4307,7 @@ impl Shared {
             client_message_deadline_rx: Mutex::new(Some(client_message_deadline_rx)),
             stopping: AtomicBool::new(false),
             copy_refresh_running: AtomicBool::new(false),
+            clock_refresh_running: AtomicBool::new(false),
             shutdown_pending: AtomicBool::new(false),
             shutdown_forced: AtomicBool::new(false),
             shutdown_announced: AtomicBool::new(false),
@@ -8265,6 +8267,7 @@ impl Shared {
                             inner.terminals.remove(pane);
                             inner.terminal_spawns.remove(pane);
                             inner.terminal_geometries.remove(pane);
+                            inner.pane_modes.remove(pane);
                             inner.paste_uploads.retain(|_, upload| upload.pane != *pane);
                             removed_panes.push(*pane);
                         }
@@ -9331,6 +9334,17 @@ impl Shared {
                     MuxEffect::UserOptionChanged { channel } => {
                         option_signals.push(channel.clone());
                     }
+                    MuxEffect::PaneModeChanged { pane, mode } => {
+                        let changed = match mode {
+                            Some(mode) => {
+                                inner.pane_modes.insert(*pane, mode.clone()) != Some(mode.clone())
+                            }
+                            None => inner.pane_modes.remove(pane).is_some(),
+                        };
+                        if changed {
+                            snapshot_changed = true;
+                        }
+                    }
                 }
             }
             if let Some((pane, format, active_session, format_client)) = pane_format_output {
@@ -9527,6 +9541,9 @@ impl Shared {
         }
         if refresh_armed {
             self.arm_copy_mode_refresh();
+        }
+        if clock_modes_are_open(&self.inner.lock()) {
+            self.arm_pane_mode_clock();
         }
         for (client, terminal) in unfocused_copy_mode_exits {
             terminal.view_action(
@@ -18481,6 +18498,17 @@ impl Shared {
                     }
                     return Ok(());
                 }
+                // `server_client_key_callback` hands a key no table claimed to
+                // `window_pane_key`, and `window_clock_key` answers it with
+                // `window_pane_reset_mode`: a bound key runs its command and
+                // leaves the mode up, an unbound one ends it and reaches the
+                // pane no further.
+                if input.action != zz_terminal::KeyAction::Release
+                    && self.end_pane_mode_on_key(client, pane, &input, text_follows)
+                {
+                    self.sync_prefix_armed(client);
+                    return Ok(());
+                }
                 self.dispatch_input_key(client, pane, input)
                     .map_err(Into::into)
             }
@@ -18502,6 +18530,29 @@ impl Shared {
         };
         self.sync_prefix_armed(client);
         result
+    }
+
+    /// `window_pane_key` for a pane holding a server-owned mode: the mode
+    /// swallows the key and ends. Returns whether the key was spent here.
+    fn end_pane_mode_on_key(
+        &self,
+        client: ClientId,
+        pane: PaneId,
+        input: &zz_terminal::KeyInput,
+        text_follows: bool,
+    ) -> bool {
+        if self.inner.lock().pane_modes.remove(&pane).is_none() {
+            return false;
+        }
+        self.suppress_committed_character(
+            client,
+            pane,
+            CommittedTextLane::Terminal,
+            input,
+            text_follows,
+        );
+        self.publish_mux_snapshots();
+        true
     }
 
     /// `server_client_key_callback`'s mouse half. A decoded pointer event the
@@ -19662,6 +19713,52 @@ impl Shared {
             log::error!(
                 target: "zz_daemon::diagnostics::terminal",
                 "failed to start the copy-mode refresh timer: {error}"
+            );
+        }
+    }
+
+    /// `window_clock_start_timer` wakes on the next whole second and
+    /// `window_clock_timer_callback` redraws the pane when the second moved,
+    /// so every attached client's face turns over together. zz formats the
+    /// time into the pane snapshot, so the tick is one republish, and the
+    /// thread lives only while some pane still holds a clock.
+    fn arm_pane_mode_clock(self: &Arc<Self>) {
+        if self.clock_refresh_running.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let shared = Arc::downgrade(self);
+        if let Err(error) = thread::Builder::new()
+            .name("zz-clock-mode".to_owned())
+            .spawn(move || {
+                loop {
+                    thread::sleep(duration_to_next_second());
+                    let Some(shared) = shared.upgrade() else {
+                        return;
+                    };
+                    if shared.stopping.load(Ordering::Acquire) {
+                        shared.clock_refresh_running.store(false, Ordering::Release);
+                        return;
+                    }
+                    if !clock_modes_are_open(&shared.inner.lock()) {
+                        shared.clock_refresh_running.store(false, Ordering::Release);
+                        // An arm that raced the store above found the thread
+                        // still running and skipped its own spawn, so look
+                        // once more before letting the thread go.
+                        if !clock_modes_are_open(&shared.inner.lock())
+                            || shared.clock_refresh_running.swap(true, Ordering::AcqRel)
+                        {
+                            return;
+                        }
+                        continue;
+                    }
+                    shared.publish_mux_snapshots();
+                }
+            })
+        {
+            self.clock_refresh_running.store(false, Ordering::Release);
+            log::error!(
+                target: "zz_daemon::diagnostics::terminal",
+                "failed to start the clock-mode redraw timer: {error}"
             );
         }
     }
@@ -28471,6 +28568,10 @@ struct ServerState {
     /// Panes whose `copy-mode -k` session has ended, waiting for the kill that
     /// `window_pane_reset_mode` runs.
     copy_kill_panes: Vec<PaneId>,
+    /// `wp->modes`: the server-owned mode each pane carries. It belongs to the
+    /// pane rather than to a client, so a clientless `list-panes` reads it and
+    /// every client attached to the window draws it.
+    pane_modes: BTreeMap<PaneId, PaneModeRequest>,
     display_panes: BTreeMap<ClientId, DisplayPanesSession>,
     silence_deadlines: BTreeMap<WindowId, SilenceDeadline>,
     next_silence_token: u64,
@@ -34518,6 +34619,53 @@ fn stamp_snapshot_for_client(
         format_client,
         snapshot,
     );
+    stamp_pane_modes(&inner.engine, &facts, &inner.pane_modes, snapshot);
+}
+
+/// Carries each pane's server-owned mode to the client, resolved from the
+/// window options the pin's own draw reads on every redraw.
+fn stamp_pane_modes(
+    engine: &MuxEngine,
+    facts: &FormatHookFacts,
+    modes: &BTreeMap<PaneId, PaneModeRequest>,
+    snapshot: &mut MuxSnapshot,
+) {
+    if modes.is_empty() {
+        return;
+    }
+    for session in &mut snapshot.sessions {
+        for window in &mut session.windows {
+            for (pane, pane_snapshot) in &mut window.panes {
+                pane_snapshot.mode = modes.get(pane).map(|mode| match mode {
+                    PaneModeRequest::Clock => {
+                        let (colour, style) = engine.clock_mode_options(window.id);
+                        PaneMode::Clock {
+                            time: clock_mode_time(facts, style),
+                            colour,
+                        }
+                    }
+                });
+            }
+        }
+    }
+}
+
+/// `window_clock_draw_screen`'s own `tim`: `clock-mode-style` picks the
+/// strftime literal, and the twelve-hour faces carry the `AM` or `PM` the pin
+/// appends from `tm_hour` rather than from a locale's `%p`.
+fn clock_mode_time(facts: &FormatHookFacts, style: u8) -> String {
+    let mut hooks = DaemonFormatHooks::command(facts);
+    let mut time = hooks.strftime(match style {
+        0 => "%l:%M ",
+        2 => "%l:%M:%S ",
+        3 => "%H:%M:%S",
+        _ => "%H:%M",
+    });
+    if style == 0 || style == 2 {
+        let hour = hooks.strftime("%H").parse::<u32>().unwrap_or_default();
+        time.push_str(if hour >= 12 { "PM" } else { "AM" });
+    }
+    time
 }
 
 /// Carries the window's pane border chrome to the client: the resolved
@@ -37110,11 +37258,47 @@ fn buffer_format_facts(buffer: &PasteBuffer) -> BufferFormatFacts {
     }
 }
 
+/// Whether any pane still holds `window_clock_mode`, which is what keeps the
+/// redraw timer alive.
+fn clock_modes_are_open(inner: &ServerState) -> bool {
+    inner
+        .pane_modes
+        .values()
+        .any(|mode| matches!(mode, PaneModeRequest::Clock))
+}
+
+/// `window_clock_start_timer`: the delay to the next whole second, so the face
+/// turns over on the boundary rather than a second after the mode opened.
+fn duration_to_next_second() -> Duration {
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    Duration::from_nanos(u64::from(1_000_000_000 - now.subsec_nanos()))
+}
+
+/// `wp->modes` for every pane holding a server-owned mode, named the way
+/// `#{pane_mode}` spells it.
+fn pane_mode_format_facts(inner: &ServerState) -> BTreeMap<PaneId, &'static str> {
+    inner
+        .pane_modes
+        .iter()
+        .map(|(pane, mode)| {
+            (
+                *pane,
+                match mode {
+                    PaneModeRequest::Clock => "clock-mode",
+                },
+            )
+        })
+        .collect()
+}
+
 fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
     FormatHookFacts {
         agent_states: Arc::clone(&inner.agent_states),
         mux: Arc::new(inner.engine.format_facts()),
         copy_modes: Arc::new(copy_mode_format_facts(inner)),
+        pane_modes: Arc::new(pane_mode_format_facts(inner)),
         unseen_changes: Arc::new(unseen_change_panes(inner)),
         terminals: Arc::new(inner.terminals.clone()),
         pane_pipes: Arc::new(
@@ -43021,7 +43205,7 @@ mod tests {
         fs::write(
             &root,
             format!(
-                "clock-mode\n\
+                "customize-mode\n\
                  source-file nested-missing.conf\n\
                  source-file 'invalid\0pattern.conf'\n\
                  source-file '{}'\n\
@@ -43050,7 +43234,10 @@ mod tests {
         );
         assert_eq!(
             causes[1],
-            format!("{}:1: unsupported tmux command: clock-mode", root.display())
+            format!(
+                "{}:1: unsupported tmux command: customize-mode",
+                root.display()
+            )
         );
         assert_eq!(
             causes[2],
@@ -43953,9 +44140,9 @@ mod tests {
     fn tmux_import_comments_unsupported_constructs_without_running_commands() {
         let engine = MuxEngine::default();
         let source =
-            "clock-mode\nlink-window \\\n -a user\nrun-shell 'exit 1'\nset -g prefix C-a\n";
+            "customize-mode\nlink-window \\\n -a user\nrun-shell 'exit 1'\nset -g prefix C-a\n";
         let (text, copied, unsupported) = prepare_tmux_import(&engine, Path::new("/donor"), source);
-        assert!(text.starts_with("# zz-unsupported: clock-mode\n"));
+        assert!(text.starts_with("# zz-unsupported: customize-mode\n"));
         assert!(text.contains("# zz-unsupported:  -a user\n"));
         assert!(text.contains("run-shell 'exit 1'\n"));
         assert_eq!(copied, 2);
@@ -66630,7 +66817,7 @@ set-option -g @alias-mixed-next yes
         let specs = zz_protocol::command_specs()
             .filter(|spec| spec.uses_tmux_option_grammar())
             .collect::<Vec<_>>();
-        assert_eq!(specs.len(), 85);
+        assert_eq!(specs.len(), 86);
         assert_eq!(
             specs.iter().map(|spec| spec.aliases.len()).sum::<usize>(),
             74
@@ -66688,9 +66875,9 @@ set-option -g @alias-mixed-next yes
                 }
             }
         }
-        assert_eq!(spellings, 159);
-        assert_eq!(diagnostic_cases, 636);
-        assert_eq!(required_cases, 413);
+        assert_eq!(spellings, 160);
+        assert_eq!(diagnostic_cases, 640);
+        assert_eq!(required_cases, 414);
 
         let mut prefix_cases = 0;
         for spec in &specs {
@@ -66712,7 +66899,7 @@ set-option -g @alias-mixed-next yes
                 );
             }
         }
-        assert_eq!(prefix_cases, 532);
+        assert_eq!(prefix_cases, 539);
 
         for spec in &specs {
             let unknown = ('0'..='9')
@@ -66774,7 +66961,7 @@ set-option -g @alias-mixed-next yes
             .filter(|spec| !zz_protocol::NATIVE_COMMAND_NAMES.contains(&spec.name))
             .filter(|spec| spec.positional_maximum().is_some())
             .collect::<Vec<_>>();
-        assert_eq!(specs.len(), 74);
+        assert_eq!(specs.len(), 75);
         for spec in specs {
             let maximum = spec.positional_maximum().expect("finite maximum");
             let arguments = vec![argument.clone(); maximum.saturating_add(1)];

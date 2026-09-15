@@ -51,7 +51,15 @@
 #   wheel-up-alternate          the same, with an alternate-screen program up
 #   double-click-word           the paste buffer the gesture leaves
 #   triple-click-line           the paste buffer the gesture leaves
-#   right-click-pane            the decoded screen (a menu, or nothing)
+#   right-click-pane            the decoded screen (a menu, or nothing), at a
+#                               blank cell and at a cell whose row carries
+#                               text, where the pin's own menu renders three
+#                               of its items off the screen under the pointer
+#   mouse-context               `#{mouse_word}`, `#{mouse_line}` and
+#                               `#{mouse_hyperlink}` as a user's own
+#                               `bind -n MouseDown3Pane` expands them, over a
+#                               plain word, a wrapped line's head and tail, an
+#                               OSC 8 hyperlink and a blank cell
 #   border-click                `#{pane_marked_set}` and the active pane
 #                               index
 #   border-drag-resize          `#{pane_width}` of the pane left of the border
@@ -267,6 +275,22 @@ wait_for() {
   die "$label did not happen within 10 seconds"
 }
 
+# `wait_for` dies when it runs out, which is right for a state both sides must
+# reach before a reading is taken. A reading that IS the comparison cannot be
+# waited on that way: a side that never answers is a divergence to report, not
+# a harness failure. This waits the same bounded ten seconds and then lets the
+# comparison speak.
+wait_at_most() {
+  local attempt
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    if "$@" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  return 1
+}
+
 capture_screen() {
   tmux_outer_command capture-pane -p -e -S 0 -E "$((ROWS_UNDER_TEST - 1))" \
     -t "=$OUTER_SESSION:$1"
@@ -353,6 +377,19 @@ click_both() {
     send_mouse "$side" "$button" "$aimed" "$row" M
     send_mouse "$side" "$button" "$aimed" "$row" m
   done
+}
+
+# A right press inside `KEYC_CLICK_TIMEOUT` of the previous one is a
+# `SecondClick3Pane`, which nothing binds: `server_client_check_mouse` resets
+# the sequence when the BUTTON differs, not when the cell does. A left click
+# between two right clicks is that reset. It is inert in the cases that use it:
+# one pane, so `select-pane -t=` selects the pane that is already active, and
+# no program asking for mouse reports, so the row's `send -M` branch writes
+# nothing.
+reset_click_sequence_both() {
+  local column="$1" row="$2"
+  send_mouse_both 0 "$column" "$row" M
+  send_mouse_both 0 "$column" "$row" m
 }
 
 # --- geometry --------------------------------------------------------------
@@ -916,6 +953,117 @@ case_right_click_pane() {
   respawn_shell_both
 }
 
+# The sample the two context cases read, printed by a program so the grid is
+# exactly these rows with no prompt and no job-control noise:
+#
+#   row 0  MOUSECTX alpha beta gamma        a plain word, and the marker
+#   row 1  WRAPPEDHEADxxx...                a 139-cell word, so it wraps
+#   row 2  ...xxxLONGTAIL                   the tail of that wrap
+#   row 3  LINKTEXT                         an OSC 8 hyperlink
+#   row 4  MOUSECTXEND                      the settle marker
+#   row 6                                   a blank row
+#
+# The tab row the oracle measured is deliberately absent: the pin's grid keeps
+# a tab as a cell of its own and libghostty keeps the columns it skipped
+# unwritten, which `capture-pane -p` shows on both binaries and which belongs
+# to the engines' grids rather than to these formats.
+#
+# The hyperlink row is absent from the MENU sample for a reason of the same
+# kind, measured here: the pin's client re-emits the OSC 8 sequence when it
+# draws that cell (`^[]8;id=tmux1;https://example.com/page^[\` around the text)
+# and the raw TUI draws the underline without it, so a screen-channel case
+# whose sample carries a link compares that and not the menu. The format probes
+# compare an option's value, not the screen, so they keep the link row.
+CONTEXT_LONG_WORD="WRAPPEDHEAD$(printf 'x%.0s' $(seq 1 120))LONGTAIL"
+context_sample_both() {
+  local link=""
+  [ "${1-}" = with-link ] &&
+    link="printf '\033]8;;https://example.com/page\033\\\\LINKTEXT\033]8;;\033\\\\\n'; "
+  respawn_program_both sh -c "printf 'MOUSECTX alpha beta gamma\n'; printf '%s\n' '$CONTEXT_LONG_WORD'; ${link}printf 'MOUSECTXEND\n'; exec sleep 600"
+  settle_both MOUSECTXEND 'the mouse context sample'
+}
+
+# The same stock gesture as right-click-pane/screen, at a cell whose row
+# carries text. `DEFAULT_PANE_MENU` renders three of its items off
+# `#{mouse_word}`, `#{mouse_line}` and `#{mouse_hyperlink}`, so over a written
+# cell the menu the pin draws is taller than the one it draws over a blank one
+# and a side that answers none of the three draws neither. Channel: the decoded
+# screen, the same as the blank-cell case beside it.
+case_right_click_pane_over_a_word() {
+  CASE_LABEL=right-click-pane-over-a-word
+  context_sample_both
+  local left top
+  left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
+  top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  send_mouse_both 2 "$((left + 16))" "$((top + 1))" M
+  both_screen_has 'Copy Line' 'the pane menu over a word'
+  settle_both 'Copy Line' 'the right click over a word'
+  check_screen CONTEXT_MENU right-click-pane/over-a-word
+  send_bytes zz $'\033'
+  send_bytes tmux $'\033'
+  both_screen_lacks 'Copy Line' 'the pane menu over a word closed'
+  send_mouse_both 2 "$((left + 16))" "$((top + 1))" m
+  respawn_shell_both
+}
+
+# The three names read directly, the way a user's own binding reads them:
+# `set-option -gF` expands its value through the invoking command's format
+# tree, which is where `format_cb_mouse_word`, `format_cb_mouse_line` and
+# `format_cb_mouse_hyperlink` publish the grid under the pointer. Channel: that
+# option's value, one asserted check per cell the gesture lands on.
+CONTEXT_SABOTAGE_CHANNEL=""
+CONTEXT_SABOTAGE_COLUMN=""
+CONTEXT_SABOTAGE_ROW=""
+context_probe() {
+  local name="$1" column="$2" row="$3" side aimed aimed_row
+  reset_click_sequence_both "$column" "$row"
+  run_on_both set-option -gu @mousectx
+  for side in zz tmux; do
+    aimed="$column"
+    aimed_row="$row"
+    if [ "$side" = zz ] && [ "$name" = "$CONTEXT_SABOTAGE_CHANNEL" ]; then
+      aimed="$CONTEXT_SABOTAGE_COLUMN"
+      aimed_row="$CONTEXT_SABOTAGE_ROW"
+    fi
+    send_mouse "$side" 18 "$aimed" "$aimed_row" M
+    send_mouse "$side" 18 "$aimed" "$aimed_row" m
+  done
+  wait_for "the pin published $name" pin_option_set @mousectx
+  wait_at_most option_nonempty zz @mousectx || true
+  settle_both MOUSECTXEND "the $name probe"
+  check_value CONTEXT_FORMAT "mouse-context/$name" \
+    "$(option_value zz @mousectx)" "$(option_value tmux @mousectx)"
+}
+option_nonempty() {
+  [ -n "$(option_value "$1" "$2")" ]
+}
+case_mouse_context_formats() {
+  CASE_LABEL=mouse-context
+  context_sample_both with-link
+  run_on_both set-option -gu @mousectx
+  # A key of its own, so the stock `MouseDown3Pane` the two menu cases need
+  # stays exactly as `key-bindings.c` installed it. `C-MouseDown3Pane` is bound
+  # by neither binary and the gesture is still a real SGR report: the control
+  # bit is 16, so a right press carries button 18.
+  #
+  # The brackets keep the value non-empty whatever the three names answer, so
+  # "the binding ran" and "the binding answered something" are different
+  # questions and the second one is never asked of the comparison.
+  run_on_both bind-key -n C-MouseDown3Pane set-option -gF @mousectx \
+    '[#{mouse_word}][#{mouse_line}][#{mouse_hyperlink}]'
+  local left top
+  left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
+  top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  context_probe over-a-word "$((left + 16))" "$((top + 1))"
+  context_probe wrapped-head "$((left + 3))" "$((top + 2))"
+  context_probe wrapped-tail "$((left + 5))" "$((top + 3))"
+  context_probe hyperlink "$((left + 4))" "$((top + 4))"
+  context_probe blank-cell "$((left + 11))" "$((top + 7))"
+  run_on_both unbind-key -n C-MouseDown3Pane
+  run_on_both set-option -gu @mousectx
+  respawn_shell_both
+}
+
 # `bind -n MouseDrag1Border { resize-pane -M }`. Channel: the width of the
 # pane left of the border. input.rs has no border hit test at all, so a drag
 # that starts on a divider column falls through to whatever owns that cell.
@@ -1361,6 +1509,10 @@ FOCUS_OFF_MODE=same
 FOCUS_OFF_REASON=""
 PASTE_COPY_MODE=same
 PASTE_COPY_REASON=""
+CONTEXT_MENU_MODE=same
+CONTEXT_MENU_REASON=""
+CONTEXT_FORMAT_MODE=same
+CONTEXT_FORMAT_REASON=""
 RIGHT_CLICK_MODE=same
 RIGHT_CLICK_REASON="MouseDown3Pane raises the pin's pane menu through a root binding over DEFAULT_PANE_MENU's twenty-eight items, positioned with -x M -y M, over #{m/r:}, #{=/9/...:}, buffer_sample, mouse_word, mouse_line, mouse_hyperlink, pane_floating_flag and a nested display-menu; the three screen-reading mouse formats are still unanswered (formats.mouse-context) and the row is not installed (keys.root-native-mouse)"
 
@@ -1374,6 +1526,8 @@ run_cases() {
   case_drag_selects
   case_multi_click
   case_right_click_pane
+  case_right_click_pane_over_a_word
+  case_mouse_context_formats
   case_border_drag
   case_border_click
   case_status_clicks
@@ -1563,6 +1717,38 @@ sc_one_sided_marked_pane() {
   case_right_click_pane
   side_command zz select-pane -M >/dev/null 2>&1
 }
+# zz's own `word-separators` set to a value that cuts the word under the
+# pointer differently. Both sides still raise the pin's pane menu over the same
+# cell and both still carry `Copy Line`, so the case's waits are unmoved and
+# the three items the menu renders off `#{mouse_word}` are the whole
+# difference. right-click-pane/over-a-word is the only channel that can carry
+# it.
+sc_one_sided_menu_context_word() {
+  side_command zz set-option -g word-separators 'aeiou' >/dev/null
+  case_right_click_pane_over_a_word
+  side_command zz set-option -gu word-separators >/dev/null
+}
+# One of the five context probes aimed at a different cell on zz. Every other
+# probe in the case is aimed at the same cell on both sides, so the sabotaged
+# channel is the only one that can report.
+sc_one_sided_context_channel() {
+  local channel="$1" left top
+  left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
+  top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  CONTEXT_SABOTAGE_CHANNEL="$channel"
+  if [ "$channel" = over-a-word ]; then
+    CONTEXT_SABOTAGE_COLUMN="$((left + 3))"
+    CONTEXT_SABOTAGE_ROW="$((top + 2))"
+  else
+    CONTEXT_SABOTAGE_COLUMN="$((left + 16))"
+    CONTEXT_SABOTAGE_ROW="$((top + 1))"
+  fi
+  case_mouse_context_formats
+  CONTEXT_SABOTAGE_CHANNEL=""
+  CONTEXT_SABOTAGE_COLUMN=""
+  CONTEXT_SABOTAGE_ROW=""
+}
+
 # `key-bindings.c`'s own `DEFAULT_WINDOW_MENU`, the eleven items the pin's
 # `MouseDown3Status` raises. It is spelled out once here so the position
 # sabotage below can rebind zz with the SAME menu and nothing but the position
@@ -1681,6 +1867,18 @@ run_self_check() {
     sc_one_sided_menu_paste_tail
   self_check_case "zz's own pane marked and the pin's not" catches \
     sc_one_sided_marked_pane
+  self_check_case "zz's own word-separators under the pane menu" catches \
+    sc_one_sided_menu_context_word
+  self_check_case "zz's word probe aimed at the wrapped row" catches \
+    sc_one_sided_context_channel over-a-word
+  self_check_case "zz's wrapped-head probe aimed at the word" catches \
+    sc_one_sided_context_channel wrapped-head
+  self_check_case "zz's wrapped-tail probe aimed at the word" catches \
+    sc_one_sided_context_channel wrapped-tail
+  self_check_case "zz's hyperlink probe aimed at the word" catches \
+    sc_one_sided_context_channel hyperlink
+  self_check_case "zz's blank-cell probe aimed at the word" catches \
+    sc_one_sided_context_channel blank-cell
   self_check_case "zz's window menu centred instead of over its status range" \
     catches sc_one_sided_status_menu_position
   self_check_case 'WheelDownStatus unbound on zz only' catches \

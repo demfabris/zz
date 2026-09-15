@@ -1,0 +1,25 @@
+TUI-014 attempt-03, cycle 10, modes lane
+
+wall clock      2026-09-15T11:19:44-03:00
+box             Linux ubuntu 7.0.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 04:26:38 UTC 2026 x86_64 GNU/Linux
+os              PRETTY_NAME="Ubuntu 26.04.1 LTS" NAME="Ubuntu" 
+cores           8   ram 30Gi
+locale          en_US.UTF-8
+python          Python 3.14.4
+bash            5.3.9(1)-release
+worktree        /home/demfabris/dev/zz-tui-modes-10
+branch          campaign/tui-modes
+revision        5585cd6a97a933c212a68f78f0233c382da096d4
+base            287e381563fa060de594db35f58cac2a9fbc4f9f (origin/main)
+worktree clean  yes apart from this evidence directory (git status --porcelain shows only compat/tui/evidence/TUI-014/attempt-03 while it is being written)
+pin             /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+pin version     tmux next-3.8
+pin revision    tmux d77c9dc6 (next-3.8)
+zz binary       /home/demfabris/dev/zz-tui-modes-10/target/debug/zz
+zz sha256       abe2c44c51e0926ffa38013e7e8430d84b1c360bcae051ae98b82423c0d6c1f6 for the fixture runs up to 12:03,
+                then 472406e384818d67c5c586a68ed63aac47e8a3c8edbca3d13a0c096830be6c76 after cargo test -p zz relinked the binary at 12:25.
+                Same revision, same sources; a cargo debug build is not bit-reproducible, and
+                verify-claims.py re-ran both fixtures against the second binary with identical tallies
+zz mtime        2026-09-15T12:25:35-03:00 (the second binary)
+wall clock end  2026-09-15T13:05-03:00
+RUN_ENV         ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins

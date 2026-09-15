@@ -1,0 +1,40 @@
+# pin      /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux (d77c9dc6, next-3.8)
+# driver   /home/demfabris/dev/zz-tui-modes-10/compat/tui/evidence/TUI-014/attempt-03/pin-suspend-probe.sh
+# command  /home/demfabris/dev/zz-tui-modes-10/compat/tui/evidence/TUI-014/attempt-03/pin-suspend-probe.sh
+# taken    2026-09-15T12:51:38-03:00
+### STATE BEFORE
+S cli 2 1
+C cli 80x24 0
+### pane process: 2273126 tmux
+### rc=0 out=[] err=[]
+### STATE AFTER
+S cli 2 0
+### pane process after: 2273126 tmux
+### SCREEN AFTER
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+$
+### cursor: 0,0 flag=1 shape=default
+### ps state: Ss+
+# exit     0

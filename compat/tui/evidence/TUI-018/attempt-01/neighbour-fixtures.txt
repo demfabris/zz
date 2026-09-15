@@ -1,0 +1,21 @@
+== the four fixtures whose channel the cursor landing could move, run at b976cfec's tree before the rebase ==
+
+--- compat/tui-screen-diff.sh
+ok    120x24-sidebar sidebar-shown differs from the pin, which is what a drawn sidebar means
+ok    120x24-sidebar sidebar-withdrawn
+all 147 asserted checkpoints identical, 6 recorded not asserted
+
+--- compat/tui-copy-mode.sh
+ok    presentation-cancel
+all 147 cases agree on every channel they assert, 0 recorded a difference elsewhere
+147 of those cases assert at least one channel; 0 assert none and are recorded in full
+
+--- compat/tui-overlays.sh
+ok    panes-coloured-shown
+ok    panes-coloured-selected
+all 48 asserted comparisons identical, 0 recorded not asserted
+
+--- compat/tui-indicators.sh
+ok    view-inactive-opened (divider row 11 asserted whole)
+ok    view-inactive-typed (divider row 11 asserted whole)
+all 23 asserted comparisons identical, 0 recorded not asserted

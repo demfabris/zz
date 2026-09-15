@@ -1,0 +1,59 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-tui-stream-10/target/debug/zz
+[1;36m==>[0m running pane-dead-time
+pane-dead-time: 6 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running pane-spawn-options
+pane-spawn-options: 25 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running pane-spawn-retain
+pane-spawn-retain: 27 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running pane-spawn-style-title-v2
+pane-spawn-style-title-v2: 18 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running panes
+panes: 9 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running nested-splits
+nested-splits: 4 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running splits-sized
+splits-sized: 5 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running split-window-zoom
+split-window-zoom: 11 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running split-window-zoom-hidden-width
+split-window-zoom-hidden-width: 21 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running display-message
+display-message: 27 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running stderr-parity
+stderr-parity: 14 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running buffer-path-format
+buffer-path-format: 36 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running buffer-missing-target-error
+buffer-missing-target-error: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| pane-dead-time | 6 | yes | 0 | yes | yes | yes |
+| pane-spawn-options | 25 | yes | 0 | yes | yes | yes |
+| pane-spawn-retain | 27 | yes | 0 | yes | yes | yes |
+| pane-spawn-style-title-v2 | 18 | yes | 0 | yes | yes | yes |
+| panes | 9 | yes | 0 | yes | yes | yes |
+| nested-splits | 4 | yes | 0 | yes | yes | yes |
+| splits-sized | 5 | yes | 0 | yes | yes | yes |
+| split-window-zoom | 11 | yes | 0 | yes | yes | yes |
+| split-window-zoom-hidden-width | 21 | yes | 0 | yes | yes | yes |
+| display-message | 27 | yes | 0 | yes | yes | yes |
+| stderr-parity | 14 | yes | 0 | yes | yes | yes |
+| buffer-path-format | 36 | yes | 0 | yes | yes | yes |
+| buffer-missing-target-error | 2 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+[1;36m==>[0m partial run complete; full summary left unchanged

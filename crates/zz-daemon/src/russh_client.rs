@@ -37,6 +37,7 @@ use crate::{
         remote_socket_probe, shell_quote,
     },
     ios_keychain::{self, KeychainError},
+    russh_prompt::{AsyncSshPrompts, HandshakeDeadline},
     russh_socks::{LoopbackForward, SocksForward, discover_loopback_ports},
     transport::TransportStream,
 };
@@ -246,17 +247,15 @@ async fn run_tunnel(
     browser: Arc<BrowserForwarding>,
 ) {
     let target = endpoint.to_string();
-    let established = tokio::time::timeout(
-        HANDSHAKE_TIMEOUT,
-        establish(&endpoint, prompts, &from_remote_tx),
-    )
-    .await
-    .unwrap_or_else(|_| {
-        Err(EndpointError::SshFailed {
+    let deadline = HandshakeDeadline::new(HANDSHAKE_TIMEOUT);
+    let prompts = prompts.map(|prompts| deadline.prompts(prompts));
+    let established = tokio::select! {
+        result = establish(&endpoint, prompts, &from_remote_tx) => result,
+        () = deadline.expired() => Err(EndpointError::SshFailed {
             target: target.clone(),
             reason: "ssh handshake timed out".to_owned(),
-        })
-    });
+        }),
+    };
 
     let (session, channel) = match established {
         Ok(pair) => pair,
@@ -350,15 +349,19 @@ type SshSession = client::Handle<TofuHandler>;
 
 async fn establish(
     endpoint: &SshEndpoint,
-    prompts: Option<SshPrompts>,
+    prompts: Option<AsyncSshPrompts>,
     from_remote_tx: &std_mpsc::Sender<Vec<u8>>,
 ) -> Result<(SshSession, russh::Channel<client::Msg>), EndpointError> {
     let target = endpoint.to_string();
     let host = endpoint.host.clone();
     let port = endpoint.port.unwrap_or(22);
+    let transport_failure = Arc::new(Mutex::new(None::<String>));
     let ssh_failed = |reason: String| EndpointError::SshFailed {
         target: target.clone(),
-        reason,
+        reason: match transport_failure.lock().as_ref() {
+            Some(detail) if !reason.contains(detail) => format!("{reason} ({detail})"),
+            _ => reason,
+        },
     };
 
     let user = endpoint
@@ -375,6 +378,7 @@ async fn establish(
         known_hosts: directory.join("known_hosts"),
         prompts: prompts.clone(),
         failure: Arc::clone(&host_key_failure),
+        transport_failure: Arc::clone(&transport_failure),
     };
     let mut session = match client::connect(config, (host.as_str(), port), handler).await {
         Ok(session) => session,
@@ -419,7 +423,7 @@ async fn authenticate(
     user: &str,
     host: &str,
     directory: &Path,
-    prompts: Option<SshPrompts>,
+    prompts: Option<AsyncSshPrompts>,
     ssh_failed: &impl Fn(String) -> EndpointError,
 ) -> Result<(), EndpointError> {
     let key_path = directory.join("id_ed25519");
@@ -457,7 +461,7 @@ async fn authenticate(
         for _ in 0..3 {
             let prompt =
                 AskpassPrompt::new(AskpassMode::Answer, format!("{user}@{host}'s password: "));
-            match prompts.respond(&prompt) {
+            match prompts.respond(prompt).await {
                 AskpassReply::Answer(password) => {
                     let attempt = session
                         .authenticate_password(user, password.as_str())
@@ -490,7 +494,7 @@ async fn authenticate_keyboard_interactive(
     session: &mut SshSession,
     user: &str,
     host: &str,
-    prompts: &SshPrompts,
+    prompts: &AsyncSshPrompts,
     ssh_failed: &impl Fn(String) -> EndpointError,
 ) -> Result<Option<russh::MethodSet>, EndpointError> {
     let mut response = session
@@ -525,7 +529,7 @@ async fn authenticate_keyboard_interactive(
                     };
                     let prompt =
                         AskpassPrompt::new(AskpassMode::Answer, context).with_echo(question.echo);
-                    match prompts.respond(&prompt) {
+                    match prompts.respond(prompt).await {
                         AskpassReply::Answer(answer) => answers.push(answer.to_string()),
                         AskpassReply::Cancel => {
                             return Err(EndpointError::AuthenticationFailed {
@@ -662,12 +666,32 @@ struct TofuHandler {
     host: String,
     port: u16,
     known_hosts: PathBuf,
-    prompts: Option<SshPrompts>,
+    prompts: Option<AsyncSshPrompts>,
     failure: Arc<Mutex<Option<String>>>,
+    transport_failure: Arc<Mutex<Option<String>>>,
 }
 
 impl client::Handler for TofuHandler {
     type Error = russh::Error;
+
+    async fn disconnected(
+        &mut self,
+        reason: client::DisconnectReason<Self::Error>,
+    ) -> Result<(), Self::Error> {
+        match reason {
+            client::DisconnectReason::ReceivedDisconnect(info) => {
+                *self.transport_failure.lock() = Some(format!(
+                    "server disconnected: {} ({:?})",
+                    info.message, info.reason_code,
+                ));
+                Ok(())
+            }
+            client::DisconnectReason::Error(error) => {
+                *self.transport_failure.lock() = Some(error.to_string());
+                Err(error)
+            }
+        }
+    }
 
     async fn check_server_key(
         &mut self,
@@ -682,9 +706,9 @@ impl client::Handler for TofuHandler {
         };
         match check_known_hosts_path(&self.host, self.port, server_public_key, &self.known_hosts) {
             Ok(true) => Ok(true),
-            Ok(false) => Ok(self.confirm_host_key(server_public_key, None)),
+            Ok(false) => Ok(self.confirm_host_key(server_public_key, None).await),
             Err(KeyError::KeyChanged { line }) => {
-                Ok(self.confirm_host_key(server_public_key, Some(line)))
+                Ok(self.confirm_host_key(server_public_key, Some(line)).await)
             }
             Err(error) => Ok(self.reject(format!("could not read known hosts: {error}"))),
         }
@@ -692,7 +716,7 @@ impl client::Handler for TofuHandler {
 }
 
 impl TofuHandler {
-    fn confirm_host_key(&mut self, key: &PublicKey, changed_line: Option<usize>) -> bool {
+    async fn confirm_host_key(&mut self, key: &PublicKey, changed_line: Option<usize>) -> bool {
         let fingerprint = key.fingerprint(HashAlg::default());
         let warning = if changed_line.is_some() {
             "WARNING: the saved SSH host key has changed."
@@ -729,7 +753,7 @@ impl TofuHandler {
         let Some(prompts) = self.prompts.as_ref() else {
             return self.reject("host trust requires confirmation".to_owned());
         };
-        match prompts.respond(&prompt) {
+        match prompts.respond(prompt).await {
             AskpassReply::Answer(answer) if answer.as_str() == "once" => true,
             AskpassReply::Answer(answer) if matches!(answer.as_str(), "save" | "yes" | "y") => {
                 match save_host_key(&self.host, self.port, key, &self.known_hosts, changed_line) {
@@ -982,6 +1006,7 @@ mod tests {
             known_hosts,
             prompts: None,
             failure: Arc::new(Mutex::new(None)),
+            transport_failure: Arc::new(Mutex::new(None)),
         };
         let mut builder =
             certificate::Builder::new(vec![0; 32], key.public_key(), 0, u64::MAX).unwrap();

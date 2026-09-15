@@ -42,6 +42,15 @@ Authentication tries that identity, keyboard-interactive prompts, and password w
 offers them. A setup password stays in memory for that attempt. Host-key prompts support reject,
 trust once, and trust/save.
 
+Prompt callbacks run through `russh_prompt::AsyncSshPrompts` on Tokio's blocking pool. The one-minute
+establishment budget pauses while a user answers and resumes with its remaining network time.
+On 2026-09-14 synchronous callbacks blocked the SSH runtime and consumed that budget, so a slow
+password answer could authenticate just before the client closed the connection. The portable
+`russh_prompt` tests cover delayed answers, cumulative timeout accounting, and cancellation.
+Server login deadlines still apply. A generic russh receive-channel error during authentication
+means its internal reply channel closed; inspect the appended disconnect reason and host logs
+before attributing it to the daemon or a password rejection.
+
 Remote scripts select `zz-dev` for dev builds and `zz` for production builds. The socket namespace
 follows the same identity. Desktop dev recipes link the dev executable into `~/.local/bin/zz-dev`;
 run the dev recipe on the target host before attaching. Remote scripts append these locations:

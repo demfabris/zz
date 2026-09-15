@@ -42,6 +42,8 @@ mod paths;
 #[cfg(target_os = "ios")]
 mod russh_client;
 #[cfg(any(target_os = "ios", test))]
+mod russh_prompt;
+#[cfg(any(target_os = "ios", test))]
 mod russh_socks;
 #[cfg(feature = "daemon")]
 mod status;

@@ -69,7 +69,7 @@ rustix = { workspace = true, features = ["fs"] }
 
 [dev-dependencies]
 russh = { version = "0.63.3", default-features = false, features = ["ring", "flate2", "rsa"] }
-tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "time", "sync", "macros"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "time", "sync", "macros", "test-util"] }
 
 [lints]
 workspace = true

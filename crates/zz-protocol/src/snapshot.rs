@@ -484,6 +484,24 @@ pub enum PaneMode {
         /// way `style_parse_colour` resolves it into `gc.fg`.
         colour: String,
     },
+    /// `window_switch_mode`. The server expands one row per session or window
+    /// through `WINDOW_SWITCH_DEFAULT_FORMAT` and the client draws each with
+    /// `format_draw`, the current one over a line cleared to `mode-style`'s
+    /// background, above the `(search)` prompt on the pane's last row.
+    Switch {
+        /// `data->matches`, each already expanded, with its `#[...]` markup.
+        rows: Vec<String>,
+        /// `data->current`, the row drawn in `mode-style`.
+        selected: u32,
+        /// `data->offset`, the first row drawn.
+        offset: u32,
+        /// The resolved `mode-style`, which is `sgc`.
+        selection_style: String,
+        /// The prompt and its input, `(search) ` plus `data->filter`.
+        prompt: String,
+        /// The resolved `message-style`, which is `pr->style`.
+        prompt_style: String,
+    },
 }
 
 impl PaneMode {
@@ -492,6 +510,7 @@ impl PaneMode {
     pub const fn name(&self) -> &'static str {
         match self {
             Self::Clock { .. } => "clock-mode",
+            Self::Switch { .. } => "switch-mode",
         }
     }
 }

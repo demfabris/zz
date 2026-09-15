@@ -598,7 +598,8 @@ import os, re, sys
 name = re.escape(os.environ["ZZ_MASK_NAME"])
 stamp = r"[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9]?[0-9] \d\d:\d\d:\d\d \d{4}"
 TOKEN_FILL = (
-    r"(/dev/CLIENT|\(PID NNNN\)|\(NN discarded\)|\(REL\)|TIMESTAMP|NN:NN|NNNN)( {2,})"
+    r"(/dev/CLIENT|\(PID NNNN\)|\(NN discarded\)|\(REL\)|TIMESTAMP|NN:NN|NNNN)"
+    r"((?:\x1b\[[0-9;]*m)*)( {2,})"
 )
 for line in sys.stdin.read().split("\n"):
     masked = re.sub(name, "/dev/CLIENT", line)
@@ -609,7 +610,7 @@ for line in sys.stdin.read().split("\n"):
     masked = re.sub(r"\(\d+ discarded\)", "(NN discarded)", masked)
     masked = re.sub(r"\d\d:\d\d", "NN:NN", masked)
     if masked != line:
-        masked = re.sub(TOKEN_FILL, r"\g<1> ", masked)
+        masked = re.sub(TOKEN_FILL, r"\g<1>\g<2> ", masked)
         masked = re.sub("\u2500{2,}", "\u2500", masked)
     sys.stdout.write(masked + "\n")
 '

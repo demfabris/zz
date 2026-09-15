@@ -1,0 +1,11 @@
+# revision 7cdd626def4091c28ae9a7e928d8f5427f0a2493 -- verify-claims.py --run TUI-014 at the evidence tip, exit 1 on the same client_info_mask fill residue
+verified: TUI-001, TUI-002, TUI-003, TUI-004, TUI-005, TUI-006, TUI-007, TUI-009, TUI-010
+re-measuring: TUI-014
+  comparing /home/demfabris/dev/zz-tui-modes-10/target/debug/zz
+  running compat/tui-client-commands.sh for TUI-014 ...
+    all 71 asserted comparisons identical, 36 recorded not asserted (0 for a sibling lane)
+    (active, 36 recorded, which is consistent)
+  running compat/tui-choosers.sh for TUI-014 ...
+
+1 problem(s):
+  TUI-014: compat/tui-choosers.sh exited 1: 1 of 78 asserted comparisons differ, 0 recorded (0 for a sibling lane) 

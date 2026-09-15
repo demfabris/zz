@@ -1,0 +1,580 @@
+   Compiling cfg-if v1.0.4
+   Compiling pin-project-lite v0.2.17
+   Compiling libc v0.2.189
+   Compiling futures-core v0.3.34
+   Compiling serde_core v1.0.229
+   Compiling parking v2.2.1
+   Compiling memchr v2.8.3
+   Compiling futures-io v0.3.34
+   Compiling zerofrom v0.1.8
+   Compiling event-listener v5.4.2
+   Compiling stable_deref_trait v1.2.1
+   Compiling yoke v0.8.3
+   Compiling event-listener-strategy v0.5.4
+   Compiling simd-adler32 v0.3.10
+   Compiling itoa v1.0.18
+   Compiling serde v1.0.229
+   Compiling async-channel v2.5.0
+   Compiling zerovec v0.11.8
+   Compiling futures-lite v2.6.1
+   Compiling smallvec v1.16.1
+   Compiling num-traits v0.2.19
+   Compiling adler2 v2.0.1
+   Compiling slab v0.4.12
+   Compiling siphasher v1.0.3
+   Compiling libm v0.2.16
+   Compiling equivalent v1.0.2
+   Compiling indexmap v2.14.2
+   Compiling phf_shared v0.13.1
+   Compiling zmij v1.0.23
+   Compiling crc32fast v1.5.2
+   Compiling miniz_oxide v0.9.1
+   Compiling once_cell v1.21.4
+   Compiling phf_generator v0.13.1
+   Compiling flate2 v1.1.10
+   Compiling serde_json v1.0.151
+   Compiling uncased v0.9.10
+   Compiling anyhow v1.0.104
+   Compiling tinystr v0.8.4
+   Compiling writeable v0.6.4
+   Compiling async-task v4.7.1
+   Compiling litemap v0.8.3
+   Compiling thiserror v1.0.69
+   Compiling thiserror v2.0.20
+   Compiling icu_locale_core v2.3.0
+   Compiling phf_macros v0.13.1
+   Compiling miniz_oxide v0.8.9
+   Compiling zerotrie v0.2.5
+   Compiling potential_utf v0.1.6
+   Compiling fdeflate v0.3.7
+   Compiling polling v3.11.0
+   Compiling aho-corasick v1.1.5
+   Compiling atomic-waker v1.1.2
+   Compiling regex-syntax v0.8.11
+   Compiling utf8_iter v1.0.4
+   Compiling shell-words v1.1.1
+   Compiling scopeguard v1.2.0
+   Compiling pxfm v0.1.30
+   Compiling moxcms v0.8.1
+   Compiling lock_api v0.4.14
+   Compiling icu_collections v2.3.0
+   Compiling phf v0.13.1
+   Compiling regex-automata v0.4.18
+   Compiling piper v0.2.5
+   Compiling ref-cast v1.0.27
+   Compiling async-io v2.6.0
+   Compiling png v0.18.1
+   Compiling icu_provider v2.3.1
+   Compiling nix v0.28.0
+   Compiling filedescriptor v0.8.3
+   Compiling parking_lot_core v0.9.12
+   Compiling serial2 v0.2.38
+   Compiling errno v0.3.14
+   Compiling downcast-rs v1.2.1
+   Compiling dyn-clone v1.0.20
+   Compiling futures-sink v0.3.34
+   Compiling base64 v0.23.1
+   Compiling byteorder-lite v0.1.0
+   Compiling image v0.25.10
+   Compiling futures-channel v0.3.34
+   Compiling schemars v1.2.2
+   Compiling portable-pty v0.9.0
+   Compiling signal-hook-registry v1.4.8
+   Compiling libghostty-vt v0.2.1 (https://github.com/uzaaft/libghostty-rs?rev=46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0#46a9d2ac)
+   Compiling parking_lot v0.12.5
+   Compiling blocking v1.7.0
+   Compiling icu_normalizer_data v2.3.0
+   Compiling icu_properties_data v2.3.0
+   Compiling regex v1.13.1
+   Compiling csscolorparser v0.8.4
+   Compiling cobs v0.3.0
+   Compiling tracing-core v0.1.36
+   Compiling async-lock v3.4.2
+   Compiling futures-task v0.3.34
+   Compiling foldhash v0.2.0
+   Compiling futures-util v0.3.34
+   Compiling zz-terminal v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-terminal)
+   Compiling tracing v0.1.44
+   Compiling postcard v1.1.3
+   Compiling icu_properties v2.3.0
+   Compiling icu_normalizer v2.3.0
+   Compiling serde_with v3.23.0
+   Compiling async-signal v0.2.14
+   Compiling getrandom v0.4.3
+   Compiling derive_more v2.1.1
+   Compiling strum v0.28.0
+   Compiling unicode-width v0.2.2
+   Compiling percent-encoding v2.3.2
+   Compiling zz-protocol v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-protocol)
+   Compiling pin-project v1.1.13
+   Compiling agent-client-protocol-schema v1.7.0
+   Compiling async-process v2.5.0
+   Compiling idna_adapter v1.2.2
+   Compiling futures-executor v0.3.34
+   Compiling iana-time-zone v0.1.65
+   Compiling fixedbitset v0.5.7
+   Compiling futures-concurrency v7.7.1
+   Compiling chrono v0.4.45
+   Compiling futures v0.3.34
+   Compiling nix v0.31.3
+   Compiling idna v1.1.0
+   Compiling form_urlencoded v1.2.2
+   Compiling uuid v1.26.1
+   Compiling async-fs v2.2.0
+   Compiling async-net v2.0.0
+   Compiling async-executor v1.14.0
+   Compiling rustc-hash v2.1.3
+   Compiling glob v0.3.4
+   Compiling zz-mux v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-mux)
+   Compiling interprocess v2.4.4
+   Compiling agent-client-protocol v2.1.0
+   Compiling smol v2.0.2
+   Compiling url v2.5.8
+   Compiling tempfile v3.27.0
+   Compiling sysinfo v0.39.6
+   Compiling zz-daemon v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-daemon)
+   Compiling zz-client v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-client)
+   Compiling rustls-pki-types v1.15.1
+   Compiling getrandom v0.2.17
+   Compiling untrusted v0.9.0
+   Compiling ring v0.17.14
+   Compiling bytes v1.12.1
+   Compiling http v1.5.0
+   Compiling rustls-webpki v0.103.15
+   Compiling httparse v1.10.1
+   Compiling subtle v2.6.1
+   Compiling rustls v0.23.44
+   Compiling ureq-proto v0.6.2
+   Compiling webpki-roots v1.0.9
+   Compiling utf8-zero v0.8.1
+   Compiling ureq v3.4.1
+   Compiling semver v1.0.28
+   Compiling zz-config v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-config)
+   Compiling zz-tui v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-tui)
+   Compiling zz-client-ffi v0.9.1 (/home/demfabris/dev/zz-tui-modes-10/crates/zz-client-ffi)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 10s
+     Running unittests src/lib.rs (target/debug/deps/zz_client-93f29a442057c75b)
+
+running 101 tests
+test agent_completion::tests::available_commands_use_standard_slash_semantics ... ok
+test agent_completion::tests::command_hints_follow_standard_slash_semantics ... ok
+test agent_completion::tests::completion_matching_supports_bare_command_names ... ok
+test agent_completion::tests::completion_replacement_keeps_unicode_prefixes_and_the_remaining_text ... ok
+test agent_completion::tests::completion_results_keep_every_available_command ... ok
+test agent_completion::tests::placeholder_only_command_descriptions_are_hidden ... ok
+test agent_config::settings_apply_tests::model_acknowledgement_resolves_effort_using_the_refreshed_option_id ... ok
+test agent_config::settings_apply_tests::unapplied_model_and_stale_cached_effort_stop_the_sequence ... ok
+test chrome::tests::a_rebound_chord_reports_the_action_it_now_carries ... ok
+test chrome::tests::a_shifted_chord_falls_back_to_the_unshifted_spelling ... ok
+test agent_config::settings_apply_tests::catalog_cache_deduplicates_requests_and_rejects_stale_scope_replies ... ok
+test chrome::tests::chrome_keys_canonicalize_their_modifier_spellings ... ok
+test chrome::tests::bindings_flatten_for_help_surfaces ... ok
+test chrome::tests::defaults_resolve_the_stock_chrome_chords ... ok
+test chrome::tests::desktop_browser_chords_resolve_per_platform ... ok
+test chrome::tests::every_action_round_trips_through_its_name ... ok
+test chrome::tests::terminal_chrome_never_claims_an_unshifted_control_chord ... ok
+test chrome::tests::the_sidebar_tells_a_shifted_letter_from_its_bare_press ... ok
+test completion::tests::completion_acceptance_preserves_text_after_the_replaced_token ... ok
+test completion::tests::command_alias_and_history_ranking_are_deterministic ... ok
+test completion::tests::empty_input_deduplicates_history_in_recency_order ... ok
+test completion::tests::daemon_native_commands_and_their_arguments_are_completed_from_the_catalog ... ok
+test completion::tests::index_option_completions_follow_table_declared_scope ... ok
+test completion::tests::options_and_live_targets_follow_command_context ... ok
+test completion::tests::quoted_unicode_tokens_have_valid_replacement_ranges ... ok
+test completion::tests::native_command_completion_respects_pane_kind_availability ... ok
+test completion::tests::used_flags_are_not_suggested_twice ... ok
+test chrome::tests::overrides_rebind_and_unbind ... ok
+test completion::tests::static_values_and_description_discovery_are_contextual ... ok
+test core::tests::a_new_chooser_state_drops_the_presentation_the_last_one_left ... ok
+test core::tests::agent_attention_edges_are_lossless_core_events ... ok
+test core::tests::agent_state_drops_with_its_pane ... ok
+test core::tests::agent_stream_payloads_pass_through_without_retention ... ok
+test core::tests::agent_state_is_stored_and_notified ... ok
+test core::tests::attachment_clears_session_state_and_notifies_changes ... ok
+test core::tests::attachment_options_track_the_daemon_and_survive_detach_for_reconnect ... ok
+test core::tests::chooser_deltas_preserve_static_filter_fallback_state ... ok
+test core::tests::command_output_watermark_resets_when_adopting_a_handshake ... ok
+test core::tests::command_output_actor_updates_replace_and_ignore_stale_traffic ... ok
+test core::tests::command_output_newer_close_and_zero_resync_prevent_resurrection ... ok
+test core::tests::detached_reason_is_retained_without_changing_the_shell_event_shape ... ok
+test core::tests::command_output_watermark_resets_with_the_connection ... ok
+test core::tests::menu_and_confirm_descriptors_reduce_and_clear_with_attachment_state ... ok
+test core::tests::popup_descriptor_owns_its_synthetic_viewport_lifetime ... ok
+test core::tests::prefix_cancel_ack_passes_through_with_its_request_id ... ok
+test core::tests::reconnect_and_session_reset_clear_agent_state ... ok
+test core::tests::timed_messages_carry_their_identity_and_the_clear_arrives_on_its_own ... ok
+test layout::tests::a_drop_that_rebuilds_the_same_arrangement_collapses_into_a_swap ... ok
+test layout::tests::drop_zones_resolve_corners_horizontally_and_flood_narrow_panes ... ok
+test layout::tests::invalid_ratios_are_resolved_deterministically ... ok
+test layout::tests::nested_splits_compose_normalized_geometry ... ok
+test layout::tests::nested_splits_on_the_same_axis_stay_inside_the_parent ... ok
+test layout::tests::pane_boxes_step_inside_interior_leading_edges_only ... ok
+test layout::tests::pane_drops_swap_at_the_center_and_join_at_every_edge ... ok
+test layout::tests::predicted_drops_reuse_the_daemon_layout_transforms ... ok
+test layout::tests::single_pane_fills_the_layout ... ok
+test menu::tests::enter_chooses_enabled_rows_and_closes_unusable_selections ... ok
+test menu::tests::every_cancel_key_closes_and_releases_are_consumed ... ok
+test menu::tests::navigation_skips_unusable_rows_wraps_and_handles_edges ... ok
+test menu::tests::paging_uses_raw_rows_and_clamps_at_edges ... ok
+test menu::tests::shift_tab_is_backtab_and_repeat_matches_press ... ok
+test menu::tests::shortcuts_win_before_cancel_and_disabled_shortcuts_do_not ... ok
+test menu::tests::unselected_and_all_disabled_navigation_keeps_raw_boundary_rows ... ok
+test status::tests::a_range_left_open_at_the_end_of_the_row_is_discarded ... ok
+test status::tests::absolute_centre_lands_in_the_middle_of_the_full_width ... ok
+test status::tests::alignment_sections_land_left_centre_and_right ... ok
+test status::tests::an_underflowing_centre_offset_clips_at_the_right_edge_like_the_pin ... ok
+test status::tests::an_unparseable_base_style_means_theme_default ... ok
+test status::tests::an_unterminated_marker_draws_nothing_like_format_draw ... ok
+test status::tests::base_style_backs_blank_and_default_cells ... ok
+test status::tests::blank_rows_compose_to_base_styled_spaces ... ok
+test status::tests::escaped_hashes_render_literally_and_never_open_a_style ... ok
+test status::tests::default_row_places_left_list_and_right ... ok
+test status::tests::fill_cells_take_only_the_fill_background_never_base_fg_or_attributes ... ok
+test status::tests::fill_paints_uncovered_columns ... ok
+test status::tests::pane_and_session_ranges_carry_wire_sized_ids ... ok
+test status::tests::push_and_pop_default_restore_the_marker_scoped_style ... ok
+test status::tests::wide_glyphs_cut_at_a_copy_boundary_become_spaces ... ok
+test status::tests::zero_width_output_is_empty ... ok
+test status::tests::truncated_list_keeps_the_focus_visible_and_paints_markers ... ok
+test status_bar::tests::attached_session_owns_the_window_list_and_recipient_focus ... ok
+test status_bar::tests::automatic_agent_labels_follow_session_titles_and_provider_changes ... ok
+test status_bar::tests::automatic_browser_labels_follow_page_titles_and_current_url ... ok
+test status_bar::tests::badges_do_not_control_the_agents_item ... ok
+test status_bar::tests::badges_use_window_and_pane_flags_and_agents_include_only_live_panes ... ok
+test status_bar::tests::explicit_window_names_override_agent_session_labels ... ok
+test status_bar::tests::mixed_window_prefers_the_active_agent_and_keeps_terminal_window_names ... ok
+test status_bar::tests::pane_deck_preserves_layout_order_and_current_browser_tab_without_badges ... ok
+test status_bar::tests::settings_defaults_enable_every_item ... ok
+test status_bar::tests::settings_hide_presentational_items_without_hiding_windows ... ok
+test status_bar::tests::window_projection_keeps_every_attached_window ... ok
+test status_bar::tests::zero_agents_and_missing_attachments_are_empty ... ok
+test url_input::tests::defaults_local_development_addresses_to_http ... ok
+test url_input::tests::defaults_public_hosts_to_https_and_preserves_explicit_schemes ... ok
+test url_input::tests::keeps_explicit_schemes_out_of_search ... ok
+test url_input::tests::normalizes_addresses ... ok
+test url_input::tests::navigates_to_anything_that_looks_like_an_address ... ok
+test url_input::tests::redacts_diagnostic_urls ... ok
+test url_input::tests::round_trips_provider_names ... ok
+test url_input::tests::searches_everything_that_does_not ... ok
+test url_input::tests::searches_on_the_configured_provider ... ok
+
+test result: ok. 101 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/display_menu_cell_layout.rs (target/debug/deps/display_menu_cell_layout-d4a22179f0179550)
+
+running 2 tests
+test a_row_with_no_annotation_still_answers_its_action_key ... ok
+test a_trimmed_row_keeps_its_marker_and_its_key ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/simulator.rs (target/debug/deps/simulator-333e3c02e3bf3f70)
+
+running 2 tests
+test seeded_convergence_seed_c0ffee ... ok
+test seeded_convergence_seed_5eed ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.22s
+
+     Running unittests src/lib.rs (target/debug/deps/zz_client_ffi-cc27bbee0619c089)
+
+running 28 tests
+test ffi::agent::tests::preferences_remember_only_the_acknowledged_user_selection ... ok
+test ffi::agent::tests::restored_prompts_are_owned_deduplicated_and_retained_until_acknowledged ... ok
+test ffi::agent::tests::journal_fallback_can_reset_at_a_new_sequence_during_replay ... ok
+test ffi::agent::tests::reliable_ready_waits_for_ordered_turn_completion_before_the_next_optimistic_prompt ... ok
+test ffi::agent::tests::stream_replay_deduplicates_and_recovers_a_gap_without_losing_chunks ... ok
+test ffi::agent::tests::unknown_updates_advance_the_cursor_and_do_not_discard_later_text ... ok
+test ffi::settings::mobile::tests::local_palette_preserves_rgb_cells_and_shared_cell_storage ... ok
+test ffi::chrome::tests::overrides_resolve_through_the_shared_keymap_and_ignore_releases ... ok
+test ffi::agent::tests::session_reset_replaces_entries_even_without_a_new_transcript_revision ... ok
+test ffi::settings::mobile::tests::local_theme_preserves_terminal_osc_colors ... ok
+test ffi::settings::mobile::tests::local_theme_restyles_configured_defaults_and_preserves_resolved_inverse_cells ... ok
+test ffi::tests::agent_lag_notices_keep_their_pane_and_sequence ... ok
+test ffi::tests::agent_session_replies_keep_pane_request_and_result ... ok
+test ffi::tests::agent_update_batches_keep_order_and_their_event_kind ... ok
+test ffi::tests::attention_edges_keep_their_ffi_flags ... ok
+test ffi::tests::agent_permission_payload_becomes_typed_c_state ... ok
+test ffi::tests::command_replies_carry_output_and_error_text_to_the_abi ... ok
+test ffi::tests::command_reply_reads_are_null_safe_and_release_owns_the_handle ... ok
+test ffi::tests::overlay_core_events_reach_their_own_ffi_kinds ... ok
+test ffi::tests::prefix_command_summary_joins_first_command_and_args ... ok
+test ffi::tests::prefix_snapshot_exposes_key_note_repeat_and_summary ... ok
+test ffi::tests::prefix_snapshot_reads_are_null_safe_and_bounded ... ok
+test ffi::tests::row_text_never_splits_a_utf8_scalar ... ok
+test ffi::tests::row_text_resolves_graphemes_and_omits_spacer_cells ... ok
+test ffi::tests::unread_command_replies_drop_the_oldest_at_the_cap ... ok
+test ffi::tests::zoomed_window_only_exposes_the_zoomed_pane_rect ... ok
+test ffi::tmux::tests::absent_overlays_and_null_handles_are_empty ... ok
+test ffi::tmux::tests::overlay_actions_preserve_daemon_semantics ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/command_output.rs (target/debug/deps/command_output-7cd8f845ad68867d)
+
+running 1 test
+test cancelling_the_output_view_gives_a_vi_pane_its_input_back ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.71s
+
+     Running tests/mobile.rs (target/debug/deps/mobile-e1c2b7f8a802aed7)
+
+running 1 test
+test mobile_settings_and_tmux_interaction_share_daemon_contracts ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.67s
+
+     Running tests/paste.rs (target/debug/deps/paste-44a7416f8945eeae)
+
+running 2 tests
+test pasted_bytes_skip_the_key_tables_that_swallow_typed_text ... ok
+test paste_translates_newlines_and_brackets_only_when_the_program_asked ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.91s
+
+     Running tests/smoke.rs (target/debug/deps/smoke-2fdbd40ad2b01b34)
+
+running 1 test
+test a_c_client_attaches_reads_and_types_through_the_abi ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.96s
+
+     Running unittests src/lib.rs (target/debug/deps/zz_tui-55a98ea5d2c359b4)
+
+running 209 tests
+test app::tests::a_nomouse_menu_leaves_the_arming_to_the_mouse_option ... ok
+test app::tests::app_requested_mouse_lights_the_outer_modes_while_the_option_is_off ... ok
+test app::tests::command_output_begin_search_starts_the_matching_local_prompt ... ok
+test app::tests::escape_timeout_honors_the_pinned_default_and_live_values ... ok
+test app::tests::failed_connect_first_host_switch_keeps_the_current_endpoint ... ok
+test app::tests::file_probe_selects_file_only_on_ok_and_honors_the_override ... ok
+test app::tests::command_output_resize_matches_rendered_content_and_tracks_geometry ... ok
+test app::tests::frame_inbox_removes_a_retired_synthetic_pane_before_delivery ... ok
+test app::tests::kitty_probe_disables_when_device_attributes_arrive_first ... ok
+test app::tests::frame_inbox_keeps_only_the_latest_viewport_per_pane ... ok
+test app::tests::kitty_probe_enables_on_a_matching_ok_response ... ok
+test app::tests::mouse_gate_follows_the_effective_option_value ... ok
+test app::tests::only_the_root_tables_mouse_names_are_collected ... ok
+test app::tests::mouse_off_forwards_only_to_a_tracking_pane_and_skips_chrome ... ok
+test app::tests::provider_navigation_publishes_the_full_tab_descriptor_once_changed ... ok
+test app::tests::popup_descriptor_owns_outer_mouse_tracking_even_before_its_frame ... ok
+test app::tests::tui_exit_notices_and_codes_match_tmux ... ok
+test browser::tests::absent_or_frameless_providers_leave_browser_cards_in_degraded_mode ... ok
+test app::tests::same_output_frames_dedupe_but_an_identical_replacement_resizes ... ok
+test app::tests::unrelated_request_zero_error_preserves_pending_attach_recovery ... ok
+test browser::tests::damage_installs_each_paint_while_unknown_damage_dedupes_by_hash ... ok
+test browser::tests::file_transport_enforces_the_eight_millisecond_floor ... ok
+test browser::tests::inline_debt_uses_the_budget_and_caps_the_install_delay ... ok
+test browser::tests::provider_routes_commands_and_pointer_only_for_open_surfaces ... ok
+test browser::tests::receive_timeout_exists_only_while_a_provider_surface_is_active ... ok
+test browser::tests::reconnect_teardown_closes_every_surface_and_clears_pending_work ... ok
+test browser::tests::resize_discards_a_throttled_frame_from_the_old_pixel_viewport ... ok
+test browser::tests::frames_coalesce_until_the_file_floor_and_keep_generation_in_lockstep ... ok
+test browser::tests::scale_rounding_overshoot_past_the_budget_still_validates ... ok
+test browser::tests::surface_clamp_uses_the_transport_budget ... ok
+test browser::tests::surface_diff_opens_resizes_reopens_and_closes ... ok
+test browser::tests::zoom_steps_scale_the_surface_and_reset_returns_to_base ... ok
+test clipboard::tests::a_server_selection_names_no_field_and_an_application_write_keeps_its_own ... ok
+test input::tests::a_nomouse_menu_answers_only_button_one ... ok
+test input::tests::a_pointer_event_names_the_pins_mouse_key_for_where_it_landed ... ok
+test input::tests::add_host_input_matches_fleet_add_endpoint_and_validation_rules ... ok
+test input::tests::browser_mouse_uses_content_relative_pixels_and_wheel_direction ... ok
+test input::tests::browser_surfaces_forward_key_releases_through_the_daemon ... ok
+test input::tests::command_output_mouse_owns_every_outer_route ... ok
+test input::tests::chrome_leaves_every_pane_key_to_the_daemon ... ok
+test input::tests::command_output_routes_press_and_repeat_keys_but_not_releases ... ok
+test input::tests::command_output_search_drops_control_characters_from_paste ... ok
+test input::tests::command_output_search_edits_accepts_and_closes_locally ... ok
+test input::tests::command_output_search_enter_swallows_its_repeat_and_release ... ok
+test input::tests::command_output_search_escape_swallows_its_repeat_and_release ... ok
+test input::tests::command_output_search_exit_does_not_swallow_unrelated_keys ... ok
+test input::tests::command_output_search_paste_updates_the_query ... ok
+test input::tests::command_output_search_releases_and_modified_text_are_inert ... ok
+test input::tests::command_output_search_respects_the_utf8_byte_limit ... ok
+test input::tests::confirm_consumes_paste_pointer_and_the_reply_key_lifecycle ... ok
+test input::tests::confirm_keys_follow_the_published_case_and_enter_rules ... ok
+test input::tests::confirm_routes_extended_modifier_bit_eight_like_tmux_meta ... ok
+test input::tests::key_mapping_keeps_typed_text_and_normalizes_letter_identity ... ok
+test input::tests::menu_backtab_uses_real_parser_bytes ... ok
+test input::tests::focus_events_skip_live_popups_close_dead_any_key_popups_and_forward_to_terminals ... ok
+test input::tests::menu_cancel_enter_and_disabled_stay_open_use_the_shared_resolver ... ok
+test input::tests::menu_paste_answers_every_character_and_hands_the_tail_back ... ok
+test input::tests::menu_pending_action_owns_input_until_close ... ok
+test input::tests::menu_pointer_reports_follow_the_pin_hit_box ... ok
+test input::tests::menu_release_and_action_key_lifecycle ... ok
+test input::tests::menu_shortcuts_win_and_navigation_changes_only_local_selection ... ok
+test input::tests::popup_close_and_replacement_swallow_the_triggering_key_lifecycle ... ok
+test input::tests::popup_close_preserves_every_held_key_until_its_release ... ok
+test input::tests::popup_paste_uses_terminal_view_and_inactive_paste_does_not ... ok
+test input::tests::popup_pointer_and_scroll_are_content_relative_and_tracking_gated ... ok
+test input::tests::rename_commands_use_stable_session_and_window_targets ... ok
+test input::tests::scalar_index_clamps_and_tracks_multibyte_text ... ok
+test input::tests::sidebar_keys_come_from_the_chrome_table ... ok
+test input::tests::xterm_shift_sequences_reach_the_shared_key_contract ... ok
+test kitty::tests::a_fully_clipped_placement_is_omitted ... ok
+test clipboard::tests::encoded_payload_is_capped_at_one_mibibyte ... ok
+test input::tests::popup_press_repeat_and_kitty_release_use_the_popup_key_lane ... ok
+test kitty::tests::clipping_a_negative_row_advances_the_source_rectangle ... ok
+test kitty::tests::clipping_at_the_right_edge_reduces_cells_and_source_width ... ok
+test kitty::tests::an_image_arriving_after_its_viewport_places_once ... ok
+test kitty::tests::clipping_tightens_an_existing_source_rectangle_on_every_edge ... ok
+test kitty::tests::daemon_image_ids_are_namespaced_across_panes ... ok
+test kitty::tests::image_assembly_replaces_an_incomplete_generation ... ok
+test kitty::tests::kitty_layers_map_to_the_settled_z_indices ... ok
+test kitty::tests::inline_transmit_compresses_rgba_and_sends_each_generation_once ... ok
+test kitty::tests::premultiplied_bgra_converts_to_straight_rgba ... ok
+test kitty::tests::leaving_the_layout_deletes_the_panes_placements ... ok
+test layout::tests::borderless_floating_content_uses_the_full_frame ... ok
+test layout::tests::collapsed_active_pane_keeps_its_visible_divider ... ok
+test layout::tests::divider_style_pane_prefers_an_active_pane_in_either_subtree ... ok
+test layout::tests::floating_geometry_centres_the_published_grid_and_clamps_to_bounds ... ok
+test layout::tests::horizontal_split_floors_first_and_gives_remainder_to_second ... ok
+test kitty::tests::file_transmit_rotates_eight_slots_and_cleanup_removes_them ... ok
+test layout::tests::inactive_junction_uses_directional_owner_priority ... ok
+test layout::tests::non_finite_vertical_ratio_uses_half_and_tiles_deterministically ... ok
+test layout::tests::out_of_range_ratios_clamp_after_reserving_the_divider ... ok
+test layout::tests::perpendicular_split_partitions_outer_divider_and_gives_junction_to_active_pane ... ok
+test layout::tests::same_axis_hidden_active_pane_does_not_own_ancestor_divider ... ok
+test layout::tests::split_only_cross_uses_creation_order_for_direction_ties ... ok
+test layout::tests::the_pane_status_row_costs_a_row_only_while_pane_border_status_is_on ... ok
+test layout::tests::two_pane_colour_indicators_split_the_divider_by_position ... ok
+test layout::tests::zero_extent_does_not_move_children_outside_the_parent ... ok
+test mode_view::tests::a_filled_message_clears_the_row_to_the_fill_with_the_default_foreground ... ok
+test mode_view::tests::a_right_aligned_position_draws_only_its_own_cells ... ok
+test mode_view::tests::a_selection_style_resolves_through_the_published_theme ... ok
+test mode_view::tests::an_empty_position_draws_nothing ... ok
+test mode_view::tests::an_unfilled_message_keeps_the_row_underneath_past_its_text ... ok
+test overlay::tests::a_large_pane_gets_the_clock_digit_centred_in_the_active_colour ... ok
+test overlay::tests::a_long_prompt_scrolls_so_the_cursor_stays_on_the_last_column ... ok
+test overlay::tests::a_long_prompt_with_the_cursor_home_draws_from_the_start ... ok
+test overlay::tests::a_prompt_wider_than_the_area_puts_the_cursor_at_its_end ... ok
+test overlay::tests::a_short_prompt_keeps_the_cursor_after_the_input ... ok
+test mode_view::tests::emacs_drops_the_bottom_right_cell_the_way_screen_check_selection_does ... ok
+test overlay::tests::a_small_pane_gets_the_plain_number_in_the_inactive_colour ... ok
+test overlay::tests::an_fg_only_overlay_style_leaves_the_terminal_ground_under_every_cell ... ok
+test picker::tests::picker_maps_navigation_enter_direct_keys_and_cancel ... ok
+test render::pane_mode::tests::a_switch_row_keeps_its_dim_runs_over_the_selection_style ... ok
+test render::tests::a_command_output_on_another_pane_owns_neither_the_prompt_nor_the_cursor ... ok
+test render::tests::a_client_message_replaces_the_message_line_row ... ok
+test render::tests::a_message_with_status_off_paints_one_virtual_row ... ok
+test render::tests::a_pane_prompt_draws_over_its_pane_and_leaves_the_status_row ... ok
+test render::tests::a_terminal_that_answered_nothing_leaves_every_colour_alone ... ok
+test render::tests::a_terminal_under_its_colours_takes_the_pin_nearest_one ... ok
+test render::tests::a_status_row_message_takes_the_cursor_and_a_prompt_keeps_it ... ok
+test render::tests::a_row_format_takes_over_the_row_the_chooser_would_have_composed ... ok
+test render::tests::borderless_popup_uses_its_full_frame_and_missing_frame_hides_the_underlay_cursor ... ok
+test render::tests::browser_frame_switches_the_renderer_between_card_and_live_modes ... ok
+test render::tests::chooser_fallback_status_keeps_fully_keyless_rows_selectable_without_a_gutter ... ok
+test render::tests::copy_mode_hides_only_its_position_when_the_daemon_asks ... ok
+test render::tests::floating_border_tables_cover_every_published_line_style ... ok
+test render::tests::command_output_search_prompt_tracks_direction_and_status_overlay ... ok
+test render::tests::forgetting_a_popup_purges_terminal_damage_and_image_caches ... ok
+test render::tests::higher_menu_paints_after_popup_and_suppresses_its_cursor ... ok
+test render::tests::confirm_prompt_replaces_the_status_row_and_other_local_overlays ... ok
+test render::tests::pane_cells_reach_the_terminal_in_the_class_the_program_wrote ... ok
+test render::tests::plain_text_clipping_uses_terminal_display_cells ... ok
+test render::tests::menu_paints_title_rows_shortcuts_selection_and_disabled_style ... ok
+test render::tests::menu_hides_the_workspace_cursor ... ok
+test render::tests::popup_blank_rows_keep_the_popup_style_instead_of_an_erase ... ok
+test render::tests::popup_images_are_placed_replaced_and_cleaned_up_on_close ... ok
+test render::tests::popup_damage_survives_workspace_retention_and_repaints_only_changed_rows ... ok
+test render::tests::popup_paints_bounded_title_styles_border_content_and_cursor ... ok
+test render::tests::sgr_changes_once_per_style_run ... ok
+test render::tests::style_only_changes_invalidate_cached_lines ... ok
+test render::tests::status_position_top_paints_the_block_at_row_zero ... ok
+test render::tests::status_block_paints_daemon_rows_and_blank_rows_carry_base_style ... ok
+test render::tests::styled_lines_clip_text_without_counting_markers ... ok
+test render::tests::styled_lines_send_named_and_indexed_colours_the_way_the_pin_does ... ok
+test render::tests::the_chooser_key_gutter_sizes_once_and_pads_keyless_rows ... ok
+test render::tests::the_chooser_paints_every_row_key_in_its_gutter ... ok
+test render::tests::the_copy_cursor_is_the_terminal_cursor_and_not_a_reversed_cell ... ok
+test render::tests::the_mode_badge_lives_on_the_sidebar_and_never_on_the_status_row ... ok
+test render::tests::the_detach_hint_is_sidebar_chrome_and_never_covers_the_status_row ... ok
+test render::tests::the_status_row_never_carries_the_armed_prefix_hint ... ok
+test render::tests::the_status_row_resolves_theme_colours_through_the_published_table_and_keeps_the_class ... ok
+test render::tests::trailing_prompt_spaces_are_left_to_the_fill ... ok
+test render::tests::trailing_prompt_spaces_survive_with_no_status_row_under_them ... ok
+test render::tests::window_status_labels_use_daemon_text_and_keep_empty_formats_empty ... ok
+test render::tests::unchanged_grid_emits_no_row_output ... ok
+test sidebar::tests::editor_operations_track_multibyte_scalar_positions_and_scroll_the_cursor ... ok
+test sidebar::tests::hosts_section_marks_the_current_endpoint_and_ends_with_add_host ... ok
+test sidebar::tests::single_session_flattens_windows_directly_under_host_with_markers ... ok
+test sidebar::tests::multiple_sessions_include_every_session_node ... ok
+test render::tests::the_published_theme_defaults_are_the_table_the_client_used_to_hard_code ... ok
+test sidebar::tests::width_never_invokes_the_sidebar_and_only_the_command_does ... ok
+test state::tests::a_timed_message_expires_on_its_duration_and_clears_only_by_identity ... ok
+test state::tests::client_focus_adopts_the_focused_attach_default_and_reports_only_a_loss ... ok
+test state::tests::client_focus_changed_while_attach_is_pending_replays_the_latest_state ... ok
+test state::tests::client_focus_replays_once_per_reattach_without_pane_focus ... ok
+test state::tests::command_output_actor_identity_owns_local_overlay_state ... ok
+test state::tests::command_output_search_uses_the_reserved_bottom_row_without_status ... ok
+test state::tests::command_output_search_survives_frames_and_clears_with_the_view ... ok
+test state::tests::confirm_state_seeds_and_resets_with_the_connection ... ok
+test state::tests::confirm_uses_the_message_row_with_status_on_or_off ... ok
+test state::tests::failed_attach_recovers_latest_focus_without_same_value_churn ... ok
+test state::tests::menu_state_seeds_updates_closes_and_resets_with_the_connection ... ok
+test state::tests::message_row_follows_message_line_and_becomes_virtual_when_off ... ok
+test state::tests::popup_state_seeds_updates_closes_replaces_and_resets_with_the_connection ... ok
+test state::tests::reconnect_clears_command_output_state_and_resize_cache ... ok
+test state::tests::reconnect_discards_the_old_epoch_and_replays_without_pane_focus ... ok
+test state::tests::status_rows_change_geometry_and_report_a_layout_event ... ok
+test state::tests::status_hit_targets_map_columns_to_window_ranges ... ok
+test state::tests::the_block_is_suppressed_when_no_pane_content_row_would_remain ... ok
+test state::tests::unrelated_failure_while_ready_does_not_change_focus_delivery ... ok
+test terminal_event::tests::a_device_control_string_with_no_terminator_is_read_as_an_escape ... ok
+test state::tests::the_status_block_spans_only_the_main_columns_beside_the_sidebar ... ok
+test terminal_event::tests::a_terminal_that_names_itself_is_read_and_never_typed ... ok
+test terminal_event::tests::bracketed_paste_can_span_reads ... ok
+test terminal_event::tests::bracketed_paste_swallows_control_bytes_the_pin_would_time ... ok
+test terminal_event::tests::file_probe_response_accepts_a_relay_stripped_prefix_and_rejects_errors ... ok
+test terminal_event::tests::kitty_response_and_device_attributes_can_span_reads ... ok
+test terminal_event::tests::legacy_functional_keys_honor_kitty_event_types ... ok
+test terminal_event::tests::lone_escape_is_flushed_without_losing_following_input ... ok
+test terminal_event::tests::modify_other_keys_reports_decode_as_the_pin_decodes_them ... ok
+test terminal_event::tests::non_kitty_application_commands_are_swallowed ... ok
+test terminal_event::tests::parses_kitty_release_and_sgr_mouse ... ok
+test terminal_event::tests::parses_terminal_cell_pixel_report ... ok
+test terminal_event::tests::parses_text_control_and_legacy_keys ... ok
+test terminal_event::tests::the_keypad_in_application_mode_decodes_to_the_character_on_the_key ... ok
+test tests::cli_accepts_local_and_named_host_attach_forms ... ok
+test tests::cli_rejects_conflicting_or_extra_arguments ... ok
+test tests::command_output_reaches_the_terminal_as_bytes ... ok
+test tests::targetless_attach_preflights_the_current_session ... ok
+test tty::tests::extended_keys_arm_for_every_value_but_off ... ok
+test tty::tests::mouse_sequences_emit_and_retract_the_tmux_outer_modes ... ok
+test tty::tests::only_the_terminals_the_pin_names_carry_features ... ok
+test tty::tests::pixel_geometry_uses_ioctl_values_or_documented_fallbacks ... ok
+test tty::tests::the_keypad_is_armed_on_entry_and_put_back_on_exit ... ok
+test tty::tests::the_startup_requests_carry_the_pin_three_attribute_queries ... ok
+test writer::tests::a_write_error_is_reported_on_the_next_paint ... ok
+test writer::tests::a_terminal_that_never_reads_does_not_stall_the_paint_that_feeds_it ... ok
+test writer::tests::past_the_budget_the_queue_is_dropped_and_no_paint_ever_waits ... ok
+test writer::tests::a_cleared_block_asks_for_one_repaint ... ok
+test writer::tests::an_abandoned_queue_never_reaches_the_terminal ... ok
+
+test result: ok. 209 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+
+     Running unittests src/main.rs (target/debug/deps/zz_tui-85ce6385fb0309b4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests zz_client
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests zz_client_ffi
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests zz_tui
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

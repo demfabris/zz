@@ -4425,6 +4425,11 @@ impl MuxEngine {
         }
         for expanded in &mut commands {
             expanded.source.clone_from(&command.source);
+            if let Some(stdin) = command.stdin() {
+                expanded.set_stdin(stdin.clone());
+            } else if command.stdin_was_spent() {
+                expanded.set_stdin_spent();
+            }
         }
         if commands.len() == 1 {
             return CommandAliasResolution::Expanded(commands.remove(0));
@@ -4435,6 +4440,11 @@ impl MuxEngine {
                 .with_command_blocks([0])
                 .into_expanded_alias_group();
         expanded.source.clone_from(&command.source);
+        if let Some(stdin) = command.stdin() {
+            expanded.set_stdin(stdin.clone());
+        } else if command.stdin_was_spent() {
+            expanded.set_stdin_spent();
+        }
         CommandAliasResolution::Expanded(expanded)
     }
 
@@ -4504,10 +4514,13 @@ impl MuxEngine {
         if let Some(commands) = parse_command_alias_group(command)? {
             validate_static_command_chain(&commands)?;
             let mut combined = Execution::default();
-            let stream = command.stdin();
+            let mut stream = command.stdin().cloned();
+            let mut spent = command.stdin_was_spent();
             for mut command in commands {
-                if let Some(stream) = stream {
+                if let Some(stream) = &stream {
                     command.set_stdin(stream.clone());
+                } else if spent {
+                    command.set_stdin_spent();
                 }
                 let execution = self.execute_without_alias_expansion(
                     context,
@@ -4515,6 +4528,18 @@ impl MuxEngine {
                     hooks,
                     default_shell_is_valid,
                 )?;
+                if execution.effects.iter().any(|effect| {
+                    matches!(
+                        effect,
+                        MuxEffect::SourceFile {
+                            stdin: Some(SourceStream::Bytes(_)),
+                            ..
+                        } | MuxEffect::PaneStreamInput { .. }
+                    )
+                }) {
+                    stream = None;
+                    spent = true;
+                }
                 if !execution.output.is_empty() {
                     if !combined.output.is_empty() && !combined.output.ends_with('\n') {
                         combined.output.push_bytes(b"\n");
@@ -4642,7 +4667,13 @@ impl MuxEngine {
             )?,
             "set-environment" => self.set_environment(context, &command.args, hooks)?,
             "show-environment" => self.show_environment(context, &command.args)?,
-            "source-file" => self.source_file(context, &command.args, command.stdin(), hooks)?,
+            "source-file" => self.source_file(
+                context,
+                &command.args,
+                command.stdin(),
+                command.stdin_was_spent(),
+                hooks,
+            )?,
             "reload-config" => {
                 parse_command_options("reload-config", &command.args)?;
                 if command.args.is_empty() {
@@ -13553,6 +13584,7 @@ impl MuxEngine {
         context: &ExecutionContext,
         args: &[RawText],
         stdin: Option<&RawText>,
+        stdin_spent: bool,
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("source-file", args)?;
@@ -13577,7 +13609,7 @@ impl MuxEngine {
             }
         }
         let mut stream = stdin.cloned();
-        let carried_a_stream = stdin.is_some();
+        let carried_a_stream = stdin.is_some() || stdin_spent;
         Ok(Execution {
             output: RawText::default(),
             effects: positional
@@ -37056,6 +37088,64 @@ mod tests {
             Execution::default()
         );
         assert_eq!(engine.state.generation(), generation);
+    }
+
+    #[test]
+    fn caller_stream_survives_alias_expansion_and_is_spent_by_the_first_reader() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        for (body, expected) in [
+            ("source-file -", vec![true]),
+            (
+                "display-message -p before ; source-file local.conf ; source-file - - ; source-file -",
+                vec![true, false, false],
+            ),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-option",
+                        ["-s", "command-alias[90]", &format!("stream={body}")],
+                    ),
+                )
+                .expect("install stream alias");
+            for payload in ["", "set -g @stream yes"] {
+                let mut invocation = command("stream", &[]);
+                invocation.set_stdin(payload);
+                let execution = engine
+                    .execute(&mut context, &invocation)
+                    .expect("stream alias");
+                let streams = execution
+                    .effects
+                    .into_iter()
+                    .filter_map(|effect| match effect {
+                        MuxEffect::SourceFile { path, stdin, .. } if path == "-" => Some(stdin),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(streams.len(), expected.len());
+                for (stream, available) in streams.into_iter().zip(&expected) {
+                    assert_eq!(
+                        stream,
+                        Some(if *available {
+                            SourceStream::Bytes(payload.into())
+                        } else {
+                            SourceStream::Spent
+                        })
+                    );
+                }
+            }
+            let execution = engine
+                .execute(&mut context, &command("stream", &[]))
+                .expect("callerless alias");
+            assert!(
+                execution
+                    .effects
+                    .iter()
+                    .all(|effect| !matches!(effect, MuxEffect::SourceFile { stdin: Some(_), .. }))
+            );
+        }
     }
 
     #[test]

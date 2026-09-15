@@ -12121,6 +12121,7 @@ impl Shared {
             InsertedCommandMode::CommandAlias {
                 client_terminal,
                 queue_execution,
+                stdin: command.stdin(),
             },
         )?;
         inserted_execution(client, kind, result)
@@ -12287,7 +12288,12 @@ impl Shared {
         let mut result = InsertedCommandResult::default();
         let mut first_error = None;
         let mut failed_group = None;
-        for command in parsed.commands {
+        let mut stdin = match mode {
+            InsertedCommandMode::CommandAlias { stdin, .. } => stdin.cloned(),
+            InsertedCommandMode::Standard(_) => None,
+        };
+        let carried_a_stream = stdin.is_some();
+        for mut command in parsed.commands {
             if mode.queue_execution().has_yielded()
                 || self.command_queue_cancelled(client)
                 || self.stopping.load(Ordering::Acquire)
@@ -12305,6 +12311,16 @@ impl Shared {
                     continue;
                 }
                 failed_group = None;
+            }
+            if carried_a_stream
+                && command_stdin_sink(canonical_command(&command.name), &command.args)
+                    .is_some_and(|sink| !sink.is_argument())
+            {
+                if let Some(stdin) = stdin.take() {
+                    command.set_stdin(stdin);
+                } else {
+                    command.set_stdin_spent();
+                }
             }
             let callback_failures_start = mode
                 .queue_execution()
@@ -12342,6 +12358,7 @@ impl Shared {
                         InsertedCommandMode::CommandAlias {
                             client_terminal,
                             queue_execution,
+                            ..
                         } => self.execute_with_mux_source_routed_for_terminal_in_queue(
                             client,
                             kind,
@@ -12679,6 +12696,7 @@ impl Shared {
                 InsertedCommandMode::CommandAlias {
                     client_terminal,
                     queue_execution,
+                    ..
                 } => self.execute_with_mux_source_routed_for_terminal_in_queue(
                     client,
                     kind,
@@ -38802,6 +38820,7 @@ enum InsertedCommandMode<'a> {
     CommandAlias {
         client_terminal: ClientTerminal,
         queue_execution: &'a CommandQueueExecution,
+        stdin: Option<&'a RawText>,
     },
 }
 

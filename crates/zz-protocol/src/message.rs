@@ -1735,6 +1735,8 @@ pub struct CommandInvocation {
     /// commands the payload is not an argument; `format_command` never prints
     /// it. See `knowledge/designs/command-stream-channel.md`.
     stdin: Option<RawText>,
+    #[serde(skip)]
+    stdin_spent: bool,
 }
 
 impl CommandInvocation {
@@ -1750,12 +1752,24 @@ impl CommandInvocation {
             command_blocks: Vec::new(),
             expanded_alias_group: false,
             stdin: None,
+            stdin_spent: false,
         }
     }
 
     /// Attach the caller's standard input to this invocation.
     pub fn set_stdin(&mut self, stdin: impl Into<RawText>) {
         self.stdin = Some(stdin.into());
+        self.stdin_spent = false;
+    }
+
+    pub fn set_stdin_spent(&mut self) {
+        self.stdin = None;
+        self.stdin_spent = true;
+    }
+
+    #[must_use]
+    pub const fn stdin_was_spent(&self) -> bool {
+        self.stdin_spent
     }
 
     #[must_use]
@@ -4824,6 +4838,27 @@ mod tests {
         })
         .expect("oversized shape");
         assert!(postcard::from_bytes::<super::ChooseTreeItem>(&oversized).is_err());
+    }
+
+    #[test]
+    fn caller_stream_spent_marker_stays_in_process() {
+        let absent = super::CommandInvocation::new("source-file", ["-"]);
+        let mut spent = absent.clone();
+        spent.set_stdin("payload");
+        spent.set_stdin_spent();
+        assert!(spent.stdin().is_none());
+        assert!(spent.stdin_was_spent());
+        let bytes = postcard::to_stdvec(&spent).expect("encode spent stream");
+        assert_eq!(
+            bytes,
+            postcard::to_stdvec(&absent).expect("encode absent stream")
+        );
+        let decoded =
+            postcard::from_bytes::<super::CommandInvocation>(&bytes).expect("decode absent stream");
+        assert_eq!(decoded, absent);
+        spent.set_stdin("");
+        assert!(spent.stdin().is_some());
+        assert!(!spent.stdin_was_spent());
     }
 
     #[test]

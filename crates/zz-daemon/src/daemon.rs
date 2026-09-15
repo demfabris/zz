@@ -38698,13 +38698,15 @@ fn parse_capture_pane_args(args: &[RawText]) -> Result<ParsedCapturePane, Server
         "capture-pane",
         args,
         &['b', 'E', 'S', 't'],
-        &['a', 'e', 'J', 'M', 'N', 'p', 'T', 'q'],
+        &['a', 'C', 'e', 'J', 'L', 'M', 'N', 'p', 'T', 'q'],
     )?;
     require_no_positionals("capture-pane", &args)?;
     let options = CaptureOptions {
         alternate: args.has('a'),
         escape_sequences: args.has('e'),
+        escape_nonprintable: args.has('C'),
         join_wrapped: args.has('J'),
+        number_lines: args.has('L'),
         mode: args.has('M'),
         preserve_trailing: args.has('J') || args.has('N'),
         trim_positions: args.has('T'),
@@ -71652,8 +71654,13 @@ set-option -g @alias-mixed-next yes
 
     #[test]
     fn capture_pane_parser_rejects_unimplemented_flags() {
-        let error = parse_capture_pane_args(&["-C".into()]).expect_err("unsupported flag");
-        assert!(matches!(error, ServerError::CommandParse(_)));
+        for flag in ["-F", "-H", "-P", "-R"] {
+            let error = parse_capture_pane_args(&[flag.into()]).expect_err("unsupported flag");
+            assert!(matches!(error, ServerError::CommandParse(_)), "{flag}");
+        }
+        let parsed = parse_capture_pane_args(&["-C".into(), "-L".into()]).expect("transforms");
+        assert!(parsed.options.escape_nonprintable);
+        assert!(parsed.options.number_lines);
     }
 
     #[test]

@@ -17,17 +17,17 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **40**. Classified items: **376**.
+Tracked gap groups: **40**. Classified items: **374**.
 
 - Status: open: 1, accepted: 39.
 - Decision: adopt: 1, native: 30, never: 9.
 - Priority: now: 1, none: 39.
 - Closed history entries: 207.
-- Surface: command: 8, flag: 25, native-command: 26, option: 34, format: 46, key: 51, binding: 37, native-key: 91, semantic: 49, presentation: 8, protocol: 1.
+- Surface: command: 8, flag: 23, native-command: 26, option: 34, format: 46, key: 51, binding: 37, native-key: 91, semantic: 49, presentation: 8, protocol: 1.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 84 of those commands. The registry classifies 25 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 26 native command names, 34 options absent from `BEHAVES`, 46 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 0 currently documented hook-producer gaps, 51 omitted default keys, 37 divergent shared default bindings, 91 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 84 of those commands. The registry classifies 23 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 26 native command names, 34 options absent from `BEHAVES`, 46 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 0 currently documented hook-producer gaps, 51 omitted default keys, 37 divergent shared default bindings, 91 zz-only default keys.
 
 ## Enforcement boundary
 
@@ -119,25 +119,25 @@ Settled 2026-09-02 as a native decision rather than a gap, because the clause it
 
 ### `capture.rich-transports`: Add rich capture transports
 
-Pinned tmux backs `-R`, `-P`, `-C`, `-F`, `-H`, and `-L` with its own grid and input-parser internals: `-R` prints per-line `grid_line` flags plus every cell's colour, attribute, and hyperlink id, and `-P` drains the incomplete escape sequence still sitting in `input_pending`. zz's capture surface is the terminal worker's retained UTF-8 text snapshot, which the daemon serves for `-a`, `-e`, `-J`, `-M`, `-N`, `-p`, `-q`, `-b`, `-S`, and `-E` with the pin's routing, alongside the zz-native `show-last-output` and `capture-browser` verbs. The six rich transports stay loudly refused rather than approximated. Reopen only when a named scripted workload needs cell attributes, hyperlinks, or a saved alternate grid, which takes a terminal-owned rich snapshot rather than another text transform. semantic:capture-pane-trailing-blank-rows closed 2026-09-14: the text residues were not the transports. cmd_capture_pane_history prints one line per grid row of the range whatever the row holds, and grid_string_cells walks each row to gl->cellsize under GRID_STRING_EMPTY_CELLS and to gl->cellused otherwise, then drops trailing spaces under GRID_STRING_TRIM_SPACES; cmd_capture_pane_exec then drops one trailing newline and prints one, so an empty last row survives. The worker now adds back the rows after the last one written and the cells after the ones used, and -M falls back to the pane the way the pin's else branch does. Measured 2026-09-14 on Linux against the pin d77c9dc6 on an 80x24 pane holding three written rows: capture-pane -p, -p -e, -p -N, -p -M and -p -a -q and every explicit range from -E 0 to -E 30 are byte-identical on both sides, where -p was 3 lines against 24 and -p -N was 37 bytes against 104 before. The one grid fact this reproduces is grid_expand_line's growth to a quarter, a half or the whole screen width, read off the cells the row currently uses: a row the pin once wrote wider and later erased keeps the wider allocation there and not here. The cases are capture-default-range, capture-past-last-row, capture-preserve-trailing and its three neighbours, capture-mode-screen, capture-mode-default, capture-escape, capture-alternate and capture-alternate-quiet in compat/tui-client-commands.sh.
+Pinned tmux backs `-R`, `-P`, `-C`, `-F`, `-H`, and `-L` with its own grid and input-parser internals: `-R` prints per-line `grid_line` flags plus every cell's colour, attribute, and hyperlink id, and `-P` drains the incomplete escape sequence still sitting in `input_pending`. zz's capture surface is the terminal worker's retained UTF-8 text snapshot, which the daemon serves for `-a`, `-e`, `-J`, `-M`, `-N`, `-p`, `-q`, `-b`, `-S`, and `-E` with the pin's routing, alongside the zz-native `show-last-output` and `capture-browser` verbs. The six rich transports stay loudly refused rather than approximated. Reopen only when a named scripted workload needs cell attributes, hyperlinks, or a saved alternate grid, which takes a terminal-owned rich snapshot rather than another text transform. semantic:capture-pane-trailing-blank-rows closed 2026-09-14: the text residues were not the transports. cmd_capture_pane_history prints one line per grid row of the range whatever the row holds, and grid_string_cells walks each row to gl->cellsize under GRID_STRING_EMPTY_CELLS and to gl->cellused otherwise, then drops trailing spaces under GRID_STRING_TRIM_SPACES; cmd_capture_pane_exec then drops one trailing newline and prints one, so an empty last row survives. The worker now adds back the rows after the last one written and the cells after the ones used, and -M falls back to the pane the way the pin's else branch does. Measured 2026-09-14 on Linux against the pin d77c9dc6 on an 80x24 pane holding three written rows: capture-pane -p, -p -e, -p -N, -p -M and -p -a -q and every explicit range from -E 0 to -E 30 are byte-identical on both sides, where -p was 3 lines against 24 and -p -N was 37 bytes against 104 before. The one grid fact this reproduces is grid_expand_line's growth to a quarter, a half or the whole screen width, read off the cells the row currently uses: a row the pin once wrote wider and later erased keeps the wider allocation there and not here. The cases are capture-default-range, capture-past-last-row, capture-preserve-trailing and its three neighbours, capture-mode-screen, capture-mode-default, capture-escape, capture-alternate and capture-alternate-quiet in compat/tui-client-commands.sh. Narrowed on 2026-09-15 by the cycle 10 capture lane: `-C` and `-L` are transforms of the text snapshot and nothing else, so they left this gap. `-C` doubles a backslash in cell data and, with `-e`, writes every escape introducer as a literal `\033` (grid.c's GRID_STRING_ESCAPE_SEQUENCES does only that in the history path; the octal escaping the manual page describes is `-P`'s alone). `-L` numbers each line from the history size, negative in history, and with `-J` keeps the number of every joined row inside the joined line. Both are asserted against the pin in compat/tui-client-commands.sh and compat/scenarios/capture-pane.txt.
 
 - Decision: `native`
 - Status: `accepted`
 - Priority and ease: `none` / `none`
 - Owner: `terminal`
 - User impact: scripts
-- Items: `flag:capture-pane:-C`, `flag:capture-pane:-F`, `flag:capture-pane:-H`, `flag:capture-pane:-L`, `flag:capture-pane:-P`, `flag:capture-pane:-R`, `semantic:capture-pane-saved-alternate`
+- Items: `flag:capture-pane:-F`, `flag:capture-pane:-H`, `flag:capture-pane:-P`, `flag:capture-pane:-R`, `semantic:capture-pane-saved-alternate`
 - Depends on: none
 - Evidence:
-  - `resource:crates/zz-protocol/src/catalog.rs`
   - `resource:crates/zz-daemon/src/daemon.rs`
+  - `resource:crates/zz-protocol/src/catalog.rs`
+  - `resource:crates/zz-terminal/src/session.rs`
   - `resource:knowledge/tmux/divergences.md`
   - `scenario:compat/scenarios/capture-pane.txt`
-  - `resource:crates/zz-terminal/src/session.rs`
   - `file:compat/tui-client-commands.sh`
 - Acceptance:
-  - ``capture-pane` keeps the pin's routing, boundary, and text semantics over the retained UTF-8 snapshot, and `-C`, `-F`, `-H`, `-L`, `-P`, and `-R` stay loudly unsupported rather than approximated.`
-  - `The divergence matrix keeps the accepted text-snapshot shape visible: the saved alternate grid the pin keeps for -a and the six rich transports.`
+  - ``capture-pane` keeps the pin's routing, boundary, and text semantics over the retained UTF-8 snapshot, `-C` and `-L` answer the pin's bytes over it, and `-F`, `-H`, `-P`, and `-R` stay loudly unsupported rather than approximated.`
+  - `The divergence matrix keeps the accepted text-snapshot shape visible: the saved alternate grid the pin keeps for -a and the four rich transports.`
 
 ### `clients.interactive-refresh`: Complete interactive client commands
 

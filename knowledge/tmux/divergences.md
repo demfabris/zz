@@ -209,7 +209,7 @@ gated by decision 3 or by missing context/model support, the rest are plain work
 | --- | --- |
 | `attach-session` | `-c -f -x`; `-E` † |
 | `break-pane` | `-W -x -y -X -Y` † |
-| `capture-pane` | `-C -F -H -L -P -R` |
+| `capture-pane` | `-F -H -P -R` |
 | `choose-buffer` | `-F -k -y` |
 | `choose-tree` | `-F -h -k -y`; `-G` † |
 | `clear-history` | `-H` |
@@ -661,9 +661,13 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   match.
   One text residue remains: when `-E` falls back to visible end and the viewport has trailing blank
   rows, tmux emits those rows as newlines while zz stops after the last retained content row. `-T`
-  is inert. Capture stays UTF-8 text/VT output; there is no retained saved-alternate grid, pending
-  raw-byte stream, raw-grid dump, hyperlink list, line-flag prefix, or line-number prefix. The last
-  six forms stay loudly rejected as `-P`/`-C`/`-R`/`-H`/`-F`/`-L` rather than being approximated.
+  is inert. `-C` and `-L` answer the pin over that text since 2026-09-15: `-C` doubles a backslash
+  in cell data and, with `-e`, writes every escape introducer as a literal `\033`, which is all
+  `GRID_STRING_ESCAPE_SEQUENCES` does in tmux's history path, and `-L` numbers each line from the
+  history size, negative in history, keeping the number of every joined row inside a `-J` line.
+  Capture otherwise stays UTF-8 text/VT output; there is no retained saved-alternate grid, pending
+  raw-byte stream, raw-grid dump, hyperlink list, or line-flag prefix, so `-P`/`-R`/`-H`/`-F` stay
+  loudly rejected rather than approximated.
 - `copy-mode` (every flag, including bare) exits 1 with `pane is not attached: %N` when no
   client is attached to the target pane, where the pin sets the mode regardless — the mode
   lives on the pane in tmux and on the per-client terminal view in zz

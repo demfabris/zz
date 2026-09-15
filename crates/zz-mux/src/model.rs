@@ -2302,7 +2302,7 @@ impl MuxState {
         if target.is_some_and(is_marked_target) {
             return Ok(self.windows[&self.marked_window()?].session);
         }
-        self.resolve_named_session(target, current, TargetSlot::Classified)
+        self.resolve_named_session(target, current, TargetSlot::Session)
     }
 
     fn resolve_named_session(
@@ -2317,7 +2317,7 @@ impl MuxState {
                 .or_else(|| self.sessions.keys().next().copied())
                 .ok_or_else(|| ServerError::SessionNotFound("current session".to_owned()));
         };
-        if slot == TargetSlot::Classified {
+        if slot == TargetSlot::Session {
             let window_target = target.split_once(':').map_or(target, |(_, window)| window);
             let current_window = current
                 .and_then(|session| self.sessions.get(&session))
@@ -3958,6 +3958,7 @@ fn validate_window_index_run(base_index: u32, count: usize) -> Result<(), Server
 /// search for the token exactly as written (cmd-find.c).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TargetSlot {
+    Session,
     Classified,
     PaneFallback,
 }

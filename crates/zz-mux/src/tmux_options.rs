@@ -12,6 +12,7 @@ pub(crate) struct TmuxOption {
     pub(crate) scope: TmuxOptionScope,
     pub(crate) default: Option<TmuxOptionDefault>,
     pub(crate) is_array: bool,
+    pub(crate) metadata: crate::tmux_option_metadata::TmuxOptionMetadata,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -968,6 +969,7 @@ pub(crate) fn tmux_options() -> impl Iterator<Item = TmuxOption> {
             scope,
             default: tmux_option_default(name),
             is_array: tmux_option_is_array(name),
+            metadata: crate::tmux_option_metadata::tmux_option_metadata(name),
         })
     })
 }

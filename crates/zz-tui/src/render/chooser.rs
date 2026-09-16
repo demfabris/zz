@@ -1015,7 +1015,7 @@ impl Renderer {
 
     fn draw_mode_tree(&mut self, model: &Model) -> Option<(u16, u16, bool)> {
         let presentation = model.chooser_presentation.as_ref()?;
-        let (mut lines, selected, show_help, prompt, no_matches, help_kind) =
+        let (lines, selected, show_help, prompt, no_matches, help_kind) =
             if let Some(state) = model.choose_tree.as_ref() {
                 let prompt = if state.prompt.is_empty() {
                     state
@@ -1062,216 +1062,28 @@ impl Renderer {
         if sx == 0 || sy == 0 || lines.is_empty() {
             return None;
         }
-        link_lines(&mut lines);
-        let count = lines.len();
-        let current = usize::try_from(selected)
-            .unwrap_or(usize::MAX)
-            .min(count - 1);
-        let height = list_height(presentation.preview_size, usize::from(sy), count);
-        if !self.mode_tree.open {
-            self.mode_tree.offset = 0;
-        }
-        if current < self.mode_tree.offset {
-            self.mode_tree.offset = current;
-        } else if current >= self.mode_tree.offset + height {
-            self.mode_tree.offset = current + 1 - height;
-        }
-        let offset = self.mode_tree.offset;
-        let colours = Colours {
-            grey: theme("themelightgrey"),
-            red: theme("themered"),
-            green: theme("themegreen"),
-            cyan: theme("themecyan"),
-        };
-        let selection = layered(&presentation.selection_style, &plain());
-        let border = layered(&presentation.border_style, &plain());
-        let key_width = lines
-            .iter()
-            .filter(|line| !line.key.is_empty())
-            .map(|line| line.key.len() + 3)
-            .max()
-            .unwrap_or(0);
-        let mut align_widths: HashMap<usize, usize> = HashMap::new();
-        for line in lines.iter().filter(|line| line.align) {
-            let width = align_widths.entry(line.depth).or_default();
-            *width = (*width).max(line.name.len());
-        }
-        let mut grid = Grid::new(sx, sy);
-        for (row, index) in (offset..count.min(offset + height)).enumerate() {
-            let line = &lines[index];
-            let y = narrow(row);
-            let chosen = index == current;
-            let mut unselected = plain();
-            let mut chosen_style = selection.clone();
-            if line.tagged {
-                unselected.fg = colours.cyan;
-                chosen_style.fg = colours.cyan;
-            }
-            if chosen {
-                let fill = TmuxStyle {
-                    bg: chosen_style.bg,
-                    ..plain()
-                };
-                grid.fill(0, y, sx, &Paint::Style(fill));
-            }
-            let pieces = prefix_pieces(line, key_width, &colours);
-            let prefix_width =
-                narrow(pieces.iter().map(|(text, _)| text_width(text)).sum()).min(sx);
-            let mut x = 0;
-            for (text, fg) in &pieces {
-                let style = if chosen {
-                    chosen_style.clone()
-                } else {
-                    TmuxStyle { fg: *fg, ..plain() }
-                };
-                x += grid.text(x, y, text, &Paint::Style(style), prefix_width - x);
-            }
-            let left = sx - prefix_width;
-            if left == 0 {
-                continue;
-            }
-            let name = if line.align {
-                let width = align_widths.get(&line.depth).copied().unwrap_or(0);
-                format!("{:>width$}", line.name)
-            } else {
-                line.name.to_owned()
-            };
-            let tag = if line.tagged { "*" } else { "" };
-            let head = format!("{name}{tag}#[fg=themelightgrey]: #[default]");
-            let base = if chosen { &chosen_style } else { &unselected };
-            let head_width = narrow(markup_width(&head)).min(left);
-            grid.markup(prefix_width, y, left, &head, base, chosen);
-            let width = prefix_width + head_width;
-            if width < sx {
-                grid.markup(width, y, sx - width, line.text, base, chosen);
-            }
-        }
-        let rows = usize::from(sy);
-        if presentation.preview_size != ChooserPreviewSize::Off
-            && !(rows <= 4 || height < 2 || rows - height <= 4 || sx <= 4)
-        {
-            let box_top = narrow(height);
-            let box_paint = Paint::Style(border.clone());
-            grid.frame(0, box_top, sx, sy - box_top, &box_paint);
-            let name = lines[current].name;
-            let view = if presentation.view.is_empty() {
-                String::new()
-            } else {
-                format!(" (view: {})", presentation.view)
-            };
-            let title = if presentation.sort.is_empty() {
-                format!(" {name}")
-            } else {
-                format!(" {name} (sort: {}){view}", presentation.sort)
-            };
-            if usize::from(sx) - 2 >= title.len() {
-                let used = grid.text(1, box_top, &title, &box_paint, sx - 1);
-                let state = if no_matches { "no matches" } else { "active" };
-                let tail = if presentation.filter
-                    && usize::from(sx) - 2 >= title.len() + 10 + state.len() + 2
-                {
-                    format!(" (filter: {state}) ")
-                } else {
-                    " ".to_owned()
-                };
-                grid.text(1 + used, box_top, &tail, &box_paint, sx - 1 - used);
-            }
-            let (box_x, box_y) = (sx - 4, sy - box_top - 2);
-            if box_x != 0 && box_y != 0 {
-                match &presentation.preview {
-                    Some(ChooserPreview::Tiles { tiles, current }) => tile_row(
-                        &mut grid,
-                        (2, box_top + 1),
-                        (box_x, box_y),
-                        tiles,
-                        usize::try_from(*current).unwrap_or(0),
-                        &border,
-                    ),
-                    Some(ChooserPreview::Screen { viewport }) => {
-                        grid.preview(2, box_top + 1, box_x, box_y, viewport);
-                    }
-                    // `window_client_draw`: the client's current pane over a
-                    // rule and a copy of that client's own status rows.
-                    Some(ChooserPreview::Client {
-                        viewport,
-                        status,
-                        status_style,
-                        status_width,
-                    }) => {
-                        let rows = narrow(status.len()).min(box_y);
-                        let body = box_y.saturating_sub(2 + rows);
-                        if let (Some(viewport), true) = (viewport.as_ref(), body != 0) {
-                            grid.preview(2, box_top + 1, box_x, body, viewport);
-                        }
-                        if box_y > rows {
-                            grid.hline(
-                                2,
-                                box_top + box_y - rows,
-                                box_x,
-                                &Paint::Style(border.clone()),
-                            );
-                        }
-                        let compose = u16::try_from(*status_width).unwrap_or(box_x).max(box_x);
-                        for (index, line) in status.iter().enumerate() {
-                            let y = box_top + 1 + box_y - rows + narrow(index);
-                            let composed =
-                                zz_client::compose_status_row(line, compose, status_style);
-                            let mut used = 0;
-                            for segment in &composed.segments {
-                                if used >= box_x {
-                                    break;
-                                }
-                                used += grid.text(
-                                    2 + used,
-                                    y,
-                                    &segment.text,
-                                    &Paint::Style(segment.style.clone()),
-                                    box_x - used,
-                                );
-                            }
-                        }
-                    }
-                    Some(ChooserPreview::Markup { lines }) => {
-                        for (index, line) in lines.iter().take(usize::from(box_y)).enumerate() {
-                            grid.markup(
-                                2,
-                                box_top + 1 + narrow(index),
-                                box_x,
-                                line,
-                                &plain(),
-                                false,
-                            );
-                        }
-                    }
-                    Some(ChooserPreview::Text { lines }) => {
-                        for (index, line) in lines.iter().take(usize::from(box_y)).enumerate() {
-                            if !line.is_empty() {
-                                grid.text(
-                                    2,
-                                    box_top + 1 + narrow(index),
-                                    line,
-                                    &Paint::Style(plain()),
-                                    box_x,
-                                );
-                            }
-                        }
-                    }
-                    None => {}
-                }
-            }
-        }
-        if show_help {
-            help(&mut grid, help_kind, &border, &colours);
-        }
-        let cursor = if let Some(prompt) = prompt {
-            let row = if model.status_top() { 0 } else { sy - 1 };
-            let style = layered(&presentation.prompt_style, &plain());
-            let used = grid.text(0, row, &prompt, &Paint::Style(style), sx);
-            (used.min(sx - 1), top + row, true)
+        let offset = if self.mode_tree.open {
+            self.mode_tree.offset
         } else {
-            (0, top + narrow(current - offset), false)
+            0
         };
-        grid.settle_blank_runs();
+        let (grid, mut cursor, offset) = draw_tree_grid(TreeDrawing {
+            lines,
+            presentation,
+            selected,
+            show_help,
+            prompt,
+            no_matches,
+            help_kind,
+            sx,
+            sy,
+            offset,
+            height: None,
+            prompt_top: model.status_top(),
+            customize: false,
+        });
+        self.mode_tree.offset = offset;
+        cursor.1 += top;
         grid.emit(
             &mut self.output,
             0,
@@ -1288,4 +1100,299 @@ impl Renderer {
         self.paint_status_block(model, true);
         Some(cursor)
     }
+}
+
+struct TreeDrawing<'a> {
+    lines: Vec<Line<'a>>,
+    presentation: &'a ChooserPresentation,
+    selected: u32,
+    show_help: bool,
+    prompt: Option<String>,
+    no_matches: bool,
+    help_kind: HelpKind,
+    sx: u16,
+    sy: u16,
+    offset: usize,
+    height: Option<usize>,
+    prompt_top: bool,
+    customize: bool,
+}
+
+fn draw_tree_grid(drawing: TreeDrawing<'_>) -> (Grid, (u16, u16, bool), usize) {
+    let TreeDrawing {
+        mut lines,
+        presentation,
+        selected,
+        show_help,
+        prompt,
+        no_matches,
+        help_kind,
+        sx,
+        sy,
+        mut offset,
+        height,
+        prompt_top,
+        customize,
+    } = drawing;
+    link_lines(&mut lines);
+    let count = lines.len();
+    let current = usize::try_from(selected)
+        .unwrap_or(usize::MAX)
+        .min(count - 1);
+    let height = height
+        .unwrap_or_else(|| list_height(presentation.preview_size, usize::from(sy), count))
+        .max(1);
+    if current < offset {
+        offset = current;
+    } else if current >= offset + height {
+        offset = current + 1 - height;
+    }
+    let colours = Colours {
+        grey: theme("themelightgrey"),
+        red: theme("themered"),
+        green: theme("themegreen"),
+        cyan: theme("themecyan"),
+    };
+    let selection = layered(&presentation.selection_style, &plain());
+    let border = layered(&presentation.border_style, &plain());
+    let key_width = lines
+        .iter()
+        .filter(|line| !line.key.is_empty())
+        .map(|line| line.key.len() + 3)
+        .max()
+        .unwrap_or(0);
+    let mut align_widths: HashMap<usize, usize> = HashMap::new();
+    for line in lines.iter().filter(|line| line.align) {
+        let width = align_widths.entry(line.depth).or_default();
+        *width = (*width).max(line.name.len());
+    }
+    let mut grid = Grid::new(sx, sy);
+    for (row, index) in (offset..count.min(offset + height)).enumerate() {
+        let line = &lines[index];
+        let y = narrow(row);
+        let chosen = index == current;
+        let mut unselected = plain();
+        let mut chosen_style = selection.clone();
+        if line.tagged {
+            unselected.fg = colours.cyan;
+            chosen_style.fg = colours.cyan;
+        }
+        if chosen {
+            let fill = TmuxStyle {
+                bg: chosen_style.bg,
+                ..plain()
+            };
+            grid.fill(0, y, sx, &Paint::Style(fill));
+        }
+        let pieces = prefix_pieces(line, key_width, &colours);
+        let prefix_width = narrow(pieces.iter().map(|(text, _)| text_width(text)).sum()).min(sx);
+        let mut x = 0;
+        for (text, fg) in &pieces {
+            let style = if chosen {
+                chosen_style.clone()
+            } else {
+                TmuxStyle { fg: *fg, ..plain() }
+            };
+            x += grid.text(x, y, text, &Paint::Style(style), prefix_width - x);
+        }
+        let left = sx - prefix_width;
+        if left == 0 {
+            continue;
+        }
+        let name = if line.align {
+            let width = align_widths.get(&line.depth).copied().unwrap_or(0);
+            format!("{:>width$}", line.name)
+        } else {
+            line.name.to_owned()
+        };
+        let tag = if line.tagged { "*" } else { "" };
+        let head = if customize && line.text.is_empty() {
+            format!("{name}{tag}")
+        } else {
+            format!("{name}{tag}#[fg=themelightgrey]: #[default]")
+        };
+        let base = if chosen { &chosen_style } else { &unselected };
+        let head_width = narrow(markup_width(&head)).min(left);
+        grid.markup(prefix_width, y, left, &head, base, chosen);
+        let width = prefix_width + head_width;
+        if width < sx {
+            grid.markup(width, y, sx - width, line.text, base, chosen);
+        }
+    }
+    let rows = usize::from(sy);
+    if presentation.preview_size != ChooserPreviewSize::Off
+        && !(rows <= 4 || height < 2 || rows - height <= 4 || sx <= 4)
+    {
+        let box_top = narrow(height);
+        let box_paint = Paint::Style(border.clone());
+        grid.frame(0, box_top, sx, sy - box_top, &box_paint);
+        let name = lines[current].name;
+        let view = if presentation.view.is_empty() {
+            String::new()
+        } else {
+            format!(" (view: {})", presentation.view)
+        };
+        let title = if presentation.sort.is_empty() {
+            format!(" {name}")
+        } else {
+            format!(" {name} (sort: {}){view}", presentation.sort)
+        };
+        if usize::from(sx) - 2 >= title.len() {
+            let used = grid.text(1, box_top, &title, &box_paint, sx - 1);
+            let state = if no_matches { "no matches" } else { "active" };
+            let tail = if presentation.filter
+                && usize::from(sx) - 2 >= title.len() + 10 + state.len() + 2
+            {
+                format!(" (filter: {state}) ")
+            } else {
+                " ".to_owned()
+            };
+            grid.text(1 + used, box_top, &tail, &box_paint, sx - 1 - used);
+        }
+        let (box_x, box_y) = (sx - 4, sy - box_top - 2);
+        if box_x != 0 && box_y != 0 {
+            match &presentation.preview {
+                Some(ChooserPreview::Tiles { tiles, current }) => tile_row(
+                    &mut grid,
+                    (2, box_top + 1),
+                    (box_x, box_y),
+                    tiles,
+                    usize::try_from(*current).unwrap_or(0),
+                    &border,
+                ),
+                Some(ChooserPreview::Screen { viewport }) => {
+                    grid.preview(2, box_top + 1, box_x, box_y, viewport);
+                }
+                Some(ChooserPreview::Client {
+                    viewport,
+                    status,
+                    status_style,
+                    status_width,
+                }) => {
+                    let rows = narrow(status.len()).min(box_y);
+                    let body = box_y.saturating_sub(2 + rows);
+                    if let (Some(viewport), true) = (viewport.as_ref(), body != 0) {
+                        grid.preview(2, box_top + 1, box_x, body, viewport);
+                    }
+                    if box_y > rows {
+                        grid.hline(
+                            2,
+                            box_top + box_y - rows,
+                            box_x,
+                            &Paint::Style(border.clone()),
+                        );
+                    }
+                    let compose = u16::try_from(*status_width).unwrap_or(box_x).max(box_x);
+                    for (index, line) in status.iter().enumerate() {
+                        let y = box_top + 1 + box_y - rows + narrow(index);
+                        let composed = zz_client::compose_status_row(line, compose, status_style);
+                        let mut used = 0;
+                        for segment in &composed.segments {
+                            if used >= box_x {
+                                break;
+                            }
+                            used += grid.text(
+                                2 + used,
+                                y,
+                                &segment.text,
+                                &Paint::Style(segment.style.clone()),
+                                box_x - used,
+                            );
+                        }
+                    }
+                }
+                Some(ChooserPreview::Markup { lines }) => {
+                    for (index, line) in lines.iter().take(usize::from(box_y)).enumerate() {
+                        grid.markup(2, box_top + 1 + narrow(index), box_x, line, &plain(), false);
+                    }
+                }
+                Some(ChooserPreview::Text { lines }) => {
+                    let wrapped;
+                    let lines = if customize {
+                        wrapped = lines
+                            .iter()
+                            .flat_map(|line| wrap_customization_text(line, usize::from(box_x)))
+                            .collect::<Vec<_>>();
+                        &wrapped
+                    } else {
+                        lines
+                    };
+                    for (index, line) in lines.iter().take(usize::from(box_y)).enumerate() {
+                        if !line.is_empty() {
+                            grid.text(
+                                2,
+                                box_top + 1 + narrow(index),
+                                line,
+                                &Paint::Style(plain()),
+                                box_x,
+                            );
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+    }
+    if show_help {
+        help(&mut grid, help_kind, &border, &colours);
+    }
+    let cursor = if let Some(prompt) = prompt {
+        let row = if prompt_top { 0 } else { sy - 1 };
+        let style = layered(&presentation.prompt_style, &plain());
+        let used = grid.text(0, row, &prompt, &Paint::Style(style), sx);
+        (used.min(sx - 1), row, true)
+    } else {
+        (0, narrow(current - offset), false)
+    };
+    grid.settle_blank_runs();
+    (grid, cursor, offset)
+}
+
+pub(super) fn customize_surface(
+    state: &ChooseTreeState,
+    presentation: &ChooserPresentation,
+    offset: u32,
+    rect: crate::layout::Rect,
+) -> (Grid, (u16, u16, bool)) {
+    let lines = tree_lines(state, presentation).unwrap_or_default();
+    if lines.is_empty() || rect.width == 0 || rect.height == 0 {
+        return (Grid::new(rect.width, rect.height), (0, 0, false));
+    }
+    let height = if presentation.preview_size != ChooserPreviewSize::Off && rect.height > 12 {
+        rect.height - 12
+    } else {
+        rect.height
+    };
+    let (grid, cursor, _) = draw_tree_grid(TreeDrawing {
+        lines,
+        presentation,
+        selected: state.selected,
+        show_help: false,
+        prompt: (!state.prompt.is_empty()).then(|| state.prompt.clone()),
+        no_matches: state.filter_no_matches,
+        help_kind: HelpKind::Tree,
+        sx: rect.width,
+        sy: rect.height,
+        offset: offset as usize,
+        height: Some(usize::from(height)),
+        prompt_top: false,
+        customize: true,
+    });
+    (grid, cursor)
+}
+
+fn wrap_customization_text(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        if !line.is_empty() && text_width(&line) + 1 + text_width(word) > width {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    lines.push(line);
+    lines
 }

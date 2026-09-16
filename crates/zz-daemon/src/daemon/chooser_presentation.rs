@@ -614,6 +614,10 @@ pub(super) fn mode_style_for_pane(inner: &ServerState, pane: PaneId) -> String {
     Styles { inner }.selection(pane)
 }
 
+pub(super) fn border_style_for_pane(_inner: &ServerState, _pane: PaneId) -> String {
+    TREE_MODE_BORDER_STYLE.to_owned()
+}
+
 pub(super) fn prompt_style() -> String {
     MESSAGE_STYLE.to_owned()
 }

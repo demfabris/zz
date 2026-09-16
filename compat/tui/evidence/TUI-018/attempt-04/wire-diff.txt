@@ -1,0 +1,108 @@
+diff --git a/crates/zz-protocol/src/message.rs b/crates/zz-protocol/src/message.rs
+index fcf1f69b..6dbde9b8 100644
+--- a/crates/zz-protocol/src/message.rs
++++ b/crates/zz-protocol/src/message.rs
+@@ -18,7 +18,7 @@ use crate::{Axis, ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, Sp
+ 
+ /// Client and daemon must match this exactly. The handshake rejects any
+ /// mismatch instead of negotiating down.
+-pub const PROTOCOL_VERSION: u16 = 103;
++pub const PROTOCOL_VERSION: u16 = 104;
+ pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
+ pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
+ pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
+@@ -1735,6 +1735,8 @@ pub struct CommandInvocation {
+     /// commands the payload is not an argument; `format_command` never prints
+     /// it. See `knowledge/designs/command-stream-channel.md`.
+     stdin: Option<RawText>,
++    #[serde(skip)]
++    stdin_spent: bool,
+ }
+ 
+ impl CommandInvocation {
+@@ -1750,12 +1752,24 @@ impl CommandInvocation {
+             command_blocks: Vec::new(),
+             expanded_alias_group: false,
+             stdin: None,
++            stdin_spent: false,
+         }
+     }
+ 
+     /// Attach the caller's standard input to this invocation.
+     pub fn set_stdin(&mut self, stdin: impl Into<RawText>) {
+         self.stdin = Some(stdin.into());
++        self.stdin_spent = false;
++    }
++
++    pub fn set_stdin_spent(&mut self) {
++        self.stdin = None;
++        self.stdin_spent = true;
++    }
++
++    #[must_use]
++    pub const fn stdin_was_spent(&self) -> bool {
++        self.stdin_spent
+     }
+ 
+     #[must_use]
+@@ -4767,6 +4781,27 @@ mod tests {
+         assert!(postcard::from_bytes::<super::ChooseTreeItem>(&oversized).is_err());
+     }
+ 
++    #[test]
++    fn caller_stream_spent_marker_stays_in_process() {
++        let absent = super::CommandInvocation::new("source-file", ["-"]);
++        let mut spent = absent.clone();
++        spent.set_stdin("payload");
++        spent.set_stdin_spent();
++        assert!(spent.stdin().is_none());
++        assert!(spent.stdin_was_spent());
++        let bytes = postcard::to_stdvec(&spent).expect("encode spent stream");
++        assert_eq!(
++            bytes,
++            postcard::to_stdvec(&absent).expect("encode absent stream")
++        );
++        let decoded =
++            postcard::from_bytes::<super::CommandInvocation>(&bytes).expect("decode absent stream");
++        assert_eq!(decoded, absent);
++        spent.set_stdin("");
++        assert!(spent.stdin().is_some());
++        assert!(!spent.stdin_was_spent());
++    }
++
+     #[test]
+     fn command_prompt_appends_type_mode_and_no_freeze() {
+         assert_eq!(
+@@ -5075,7 +5110,7 @@ mod tests {
+ 
+     #[test]
+     fn detached_reason_holds_its_appended_wire_field() {
+-        assert_eq!(super::PROTOCOL_VERSION, 103);
++        assert_eq!(super::PROTOCOL_VERSION, 104);
+         for (reason, tag) in [
+             (super::DetachReason::Requested, 0),
+             (super::DetachReason::Evicted, 1),
+diff --git a/crates/zz-protocol/tests/hunt_claims.rs b/crates/zz-protocol/tests/hunt_claims.rs
+index d685171c..6e9a55d9 100644
+--- a/crates/zz-protocol/tests/hunt_claims.rs
++++ b/crates/zz-protocol/tests/hunt_claims.rs
+@@ -14,8 +14,8 @@ fn payload(frame: &[u8]) -> &[u8] {
+ }
+ 
+ #[test]
+-fn protocol_version_on_this_commit_is_one_hundred_and_three() {
+-    assert_eq!(PROTOCOL_VERSION, 103);
++fn protocol_version_on_this_commit_is_one_hundred_and_four() {
++    assert_eq!(PROTOCOL_VERSION, 104);
+ }
+ 
+ #[test]
+@@ -322,7 +322,7 @@ fn dark_interactive_hello_encodes_version_instance_and_process_id_as_varints() {
+     assert_eq!(
+         frame,
+         [
+-            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x67, 0x00, 0x00, 0x67, 0x00, 0x00, 0x00, 0x00,
++            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00, 0x68, 0x00, 0x00, 0x00, 0x00,
+             0x01, 0x01, 0x00, 0x00, 0x00, 0x07,
+         ]
+     );

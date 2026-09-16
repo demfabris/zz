@@ -1,0 +1,195 @@
+Full evidence commit diff check: exit 2
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:107: trailing whitespace.
++        < 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:127: trailing whitespace.
++        < 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:279: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:280: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:281: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:282: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:283: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:284: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:285: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:286: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:287: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:288: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:328: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:329: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:364: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:365: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:366: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:367: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:368: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:369: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:370: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:371: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:372: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:373: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:374: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:375: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:376: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:377: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:378: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:379: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:380: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:413: trailing whitespace.
++        < 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:453: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:454: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:455: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:456: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:457: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:458: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:459: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:460: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:461: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:462: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:463: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:464: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:465: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:466: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:467: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:468: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:469: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:470: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/client-commands.txt:471: trailing whitespace.
++        > 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:1: trailing whitespace.
++2026-09-16T16:15:32Z START wire tip=9f5dabd854e85bd1d38e4feaf9935e05f8958168 python3 compat/wire-version.py 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:3: trailing whitespace.
++2026-09-16T16:15:32Z START fmt tip=9f5dabd854e85bd1d38e4feaf9935e05f8958168 /tmp/zz-cargo.sh fmt --all 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:5: trailing whitespace.
++2026-09-16T16:15:42Z START build tip=9f5dabd854e85bd1d38e4feaf9935e05f8958168 /tmp/zz-cargo.sh build -p zz 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:6: trailing whitespace.
++2026-09-16T16:16:14Z START test-protocol tip=9f5dabd854e85bd1d38e4feaf9935e05f8958168 /tmp/zz-cargo.sh test -p zz-protocol 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:8: trailing whitespace.
++2026-09-16T16:17:10Z START streams-closing tip=753c8497781e54dd6b4717e0e0e1243d2857737f env ZZ_BIN=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz compat/tui-command-streams.sh 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:10: trailing whitespace.
++2026-09-16T16:17:29Z START compat-check tip=753c8497781e54dd6b4717e0e0e1243d2857737f compat/check.sh 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:11: trailing whitespace.
++2026-09-16T16:18:17Z START delta-list tip=753c8497781e54dd6b4717e0e0e1243d2857737f env ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz compat/run.sh --delta origin/main...HEAD --commands source-file\,load-buffer\,save-buffer\,show-buffer\,command-alias\,send-keys\,send-text\,agent-send\,display-message\,split-window --list 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:13: trailing whitespace.
++2026-09-16T16:20:06Z START fetch tip=753c8497781e54dd6b4717e0e0e1243d2857737f git fetch origin 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:15: trailing whitespace.
++2026-09-16T16:20:06Z START rebase tip=753c8497781e54dd6b4717e0e0e1243d2857737f git rebase origin/main 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:17: trailing whitespace.
++2026-09-16T16:20:06Z START remote-main tip=753c8497781e54dd6b4717e0e0e1243d2857737f git ls-remote origin refs/heads/main 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:20: trailing whitespace.
++2026-09-16T16:25:01Z START streams-self-check tip=753c8497781e54dd6b4717e0e0e1243d2857737f env ZZ_BIN=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz compat/tui-command-streams.sh --self-check 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:22: trailing whitespace.
++2026-09-16T16:28:55Z START client-commands tip=753c8497781e54dd6b4717e0e0e1243d2857737f env ZZ_BIN=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz compat/tui-client-commands.sh 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:24: trailing whitespace.
++2026-09-16T16:29:17Z START clippy tip=753c8497781e54dd6b4717e0e0e1243d2857737f /tmp/zz-cargo.sh clippy -p zz-daemon -p zz-mux -p zz-protocol -p zz --all-targets --all-features -- -D warnings 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:26: trailing whitespace.
++2026-09-16T16:29:37Z START fmt-final tip=753c8497781e54dd6b4717e0e0e1243d2857737f /tmp/zz-cargo.sh fmt --all 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:28: trailing whitespace.
++2026-09-16T16:30:42Z START test-cli-stream tip=753c8497781e54dd6b4717e0e0e1243d2857737f /tmp/zz-cargo.sh test -p zz --test cli_binary caller_stream_ -- --test-threads=1 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:31: trailing whitespace.
++2026-09-16T16:32:12Z START client-self-check tip=753c8497781e54dd6b4717e0e0e1243d2857737f env ZZ_BIN=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz compat/tui-client-commands.sh --self-check 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:33: trailing whitespace.
++2026-09-16T16:32:54Z START attached-client tip=753c8497781e54dd6b4717e0e0e1243d2857737f env ZZ_BIN=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz compat/attached-client.sh 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:34: trailing whitespace.
++2026-09-16T16:35:18Z START tracker tip=753c8497781e54dd6b4717e0e0e1243d2857737f python3 compat/tui/tracker.py check 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:37: trailing whitespace.
++2026-09-16T16:43:45Z START verify-claims tip=753c8497781e54dd6b4717e0e0e1243d2857737f env ZZ_BIN=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz python3 compat/tui/verify-claims.py --run TUI-018 --zz /home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:38: trailing whitespace.
++2026-09-16T16:44:33Z START wire-final tip=753c8497781e54dd6b4717e0e0e1243d2857737f python3 compat/wire-version.py 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:40: trailing whitespace.
++2026-09-16T16:44:33Z START tracker-final tip=753c8497781e54dd6b4717e0e0e1243d2857737f python3 compat/tui/tracker.py check 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:42: trailing whitespace.
++2026-09-16T16:44:33Z START compat-check-final tip=753c8497781e54dd6b4717e0e0e1243d2857737f compat/check.sh 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:43: trailing whitespace.
++2026-09-16T16:45:04Z START tracker-updated tip=753c8497781e54dd6b4717e0e0e1243d2857737f python3 compat/tui/tracker.py check 
+compat/tui/evidence/TUI-018/attempt-04/commands.txt:47: trailing whitespace.
++2026-09-16T16:54:42Z START tracker-delivery tip=753c8497781e54dd6b4717e0e0e1243d2857737f python3 compat/tui/tracker.py check 
+compat/tui/evidence/TUI-018/attempt-04/compat-check-final.txt:609: new blank line at EOF.
+compat/tui/evidence/TUI-018/attempt-04/compat-check.txt:782: new blank line at EOF.
+compat/tui/evidence/TUI-018/attempt-04/streams-self-check.txt:34: trailing whitespace.
++        < C 1 
+compat/tui/evidence/TUI-018/attempt-04/streams-self-check.txt:104: trailing whitespace.
++        > O @zzcs-after 
+compat/tui/evidence/TUI-018/attempt-04/streams-self-check.txt:111: trailing whitespace.
++        > O @zzcs-after 
+compat/tui/evidence/TUI-018/attempt-04/streams-self-check.txt:121: trailing whitespace.
++        > O @zzcs-after 
+compat/tui/evidence/TUI-018/attempt-04/streams-self-check.txt:128: trailing whitespace.
++        > O @zzcs-after 
+compat/tui/evidence/TUI-018/attempt-04/streams-self-check.txt:138: trailing whitespace.
++        > O @zzcs-after 
+compat/tui/evidence/TUI-018/attempt-04/streams-self-check.txt:145: trailing whitespace.
++        > O @zzcs-after 
+compat/tui/evidence/TUI-018/attempt-04/streams-self-check.txt:157: trailing whitespace.
++        < O @zzcs-after 
+compat/tui/evidence/TUI-018/attempt-04/streams-self-check.txt:169: trailing whitespace.
++        > O @zzcs-replay 
+compat/tui/evidence/TUI-018/attempt-04/streams-self-check.txt:176: trailing whitespace.
++        > O @zzcs-replay 
+compat/tui/evidence/TUI-018/attempt-04/test-cli-stream.txt:12: new blank line at EOF.
+compat/tui/evidence/TUI-018/attempt-04/test-protocol.txt:299: new blank line at EOF.
+compat/tui/evidence/TUI-018/attempt-04/verify-claims.txt:9: trailing whitespace.
++  TUI-018: compat/tui-client-commands.sh exited 1: 3 of 84 asserted comparisons differ, 25 recorded (0 for a sibling lane, owners TUI-014=6 TUI-015=4 TUI-017=6 decided:TUI 
+compat/tui/evidence/TUI-018/attempt-04/wire-diff.txt:6: trailing whitespace.
++ 
+compat/tui/evidence/TUI-018/attempt-04/wire-diff.txt:21: trailing whitespace.
++ 
+compat/tui/evidence/TUI-018/attempt-04/wire-diff.txt:30: trailing whitespace.
++ 
+compat/tui/evidence/TUI-018/attempt-04/wire-diff.txt:46: trailing whitespace.
++ 
+compat/tui/evidence/TUI-018/attempt-04/wire-diff.txt:51: trailing whitespace.
++ 
+compat/tui/evidence/TUI-018/attempt-04/wire-diff.txt:77: trailing whitespace.
++ 
+compat/tui/evidence/TUI-018/attempt-04/wire-diff.txt:91: trailing whitespace.
++ 
+compat/tui/evidence/TUI-018/attempt-04/wire-diff.txt:98: trailing whitespace.
++ 
+
+Source, fixture and knowledge diff check: exit 0

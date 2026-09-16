@@ -1175,18 +1175,19 @@
         "knowledge/designs/tmux-superset-roadmap.md",
         "crates/zz/tests/cli_binary.rs",
         "compat/tui/evidence/TUI-018/attempt-03/notes.md",
-        "crates/zz-daemon/src/lib.rs"
+        "crates/zz-daemon/src/lib.rs",
+        "compat/tui/evidence/TUI-018/attempt-04/notes.md"
       ],
       "acceptance": [
         "Design one bounded command-stream channel covering stdin, stdout, binary bytes, backpressure, cancellation and process lifetime, and carry source-file -, display-message -I and split-window -I over it, or keep each refusal with the workload it would serve.",
         "Compare each form's exact stdout, stderr, exit status and the state it leaves behind, including that the pin's source-file - really applies its stdin."
       ],
-      "evidence_note": "The 2026-09-16 alias fix pass raises the stream fixture from 43 to 57 asserted comparisons, with zero recorded and the four existing cap decisions. The verifier repeats 57/0/4. Spent source readers preserve trailing stdout and state after source, buffer and PaneInput readers; missing source paths still abort. Command-client file replay retains one bounded stream through aliases and nested files, while daemon-start config still refuses stdin. Raw alias stdout preserves unterminated binary bytes, including file replay and the C locale; a later print-only alias does not inherit an earlier raw claim. All 16 new sabotages, 29 total, and both equivalences pass. The shared fixture has no TUI-018 records and unattributed=0, but three of its 84 assertions fail on CLI error exit status, so verify-claims exits 1. Its self-check and attached-client pass. Daemon, mux and protocol package suites and all CLI integration tests pass; two unchanged zz GUI tests fail also in isolation. Four-crate all-target/all-feature clippy and formatting pass. Protocol stays 103 and the spent marker remains serde-skipped; the fetched v0.10.0 release makes wire-version.py reject the inherited message.rs change. All 222 selected delta rows and 2,639 steps ran: 207 rows have zero divergences, three match their registered known tuples, and 12 still fail after retry. Coverage, retries and residuals are recorded in attempt-03/corpus-coverage.json and notes.md. Status remains review; no independent approval or verified claim is made.",
-      "next_action": "Independently gate the asserted caller-stream shapes and their sabotages at the proof revision. Resolve the protocol-103 release-guard conflict under the batch constraint, account for the shared CLI error-status and corpus residuals and the two GUI test failures, and rerun the failed gates before deciding verification. The worker does not change the board or mark verified.",
+      "evidence_note": "The 2026-09-16 alias fix pass raises the stream fixture from 43 to 57 asserted comparisons, with zero recorded and the four existing cap decisions. The verifier repeats 57/0/4. Spent source readers preserve trailing stdout and state after source, buffer and PaneInput readers; missing source paths still abort. Command-client file replay retains one bounded stream through aliases and nested files, while daemon-start config still refuses stdin. Raw alias stdout preserves unterminated binary bytes, including file replay and the C locale; a later print-only alias does not inherit an earlier raw claim. All 16 new sabotages, 29 total, and both equivalences pass. The shared fixture has no TUI-018 records and unattributed=0, but three of its 84 assertions fail on CLI error exit status, so verify-claims exits 1. Its self-check and attached-client pass. Daemon, mux and protocol package suites and all CLI integration tests pass; two unchanged zz GUI tests fail also in isolation. Four-crate all-target/all-feature clippy and formatting pass. The orchestrator correction advances the protocol to 104; the spent marker remains serde-skipped and the released v103 payload history stays intact. Attempt-04 reruns wire-version.py and compat/check.sh successfully at 753c8497 on the be5709df release base. The full protocol package, focused CLI stream tests, four-crate clippy and formatting also pass at 104. The stream and shared fixture results and both self-checks repeat at 104; the full attached-client fixture also passes at 104. The verifier rerun confirms 57/0/4 and exits 1 on the same shared three-of-84 summary; the final compat/check.sh rerun exits 0. The full delta corpus and full four-package results cited here remain attempt-03 measurements on the same base, before the version-only correction. All 222 selected delta rows and 2,639 steps ran: 207 rows have zero divergences, three match their registered known tuples, and 12 still fail after retry. Coverage, retries and residuals are recorded in attempt-03/corpus-coverage.json and notes.md. Status remains review; no independent approval or verified claim is made.",
+      "next_action": "Independently gate the asserted caller-stream shapes and their sabotages at the proof revision. The protocol release guard and compat/check.sh now pass. Account for the shared CLI error-status and corpus residuals and the two GUI test failures before deciding verification. The worker does not change the board or mark verified.",
       "proof": {
-        "revision": "357330a8265601076ab0ab0f921a393ba352d640",
+        "revision": "753c8497781e54dd6b4717e0e0e1243d2857737f",
         "tmux_commit": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
-        "environment": "2026-09-16, alienware Linux x86_64, Rust 1.97.0; isolated homes and sockets, local pinned tmux. Every Cargo invocation uses /tmp/zz-cargo.sh with shared compile slots and memory caps. Runtime fixtures use the frozen zz binary SHA256 158a9408818cb7fa48837b4a277cc8a0290ece374efce1573e62c2d53716a598. See environment.txt, commands.txt and notes.md for build and comment-only amendment provenance. The inner commands below were invoked through attempt-03/run.sh, which applies the scrubbed environment and the wrapper argument shim.",
+        "environment": "2026-09-16, alienware Linux x86_64, Rust 1.97.0; be5709df v0.10.0 release base. Protocol 104 runtime proof binary SHA256 b02e5b50562b9755a2092868bd5844ef1d484f1bbaa9ea1fdfb469b3e31d4e4a. Isolated homes and sockets, pinned tmux. Every Cargo command uses /tmp/zz-cargo.sh with its memory cap and shared slots, including internal compat/check.sh calls through the attempt-03 PATH shim. Attempt-04/run.sh records current runs; attempt-03 artifacts retain the earlier 103 full corpus and full package measurements. See both notes.md files for provenance.",
         "commands": [
           "/tmp/zz-cargo.sh test --no-fail-fast -p zz-daemon -p zz-mux -p zz-protocol -p zz -- --test-threads=3",
           "/tmp/zz-cargo.sh test -p zz --test cli_binary caller_stream_ -- --test-threads=1",
@@ -1201,7 +1202,11 @@
           "ZZ_COMPAT_ZZ=target/c11-alias-proof/zz compat/run.sh --delta origin/main...HEAD --commands source-file,load-buffer,save-buffer,show-buffer,command-alias,send-keys,send-text,agent-send,display-message,split-window --list",
           "python3 compat/tui/evidence/TUI-018/attempt-03/corpus-complete.py 0",
           "python3 compat/tui/evidence/TUI-018/attempt-03/corpus-complete.py 1",
-          "python3 compat/tui/evidence/TUI-018/attempt-03/corpus-extra.py"
+          "python3 compat/tui/evidence/TUI-018/attempt-03/corpus-extra.py",
+          "/tmp/zz-cargo.sh test -p zz-protocol",
+          "python3 compat/wire-version.py",
+          "compat/check.sh",
+          "bash compat/tui/evidence/TUI-018/attempt-04/proofs.sh"
         ],
         "artifacts": [
           "compat/tui/evidence/TUI-018/attempt-03/notes.md",
@@ -1234,9 +1239,34 @@
           "compat/tui/evidence/TUI-018/attempt-03/tracker-delivery.txt",
           "compat/tui/evidence/TUI-018/attempt-03/tmux-tracker-delivery.txt",
           "compat/tui/evidence/TUI-018/attempt-03/post-wire-test-coverage.txt",
-          "compat/tui/evidence/TUI-018/attempt-03/okf-delivery.txt"
+          "compat/tui/evidence/TUI-018/attempt-03/okf-delivery.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/notes.md",
+          "compat/tui/evidence/TUI-018/attempt-04/commands.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/environment.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/wire.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/wire-diff.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/released-history-check.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/payload-source-inventory.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/test-protocol.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/test-cli-stream.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/compat-check.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/clippy.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/fmt-final.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/streams-closing.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/streams-self-check.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/client-commands.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/client-self-check.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/delta-list.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/corpus-provenance.json",
+          "compat/tui/evidence/TUI-018/attempt-04/attached-client.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/verify-claims.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/compat-check-final.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/wire-final.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/tracker-final.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/okf.txt",
+          "compat/tui/evidence/TUI-018/attempt-04/footprint.txt"
         ],
-        "review": "compat/tui/evidence/TUI-018/attempt-03/gate-handoff.md"
+        "review": "compat/tui/evidence/TUI-018/attempt-04/gate-handoff.md"
       }
     }
   ]

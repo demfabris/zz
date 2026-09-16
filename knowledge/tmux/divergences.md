@@ -670,6 +670,10 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   divergence: Ghostty merges them with named colours in the stored cell. Styled frozen mode
   captures still use the existing snapshot formatter; the mode-fallback text cases do not prove
   their SGR bytes.
+  TUI-017 carries four ordinary fixture records: `capture-low-indexed-colour`,
+  `capture-tab-trailing`, `capture-tab-internal`, and `capture-tab-wide`. All four must close
+  before verification. The tab records share the existing TAB-cell storage limitation;
+  they are separate from the DEC charset decision and belong in the sibling capture batch.
   Capture has no retained saved-alternate grid, pending raw-byte stream, raw-grid dump,
   hyperlink list, or complete line-flag prefix, so `-P`/`-R`/`-H`/`-F` remain refused with measured
   workload-specific decisions in the fixture.

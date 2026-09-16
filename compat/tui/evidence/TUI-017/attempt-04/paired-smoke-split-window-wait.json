@@ -1,0 +1,65 @@
+[
+  {
+    "iteration": 1,
+    "side": "main",
+    "scenario": "smoke/split-window-wait",
+    "exit_status": 0,
+    "sha256": "98a776b32ef7fd4e5d59dd50690e6f88c8ff3841733fd7dce5cc1b27b8e574ab",
+    "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+    "difference_lines": []
+  },
+  {
+    "iteration": 1,
+    "side": "candidate",
+    "scenario": "smoke/split-window-wait",
+    "exit_status": 1,
+    "sha256": "73ec904eac0e742d9382483eb52ef4bdb42973c3badde43f950f7899ec192517",
+    "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=1",
+    "difference_lines": [
+      "-parked returned=[] panes=1",
+      "+parked returned=[] panes=2"
+    ]
+  },
+  {
+    "iteration": 2,
+    "side": "main",
+    "scenario": "smoke/split-window-wait",
+    "exit_status": 0,
+    "sha256": "98a776b32ef7fd4e5d59dd50690e6f88c8ff3841733fd7dce5cc1b27b8e574ab",
+    "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+    "difference_lines": []
+  },
+  {
+    "iteration": 2,
+    "side": "candidate",
+    "scenario": "smoke/split-window-wait",
+    "exit_status": 1,
+    "sha256": "73ec904eac0e742d9382483eb52ef4bdb42973c3badde43f950f7899ec192517",
+    "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=1",
+    "difference_lines": [
+      "-parked returned=[] panes=1",
+      "+parked returned=[] panes=2"
+    ]
+  },
+  {
+    "iteration": 3,
+    "side": "main",
+    "scenario": "smoke/split-window-wait",
+    "exit_status": 0,
+    "sha256": "98a776b32ef7fd4e5d59dd50690e6f88c8ff3841733fd7dce5cc1b27b8e574ab",
+    "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+    "difference_lines": []
+  },
+  {
+    "iteration": 3,
+    "side": "candidate",
+    "scenario": "smoke/split-window-wait",
+    "exit_status": 1,
+    "sha256": "73ec904eac0e742d9382483eb52ef4bdb42973c3badde43f950f7899ec192517",
+    "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=1",
+    "difference_lines": [
+      "-parked returned=[] panes=1",
+      "+parked returned=[] panes=2"
+    ]
+  }
+]

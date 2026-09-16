@@ -1,0 +1,5 @@
+command: ["python3", "compat/tui/evidence/TUI-017/attempt-04/summarize.py"]
+Delta corpus: 163/163 completed, 13 final divergent rows, 0 missing
+Additional main comparisons needed: []
+
+exit_status: 0

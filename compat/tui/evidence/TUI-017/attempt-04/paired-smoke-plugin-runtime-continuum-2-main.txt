@@ -1,0 +1,64 @@
+command: ["/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-reconciled-main-src/compat/run.sh", "smoke/plugin-runtime-continuum"]
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m checking pinned plugin corpus
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-c11-capture-fix/target/capture-12-reconciled-main-build/debug/zz
+[1;36m==>[0m running smoke/plugin-runtime-continuum
+smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 1 WARN divergence(s)
+[1;36m==>[0m retrying smoke/plugin-runtime-continuum alone
+smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| smoke/plugin-runtime-continuum | 2 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Failed on the first pass and passed when re-run alone: smoke/plugin-runtime-continuum
+
+[1;36m==>[0m partial run complete; full summary left unchanged
+[1;33mwarn:[0m smoke/plugin-runtime-continuum failed; it is retried alone after the corpus
+    SMOKE STDOUT: divergence
+    --- zz SMOKE STDOUT step 1
+    +++ tmux SMOKE STDOUT step 1
+    @@ -4,7 +4,7 @@
+     CONTINUUM_STATUS_TEXT[0]=off
+     CONTINUUM_SAVE_TIMESTAMP_ADVANCED=True
+     CONTINUUM_SAVE_FILE=True
+    -CONTINUUM_SAVE_PANES=pane	continuum-runtime	0	1	:*	0	CONTINUUM	:<DIR>	0	sh	:
+    +CONTINUUM_SAVE_PANES=pane	continuum-runtime	0	1	:*	0	CONTINUUM	:<DIR>	0	sleep	:
+     pane	continuum-runtime	0	1	:*	1	<HOST>	:<DIR>	1	sleep	:
+     CONTINUUM_SAVE_PANE_FIELDS=11,11
+     CONTINUUM_SAVE_PANE_TITLES=CONTINUUM,<HOST>
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 2
+    COMMAND: out: show-environment -g ZZ_CONTINUUM_RUNTIME
+    zz exit: 0
+    tmux exit: 0
+    zz stderr:
+        <empty>
+    tmux stderr:
+        <empty>
+    zz stdout:
+        ZZ_CONTINUUM_RUNTIME=clean:status-job-and-save-trigger
+    tmux stdout:
+        ZZ_CONTINUUM_RUNTIME=clean:status-job-and-save-trigger
+    OUT: clean
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=1
+
+exit_status: 0

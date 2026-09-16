@@ -1,0 +1,38 @@
+[
+  {
+    "iteration": 1,
+    "side": "main",
+    "scenario": "smoke/plugin-runtime-continuum",
+    "exit_status": 0,
+    "sha256": "41bdd638531b1e59a9b9b28ddc0bd1b9533978fc9ed54462e867080a86a32f40",
+    "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+    "difference_lines": []
+  },
+  {
+    "iteration": 1,
+    "side": "candidate",
+    "scenario": "smoke/plugin-runtime-continuum",
+    "exit_status": 0,
+    "sha256": "1b379639f9943297a7553cd2d09ae2614027b2d9b468b507a09e2406600fb9b5",
+    "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+    "difference_lines": []
+  },
+  {
+    "iteration": 2,
+    "side": "main",
+    "scenario": "smoke/plugin-runtime-continuum",
+    "exit_status": 0,
+    "sha256": "41bdd638531b1e59a9b9b28ddc0bd1b9533978fc9ed54462e867080a86a32f40",
+    "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+    "difference_lines": []
+  },
+  {
+    "iteration": 2,
+    "side": "candidate",
+    "scenario": "smoke/plugin-runtime-continuum",
+    "exit_status": 0,
+    "sha256": "1b379639f9943297a7553cd2d09ae2614027b2d9b468b507a09e2406600fb9b5",
+    "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+    "difference_lines": []
+  }
+]

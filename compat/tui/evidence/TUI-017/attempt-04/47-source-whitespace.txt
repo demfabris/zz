@@ -1,0 +1,3 @@
+command: ["git", "diff", "--check", "origin/main", "--", "crates", "compat/tui-client-commands.sh", "compat/scenarios", "knowledge", "compat/tmux-gaps.json", "compat/tui/campaign.json", "compat/tui/verify-claims.py"]
+
+exit_status: 0

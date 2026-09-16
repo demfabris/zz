@@ -1,0 +1,4 @@
+command: ["python3", "compat/tui/evidence/TUI-017/attempt-04/classify.py"]
+163/163 delta rows completed; 13 final failures: 12 inherited, 1 caused-here at the corpus boundary; 2 first-pass failures cleared on retry
+
+exit_status: 0

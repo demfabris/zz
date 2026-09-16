@@ -1,0 +1,4 @@
+command: ["python3", "compat/tmux-tracker.py", "check"]
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+
+exit_status: 0

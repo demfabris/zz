@@ -1,0 +1,9 @@
+command: ["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=2G", "-p", "MemorySwapMax=1G", "python3", "compat/tui/evidence/TUI-017/attempt-04/split-timing.py"]
+{"side": "main", "iteration": 1, "list_started": 0.4010780190001242, "list_finished": 1.7834582070063334, "panes": "%0\n", "pane_exit": 0, "pane_stderr": "", "split_exit": 0, "split_stdout": "", "split_stderr": ""}
+{"side": "main", "iteration": 2, "list_started": 0.40090634700027294, "list_finished": 1.3205768080078997, "panes": "%0\n%2\n", "pane_exit": 0, "pane_stderr": "", "split_exit": 0, "split_stdout": "", "split_stderr": ""}
+{"side": "main", "iteration": 3, "list_started": 0.40173804000369273, "list_finished": 1.7697239999833982, "panes": "%0\n%3\n", "pane_exit": 0, "pane_stderr": "", "split_exit": 0, "split_stdout": "", "split_stderr": ""}
+{"side": "candidate", "iteration": 1, "list_started": 0.4016927180055063, "list_finished": 1.6744932199944742, "panes": "%0\n", "pane_exit": 0, "pane_stderr": "", "split_exit": 0, "split_stdout": "", "split_stderr": ""}
+{"side": "candidate", "iteration": 2, "list_started": 0.4016916890104767, "list_finished": 1.308294163987739, "panes": "%0\n%2\n", "pane_exit": 0, "pane_stderr": "", "split_exit": 0, "split_stdout": "", "split_stderr": ""}
+{"side": "candidate", "iteration": 3, "list_started": 0.4022610989923123, "list_finished": 1.3648555079998914, "panes": "%0\n%3\n", "pane_exit": 0, "pane_stderr": "", "split_exit": 0, "split_stdout": "", "split_stderr": ""}
+
+exit_status: 0

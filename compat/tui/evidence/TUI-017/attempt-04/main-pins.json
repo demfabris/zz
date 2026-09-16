@@ -1,0 +1,15 @@
+{
+  "base": "e40a13e1c981aa9b707a5a6a54f5e0267c751de9",
+  "test": "session_targets_accept_pane_and_window_ids",
+  "test_unchanged": true,
+  "test_sha256": "4f790df14b33cfdba6bb6121d744ba4c3e414709785c7a7e951441ffccfd4c9e",
+  "scenario": "compat/scenarios/targets.txt",
+  "scenario_unchanged": true,
+  "scenario_sha256": "8abbaaa9a94181f5b61c22656dea905fc1a7533954252db00aa29359001a0f3f",
+  "added_cases": [
+    "has-session -t %0",
+    "has-session -t @0",
+    "has-session -t %99",
+    "has-session -t @99"
+  ]
+}

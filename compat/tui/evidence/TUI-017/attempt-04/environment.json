@@ -1,0 +1,18 @@
+{
+  "base": "e40a13e1c981aa9b707a5a6a54f5e0267c751de9",
+  "candidate": "204c7975da35bcd613b723de3b9363389cf15137",
+  "binary": "/home/demfabris/dev/zz-c11-capture-fix/target/debug/zz",
+  "binary_sha256": "3ecf75a60c3e7c2bc3309fc605cb9601f8fdf0411c2dde4558ffec83c6c9a1fe",
+  "fixture_sha256": "42611839481edbfccc4ae9b61f432ec701d568b2e1659ea2d2fcd9323074166d",
+  "pin_sha256": "df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5",
+  "tmux_commit": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
+  "os": [
+    "Linux",
+    "alienware",
+    "7.2.3-1-cachyos-deckify",
+    "#1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000",
+    "x86_64"
+  ],
+  "cargo_wrapper_sha256": "3718ef3abf23b1bea91b5e1d0853e00d94442b6295bb596924a99d234d533cd9",
+  "credentials_removed_from_child_environment": true
+}

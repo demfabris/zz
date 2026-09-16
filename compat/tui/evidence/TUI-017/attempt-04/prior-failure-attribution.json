@@ -1,0 +1,228 @@
+[
+  {
+    "scenario": "show-options-hooks.txt",
+    "classification": "inherited",
+    "prior_candidate_sha256": "1bfaad6335a69f032dec50629e58dc3856fb3d0ecf9de7ec27eb40d39c087654",
+    "clean_main_sha256": "c0354e060b9f0b3b2906bdb3998f81ff424ccb7bcb7d14dd7d5ca1d112ef1095",
+    "same_difference_lines": true,
+    "prior_difference_lines": [
+      "-lock-command \"lock -np\"",
+      "+lock-command vlock",
+      "-lock-command \"lock -np\"",
+      "+lock-command vlock",
+      "-lock -np",
+      "+vlock",
+      "-lock-command* \"lock -np\"",
+      "+lock-command* vlock",
+      "-lock-command \"lock -np\"",
+      "+lock-command vlock",
+      "-lock-command \"lock -np\"",
+      "+lock-command vlock",
+      "-lock -np",
+      "+vlock"
+    ],
+    "main_difference_lines": [
+      "-lock-command \"lock -np\"",
+      "+lock-command vlock",
+      "-lock-command \"lock -np\"",
+      "+lock-command vlock",
+      "-lock -np",
+      "+vlock",
+      "-lock-command* \"lock -np\"",
+      "+lock-command* vlock",
+      "-lock-command \"lock -np\"",
+      "+lock-command vlock",
+      "-lock-command \"lock -np\"",
+      "+lock-command vlock",
+      "-lock -np",
+      "+vlock"
+    ]
+  },
+  {
+    "scenario": "smoke/alias-group-forgery.txt",
+    "classification": "inherited",
+    "prior_candidate_sha256": "0a64a2eb3cbd13dc99672f75698fb4dcc125339aea348cc3db5ca1a20cf974ab",
+    "clean_main_sha256": "4fd71bdd06c1816d2fbf06a22cead9b37d613a9a0597a212a61eaf845bbb923e",
+    "same_difference_lines": true,
+    "prior_difference_lines": [
+      "-FORGERY_CLI=status=2 out= err=unknown command: __zz-command-alias-group|",
+      "+FORGERY_CLI=status=1 out= err=unknown command: __zz-command-alias-group|"
+    ],
+    "main_difference_lines": [
+      "-FORGERY_CLI=status=2 out= err=unknown command: __zz-command-alias-group|",
+      "+FORGERY_CLI=status=1 out= err=unknown command: __zz-command-alias-group|"
+    ]
+  },
+  {
+    "scenario": "smoke/args-parse-choosers.txt",
+    "classification": "inherited",
+    "prior_candidate_sha256": "f3253acce2c3adcded679efeaeffb0a0482ec4c34d67bc1665deb9f4a5581061",
+    "clean_main_sha256": "1e9b492951104c7152dd774252fbc8a3fe7dba8a5470e93575555b9525a0299f",
+    "same_difference_lines": true,
+    "prior_difference_lines": [
+      "-ARGS_PARSE_CHOOSERS=failed:zz-side-only:direct-buffer-arity,direct-tree-arity",
+      "+ARGS_PARSE_CHOOSERS=clean:26"
+    ],
+    "main_difference_lines": [
+      "-ARGS_PARSE_CHOOSERS=failed:zz-side-only:direct-buffer-arity,direct-tree-arity",
+      "+ARGS_PARSE_CHOOSERS=clean:26"
+    ]
+  },
+  {
+    "scenario": "smoke/cli-chain-parse-abort.txt",
+    "classification": "inherited",
+    "prior_candidate_sha256": "8dcf8aae0e353accaa8568c29cc80575de447d7c4eeb3f2e441b3664a63db08e",
+    "clean_main_sha256": "4f14cf1feb1a93e56e85a04963153d9996b75b446e63a781f6da9421d7c38fa0",
+    "same_difference_lines": true,
+    "prior_difference_lines": [
+      "-CLI_PARSE_ABORT=broken",
+      "+CLI_PARSE_ABORT=clean:6"
+    ],
+    "main_difference_lines": [
+      "-CLI_PARSE_ABORT=broken",
+      "+CLI_PARSE_ABORT=clean:6"
+    ]
+  },
+  {
+    "scenario": "smoke/command-flag-errors.txt",
+    "classification": "inherited",
+    "prior_candidate_sha256": "2c4008aecdde89b1bbef4edecc7bc08176a2e3b380123962c09db4e52d0eb3c8",
+    "clean_main_sha256": "e791acc7ce064cf463ce2ce3b423c99d4e0ab3d9a28cb87dada3528fe3c4bab5",
+    "same_difference_lines": true,
+    "prior_difference_lines": [
+      "-unknown variable: COMMAND_FLAG_ERRORS"
+    ],
+    "main_difference_lines": [
+      "-unknown variable: COMMAND_FLAG_ERRORS"
+    ]
+  },
+  {
+    "scenario": "smoke/daemon-invalid-flags.txt",
+    "classification": "inherited",
+    "prior_candidate_sha256": "8b3290c40a08fbcbb4cdbdea73fe4ed68bbaae0e1b09808adb32720c11ef8e08",
+    "clean_main_sha256": "5650dfcabf22d9d80356253aa76e1ce6000a0acd9a2c7440ffee668257f8ec98",
+    "same_difference_lines": true,
+    "prior_difference_lines": [
+      "-unknown variable: DAEMON_INVALID_FLAGS"
+    ],
+    "main_difference_lines": [
+      "-unknown variable: DAEMON_INVALID_FLAGS"
+    ]
+  },
+  {
+    "scenario": "smoke/jobs-command-environment.txt",
+    "classification": "inherited",
+    "prior_candidate_sha256": "5cfff41325bc289f50bf95f608365842a0b52b88b13a53e6de0e8ba64eb5fc02",
+    "clean_main_sha256": "bf13c86c426a1f755de098a0c63d78fbdaccc4a37484f0a6eaccf931945b7c8d",
+    "same_difference_lines": true,
+    "prior_difference_lines": [
+      "-jobs-command-environment-zz: positive-destroyed",
+      "-jobs-command-environment-zz: positive-missing",
+      "-unknown variable: JOBS_COMMAND_ENVIRONMENT"
+    ],
+    "main_difference_lines": [
+      "-jobs-command-environment-zz: positive-destroyed",
+      "-jobs-command-environment-zz: positive-missing",
+      "-unknown variable: JOBS_COMMAND_ENVIRONMENT"
+    ]
+  },
+  {
+    "scenario": "smoke/plugin-runtime-resurrect-restore.txt",
+    "classification": "inherited",
+    "prior_candidate_sha256": "f38d822913fe57cbac8a0c7571ebe15a2c4ea8ae91f386505ab0cf11e4bb9833",
+    "clean_main_sha256": "19b6cc499a1cabd198bdce5eccb3856a51558235558da214125df91ed5cbca81",
+    "same_difference_lines": true,
+    "prior_difference_lines": [
+      "-RESTORE_AFTER=0|ALPHA|<DIR>/alpha",
+      "-1|BETA|<DIR>/beta",
+      "+AssertionError(('0|ALPHA|<DIR>/alpha\\n1|BETA|<DIR>/beta', '0|demfabris@alienware:~/resurrect-restore-tmux/alpha|<DIR>/alpha\\n1|demfabris@alienware:~/resurrect-restore-tmux/beta|<DIR>/beta'))",
+      "-ZZ_RESURRECT_RESTORE=clean:two-panes-restored",
+      "+ZZ_RESURRECT_RESTORE=failed:tmux-side-only"
+    ],
+    "main_difference_lines": [
+      "-RESTORE_AFTER=0|ALPHA|<DIR>/alpha",
+      "-1|BETA|<DIR>/beta",
+      "+AssertionError(('0|ALPHA|<DIR>/alpha\\n1|BETA|<DIR>/beta', '0|demfabris@alienware:~/resurrect-restore-tmux/alpha|<DIR>/alpha\\n1|demfabris@alienware:~/resurrect-restore-tmux/beta|<DIR>/beta'))",
+      "-ZZ_RESURRECT_RESTORE=clean:two-panes-restored",
+      "+ZZ_RESURRECT_RESTORE=failed:tmux-side-only"
+    ]
+  },
+  {
+    "scenario": "smoke/positional-maximums.txt",
+    "classification": "inherited",
+    "prior_candidate_sha256": "2f9616992fe53faec2ccf7d9616921c373c76110255062454747a653a7ae2be1",
+    "clean_main_sha256": "f17ada852d4e98b446c9fb845c56529713cb2bd167e3c811c43c38a0424e4380",
+    "same_difference_lines": true,
+    "prior_difference_lines": [
+      "-unknown variable: POSITIONAL_MAXIMUMS"
+    ],
+    "main_difference_lines": [
+      "-unknown variable: POSITIONAL_MAXIMUMS"
+    ]
+  },
+  {
+    "scenario": "smoke/positional-minimums.txt",
+    "classification": "inherited",
+    "prior_candidate_sha256": "7c4f3bea27ff001553463d2b4f7b21dee1d17d61db72a9a758a4b3b8c218524d",
+    "clean_main_sha256": "911f8308aecb43016ed7ec463ffca0cf904bdae19617dd4e9b964bb549502349",
+    "same_difference_lines": true,
+    "prior_difference_lines": [
+      "-unknown variable: POSITIONAL_MINIMUMS"
+    ],
+    "main_difference_lines": [
+      "-unknown variable: POSITIONAL_MINIMUMS"
+    ]
+  },
+  {
+    "scenario": "smoke/source-replay-diagnostics.txt",
+    "classification": "inherited",
+    "prior_candidate_sha256": "1398f36b6dcbd40351722f5b345c62c3d1b975b947efd0be4d3810f67180bc6e",
+    "clean_main_sha256": "6b966a9932aa0f02c820fddc0cc611419cf33209fa18d6fed13c27da27e1ddc9",
+    "same_difference_lines": true,
+    "prior_difference_lines": [
+      "-SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:124,stderr:_,events:",
+      "+SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:1,stderr:_,events:0:end:_;0:end:_;0:end:_;0:end:_;raw:<CONFIRM_CHILD>:1: syntax error;0:end:CONFIRM_CHILD_LATER;0:end:CONFIRM_INNER_AFTER;0:end:CONFIRM_OUTER_AFTER"
+    ],
+    "main_difference_lines": [
+      "-SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:124,stderr:_,events:",
+      "+SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:1,stderr:_,events:0:end:_;0:end:_;0:end:_;0:end:_;raw:<CONFIRM_CHILD>:1: syntax error;0:end:CONFIRM_CHILD_LATER;0:end:CONFIRM_INNER_AFTER;0:end:CONFIRM_OUTER_AFTER"
+    ]
+  },
+  {
+    "scenario": "smoke/split-window-wait.txt",
+    "classification": "pending new-candidate result",
+    "prior_candidate_sha256": "73ec904eac0e742d9382483eb52ef4bdb42973c3badde43f950f7899ec192517",
+    "clean_main_sha256": "98a776b32ef7fd4e5d59dd50690e6f88c8ff3841733fd7dce5cc1b27b8e574ab",
+    "same_difference_lines": false,
+    "prior_difference_lines": [
+      "-parked returned=[] panes=1",
+      "+parked returned=[] panes=2"
+    ],
+    "main_difference_lines": []
+  },
+  {
+    "scenario": "smoke/status-background-jobs.txt",
+    "classification": "inherited",
+    "prior_candidate_sha256": "3566dfbeaf0c5530bad7cf9978d7bd70bda1ffc2ae0ee43422507741e7df0491",
+    "clean_main_sha256": "16131d3f6d476abd5ce9207c888b484942ab93604f732afebcbf1ed45166ef92",
+    "same_difference_lines": true,
+    "prior_difference_lines": [
+      "-AssertionError(('first drawn expansion is empty', b'\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n[]\\n'))",
+      "+status jobs: attach below 1.5s; shared job; slow output; cached output; interval rerun",
+      "+status jobs: window and pane loops each key one job per looped item",
+      "+status jobs: long cached output retains TAIL on both binaries",
+      "+status jobs: drawn DATE changes at seconds 1, 3, 5 and 7 with interval 2",
+      "-ZZ_STATUS_BACKGROUND_JOBS=failed:zz-side-only",
+      "+ZZ_STATUS_BACKGROUND_JOBS=clean:9"
+    ],
+    "main_difference_lines": [
+      "-AssertionError(('first drawn expansion is empty', b'\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n[]\\n'))",
+      "+status jobs: attach below 1.5s; shared job; slow output; cached output; interval rerun",
+      "+status jobs: window and pane loops each key one job per looped item",
+      "+status jobs: long cached output retains TAIL on both binaries",
+      "+status jobs: drawn DATE changes at seconds 1, 3, 5 and 7 with interval 2",
+      "-ZZ_STATUS_BACKGROUND_JOBS=failed:zz-side-only",
+      "+ZZ_STATUS_BACKGROUND_JOBS=clean:9"
+    ]
+  }
+]

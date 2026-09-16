@@ -1,0 +1,509 @@
+{
+  "show-options-hooks.txt": {
+    "candidate": {
+      "summary": {
+        "steps": "34",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "7",
+        "warn_divergences": "0"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-lock-command \"lock -np\"",
+        "+lock-command vlock",
+        "-lock-command \"lock -np\"",
+        "+lock-command vlock",
+        "-lock -np",
+        "+vlock",
+        "-lock-command* \"lock -np\"",
+        "+lock-command* vlock",
+        "-lock-command \"lock -np\"",
+        "+lock-command vlock",
+        "-lock-command \"lock -np\"",
+        "+lock-command vlock",
+        "-lock -np",
+        "+vlock"
+      ]
+    },
+    "main": {
+      "summary": {
+        "steps": "34",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "7",
+        "warn_divergences": "0"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-lock-command \"lock -np\"",
+        "+lock-command vlock",
+        "-lock-command \"lock -np\"",
+        "+lock-command vlock",
+        "-lock -np",
+        "+vlock",
+        "-lock-command* \"lock -np\"",
+        "+lock-command* vlock",
+        "-lock-command \"lock -np\"",
+        "+lock-command vlock",
+        "-lock-command \"lock -np\"",
+        "+lock-command vlock",
+        "-lock -np",
+        "+vlock"
+      ]
+    },
+    "classification": "inherited",
+    "matching_clean_main_observations": [
+      "c0354e060b9f0b3b2906bdb3998f81ff424ccb7bcb7d14dd7d5ca1d112ef1095"
+    ],
+    "reason": "An unmodified clean e40a13e1 corpus run has exactly these difference lines; the raw output is retained in corpus-observations.jsonl under the matching hash."
+  },
+  "smoke/alias-group-forgery.txt": {
+    "candidate": {
+      "summary": {
+        "steps": "7",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "0"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-FORGERY_CLI=status=2 out= err=unknown command: __zz-command-alias-group|",
+        "+FORGERY_CLI=status=1 out= err=unknown command: __zz-command-alias-group|"
+      ]
+    },
+    "main": {
+      "summary": {
+        "steps": "7",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "0"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-FORGERY_CLI=status=2 out= err=unknown command: __zz-command-alias-group|",
+        "+FORGERY_CLI=status=1 out= err=unknown command: __zz-command-alias-group|"
+      ]
+    },
+    "classification": "inherited",
+    "matching_clean_main_observations": [
+      "4fd71bdd06c1816d2fbf06a22cead9b37d613a9a0597a212a61eaf845bbb923e"
+    ],
+    "reason": "An unmodified clean e40a13e1 corpus run has exactly these difference lines; the raw output is retained in corpus-observations.jsonl under the matching hash."
+  },
+  "smoke/args-parse-choosers.txt": {
+    "candidate": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "0"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-ARGS_PARSE_CHOOSERS=failed:zz-side-only:direct-buffer-arity,direct-tree-arity",
+        "+ARGS_PARSE_CHOOSERS=clean:26"
+      ]
+    },
+    "main": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "0"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-ARGS_PARSE_CHOOSERS=failed:zz-side-only:direct-buffer-arity,direct-tree-arity",
+        "+ARGS_PARSE_CHOOSERS=clean:26"
+      ]
+    },
+    "classification": "inherited",
+    "matching_clean_main_observations": [
+      "1e9b492951104c7152dd774252fbc8a3fe7dba8a5470e93575555b9525a0299f"
+    ],
+    "reason": "An unmodified clean e40a13e1 corpus run has exactly these difference lines; the raw output is retained in corpus-observations.jsonl under the matching hash."
+  },
+  "smoke/cli-chain-parse-abort.txt": {
+    "candidate": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "0"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-CLI_PARSE_ABORT=broken",
+        "+CLI_PARSE_ABORT=clean:6"
+      ]
+    },
+    "main": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "0"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-CLI_PARSE_ABORT=broken",
+        "+CLI_PARSE_ABORT=clean:6"
+      ]
+    },
+    "classification": "inherited",
+    "matching_clean_main_observations": [
+      "4f14cf1feb1a93e56e85a04963153d9996b75b446e63a781f6da9421d7c38fa0"
+    ],
+    "reason": "An unmodified clean e40a13e1 corpus run has exactly these difference lines; the raw output is retained in corpus-observations.jsonl under the matching hash."
+  },
+  "smoke/command-flag-errors.txt": {
+    "candidate": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-unknown variable: COMMAND_FLAG_ERRORS"
+      ]
+    },
+    "main": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-unknown variable: COMMAND_FLAG_ERRORS"
+      ]
+    },
+    "classification": "inherited",
+    "matching_clean_main_observations": [
+      "e791acc7ce064cf463ce2ce3b423c99d4e0ab3d9a28cb87dada3528fe3c4bab5"
+    ],
+    "reason": "An unmodified clean e40a13e1 corpus run has exactly these difference lines; the raw output is retained in corpus-observations.jsonl under the matching hash."
+  },
+  "smoke/daemon-invalid-flags.txt": {
+    "candidate": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-unknown variable: DAEMON_INVALID_FLAGS"
+      ]
+    },
+    "main": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-unknown variable: DAEMON_INVALID_FLAGS"
+      ]
+    },
+    "classification": "inherited",
+    "matching_clean_main_observations": [
+      "5650dfcabf22d9d80356253aa76e1ce6000a0acd9a2c7440ffee668257f8ec98"
+    ],
+    "reason": "An unmodified clean e40a13e1 corpus run has exactly these difference lines; the raw output is retained in corpus-observations.jsonl under the matching hash."
+  },
+  "smoke/jobs-command-environment.txt": {
+    "candidate": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "2"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-jobs-command-environment-zz: positive-destroyed",
+        "-jobs-command-environment-zz: positive-missing",
+        "-unknown variable: JOBS_COMMAND_ENVIRONMENT"
+      ]
+    },
+    "main": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "2"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-jobs-command-environment-zz: positive-destroyed",
+        "-jobs-command-environment-zz: positive-missing",
+        "-unknown variable: JOBS_COMMAND_ENVIRONMENT"
+      ]
+    },
+    "classification": "inherited",
+    "matching_clean_main_observations": [
+      "bf13c86c426a1f755de098a0c63d78fbdaccc4a37484f0a6eaccf931945b7c8d"
+    ],
+    "reason": "An unmodified clean e40a13e1 corpus run has exactly these difference lines; the raw output is retained in corpus-observations.jsonl under the matching hash."
+  },
+  "smoke/plugin-runtime-resurrect-restore.txt": {
+    "candidate": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-RESTORE_AFTER=0|ALPHA|<DIR>/alpha",
+        "-1|BETA|<DIR>/beta",
+        "+AssertionError(('0|ALPHA|<DIR>/alpha\\n1|BETA|<DIR>/beta', '0|demfabris@alienware:~/resurrect-restore-tmux/alpha|<DIR>/alpha\\n1|demfabris@alienware:~/resurrect-restore-tmux/beta|<DIR>/beta'))",
+        "-ZZ_RESURRECT_RESTORE=clean:two-panes-restored",
+        "+ZZ_RESURRECT_RESTORE=failed:tmux-side-only"
+      ]
+    },
+    "main": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-RESTORE_AFTER=0|ALPHA|<DIR>/alpha",
+        "-1|BETA|<DIR>/beta",
+        "+AssertionError(('0|ALPHA|<DIR>/alpha\\n1|BETA|<DIR>/beta', '0|demfabris@alienware:~/resurrect-restore-tmux/alpha|<DIR>/alpha\\n1|demfabris@alienware:~/resurrect-restore-tmux/beta|<DIR>/beta'))",
+        "-ZZ_RESURRECT_RESTORE=clean:two-panes-restored",
+        "+ZZ_RESURRECT_RESTORE=failed:tmux-side-only"
+      ]
+    },
+    "classification": "inherited",
+    "matching_clean_main_observations": [
+      "19b6cc499a1cabd198bdce5eccb3856a51558235558da214125df91ed5cbca81"
+    ],
+    "reason": "An unmodified clean e40a13e1 corpus run has exactly these difference lines; the raw output is retained in corpus-observations.jsonl under the matching hash."
+  },
+  "smoke/positional-maximums.txt": {
+    "candidate": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-unknown variable: POSITIONAL_MAXIMUMS"
+      ]
+    },
+    "main": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-unknown variable: POSITIONAL_MAXIMUMS"
+      ]
+    },
+    "classification": "inherited",
+    "matching_clean_main_observations": [
+      "f17ada852d4e98b446c9fb845c56529713cb2bd167e3c811c43c38a0424e4380"
+    ],
+    "reason": "An unmodified clean e40a13e1 corpus run has exactly these difference lines; the raw output is retained in corpus-observations.jsonl under the matching hash."
+  },
+  "smoke/positional-minimums.txt": {
+    "candidate": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-unknown variable: POSITIONAL_MINIMUMS"
+      ]
+    },
+    "main": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-unknown variable: POSITIONAL_MINIMUMS"
+      ]
+    },
+    "classification": "inherited",
+    "matching_clean_main_observations": [
+      "911f8308aecb43016ed7ec463ffca0cf904bdae19617dd4e9b964bb549502349"
+    ],
+    "reason": "An unmodified clean e40a13e1 corpus run has exactly these difference lines; the raw output is retained in corpus-observations.jsonl under the matching hash."
+  },
+  "smoke/source-replay-diagnostics.txt": {
+    "candidate": {
+      "summary": {
+        "steps": "60",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "0"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:124,stderr:_,events:",
+        "+SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:1,stderr:_,events:0:end:_;0:end:_;0:end:_;0:end:_;raw:<CONFIRM_CHILD>:1: syntax error;0:end:CONFIRM_CHILD_LATER;0:end:CONFIRM_INNER_AFTER;0:end:CONFIRM_OUTER_AFTER"
+      ]
+    },
+    "main": {
+      "summary": {
+        "steps": "60",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "0"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:124,stderr:_,events:",
+        "+SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:1,stderr:_,events:0:end:_;0:end:_;0:end:_;0:end:_;raw:<CONFIRM_CHILD>:1: syntax error;0:end:CONFIRM_CHILD_LATER;0:end:CONFIRM_INNER_AFTER;0:end:CONFIRM_OUTER_AFTER"
+      ]
+    },
+    "classification": "inherited",
+    "matching_clean_main_observations": [
+      "6b966a9932aa0f02c820fddc0cc611419cf33209fa18d6fed13c27da27e1ddc9"
+    ],
+    "reason": "An unmodified clean e40a13e1 corpus run has exactly these difference lines; the raw output is retained in corpus-observations.jsonl under the matching hash."
+  },
+  "smoke/split-window-wait.txt": {
+    "candidate": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-parked returned=[] panes=1",
+        "+parked returned=[] panes=2"
+      ]
+    },
+    "main": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "classification": "caused-here",
+    "matching_clean_main_observations": [],
+    "reason": "Conservative corpus attribution: candidate fails and clean main passes the initial run and all three paired repeats. A smaller timing probe can produce one pane on both binaries; no source-level cause or fix is established. The unchanged corpus regression remains open."
+  },
+  "smoke/status-background-jobs.txt": {
+    "candidate": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-AssertionError(('first drawn expansion is empty', b'\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n[]\\n'))",
+        "+status jobs: attach below 1.5s; shared job; slow output; cached output; interval rerun",
+        "+status jobs: window and pane loops each key one job per looped item",
+        "+status jobs: long cached output retains TAIL on both binaries",
+        "+status jobs: drawn DATE changes at seconds 1, 3, 5 and 7 with interval 2",
+        "-ZZ_STATUS_BACKGROUND_JOBS=failed:zz-side-only",
+        "+ZZ_STATUS_BACKGROUND_JOBS=clean:9"
+      ]
+    },
+    "main": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 1, 0, b'\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n[]\\n'))",
+        "+status jobs: drawn DATE changes at seconds 1, 3, 5 and 7 with interval 2",
+        "-ZZ_STATUS_BACKGROUND_JOBS=failed:zz-side-only",
+        "+ZZ_STATUS_BACKGROUND_JOBS=clean:9"
+      ]
+    },
+    "classification": "inherited",
+    "matching_clean_main_observations": [
+      "16131d3f6d476abd5ce9207c888b484942ab93604f732afebcbf1ed45166ef92"
+    ],
+    "reason": "An unmodified clean e40a13e1 corpus run has exactly these difference lines; the raw output is retained in corpus-observations.jsonl under the matching hash."
+  }
+}

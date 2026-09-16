@@ -1,0 +1,26 @@
+[
+  {
+    "scenario": "smoke/control-hard-loss.txt",
+    "initial_sha256": "cf4a9ac3a36cc54b16ce9c2f98414967fe24a13f799faefa08ac707ddf8561bf",
+    "final_summary": {
+      "steps": "2",
+      "topo_divergences": "0",
+      "geo_divergences": "0",
+      "fmt_divergences": "0",
+      "out_divergences": "0",
+      "warn_divergences": "0"
+    }
+  },
+  {
+    "scenario": "smoke/plugin-runtime-continuum.txt",
+    "initial_sha256": "c1092e8719c8486a63f9b4e4a53926d5a5fca76265e71bfc867ab96235bba542",
+    "final_summary": {
+      "steps": "2",
+      "topo_divergences": "0",
+      "geo_divergences": "0",
+      "fmt_divergences": "0",
+      "out_divergences": "0",
+      "warn_divergences": "0"
+    }
+  }
+]

@@ -1,0 +1,538 @@
+{
+  "batch_compared": 42,
+  "batch_differences": [],
+  "all_differences": [
+    {
+      "scene": "80x24/tab-trailing",
+      "mode": "join",
+      "expected": {
+        "exit": 0,
+        "stdout": "0 ABC\t\n1 NEXT\n2 \n3 \n4 \n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "0 ABC\n1 NEXT\n2 \n3 \n4 \n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "80x24/tab-trailing",
+      "mode": "trim",
+      "expected": {
+        "exit": 0,
+        "stdout": "ABC\t\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "ABC\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "80x24/tab-trailing",
+      "mode": "escape",
+      "expected": {
+        "exit": 0,
+        "stdout": "ABC\t\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "ABC\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "80x24/tab-trailing",
+      "mode": "padding",
+      "expected": {
+        "exit": 0,
+        "stdout": "ABC\t            \nNEXT                \n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "ABC                 \nNEXT                \n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "80x24/tab-trailing",
+      "mode": "tabs",
+      "expected": {
+        "exit": 0,
+        "stdout": "ABC\t\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "ABC\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "80x24/tab-internal",
+      "mode": "join",
+      "expected": {
+        "exit": 0,
+        "stdout": "0 ABC\tDEF\n1 NEXT\n2 \n3 \n4 \n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "0 ABC     DEF\n1 NEXT\n2 \n3 \n4 \n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "80x24/tab-internal",
+      "mode": "trim",
+      "expected": {
+        "exit": 0,
+        "stdout": "ABC\tDEF\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "ABC     DEF\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "80x24/tab-internal",
+      "mode": "escape",
+      "expected": {
+        "exit": 0,
+        "stdout": "ABC\tDEF\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "ABC     DEF\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "80x24/tab-internal",
+      "mode": "padding",
+      "expected": {
+        "exit": 0,
+        "stdout": "ABC\tDEF         \nNEXT                \n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "ABC     DEF         \nNEXT                \n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "80x24/tab-internal",
+      "mode": "tabs",
+      "expected": {
+        "exit": 0,
+        "stdout": "ABC\tDEF\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "ABC     DEF\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "80x24/tab-wide",
+      "mode": "join",
+      "expected": {
+        "exit": 0,
+        "stdout": "0 \u754c\t\n1 NEXT\n2 \n3 \n4 \n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "0 \u754c\n1 NEXT\n2 \n3 \n4 \n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "80x24/tab-wide",
+      "mode": "trim",
+      "expected": {
+        "exit": 0,
+        "stdout": "\u754c\t\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "\u754c\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "80x24/tab-wide",
+      "mode": "escape",
+      "expected": {
+        "exit": 0,
+        "stdout": "\u754c\t\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "\u754c\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "80x24/tab-wide",
+      "mode": "padding",
+      "expected": {
+        "exit": 0,
+        "stdout": "\u754c\t            \nNEXT                \n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "\u754c                  \nNEXT                \n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "80x24/tab-wide",
+      "mode": "tabs",
+      "expected": {
+        "exit": 0,
+        "stdout": "\u754c\t\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "\u754c\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/erase-line",
+      "mode": "escape",
+      "expected": {
+        "exit": 0,
+        "stdout": "\\033[41m\n\\033[49mNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "\\033[41m                                                                                \\033[49m\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/erase-line",
+      "mode": "padding",
+      "expected": {
+        "exit": 0,
+        "stdout": "\u001b[41m                                                                                                    \n\u001b[49mNEXT                     \n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "\u001b[41m                                                                                \u001b[49m                    \nNEXT                     \n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/erase-display",
+      "mode": "escape",
+      "expected": {
+        "exit": 0,
+        "stdout": "\\033[41m\n\\033[49mNEXT\\033[41m\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "\\033[41m                                                                                \\033[49m\nNEXT\\033[41m                                                                            \\033[49m\n\\033[41m                                                                                \\033[49m\n\\033[41m                                                                                \\033[49m\n\\033[41m                                                                                \\033[49m\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/erase-display",
+      "mode": "padding",
+      "expected": {
+        "exit": 0,
+        "stdout": "\u001b[41m                                                                                                    \n\u001b[49mNEXT\u001b[41m                                                                                                \n                                                                                                    \n                                                                                                    \n                                                                                                    \n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "\u001b[41m                                                                                \u001b[49m                    \nNEXT\u001b[41m                                                                            \u001b[49m                    \n\u001b[41m                                                                                \u001b[49m                    \n\u001b[41m                                                                                \u001b[49m                    \n\u001b[41m                                                                                \u001b[49m                    \n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/clear",
+      "mode": "escape",
+      "expected": {
+        "exit": 0,
+        "stdout": "\\033[41m\n\\033[49mNEXT\\033[41m\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "\\033[41m                                                                                \\033[49m\nNEXT\\033[41m                                                                            \\033[49m\n\\033[41m                                                                                \\033[49m\n\\033[41m                                                                                \\033[49m\n\\033[41m                                                                                \\033[49m\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/clear",
+      "mode": "padding",
+      "expected": {
+        "exit": 0,
+        "stdout": "\u001b[41m                                                                                                    \n\u001b[49mNEXT\u001b[41m                                                                                                \n                                                                                                    \n                                                                                                    \n                                                                                                    \n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "\u001b[41m                                                                                \u001b[49m                    \nNEXT\u001b[41m                                                                            \u001b[49m                    \n\u001b[41m                                                                                \u001b[49m                    \n\u001b[41m                                                                                \u001b[49m                    \n\u001b[41m                                                                                \u001b[49m                    \n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/scroll-region",
+      "mode": "escape",
+      "expected": {
+        "exit": 0,
+        "stdout": "\n\\033[41m\n\\033[49mNEXT\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "\n\\033[41m                                                                                \\033[49m\nNEXT\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/scroll-region",
+      "mode": "padding",
+      "expected": {
+        "exit": 0,
+        "stdout": "\n\u001b[41m                                                                                                    \n\u001b[49mNEXT                     \n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "\n\u001b[41m                                                                                \u001b[49m                    \nNEXT                     \n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/tab-trailing",
+      "mode": "join",
+      "expected": {
+        "exit": 0,
+        "stdout": "0 ABC\t\n1 NEXT\n2 \n3 \n4 \n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "0 ABC\n1 NEXT\n2 \n3 \n4 \n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/tab-trailing",
+      "mode": "trim",
+      "expected": {
+        "exit": 0,
+        "stdout": "ABC\t\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "ABC\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/tab-trailing",
+      "mode": "escape",
+      "expected": {
+        "exit": 0,
+        "stdout": "ABC\t\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "ABC\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/tab-trailing",
+      "mode": "padding",
+      "expected": {
+        "exit": 0,
+        "stdout": "ABC\t                 \nNEXT                     \n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "ABC                      \nNEXT                     \n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/tab-trailing",
+      "mode": "tabs",
+      "expected": {
+        "exit": 0,
+        "stdout": "ABC\t\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "ABC\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/tab-internal",
+      "mode": "join",
+      "expected": {
+        "exit": 0,
+        "stdout": "0 ABC\tDEF\n1 NEXT\n2 \n3 \n4 \n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "0 ABC     DEF\n1 NEXT\n2 \n3 \n4 \n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/tab-internal",
+      "mode": "trim",
+      "expected": {
+        "exit": 0,
+        "stdout": "ABC\tDEF\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "ABC     DEF\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/tab-internal",
+      "mode": "escape",
+      "expected": {
+        "exit": 0,
+        "stdout": "ABC\tDEF\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "ABC     DEF\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/tab-internal",
+      "mode": "padding",
+      "expected": {
+        "exit": 0,
+        "stdout": "ABC\tDEF              \nNEXT                     \n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "ABC     DEF              \nNEXT                     \n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/tab-internal",
+      "mode": "tabs",
+      "expected": {
+        "exit": 0,
+        "stdout": "ABC\tDEF\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "ABC     DEF\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/tab-wide",
+      "mode": "join",
+      "expected": {
+        "exit": 0,
+        "stdout": "0 \u754c\t\n1 NEXT\n2 \n3 \n4 \n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "0 \u754c\n1 NEXT\n2 \n3 \n4 \n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/tab-wide",
+      "mode": "trim",
+      "expected": {
+        "exit": 0,
+        "stdout": "\u754c\t\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "\u754c\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/tab-wide",
+      "mode": "escape",
+      "expected": {
+        "exit": 0,
+        "stdout": "\u754c\t\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "\u754c\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/tab-wide",
+      "mode": "padding",
+      "expected": {
+        "exit": 0,
+        "stdout": "\u754c\t                 \nNEXT                     \n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "\u754c                       \nNEXT                     \n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "scene": "100x30/tab-wide",
+      "mode": "tabs",
+      "expected": {
+        "exit": 0,
+        "stdout": "\u754c\t\nNEXT\n\n\n\n",
+        "stderr": ""
+      },
+      "actual": {
+        "exit": 0,
+        "stdout": "\u754c\nNEXT\n\n\n\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

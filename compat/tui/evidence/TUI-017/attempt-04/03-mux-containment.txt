@@ -1,0 +1,11 @@
+command: ["/tmp/zz-cargo.sh", "test", "-p", "zz-mux", "--lib", "window_targets_accept_pane_forms_like_tmux"]
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.64s
+     Running unittests src/lib.rs (target/debug/deps/zz_mux-eed3ba838a6892ab)
+
+running 1 test
+test model::tests::window_targets_accept_pane_forms_like_tmux ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 533 filtered out; finished in 0.01s
+
+
+exit_status: 0

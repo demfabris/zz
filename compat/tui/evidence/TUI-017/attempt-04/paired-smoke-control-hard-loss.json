@@ -1,0 +1,38 @@
+[
+  {
+    "iteration": 1,
+    "side": "main",
+    "scenario": "smoke/control-hard-loss",
+    "exit_status": 0,
+    "sha256": "2c45f501ef1c8b1e7f407366e01e9f70c9e02038ca6ae74c059922e64c938dda",
+    "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+    "difference_lines": []
+  },
+  {
+    "iteration": 1,
+    "side": "candidate",
+    "scenario": "smoke/control-hard-loss",
+    "exit_status": 0,
+    "sha256": "e016014e5597dafbfb1e777ce60783dee381d61bd8c2b0961adec44e8f128820",
+    "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+    "difference_lines": []
+  },
+  {
+    "iteration": 2,
+    "side": "main",
+    "scenario": "smoke/control-hard-loss",
+    "exit_status": 0,
+    "sha256": "2c45f501ef1c8b1e7f407366e01e9f70c9e02038ca6ae74c059922e64c938dda",
+    "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+    "difference_lines": []
+  },
+  {
+    "iteration": 2,
+    "side": "candidate",
+    "scenario": "smoke/control-hard-loss",
+    "exit_status": 0,
+    "sha256": "e016014e5597dafbfb1e777ce60783dee381d61bd8c2b0961adec44e8f128820",
+    "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+    "difference_lines": []
+  }
+]

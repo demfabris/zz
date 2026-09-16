@@ -1,0 +1,10 @@
+{
+  "candidate_binary": "3ecf75a60c3e7c2bc3309fc605cb9601f8fdf0411c2dde4558ffec83c6c9a1fe",
+  "main_binary": "d9993f4670a94a10fd23d5c8db4e08e259e2700dfbd3cdab0016b3d794145384",
+  "shared_fixture": "42611839481edbfccc4ae9b61f432ec701d568b2e1659ea2d2fcd9323074166d",
+  "tmux_pin": "df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5",
+  "main_target_scenario_unchanged": true,
+  "main_target_test_unchanged": true,
+  "credential_values_checked": 2,
+  "credential_value_matches": 0
+}

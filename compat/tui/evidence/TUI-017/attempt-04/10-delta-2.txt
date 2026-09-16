@@ -1,0 +1,275 @@
+command: ["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=2G", "-p", "MemorySwapMax=1G", "env", "ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-capture-fix/target/debug/zz", "ZZ_COMPAT_TMUX=/home/demfabris/dev/zz-c11-capture-fix/compat/.cache/tmux-src/tmux", "ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz-c11-capture-fix/compat/.cache/plugins", "compat/run.sh", "--delta", "e40a13e1c981aa9b707a5a6a54f5e0267c751de9...HEAD", "--commands", "capture-pane,lock-session,lock-client,lock-server,has-session,list-windows", "--", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/break-pane.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/command-alias.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/formats-values.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/mru-activity.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/pane-border-span-owner.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/send-keys-reset.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/args-parse-bind-key.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/args-parse-confirm-before.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/args-parse-if-shell.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/args-parse-set-option.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/cheap-flags.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/chooser-kill-keys.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/chooser-tree-vocabulary.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/cli-output-bytes.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/client-resized-context.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/command-prompt-chain.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/config-alias-parse-unit.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/config-discovery-launcher.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/config-non-utf8-byte-matrix.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/control-alias-prepare.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/control-notify.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/copy-mode-copy-line.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/copy-mode-mode-keys-tail.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/copy-mode-refresh.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/copy-selection-clipboard-bytes.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/display-menu-action-queue.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/display-menu-paste.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/display-menu-style-refresh.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/display-popup-drag.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/display-popup-menu-policy.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/display-popup-style-refresh.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/fixture-conf.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/format-environment-loop-context.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/format-modifier-environment-loop.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/format-pane-process.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/format-window-bigger.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/hooks-pane-focus.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/jobs-shell-job-cwd.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/keys-prefix-stock.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/kill-filters.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/own-conf.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/pane-border-status.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/pane-engine-knobs-input.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/pane-tmux-path.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/plugin-runtime-oh-my-tmux.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/plugin-runtime-vim-tmux-navigator.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/positional-minimums.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/resurrect-init.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/send-keys-control.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/source-file-byte-name.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/source-file-diagnostics.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/split-window-wait.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/terminal-facts.txt", "/home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/vim-tmux-navigator.txt"]
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m checking pinned plugin corpus
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-c11-capture-fix/target/debug/zz
+[1;36m==>[0m running break-pane
+break-pane: 30 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running command-alias
+command-alias: 16 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running formats-values
+formats-values: 45 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running mru-activity
+mru-activity: 11 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running pane-border-span-owner
+pane-border-span-owner: 10 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running send-keys-reset
+send-keys-reset: 16 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/args-parse-bind-key
+smoke/args-parse-bind-key: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/args-parse-confirm-before
+smoke/args-parse-confirm-before: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/args-parse-if-shell
+smoke/args-parse-if-shell: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/args-parse-set-option
+smoke/args-parse-set-option: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/cheap-flags
+smoke/cheap-flags: 22 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/chooser-kill-keys
+smoke/chooser-kill-keys: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/chooser-tree-vocabulary
+smoke/chooser-tree-vocabulary: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/cli-output-bytes
+smoke/cli-output-bytes: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/client-resized-context
+smoke/client-resized-context: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/command-prompt-chain
+smoke/command-prompt-chain: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/config-alias-parse-unit
+smoke/config-alias-parse-unit: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/config-discovery-launcher
+smoke/config-discovery-launcher: 12 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/config-non-utf8-byte-matrix
+smoke/config-non-utf8-byte-matrix: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/control-alias-prepare
+smoke/control-alias-prepare: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/control-notify
+smoke/control-notify: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/copy-mode-copy-line
+smoke/copy-mode-copy-line: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/copy-mode-mode-keys-tail
+smoke/copy-mode-mode-keys-tail: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/copy-mode-refresh
+smoke/copy-mode-refresh: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/copy-selection-clipboard-bytes
+smoke/copy-selection-clipboard-bytes: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/display-menu-action-queue
+smoke/display-menu-action-queue: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/display-menu-paste
+smoke/display-menu-paste: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/display-menu-style-refresh
+smoke/display-menu-style-refresh: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/display-popup-drag
+smoke/display-popup-drag: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/display-popup-menu-policy
+smoke/display-popup-menu-policy: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/display-popup-style-refresh
+smoke/display-popup-style-refresh: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/fixture-conf
+smoke/fixture-conf: 5 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/format-environment-loop-context
+smoke/format-environment-loop-context: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/format-modifier-environment-loop
+smoke/format-modifier-environment-loop: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/format-pane-process
+smoke/format-pane-process: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/format-window-bigger
+smoke/format-window-bigger: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/hooks-pane-focus
+smoke/hooks-pane-focus: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/jobs-shell-job-cwd
+smoke/jobs-shell-job-cwd: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/keys-prefix-stock
+smoke/keys-prefix-stock: 40 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/kill-filters
+smoke/kill-filters: 17 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/own-conf
+smoke/own-conf: 6 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/pane-border-status
+smoke/pane-border-status: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/pane-engine-knobs-input
+smoke/pane-engine-knobs-input: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/pane-tmux-path
+smoke/pane-tmux-path: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/plugin-runtime-oh-my-tmux
+smoke/plugin-runtime-oh-my-tmux: 4 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/plugin-runtime-vim-tmux-navigator
+smoke/plugin-runtime-vim-tmux-navigator: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/positional-minimums
+smoke/positional-minimums: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 1 WARN divergence(s)
+[1;33mwarn:[0m smoke/positional-minimums failed; it is retried alone after the corpus
+    SMOKE STDERR: divergence
+    --- zz SMOKE STDERR step 3
+    +++ tmux SMOKE STDERR step 3
+    @@ -1 +0,0 @@
+    -unknown variable: POSITIONAL_MINIMUMS
+    TOPO: clean
+    GEO: clean
+    
+    SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=1
+[1;36m==>[0m running smoke/resurrect-init
+smoke/resurrect-init: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/send-keys-control
+smoke/send-keys-control: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/source-file-byte-name
+smoke/source-file-byte-name: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/source-file-diagnostics
+smoke/source-file-diagnostics: 12 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/split-window-wait
+smoke/split-window-wait: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 1 WARN divergence(s)
+[1;33mwarn:[0m smoke/split-window-wait failed; it is retried alone after the corpus
+    SMOKE STDOUT: divergence
+    --- zz SMOKE STDOUT step 1
+    +++ tmux SMOKE STDOUT step 1
+    @@ -9,5 +9,5 @@
+     hooked | AFTER
+     ordered rc=0 marker=present
+     ordered | AFTER
+    -parked returned=[] panes=1
+    +parked returned=[] panes=2
+     parked-after rc=0 panes=[%1]
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 2
+    COMMAND: out: show-environment -g SPLIT_WINDOW_WAIT
+    zz exit: 0
+    tmux exit: 0
+    zz stderr:
+        <empty>
+    tmux stderr:
+        <empty>
+    zz stdout:
+        SPLIT_WINDOW_WAIT=reached-end
+    tmux stdout:
+        SPLIT_WINDOW_WAIT=reached-end
+    OUT: clean
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=1
+[1;36m==>[0m running smoke/terminal-facts
+smoke/terminal-facts: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/vim-tmux-navigator
+smoke/vim-tmux-navigator: 8 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m retrying smoke/positional-minimums alone
+smoke/positional-minimums: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 1 WARN divergence(s)
+[1;33mwarn:[0m smoke/positional-minimums failed again alone; see /home/demfabris/dev/zz-c11-capture-fix/compat/results/smoke/positional-minimums.log
+    SMOKE STDERR: divergence
+    --- zz SMOKE STDERR step 3
+    +++ tmux SMOKE STDERR step 3
+    @@ -1 +0,0 @@
+    -unknown variable: POSITIONAL_MINIMUMS
+    TOPO: clean
+    GEO: clean
+    
+    SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=1
+[1;36m==>[0m retrying smoke/split-window-wait alone
+smoke/split-window-wait: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 1 WARN divergence(s)
+[1;33mwarn:[0m smoke/split-window-wait failed again alone; see /home/demfabris/dev/zz-c11-capture-fix/compat/results/smoke/split-window-wait.log
+    SMOKE STDOUT: divergence
+    --- zz SMOKE STDOUT step 1
+    +++ tmux SMOKE STDOUT step 1
+    @@ -9,5 +9,5 @@
+     hooked | AFTER
+     ordered rc=0 marker=present
+     ordered | AFTER
+    -parked returned=[] panes=1
+    +parked returned=[] panes=2
+     parked-after rc=0 panes=[%1]
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 2
+    COMMAND: out: show-environment -g SPLIT_WINDOW_WAIT
+    zz exit: 0
+    tmux exit: 0
+    zz stderr:
+        <empty>
+    tmux stderr:
+        <empty>
+    zz stdout:
+        SPLIT_WINDOW_WAIT=reached-end
+    tmux stdout:
+        SPLIT_WINDOW_WAIT=reached-end
+    OUT: clean
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=1
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| break-pane | 30 | yes | 0 | yes | yes | yes |
+| command-alias | 16 | yes | 0 | yes | yes | yes |
+| formats-values | 45 | yes | 0 | yes | yes | yes |
+| mru-activity | 11 | yes | 0 | yes | yes | yes |
+| pane-border-span-owner | 10 | yes | 0 | yes | yes | yes |
+| send-keys-reset | 16 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-bind-key | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-confirm-before | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-if-shell | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-set-option | 3 | yes | 0 | yes | yes | yes |
+| smoke/cheap-flags | 22 | yes | 0 | yes | yes | yes |
+| smoke/chooser-kill-keys | 3 | yes | 0 | yes | yes | yes |
+| smoke/chooser-tree-vocabulary | 3 | yes | 0 | yes | yes | yes |
+| smoke/cli-output-bytes | 2 | yes | 0 | yes | yes | yes |
+| smoke/client-resized-context | 3 | yes | 0 | yes | yes | yes |
+| smoke/command-prompt-chain | 2 | yes | 0 | yes | yes | yes |
+| smoke/config-alias-parse-unit | 2 | yes | 0 | yes | yes | yes |
+| smoke/config-discovery-launcher | 12 | yes | 0 | yes | yes | yes |
+| smoke/config-non-utf8-byte-matrix | 2 | yes | 0 | yes | yes | yes |
+| smoke/control-alias-prepare | 3 | yes | 0 | yes | yes | yes |
+| smoke/control-notify | 2 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-copy-line | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-mode-keys-tail | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-refresh | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-selection-clipboard-bytes | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-action-queue | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-paste | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-style-refresh | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-drag | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-menu-policy | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-style-refresh | 3 | yes | 0 | yes | yes | yes |
+| smoke/fixture-conf | 5 | yes | 0 | yes | yes | yes |
+| smoke/format-environment-loop-context | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-modifier-environment-loop | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-pane-process | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-window-bigger | 3 | yes | 0 | yes | yes | yes |
+| smoke/hooks-pane-focus | 3 | yes | 0 | yes | yes | yes |
+| smoke/jobs-shell-job-cwd | 3 | yes | 0 | yes | yes | yes |
+| smoke/keys-prefix-stock | 40 | yes | 0 | yes | yes | yes |
+| smoke/kill-filters | 17 | yes | 0 | yes | yes | yes |
+| smoke/own-conf | 6 | yes | 0 | yes | yes | yes |
+| smoke/pane-border-status | 34 | yes | 0 | yes | yes | yes |
+| smoke/pane-engine-knobs-input | 3 | yes | 0 | yes | yes | yes |
+| smoke/pane-tmux-path | 3 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-oh-my-tmux | 4 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-vim-tmux-navigator | 2 | yes | 0 | yes | yes | yes |
+| smoke/positional-minimums | 3 | yes | 0 | yes | no | no |
+| smoke/resurrect-init | 3 | yes | 0 | yes | yes | yes |
+| smoke/send-keys-control | 3 | yes | 0 | yes | yes | yes |
+| smoke/source-file-byte-name | 2 | yes | 0 | yes | yes | yes |
+| smoke/source-file-diagnostics | 12 | yes | 0 | yes | yes | yes |
+| smoke/split-window-wait | 2 | yes | 0 | yes | yes | no |
+| smoke/terminal-facts | 2 | yes | 0 | yes | yes | yes |
+| smoke/vim-tmux-navigator | 8 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+
+exit_status: 1

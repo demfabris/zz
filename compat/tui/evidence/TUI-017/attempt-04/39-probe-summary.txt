@@ -1,0 +1,4 @@
+command: ["python3", "compat/tui/evidence/TUI-017/attempt-04/probe-summary.py"]
+Batch-scope comparisons: 42, differences: 0; all probe differences: 38
+
+exit_status: 0

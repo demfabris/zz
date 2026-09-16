@@ -1,0 +1,91 @@
+command: ["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=2G", "-p", "MemorySwapMax=1G", "env", "ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-reconciled-main-build/debug/zz", "ZZ_COMPAT_TMUX=/home/demfabris/dev/zz-c11-capture-fix/compat/.cache/tmux-src/tmux", "ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz-c11-capture-fix/compat/.cache/plugins", "target/capture-12-reconciled-main-src/compat/run.sh", "smoke/control-hard-loss"]
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-c11-capture-fix/target/capture-12-reconciled-main-build/debug/zz
+[1;36m==>[0m running smoke/control-hard-loss
+smoke/control-hard-loss: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 1 WARN divergence(s)
+[1;33mwarn:[0m smoke/control-hard-loss failed; it is retried alone after the corpus
+    SMOKE STDOUT: divergence
+    --- zz SMOKE STDOUT step 1
+    +++ tmux SMOKE STDOUT step 1
+    @@ -1,4 +1,4 @@
+    -observed hard-direct status=signal9 ran=[]
+    +observed hard-direct status=signal9 ran=[m1]
+     observed hard-source status=signal9 ran=[m1]
+     observed replacement extra-lines=0
+     observed live-source ran=[m1,m2,m3]
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 2
+    COMMAND: out: show-environment -g CONTROL_HARD_LOSS
+    zz exit: 0
+    tmux exit: 0
+    zz stderr:
+        <empty>
+    tmux stderr:
+        <empty>
+    zz stdout:
+        CONTROL_HARD_LOSS=reached-end
+    tmux stdout:
+        CONTROL_HARD_LOSS=reached-end
+    OUT: clean
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=1
+[1;36m==>[0m retrying smoke/control-hard-loss alone
+smoke/control-hard-loss: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 1 WARN divergence(s)
+[1;33mwarn:[0m smoke/control-hard-loss failed again alone; see /home/demfabris/dev/zz-c11-capture-fix/target/capture-12-reconciled-main-src/compat/results/smoke/control-hard-loss.log
+    SMOKE STDOUT: divergence
+    --- zz SMOKE STDOUT step 1
+    +++ tmux SMOKE STDOUT step 1
+    @@ -1,4 +1,4 @@
+     observed hard-direct status=signal9 ran=[m1]
+    -observed hard-source status=signal9 ran=[]
+    +observed hard-source status=signal9 ran=[m1]
+     observed replacement extra-lines=0
+     observed live-source ran=[m1,m2,m3]
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 2
+    COMMAND: out: show-environment -g CONTROL_HARD_LOSS
+    zz exit: 0
+    tmux exit: 0
+    zz stderr:
+        <empty>
+    tmux stderr:
+        <empty>
+    zz stdout:
+        CONTROL_HARD_LOSS=reached-end
+    tmux stdout:
+        CONTROL_HARD_LOSS=reached-end
+    OUT: clean
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=1
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| smoke/control-hard-loss | 2 | yes | 0 | yes | yes | no |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+
+exit_status: 1

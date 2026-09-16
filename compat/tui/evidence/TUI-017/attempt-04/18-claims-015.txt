@@ -1,0 +1,10 @@
+command: ["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=2G", "-p", "MemorySwapMax=1G", "python3", "compat/tui/verify-claims.py", "--run", "TUI-015"]
+verified: TUI-001, TUI-002, TUI-003, TUI-004, TUI-005, TUI-006, TUI-007, TUI-008, TUI-009, TUI-010, TUI-012, TUI-016
+re-measuring: TUI-015
+  comparing /home/demfabris/dev/zz-c11-capture-fix/target/debug/zz
+  running compat/tui-client-commands.sh for TUI-015 ...
+
+1 problem(s):
+  TUI-015: compat/tui-client-commands.sh exited 1: 8 of 186 asserted comparisons differ, 32 recorded (0 for a sibling lane, owners TUI-014=6 TUI-015=3 TUI-017=4 decided:TU 
+
+exit_status: 1

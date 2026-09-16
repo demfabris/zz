@@ -1,0 +1,4 @@
+command: ["python3", "compat/tui/evidence/TUI-017/attempt-04/build-candidate.py"]
+{"label": "04-candidate-build", "command": ["/tmp/zz-cargo.sh", "build", "-p", "zz"], "start": "2026-09-16T18:12:56.085905+00:00", "end": "2026-09-16T18:14:00.832890+00:00", "exit_status": 0}
+
+exit_status: 0

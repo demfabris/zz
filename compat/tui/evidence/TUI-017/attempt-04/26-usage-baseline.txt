@@ -1,0 +1,132 @@
+command: ["python3", "compat/tui/evidence/TUI-017/attempt-04/usage-baseline.py"]
+{
+  "pin": {
+    "refresh-missing-argument": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command refresh-client: -r expects an argument\n"
+    },
+    "lock-server-arity": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command lock-server: too many arguments (need at most 0)\n"
+    },
+    "lock-server-unknown-flag": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command lock-server: unknown flag -t\n"
+    },
+    "lock-session-arity": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command lock-session: too many arguments (need at most 0)\n"
+    },
+    "lock-client-arity": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command lock-client: too many arguments (need at most 0)\n"
+    },
+    "lock-client-missing-argument": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command lock-client: -t expects an argument\n"
+    },
+    "client-tree-unknown-flag": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command choose-client: unknown flag -Q\n"
+    },
+    "client-tree-usage": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command choose-client: too many arguments (need at most 1)\n"
+    }
+  },
+  "main": {
+    "refresh-missing-argument": {
+      "exit": 2,
+      "stdout": "",
+      "stderr": "command refresh-client: -r expects an argument\n"
+    },
+    "lock-server-arity": {
+      "exit": 2,
+      "stdout": "",
+      "stderr": "command lock-server: too many arguments (need at most 0)\n"
+    },
+    "lock-server-unknown-flag": {
+      "exit": 2,
+      "stdout": "",
+      "stderr": "command lock-server: unknown flag -t\n"
+    },
+    "lock-session-arity": {
+      "exit": 2,
+      "stdout": "",
+      "stderr": "command lock-session: too many arguments (need at most 0)\n"
+    },
+    "lock-client-arity": {
+      "exit": 2,
+      "stdout": "",
+      "stderr": "command lock-client: too many arguments (need at most 0)\n"
+    },
+    "lock-client-missing-argument": {
+      "exit": 2,
+      "stdout": "",
+      "stderr": "command lock-client: -t expects an argument\n"
+    },
+    "client-tree-unknown-flag": {
+      "exit": 2,
+      "stdout": "",
+      "stderr": "command choose-client: unknown flag -Q\n"
+    },
+    "client-tree-usage": {
+      "exit": 2,
+      "stdout": "",
+      "stderr": "command choose-client: too many arguments (need at most 1)\n"
+    }
+  },
+  "candidate": {
+    "refresh-missing-argument": {
+      "exit": 2,
+      "stdout": "",
+      "stderr": "command refresh-client: -r expects an argument\n"
+    },
+    "lock-server-arity": {
+      "exit": 2,
+      "stdout": "",
+      "stderr": "command lock-server: too many arguments (need at most 0)\n"
+    },
+    "lock-server-unknown-flag": {
+      "exit": 2,
+      "stdout": "",
+      "stderr": "command lock-server: unknown flag -t\n"
+    },
+    "lock-session-arity": {
+      "exit": 2,
+      "stdout": "",
+      "stderr": "command lock-session: too many arguments (need at most 0)\n"
+    },
+    "lock-client-arity": {
+      "exit": 2,
+      "stdout": "",
+      "stderr": "command lock-client: too many arguments (need at most 0)\n"
+    },
+    "lock-client-missing-argument": {
+      "exit": 2,
+      "stdout": "",
+      "stderr": "command lock-client: -t expects an argument\n"
+    },
+    "client-tree-unknown-flag": {
+      "exit": 2,
+      "stdout": "",
+      "stderr": "command choose-client: unknown flag -Q\n"
+    },
+    "client-tree-usage": {
+      "exit": 2,
+      "stdout": "",
+      "stderr": "command choose-client: too many arguments (need at most 1)\n"
+    }
+  }
+}
+All eight shared-fixture failures reproduce on clean e40a13e1: exact stdout/stderr, main and candidate exit 2 versus pin exit 1
+
+exit_status: 0

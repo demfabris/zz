@@ -1,0 +1,6 @@
+{
+  "base": "e40a13e1c981aa9b707a5a6a54f5e0267c751de9",
+  "old_tip": "98c5f77d05fb1d3eca02387dbbdd4d3bfbc35f5f",
+  "rebased_tip": "204c7975da35bcd613b723de3b9363389cf15137",
+  "resolution": "Removed duplicate bare-ID lookup blocks; kept both tests unchanged; regenerated gaps.md."
+}

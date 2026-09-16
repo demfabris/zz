@@ -1,0 +1,13 @@
+{
+  "main_corpus": 1,
+  "fixture_1": 1,
+  "fixture_2": 1,
+  "fixture_3": 1,
+  "13-self-check": 0,
+  "14-attached-client": 1,
+  "15-capture-probe": 0,
+  "16-lock-probe": 0,
+  "17-rich-transports": 0,
+  "18-claims-015": 1,
+  "19-claims-017": 1
+}

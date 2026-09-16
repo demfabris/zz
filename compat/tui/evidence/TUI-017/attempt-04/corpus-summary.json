@@ -1,0 +1,2034 @@
+{
+  "selected": 163,
+  "completed": 163,
+  "missing": [],
+  "failed": [
+    "show-options-hooks.txt",
+    "smoke/alias-group-forgery.txt",
+    "smoke/args-parse-choosers.txt",
+    "smoke/cli-chain-parse-abort.txt",
+    "smoke/command-flag-errors.txt",
+    "smoke/daemon-invalid-flags.txt",
+    "smoke/jobs-command-environment.txt",
+    "smoke/plugin-runtime-resurrect-restore.txt",
+    "smoke/positional-maximums.txt",
+    "smoke/positional-minimums.txt",
+    "smoke/source-replay-diagnostics.txt",
+    "smoke/split-window-wait.txt",
+    "smoke/status-background-jobs.txt"
+  ],
+  "rows": {
+    "alerts.txt": {
+      "summary": {
+        "steps": "62",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "break-pane.txt": {
+      "summary": {
+        "steps": "30",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "capture-pane.txt": {
+      "summary": {
+        "steps": "34",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "census-hooks.txt": {
+      "summary": {
+        "steps": "152",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "command-alias.txt": {
+      "summary": {
+        "steps": "16",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "command-item-format.txt": {
+      "summary": {
+        "steps": "125",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "format-window-cell-metrics.txt": {
+      "summary": {
+        "steps": "8",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "formats-values.txt": {
+      "summary": {
+        "steps": "45",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "list-sort-filter.txt": {
+      "summary": {
+        "steps": "12",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "micro-flags.txt": {
+      "summary": {
+        "steps": "17",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "mru-activity.txt": {
+      "summary": {
+        "steps": "11",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "native-prefix-isolation.txt": {
+      "summary": {
+        "steps": "29",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "new-session-environment.txt": {
+      "summary": {
+        "steps": "18",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "pane-border-span-owner.txt": {
+      "summary": {
+        "steps": "10",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "pane-exact-target-prefix.txt": {
+      "summary": {
+        "steps": "31",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "pane-spawn-options.txt": {
+      "summary": {
+        "steps": "25",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "send-keys-reset.txt": {
+      "summary": {
+        "steps": "16",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "show-options-hooks.txt": {
+      "summary": {
+        "steps": "34",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "7",
+        "warn_divergences": "0"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-lock-command \"lock -np\"",
+        "+lock-command vlock",
+        "-lock-command \"lock -np\"",
+        "+lock-command vlock",
+        "-lock -np",
+        "+vlock",
+        "-lock-command* \"lock -np\"",
+        "+lock-command* vlock",
+        "-lock-command \"lock -np\"",
+        "+lock-command vlock",
+        "-lock-command \"lock -np\"",
+        "+lock-command vlock",
+        "-lock -np",
+        "+vlock"
+      ]
+    },
+    "smoke/alias-group-forgery.txt": {
+      "summary": {
+        "steps": "7",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "0"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-FORGERY_CLI=status=2 out= err=unknown command: __zz-command-alias-group|",
+        "+FORGERY_CLI=status=1 out= err=unknown command: __zz-command-alias-group|"
+      ]
+    },
+    "smoke/args-parse-bind-key.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/args-parse-choosers.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "0"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-ARGS_PARSE_CHOOSERS=failed:zz-side-only:direct-buffer-arity,direct-tree-arity",
+        "+ARGS_PARSE_CHOOSERS=clean:26"
+      ]
+    },
+    "smoke/args-parse-command-prompt.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/args-parse-confirm-before.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/args-parse-display-menu.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/args-parse-display-panes.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/args-parse-if-shell.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/args-parse-run-shell.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/args-parse-set-hook.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/args-parse-set-option.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/buffer-clipboard-write.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/buffer-standard-streams.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/cheap-flags.txt": {
+      "summary": {
+        "steps": "22",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/chooser-buffer-confirm-flag.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/chooser-buffer-vocabulary.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/chooser-kill-keys.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/chooser-kill-on-exit.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/chooser-row-flags.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/chooser-tree-vocabulary.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/clear-history-hyperlinks.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/cli-chain-parse-abort.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "0"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-CLI_PARSE_ABORT=broken",
+        "+CLI_PARSE_ABORT=clean:6"
+      ]
+    },
+    "smoke/cli-output-bytes.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/client-exit-actions.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/client-non-utf8-cwd.txt": {
+      "summary": {
+        "steps": "4",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/client-resized-context.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/client-utf8-sanitizer.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/command-flag-errors.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-unknown variable: COMMAND_FLAG_ERRORS"
+      ]
+    },
+    "smoke/command-prompt-chain.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/command-prompt-editing.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/command-prompt-target.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/config-alias-parse-unit.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/config-chain-parse-abort.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/config-discovery-explicit.txt": {
+      "summary": {
+        "steps": "13",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/config-discovery-launcher.txt": {
+      "summary": {
+        "steps": "12",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/config-discovery.txt": {
+      "summary": {
+        "steps": "12",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/config-grammar.txt": {
+      "summary": {
+        "steps": "17",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/config-non-utf8-byte-matrix.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/config-non-utf8-file-bytes.txt": {
+      "summary": {
+        "steps": "8",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/continuum-init.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/control-alias-prepare.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/control-eof-drain.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/control-hard-loss.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/control-notify.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/control-tilde-environment.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/copy-mode-command-errors.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/copy-mode-copy-line.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/copy-mode-formats.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/copy-mode-kill-on-exit.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/copy-mode-mode-keys-tail.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/copy-mode-mode-keys.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/copy-mode-prompt-bindings.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/copy-mode-refresh.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/copy-mode-search.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/copy-mode-source-pane.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/copy-selection-clipboard-bytes.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/daemon-invalid-flags.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-unknown variable: DAEMON_INVALID_FLAGS"
+      ]
+    },
+    "smoke/default-client-command.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/display-menu-action-queue.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/display-menu-cell-layout.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/display-menu-mouse.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/display-menu-paste.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/display-menu-resize-lifecycle.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/display-menu-shortcut-grammar.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/display-menu-style-refresh.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/display-message-client-aliases.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/display-panes-template.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/display-popup-drag.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/display-popup-kitty-noresize.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/display-popup-kitty.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/display-popup-menu-policy.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/display-popup-menu.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/display-popup-resize-lifecycle.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/display-popup-style-refresh.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/display-popup-to-pane.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/environment-bytes.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/fixture-conf.txt": {
+      "summary": {
+        "steps": "5",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/focus-follows-mouse.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/format-client-loop-context.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/format-environment-loop-context.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/format-listing.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/format-modifier-client-loop.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/format-modifier-environment-loop.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/format-modifier-interrogate.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/format-monitor-hooks.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/format-pane-process.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/format-pane-progress.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/format-trace.txt": {
+      "summary": {
+        "steps": "29",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/format-window-bigger.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/fpp-init.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/hooks-pane-focus-clients.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/hooks-pane-focus.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/jobs-command-environment.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "2"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-jobs-command-environment-zz: positive-destroyed",
+        "-jobs-command-environment-zz: positive-missing",
+        "-unknown variable: JOBS_COMMAND_ENVIRONMENT"
+      ]
+    },
+    "smoke/jobs-display-popup-environment.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/jobs-shell-job-cwd.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/keys-prefix-attached.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/keys-prefix-remainder.txt": {
+      "summary": {
+        "steps": "6",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/keys-prefix-stock.txt": {
+      "summary": {
+        "steps": "40",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/keys-shift-attached.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/keys-table-lifecycle.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/kill-filters.txt": {
+      "summary": {
+        "steps": "17",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/launcher-installed-layout.txt": {
+      "summary": {
+        "steps": "7",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/oh-my-tmux.txt": {
+      "summary": {
+        "steps": "15",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/own-conf.txt": {
+      "summary": {
+        "steps": "6",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/pane-border-indicators.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/pane-border-lines.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/pane-border-status.txt": {
+      "summary": {
+        "steps": "34",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/pane-border-zorder.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/pane-colours-palette.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/pane-engine-knobs-input.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/pane-engine-knobs.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/pane-runtime-facts.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/pane-tmux-path.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/plugin-runtime-continuum.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/plugin-runtime-fpp.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/plugin-runtime-oh-my-tmux.txt": {
+      "summary": {
+        "steps": "4",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/plugin-runtime-resurrect-restore.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-RESTORE_AFTER=0|ALPHA|<DIR>/alpha",
+        "-1|BETA|<DIR>/beta",
+        "+AssertionError(('0|ALPHA|<DIR>/alpha\\n1|BETA|<DIR>/beta', '0|demfabris@alienware:~/resurrect-restore-tmux/alpha|<DIR>/alpha\\n1|demfabris@alienware:~/resurrect-restore-tmux/beta|<DIR>/beta'))",
+        "-ZZ_RESURRECT_RESTORE=clean:two-panes-restored",
+        "+ZZ_RESURRECT_RESTORE=failed:tmux-side-only"
+      ]
+    },
+    "smoke/plugin-runtime-tpm-install.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/plugin-runtime-vim-tmux-navigator.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/plugin-runtime-yank.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/positional-maximums.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-unknown variable: POSITIONAL_MAXIMUMS"
+      ]
+    },
+    "smoke/positional-minimums.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-unknown variable: POSITIONAL_MINIMUMS"
+      ]
+    },
+    "smoke/refresh-status.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/remain-on-exit-format.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/resurrect-init.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/resurrect-save.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/send-keys-client-selection.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/send-keys-control.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/send-keys-inject.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/sensible.txt": {
+      "summary": {
+        "steps": "6",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/source-file-byte-name.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/source-file-control.txt": {
+      "summary": {
+        "steps": "12",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/source-file-depth.txt": {
+      "summary": {
+        "steps": "4",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/source-file-diagnostics.txt": {
+      "summary": {
+        "steps": "12",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/source-file-tilde.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/source-replay-diagnostics.txt": {
+      "summary": {
+        "steps": "60",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "0"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:124,stderr:_,events:",
+        "+SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:1,stderr:_,events:0:end:_;0:end:_;0:end:_;0:end:_;raw:<CONFIRM_CHILD>:1: syntax error;0:end:CONFIRM_CHILD_LATER;0:end:CONFIRM_INNER_AFTER;0:end:CONFIRM_OUTER_AFTER"
+      ]
+    },
+    "smoke/split-window-wait.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-parked returned=[] panes=1",
+        "+parked returned=[] panes=2"
+      ]
+    },
+    "smoke/status-background-jobs.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "1",
+        "warn_divergences": "1"
+      },
+      "failed": true,
+      "difference_lines": [
+        "-AssertionError(('first drawn expansion is empty', b'\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n[]\\n'))",
+        "+status jobs: attach below 1.5s; shared job; slow output; cached output; interval rerun",
+        "+status jobs: window and pane loops each key one job per looped item",
+        "+status jobs: long cached output retains TAIL on both binaries",
+        "+status jobs: drawn DATE changes at seconds 1, 3, 5 and 7 with interval 2",
+        "-ZZ_STATUS_BACKGROUND_JOBS=failed:zz-side-only",
+        "+ZZ_STATUS_BACKGROUND_JOBS=clean:9"
+      ]
+    },
+    "smoke/status-keys-editor-default.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/terminal-facts.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/tpm-init.txt": {
+      "summary": {
+        "steps": "5",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/tui-client-input-backpressure.txt": {
+      "summary": {
+        "steps": "2",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/vim-tmux-navigator.txt": {
+      "summary": {
+        "steps": "8",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "smoke/yank.txt": {
+      "summary": {
+        "steps": "3",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    },
+    "targets.txt": {
+      "summary": {
+        "steps": "20",
+        "topo_divergences": "0",
+        "geo_divergences": "0",
+        "fmt_divergences": "0",
+        "out_divergences": "0",
+        "warn_divergences": "0"
+      },
+      "failed": false,
+      "difference_lines": []
+    }
+  }
+}

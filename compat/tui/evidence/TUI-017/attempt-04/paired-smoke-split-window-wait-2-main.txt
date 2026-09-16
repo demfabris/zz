@@ -1,0 +1,61 @@
+command: ["/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-reconciled-main-src/compat/run.sh", "smoke/split-window-wait"]
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-c11-capture-fix/target/capture-12-reconciled-main-build/debug/zz
+[1;36m==>[0m running smoke/split-window-wait
+smoke/split-window-wait: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 1 WARN divergence(s)
+[1;36m==>[0m retrying smoke/split-window-wait alone
+smoke/split-window-wait: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| smoke/split-window-wait | 2 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Failed on the first pass and passed when re-run alone: smoke/split-window-wait
+
+[1;36m==>[0m partial run complete; full summary left unchanged
+[1;33mwarn:[0m smoke/split-window-wait failed; it is retried alone after the corpus
+    SMOKE STDOUT: divergence
+    --- zz SMOKE STDOUT step 1
+    +++ tmux SMOKE STDOUT step 1
+    @@ -9,5 +9,5 @@
+     hooked | AFTER
+     ordered rc=0 marker=present
+     ordered | AFTER
+    -parked returned=[] panes=1
+    +parked returned=[] panes=2
+     parked-after rc=0 panes=[%1]
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 2
+    COMMAND: out: show-environment -g SPLIT_WINDOW_WAIT
+    zz exit: 0
+    tmux exit: 0
+    zz stderr:
+        <empty>
+    tmux stderr:
+        <empty>
+    zz stdout:
+        SPLIT_WINDOW_WAIT=reached-end
+    tmux stdout:
+        SPLIT_WINDOW_WAIT=reached-end
+    OUT: clean
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=1
+
+exit_status: 0

@@ -1,0 +1,10 @@
+{
+  "time": "2026-09-16T16:20:50.395050+00:00",
+  "base": "be5709dfcd9936d44519683e5da8dc6ab7748d96",
+  "rebased_tip": "f0b70b7cc3b5de399efc1ea0222dff0201d978b0",
+  "os": "Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux",
+  "binary_sha256": "ecbce2249bb307a4467fd0b94c712bf58405acfc859d1c79d250e064b16895f5",
+  "tmux_sha256": "df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5",
+  "tmux_pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
+  "note": "Initial build overlapped first local edits: target resolver fixes were already present, capture fixes were not. This is not a pristine rebased baseline. Detached 100-column attempts are invalid for terminal-grid extent; use two-attached-client probe instead."
+}

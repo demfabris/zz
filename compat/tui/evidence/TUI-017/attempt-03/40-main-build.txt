@@ -1,0 +1,19 @@
+command: ["env", "CARGO_TARGET_DIR=/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-build", "/tmp/zz-cargo.sh", "build", "--manifest-path", "/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-src/Cargo.toml", "-p", "zz"]
+   Compiling libghostty-vt-sys v0.2.1 (/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-src/third_party/rust/libghostty-vt-sys)
+   Compiling cef-dll-sys v152.2.0+152.0.6
+   Compiling cef v152.2.0+152.0.6
+   Compiling zz v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-src/crates/zz)
+   Compiling libghostty-vt v0.2.1 (https://github.com/uzaaft/libghostty-rs?rev=46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0#46a9d2ac)
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-src/crates/zz-terminal)
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-src/crates/zz-protocol)
+   Compiling zz-client v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-src/crates/zz-client)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-src/crates/zz-mux)
+   Compiling zz-browser v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-src/crates/zz-browser)
+   Compiling zz-chrome-import v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-src/crates/zz-chrome-import)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-src/crates/zz-daemon)
+   Compiling zz-ui v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-src/crates/zz-ui)
+   Compiling zz-config v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-src/crates/zz-config)
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-src/crates/zz-tui)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4m 56s
+
+exit_status: 0

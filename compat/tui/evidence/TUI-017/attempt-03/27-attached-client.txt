@@ -1,0 +1,5 @@
+command: ["env", "ZZ_BIN=/home/demfabris/dev/zz-c11-capture-fix/target/debug/zz", "ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-capture-fix/target/debug/zz", "compat/attached-client.sh"]
+usage: compat/attached-client.sh [--command-output|--lifecycle] [ZZ_BIN [TMUX_BIN]]
+       ZZ_BIN=path TMUX_BIN=path compat/attached-client.sh
+
+exit_status: 2

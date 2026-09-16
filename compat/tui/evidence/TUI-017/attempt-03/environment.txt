@@ -1,0 +1,16 @@
+{
+  "time": "2026-09-16T16:31:59.990261+00:00",
+  "base": "be5709dfcd9936d44519683e5da8dc6ab7748d96",
+  "source_revision": "d7fdf52b11513866960098d18e677aab0cd95bc6",
+  "branch": "campaign/tui-capture-12",
+  "os": "Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux",
+  "shell": "GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)",
+  "TERM": "xterm-ghostty",
+  "fixture_geometry": "80x24 outer; rich scenes 80x24; probe two attached clients at 80x24 and 100x30 plus resize",
+  "binary_sha256": "a88addc05e59285d01174f9e3859231c362a43c97d224ae8a196a8356bfbcf5c",
+  "tmux_sha256": "df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5",
+  "tmux_pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
+  "dirty_fixture_sha256": "42611839481edbfccc4ae9b61f432ec701d568b2e1659ea2d2fcd9323074166d",
+  "dirty_status": " M compat/tui-client-commands.sh\n?? compat/tui/evidence/TUI-015/attempt-02/\n?? compat/tui/evidence/TUI-017/attempt-03/\n",
+  "cargo": "Every invocation enters /tmp/zz-cargo.sh; default 5G cap, 3G swap, three jobs; builds 7G and four jobs; shared two-slot flock."
+}

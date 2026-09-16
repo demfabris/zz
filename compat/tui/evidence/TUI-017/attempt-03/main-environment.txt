@@ -1,0 +1,7 @@
+{
+  "source_revision": "be5709dfcd9936d44519683e5da8dc6ab7748d96",
+  "source": "/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-src",
+  "binary": "/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-build/debug/zz",
+  "sha256": "bd379dda5bade73e712dfd0c940e5e3474732316eaa789530737f84f2ec1e076",
+  "source_files_checked_against_git": true
+}

@@ -1,0 +1,7 @@
+2026-09-16T17:20:28.468707+00:00
+{"pid": 2419712, "cgroup": "/user.slice/user-1000.slice/user@1000.service/app.slice/run-p2113824-i2114794.scope", "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0", "memory.current": "105390080", "memory.peak": "1143623680", "memory.max": "2147483648"}
+Process already exited: 2426119
+compat/results/.smoke-display-menu-cell-layout.0iLKRf/home/display-menu-cell-layout-work-zz
+failures b'overlong\ndrive-3\ndrive-4\nhidden-annotation\nhidden-annotation-exit\ndrive-5\ndrive-6\nshown-annotation\nshown-annotation-exit\ndrive-7\ndrive-8\nnarrow-client\nnarrow-client-exit\ndrive-9\ndrive-10\n'
+attach.out b''
+steps ['ack-1', 'ack-2', 'step-1', 'step-10', 'step-2', 'step-3', 'step-4', 'step-5', 'step-6', 'step-7', 'step-8', 'step-9']

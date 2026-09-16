@@ -1,0 +1,16 @@
+command: ["env", "HOME=/tmp/zz-emptyhome", "XDG_CONFIG_HOME=/tmp/zz-emptyhome/config", "target/debug/deps/format_modifier_environment_loop-d8c8300b70ce463e"]
+
+running 8 tests
+test the_default_and_the_session_flag_walk_the_sessions_own_store ... ok
+test an_emptied_session_store_produces_no_rows_while_the_global_one_keeps_its_own ... ok
+test nested_and_malformed_environment_loops_keep_the_pinned_fallback ... ok
+test hidden_and_removed_entries_keep_their_rows ... ok
+test the_row_formats_stay_empty_outside_a_loop ... ok
+test an_unspelled_flag_word_leaves_no_store_and_no_rows ... ok
+test each_flag_word_reads_its_own_store_when_the_names_collide ... ok
+test the_client_store_is_the_invoking_clients_own_environment ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.39s
+
+
+exit_status: 0

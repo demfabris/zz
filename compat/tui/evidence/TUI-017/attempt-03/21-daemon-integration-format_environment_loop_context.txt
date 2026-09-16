@@ -1,0 +1,13 @@
+command: ["env", "HOME=/tmp/zz-emptyhome", "XDG_CONFIG_HOME=/tmp/zz-emptyhome/config", "target/debug/deps/format_environment_loop_context-6d536d475b53c4e1"]
+
+running 5 tests
+test none_of_the_six_formats_answer_outside_a_loop ... ok
+test each_row_reports_its_own_entry_and_its_position ... ok
+test hidden_and_removed_entries_report_their_own_flags ... ok
+test the_global_and_client_stores_carry_the_same_six_formats ... ok
+test a_nested_loop_owns_the_row_formats_only_while_its_rows_run ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.68s
+
+
+exit_status: 0

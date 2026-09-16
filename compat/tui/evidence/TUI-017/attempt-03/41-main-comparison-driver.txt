@@ -1,0 +1,4 @@
+command: ["python3", "compat/tui/evidence/TUI-017/attempt-03/main-comparison.py"]
+{"label": "41-main-corpus", "command": ["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=2G", "-p", "MemorySwapMax=1G", "env", "ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-build/debug/zz", "ZZ_COMPAT_TMUX=/home/demfabris/dev/zz-c11-capture-fix/compat/.cache/tmux-src/tmux", "ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz-c11-capture-fix/compat/.cache/plugins", "/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-src/compat/run.sh", "smoke/chooser-tree-vocabulary", "smoke/display-menu-mouse", "smoke/alias-group-forgery"], "start": "2026-09-16T17:16:16.621818+00:00", "end": "2026-09-16T17:22:06.796087+00:00", "exit_status": 1}
+
+exit_status: 1

@@ -1,0 +1,8 @@
+command: python3 compat/tui/evidence/TUI-017/attempt-03/delta-batches.py 1844441
+Traceback (most recent call last):
+  File "/home/demfabris/dev/zz-c11-capture-fix/compat/tui/evidence/TUI-017/attempt-03/delta-batches.py", line 21, in <module>
+    assert len(selected) == 163, len(selected)
+           ^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0
+exit_status: 1
+The selection lists relative paths. The corrected driver joins them to compat/scenarios.

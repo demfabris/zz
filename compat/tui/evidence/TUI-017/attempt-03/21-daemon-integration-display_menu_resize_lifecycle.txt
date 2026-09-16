@@ -1,0 +1,9 @@
+command: ["env", "HOME=/tmp/zz-emptyhome", "XDG_CONFIG_HOME=/tmp/zz-emptyhome/config", "target/debug/deps/display_menu_resize_lifecycle-4f911bec639b1157"]
+
+running 1 test
+test a_resize_moves_the_menu_and_keeps_everything_else ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.95s
+
+
+exit_status: 0

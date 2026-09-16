@@ -1,0 +1,15 @@
+   Compiling libghostty-vt v0.2.1 (https://github.com/uzaaft/libghostty-rs?rev=46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0#46a9d2ac)
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-terminal)
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-mux)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 49.43s
+     Running unittests src/lib.rs (target/debug/deps/zz_daemon-7a6e412177cab2ac)
+
+running 3 tests
+test daemon::tests::capture_pane_parser_rejects_unimplemented_flags ... ok
+test daemon::tests::capture_pane_parser_supports_history_mode_and_wrapped_output ... ok
+test daemon::tests::capture_pane_routes_stdout_buffers_and_reversed_ranges_like_tmux ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 934 filtered out; finished in 0.21s
+

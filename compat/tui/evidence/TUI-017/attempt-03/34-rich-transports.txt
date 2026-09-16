@@ -1,0 +1,89 @@
+command: ["bash", "compat/tui/evidence/TUI-017/attempt-03/rich-transports-probe.sh"]
+THE PIN, measured 2026-09-16 on a 40x8 pane holding a plain row, an OSC 8 row and a red row.
+
+===== pin capture-pane -p -C -S 0 -E 6
+$ printf 'plain\\n'$
+plain$
+$ printf '\\033]8;id=zzid;https://example$
+.com/a\\033\\\\LINK\\033]8;;\\033\\\\\\n'$
+LINK$
+$ printf '\\033[31mRED\\033[0m\\n'$
+RED$
+===== pin capture-pane -p -F -S 0 -E 6
+- $ printf 'plain\n'$
+- plain$
+W $ printf '\033]8;id=zzid;https://example$
+- .com/a\033\\LINK\033]8;;\033\\\n'$
+HX LINK$
+- $ printf '\033[31mRED\033[0m\n'$
+- RED$
+===== pin capture-pane -p -H -S 0 -E 6
+https://example.com/a$
+===== pin capture-pane -p -L -S 0 -E 6
+0 $ printf 'plain\n'$
+1 plain$
+2 $ printf '\033]8;id=zzid;https://example$
+3 .com/a\033\\LINK\033]8;;\033\\\n'$
+4 LINK$
+5 $ printf '\033[31mRED\033[0m\n'$
+6 RED$
+===== pin capture-pane -p -P -S 0 -E 6
+$
+===== pin capture-pane -p -R (head, then the line count)
+G 40x8 (0/2000)$
+^IL 0 (0) flags=NONE[0] 18/20$
+^I^IC 0,0 data=(1,1,$) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE$
+^I^IC 0,1 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE$
+lines: 329
+
+ZZ AT THIS LANDING: -C and -L answer, the other four refuse.
+===== zz capture-pane -p -C -S 0 -E 6
+$ printf 'plain\\n'$
+plain$
+$ printf '\\033]8;id=zzid;https://example.com/a\\033\\\\LINK\\033]8;;\\033\\\\\\n'$
+LINK$
+$ printf '\\033[31mRED\\033[0m\\n'$
+RED$
+$$
+===== zz capture-pane -p -F -S 0 -E 6
+unsupported command: capture-pane -F$
+===== zz capture-pane -p -H -S 0 -E 6
+unsupported command: capture-pane -H$
+===== zz capture-pane -p -L -S 0 -E 6
+0 $ printf 'plain\n'$
+1 plain$
+2 $ printf '\033]8;id=zzid;https://example.com/a\033\\LINK\033]8;;\033\\\n'$
+3 LINK$
+4 $ printf '\033[31mRED\033[0m\n'$
+5 RED$
+6 $$
+===== zz capture-pane -p -P -S 0 -E 6
+unsupported command: capture-pane -P$
+===== zz capture-pane -p -R -S 0 -E 6
+unsupported command: capture-pane -R$
+
+WHY -H CANNOT BE ANSWERED: on the row the pin marks HX, a zz -e capture
+carries no OSC 8 at all, so the retained snapshot did not keep the link.
+--- pin -F, the flag column only
+- $
+- p
+W $
+- .
+HX 
+- $
+- R
+--- pin -e of that row
+^[]8;id=zzid;https://example.com/a^[\LINK^[]8;;^[\$
+--- zz -e of that row
+LINK$
+
+A SECOND MEASUREMENT FOR CLAUSE 2, beyond the one trailing cell it names:
+compare the -e colour spelling on a coloured row.
+--- pin
+$ printf '\033[31mRED\033[0m\n'$
+^[[31mRED^[[39m$
+--- zz
+$ printf '\033[31mRED\033[0m\n'$
+^[[31mRED^[[39m$
+
+exit_status: 0

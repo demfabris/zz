@@ -1057,7 +1057,7 @@
       "title": "A lock surface a client can draw",
       "milestone": "breadth",
       "priority": 15,
-      "status": "active",
+      "status": "review",
       "depends_on": [],
       "tmux_gaps": [
         "options.lock-program"
@@ -1072,15 +1072,36 @@
         "crates/zz-mux/src/model.rs",
         "compat/tui/verify-claims.py",
         "compat/tui/evidence/TUI-015/attempt-01/notes.md",
-        "compat/tui/evidence/TUI-015/attempt-01/environment.txt"
+        "compat/tui/evidence/TUI-015/attempt-01/environment.txt",
+        "compat/tui/evidence/TUI-015/attempt-02/notes.md",
+        "compat/tui/evidence/TUI-015/attempt-02/environment.txt"
       ],
       "acceptance": [
         "Record the decision that zz delegates locking to the OS session rather than drawing a lock surface of its own, with the measurement behind it: the pin spawns lock-command onto the client's tty because its server owns that terminal, and zz's daemon publishes frames its clients draw, so there is no terminal to spawn onto and a desktop window running lock -np has no meaning. Keep the decision in knowledge/designs/tui-parity.md and in the options.lock-program gap.",
         "Keep lock-client, lock-server and lock-session answering exactly what the pin answers: stdout, stderr, exit status, target validation and the after-lock-server hook, which compat/tui-client-commands.sh asserts. lock-after-time and lock-command stay accepted options that arm nothing, named as such rather than silently ignored."
       ],
-      "evidence_note": "FIX PASS 2026-09-15 AFTER REJECT, rebased onto origin/main 7e7cb1ee. ACTIVE. Clause 1 keeps fabrico's OS-session locking decision, and all five historical lock screen records now start DECIDED and carry the required 2026-09-14 sentence. Clause 2 asserts the CLI, arity, options, default session:window.pane grammar, exact-prefix handling, pane IDs and positive/negative after-lock-server behavior. lock-session, has-session and list-windows now name the same missing target component as the pin. The negative assertions clear the marker before each successful session/client lock and read it back empty; one-sided hook and target sabotages test the comparisons. Three owned records remain: with pane-base-index=1, =cli:win.1 succeeds on the pin but zz rejects pane 1. Configured pane indices live in CommandEngine and require plumbing beyond the authorized resolve_named_session-only excursion, so clause 2 stays open without a decision waiver. Fixture summary: 'all 168 asserted comparisons identical, 30 recorded not asserted (0 for a sibling lane, owners TUI-014=6 TUI-015=3 TUI-017=1 decided:TUI-015=5 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0)'. Zone excursions: crates/zz-mux/src/model.rs (resolve_named_session grammar, private TargetSlot::Session entry classification, and unit tests), compat/tui/verify-claims.py (retained TUI-015 fixture mapping), plus the earlier knowledge/tmux/divergences.md and compat/scenarios/smoke/fixtures/command-flag-errors.sh. Historical count correction: five CLI/screen records and thirty lock assertions at edd593bb. Evidence: compat/tui/evidence/TUI-015/attempt-01/; the final report records post-commit proofs at the final tip. No proof block or TUI-011 change.",
-      "next_action": "Keep active until configured pane-base-index reaches the session-target resolver. Obtain the CommandEngine plumbing zone, make the three lock-target-base-index records assert, and rerun the fixture and its self-check plus the has-session/list-windows delta corpus. Do not count OS-lock screen decisions as open lock implementation work.",
-      "proof": null
+      "evidence_note": "CYCLE 12 FIX PASS 2026-09-16, rebased onto origin/main be5709df (v0.10.0). REVIEW, not verified. Session-only compound resolution accepts cli:= and =:, and an omitted session resolves absolute pane IDs globally. Explicit sessions still constrain panes, and window/pane fallback containment tests pass. The shared fixture adds nine target-command regressions and two negative-hook controls; exact-empty rejection and one-sided absolute-pane sabotages pass. lock-client now asserts all five channels with a status-row sabotage. Three pane-base-index records remain attributed to TUI-015 for the sibling lane. The final fixture and corpus measurements are retained in compat/tui/evidence/TUI-017/attempt-03. Main's existing exit-2 command-parse policy conflicts with eight unchanged exact-exit assertions; none is waived or converted to a record. The proof block identifies the worker candidate and pending independent review, not a completed obligation. PROTOCOL_VERSION remains 103; no serialized payload changes. Three final fixture runs agree: 8 of 186 asserted comparisons differ, 32 recorded (0 for a sibling lane, owners TUI-014=6 TUI-015=3 TUI-017=4 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0). All 18 added regressions pass; lock-client closes its attached-channel record. Self-check and attached-client pass. Both --run claim checks return 1 for the eight inherited assertion failures. Delta corpus: 163/163 completed, 13 final divergent rows, zero missing or geometry differences; eight of 21 initial failures pass on retry. Capture-pane and targets are clean. Main comparison proves the alias exit-status failure is inherited; other final corpus failures remain unclassified unless the evidence notes say otherwise. This is a partial worker delivery with all failures retained.",
+      "next_action": "Gate the target fixes after resolving the inherited CLI exit-policy failures. The sibling lane must close the three pane-base-index records; retain the OS-session locking decisions. Triage the thirteen final delta corpus failures listed in attempt-03/corpus-summary.json; do not treat them all as proven baseline failures.",
+      "proof": {
+        "revision": "24f660caa20db28c7827985870c9f10de605d5bc",
+        "tmux_commit": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
+        "environment": "Alienware Linux; pinned tmux; isolated HOME/XDG_CONFIG_HOME and sockets; 80x24 fixture; two-client 80x24/100x30 capture probe. See compat/tui/evidence/TUI-015/attempt-02/environment.txt.",
+        "commands": [
+          "compat/tui-client-commands.sh (three runs)",
+          "compat/tui-client-commands.sh --self-check",
+          "compat/attached-client.sh target/debug/zz compat/.cache/tmux-src/tmux",
+          "ZZ_COMPAT_ZZ=$PWD/target/debug/zz compat/run.sh --delta origin/main...HEAD --commands capture-pane,lock-session,lock-client,lock-server,has-session,list-windows",
+          "python3 compat/tui/verify-claims.py --run TUI-015"
+        ],
+        "artifacts": [
+          "compat/tui/evidence/TUI-015/attempt-02/notes.md",
+          "compat/tui/evidence/TUI-015/attempt-02/environment.txt",
+          "compat/tui/evidence/TUI-017/attempt-03/runs.jsonl",
+          "compat/tui/evidence/TUI-017/attempt-03/corpus-summary.json",
+          "compat/tui/evidence/TUI-017/attempt-03/corpus-retries.json"
+        ],
+        "review": "compat/tui/evidence/TUI-015/attempt-02/review.md"
+      }
     },
     {
       "id": "TUI-016",
@@ -1139,7 +1160,7 @@
       "title": "Rich capture transports and the snapshot residues",
       "milestone": "breadth",
       "priority": 17,
-      "status": "active",
+      "status": "review",
       "depends_on": [],
       "tmux_gaps": [
         "capture.rich-transports"
@@ -1152,15 +1173,36 @@
         "crates/zz-protocol/src/catalog.rs",
         "compat/tmux-gaps.json",
         "compat/tui/evidence/TUI-017/attempt-02/notes.md",
-        "compat/tui/evidence/TUI-017/attempt-02/environment.txt"
+        "compat/tui/evidence/TUI-017/attempt-02/environment.txt",
+        "compat/tui/evidence/TUI-017/attempt-03/notes.md",
+        "compat/tui/evidence/TUI-017/attempt-03/environment.txt"
       ],
       "acceptance": [
         "Answer capture-pane -C, -F, -H, -L, -P and -R with the pin's bytes over a rich snapshot the terminal worker owns, or keep each refusal with a measured reason that names the workload it would serve.",
         "Close the three text residues the roster measured: the default range printing every visible row rather than stopping at the last written one, -N keeping trailing spaces to the pane edge, and -M falling back to the pane when it is in no mode, plus the -a wording and the one trailing cell -e keeps."
       ],
-      "evidence_note": "FIX PASS 2026-09-15 AFTER REJECT, rebased onto origin/main 7e7cb1ee. ACTIVE. Numbered joined capture now uses physical row wrap flags instead of ANSI byte lengths: the 80x24 coloured 170-A scene retains rows 0, 1 and 2 and row 3 NEXT. Real negative-history and wrapped-row cases assert, with one-sided sabotages. Live styled capture now follows grid_string_cells_code for named foreground/background, bright colours, indexed colour 196, RGB, bold, underline and attribute removal; exact-byte fixtures and unit tests cover them. Clause 2's enumerated default-range, -N, -M fallback, -a and trailing-cell cases remain asserted. The four -F/-H/-P/-R refusals each start DECIDED, name their workload and carry verbatim the authorized 2026-09-15 decision sentence. Ghostty loses DEC charset provenance, measured as qqq or literal \\016qqq\\017 on the pin versus Unicode box drawing on zz; both charset records carry that authorized decision, while literal Unicode line drawing asserts. One owned divergence keeps clause 1 open: explicit indexed colour 1 becomes named 31 on zz because both share Palette(1). No decision waives this. Styled frozen-mode bytes remain outside the demonstrated live-grid fixes. Fixture summary: 'all 168 asserted comparisons identical, 30 recorded not asserted (0 for a sibling lane, owners TUI-014=6 TUI-015=3 TUI-017=1 decided:TUI-015=5 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0)'. Historical count correction: twelve new capture assertions at edd593bb; this fix adds twelve asserted rich scenes and three measured provenance records. Evidence: compat/tui/evidence/TUI-017/attempt-02/, including exact probe bytes; final-tip post-commit proofs are in the final report. No wire change or proof block.",
-      "next_action": "Keep active while capture-low-indexed-colour is charged to TUI-017. Retain original named-versus-indexed colour class in the terminal grid, then make that record assert with a one-sided sabotage. Preserve the six authorized capture decisions and the coloured-wrap NEXT regression. Do not infer exact styled frozen-mode bytes from the -M fallback tests.",
-      "proof": null
+      "evidence_note": "CYCLE 12 FIX PASS 2026-09-16, rebased onto origin/main be5709df (v0.10.0). REVIEW, not verified. Live styled capture separates text extent from retained erased backgrounds for -J/-T and emits default-coloured SpacerHead padding when allocated cells are captured. Four erased-background and three wide-wrap scenes assert, with a sabotage for each. Three ordinary tab records now cover trailing, internal and wide-text tabs; they share the engine-storage root of the existing TAB-cell residual and are not waived by the DEC charset decision. Indexed colour 1 remains recorded for the sibling lane. The final fixture and corpus measurements are retained in compat/tui/evidence/TUI-017/attempt-03. Main's existing exit-2 command-parse policy conflicts with eight unchanged exact-exit assertions; none is waived or converted to a record. The proof block identifies the worker candidate and pending independent review, not a completed obligation. PROTOCOL_VERSION remains 103; no serialized payload changes. The two-client probe compares 42 batch-scope results identically. It also retains eight TUI-017-owned probe-only differences for ordinary -e/-N captures of erased backgrounds at 100 columns (EL, ED, clear and scroll-region); these are not fixture assertions or counted flips. Three final fixture runs agree: 8 of 186 asserted comparisons differ, 32 recorded (0 for a sibling lane, owners TUI-014=6 TUI-015=3 TUI-017=4 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0). All 18 added regressions pass; lock-client closes its attached-channel record. Self-check and attached-client pass. Both --run claim checks return 1 for the eight inherited assertion failures. Delta corpus: 163/163 completed, 13 final divergent rows, zero missing or geometry differences; eight of 21 initial failures pass on retry. Capture-pane and targets are clean. Main comparison proves the alias exit-status failure is inherited; other final corpus failures remain unclassified unless the evidence notes say otherwise. This is a partial worker delivery with all failures retained.",
+      "next_action": "Gate the capture fixes after resolving the inherited CLI exit-policy failures. The sibling lane owns indexed colour 1. Preserve or reconstruct tab-cell provenance to close capture-tab-trailing, capture-tab-internal and capture-tab-wide; these remain ordinary TUI-017 work. Do not infer styled frozen-mode parity from live-grid or -M fallback tests. Investigate the eight 100-column ordinary erased-background probe differences retained under this owner. Triage the thirteen final delta corpus failures listed in attempt-03/corpus-summary.json; do not treat them all as proven baseline failures.",
+      "proof": {
+        "revision": "24f660caa20db28c7827985870c9f10de605d5bc",
+        "tmux_commit": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
+        "environment": "Alienware Linux; pinned tmux; isolated HOME/XDG_CONFIG_HOME and sockets; 80x24 fixture; two-client 80x24/100x30 capture probe. See compat/tui/evidence/TUI-017/attempt-03/environment.txt.",
+        "commands": [
+          "compat/tui-client-commands.sh (three runs)",
+          "compat/tui-client-commands.sh --self-check",
+          "compat/attached-client.sh target/debug/zz compat/.cache/tmux-src/tmux",
+          "ZZ_COMPAT_ZZ=$PWD/target/debug/zz compat/run.sh --delta origin/main...HEAD --commands capture-pane,lock-session,lock-client,lock-server,has-session,list-windows",
+          "python3 compat/tui/verify-claims.py --run TUI-017"
+        ],
+        "artifacts": [
+          "compat/tui/evidence/TUI-017/attempt-03/notes.md",
+          "compat/tui/evidence/TUI-017/attempt-03/environment.txt",
+          "compat/tui/evidence/TUI-017/attempt-03/runs.jsonl",
+          "compat/tui/evidence/TUI-017/attempt-03/corpus-summary.json",
+          "compat/tui/evidence/TUI-017/attempt-03/corpus-retries.json"
+        ],
+        "review": "compat/tui/evidence/TUI-017/attempt-03/review.md"
+      }
     },
     {
       "id": "TUI-018",

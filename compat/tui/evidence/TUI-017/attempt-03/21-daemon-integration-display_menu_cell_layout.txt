@@ -1,0 +1,15 @@
+command: ["env", "HOME=/tmp/zz-emptyhome", "XDG_CONFIG_HOME=/tmp/zz-emptyhome/config", "target/debug/deps/display_menu_cell_layout-93861d481b3114f2"]
+
+running 7 tests
+test a_disabled_row_never_annotates_its_key ... ok
+test an_empty_key_never_annotates ... ok
+test annotates_a_key_that_fits_a_quarter_of_the_room ... ok
+test annotates_a_wider_key_only_while_the_whole_name_still_fits_beside_it ... ok
+test drops_the_annotation_when_the_key_alone_fills_the_room ... ok
+test measuring_and_trimming_skip_style_runs_and_count_wide_cells ... ok
+test trims_an_overlong_name_from_the_left_and_marks_it ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+exit_status: 0

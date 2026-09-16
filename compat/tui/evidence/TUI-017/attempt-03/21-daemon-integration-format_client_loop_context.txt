@@ -1,0 +1,13 @@
+command: ["env", "HOME=/tmp/zz-emptyhome", "XDG_CONFIG_HOME=/tmp/zz-emptyhome/config", "target/debug/deps/format_client_loop_context-da9c87d448f1d03a"]
+
+running 5 tests
+test an_empty_roster_produces_no_positions_at_all ... ok
+test the_position_formats_stay_empty_outside_every_loop ... ok
+test one_client_is_index_zero_and_the_last_row ... ok
+test a_nested_loop_owns_the_position_only_while_its_rows_run ... ok
+test two_clients_count_from_zero_and_only_the_final_row_carries_the_flag ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.67s
+
+
+exit_status: 0

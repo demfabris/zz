@@ -1,0 +1,15 @@
+command: ["env", "HOME=/tmp/zz-emptyhome", "XDG_CONFIG_HOME=/tmp/zz-emptyhome/config", "target/debug/deps/format_modifier_client_loop-a1432b9bc2be418f"]
+
+running 7 tests
+test an_empty_roster_expands_the_loop_to_nothing ... ok
+test a_row_answers_only_for_its_own_client_and_leaks_nothing_outside_the_loop ... ok
+test an_unknown_order_letter_falls_back_to_the_name_order_without_reversing ... ok
+test client_loops_nest_and_each_level_keeps_its_own_row ... ok
+test reversal_negates_the_finished_comparison_including_the_name_tie_break ... ok
+test the_default_and_the_index_and_name_flags_all_order_by_client_name ... ok
+test the_time_flag_orders_by_activity_newest_first ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+exit_status: 0

@@ -1,0 +1,115 @@
+command: ["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=2G", "-p", "MemorySwapMax=1G", "env", "ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-build/debug/zz", "ZZ_COMPAT_TMUX=/home/demfabris/dev/zz-c11-capture-fix/compat/.cache/tmux-src/tmux", "ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz-c11-capture-fix/compat/.cache/plugins", "/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-src/compat/run.sh", "smoke/chooser-tree-vocabulary", "smoke/display-menu-mouse", "smoke/alias-group-forgery"]
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-build/debug/zz
+[1;36m==>[0m running smoke/chooser-tree-vocabulary
+smoke/chooser-tree-vocabulary: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/display-menu-mouse
+smoke/display-menu-mouse: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/alias-group-forgery
+smoke/alias-group-forgery: 7 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 0 WARN divergence(s)
+[1;33mwarn:[0m smoke/alias-group-forgery failed; it is retried alone after the corpus
+    OUT: divergence
+    --- zz OUT step 2
+    +++ tmux OUT step 2
+    @@ -1 +1 @@
+    -FORGERY_CLI=status=2 out= err=unknown command: __zz-command-alias-group|
+    +FORGERY_CLI=status=1 out= err=unknown command: __zz-command-alias-group|
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 3
+    COMMAND: out: show-environment -g FORGERY_CONFIG
+    zz exit: 0
+    tmux exit: 0
+    zz stderr:
+        <empty>
+    tmux stderr:
+        <empty>
+    zz stdout:
+        FORGERY_CONFIG=status=1 out=forgery.conf:2: unknown command: __zz-command-alias-group| err=
+    tmux stdout:
+        FORGERY_CONFIG=status=1 out=forgery.conf:2: unknown command: __zz-command-alias-group| err=
+    OUT: clean
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 4
+    COMMAND: out: show-environment -g FORGERY_CONTROL
+    zz exit: 0
+    tmux exit: 0
+    zz stderr:
+        <empty>
+    tmux stderr:
+        <empty>
+    zz stdout:
+        FORGERY_CONTROL=error=1 err=
+    tmux stdout:
+        FORGERY_CONTROL=error=1 err=
+    OUT: clean
+[1;36m==>[0m retrying smoke/alias-group-forgery alone
+smoke/alias-group-forgery: 7 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 0 WARN divergence(s)
+[1;33mwarn:[0m smoke/alias-group-forgery failed again alone; see /home/demfabris/dev/zz-c11-capture-fix/target/capture-12-main-src/compat/results/smoke/alias-group-forgery.log
+    OUT: divergence
+    --- zz OUT step 2
+    +++ tmux OUT step 2
+    @@ -1 +1 @@
+    -FORGERY_CLI=status=2 out= err=unknown command: __zz-command-alias-group|
+    +FORGERY_CLI=status=1 out= err=unknown command: __zz-command-alias-group|
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 3
+    COMMAND: out: show-environment -g FORGERY_CONFIG
+    zz exit: 0
+    tmux exit: 0
+    zz stderr:
+        <empty>
+    tmux stderr:
+        <empty>
+    zz stdout:
+        FORGERY_CONFIG=status=1 out=forgery.conf:2: unknown command: __zz-command-alias-group| err=
+    tmux stdout:
+        FORGERY_CONFIG=status=1 out=forgery.conf:2: unknown command: __zz-command-alias-group| err=
+    OUT: clean
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 4
+    COMMAND: out: show-environment -g FORGERY_CONTROL
+    zz exit: 0
+    tmux exit: 0
+    zz stderr:
+        <empty>
+    tmux stderr:
+        <empty>
+    zz stdout:
+        FORGERY_CONTROL=error=1 err=
+    tmux stdout:
+        FORGERY_CONTROL=error=1 err=
+    OUT: clean
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| smoke/chooser-tree-vocabulary | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-mouse | 3 | yes | 0 | yes | yes | yes |
+| smoke/alias-group-forgery | 7 | yes | 0 | yes | no | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+
+exit_status: 1

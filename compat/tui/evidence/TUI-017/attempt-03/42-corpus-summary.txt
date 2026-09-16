@@ -1,0 +1,17 @@
+command: ["python3", "compat/tui/evidence/TUI-017/attempt-03/summarize-corpus.py"]
+Delta corpus: 163/163 completed, 13 final divergent rows, 0 missing
+DIFF show-options-hooks.txt
+DIFF smoke/alias-group-forgery.txt
+DIFF smoke/args-parse-choosers.txt
+DIFF smoke/cli-chain-parse-abort.txt
+DIFF smoke/command-flag-errors.txt
+DIFF smoke/daemon-invalid-flags.txt
+DIFF smoke/jobs-command-environment.txt
+DIFF smoke/plugin-runtime-resurrect-restore.txt
+DIFF smoke/positional-maximums.txt
+DIFF smoke/positional-minimums.txt
+DIFF smoke/source-replay-diagnostics.txt
+DIFF smoke/split-window-wait.txt
+DIFF smoke/status-background-jobs.txt
+
+exit_status: 1

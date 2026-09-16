@@ -1,0 +1,10 @@
+command: ["env", "HOME=/tmp/zz-emptyhome", "XDG_CONFIG_HOME=/tmp/zz-emptyhome/config", "target/debug/deps/display_popup_resize_lifecycle-19750933db7850a5"]
+
+running 2 tests
+test a_borderless_popup_resizes_to_the_whole_viewport ... ok
+test a_resize_rebuilds_the_popup_from_what_it_asked_for ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.10s
+
+
+exit_status: 0

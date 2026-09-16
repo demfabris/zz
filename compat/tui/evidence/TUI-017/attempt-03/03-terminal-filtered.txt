@@ -1,0 +1,52 @@
+   Compiling serde_core v1.0.229
+   Compiling num-traits v0.2.19
+   Compiling serde v1.0.229
+   Compiling thiserror-impl v1.0.69
+   Compiling rustix v1.1.4
+   Compiling event-listener v5.4.2
+   Compiling proc-macro2-diagnostics v0.10.1
+   Compiling linux-raw-sys v0.12.1
+   Compiling smallvec v1.16.1
+   Compiling parking_lot_core v0.9.12
+   Compiling moxcms v0.8.1
+   Compiling int-enum v1.2.0
+   Compiling thiserror v1.0.69
+   Compiling filedescriptor v0.8.3
+   Compiling event-listener-strategy v0.5.4
+   Compiling concurrent-queue v2.5.0
+   Compiling futures-core v0.3.34
+   Compiling once_cell v1.21.4
+   Compiling tempfile v3.27.0
+   Compiling portable-pty v0.9.0
+   Compiling libghostty-vt v0.2.1 (https://github.com/uzaaft/libghostty-rs?rev=46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0#46a9d2ac)
+   Compiling async-channel v2.5.0
+   Compiling image v0.25.10
+   Compiling csscolorparser v0.8.4
+   Compiling parking_lot v0.12.5
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-terminal)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 28.96s
+     Running unittests src/terminal_core.rs (target/debug/deps/zz_terminal-64256977343f0158)
+
+running 4 tests
+test session::tests::live_styled_capture_keeps_sgr_and_uses_lf_between_rows ... ok
+test session::tests::styled_capture_preserves_default_padding_before_wide_wraps ... FAILED
+test session::tests::styled_capture_trims_erased_backgrounds_to_text_extent ... ok
+test session::tests::styled_capture_matches_pinned_colour_and_attribute_transitions ... ok
+
+failures:
+
+---- session::tests::styled_capture_preserves_default_padding_before_wide_wraps stdout ----
+
+thread 'session::tests::styled_capture_preserves_default_padding_before_wide_wraps' (1678189) panicked at crates/zz-terminal/src/session.rs:18413:17:
+assertion `left == right` failed
+  left: "\u{1b}[31mAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n界界\u{1b}[39mNEXT"
+ right: "\u{1b}[31mAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\u{1b}[39m\n\u{1b}[31m界界\u{1b}[39mNEXT"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    session::tests::styled_capture_preserves_default_padding_before_wide_wraps
+
+test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 277 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p zz-terminal --lib`

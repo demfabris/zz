@@ -1,0 +1,11 @@
+{
+  "binary_matches_measured": true,
+  "fixture_matches_measured": true,
+  "pin_matches_measured": true,
+  "wrapper_sha256": "3718ef3abf23b1bea91b5e1d0853e00d94442b6295bb596924a99d234d533cd9",
+  "wrapper_defaults_at_final_check": {
+    "CAP": "4G",
+    "SWAP": "2G",
+    "JOBS": "2"
+  }
+}

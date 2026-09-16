@@ -1,0 +1,10 @@
+command: ["env", "HOME=/tmp/zz-emptyhome", "XDG_CONFIG_HOME=/tmp/zz-emptyhome/config", "target/debug/deps/display_menu_shortcut_grammar-e9aa96eaec006b7d"]
+
+running 2 tests
+test a_disabled_row_carries_no_shortcut ... ok
+test display_menu_keeps_only_shortcuts_an_attached_client_can_press ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.26s
+
+
+exit_status: 0

@@ -1,0 +1,12 @@
+[
+  {
+    "path": "compat/tui/evidence/TUI-017/attempt-03/corpus-observations.jsonl",
+    "variable": "GITHUB_PERSONAL_ACCESS_TOKEN",
+    "occurrences": 2
+  },
+  {
+    "path": "compat/tui/evidence/TUI-017/attempt-03/corpus-observations.jsonl",
+    "variable": "CLAUDE_CODE_MESSAGING_TOKEN",
+    "occurrences": 1
+  }
+]

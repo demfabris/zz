@@ -1,0 +1,4 @@
+command: ["python3", "compat/wire-version.py"]
+wire-version: 103 matches v0.10.0 and the wire is unchanged
+
+exit_status: 0

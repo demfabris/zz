@@ -1,0 +1,13 @@
+    Blocking waiting for file lock on build directory
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-terminal)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 19.81s
+     Running unittests src/terminal_core.rs (target/debug/deps/zz_terminal-64256977343f0158)
+
+running 4 tests
+test session::tests::live_styled_capture_keeps_sgr_and_uses_lf_between_rows ... ok
+test session::tests::styled_capture_trims_erased_backgrounds_to_text_extent ... ok
+test session::tests::styled_capture_preserves_default_padding_before_wide_wraps ... ok
+test session::tests::styled_capture_matches_pinned_colour_and_attribute_transitions ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 277 filtered out; finished in 0.01s
+

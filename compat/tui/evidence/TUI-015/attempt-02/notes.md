@@ -24,3 +24,21 @@ Shared build, fixture, probe and validation artifacts live in
 That directory's notes document the initial mixed build, retained failed probes,
 and main's pre-existing exit-2 policy conflict. Those eight assertions remain red;
 this worker does not claim that the shared fixture is wholly green.
+
+## Repeated fixture result
+
+All three runs (22, 23, 24) return exit 1 with the same eight inherited failures:
+
+```text
+8 of 186 asserted comparisons differ, 32 recorded (0 for a sibling lane, owners TUI-014=6 TUI-015=3 TUI-017=4 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0)
+```
+
+All eighteen added regressions pass on all three runs. The one recorded-to-asserted
+flip is lock-client: its attached channels now assert too. Self-check passes
+(25, exit 0), and attached-client passes (29, exit 0). Both verify-claims runs
+(32 and 33) return exit 1 because the shared fixture is nonzero.
+
+The final delta corpus completes all 163 rows with 13 final divergent rows and
+zero missing rows. Capture-pane and targets pass. Eight of the 21 first-run
+failures pass on retry. The exact failure list and attribution limits are in
+TUI-017/attempt-03/notes.md and corpus-summary.json; this is a partial delivery.

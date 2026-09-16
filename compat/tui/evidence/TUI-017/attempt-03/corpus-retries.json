@@ -1,0 +1,36 @@
+{
+  "first_pass_failed": [
+    "show-options-hooks.txt",
+    "smoke/alias-group-forgery.txt",
+    "smoke/args-parse-choosers.txt",
+    "smoke/cli-chain-parse-abort.txt",
+    "smoke/command-flag-errors.txt",
+    "smoke/chooser-tree-vocabulary.txt",
+    "smoke/daemon-invalid-flags.txt",
+    "smoke/display-menu-mouse.txt",
+    "smoke/copy-mode-refresh.txt",
+    "smoke/display-menu-shortcut-grammar.txt",
+    "smoke/display-menu-cell-layout.txt",
+    "smoke/jobs-command-environment.txt",
+    "smoke/own-conf.txt",
+    "smoke/positional-maximums.txt",
+    "smoke/plugin-runtime-continuum.txt",
+    "smoke/plugin-runtime-oh-my-tmux.txt",
+    "smoke/positional-minimums.txt",
+    "smoke/plugin-runtime-resurrect-restore.txt",
+    "smoke/split-window-wait.txt",
+    "smoke/status-background-jobs.txt",
+    "smoke/source-replay-diagnostics.txt"
+  ],
+  "passed_on_retry": [
+    "smoke/chooser-tree-vocabulary.txt",
+    "smoke/display-menu-mouse.txt",
+    "smoke/copy-mode-refresh.txt",
+    "smoke/display-menu-shortcut-grammar.txt",
+    "smoke/display-menu-cell-layout.txt",
+    "smoke/own-conf.txt",
+    "smoke/plugin-runtime-continuum.txt",
+    "smoke/plugin-runtime-oh-my-tmux.txt"
+  ],
+  "retained_observations": 172
+}

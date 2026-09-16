@@ -75,17 +75,25 @@ sed 's/^/ordered | /' "$work/ordered.out"
 sed 's/^/ordered ! /' "$work/ordered.err"
 
 # While the item is parked the pane is alive and the client has not returned.
-rm -f "$work/parked.exit"
+rm -f "$work/parked.exit" "$work/parked.ready" "$work/parked.release"
 (
     set +e
-    main_client split-window -d -W -t "=$session:" 'sleep 1' >/dev/null 2>&1
+    main_client split-window -d -W -t "=$session:" \
+        "touch '$work/parked.ready'; n=0; while [ ! -e '$work/parked.release' ]; do n=\$((n + 1)); [ \$n -lt 300 ] || exit 124; sleep 0.1; done" >/dev/null 2>&1
     echo "$?" >"$work/parked.exit"
 ) &
 parked_pid=$!
-sleep 0.4
+n=0
+while [ ! -e "$work/parked.ready" ]; do
+    n=$((n + 1))
+    [ "$n" -lt 300 ] || { printf 'parked child did not start\n' >&2; exit 1; }
+    sleep 0.1
+done
+parked_panes="$(panes | tr ' ' '\n' | grep -c .)"
 printf 'parked returned=[%s] panes=%s\n' \
     "$(cat "$work/parked.exit" 2>/dev/null)" \
-    "$(panes | tr ' ' '\n' | grep -c .)"
+    "$parked_panes"
+touch "$work/parked.release"
 wait "$parked_pid" 2>/dev/null || true
 printf 'parked-after rc=%s panes=[%s]\n' "$(cat "$work/parked.exit" 2>/dev/null)" "$(panes)"
 

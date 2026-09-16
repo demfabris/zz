@@ -1,0 +1,327 @@
+case=file-unused-open-stdin
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay yes
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay yes
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+case=file-unused-oversized-stdin
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay yes
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay yes
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+case=alias-preceding-state-before-eof
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+6265666f72652d656f663d7965730a
+zz stderr hex
+tmux stdout hex
+6265666f72652d656f663d7965730a
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before yes
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before yes
+O @zzcs-control 
+C 0 $|
+case=file-preceding-state-before-eof
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+6265666f72652d656f663d7965730a
+zz stderr hex
+tmux stdout hex
+6265666f72652d656f663d7965730a
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before yes
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before yes
+O @zzcs-control 
+C 0 $|
+case=pending-source-sigterm-status
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+6265666f72652d656f663d7965730a
+zz stderr hex
+tmux stdout hex
+6265666f72652d656f663d7965730a
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before yes
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before yes
+O @zzcs-control 
+C 0 $|
+case=pending-source-sigterm-payload-unapplied
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+6265666f72652d656f663d7965730a
+zz stderr hex
+tmux stdout hex
+6265666f72652d656f663d7965730a
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before yes
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before yes
+O @zzcs-control 
+C 0 $|
+case=pending-source-sigterm-tail-unapplied
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+6265666f72652d656f663d7965730a
+zz stderr hex
+tmux stdout hex
+6265666f72652d656f663d7965730a
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before yes
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before yes
+O @zzcs-control 
+C 0 $|
+case=control-source-read-error-continues-output
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+25626567696e2054494d4520494420300a25656e642054494d4520494420
+300a4261642066696c652064657363726970746f723a202d0a2562656769
+6e2054494d4520494420300a61667465720a25656e642054494d45204944
+20300a25626567696e2054494d4520494420300a25656e642054494d4520
+494420300a25657869740a
+zz stderr hex
+tmux stdout hex
+25626567696e2054494d4520494420300a25656e642054494d4520494420
+300a4261642066696c652064657363726970746f723a202d0a2562656769
+6e2054494d4520494420300a61667465720a25656e642054494d45204944
+20300a25626567696e2054494d4520494420300a25656e642054494d4520
+494420300a25657869740a
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control yes
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control yes
+C 0 $|
+case=control-source-read-error-continues-state
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+25626567696e2054494d4520494420300a25656e642054494d4520494420
+300a4261642066696c652064657363726970746f723a202d0a2562656769
+6e2054494d4520494420300a61667465720a25656e642054494d45204944
+20300a25626567696e2054494d4520494420300a25656e642054494d4520
+494420300a25657869740a
+zz stderr hex
+tmux stdout hex
+25626567696e2054494d4520494420300a25656e642054494d4520494420
+300a4261642066696c652064657363726970746f723a202d0a2562656769
+6e2054494d4520494420300a61667465720a25656e642054494d45204944
+20300a25626567696e2054494d4520494420300a25656e642054494d4520
+494420300a25657869740a
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control yes
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control yes
+C 0 $|

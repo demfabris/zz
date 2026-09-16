@@ -1,0 +1,11 @@
+ok    file-unused-open-stdin
+ok    file-unused-oversized-stdin
+ok    alias-preceding-state-before-eof
+ok    file-preceding-state-before-eof
+ok    pending-source-sigterm-status
+ok    pending-source-sigterm-payload-unapplied
+ok    pending-source-sigterm-tail-unapplied
+ok    control-source-read-error-continues-output
+ok    control-source-read-error-continues-state
+execution-check: 9 asserted, 0 failures, 0 self-check failures
+exit_status=0

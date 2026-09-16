@@ -1,0 +1,11 @@
+%begin 1789592261 315 0
+%end 1789592261 315 0
+Bad file descriptor: -
+%begin 1789592261 317 0
+after
+%end 1789592261 317 0
+%begin 1789592261 318 0
+%end 1789592261 318 0
+%exit
+exit_status=1
+yes

@@ -1,0 +1,23 @@
+    Blocking waiting for file lock on build directory
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 34.48s
+     Running unittests src/lib.rs (target/debug/deps/zz_daemon-7a6e412177cab2ac)
+
+running 1 test
+test daemon::tests::control_source_stdin_read_failure_keeps_alias_continuation ... FAILED
+
+failures:
+
+---- daemon::tests::control_source_stdin_read_failure_keeps_alias_continuation stdout ----
+
+thread 'daemon::tests::control_source_stdin_read_failure_keeps_alias_continuation' (2054481) panicked at crates/zz-daemon/src/daemon.rs:42738:9:
+Error { request_id: 1, error: InvalidCommand("Bad file descriptor: -"), output: "" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    daemon::tests::control_source_stdin_read_failure_keeps_alias_continuation
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 952 filtered out; finished in 0.07s
+
+error: test failed, to rerun pass `-p zz-daemon --lib`

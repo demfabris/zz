@@ -2,7 +2,7 @@
 type: Design Plan
 title: Per-pane TUI customize mode
 description: Reuse the pane mode stack and chooser grid for tmux option editing, with a separate entry point for future zz controls.
-status: Implementation in progress on 2026-09-16; attached proof pending.
+status: Implemented for opening and scoped option editing on 2026-09-16; gate review pending.
 resource: crates/zz-mux/src/command/customize.rs
 timestamp: 2026-09-16T00:00:00Z
 tags: [tui, tmux, options]
@@ -52,5 +52,14 @@ process signal; the pin measurement for these classes belongs in the evidence.
 The pane tree extends the same unreleased v104 as the base pane mode field.
 Suspend uses process signals plus the tail `ClientSuspendState` input variant to restore
 the client's attachment accounting after SIGCONT. The evidence under
-`compat/tui/evidence/TUI-014/attempt-07-customize/` will distinguish attached
-comparisons, regression tests and remaining unproved behavior.
+`compat/tui/evidence/TUI-014/attempt-07-customize/` records exact opening-screen
+comparisons, a numeric option edit, terminal stop/resume, and regression results.
+The two newly asserted cases have one-sided sabotages in the fixture self-check.
+
+The opening-screen proof does not cover every customize interaction. Key binding
+editing, reset/unset and tagged bulk mutations, array insertion, help, mouse,
+kill-on-exit (`-k`) and zoom restoration (`-Z`) remain unimplemented; the two flags
+are explicitly refused. Search, filtering, navigation and arbitrary option edits
+have not all received pin screen comparisons. The zz section belongs to the
+sibling lane. Actual GUI, web and remote SSH suspend behavior was not exercised;
+the no-tty policy was tested in the daemon and compared with a pin control client.

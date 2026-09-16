@@ -1,0 +1,33 @@
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:57:        if (observed.stdout, observed.stderr, observed.returncode) != (expected, b"Bad file descriptor: -\n", 1):
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:75:        if (observed.stdout, observed.stderr, observed.returncode) != (expected, b"Bad file descriptor: -\n", 1):
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:87:        if (observed.stdout, observed.stderr, observed.returncode) != (expected, b"Bad file descriptor: -\n", 1):
+compat/scenarios/stderr-parity.txt
+compat/scenarios/daemon-command-item-format.txt
+compat/scenarios/command-item-format.txt
+compat/scenarios/command-alias.txt
+compat/scenarios/native-prefix-isolation.txt
+compat/scenarios/census-hooks.txt
+compat/scenarios/buffer-path-format.txt
+compat/scenarios/buffer-missing-target-error.txt
+compat/scenarios/behavior-options.txt
+compat/scenarios/micro-flags.txt
+compat/scenarios/aliases-multi-body.txt
+compat/scenarios/lane2-store.txt
+compat/scenarios/source-file-output.txt
+compat/scenarios/honest-knobs-c1-readback.txt
+compat/scenarios/source-file-current-file.txt
+compat/scenarios/source-file-format.txt
+compat/scenarios/option-name-formats.txt
+compat/scenarios/smoke/client-non-utf8-cwd.txt
+compat/scenarios/smoke/buffer-standard-streams.txt
+compat/scenarios/smoke/source-replay-diagnostics.txt
+compat/scenarios/smoke/source-file-tilde.txt
+compat/scenarios/smoke/source-file-diagnostics.txt
+compat/scenarios/smoke/source-file-depth.txt
+compat/scenarios/smoke/source-file-control.txt
+compat/scenarios/smoke/source-file-byte-name.txt
+compat/scenarios/smoke/plugin-runtime-oh-my-tmux.txt
+compat/scenarios/smoke/config-non-utf8-file-bytes.txt
+compat/scenarios/smoke/config-non-utf8-byte-matrix.txt
+compat/scenarios/smoke/config-discovery.txt
+compat/scenarios/smoke/config-discovery-launcher.txt

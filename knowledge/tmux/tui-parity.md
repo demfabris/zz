@@ -4,7 +4,13 @@ title: "TUI parity campaign"
 description: "TUI parity obligations, their proof status, and progress against the fixed baseline."
 resource: compat/tui/campaign.json
 tags: [tmux, tui, compatibility, campaign]
+<<<<<<< HEAD
 timestamp: 2026-09-17T00:00:00Z
+||||||| parent of 25ff2f99 (Record alias stream proof and remaining gate failures)
+timestamp: 2026-09-14T00:00:00Z
+=======
+timestamp: 2026-09-16T00:00:00Z
+>>>>>>> 25ff2f99 (Record alias stream proof and remaining gate failures)
 ---
 
 # TUI parity campaign
@@ -967,11 +973,36 @@ Sources:
 - `knowledge/designs/command-stream-channel.md`
 - `knowledge/designs/tmux-superset-roadmap.md`
 - `crates/zz/tests/cli_binary.rs`
-- `compat/tui/evidence/TUI-018/attempt-02/notes.md`
+- `compat/tui/evidence/TUI-018/attempt-03/notes.md`
 - `crates/zz-daemon/src/lib.rs`
 
 Tmux gap references: `protocol.binary-streams`.
 
-Both caller-stream alias fixes implemented and measured against tmux d77c9dc6 on 2026-09-15. compat/tui-command-streams.sh reads `all 43 asserted comparisons identical, 0 recorded not asserted, 4 decided (0 for a sibling lane)`. The two source alias records now assert exact exit status, stdout bytes, stderr bytes and option state. Six added buffer comparisons assert binary payload preservation, a source reader after a buffer reader, two buffer readers followed by a print, and a nonreader before the buffer reader, including raw buffer readback. The pin and zz apply the first source stream once, then answer Bad file descriptor: - with exit 1; a spent buffer reader reports the same error and allows later members to run. A single-member alias remains the control. CommandInvocation.stdin_spent is serde-skipped and in-process; protocol 103 and the wire shape remain unchanged. Alias expansion preserves the existing stdin carrier; the mux spends it on the first stream effect, and the daemon prepared alias queue distributes it to the first sink. The CLI resolves sinks in member order through zz_daemon::command_stdin_sink and carries raw group input without formatting bytes into command text. The daemon appends Argument bytes only to the consuming member after static preparation, using the same argument-boundary helper as direct CLI calls. The four decided cases remain solely the existing 1 MiB cap decision. Filtered protocol, mux, CLI routing and live CLI tests pass. Evidence and final-tip proof outputs are under compat/tui/evidence/TUI-018/attempt-02/. Status stays review; the gate owns verification.
+The 2026-09-16 alias fix pass raises the stream fixture from 43 to 57 asserted comparisons, with zero recorded and the four existing cap decisions. The verifier repeats 57/0/4. Spent source readers preserve trailing stdout and state after source, buffer and PaneInput readers; missing source paths still abort. Command-client file replay retains one bounded stream through aliases and nested files, while daemon-start config still refuses stdin. Raw alias stdout preserves unterminated binary bytes, including file replay and the C locale; a later print-only alias does not inherit an earlier raw claim. All 16 new sabotages, 29 total, and both equivalences pass. The shared fixture has no TUI-018 records and unattributed=0, but three of its 84 assertions fail on CLI error exit status, so verify-claims exits 1. Its self-check and attached-client pass. Daemon, mux and protocol package suites and all CLI integration tests pass; two unchanged zz GUI tests fail also in isolation. Four-crate all-target/all-feature clippy and formatting pass. Protocol stays 103 and the spent marker remains serde-skipped; the fetched v0.10.0 release makes wire-version.py reject the inherited message.rs change. All 222 selected delta rows and 2,639 steps ran: 207 rows have zero divergences, three match their registered known tuples, and 12 still fail after retry. Coverage, retries and residuals are recorded in attempt-03/corpus-coverage.json and notes.md. Status remains review; no independent approval or verified claim is made.
 
-Next action: Gate the two alias stream fixes: re-run both TUI-018 fixtures and their self-checks, require zero recorded cases attributed to TUI-018 and retain the four decided cap cases, then verify both acceptance clauses if the final-tip package, clippy, delta and compat checks hold. The worker leaves the proof block untouched.
+Next action: Independently gate the asserted caller-stream shapes and their sabotages at the proof revision. Resolve the protocol-103 release-guard conflict under the batch constraint, account for the shared CLI error-status and corpus residuals and the two GUI test failures, and rerun the failed gates before deciding verification. The worker does not change the board or mark verified.
+
+Proof revision: `357330a8265601076ab0ab0f921a393ba352d640`. Tmux: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
+
+Environment: 2026-09-16, alienware Linux x86_64, Rust 1.97.0; isolated homes and sockets, local pinned tmux. Every Cargo invocation uses /tmp/zz-cargo.sh with shared compile slots and memory caps. Runtime fixtures use the frozen zz binary SHA256 158a9408818cb7fa48837b4a277cc8a0290ece374efce1573e62c2d53716a598. See environment.txt, commands.txt and notes.md for build and comment-only amendment provenance. The inner commands below were invoked through attempt-03/run.sh, which applies the scrubbed environment and the wrapper argument shim.
+
+Proof commands:
+
+- `/tmp/zz-cargo.sh test --no-fail-fast -p zz-daemon -p zz-mux -p zz-protocol -p zz -- --test-threads=3`
+- `/tmp/zz-cargo.sh test -p zz --test cli_binary caller_stream_ -- --test-threads=1`
+- `/tmp/zz-cargo.sh clippy -p zz-daemon -p zz-mux -p zz-protocol -p zz --all-targets --all-features -- -D warnings`
+- `/tmp/zz-cargo.sh fmt --all`
+- `ZZ_BIN=target/c11-alias-proof/zz TMUX_BIN=compat/.cache/tmux-src/tmux compat/tui-command-streams.sh`
+- `ZZ_BIN=target/c11-alias-proof/zz TMUX_BIN=compat/.cache/tmux-src/tmux compat/tui-command-streams.sh --self-check`
+- `ZZ_BIN=target/c11-alias-proof/zz TMUX_BIN=compat/.cache/tmux-src/tmux compat/tui-client-commands.sh`
+- `ZZ_BIN=target/c11-alias-proof/zz TMUX_BIN=compat/.cache/tmux-src/tmux compat/tui-client-commands.sh --self-check`
+- `ZZ_BIN=target/c11-alias-proof/zz TMUX_BIN=compat/.cache/tmux-src/tmux compat/attached-client.sh`
+- `python3 compat/tui/verify-claims.py --run TUI-018 --zz target/c11-alias-proof/zz`
+- `ZZ_COMPAT_ZZ=target/c11-alias-proof/zz compat/run.sh --delta origin/main...HEAD --commands source-file,load-buffer,save-buffer,show-buffer,command-alias,send-keys,send-text,agent-send,display-message,split-window --list`
+- `python3 compat/tui/evidence/TUI-018/attempt-03/corpus-complete.py 0`
+- `python3 compat/tui/evidence/TUI-018/attempt-03/corpus-complete.py 1`
+- `python3 compat/tui/evidence/TUI-018/attempt-03/corpus-extra.py`
+
+Artifacts: `compat/tui/evidence/TUI-018/attempt-03/notes.md`, `compat/tui/evidence/TUI-018/attempt-03/commands.txt`, `compat/tui/evidence/TUI-018/attempt-03/environment.txt`, `compat/tui/evidence/TUI-018/attempt-03/frozen-closing-artifacts.txt`, `compat/tui/evidence/TUI-018/attempt-03/fixture-final.sha256`, `compat/tui/evidence/TUI-018/attempt-03/comment-only-amendment.txt`, `compat/tui/evidence/TUI-018/attempt-03/streams-closing-57.txt`, `compat/tui/evidence/TUI-018/attempt-03/streams-self-check-stable-panes.txt`, `compat/tui/evidence/TUI-018/attempt-03/self-check-caught.txt`, `compat/tui/evidence/TUI-018/attempt-03/client-commands-57.txt`, `compat/tui/evidence/TUI-018/attempt-03/client-self-check-57.txt`, `compat/tui/evidence/TUI-018/attempt-03/attached-client-57.txt`, `compat/tui/evidence/TUI-018/attempt-03/verify-claims-57.txt`, `compat/tui/evidence/TUI-018/attempt-03/test-package-summary.txt`, `compat/tui/evidence/TUI-018/attempt-03/test-packages-final.txt`, `compat/tui/evidence/TUI-018/attempt-03/test-stream-closing.txt`, `compat/tui/evidence/TUI-018/attempt-03/test-palette-solo.txt`, `compat/tui/evidence/TUI-018/attempt-03/test-settings-solo.txt`, `compat/tui/evidence/TUI-018/attempt-03/clippy-closing.txt`, `compat/tui/evidence/TUI-018/attempt-03/fmt-closing.txt`, `compat/tui/evidence/TUI-018/attempt-03/wire.txt`, `compat/tui/evidence/TUI-018/attempt-03/delta-selection-full.txt`, `compat/tui/evidence/TUI-018/attempt-03/corpus-coverage.json`, `compat/tui/evidence/TUI-018/attempt-03/corpus-complete-0.txt`, `compat/tui/evidence/TUI-018/attempt-03/corpus-complete-1.txt`, `compat/tui/evidence/TUI-018/attempt-03/corpus-complete-extra.txt`, `compat/tui/evidence/TUI-018/attempt-03/compat-check-delivery.txt`, `compat/tui/evidence/TUI-018/attempt-03/tracker-delivery.txt`, `compat/tui/evidence/TUI-018/attempt-03/tmux-tracker-delivery.txt`, `compat/tui/evidence/TUI-018/attempt-03/post-wire-test-coverage.txt`, `compat/tui/evidence/TUI-018/attempt-03/okf-delivery.txt`.
+
+Review: `compat/tui/evidence/TUI-018/attempt-03/gate-handoff.md`.

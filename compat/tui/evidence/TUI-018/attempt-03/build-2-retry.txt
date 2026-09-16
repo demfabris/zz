@@ -1,0 +1,5 @@
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-alias/crates/zz-daemon)
+   Compiling zz-config v0.10.0 (/home/demfabris/dev/zz-c11-alias/crates/zz-config)
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-alias/crates/zz-tui)
+   Compiling zz v0.10.0 (/home/demfabris/dev/zz-c11-alias/crates/zz)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 26.14s

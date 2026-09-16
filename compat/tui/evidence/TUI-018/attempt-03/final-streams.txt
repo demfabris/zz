@@ -1,0 +1,9 @@
+caller stream forms at 80x24 (pin tmux, cap 1048576 bytes)
+ok    source-file-applies
+ok    source-file-applied-value
+ok    source-file-closed-stdin
+ok    source-file-unknown-command
+ok    source-file-cancelled-midline
+ok    source-file-parse-only
+ok    source-file-verbose
+ok    source-file-quiet

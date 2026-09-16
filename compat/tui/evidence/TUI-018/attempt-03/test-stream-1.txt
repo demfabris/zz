@@ -1,0 +1,43 @@
+   Compiling fnv v1.0.7
+   Compiling collections v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling convert_case v0.11.0
+   Compiling zlog v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling wait-timeout v0.2.1
+   Compiling bit-vec v0.8.0
+   Compiling quick-error v1.2.3
+   Compiling ztracing v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling rusty-fork v0.3.1
+   Compiling proptest-macro v0.5.0 (https://github.com/proptest-rs/proptest?rev=3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b#3dca198a)
+   Compiling bit-set v0.8.0
+   Compiling logos-codegen v0.14.4
+   Compiling perf v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling gpui v0.2.2 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling rand_xorshift v0.4.0
+   Compiling unarray v0.1.4
+   Compiling http_client v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling sum_tree v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling util_macros v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling proptest v1.10.0 (https://github.com/proptest-rs/proptest?rev=3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b#3dca198a)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-alias/crates/zz-daemon)
+   Compiling logos-derive v0.14.4
+   Compiling logos v0.14.4
+   Compiling merman-core v0.6.2
+   Compiling zz-config v0.10.0 (/home/demfabris/dev/zz-c11-alias/crates/zz-config)
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-alias/crates/zz-tui)
+   Compiling merman-render v0.6.2
+   Compiling gpui_wgpu v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling gpui_linux v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling merman v0.6.2
+   Compiling zz-ui v0.10.0 (/home/demfabris/dev/zz-c11-alias/crates/zz-ui)
+   Compiling gpui_platform v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling zz v0.10.0 (/home/demfabris/dev/zz-c11-alias/crates/zz)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4m 20s
+     Running tests/cli_binary.rs (target/debug/deps/cli_binary-2f7f85c9fce73adb)
+
+running 3 tests
+test daemon_autostart::caller_stream_source_alias_group_applies_once_and_reports_the_spent_reader ... ok
+test daemon_autostart::caller_stream_file_replay_keeps_one_reader_across_aliases_and_nested_files ... ok
+test daemon_autostart::caller_stream_buffer_alias_groups_preserve_bytes_and_continue_after_a_spent_reader ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 130 filtered out; finished in 7.26s
+

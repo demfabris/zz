@@ -5,7 +5,7 @@ description: "MuxEngine, the tmux-style command executor: canonical names + alia
 resource: crates/zz-mux/src/command.rs
 tags: [tmux, commands, mux-engine, targets, effects]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-09-15
+last_updated: 2026-09-16
 ---
 
 # Cycle-16 checkpoint
@@ -76,10 +76,16 @@ mapping option names to value strings in the selected scope. Combining `-F` and
 | --- | --- |
 | 0 | Success. |
 | 1 | Command failure, missing daemon, or connection loss. |
-| 2 | Usage error: unknown verb, invalid flag, missing argument, or malformed value. |
+| 2 | Native CLI usage error, an unknown verb, or invalid use of a declared extension such as `--json`. |
 | 3 | Blocked or unable to answer now, including `agent-send --on-block fail`. |
 | 124 | Wait timed out, including `agent-send --timeout`. |
 | 125 | Reserved for the `run-pane` timeout. |
+
+Known tmux commands keep exit 1 for flag and argument-count errors rejected by the
+shared parser, both before daemon startup and during command preparation. The CLI
+retains exit 2 for native usage and declared extensions such as `--json`.
+`command_syntax_failure` matches the shared parser's error before choosing that
+status, so a later preparation failure is not reclassified by its outer verb.
 
 Commands that set an explicit exit code keep that code.
 

@@ -80,13 +80,17 @@ fn catalog_help_is_available_without_a_daemon() {
 }
 
 #[test]
-fn invalid_cli_arguments_exit_two_without_a_daemon() {
-    for (arguments, expected) in [
-        (&["bogus-verb"][..], "unknown command: bogus-verb"),
-        (&["bogus-verb", "--help"][..], "unknown command: bogus-verb"),
-        (&["split-window", "--nope"][..], "invalid flag"),
-        (&["-Z"][..], "unknown option -- Z"),
-        (&["list-sessions", "-F", "x", "--json"][..], "--json"),
+fn invalid_cli_arguments_classify_tmux_and_native_usage_without_a_daemon() {
+    for (arguments, expected, status) in [
+        (&["bogus-verb"][..], "unknown command: bogus-verb", 2),
+        (
+            &["bogus-verb", "--help"][..],
+            "unknown command: bogus-verb",
+            2,
+        ),
+        (&["split-window", "--nope"][..], "invalid flag", 1),
+        (&["-Z"][..], "unknown option -- Z", 2),
+        (&["list-sessions", "-F", "x", "--json"][..], "--json", 2),
     ] {
         let (home, mut zz) = isolated_zz();
         let socket = home.path().join("absent.sock");
@@ -97,7 +101,7 @@ fn invalid_cli_arguments_exit_two_without_a_daemon() {
             .args(arguments)
             .output()
             .expect("run invalid CLI arguments");
-        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+        assert_eq!(output.status.code(), Some(status), "{arguments:?}");
         assert!(output.stdout.is_empty(), "{arguments:?}");
         assert!(
             String::from_utf8_lossy(&output.stderr).contains(expected),
@@ -424,6 +428,47 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn pane_mode_syntax_errors_keep_the_pinned_exit_status_with_a_daemon() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "mode-errors"])
+                .status
+                .success()
+        );
+        for (arguments, expected) in [
+            (
+                &["choose-client", "-Q"][..],
+                "command choose-client: unknown flag -Q\n",
+            ),
+            (
+                &["choose-client", "one", "two"][..],
+                "command choose-client: too many arguments (need at most 1)\n",
+            ),
+            (
+                &["clock-mode", "-Q"][..],
+                "command clock-mode: unknown flag -Q\n",
+            ),
+            (
+                &["switch-mode", "one", "two"][..],
+                "command switch-mode: too many arguments (need at most 1)\n",
+            ),
+            (
+                &["refresh-client", "-r"][..],
+                "command refresh-client: -r expects an argument\n",
+            ),
+        ] {
+            let output = fixture.run(arguments);
+            assert_eq!(output.status.code(), Some(1), "{arguments:?}");
+            assert!(output.stdout.is_empty(), "{arguments:?}");
+            assert_eq!(output.stderr, expected.as_bytes(), "{arguments:?}");
+        }
+    }
+
+    #[test]
     fn json_and_format_conflict_exits_two_with_a_daemon() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
@@ -477,7 +522,7 @@ mod daemon_autostart {
             fixture.assert_not_started();
         }
         let output = fixture.run(&["source-file"]);
-        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
         assert_eq!(
             output.stderr,
@@ -3160,7 +3205,7 @@ mod daemon_autostart {
             let mut arguments = vec!["set-environment", "-g", marker, "mutated", ";"];
             arguments.extend_from_slice(later);
             let rejected = fixture.run(&arguments);
-            assert_eq!(rejected.status.code(), Some(2), "{marker}");
+            assert_eq!(rejected.status.code(), Some(1), "{marker}");
             assert!(rejected.stdout.is_empty(), "{marker}");
             assert_eq!(rejected.stderr, expected, "{marker}");
 
@@ -3278,7 +3323,12 @@ mod daemon_autostart {
                     Some("extra") => "command list-sessions: too many arguments (need at most 0)",
                     _ => unreachable!("covered cold invocation"),
                 };
-                assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+                let expected_status = if arguments.last() == Some(&"frobnicate") {
+                    2
+                } else {
+                    1
+                };
+                assert_eq!(output.status.code(), Some(expected_status), "{arguments:?}");
                 assert!(output.stdout.is_empty(), "{arguments:?}");
                 assert_eq!(
                     output.stderr,

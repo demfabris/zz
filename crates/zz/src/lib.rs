@@ -1014,9 +1014,13 @@ fn run_command_mode(
         } else {
             &command_chain
         };
-        if let Err(error) = zz_mux::validate_static_command_chain(static_commands) {
-            eprintln!("{}", server_error_message(&error));
-            return Some(exit_code_for(CliFailure::Server(&error)));
+        for invocation in static_commands {
+            if let Err(error) =
+                zz_mux::validate_static_command_chain(std::slice::from_ref(invocation))
+            {
+                eprintln!("{}", server_error_message(&error));
+                return Some(exit_code_for(command_syntax_failure(invocation, &error)));
+            }
         }
     }
 
@@ -1087,12 +1091,15 @@ fn run_command_mode(
         }
     }
 
-    if let Some(error) = prepared
+    if let Some((command, error)) = prepared
         .as_ref()
         .and_then(|prepared| prepared_command_error(&prepared.commands))
     {
         eprintln!("{}", server_error_message(error));
-        return Some(exit_code_for(CliFailure::Usage));
+        return Some(exit_code_for(command_syntax_failure(
+            &command.invocation,
+            error,
+        )));
     }
 
     if command == "kill-server" && host.is_none() && prepared.is_none() {
@@ -1512,11 +1519,43 @@ fn prepared_command_any(
 }
 
 #[cfg(not(target_os = "ios"))]
-fn prepared_command_error(commands: &[PreparedCommand]) -> Option<&ServerError> {
+fn prepared_command_error(
+    commands: &[PreparedCommand],
+) -> Option<(&PreparedCommand, &ServerError)> {
     commands.iter().find_map(|command| match &command.result {
         PreparedCommandResult::Ready => None,
-        PreparedCommandResult::Error(error) => Some(error),
+        PreparedCommandResult::Error(error) => Some((command, error)),
     })
+}
+
+#[cfg(not(target_os = "ios"))]
+fn command_syntax_failure(
+    invocation: &CommandInvocation,
+    error: &ServerError,
+) -> CliFailure<'static> {
+    let name = canonical_command(&invocation.name);
+    let Some(spec) =
+        catalog_command_spec(name).or_else(|| zz_protocol::unimplemented_tmux_command_spec(name))
+    else {
+        return CliFailure::Usage;
+    };
+    if !spec.uses_tmux_option_grammar()
+        || invocation
+            .args
+            .iter()
+            .any(|argument| argument.starts_with("--") && spec.option(argument.as_str()).is_some())
+    {
+        return CliFailure::Usage;
+    }
+    let syntax = zz_protocol::parse_tmux_command_options(spec, invocation).and_then(|parsed| {
+        spec.validate_positional_minimum(parsed.positionals.len())?;
+        spec.validate_positional_maximum(parsed.positionals.len())
+    });
+    if syntax.as_ref().err() == Some(error) {
+        CliFailure::Runtime
+    } else {
+        CliFailure::Usage
+    }
 }
 
 #[cfg(not(target_os = "ios"))]

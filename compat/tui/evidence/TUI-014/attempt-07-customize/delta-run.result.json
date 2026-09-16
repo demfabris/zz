@@ -1,0 +1,11 @@
+{
+  "command": [
+    "compat/run.sh",
+    "--delta",
+    "2e2dc584",
+    "--commands",
+    "customize-mode,suspend-client,send-keys,copy-mode,set-option,bind-key"
+  ],
+  "exit": 1,
+  "seconds": 14255.1
+}

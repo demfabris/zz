@@ -1,0 +1,42 @@
+{
+  "command": [
+    "/tmp/zz-cargo.sh",
+    "clippy",
+    "-p",
+    "zz-protocol",
+    "-p",
+    "zz-mux",
+    "-p",
+    "zz-daemon",
+    "-p",
+    "zz-tui",
+    "--all-targets",
+    "--all-features",
+    "--",
+    "-D",
+    "warnings"
+  ],
+  "launcher": [
+    "bash",
+    "-c",
+    "RANDOM=\"$1\"; shift; source /tmp/zz-cargo.sh \"$@\"",
+    "zz-cargo-slot",
+    "1",
+    "clippy",
+    "-p",
+    "zz-protocol",
+    "-p",
+    "zz-mux",
+    "-p",
+    "zz-daemon",
+    "-p",
+    "zz-tui",
+    "--all-targets",
+    "--all-features",
+    "--",
+    "-D",
+    "warnings"
+  ],
+  "exit": 0,
+  "seconds": 37.1
+}

@@ -1,0 +1,302 @@
+      case customize-mode-open
+      screen differs
+        6,8c6,7
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        > ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        12,22c11,22
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        ---
+        > 
+        > M-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+DIFF  customize-mode-open
+      case customize-Right
+      screen differs
+        12,22c12,22
+        < ^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        ---
+        > ^[[39mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+DIFF  customize-Right
+      case customize-Down
+      screen differs
+        12,22c12,22
+        < ^[[48;2;38;38;38mM-bM-^TM-^L backspace M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m The key to send for backspace.                                               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m This is a server option.                                                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m Option value: C-?                                                            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        ---
+        > ^[[39mM-bM-^TM-^L backspace M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        > M-bM-^TM-^B The key to send for backspace.                                               M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B This is a server option.                                                     M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B Option value: C-?                                                            M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+DIFF  customize-Down
+      case customize-Down
+      screen differs
+        12,22c12,22
+        < ^[[48;2;38;38;38mM-bM-^TM-^L buffer-limit M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m The maximum number of automatic buffers. When this is reached, the oldest    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m buffer is deleted.                                                           ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m This is a server option.                                                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m Option value: 50                                                             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        ---
+        > ^[[39mM-bM-^TM-^L buffer-limit M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        > M-bM-^TM-^B The maximum number of automatic buffers. When this is reached, the oldest bu M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B This is a server option.                                                     M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B Option value: 50                                                             M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+DIFF  customize-Down
+      case customize-Enter
+      screen differs
+        12,23c12,23
+        < ^[[48;2;38;38;38mM-bM-^TM-^L buffer-limit M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m The maximum number of automatic buffers. When this is reached, the oldest    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m buffer is deleted.                                                           ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m This is a server option.                                                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m Option value: 50                                                             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(buffer-limit) 50^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        ---
+        > ^[[39mM-bM-^TM-^L buffer-limit M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        > M-bM-^TM-^B The maximum number of automatic buffers. When this is reached, the oldest bu M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B This is a server option.                                                     M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B Option value: 50                                                             M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11m(buffer-limit) 50^[[39m^[[49mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+DIFF  customize-Enter
+      case customize-C-u
+      screen differs
+        12,23c12,23
+        < ^[[48;2;38;38;38mM-bM-^TM-^L buffer-limit M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m The maximum number of automatic buffers. When this is reached, the oldest    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m buffer is deleted.                                                           ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m This is a server option.                                                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m Option value: 50                                                             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(buffer-limit) ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        ---
+        > ^[[39mM-bM-^TM-^L buffer-limit M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        > M-bM-^TM-^B The maximum number of automatic buffers. When this is reached, the oldest bu M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B This is a server option.                                                     M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B Option value: 50                                                             M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11m(buffer-limit) ^[[39m^[[49mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+DIFF  customize-C-u
+      case customize-7
+      screen differs
+        12,23c12,23
+        < ^[[48;2;38;38;38mM-bM-^TM-^L buffer-limit M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m The maximum number of automatic buffers. When this is reached, the oldest    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m buffer is deleted.                                                           ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m This is a server option.                                                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m Option value: 50                                                             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(buffer-limit) 7^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        ---
+        > ^[[39mM-bM-^TM-^L buffer-limit M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        > M-bM-^TM-^B The maximum number of automatic buffers. When this is reached, the oldest bu M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B This is a server option.                                                     M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B Option value: 50                                                             M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11m(buffer-limit) 7^[[39m^[[49mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+DIFF  customize-7
+      case customize-Enter
+      screen differs
+        12,22c12,22
+        < ^[[48;2;38;38;38mM-bM-^TM-^L buffer-limit M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m The maximum number of automatic buffers. When this is reached, the oldest    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m buffer is deleted.                                                           ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m This is a server option.                                                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m Option value: 7                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m The default is: 50                                                           ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        ---
+        > ^[[39mM-bM-^TM-^L buffer-limit M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        > M-bM-^TM-^B The maximum number of automatic buffers. When this is reached, the oldest bu M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B This is a server option.                                                     M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B Option value: 7                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B The default is: 50                                                           M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+DIFF  customize-Enter
+      case customize-value
+      screen differs
+        12,22c12,22
+        < ^[[48;2;38;38;38mM-bM-^TM-^L buffer-limit M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m The maximum number of automatic buffers. When this is reached, the oldest    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m buffer is deleted.                                                           ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m This is a server option.                                                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m Option value: 7                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m The default is: 50                                                           ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        ---
+        > ^[[39mM-bM-^TM-^L buffer-limit M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        > M-bM-^TM-^B The maximum number of automatic buffers. When this is reached, the oldest bu M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B This is a server option.                                                     M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B Option value: 7                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B The default is: 50                                                           M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+        > M-bM-^TM-^B                                                                              M-bM-^TM-^B
+DIFF  customize-value
+ok    customize-close
+note  suspend-client: the tmux screen never settled within 6 seconds
+      case suspend-client
+      screen differs
+        0a1,3
+        > $ printf 'SCENE-%s\n' %0
+        > SCENE-%0
+        > $
+        1a5,24
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        cursor tmux: 0,0 flag=1 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        1c1
+        < S cli 2 0
+        ---
+        > S cli 2 1
+        5a6
+        > C cli 80x24 0
+DIFF  suspend-client
+zz process 1975911
+S<sl+
+tmux process 1975914
+S<s+
+ok    suspend-resumed
+probe checks=12 failures=10

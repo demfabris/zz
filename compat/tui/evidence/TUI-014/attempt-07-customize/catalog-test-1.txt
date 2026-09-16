@@ -1,0 +1,28 @@
+   Compiling libghostty-vt v0.2.1 (https://github.com/uzaaft/libghostty-rs?rev=46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0#46a9d2ac)
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-terminal)
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-mux)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 23s
+     Running unittests src/lib.rs (target/debug/deps/zz_daemon-7a6e412177cab2ac)
+
+running 1 test
+test daemon::tests::every_upstream_command_spelling_has_exact_flag_diagnostics_before_state_or_effects ... FAILED
+
+failures:
+
+---- daemon::tests::every_upstream_command_spelling_has_exact_flag_diagnostics_before_state_or_effects stdout ----
+
+thread 'daemon::tests::every_upstream_command_spelling_has_exact_flag_diagnostics_before_state_or_effects' (2194571) panicked at crates/zz-daemon/src/daemon.rs:68221:9:
+assertion `left == right` failed
+  left: 164
+ right: 161
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    daemon::tests::every_upstream_command_spelling_has_exact_flag_diagnostics_before_state_or_effects
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 936 filtered out; finished in 2.77s
+
+error: test failed, to rerun pass `-p zz-daemon --lib`

@@ -1,0 +1,11 @@
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-protocol)
+   Compiling zz-client v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-client)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-mux)
+   Compiling zz-browser v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-browser)
+   Compiling zz-ui v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-ui)
+   Compiling zz-chrome-import v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-chrome-import)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-daemon)
+   Compiling zz-config v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-config)
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-tui)
+   Compiling zz v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 43.46s

@@ -1,0 +1,12 @@
+{
+  "command": [
+    "/tmp/zz-cargo.sh",
+    "test",
+    "-p",
+    "zz-daemon",
+    "--lib",
+    "positive_delay_shell_job_retains_destroyed_target_and_keeps_missing_target_sessionless"
+  ],
+  "exit": 0,
+  "seconds": 1277.6
+}

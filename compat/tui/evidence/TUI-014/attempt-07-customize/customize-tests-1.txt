@@ -1,0 +1,28 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-mux)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 30.79s
+     Running unittests src/lib.rs (target/debug/deps/zz_mux-eed3ba838a6892ab)
+
+running 2 tests
+test command::customize::tests::customize_edits_a_number_and_preserves_the_selected_option ... ok
+test command::customize::tests::customize_cycles_flags_and_choices_in_the_local_scope ... FAILED
+
+failures:
+
+---- command::customize::tests::customize_cycles_flags_and_choices_in_the_local_scope stdout ----
+
+thread 'command::customize::tests::customize_cycles_flags_and_choices_in_the_local_scope' (1923992) panicked at crates/zz-mux/src/command/customize.rs:333:13:
+assertion `left == right` failed
+  left: "off"
+ right: "on"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    command::customize::tests::customize_cycles_flags_and_choices_in_the_local_scope
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 534 filtered out; finished in 0.07s
+
+error: test failed, to rerun pass `-p zz-mux --lib`

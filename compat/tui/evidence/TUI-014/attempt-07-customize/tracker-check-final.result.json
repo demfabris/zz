@@ -1,0 +1,14 @@
+{
+  "command": [
+    "python3",
+    "compat/tui/tracker.py",
+    "check"
+  ],
+  "launcher": [
+    "python3",
+    "compat/tui/tracker.py",
+    "check"
+  ],
+  "exit": 0,
+  "seconds": 0.1
+}

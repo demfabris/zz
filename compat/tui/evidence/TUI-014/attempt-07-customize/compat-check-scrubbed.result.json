@@ -1,0 +1,7 @@
+{
+  "command": [
+    "compat/check.sh"
+  ],
+  "exit": 0,
+  "seconds": 17.0
+}

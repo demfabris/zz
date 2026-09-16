@@ -5820,6 +5820,7 @@ impl Shared {
             inner.client_created_times.remove(&client);
             inner.client_focused.remove(&client);
             inner.client_pids.remove(&client);
+            inner.suspended_clients.remove(&client);
             inner.last_sessions.remove(&client);
             inner.client_flags.clear(client);
             inner.control_outputs.remove(&client);
@@ -9451,6 +9452,33 @@ impl Shared {
                             flags.clone(),
                             *update_environment,
                         ));
+                    }
+                    MuxEffect::SuspendClient { target_client } => {
+                        let target =
+                            resolve_client_target(&inner, client, kind, target_client.as_deref())?;
+                        if inner.client_flags.contains(client) {
+                            return Err(ServerError::InvalidCommand(
+                                "client is read-only".to_owned(),
+                            )
+                            .into());
+                        }
+                        if inner.client_kinds.get(&target) != Some(&ClientKind::Control)
+                            && inner
+                                .client_ttys
+                                .get(&target)
+                                .is_some_and(|tty| !tty.is_empty())
+                        {
+                            #[cfg(unix)]
+                            if let Some(pid) = inner
+                                .client_pids
+                                .get(&target)
+                                .and_then(|pid| rustix::process::Pid::from_raw(*pid as i32))
+                            {
+                                rustix::process::kill_process(pid, rustix::process::Signal::TSTP)
+                                    .map_err(|error| ServerError::InvalidCommand(error.to_string()))?;
+                                inner.suspended_clients.insert(target);
+                            }
+                        }
                     }
                     MuxEffect::Detach(request) => {
                         let target_client = resolve_client_target(
@@ -14692,6 +14720,7 @@ impl Shared {
                 clients
                     .iter()
                     .copied()
+                    .filter(|client| !inner.suspended_clients.contains(client))
                     .map(|client| (client, *session))
                     .collect::<Vec<_>>()
             })
@@ -17959,6 +17988,17 @@ impl Shared {
                 InputMessage::Confirm { action } => {
                     self.input_confirm(client, context, action);
                 }
+                InputMessage::ClientSuspendState { suspended } => {
+                    {
+                        let mut inner = self.inner.lock();
+                        if suspended {
+                            inner.suspended_clients.insert(client);
+                        } else {
+                            inner.suspended_clients.remove(&client);
+                        }
+                    }
+                    self.publish_mux_snapshots();
+                }
                 InputMessage::ClientTerminalSize { columns, rows } => {
                     if columns > 0 && rows > 0 {
                         let hook_events = {
@@ -19481,8 +19521,28 @@ impl Shared {
         else {
             return false;
         };
+        if let PaneModeRequest::Customize(mut mode) = mode {
+            let (close, command) = self.inner.lock().engine.customize_key(pane, &mut mode, key);
+            {
+                let mut inner = self.inner.lock();
+                if let Some(modes) = inner.pane_modes.get_mut(&pane) {
+                    modes.pop();
+                    if !close {
+                        modes.push(PaneModeRequest::Customize(mode));
+                    }
+                    if modes.is_empty() {
+                        inner.pane_modes.remove(&pane);
+                    }
+                }
+            }
+            if let Some(command) = command {
+                let _ = self.execute(client, ClientKind::Interactive, context, &command);
+            }
+            self.publish_mux_snapshots();
+            return true;
+        }
         let activate = match &mode {
-            PaneModeRequest::Clock => None,
+            PaneModeRequest::Clock | PaneModeRequest::Customize(_) => None,
             PaneModeRequest::Switch { .. } => match key {
                 "Escape" | "C-[" | "C-c" | "C-g" | "[ETX]" | "[BEL]" | "\u{1b}" | "\u{3}"
                 | "\u{7}" => None,
@@ -19503,7 +19563,7 @@ impl Shared {
         if let Some((target, selected)) = activate {
             let template = match &mode {
                 PaneModeRequest::Switch { template, .. } => template.as_deref(),
-                PaneModeRequest::Clock => None,
+                PaneModeRequest::Clock | PaneModeRequest::Customize(_) => None,
             }
             .unwrap_or("switch-client -Zt '%%'");
             let target_client = current_format_client(&self.inner.lock(), client).unwrap_or(client);
@@ -29818,6 +29878,7 @@ struct ServerState {
     client_color_schemes: BTreeMap<ClientId, TerminalColorScheme>,
     client_names: BTreeMap<ClientId, String>,
     client_pids: BTreeMap<ClientId, u32>,
+    suspended_clients: BTreeSet<ClientId>,
     client_instances: BTreeMap<ClientId, ClientInstanceId>,
     client_kinds: BTreeMap<ClientId, ClientKind>,
     client_terminals: BTreeSet<ClientId>,
@@ -35968,6 +36029,20 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                                 colour,
                             }
                         }
+                        PaneModeRequest::Customize(mode) => {
+                            let (state, mut presentation) =
+                                engine.customize_presentation(*pane, mode);
+                            presentation.selection_style =
+                                chooser_presentation::mode_style_for_pane(inner, *pane);
+                            presentation.border_style =
+                                chooser_presentation::border_style_for_pane(inner, *pane);
+                            presentation.prompt_style = chooser_presentation::prompt_style();
+                            PaneMode::Customize {
+                                state,
+                                presentation: Box::new(presentation),
+                                offset: mode.offset as u32,
+                            }
+                        }
                         PaneModeRequest::Switch {
                             windows, format, ..
                         } => PaneMode::Switch {
@@ -38387,6 +38462,7 @@ fn read_only_blocks_input(input: &InputMessage) -> bool {
         | InputMessage::ResizeCommandOutput { .. }
         | InputMessage::CommandOutputView { .. }
         | InputMessage::CancelPrefix { .. }
+        | InputMessage::ClientSuspendState { .. }
         | InputMessage::ClientTerminalSize { .. }
         | InputMessage::ClientFocus { .. } => false,
     }
@@ -38690,6 +38766,7 @@ fn pane_mode_format_facts(inner: &ServerState) -> BTreeMap<PaneId, (usize, &'sta
                     modes.len(),
                     match modes.last()? {
                         PaneModeRequest::Clock => "clock-mode",
+                        PaneModeRequest::Customize(_) => "options-mode",
                         PaneModeRequest::Switch { .. } => "switch-mode",
                     },
                 ),
@@ -38721,6 +38798,11 @@ fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
                     // format_cb_session_attached_list joins `loop->name`, which
                     // is the tty for a pty client, not the device name the
                     // hello carries.
+                    let clients = clients
+                        .iter()
+                        .filter(|client| !inner.suspended_clients.contains(client))
+                        .copied()
+                        .collect::<Vec<_>>();
                     let names = clients
                         .iter()
                         .map(|client| client_format_name(inner, *client))
@@ -45167,7 +45249,7 @@ mod tests {
         fs::write(
             &root,
             format!(
-                "customize-mode\n\
+                "link-window\n\
                  source-file nested-missing.conf\n\
                  source-file 'invalid\0pattern.conf'\n\
                  source-file '{}'\n\
@@ -45197,7 +45279,7 @@ mod tests {
         assert_eq!(
             causes[1],
             format!(
-                "{}:1: unsupported tmux command: customize-mode",
+                "{}:1: unsupported tmux command: link-window",
                 root.display()
             )
         );
@@ -46104,11 +46186,11 @@ mod tests {
         let source =
             "customize-mode\nlink-window \\\n -a user\nrun-shell 'exit 1'\nset -g prefix C-a\n";
         let (text, copied, unsupported) = prepare_tmux_import(&engine, Path::new("/donor"), source);
-        assert!(text.starts_with("# zz-unsupported: customize-mode\n"));
+        assert!(text.starts_with("customize-mode\n# zz-unsupported: link-window"));
         assert!(text.contains("# zz-unsupported:  -a user\n"));
         assert!(text.contains("run-shell 'exit 1'\n"));
-        assert_eq!(copied, 2);
-        assert_eq!(unsupported.len(), 2);
+        assert_eq!(copied, 3);
+        assert_eq!(unsupported.len(), 1);
     }
 
     #[test]
@@ -69819,10 +69901,10 @@ set-option -g @alias-mixed-next yes
         let specs = zz_protocol::command_specs()
             .filter(|spec| spec.uses_tmux_option_grammar())
             .collect::<Vec<_>>();
-        assert_eq!(specs.len(), 87);
+        assert_eq!(specs.len(), 89);
         assert_eq!(
             specs.iter().map(|spec| spec.aliases.len()).sum::<usize>(),
-            74
+            75
         );
         let mut spellings = 0;
         let mut diagnostic_cases = 0;
@@ -69877,9 +69959,9 @@ set-option -g @alias-mixed-next yes
                 }
             }
         }
-        assert_eq!(spellings, 161);
-        assert_eq!(diagnostic_cases, 644);
-        assert_eq!(required_cases, 416);
+        assert_eq!(spellings, 164);
+        assert_eq!(diagnostic_cases, 656);
+        assert_eq!(required_cases, 421);
 
         let mut prefix_cases = 0;
         for spec in &specs {
@@ -69901,7 +69983,7 @@ set-option -g @alias-mixed-next yes
                 );
             }
         }
-        assert_eq!(prefix_cases, 542);
+        assert_eq!(prefix_cases, 566);
 
         for spec in &specs {
             let unknown = ('0'..='9')
@@ -69963,7 +70045,7 @@ set-option -g @alias-mixed-next yes
             .filter(|spec| !zz_protocol::NATIVE_COMMAND_NAMES.contains(&spec.name))
             .filter(|spec| spec.positional_maximum().is_some())
             .collect::<Vec<_>>();
-        assert_eq!(specs.len(), 76);
+        assert_eq!(specs.len(), 78);
         for spec in specs {
             let maximum = spec.positional_maximum().expect("finite maximum");
             let arguments = vec![argument.clone(); maximum.saturating_add(1)];
@@ -95402,6 +95484,30 @@ bind - split-window -v -c "#{pane_current_path}"
                 .global_environment_variable("BIND_COMMAND_EXIT_AFTER_ERROR"),
             Some("yes".to_owned())
         );
+    }
+
+    #[test]
+    fn suspend_client_leaves_control_and_nonterminal_clients_attached() {
+        for kind in [ClientKind::Control, ClientKind::Interactive] {
+            let shared = Arc::new(Shared::new(1));
+            let (session, _, _) = switch_test_session(&shared, "suspend");
+            let mailbox = OutboundMailbox::new();
+            let (client, _) =
+                shared.register_subscribed(kind, Some("without-tty".to_owned()), None, mailbox);
+            shared.attach(client, session).unwrap();
+            let mut context = ExecutionContext::default();
+            shared
+                .execute(
+                    client,
+                    kind,
+                    &mut context,
+                    &CommandInvocation::new("suspend-client", std::iter::empty::<&str>()),
+                )
+                .unwrap();
+            let inner = shared.inner.lock();
+            assert!(!inner.suspended_clients.contains(&client));
+            assert!(inner.attached[&session].contains(&client));
+        }
     }
 
     #[test]

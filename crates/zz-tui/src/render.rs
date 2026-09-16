@@ -547,6 +547,12 @@ impl Renderer {
         self.writer.take_unblocked()
     }
 
+    pub fn pause(&mut self, paused: bool) {
+        self.output.clear();
+        self.writer.pause(paused);
+        self.invalidate();
+    }
+
     /// Throws away whatever the writer has not painted yet.
     ///
     /// The client calls this when its event loop ends, before the terminal is

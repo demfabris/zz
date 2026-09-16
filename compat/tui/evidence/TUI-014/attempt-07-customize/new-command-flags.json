@@ -1,0 +1,189 @@
+[
+  {
+    "arguments": [
+      "customize-mode",
+      "-0"
+    ],
+    "zz": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command customize-mode: unknown flag -0\n"
+    },
+    "tmux": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command customize-mode: unknown flag -0\n"
+    },
+    "identical": true
+  },
+  {
+    "arguments": [
+      "customize-mode",
+      "-@"
+    ],
+    "zz": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command customize-mode: invalid flag -@\n"
+    },
+    "tmux": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command customize-mode: invalid flag -@\n"
+    },
+    "identical": true
+  },
+  {
+    "arguments": [
+      "customize-mode",
+      "--bogus"
+    ],
+    "zz": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command customize-mode: invalid flag --\n"
+    },
+    "tmux": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command customize-mode: invalid flag --\n"
+    },
+    "identical": true
+  },
+  {
+    "arguments": [
+      "customize-mode",
+      "-?"
+    ],
+    "zz": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "usage: customize-mode [-kNZ] [-F format] [-f filter] [-t target-pane]\n"
+    },
+    "tmux": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "usage: customize-mode [-kNZ] [-F format] [-f filter] [-t target-pane]\n"
+    },
+    "identical": true
+  },
+  {
+    "arguments": [
+      "customize-mode",
+      "-F"
+    ],
+    "zz": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command customize-mode: -F expects an argument\n"
+    },
+    "tmux": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command customize-mode: -F expects an argument\n"
+    },
+    "identical": true
+  },
+  {
+    "arguments": [
+      "suspend-client",
+      "-0"
+    ],
+    "zz": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command suspend-client: unknown flag -0\n"
+    },
+    "tmux": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command suspend-client: unknown flag -0\n"
+    },
+    "identical": true
+  },
+  {
+    "arguments": [
+      "suspend-client",
+      "-@"
+    ],
+    "zz": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command suspend-client: invalid flag -@\n"
+    },
+    "tmux": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command suspend-client: invalid flag -@\n"
+    },
+    "identical": true
+  },
+  {
+    "arguments": [
+      "suspend-client",
+      "--bogus"
+    ],
+    "zz": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command suspend-client: invalid flag --\n"
+    },
+    "tmux": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command suspend-client: invalid flag --\n"
+    },
+    "identical": true
+  },
+  {
+    "arguments": [
+      "suspend-client",
+      "-?"
+    ],
+    "zz": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "usage: suspend-client [-t target-client]\n"
+    },
+    "tmux": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "usage: suspend-client [-t target-client]\n"
+    },
+    "identical": true
+  },
+  {
+    "arguments": [
+      "suspend-client",
+      "-t"
+    ],
+    "zz": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command suspend-client: -t expects an argument\n"
+    },
+    "tmux": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command suspend-client: -t expects an argument\n"
+    },
+    "identical": true
+  },
+  {
+    "arguments": [
+      "suspendc",
+      "-0"
+    ],
+    "zz": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command suspend-client: unknown flag -0\n"
+    },
+    "tmux": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "command suspend-client: unknown flag -0\n"
+    },
+    "identical": true
+  }
+]

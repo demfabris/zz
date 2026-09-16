@@ -1,0 +1,9 @@
+{
+  "command": [
+    "bash",
+    "-c",
+    "RANDOM=1; source /tmp/zz-cargo.sh test -p zz-daemon --lib positive_delay_shell_job_freezes_selected_client_working_directory"
+  ],
+  "exit": 0,
+  "seconds": 12.1
+}

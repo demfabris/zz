@@ -1,0 +1,78 @@
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-mux)
+error[E0061]: this function takes 3 arguments but 2 arguments were supplied
+    --> crates/zz-mux/src/command/customize.rs:109:76
+     |
+ 109 |                 if mode.filter.as_ref().is_some_and(|filter| !format_true(&crate::expand_format_values(filter, &vars))) { continue; }
+     |                                                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^--------------- argument #3 of type `&mut _` is missing
+     |
+note: expected `&StatusContext`, found `&BTreeMap<String, String>`
+    --> crates/zz-mux/src/command/customize.rs:109:112
+     |
+ 109 |                 if mode.filter.as_ref().is_some_and(|filter| !format_true(&crate::expand_format_values(filter, &vars))) { continue; }
+     |                                                                                                                ^^^^^
+     = note: expected reference `&formats::StatusContext`
+                found reference `&std::collections::BTreeMap<std::string::String, std::string::String>`
+note: function defined here
+    --> crates/zz-mux/src/formats.rs:1670:8
+     |
+1670 | pub fn expand_format_values(
+     |        ^^^^^^^^^^^^^^^^^^^^
+1671 |     format: &str,
+1672 |     context: &StatusContext,
+     |     -----------------------
+1673 |     hooks: &mut impl StatusHooks,
+     |     ----------------------------
+help: provide the argument
+     |
+ 109 -                 if mode.filter.as_ref().is_some_and(|filter| !format_true(&crate::expand_format_values(filter, &vars))) { continue; }
+ 109 +                 if mode.filter.as_ref().is_some_and(|filter| !format_true(&crate::expand_format_values(filter, /* &formats::StatusContext */, /* hooks */))) { continue; }
+     |
+
+error[E0061]: this function takes 3 arguments but 2 arguments were supplied
+    --> crates/zz-mux/src/command/customize.rs:111:21
+     |
+ 111 |                     crate::expand_format_values(format, &vars)
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^--------------- argument #3 of type `&mut _` is missing
+     |
+note: expected `&StatusContext`, found `&BTreeMap<String, String>`
+    --> crates/zz-mux/src/command/customize.rs:111:57
+     |
+ 111 |                     crate::expand_format_values(format, &vars)
+     |                                                         ^^^^^
+     = note: expected reference `&formats::StatusContext`
+                found reference `&std::collections::BTreeMap<std::string::String, std::string::String>`
+note: function defined here
+    --> crates/zz-mux/src/formats.rs:1670:8
+     |
+1670 | pub fn expand_format_values(
+     |        ^^^^^^^^^^^^^^^^^^^^
+1671 |     format: &str,
+1672 |     context: &StatusContext,
+     |     -----------------------
+1673 |     hooks: &mut impl StatusHooks,
+     |     ----------------------------
+help: provide the argument
+     |
+ 111 -                     crate::expand_format_values(format, &vars)
+ 111 +                     crate::expand_format_values(format, /* &formats::StatusContext */, /* hooks */)
+     |
+
+error[E0614]: type `(&zz_protocol::PaneId, &model::Pane)` cannot be dereferenced
+   --> crates/zz-mux/src/command/customize.rs:149:198
+    |
+149 | ...then(|window| window.panes.iter().position(|pane| *pane == id)).unwrap_or(0)),
+    |                                                      ^^^^^ can't be dereferenced
+
+error[E0599]: no variant, associated function, or constant named `Command` found for enum `TmuxOptionKind` in the current scope
+  --> crates/zz-mux/src/tmux_option_metadata.rs:29:54
+   |
+ 2 | pub(crate) enum TmuxOptionKind {
+   | ------------------------------ variant, associated function, or constant `Command` not found for this enum
+...
+29 |         "default-client-command" => (TmuxOptionKind::Command, "Default command to run when tmux is run without a command.", "", &[]),
+   |                                                      ^^^^^^^ variant, associated function, or constant not found in `TmuxOptionKind`
+
+Some errors have detailed explanations: E0061, E0599, E0614.
+For more information about an error, try `rustc --explain E0061`.
+error: could not compile `zz-mux` (lib test) due to 4 previous errors

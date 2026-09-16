@@ -1,0 +1,332 @@
+self-check: one deliberate one-sided difference per channel, plus two equivalences
+ok    self-check equivalence: the same command on both sides
+      case stdout-sabotage
+      stdout differs
+        0a1
+        > zzcc-sabotage
+      state differs
+        5a6
+        > B zzcc-sabotage 8
+ok    self-check stdout, a buffer on one side only
+      case access-sabotage
+      stdout differs
+        2d1
+        < demfabris (G,W)
+      state differs
+        5a6
+        > B zzcc-sabotage 8
+ok    self-check stdout, an access entry on the pin only
+      case access-format-equivalence
+      state differs
+        5a6
+        > B zzcc-sabotage 8
+ok    self-check formatted identity resolves before lookup
+      case access-format-sabotage
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unknown user: zzcc-missing
+      state differs
+        5a6
+        > B zzcc-sabotage 8
+ok    self-check one-sided formatted identity failure changes stderr and status
+      case exit-sabotage
+      exit tmux: 1  zz: 0
+      stdout differs
+        0a1
+        > SABOTAGE
+        \ No newline at end of file
+      stderr differs
+        1d0
+        < no buffer zzcc-sabotage
+      state differs
+        5a6
+        > B zzcc-sabotage 8
+ok    self-check exit and stderr, a buffer missing on one side
+      case state-sabotage
+      state differs
+        1a2
+        > S zzcc-sab 1 0
+        3a5
+        > W zzcc-sab:0 0 * 1
+        5a8
+        > P zzcc-sab:0.0 mode=0/ 80x24 alienware
+ok    self-check state, a session on one side only
+      case clock-sabotage
+      screen differs
+        1,5d0
+        < $ printf 'SCENE-%s\n' %0
+        < SCENE-%0
+        < $
+        < 
+        < 
+        13a9,13
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m           ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   54,12 flag=0 pane=80x24 shape=default
+      state differs
+        4c4
+        < P cli:0.0 mode=0/ 80x23 ptitle
+        ---
+        > P cli:0.0 mode=1/clock-mode 80x23 ptitle
+ok    self-check screen and state, a clock on one side only
+clock capture seconds-24-with-seconds-sabotage: both faces redrew; screen and cursor pair stayed inside epoch second 1789580452
+      case seconds-24-with-seconds-sabotage
+      screen differs
+        9,13c9,13
+        <                     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m
+        <                     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m         ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        <                     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m
+        <                     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        <                     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m           ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m
+        ---
+        >                     ^[[31m^[[41m#^[[39m^[[49m ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m       ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m ^[[31m^[[41m#####^[[39m^[[49m       ^[[31m^[[41m#####^[[39m^[[49m ^[[31m^[[41m#####^[[39m^[[49m
+        >                     ^[[31m^[[41m#^[[39m^[[49m ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m         ^[[31m^[[41m#^[[39m^[[49m
+        >                     ^[[31m^[[41m#^[[39m^[[49m ^[[31m^[[41m#####^[[39m^[[49m       ^[[31m^[[41m#####^[[39m^[[49m ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m       ^[[31m^[[41m#####^[[39m^[[49m ^[[31m^[[41m#####^[[39m^[[49m
+        >                     ^[[31m^[[41m#^[[39m^[[49m     ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m       ^[[31m^[[41m#^[[39m^[[49m ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m       ^[[31m^[[41m#^[[39m^[[49m ^[[31m^[[41m#^[[39m^[[49m
+        >                     ^[[31m^[[41m#^[[39m^[[49m     ^[[31m^[[41m#^[[39m^[[49m           ^[[31m^[[41m#^[[39m^[[49m ^[[31m^[[41m#####^[[39m^[[49m       ^[[31m^[[41m#####^[[39m^[[49m ^[[31m^[[41m#####^[[39m^[[49m
+ok    self-check 24-with-seconds one-sided colour changes the synchronized screen
+clock capture seconds-12-with-seconds-sabotage: both faces redrew; screen and cursor pair stayed inside epoch second 1789580465
+      case seconds-12-with-seconds-sabotage
+      screen differs
+        9,13c9,13
+        <              ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        <                  ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m           ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m##^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m##^[[39m^[[49m
+        <              ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        <              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        <              ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m           ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        ---
+        >              ^[[31m^[[41m#####^[[39m^[[49m       ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m     ^[[31m^[[41m#^[[39m^[[49m       ^[[31m^[[41m#####^[[39m^[[49m ^[[31m^[[41m#####^[[39m^[[49m       ^[[31m^[[41m#####^[[39m^[[49m ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m
+        >                  ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m     ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m ^[[31m^[[41m#^[[39m^[[49m           ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m ^[[31m^[[41m##^[[39m^[[49m ^[[31m^[[41m##^[[39m^[[49m
+        >              ^[[31m^[[41m#####^[[39m^[[49m       ^[[31m^[[41m#####^[[39m^[[49m     ^[[31m^[[41m#^[[39m^[[49m       ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m ^[[31m^[[41m#####^[[39m^[[49m       ^[[31m^[[41m#####^[[39m^[[49m ^[[31m^[[41m#^[[39m^[[49m ^[[31m^[[41m#^[[39m^[[49m ^[[31m^[[41m#^[[39m^[[49m
+        >              ^[[31m^[[41m#^[[39m^[[49m       ^[[31m^[[41m#^[[39m^[[49m       ^[[31m^[[41m#^[[39m^[[49m     ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m     ^[[31m^[[41m#^[[39m^[[49m       ^[[31m^[[41m#^[[39m^[[49m     ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m
+        >              ^[[31m^[[41m#####^[[39m^[[49m           ^[[31m^[[41m#^[[39m^[[49m     ^[[31m^[[41m#^[[39m^[[49m       ^[[31m^[[41m#####^[[39m^[[49m ^[[31m^[[41m#####^[[39m^[[49m       ^[[31m^[[41m#^[[39m^[[49m     ^[[31m^[[41m#^[[39m^[[49m   ^[[31m^[[41m#^[[39m^[[49m
+ok    self-check 12-with-seconds one-sided colour changes the synchronized screen
+      case injected-clock-sabotage
+      screen differs
+        1,5d0
+        < $ printf 'SCENE-%s\n' %0
+        < SCENE-%0
+        < $
+        < 
+        < 
+        13a9,13
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m           ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   54,12 flag=0 pane=80x24 shape=default
+      state differs
+        4c4
+        < P cli:0.0 mode=0/ 80x23 ptitle
+        ---
+        > P cli:0.0 mode=1/clock-mode 80x23 ptitle
+ok    self-check injected key bypass leaves a one-sided clock
+      case injected-shell-sabotage
+      stdout differs
+        3c3
+        < $
+        ---
+        > $ x
+      screen differs
+        3c3
+        < $
+        ---
+        > $ x
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   3,2 flag=1 pane=80x24 shape=default
+ok    self-check a one-sided leaked key reaches shell bytes and screen
+      case cancel-clock-sabotage
+      screen differs
+        1,5d0
+        < $ printf 'SCENE-%s\n' %0
+        < SCENE-%0
+        < $
+        < 
+        < 
+        13a9,13
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        >                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m           ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   54,12 flag=0 pane=80x24 shape=default
+      state differs
+        4c4
+        < P cli:0.0 mode=0/ 80x23 ptitle
+        ---
+        > P cli:0.0 mode=1/clock-mode 80x23 ptitle
+ok    self-check generic cancellation leaves a one-sided clock
+      case stack-sabotage
+      stdout differs
+        1c1
+        < 1/switch-mode
+        ---
+        > 2/switch-mode
+      state differs
+        4c4
+        < P cli:0.0 mode=1/switch-mode 80x23 ptitle
+        ---
+        > P cli:0.0 mode=2/switch-mode 80x23 ptitle
+ok    self-check a missing suspended mode changes the stack count
+      case switch-sabotage
+      screen differs
+        1,3c1
+        < $ printf 'SCENE-%s\n' %0
+        < SCENE-%0
+        < $
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m2 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mwin^[[0m^[[48;2;184;134;11m
+        23a22,23
+        > 
+        > ^[[38;2;13;13;13m(search) ^[[39m^[[49m
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   9,22 flag=1 pane=80x24 shape=default
+      state differs
+        4c4
+        < P cli:0.0 mode=0/ 80x23 ptitle
+        ---
+        > P cli:0.0 mode=1/switch-mode 80x23 ptitle
+ok    self-check screen and state, a switch mode on one side only
+      case switch-format-sabotage
+      screen differs
+        1c1
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mREVIEW-cli^[[39m
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11mWRONG-cli^[[39m
+ok    self-check a discarded switch format changes the rows
+      case switch-template-sabotage
+      stdout differs
+        1c1
+        < yes
+        ---
+        > wrong
+ok    self-check a changed Enter template changes its command effect
+      case switch-order-sabotage
+      screen differs
+        1,3c1,3
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mcli:two^[[39m
+        < ^[[49malpha:win
+        < cli:win
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11malpha:two^[[39m
+        > ^[[49mcli:win
+        > alpha:win
+ok    self-check swapped tied window labels change the screen
+      case formatted-identity-sabotage
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unknown user: zzcc-missing-identity
+ok    self-check a wrong expanded identity reaches exit and stderr
+      case screen-sabotage
+      screen differs
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   3,2 flag=1 pane=80x24 shape=default
+ok    self-check screen, one column at one prompt
+      case normalize-off
+      stdout differs
+        1c1
+        < tty /dev/pts/163
+        ---
+        > tty /dev/pts/136
+ok    self-check two pts numbers differ while nothing normalizes them
+ok    self-check the same two numbers compare equal once normalized
+      case normalize-keeps-the-line
+      stdout differs
+        1a2
+        > zzcc-norm /dev/pts/N
+      state differs
+        1a2
+        > S zzcc-norm 1 0
+        3a5
+        > W zzcc-norm:0 0 * 1
+        5a8
+        > P zzcc-norm:0.0 mode=0/ 80x24 alienware
+ok    self-check a one-sided line beside a normalized number is still reported
+      case live-job-sabotage
+      stdout differs
+        0a1
+        > Job 0: sleep 40; echo zzcc-job [fd=N, pid=N, status=0]
+      screen differs
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50m<'sleep 40^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+ok    self-check a format job armed on one side only
+      case customize-sabotage
+      screen differs
+        1,12c1,12
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        < 
+        < 
+        < 
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11m(0)   - Server Options^[[39m
+        > ^[[38;2;179;179;179m^[[49m(1)   M-bM-^TM-^\M-bM-^TM-^@>   ^[[39mbackspace^[[38;2;179;179;179m: C-?^[[39m
+        > ^[[38;2;179;179;179m(2)   M-bM-^TM-^\M-bM-^TM-^@>   ^[[39mbuffer-limit^[[38;2;179;179;179m: 50^[[39m
+        > ^[[38;2;179;179;179m(3)   M-bM-^TM-^\M-bM-^TM-^@>   ^[[39mcodepoint-widths
+        > ^[[38;2;179;179;179m(4)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mcommand-alias
+        > ^[[38;2;179;179;179m(5)   M-bM-^TM-^\M-bM-^TM-^@>   ^[[39mcopy-command^[[38;2;179;179;179m:^[[39m
+        > ^[[38;2;179;179;179m(6)   M-bM-^TM-^\M-bM-^TM-^@>   ^[[39mdark-theme-black^[[38;2;179;179;179m: #{?#{e|>=:#{client_colours},256},gray5,black}^[[39m
+        > ^[[38;2;179;179;179m(7)   M-bM-^TM-^\M-bM-^TM-^@>   ^[[39mdark-theme-blue^[[38;2;179;179;179m: #{?#{e|>=:#{client_colours},256},skyblue3,blue}^[[39m
+        > ^[[38;2;179;179;179m(8)   M-bM-^TM-^\M-bM-^TM-^@>   ^[[39mdark-theme-cyan^[[38;2;179;179;179m: #{?#{e|>=:#{client_colours},256},cadetblue,cyan}^[[39m
+        > ^[[38;2;179;179;179m(9)   M-bM-^TM-^\M-bM-^TM-^@>   ^[[39mdark-theme-dark-grey^[[38;2;179;179;179m: #{?#{e|>=:#{client_colours},256},gray15,black}
+        > (M-a) M-bM-^TM-^\M-bM-^TM-^@>   ^[[39mdark-theme-green^[[38;2;179;179;179m: #{?#{e|>=:#{client_colours},256},yellowgreen,green
+        > ^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+ok    self-check customize expansion on one side changes the decoded tree
+note  suspend-sabotage: the zz screen never settled within 6 seconds
+      case suspend-sabotage
+      screen differs
+        1,3d0
+        < $ printf 'SCENE-%s\n' %0
+        < SCENE-%0
+        < $
+        5,24d1
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   0,0 flag=1 pane=80x24 shape=default
+      state differs
+        1c1
+        < S cli 2 1
+        ---
+        > S cli 2 0
+        6d5
+        < C cli 80x24 0
+ok    self-check suspension on one side changes its screen and attachment state
+ok    self-check equivalence: every sabotage withdrawn
+self-check complete: every sabotage was caught in its own channel and both equivalences passed

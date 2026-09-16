@@ -1,0 +1,10 @@
+{
+  "command": [
+    "compat/check.sh"
+  ],
+  "launcher": [
+    "compat/check.sh"
+  ],
+  "exit": 143,
+  "seconds": 275.8
+}

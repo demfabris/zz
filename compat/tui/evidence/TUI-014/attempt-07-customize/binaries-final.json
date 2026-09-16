@@ -1,0 +1,9 @@
+{
+  "runtime_revision": "0ae39523",
+  "hashes": {
+    "target/debug/zz": "68398ab763ecd8707d512fbe911039a64513efb903112d4c48de39470d62ab3a",
+    "target/debug/zz-customize-initial": "68398ab763ecd8707d512fbe911039a64513efb903112d4c48de39470d62ab3a",
+    "target/debug/zz-customize-final-6e3b91460c00b2a1": "e152e8be57f7d729c49ffd44acf54a6bc81bb88bc58c3a8d34e61713b2ab1a41"
+  },
+  "initial_path_unchanged": true
+}

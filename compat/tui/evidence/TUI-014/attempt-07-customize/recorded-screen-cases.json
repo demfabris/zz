@@ -1,0 +1,38 @@
+[
+  {
+    "fixture": "compat/tui-screen-diff.sh",
+    "name": "80x24/cursor-style-request",
+    "owner": "TUI-002",
+    "reason": "the pin forwards a DECSCUSR the pane asked for and zz has nowhere to carry the request"
+  },
+  {
+    "fixture": "compat/tui-screen-diff.sh",
+    "name": "100x24/cursor-style-request",
+    "owner": "TUI-002",
+    "reason": "the pin forwards a DECSCUSR the pane asked for and zz has nowhere to carry the request"
+  },
+  {
+    "fixture": "compat/tui-screen-diff.sh",
+    "name": "80x10/cursor-style-request",
+    "owner": "TUI-002",
+    "reason": "the pin forwards a DECSCUSR the pane asked for and zz has nowhere to carry the request"
+  },
+  {
+    "fixture": "compat/tui-screen-diff.sh",
+    "name": "80x6/cursor-style-request",
+    "owner": "TUI-002",
+    "reason": "the pin forwards a DECSCUSR the pane asked for and zz has nowhere to carry the request"
+  },
+  {
+    "fixture": "compat/tui-screen-diff.sh",
+    "name": "109x24/cursor-style-request",
+    "owner": "TUI-002",
+    "reason": "the pin forwards a DECSCUSR the pane asked for and zz has nowhere to carry the request"
+  },
+  {
+    "fixture": "compat/tui-screen-diff.sh",
+    "name": "120x24/cursor-style-request",
+    "owner": "TUI-002",
+    "reason": "the pin forwards a DECSCUSR the pane asked for and zz has nowhere to carry the request"
+  }
+]

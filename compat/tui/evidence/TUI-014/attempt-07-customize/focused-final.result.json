@@ -1,0 +1,10 @@
+{
+  "command": [
+    "bash",
+    "compat/tui/evidence/TUI-014/attempt-07-customize/focused-probe.sh",
+    "/home/demfabris/dev/zz-c11-customize/target/debug/zz-customize-final",
+    "/home/demfabris/dev/zz-c11-customize/compat/.cache/tmux-src/tmux"
+  ],
+  "exit": 0,
+  "seconds": 89.7
+}

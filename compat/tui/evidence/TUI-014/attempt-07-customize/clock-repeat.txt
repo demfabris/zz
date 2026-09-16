@@ -1,0 +1,7 @@
+clock capture clock-repeat-24-with-seconds: both faces redrew; screen and cursor pair stayed inside epoch second 1789579469
+ok    clock-repeat-24-with-seconds
+ok    clock-repeat-24-with-seconds-closed
+clock capture clock-repeat-12-with-seconds: both faces redrew; screen and cursor pair stayed inside epoch second 1789579486
+ok    clock-repeat-12-with-seconds
+ok    clock-repeat-12-with-seconds-closed
+clock repeat checks=4 failures=0

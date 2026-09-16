@@ -5,18 +5,12 @@ description: "TUI parity obligations, their proof status, and progress against t
 resource: compat/tui/campaign.json
 tags: [tmux, tui, compatibility, campaign]
 <<<<<<< HEAD
-timestamp: 2026-09-18T00:00:00Z
-||||||| parent of 01feb5f6 (Record cycle 11 modes proofs and remaining corpus failures)
-timestamp: 2026-09-17T00:00:00Z
-=======
-<<<<<<< HEAD
 timestamp: 2026-09-17T00:00:00Z
 ||||||| parent of 773f31a3 (Record cycle 11 modes proofs and remaining corpus failures)
 timestamp: 2026-09-14T00:00:00Z
 =======
 timestamp: 2026-09-16T00:00:00Z
 >>>>>>> 773f31a3 (Record cycle 11 modes proofs and remaining corpus failures)
->>>>>>> 01feb5f6 (Record cycle 11 modes proofs and remaining corpus failures)
 ---
 
 # TUI parity campaign
@@ -29,11 +23,17 @@ The contract compares CLI stdout, stderr and exit codes exactly, and rendered ce
 
 Existing tmux gap decisions remain in `compat/tmux-gaps.json`. Accepted or closed source gaps do not establish TUI parity. Only obligations with verified proof count as complete.
 
-Fixed baseline: **11/12 verified**. Added scope: **3/6 verified**.
+Fixed baseline: **11/12 verified**. Added scope: **1/6 verified**.
 
-Status counts: unmeasured: 1, different: 0, active: 1, review: 2, blocked: 0, verified: 14.
+<<<<<<< HEAD
+Status counts: unmeasured: 1, different: 0, active: 1, review: 4, blocked: 0, verified: 12.
+||||||| parent of eb06723c (Record customize and suspension proofs for gate review)
+Status counts: unmeasured: 2, different: 0, active: 2, review: 2, blocked: 0, verified: 12.
+=======
+Status counts: unmeasured: 2, different: 0, active: 1, review: 3, blocked: 0, verified: 12.
+>>>>>>> eb06723c (Record customize and suspension proofs for gate review)
 
-Dependency-ready obligations, by priority: TUI-013, TUI-014, TUI-018.
+Dependency-ready obligations, by priority: TUI-013, TUI-014, TUI-015, TUI-017, TUI-018.
 
 ## everyday: Everyday terminal use
 
@@ -62,10 +62,18 @@ Dependency-ready obligations, by priority: TUI-013, TUI-014, TUI-018.
 | TUI-010: Slow output, recovery and client lifecycle | verified | 10 | TUI-001, TUI-002 |
 | TUI-011: Remaining stock client command inventory | review | 11 | TUI-003, TUI-006, TUI-007, TUI-014, TUI-015, TUI-016, TUI-017, TUI-018 |
 | TUI-012: Superset commands beside tmux behavior | verified | 12 | TUI-003, TUI-004, TUI-008, TUI-009, TUI-010 |
+<<<<<<< HEAD
 | TUI-014: Client mode tools in the raw TUI | active | 14 | TUI-003 |
-| TUI-015: A lock surface a client can draw | verified | 15 | none |
+| TUI-015: A lock surface a client can draw | review | 15 | none |
+||||||| parent of eb06723c (Record customize and suspension proofs for gate review)
+| TUI-014: Client mode tools in the raw TUI | active | 14 | TUI-003 |
+| TUI-015: A lock surface a client can draw | unmeasured | 15 | none |
+=======
+| TUI-014: Client mode tools in the raw TUI | review | 14 | TUI-003 |
+| TUI-015: A lock surface a client can draw | unmeasured | 15 | none |
+>>>>>>> eb06723c (Record customize and suspension proofs for gate review)
 | TUI-016: Server log and terminal introspection | verified | 16 | none |
-| TUI-017: Rich capture transports and the snapshot residues | verified | 17 | none |
+| TUI-017: Rich capture transports and the snapshot residues | review | 17 | none |
 | TUI-018: Caller stream forms | review | 18 | none |
 
 ## Obligation details
@@ -755,7 +763,7 @@ Next action: Whenever fabrico is next on the macbook: follow compat/tui/README.m
 
 ### TUI-014: Client mode tools in the raw TUI
 
-Status: active.
+Status: review.
 
 Acceptance:
 
@@ -810,46 +818,58 @@ Sources:
 - `knowledge/tmux/commands.md`
 - `compat/tui/verify-claims.py`
 - `knowledge/protocol/index.md`
+- `compat/tui-client-job.py`
+- `crates/zz-mux/src/command/customize.rs`
+- `crates/zz-mux/src/tmux_option_metadata.rs`
+- `crates/zz-mux/src/tmux_options.rs`
+- `crates/zz-protocol/src/key.rs`
+- `crates/zz-tui/src/app.rs`
+- `crates/zz-tui/src/tty.rs`
+- `crates/zz-tui/src/writer.rs`
+- `knowledge/designs/index.md`
+- `knowledge/designs/tui-customize-mode.md`
 
 Tmux gap references: `commands.native-client-tools`, `clients.interactive-refresh`.
 
-Cycle 11 modes proof pass, 2026-09-16, rebased onto be5709df. Clock and switch modes use a pane-owned stack, restore suspended surfaces, and consume command-injected keys before PTY delivery; copy-mode -q cancels them. Own pinned-outer-tmux probes verify mode depth, restored screens, shell contents, switch -F and Enter templates, formatted server-access identities, and duplicate-window ordering. The full roster exposed two further defects: BTab/KPEnter were split into literal characters, and CLI preflight changed known tmux syntax errors to status 2. This pass fixes both. Three full client-command runs pass 139 asserted comparisons and retain 30 attributed records, with TUI-014=2 and unattributed=0. Seconds clock faces now assert at 24-with-seconds and 12-with-seconds with paired sampling inside a single second; each has a one-sided colour sabotage. The noattr unit test passes and fails after removing its base_cell fix. Full measurements, failed runs, final command results, and complete footprint are in compat/tui/evidence/TUI-014/attempt-06/. This replaces the superseded attempt-04 claim that all default window-row cells matched. The default window style tail, switch navigation/filter/mouse, refused -k/-Z lifecycle variants, and both copy/pane-mode ordering variants remain measured under clients.interactive-refresh. Clause 2's final two entries, customize-mode-open and suspend-client, remain measured TUI-014 records for the sibling customize lane under fabrico's 2026-09-16 ruling. The obligation remains active; no proof here covers those commands or the registered variants. Final production revision 5036e22f passes all seven requested package suites and the retained-output live verifier (139/30 client commands, 78/0 choosers). The full 198-row delta completed 2331 steps with zero unrun rows, 187 zero-divergence rows, two documented known-divergence rows and nine failures after retry. The batch is partial; see the exact residuals and binary/revision boundaries in attempt-06/notes.md. An inherited-shell chooser cache mismatch and one earlier verifier assertion failure are retained, not erased by passing reruns. Correction attempt-07 supersedes the wire claim: v0.10.0 released 103, so the PaneSnapshot.mode tail append now uses unreleased 104 with both decimal pins and both 0x68 byte pins. Frozen v103 history is unchanged. Both switch window comparators resolve sort keys before sorting and skip orphan sessions; a regression test and the pinned alpha/cli/zulu capture pass. The v104 live verifier passes 139/30 client commands and 78/0 choosers; every client-command sabotage is caught. Protocol tests, all seven crates clippy, formatting, wire-version.py and compat/check.sh pass. A full daemon run had one terminal-capture timeout; its isolated rerun and the full four-thread retry pass (938 library tests). All outputs remain in attempt-07. The exact added-Rust-comment count against origin/main is zero. Historical corpus and other fixture runs remain protocol-103 evidence; they were not rerun for this correction.
+Customize lane, measured 2026-09-16, based on modes b2c00bd2. customize-mode-open and suspend-client flip from recorded to asserted, with one-sided expansion and actual process-suspension sabotages. The tree is per pane and shares the existing mode stack. Default roots match the pin without a zz-row mask; the sibling adds its explicit reveal section later. The final rebuilt v104 verifier exits 0: client commands 141 asserted/28 recorded, none owned by TUI-014, unattributed=0; choosers 78 asserted/0 recorded. Across four full client rosters both assigned cases pass every time; the second roster retains a seconds-clock mismatch. Earlier chooser/verifier zoom failures remain preserved. Focused edit/stop/resume checks pass 12/12, and all eleven added CLI flag diagnostics match stdout, stderr and status. Both client-command self-check runs pass. Copy-mode, screen-diff, overlays and their self-checks pass; attached-client passes and has no self-check entry point. The full four-crate run retains one delayed-job daemon failure that passes alone; all other targets pass. Clippy, formatting, the scrubbed-home compatibility gate, wire check and knowledge validation pass. The delta corpus completes 199 rows and 2352 steps, zero unrun, with 9 failures after retry; raw first and retry logs are retained. Corpus and broader regressions use the retained initial v104 binary; final verifier/focused checks use the rebased build. Key-binding editing, reset/unset and tagged bulk mutations, array insertion, help, mouse and -k/-Z remain unimplemented. Built-in SSH supplies no tty and takes the suspend no-op path; no live remote proof is claimed. The evidence records limits and failures rather than claiming exhaustive customize parity. Status is review; the gate owns verification.
 
-Next action: Sibling customize lane: implement and flip customize-mode-open and suspend-client with sabotages. Independently review the modes proofs and full declared footprint. Reconcile the nine corpus failures with their CLI/source-replay, lock-default, plugin/runtime-facts and status owners; retain all measured interactive-refresh and socket-ACL variants. Do not mark TUI-014 verified before its last two clause-2 entries are proved.
+Next action: GATE: rebuild the customize tip and review the two flips, their sabotages, the per-pane tree, suspension job control and the complete footprint. Retain the broader interaction limits and historical corpus failures; do not infer exhaustive customize parity from its opening checkpoint. zz-knobs adds the separate extension after this lane.
 
-Proof revision: `2740ec94a1f713a46fd4b356394a3fec2ccebf7a`. Tmux: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
+Proof revision: `35465f8296de23bf50be32c6e5d1cbdc1719242c`. Tmux: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Environment: Alienware Linux, 2026-09-16; pinned outer tmux; 80x24 and fixture resize geometries; isolated HOME/XDG_CONFIG_HOME; final chooser/screen/verifier runs use SHELL=/bin/sh. Frozen modes/corpus binary maps to f884b266; final binary maps to 5036e22f. Capped Cargo scopes and two shared slots. Active partial proof with retained failures; see notes.md. Correction attempt-07: same be5709df base, protocol 104, frozen zz-modes-v104 binary, SHELL=/bin/sh; full daemon retry uses RUST_TEST_THREADS=4. Earlier artifacts remain historical protocol-103 evidence.
+Environment: Alienware Linux, 2026-09-16; isolated fixture homes and sockets; 80x24 and regression resize geometries. Initial and final binary hashes are in attempt-07-customize/binaries-{initial,final}.json. Rebased onto origin/campaign/tui-modes-12 b2c00bd2, not contained in origin/main. Final runtime binary was built from 0ae39523; later commits adjust one timing-sensitive test, fixture inventory totals, formatting and documentation. Final verifier and focused/self-check probes use the rebuilt v104 binary; the delta corpus and broader regression runner use the retained initial binary. See notes.md for failed runs and provenance.
 
 Proof commands:
 
-- `ZZ_BIN=target/debug/zz-modes-proof TMUX_BIN=compat/.cache/tmux-src/tmux compat/tui-client-commands.sh (three runs and --self-check)`
-- `SHELL=/bin/sh ZZ_BIN=target/debug/zz-modes-proof TMUX_BIN=compat/.cache/tmux-src/tmux compat/tui-choosers.sh (and --self-check)`
-- `SHELL=/bin/sh ZZ_BIN=target/debug/zz-modes-proof TMUX_BIN=compat/.cache/tmux-src/tmux compat/tui-copy-mode.sh (and --self-check)`
-- `SHELL=/bin/sh ZZ_BIN=target/debug/zz-modes-proof TMUX_BIN=compat/.cache/tmux-src/tmux compat/tui-screen-diff.sh`
-- `SHELL=/bin/sh ZZ_BIN=target/debug/zz-modes-proof ZZ_COMPAT_ZZ=target/debug/zz-modes-proof TMUX_BIN=compat/.cache/tmux-src/tmux compat/attached-client.sh`
-- `SHELL=/bin/sh python3 compat/tui/verify-claims.py --run TUI-014 --zz target/debug/zz-modes-final --output-dir compat/tui/evidence/TUI-014/attempt-06/verifier-final`
-- `python3 compat/tui/evidence/TUI-014/attempt-06/run-delta.py`
-- `/tmp/zz-cargo.sh test --no-fail-fast -p zz-protocol -p zz-mux -p zz-daemon -p zz-tui -p zz-client -p zz-client-ffi`
-- `/tmp/zz-cargo.sh test -p zz --no-fail-fast`
-- `/tmp/zz-cargo.sh clippy -p zz-protocol -p zz-mux -p zz-daemon -p zz-tui -p zz-client -p zz-client-ffi -p zz --all-targets --all-features -- -D warnings`
-- `/tmp/zz-cargo.sh clippy -p zz --all-targets --all-features -- -D warnings`
-- `/tmp/zz-cargo.sh fmt --all -- --check`
-- `compat/check.sh (PATH adapter routes internal Cargo through /tmp/zz-cargo.sh)`
-- `SHELL=/bin/sh ZZ_BIN=target/debug/zz-modes-v104 TMUX_BIN=compat/.cache/tmux-src/tmux bash compat/tui/evidence/TUI-014/attempt-06/defect-probe.sh`
-- `SHELL=/bin/sh python3 compat/tui/verify-claims.py --run TUI-014 --zz target/debug/zz-modes-v104 --output-dir compat/tui/evidence/TUI-014/attempt-07/verifier`
-- `SHELL=/bin/sh ZZ_BIN=target/debug/zz-modes-v104 TMUX_BIN=compat/.cache/tmux-src/tmux compat/tui-client-commands.sh --self-check`
-- `python3 compat/wire-version.py`
-- `RUST_TEST_THREADS=4 /tmp/zz-cargo.sh test -p zz-daemon`
-- `/tmp/zz-cargo.sh test -p zz-protocol`
+- `compat/tui-client-commands.sh: four full runs, including both verifier invocations; three pass 141 assertions/28 records, second run fails only the seconds-clock case (140/141); both assigned cases pass every run`
+- `compat/tui-client-commands.sh --self-check: initial and rebuilt binaries pass every sabotage and equivalence, including customize expansion and actual process suspension`
+- `focused-probe.sh: initial and rebuilt binaries pass 12 comparisons covering opening, numeric edit, close, stop and resume`
+- `SHELL=/bin/sh python3 compat/tui/verify-claims.py --run TUI-014 --zz target/debug/zz-customize-final --output-dir compat/tui/evidence/TUI-014/attempt-07-customize/verifier-final: exit 0, 141/28 client commands and 78/0 choosers; earlier verifier exit 1 retained`
+- `compat/tui-choosers.sh: inherited-shell run fails zoom-manual-released; controlled SHELL=/bin/sh run passes 78/78; --self-check passes`
+- `compat/tui-copy-mode.sh: exit 0, 147 cases; --self-check exit 0`
+- `compat/tui-screen-diff.sh: exit 0, 147 assertions/6 existing records; --self-check exit 0`
+- `compat/tui-overlays.sh: exit 0, 48 assertions/0 records; --self-check exit 0`
+- `/tmp/zz-cargo.sh test --no-fail-fast -p zz-protocol -p zz-mux -p zz-daemon -p zz-tui -- --test-threads=4: exit 101, daemon delayed-job test fails; all other targets pass; isolated delayed-job rerun exits 0`
+- `/tmp/zz-cargo.sh clippy -p zz-protocol -p zz-mux -p zz-daemon -p zz-tui --all-targets --all-features -- -D warnings: exit 0`
+- `/tmp/zz-cargo.sh fmt --all: exit 0`
+- `compat/check.sh with attempt-local capped-bin PATH adapter: exit 0; canceled queued invocation retained`
+- `python3 compat/tui/tracker.py check: exit 0`
+- `python3 compat/wire-version.py: exit 0, unreleased 104 after shipped 103`
+- `python3 .agents/skills/okf/scripts/okf.py validate knowledge: exit 0, existing research-age warning only`
+- `compat/attached-client.sh: exit 0, attached-client compatibility: PASS; this fixture has no --self-check option`
+- `new-command-flags.py against the rebuilt binary: exit 0, 11 exact stdout/stderr/status comparisons; all newly added customize/suspend flag rows pass`
+- `ZZ_COMPAT_ZZ=target/debug/zz-customize-final compat/run.sh smoke/command-flag-errors.txt smoke/config-discovery.txt: exit 1; config import 12 clean steps, flag fixture has stale-count and inherited attach-status failures; count helper corrected in 05d3dc0c`
+- `compat/check.sh after the count helper correction: exit 0`
+- `compat/run.sh --delta 2e2dc584 --commands customize-mode,suspend-client,send-keys,copy-mode,set-option,bind-key: exit 1, 199 rows, 2352 steps, zero unrun, 9 failed after retry; see corpus-summary.json`
+- `HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config compat/check.sh with explicit toolchain homes and capped-bin PATH: exit 0 (compat-check-scrubbed)`
 
-Artifacts: `compat/tui/evidence/TUI-014/attempt-06/notes.md`, `compat/tui/evidence/TUI-014/attempt-06/review.md`, `compat/tui/evidence/TUI-014/attempt-06/environment.txt`, `compat/tui/evidence/TUI-014/attempt-06/binary-revisions.txt`, `compat/tui/evidence/TUI-014/attempt-06/defect-probe-final.txt`, `compat/tui/evidence/TUI-014/attempt-06/noattr-mutation.txt`, `compat/tui/evidence/TUI-014/attempt-06/client-commands-run-1-fixed.txt`, `compat/tui/evidence/TUI-014/attempt-06/client-commands-run-2-fixed.txt`, `compat/tui/evidence/TUI-014/attempt-06/client-commands-run-3-fixed.txt`, `compat/tui/evidence/TUI-014/attempt-06/client-commands-self-check-seconds-fixed.txt`, `compat/tui/evidence/TUI-014/attempt-06/choosers-sh.txt`, `compat/tui/evidence/TUI-014/attempt-06/choosers-self-check-sh.txt`, `compat/tui/evidence/TUI-014/attempt-06/copy-mode-sh.txt`, `compat/tui/evidence/TUI-014/attempt-06/copy-mode-self-check-sh.txt`, `compat/tui/evidence/TUI-014/attempt-06/screen-diff-sh.txt`, `compat/tui/evidence/TUI-014/attempt-06/attached-client-sh.txt`, `compat/tui/evidence/TUI-014/attempt-06/verify-claims-final-retained.txt`, `compat/tui/evidence/TUI-014/attempt-06/six-package-tests.txt`, `compat/tui/evidence/TUI-014/attempt-06/zz-package-tests-control-fixed.txt`, `compat/tui/evidence/TUI-014/attempt-06/clippy.txt`, `compat/tui/evidence/TUI-014/attempt-06/clippy-control-final.txt`, `compat/tui/evidence/TUI-014/attempt-06/fmt-control-final.txt`, `compat/tui/evidence/TUI-014/attempt-06/compat-check-final.txt`, `compat/tui/evidence/TUI-014/attempt-06/corpus-summary.json`, `compat/tui/evidence/TUI-014/attempt-06/corpus-final-details.txt`, `compat/tui/evidence/TUI-014/attempt-06/footprint.txt`, `compat/tui/evidence/TUI-014/attempt-07/notes.md`, `compat/tui/evidence/TUI-014/attempt-07/environment.json`, `compat/tui/evidence/TUI-014/attempt-07/commands.json`, `compat/tui/evidence/TUI-014/attempt-07/binary-revision.txt`, `compat/tui/evidence/TUI-014/attempt-07/binary-sha256.txt`, `compat/tui/evidence/TUI-014/attempt-07/source-checks.txt`, `compat/tui/evidence/TUI-014/attempt-07/added-comments.txt`, `compat/tui/evidence/TUI-014/attempt-07/tie-order.txt`, `compat/tui/evidence/TUI-014/attempt-07/defect-probe.txt`, `compat/tui/evidence/TUI-014/attempt-07/client-self-check.txt`, `compat/tui/evidence/TUI-014/attempt-07/verify-claims.txt`, `compat/tui/evidence/TUI-014/attempt-07/protocol-tests.txt`, `compat/tui/evidence/TUI-014/attempt-07/switch-filtered.txt`, `compat/tui/evidence/TUI-014/attempt-07/daemon-tests.txt`, `compat/tui/evidence/TUI-014/attempt-07/daemon-timeout-filtered.txt`, `compat/tui/evidence/TUI-014/attempt-07/daemon-tests-retry.txt`, `compat/tui/evidence/TUI-014/attempt-07/clippy.txt`, `compat/tui/evidence/TUI-014/attempt-07/fmt-final.txt`, `compat/tui/evidence/TUI-014/attempt-07/wire-version.txt`, `compat/tui/evidence/TUI-014/attempt-07/compat-check.txt`, `compat/tui/evidence/TUI-014/attempt-07/footprint.txt`, `compat/tui/evidence/TUI-014/attempt-07/compat-check-final.txt`.
+Artifacts: `compat/tui/evidence/TUI-014/attempt-06/notes.md`, `compat/tui/evidence/TUI-014/attempt-07/notes.md`, `compat/tui/evidence/TUI-014/attempt-07-customize/added-comments.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/attach-flag-diagnostic-with-server.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/attach-flag-diagnostic.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/attached-client.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/binaries-final.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/binaries-initial.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/build-1.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/build-2.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/build-3.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/build-4.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/build-final.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/build-final.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/build-suspend-diagnostic.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/capped-bin/cargo`, `compat/tui/evidence/TUI-014/attempt-07-customize/capture-corpus.py`, `compat/tui/evidence/TUI-014/attempt-07-customize/catalog-filtered-retry.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/catalog-filtered-retry.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/catalog-filtered.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/catalog-filtered.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/catalog-test-1.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/catalog-test-2.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/catalog-test-3.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/client-run-1-captures.tar.gz`, `compat/tui/evidence/TUI-014/attempt-07-customize/client-run-1.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/client-run-2.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/client-run-2.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/client-self-check-1.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/client-self-check-final.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/client-self-check-final.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/clippy-1.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/clippy-2.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/clippy-final.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/clippy-final.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/clock-repeat.sh`, `compat/tui/evidence/TUI-014/attempt-07-customize/clock-repeat.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/compat-check-counts.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/compat-check-counts.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/compat-check-final.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/compat-check-final.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/compat-check-free-slot.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/compat-check-free-slot.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/compat-check-scrubbed.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/compat-check-scrubbed.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/control-pin-probe.py`, `compat/tui/evidence/TUI-014/attempt-07-customize/control-pin-probe.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/corpus-first-pass.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/corpus-log-manifest.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/corpus-logs.tar.gz`, `compat/tui/evidence/TUI-014/attempt-07-customize/corpus-summary.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/customize-compile-1.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/customize-compile-2.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/customize-compile-3.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/customize-tests-1.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/customize-tests-2.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/daemon-delay-final-retry.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/daemon-delay-final-retry.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/daemon-delay-final-solo.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/daemon-delay-final-solo.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/daemon-delay-solo.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/daemon-delay-solo.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/daemon-prefix-controlled.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/daemon-prefix-controlled.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/daemon-prefix-solo.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/daemon-prefix-solo.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/delta-list.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/delta-list.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/delta-run.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/delta-run.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/design-index-final.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/design-index.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/early-results.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/environment.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/final-checks.py`, `compat/tui/evidence/TUI-014/attempt-07-customize/final-command-flag-errors-first.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/final-command-flag-errors-last.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/final-config-discovery-last.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/final-corpus-flags.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/final-corpus-flags.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/finalize-proof.py`, `compat/tui/evidence/TUI-014/attempt-07-customize/fmt-1.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/fmt-2.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/fmt-final.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/focused-final.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/focused-final.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/focused-probe-1.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/focused-probe-2.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/focused-probe-3.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/focused-probe.sh`, `compat/tui/evidence/TUI-014/attempt-07-customize/footprint-from-main.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/footprint.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/format-final.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/format-final.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/knowledge-final.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/knowledge-final.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/knowledge-validation.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/manifest-tests-1.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/manifest-tests-2.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/manifest-tests-3.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/mux-catalog-filtered.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/mux-catalog-filtered.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/new-command-flags.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/new-command-flags.py`, `compat/tui/evidence/TUI-014/attempt-07-customize/new-command-flags.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/new-command-flags.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/notes.md`, `compat/tui/evidence/TUI-014/attempt-07-customize/package-results.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/packages-1.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/packages-final.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/packages-final.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/pin-probe.sh`, `compat/tui/evidence/TUI-014/attempt-07-customize/pin-probe.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/rebase-final.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/rebase.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/recorded-cases.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/recorded-screen-cases.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/regression-results.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/review.md`, `compat/tui/evidence/TUI-014/attempt-07-customize/run-command.py`, `compat/tui/evidence/TUI-014/attempt-07-customize/run-regressions.py`, `compat/tui/evidence/TUI-014/attempt-07-customize/seal-corpus.py`, `compat/tui/evidence/TUI-014/attempt-07-customize/signal-test-1.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/source-checks-final.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/suspend-probe-1.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/suspend-probe.sh`, `compat/tui/evidence/TUI-014/attempt-07-customize/suspend-writer-tests.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/tracker-check-final.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/tracker-check-final.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/tracker-check-sealed.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/tracker-check-sealed.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/tui-choosers-self-check.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/tui-choosers-sh.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/tui-choosers-sh.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/tui-choosers.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/tui-copy-mode-self-check.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/tui-copy-mode.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/tui-overlays-self-check.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/tui-overlays.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/tui-screen-diff-self-check.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/tui-screen-diff.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/usage-binary-boundary.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/verifier/TUI-014-tui-choosers.result.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/verifier/TUI-014-tui-choosers.stderr.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/verifier/TUI-014-tui-choosers.stdout.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/verifier/TUI-014-tui-client-commands.result.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/verifier/TUI-014-tui-client-commands.stderr.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/verifier/TUI-014-tui-client-commands.stdout.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/verifier-final/TUI-014-tui-choosers.result.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/verifier-final/TUI-014-tui-choosers.stderr.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/verifier-final/TUI-014-tui-choosers.stdout.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/verifier-final/TUI-014-tui-client-commands.result.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/verifier-final/TUI-014-tui-client-commands.stderr.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/verifier-final/TUI-014-tui-client-commands.stdout.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/verify-claims-final.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/verify-claims-final.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/verify-claims.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/verify-claims.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/wire-check-final.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/wire-check-final.txt`, `compat/tui/evidence/TUI-014/attempt-07-customize/wire-check-sealed.result.json`, `compat/tui/evidence/TUI-014/attempt-07-customize/wire-check-sealed.txt`.
 
-Review: `compat/tui/evidence/TUI-014/attempt-06/review.md`.
+Review: `compat/tui/evidence/TUI-014/attempt-07-customize/review.md`.
 
 ### TUI-015: A lock surface a client can draw
 
-Status: verified.
+Status: review.
 
 Acceptance:
 
@@ -884,85 +904,30 @@ Sources:
 - `compat/tui/evidence/TUI-015/attempt-03/environment.json`
 - `compat/tui/evidence/TUI-015/attempt-03/fixture-summary.json`
 - `compat/tui/evidence/TUI-015/attempt-03/self-check-summary.json`
-- `crates/zz-mux/src/command.rs`
-- `third_party/rust/libghostty-vt-sys/provenance.patch`
-- `third_party/rust/libghostty-vt/src/screen.rs`
-- `third_party/rust/libghostty-vt/src/style.rs`
-- `compat/tui/evidence/TUI-017/attempt-07/notes.md`
-- `compat/tui/evidence/TUI-017/attempt-07/environment.json`
-- `compat/tui/evidence/TUI-017/attempt-07/flipped-cases.json`
-- `compat/tui/evidence/TUI-017/attempt-07/records.json`
-- `compat/tui/evidence/TUI-017/attempt-07/probe-residuals.json`
-- `compat/tui/evidence/TUI-017/attempt-07/baseline-source-audit.json`
-- `compat/tui/evidence/TUI-015/attempt-04/notes.md`
-- `compat/tui/evidence/TUI-015/attempt-04/pane-index-scopes.txt`
-- `compat/tui/evidence/TUI-015/attempt-05/notes.md`
-- `compat/tui/evidence/TUI-017/attempt-08/notes.md`
-- `compat/tui/evidence/TUI-017/attempt-08/proof-summary.json`
-- `compat/tui/evidence/TUI-017/attempt-08/record-audit.json`
-- `compat/tui/evidence/TUI-017/attempt-09/notes.md`
-- `compat/tui/evidence/TUI-017/attempt-09/proof-summary.json`
-- `compat/tui/evidence/TUI-017/attempt-09/new-asserted-cases.json`
-- `compat/tui/evidence/TUI-017/attempt-09/record-audit.json`
-- `compat/tui/evidence/TUI-015/attempt-06/notes.md`
-- `compat/tui/evidence/TUI-017/attempt-10/notes.md`
-- `compat/tui/evidence/TUI-017/attempt-10/execution-context.json`
-- `compat/tui/evidence/TUI-017/attempt-10/case-changes.json`
-- `compat/tui/evidence/TUI-017/attempt-10/native-summary.txt`
-- `compat/tui/evidence/TUI-017/attempt-10/native-attribution-summary.txt`
-- `compat/tui/evidence/TUI-017/attempt-10/delta-summary.json`
 
 Tmux gap references: `options.lock-program`.
 
-TAB DECISION REVISION 2026-09-18. Rebased onto origin/main 7f8d2cc4 (v0.11.0); compat/wire-version.py reports 104 matching the release with the wire unchanged. fabrico's ruling removes tab provenance from the vendored Ghostty patch and from the capture path: the tab style flag, the printSliceFill mask, the per-HT marking and the edit handling that existed only for tabs are gone, while the indexed-colour class bits stay and capture-low-indexed-colour stays asserted. Seventeen cases became records opening DECIDED 2026-09-18 (fabrico) under decided:TUI-017; nine edited-tab cases whose pin rows end up holding no tab stay asserted, and capture-edited-tab-ech-entire took a new sabotage because erasing the cells a tab produced is invisible without the literal tab. The reviewer's own workloads now run main's instruction stream: overwrite, widestops, alltabs, mixed, htsevery and reflow match main to five decimal places and only edits differs, at +1.08% and +1.29%, which the indexed-colour-only control attributes to the retained ICH hunk an asserted pin case requires; CPU medians sit inside this shared host's noise in both directions. The eight 100x30 erased-background probe differences were a detached new-session starting its pty at 80x24 whatever -x and -y asked; panes now spawn at their laid-out size, the eight cases assert with sabotages, and the attached probe reports 0 differences fixed against 8 and 7 reverted. build.rs mirrors the fetched Ghostty tree into a directory keyed by the patch hash, so an unpatched build can no longer link the patched library. Three shared runs each pass 219 assertions with 42 records, unattributed=0 and zero ordinary TUI-015 or TUI-017 records; the self-check passes 152 expectations; copy-mode is 147/0 with 27 self-check expectations, screen-diff 147/6 with 18, and the attached client passes. verify-claims re-measures both obligations and reports none of the 42 records theirs. zz-terminal, zz-mux and zz-tui pass 1136 tests with one ignored; zz-daemon passes 986 with one ignored and one failure, the ACP agent slow-client soak, which fails alone twice here and which attempt-07 reproduced on a clean unmodified baseline; no all-tests-green claim is made. Clippy over the four crates, cargo fmt, compat/check.sh, the tracker check, the evidence secret scan and the OKF validation all pass. All 254 delta rows ran with none unrun: ten failed, seven of them identically on the main 38c50df4 control and three because the harness needs a zz_cli beside the binary, which pass once it is there. Attempt-07's retained environment listings are redacted at this tip. Protocol 104 unchanged. Leave both obligations at review. GATE, 2026-09-18, cycle 11, alienware box, revision b3052c53b68a. VERIFIED. The gate re-ran every proof at its own merge revision: compat/tui-client-commands.sh three times, each `all 219 asserted comparisons identical, 42 recorded not asserted (0 for a sibling lane, owners TUI-014=6 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=23 gap:clients.interactive-refresh=8 unattributed=0)`, so this obligation owns zero ordinary records; --self-check caught every sabotage in its own channel; compat/tui-copy-mode.sh 147; compat/tui-screen-diff.sh 147 asserted with its own six records; compat/attached-client.sh PASS; verify-claims --run for both obligations answered `every verified obligation holds up`; compat/check.sh exit 0. The adversarial review of b3052c53 accepted both obligations and proved the two load-bearing claims by experiment: reverting the detached pty initial size turns exactly the four erased-background cases red, and removing the retained ICH hunk turns exactly capture-edited-tab-ich-off-line red. Performance is back to main: the overwrite workload the previous review measured at +68.33% is -0.34% and a tab stop on every column is +2.01%, with instruction counts equal to main except the +1.08% the retained ICH rule carries.
+EMPTY EXACT WINDOW FOLLOW-UP 2026-09-17. Rebased onto main f9c52359. Source cf8e0b8b normalizes an empty exact window component before its pane suffix, only under TargetSlot::Session. All 108 detached command/target/layout comparisons match the pin, including literal %0 in another window or session and the exact missing-pane diagnostics. Three shared-fixture runs each pass all 198 asserted comparisons with 32 records and unattributed=0. The self-check passes 110 expectations and catches all six new rejection sabotages. These are six new assertions, not six recorded-to-asserted flips; lock-client remains the carried flip. Main's bare-ID test and all 21 targets.txt lines are unchanged; its 20 executable steps and the fallback-containment regression pass. The full mux package passes 535 library and 105 integration tests. Mux clippy, formatting, compat/check.sh and wire validation pass. The 155-row command delta exits 1: 151 pass after retries; the four final failures each reproduce on fresh clean main, including the pin-side resurrect title failure. The additional capture-pane row passes, covering the full 156-row selection. Initial failures and variable reruns are retained in attempt-03; corpus-classification.json states the limits. Earlier accepted capture and startup measurements remain in TUI-017/attempt-06. Preserve the three pane-base-index records for the residuals lane. TUI-017 still owns four records on this branch; this follow-up does not edit them or promote either obligation.
 
-Next action: Verified at cycle 11's residuals gate. Nothing open: ordinary records are zero and the tab family is a dated 2026-09-18 decision recorded in knowledge/designs/tui-parity.md.
+Next action: Keep at review. Gate the empty-exact-window follow-up using TUI-015/attempt-03, then preserve the three pane-base-index records for the residuals lane and retain the OS-session locking decisions.
 
-Proof revision: `4dac2a62864034f82421c1b11f5c4b2b7b934bda`. Tmux: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
+Proof revision: `cf8e0b8bf7a6755d58685c68bac86443f29aae48`. Tmux: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Environment: compat/tui/evidence/TUI-017/attempt-10/execution-context.json Gate 2026-09-18 on the alienware box re-ran every proof at merge revision b3052c53b68a with a freshly built target/debug/zz_cli and the pinned tmux.
+Environment: Alienware Linux, main f9c52359, immutable debug zz-cli binary from source cf8e0b8b; isolated homes and sockets; pinned tmux. Hashes, wrapper and clean-main build identity are in attempt-03/environment.json. This follow-up measures the exact-window correction; earlier accepted startup and capture details remain in attempt-06.
 
 Proof commands:
 
-- `compat/tui-client-commands.sh target/residuals-2/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-client-commands.sh --self-check target/residuals-2/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-copy-mode.sh target/residuals-2/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-copy-mode.sh --self-check target/residuals-2/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-screen-diff.sh target/residuals-2/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-screen-diff.sh --self-check target/residuals-2/zz compat/.cache/tmux-src/tmux`
-- `compat/attached-client.sh target/residuals-2/zz compat/.cache/tmux-src/tmux`
-- `python3 compat/tui/verify-claims.py --run TUI-015 --zz target/residuals-2/zz`
-- `python3 compat/tui/verify-claims.py --run TUI-017 --zz target/residuals-2/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-10/wide-erase-attached-probe.sh target/residuals-2/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-10/wide-erase-attached-probe.sh target/residuals-2/zz-no-initial-size`
-- `bash compat/tui/evidence/TUI-017/attempt-10/wide-erase-self-check.sh target/residuals-2/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-10/native-benchmark.sh 8`
-- `python3 compat/tui/evidence/TUI-017/attempt-10/native-summary.py`
-- `bash compat/tui/evidence/TUI-017/attempt-10/native-attribution.sh`
-- `/tmp/zz-cargo.sh clippy -p zz-terminal -p zz-mux -p zz-daemon -p zz-tui --all-targets --all-features -- -D warnings`
-- `/tmp/zz-cargo.sh test -p zz-terminal -p zz-mux -p zz-tui --all-features`
-- `HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config /tmp/zz-cargo.sh test -p zz-daemon --all-features`
-- `/tmp/zz-cargo.sh fmt --all --check`
-- `cargo() { /tmp/zz-cargo.sh "$@"; }; export -f cargo; compat/check.sh`
-- `python3 compat/tui/tracker.py check`
-- `python3 compat/wire-version.py`
-- `python3 compat/evidence-secrets.py`
-- `python3 .agents/skills/okf/scripts/okf.py validate knowledge`
-- `mapfile -t rows < compat/tui/evidence/TUI-017/attempt-10/corpus-shard-1.rows; ZZ_COMPAT_ZZ="$PWD/target/residuals-2/zz" compat/run.sh --strict-geometry "${rows[@]}"`
-- `mapfile -t rows < compat/tui/evidence/TUI-017/attempt-10/corpus-shard-2.rows; ZZ_COMPAT_ZZ="$PWD/target/residuals-2/zz" compat/run.sh --strict-geometry "${rows[@]}"`
-- `mapfile -t rows < compat/tui/evidence/TUI-017/attempt-10/corpus-shard-3.rows; ZZ_COMPAT_ZZ="$PWD/target/residuals-2/zz" compat/run.sh --strict-geometry "${rows[@]}"`
-- `ZZ_COMPAT_ZZ="$PWD/target/residuals-2/zz" compat/run.sh smoke/launcher-installed-layout smoke/config-discovery-launcher smoke/pane-tmux-path`
-- `ZZ_COMPAT_ZZ=target/capture-residuals-main-control/zz_cli compat/run.sh lane2-store micro-flags show-options-hooks smoke/cli-chain-parse-abort smoke/default-client-command smoke/plugin-runtime-resurrect-restore smoke/status-background-jobs`
-- `compat/tui-client-commands.sh target/debug/zz_cli compat/.cache/tmux-src/tmux (gate, three runs: all 219 asserted comparisons identical, 42 recorded, unattributed=0)`
-- `compat/tui-client-commands.sh --self-check (gate: every sabotage caught in its own channel)`
-- `compat/tui-copy-mode.sh (gate: 147 cases), compat/tui-screen-diff.sh (gate: 147 asserted, 6 recorded)`
-- `ZZ_BIN=target/debug/zz_cli TMUX_BIN=compat/.cache/tmux-src/tmux compat/attached-client.sh (gate: PASS)`
-- `python3 compat/tui/verify-claims.py --run TUI-015 and --run TUI-017 (gate: every verified obligation holds up)`
-- `compat/check.sh (gate: exit 0)`
+- `compat/tui-client-commands.sh target/capture-12-exact-proof/zz compat/.cache/tmux-src/tmux (three runs)`
+- `compat/tui-client-commands.sh --self-check target/capture-12-exact-proof/zz compat/.cache/tmux-src/tmux`
+- `ZZ_COMPAT_ZZ=$PWD/target/capture-12-exact-proof/zz python3 compat/tui/evidence/TUI-015/attempt-03/exact-window-probe.py (three layouts; commands.json)`
+- `/tmp/zz-cargo.sh test -p zz-mux`
+- `compat/diff-scenario.sh --strict-geometry compat/scenarios/targets.txt target/capture-12-exact-proof/zz compat/.cache/tmux-src/tmux`
+- `ZZ_COMPAT_ZZ=$PWD/target/capture-12-exact-proof/zz compat/run.sh --strict-geometry --delta HEAD..HEAD --commands lock-session,has-session,list-windows`
+- `compat/check.sh (exported cargo function routes every Cargo invocation through /tmp/zz-cargo.sh)`
 
-Artifacts: `compat/tui/evidence/TUI-017/attempt-10/notes.md`, `compat/tui/evidence/TUI-017/attempt-10/review.md`, `compat/tui/evidence/TUI-017/attempt-10/execution-context.json`, `compat/tui/evidence/TUI-017/attempt-10/case-changes.json`, `compat/tui/evidence/TUI-017/attempt-10/proof-summary.json`, `compat/tui/evidence/TUI-017/attempt-10/binaries.txt`, `compat/tui/evidence/TUI-017/attempt-10/client-commands-final-1.txt`, `compat/tui/evidence/TUI-017/attempt-10/client-commands-final-2.txt`, `compat/tui/evidence/TUI-017/attempt-10/client-commands-final-3.txt`, `compat/tui/evidence/TUI-017/attempt-10/client-self-check-final.txt`, `compat/tui/evidence/TUI-017/attempt-10/client-commands-1.txt`, `compat/tui/evidence/TUI-017/attempt-10/client-commands-2.txt`, `compat/tui/evidence/TUI-017/attempt-10/client-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-10/copy-mode.txt`, `compat/tui/evidence/TUI-017/attempt-10/copy-mode-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-10/screen-diff.txt`, `compat/tui/evidence/TUI-017/attempt-10/screen-diff-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-10/attached-client.txt`, `compat/tui/evidence/TUI-017/attempt-10/verify-claims-TUI-015.txt`, `compat/tui/evidence/TUI-017/attempt-10/verify-claims-TUI-017.txt`, `compat/tui/evidence/TUI-017/attempt-10/clippy-final.txt`, `compat/tui/evidence/TUI-017/attempt-10/tests-terminal-mux-tui-final.txt`, `compat/tui/evidence/TUI-017/attempt-10/tests-daemon-final.txt`, `compat/tui/evidence/TUI-017/attempt-10/compat-check.txt`, `compat/tui/evidence/TUI-017/attempt-10/tracker-check.txt`, `compat/tui/evidence/TUI-017/attempt-10/wire-version.txt`, `compat/tui/evidence/TUI-017/attempt-10/credential-scan.txt`, `compat/tui/evidence/TUI-017/attempt-10/okf-validate.txt`, `compat/tui/evidence/TUI-017/attempt-10/native-benchmark.sh`, `compat/tui/evidence/TUI-017/attempt-10/native-benchmark.txt`, `compat/tui/evidence/TUI-017/attempt-10/native-samples.jsonl`, `compat/tui/evidence/TUI-017/attempt-10/native-summary.py`, `compat/tui/evidence/TUI-017/attempt-10/native-summary.txt`, `compat/tui/evidence/TUI-017/attempt-10/native-attribution.sh`, `compat/tui/evidence/TUI-017/attempt-10/native-attribution.jsonl`, `compat/tui/evidence/TUI-017/attempt-10/native-attribution-summary.txt`, `compat/tui/evidence/TUI-017/attempt-10/native-perf.c`, `compat/tui/evidence/TUI-017/attempt-10/native-perf-review.c`, `compat/tui/evidence/TUI-017/attempt-10/native-build-commands.txt`, `compat/tui/evidence/TUI-017/attempt-10/native-binaries.txt`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-attached-probe.sh`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-attached-fixed-1.txt`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-attached-fixed-2.txt`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-attached-fixed-3.txt`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-attached-reverted-1.txt`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-attached-reverted-2.txt`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-self-check.sh`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-fixed.txt`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-reverted.txt`, `compat/tui/evidence/TUI-017/attempt-10/corpus-all.rows`, `compat/tui/evidence/TUI-017/attempt-10/delta-selection.rows`, `compat/tui/evidence/TUI-017/attempt-10/corpus-shard-1.rows`, `compat/tui/evidence/TUI-017/attempt-10/corpus-shard-2.rows`, `compat/tui/evidence/TUI-017/attempt-10/corpus-shard-3.rows`, `compat/tui/evidence/TUI-017/attempt-10/corpus-shard-1.txt`, `compat/tui/evidence/TUI-017/attempt-10/corpus-shard-2.txt`, `compat/tui/evidence/TUI-017/attempt-10/corpus-shard-3.txt`, `compat/tui/evidence/TUI-017/attempt-10/corpus-launcher-rows.txt`, `compat/tui/evidence/TUI-017/attempt-10/corpus-main-control-rows.txt`, `compat/tui/evidence/TUI-017/attempt-10/delta-summary.json`, `compat/tui/evidence/TUI-017/attempt-10/tests-daemon-soak-alone-1.txt`, `compat/tui/evidence/TUI-017/attempt-10/tests-daemon-soak-alone-2.txt`, `compat/tui/evidence/TUI-017/attempt-07/probe-residuals.json`, `compat/tui/evidence/TUI-017/attempt-07/validation-residuals.json`.
+Artifacts: `compat/tui/evidence/TUI-015/attempt-03/notes.md`, `compat/tui/evidence/TUI-015/attempt-03/environment.json`, `compat/tui/evidence/TUI-015/attempt-03/commands.json`, `compat/tui/evidence/TUI-015/attempt-03/before.json`, `compat/tui/evidence/TUI-015/attempt-03/after.json`, `compat/tui/evidence/TUI-015/attempt-03/pane-zero-other-window.json`, `compat/tui/evidence/TUI-015/attempt-03/pane-zero-foreign-session.json`, `compat/tui/evidence/TUI-015/attempt-03/fixture-summary.json`, `compat/tui/evidence/TUI-015/attempt-03/self-check-summary.json`, `compat/tui/evidence/TUI-015/attempt-03/records.json`, `compat/tui/evidence/TUI-015/attempt-03/tests-summary.json`, `compat/tui/evidence/TUI-015/attempt-03/source-audit.json`, `compat/tui/evidence/TUI-015/attempt-03/delta.txt`, `compat/tui/evidence/TUI-015/attempt-03/targets.txt`, `compat/tui/evidence/TUI-015/attempt-03/compat-check.txt`, `compat/tui/evidence/TUI-015/attempt-03/delta-summary.json`, `compat/tui/evidence/TUI-015/attempt-03/corpus-classification.json`, `compat/tui/evidence/TUI-015/attempt-03/capture-pane.txt`.
 
-Review: `compat/tui/evidence/TUI-017/attempt-10/review.md`.
+Review: `compat/tui/evidence/TUI-015/attempt-03/review.md`.
 
 ### TUI-016: Server log and terminal introspection
 
@@ -1022,7 +987,7 @@ Review: `compat/tui/evidence/TUI-016/attempt-01/review.md`.
 
 ### TUI-017: Rich capture transports and the snapshot residues
 
-Status: verified.
+Status: review.
 
 Acceptance:
 
@@ -1051,86 +1016,30 @@ Sources:
 - `compat/tui/evidence/TUI-017/attempt-06/environment.json`
 - `compat/tui/evidence/TUI-017/attempt-06/startup-summary.json`
 - `compat/tui/evidence/TUI-017/attempt-06/fixture-summary.json`
-- `crates/zz-mux/src/command.rs`
-- `third_party/rust/libghostty-vt-sys/provenance.patch`
-- `third_party/rust/libghostty-vt/src/screen.rs`
-- `third_party/rust/libghostty-vt/src/style.rs`
-- `compat/tui/evidence/TUI-017/attempt-07/notes.md`
-- `compat/tui/evidence/TUI-017/attempt-07/environment.json`
-- `compat/tui/evidence/TUI-017/attempt-07/flipped-cases.json`
-- `compat/tui/evidence/TUI-017/attempt-07/records.json`
-- `compat/tui/evidence/TUI-017/attempt-07/probe-residuals.json`
-- `compat/tui/evidence/TUI-017/attempt-07/baseline-source-audit.json`
-- `compat/tui/evidence/TUI-015/attempt-05/notes.md`
-- `compat/tui/evidence/TUI-017/attempt-08/notes.md`
-- `compat/tui/evidence/TUI-017/attempt-08/proof-summary.json`
-- `compat/tui/evidence/TUI-017/attempt-08/record-audit.json`
-- `compat/tui/evidence/TUI-017/attempt-09/notes.md`
-- `compat/tui/evidence/TUI-017/attempt-09/proof-summary.json`
-- `compat/tui/evidence/TUI-017/attempt-09/new-asserted-cases.json`
-- `compat/tui/evidence/TUI-017/attempt-09/record-audit.json`
-- `compat/tui/evidence/TUI-015/attempt-06/notes.md`
-- `compat/tui/evidence/TUI-017/attempt-10/notes.md`
-- `compat/tui/evidence/TUI-017/attempt-10/execution-context.json`
-- `compat/tui/evidence/TUI-017/attempt-10/case-changes.json`
-- `compat/tui/evidence/TUI-017/attempt-10/native-summary.txt`
-- `compat/tui/evidence/TUI-017/attempt-10/native-attribution-summary.txt`
-- `compat/tui/evidence/TUI-017/attempt-10/delta-summary.json`
-- `knowledge/designs/tui-parity.md`
-- `knowledge/tmux/divergences.md`
-- `third_party/rust/libghostty-vt-sys/build.rs`
 
 Tmux gap references: `capture.rich-transports`.
 
-TAB DECISION REVISION 2026-09-18. Rebased onto origin/main 7f8d2cc4 (v0.11.0); compat/wire-version.py reports 104 matching the release with the wire unchanged. fabrico's ruling removes tab provenance from the vendored Ghostty patch and from the capture path: the tab style flag, the printSliceFill mask, the per-HT marking and the edit handling that existed only for tabs are gone, while the indexed-colour class bits stay and capture-low-indexed-colour stays asserted. Seventeen cases became records opening DECIDED 2026-09-18 (fabrico) under decided:TUI-017; nine edited-tab cases whose pin rows end up holding no tab stay asserted, and capture-edited-tab-ech-entire took a new sabotage because erasing the cells a tab produced is invisible without the literal tab. The reviewer's own workloads now run main's instruction stream: overwrite, widestops, alltabs, mixed, htsevery and reflow match main to five decimal places and only edits differs, at +1.08% and +1.29%, which the indexed-colour-only control attributes to the retained ICH hunk an asserted pin case requires; CPU medians sit inside this shared host's noise in both directions. The eight 100x30 erased-background probe differences were a detached new-session starting its pty at 80x24 whatever -x and -y asked; panes now spawn at their laid-out size, the eight cases assert with sabotages, and the attached probe reports 0 differences fixed against 8 and 7 reverted. build.rs mirrors the fetched Ghostty tree into a directory keyed by the patch hash, so an unpatched build can no longer link the patched library. Three shared runs each pass 219 assertions with 42 records, unattributed=0 and zero ordinary TUI-015 or TUI-017 records; the self-check passes 152 expectations; copy-mode is 147/0 with 27 self-check expectations, screen-diff 147/6 with 18, and the attached client passes. verify-claims re-measures both obligations and reports none of the 42 records theirs. zz-terminal, zz-mux and zz-tui pass 1136 tests with one ignored; zz-daemon passes 986 with one ignored and one failure, the ACP agent slow-client soak, which fails alone twice here and which attempt-07 reproduced on a clean unmodified baseline; no all-tests-green claim is made. Clippy over the four crates, cargo fmt, compat/check.sh, the tracker check, the evidence secret scan and the OKF validation all pass. All 254 delta rows ran with none unrun: ten failed, seven of them identically on the main 38c50df4 control and three because the harness needs a zz_cli beside the binary, which pass once it is there. Attempt-07's retained environment listings are redacted at this tip. Protocol 104 unchanged. Leave both obligations at review. GATE, 2026-09-18, cycle 11, alienware box, revision b3052c53b68a. VERIFIED. The gate re-ran every proof at its own merge revision: compat/tui-client-commands.sh three times, each `all 219 asserted comparisons identical, 42 recorded not asserted (0 for a sibling lane, owners TUI-014=6 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=23 gap:clients.interactive-refresh=8 unattributed=0)`, so this obligation owns zero ordinary records; --self-check caught every sabotage in its own channel; compat/tui-copy-mode.sh 147; compat/tui-screen-diff.sh 147 asserted with its own six records; compat/attached-client.sh PASS; verify-claims --run for both obligations answered `every verified obligation holds up`; compat/check.sh exit 0. The adversarial review of b3052c53 accepted both obligations and proved the two load-bearing claims by experiment: reverting the detached pty initial size turns exactly the four erased-background cases red, and removing the retained ICH hunk turns exactly capture-edited-tab-ich-off-line red. Performance is back to main: the overwrite workload the previous review measured at +68.33% is -0.34% and a tab stop on every column is +2.01%, with instruction counts equal to main except the +1.08% the retained ICH rule carries.
+CAPTURE-12 RESUMED 2026-09-16. Rebased 23 carried commits without conflicts onto origin/main eef2df94, including the headless CLI split and landed exit-code predecessor. REVIEW, not verified. Attempt-06 measures immutable debug zz-cli binaries from candidate source 3209ffb7 and an independently compiled exact main archive (524 crate files byte-identical). Forty alternating measured pairs plus two warmup pairs per binary find no consistent candidate startup slowdown: candidate/main median 384.147/383.765 ms, p95 638.012/717.456 ms, maximum 987.666/784.641 ms; the candidate is slower in 20 of 40 pairs. Shared-load measurements are not an isolated microbenchmark. Every child remains parked in splitwait:0 with the other session untouched. Median pane queries take 964.688/1024.474 ms, making the former fixed 0.4-second observation of a one-second child unreliable. The target stays on TargetSlot::Classified, outside the session-only compound parser; capture formatting and wait-pane tail counting are outside this spawn path. Retain the readiness/release fixture: three candidate and three clean-main differential runs pass, and early-return and wrong-window sabotages are caught. Main's bare-ID unit test and targets.txt are unchanged, and the fallback-containment regression passes. Three shared-fixture runs each pass all 192 asserted comparisons with 32 records and unattributed=0; all eight former exit-code failures pass unchanged in every run. The 98-check self-check passes. Both executable claim checks pass and keep review with 3/4 owned records. The attached fixture fails once at a popup marker, while main fails an earlier alert timer; those different failures are not called the same inherited bug. Both isolated popup checks and the full candidate retry pass. The focused delta covers capture-pane, targets and split-window-wait, all passing; it does not rerun all 193 selected rows. Old failed runs and interrupted classification work remain in attempts 04 and 05. Protocol 104 is inherited; no further payload change. Commit 7c807b92 only refreshes inherited native-command registry and test expectations, with no runtime change. Current check outputs and limits are retained in attempt-06. TUI-017 still owns FOUR ordinary records: capture-low-indexed-colour, capture-tab-trailing, capture-tab-internal and capture-tab-wide. The later lane must close all four. Tabs share the TAB-cell storage limitation and have no DEC-charset waiver. All 44 enumerated batch capture comparisons match; 30 tab and eight ordinary 100-column background probe differences remain. Styled frozen-mode capture remains unproven. Final compat/check.sh exits 0, including all 535 mux tests and the three daemon manifest checks. Four-crate clippy with -D warnings, formatting, wire and tracker checks pass. The full daemon run has four failures, each passing its filtered rerun; no full-daemon-green claim is made. Clean main reproduces the two stale native-command test failures repaired by 7c807b92. Cancelled childless Cargo-slot waits and successful capped requeues are retained separately.
 
-Next action: Verified at cycle 11's residuals gate. Nothing open: ordinary records are zero and the tab family is a dated 2026-09-18 decision recorded in knowledge/designs/tui-parity.md.
+Next action: Keep at review. The later residuals lane must close all FOUR ordinary records: capture-low-indexed-colour and capture-tab-trailing, capture-tab-internal, capture-tab-wide. Preserve the separate tab-storage attribution, ordinary background probe residues and frozen-mode proof limit. Read attempt-06 for the current-main startup distribution and repeated fixture proof.
 
-Proof revision: `4dac2a62864034f82421c1b11f5c4b2b7b934bda`. Tmux: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
+Proof revision: `3209ffb704182b170471c3eac8707f6474d96de9`. Tmux: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Environment: compat/tui/evidence/TUI-017/attempt-10/execution-context.json Gate 2026-09-18 on the alienware box re-ran every proof at merge revision b3052c53b68a with a freshly built target/debug/zz_cli and the pinned tmux.
+Environment: Alienware Linux after reboot; base eef2df94; same debug-profile headless package on candidate and independent clean-main archive; isolated homes and sockets. Shared campaign load is recorded per latency sample. Later commit 7c807b92 changes only registry/test expectations. Binary hashes and source identity are in attempt-06.
 
 Proof commands:
 
-- `compat/tui-client-commands.sh target/residuals-2/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-client-commands.sh --self-check target/residuals-2/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-copy-mode.sh target/residuals-2/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-copy-mode.sh --self-check target/residuals-2/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-screen-diff.sh target/residuals-2/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-screen-diff.sh --self-check target/residuals-2/zz compat/.cache/tmux-src/tmux`
-- `compat/attached-client.sh target/residuals-2/zz compat/.cache/tmux-src/tmux`
-- `python3 compat/tui/verify-claims.py --run TUI-015 --zz target/residuals-2/zz`
-- `python3 compat/tui/verify-claims.py --run TUI-017 --zz target/residuals-2/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-10/wide-erase-attached-probe.sh target/residuals-2/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-10/wide-erase-attached-probe.sh target/residuals-2/zz-no-initial-size`
-- `bash compat/tui/evidence/TUI-017/attempt-10/wide-erase-self-check.sh target/residuals-2/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-10/native-benchmark.sh 8`
-- `python3 compat/tui/evidence/TUI-017/attempt-10/native-summary.py`
-- `bash compat/tui/evidence/TUI-017/attempt-10/native-attribution.sh`
-- `/tmp/zz-cargo.sh clippy -p zz-terminal -p zz-mux -p zz-daemon -p zz-tui --all-targets --all-features -- -D warnings`
-- `/tmp/zz-cargo.sh test -p zz-terminal -p zz-mux -p zz-tui --all-features`
-- `HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config /tmp/zz-cargo.sh test -p zz-daemon --all-features`
-- `/tmp/zz-cargo.sh fmt --all --check`
-- `cargo() { /tmp/zz-cargo.sh "$@"; }; export -f cargo; compat/check.sh`
-- `python3 compat/tui/tracker.py check`
-- `python3 compat/wire-version.py`
-- `python3 compat/evidence-secrets.py`
-- `python3 .agents/skills/okf/scripts/okf.py validate knowledge`
-- `mapfile -t rows < compat/tui/evidence/TUI-017/attempt-10/corpus-shard-1.rows; ZZ_COMPAT_ZZ="$PWD/target/residuals-2/zz" compat/run.sh --strict-geometry "${rows[@]}"`
-- `mapfile -t rows < compat/tui/evidence/TUI-017/attempt-10/corpus-shard-2.rows; ZZ_COMPAT_ZZ="$PWD/target/residuals-2/zz" compat/run.sh --strict-geometry "${rows[@]}"`
-- `mapfile -t rows < compat/tui/evidence/TUI-017/attempt-10/corpus-shard-3.rows; ZZ_COMPAT_ZZ="$PWD/target/residuals-2/zz" compat/run.sh --strict-geometry "${rows[@]}"`
-- `ZZ_COMPAT_ZZ="$PWD/target/residuals-2/zz" compat/run.sh smoke/launcher-installed-layout smoke/config-discovery-launcher smoke/pane-tmux-path`
-- `ZZ_COMPAT_ZZ=target/capture-residuals-main-control/zz_cli compat/run.sh lane2-store micro-flags show-options-hooks smoke/cli-chain-parse-abort smoke/default-client-command smoke/plugin-runtime-resurrect-restore smoke/status-background-jobs`
-- `compat/tui-client-commands.sh target/debug/zz_cli compat/.cache/tmux-src/tmux (gate, three runs: all 219 asserted comparisons identical, 42 recorded, unattributed=0)`
-- `compat/tui-client-commands.sh --self-check (gate: every sabotage caught in its own channel)`
-- `compat/tui-copy-mode.sh (gate: 147 cases), compat/tui-screen-diff.sh (gate: 147 asserted, 6 recorded)`
-- `ZZ_BIN=target/debug/zz_cli TMUX_BIN=compat/.cache/tmux-src/tmux compat/attached-client.sh (gate: PASS)`
-- `python3 compat/tui/verify-claims.py --run TUI-015 and --run TUI-017 (gate: every verified obligation holds up)`
-- `compat/check.sh (gate: exit 0)`
+- `compat/tui-client-commands.sh target/capture-12-resumed-proof/zz compat/.cache/tmux-src/tmux (three runs)`
+- `compat/tui-client-commands.sh --self-check target/capture-12-resumed-proof/zz compat/.cache/tmux-src/tmux`
+- `python3 compat/tui/evidence/TUI-017/attempt-06/startup-latency.py target/capture-12-resumed-proof/zz target/capture-12-resumed-proof/main`
+- `compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/split-window-wait.txt <candidate or clean-main binary> compat/.cache/tmux-src/tmux (three pairs)`
+- `compat/attached-client.sh target/capture-12-resumed-proof/zz compat/.cache/tmux-src/tmux (initial failure, full retry passes)`
+- `ZZ_COMPAT_ZZ=$PWD/target/capture-12-resumed-proof/zz compat/run.sh --strict-geometry --delta origin/main...HEAD --commands capture-pane,lock-session,lock-client,lock-server,has-session,list-windows,split-window capture-pane targets smoke/split-window-wait`
+- `python3 compat/tui/verify-claims.py --run TUI-017 --zz target/capture-12-resumed-proof/zz`
 
-Artifacts: `compat/tui/evidence/TUI-017/attempt-10/notes.md`, `compat/tui/evidence/TUI-017/attempt-10/review.md`, `compat/tui/evidence/TUI-017/attempt-10/execution-context.json`, `compat/tui/evidence/TUI-017/attempt-10/case-changes.json`, `compat/tui/evidence/TUI-017/attempt-10/proof-summary.json`, `compat/tui/evidence/TUI-017/attempt-10/binaries.txt`, `compat/tui/evidence/TUI-017/attempt-10/client-commands-final-1.txt`, `compat/tui/evidence/TUI-017/attempt-10/client-commands-final-2.txt`, `compat/tui/evidence/TUI-017/attempt-10/client-commands-final-3.txt`, `compat/tui/evidence/TUI-017/attempt-10/client-self-check-final.txt`, `compat/tui/evidence/TUI-017/attempt-10/client-commands-1.txt`, `compat/tui/evidence/TUI-017/attempt-10/client-commands-2.txt`, `compat/tui/evidence/TUI-017/attempt-10/client-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-10/copy-mode.txt`, `compat/tui/evidence/TUI-017/attempt-10/copy-mode-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-10/screen-diff.txt`, `compat/tui/evidence/TUI-017/attempt-10/screen-diff-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-10/attached-client.txt`, `compat/tui/evidence/TUI-017/attempt-10/verify-claims-TUI-015.txt`, `compat/tui/evidence/TUI-017/attempt-10/verify-claims-TUI-017.txt`, `compat/tui/evidence/TUI-017/attempt-10/clippy-final.txt`, `compat/tui/evidence/TUI-017/attempt-10/tests-terminal-mux-tui-final.txt`, `compat/tui/evidence/TUI-017/attempt-10/tests-daemon-final.txt`, `compat/tui/evidence/TUI-017/attempt-10/compat-check.txt`, `compat/tui/evidence/TUI-017/attempt-10/tracker-check.txt`, `compat/tui/evidence/TUI-017/attempt-10/wire-version.txt`, `compat/tui/evidence/TUI-017/attempt-10/credential-scan.txt`, `compat/tui/evidence/TUI-017/attempt-10/okf-validate.txt`, `compat/tui/evidence/TUI-017/attempt-10/native-benchmark.sh`, `compat/tui/evidence/TUI-017/attempt-10/native-benchmark.txt`, `compat/tui/evidence/TUI-017/attempt-10/native-samples.jsonl`, `compat/tui/evidence/TUI-017/attempt-10/native-summary.py`, `compat/tui/evidence/TUI-017/attempt-10/native-summary.txt`, `compat/tui/evidence/TUI-017/attempt-10/native-attribution.sh`, `compat/tui/evidence/TUI-017/attempt-10/native-attribution.jsonl`, `compat/tui/evidence/TUI-017/attempt-10/native-attribution-summary.txt`, `compat/tui/evidence/TUI-017/attempt-10/native-perf.c`, `compat/tui/evidence/TUI-017/attempt-10/native-perf-review.c`, `compat/tui/evidence/TUI-017/attempt-10/native-build-commands.txt`, `compat/tui/evidence/TUI-017/attempt-10/native-binaries.txt`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-attached-probe.sh`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-attached-fixed-1.txt`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-attached-fixed-2.txt`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-attached-fixed-3.txt`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-attached-reverted-1.txt`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-attached-reverted-2.txt`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-self-check.sh`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-fixed.txt`, `compat/tui/evidence/TUI-017/attempt-10/wide-erase-reverted.txt`, `compat/tui/evidence/TUI-017/attempt-10/corpus-all.rows`, `compat/tui/evidence/TUI-017/attempt-10/delta-selection.rows`, `compat/tui/evidence/TUI-017/attempt-10/corpus-shard-1.rows`, `compat/tui/evidence/TUI-017/attempt-10/corpus-shard-2.rows`, `compat/tui/evidence/TUI-017/attempt-10/corpus-shard-3.rows`, `compat/tui/evidence/TUI-017/attempt-10/corpus-shard-1.txt`, `compat/tui/evidence/TUI-017/attempt-10/corpus-shard-2.txt`, `compat/tui/evidence/TUI-017/attempt-10/corpus-shard-3.txt`, `compat/tui/evidence/TUI-017/attempt-10/corpus-launcher-rows.txt`, `compat/tui/evidence/TUI-017/attempt-10/corpus-main-control-rows.txt`, `compat/tui/evidence/TUI-017/attempt-10/delta-summary.json`, `compat/tui/evidence/TUI-017/attempt-10/tests-daemon-soak-alone-1.txt`, `compat/tui/evidence/TUI-017/attempt-10/tests-daemon-soak-alone-2.txt`, `compat/tui/evidence/TUI-017/attempt-07/probe-residuals.json`, `compat/tui/evidence/TUI-017/attempt-07/validation-residuals.json`.
+Artifacts: `compat/tui/evidence/TUI-017/attempt-06/notes.md`, `compat/tui/evidence/TUI-017/attempt-06/environment.json`, `compat/tui/evidence/TUI-017/attempt-06/commands.json`, `compat/tui/evidence/TUI-017/attempt-06/main-source-audit.json`, `compat/tui/evidence/TUI-017/attempt-06/main-pin-audit.json`, `compat/tui/evidence/TUI-017/attempt-06/startup-samples.json`, `compat/tui/evidence/TUI-017/attempt-06/startup-summary.json`, `compat/tui/evidence/TUI-017/attempt-06/startup-analysis.json`, `compat/tui/evidence/TUI-017/attempt-06/fixture-summary.json`, `compat/tui/evidence/TUI-017/attempt-06/exitcode-assertions.json`, `compat/tui/evidence/TUI-017/attempt-06/capture-summary.json`, `compat/tui/evidence/TUI-017/attempt-06/records.json`, `compat/tui/evidence/TUI-017/attempt-06/source-audit.json`, `compat/tui/evidence/TUI-017/attempt-06/runs.json`, `compat/tui/evidence/TUI-017/attempt-06/tests-summary.json`, `compat/tui/evidence/TUI-017/attempt-06/compat-check-requeued.txt`.
 
-Review: `compat/tui/evidence/TUI-017/attempt-10/review.md`.
+Review: `compat/tui/evidence/TUI-017/attempt-06/review.md`.
 
 ### TUI-018: Caller stream forms
 

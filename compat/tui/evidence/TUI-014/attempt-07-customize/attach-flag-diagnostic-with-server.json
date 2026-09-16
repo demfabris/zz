@@ -1,0 +1,28 @@
+[
+  {
+    "side": "zz",
+    "command": [
+      "target/debug/zz-customize-final",
+      "--socket",
+      "/tmp/zz-customize-flag-probe",
+      "attach-session",
+      "-0"
+    ],
+    "exit": 2,
+    "stdout": "",
+    "stderr": "command attach-session: unknown flag -0\n"
+  },
+  {
+    "side": "tmux",
+    "command": [
+      "compat/.cache/tmux-src/tmux",
+      "-L",
+      "zz-customize-flag-probe",
+      "attach-session",
+      "-0"
+    ],
+    "exit": 1,
+    "stdout": "",
+    "stderr": "command attach-session: unknown flag -0\n"
+  }
+]

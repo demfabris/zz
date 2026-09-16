@@ -1,0 +1,12 @@
+{
+  "command": [
+    "/tmp/zz-cargo.sh",
+    "test",
+    "-p",
+    "zz-protocol",
+    "--lib",
+    "catalog::tests"
+  ],
+  "exit": -15,
+  "seconds": 712.9
+}

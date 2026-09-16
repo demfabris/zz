@@ -180,7 +180,8 @@ have capture archives; v2 client runs retain fixture output rather than separate
 
 At packaging, raw files are consolidated only after the measurements finish. Archive contents are
 verified byte-for-byte before redundant loose files are removed. `measurements.json` records every
-runner command/status, `fixtures.txt`, `tests.txt`, and `corpus.txt` collect final output, and the
+runner command/status. `fixtures.txt`, `tests.txt`, and `corpus.txt` are readable aggregates with
+normalized line endings and trailing whitespace; exact original output remains in the raw archives. The
 raw/corpus/capture archives retain detailed probes, controls, helpers, and failures.
 
 The literal `compat/run.sh --delta --list` form consumes `--list` as its range and starts a run.

@@ -537,7 +537,7 @@ test file_picker::tests::selections_revalidate_deleted_paths_and_the_requested_k
 test file_picker::tests::streamed_rows_stay_visible_before_scan_completion ... [32mok(B[m
 test file_picker::tests::unreadable_children_do_not_turn_results_into_a_scan_error ... [32mok(B[m
 test fleet::tests::add_arguments_become_an_ssh_endpoint_and_reject_bad_names ... [32mok(B[m
-test fleet::tests::add_list_and_remove_round_trip_through_the_config_file ... 
+test fleet::tests::add_list_and_remove_round_trip_through_the_config_file ...
 running 1 test
 test fleet::tests::add_list_and_remove_round_trip_through_the_config_file ... ok
 
@@ -1294,7 +1294,7 @@ test daemon::tests::agent::provider_switch_and_retry_replace_the_daemon_runtime 
 test daemon::tests::agent::the_agent_lane_batches_per_pane_and_drains_behind_the_reliable_one ... [32mok(B[m
 test daemon::tests::agent::the_agent_options_reconfigure_what_the_next_pane_spawns ... [32mok(B[m
 test daemon::tests::agent_permission_parsers_require_one_choice_and_a_wait_policy ... [32mok(B[m
-test daemon::tests::agent_send_delivers_to_claude_terminal_peer ... 
+test daemon::tests::agent_send_delivers_to_claude_terminal_peer ...
 running 1 test
 test daemon::tests::agent_send_delivers_to_claude_terminal_peer ... ok
 
@@ -1362,14 +1362,14 @@ test daemon::tests::chooser_mouse_activity_preserves_bell_and_read_only_updates_
 test daemon::tests::chooser_rows_wear_the_pin_key_ladder_and_run_out_at_thirty_six ... [32mok(B[m
 test daemon::tests::chooser_specs_sort_filter_and_fall_back_when_filters_match_nothing ... [32mok(B[m
 test daemon::tests::chooser_templates_substitute_targets_and_resolve_aliases_at_selection ... [32mok(B[m
-test daemon::tests::claude_peer_status_drives_agent_state_for_terminal_panes ... 
+test daemon::tests::claude_peer_status_drives_agent_state_for_terminal_panes ...
 running 1 test
 test daemon::tests::claude_peer_status_drives_agent_state_for_terminal_panes ... ok
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 937 filtered out; finished in 0.61s
 
 [32mok(B[m
-test daemon::tests::claude_peer_status_respects_the_opt_out ... 
+test daemon::tests::claude_peer_status_respects_the_opt_out ...
 running 1 test
 test daemon::tests::claude_peer_status_respects_the_opt_out ... ok
 
@@ -1590,7 +1590,7 @@ test daemon::tests::hook_events_reach_only_control_clients_and_buffer_mutations_
 test daemon::tests::if_shell_bodies_expand_the_live_global_environment ... [32mok(B[m
 test daemon::tests::if_shell_typed_arguments_reject_conditions_and_preserve_branch_kind ... [32mok(B[m
 test daemon::tests::implicit_startup_read_errors_are_retained_without_os_error_suffixes ... [32mok(B[m
-test daemon::tests::inherited_claude_session_environment_does_not_reach_terminal_spawn ... 
+test daemon::tests::inherited_claude_session_environment_does_not_reach_terminal_spawn ...
 running 1 test
 test daemon::tests::inherited_claude_session_environment_does_not_reach_terminal_spawn ... ok
 
@@ -1823,7 +1823,7 @@ test daemon::tests::sourced_mux_config_file_binds_keys_and_missing_file_is_toler
 test daemon::tests::sourced_prepared_runtime_command_parse_is_unlocated_for_direct_and_alias_commands ... [32mok(B[m
 test daemon::tests::sourced_runtime_command_parse_preserves_control_frames_hook_and_continuation ... [32mok(B[m
 test daemon::tests::sourced_wait_yields_an_inherited_shutdown_queue ... [32mok(B[m
-test daemon::tests::stale_claude_peer_status_is_ignored ... 
+test daemon::tests::stale_claude_peer_status_is_ignored ...
 running 1 test
 test daemon::tests::stale_claude_peer_status_is_ignored ... ok
 

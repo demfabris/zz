@@ -484,7 +484,7 @@ smoke/jobs-command-environment: 3 step(s), 0 TOPO divergence(s), 0 GEO divergenc
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 3
     COMMAND: out: show-environment -g JOBS_COMMAND_ENVIRONMENT
     zz exit: 1
@@ -503,7 +503,7 @@ smoke/jobs-command-environment: 3 step(s), 0 TOPO divergence(s), 0 GEO divergenc
     -unknown variable: JOBS_COMMAND_ENVIRONMENT
     TOPO: clean
     GEO: clean
-    
+
     SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=2
 [1;36m==>[0m running smoke/keys-prefix-remainder
 smoke/keys-prefix-remainder: 6 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
@@ -574,7 +574,7 @@ smoke/display-menu-cell-layout: 3 step(s), 0 TOPO divergence(s), 0 GEO divergenc
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 3
     COMMAND: out: show-environment -g DISPLAY_MENU_CELL_LAYOUT
     zz exit: 1
@@ -593,7 +593,7 @@ smoke/display-menu-cell-layout: 3 step(s), 0 TOPO divergence(s), 0 GEO divergenc
     -unknown variable: DISPLAY_MENU_CELL_LAYOUT
     TOPO: clean
     GEO: clean
-    
+
     SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=2
 [1;36m==>[0m running smoke/oh-my-tmux
 smoke/oh-my-tmux: 15 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
@@ -759,7 +759,7 @@ lane2-store: 193 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT diver
      message-line 0
     TOPO: clean
     GEO: clean
-    
+
     ## Step 36
     COMMAND: out: show-options -gw
     zz exit: 0
@@ -799,7 +799,7 @@ lane2-store: 193 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT diver
      message-line 4
     TOPO: clean
     GEO: clean
-    
+
     SUMMARY steps=193 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=2 warn_divergences=0
 [1;36m==>[0m running option-name-formats
 option-name-formats: 60 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
@@ -817,7 +817,7 @@ smoke/source-replay-diagnostics: 60 step(s), 0 TOPO divergence(s), 0 GEO diverge
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     SUMMARY steps=60 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=0
 [1;36m==>[0m running smoke/cheap-flags
 smoke/cheap-flags: 22 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
@@ -860,7 +860,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
      message-line 0
     TOPO: clean
     GEO: clean
-    
+
     ## Step 3
     COMMAND: out: show-options -gH
     zz exit: 0
@@ -900,7 +900,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
      message-line 0
     TOPO: clean
     GEO: clean
-    
+
     ## Step 4
     COMMAND: out: show-options -gHv
     zz exit: 0
@@ -914,7 +914,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
         1
         0
         any
-        
+
         /bin/bash
         80x24
         off
@@ -940,7 +940,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
      0
     TOPO: clean
     GEO: clean
-    
+
     ## Step 5
     COMMAND: out: show-options -sH
     zz exit: 0
@@ -980,7 +980,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
      message-line* 0
     TOPO: clean
     GEO: clean
-    
+
     ## Step 8
     COMMAND: out: show-options -pAH
     zz exit: 0
@@ -1020,7 +1020,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
      message-line 0
     TOPO: clean
     GEO: clean
-    
+
     ## Step 13
     COMMAND: set-hook -g 'after-bind-key[0]' 'display-message global-zero'
     zz exit: 0
@@ -1032,7 +1032,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
     COMMAND EXIT-CLASS: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 14
     COMMAND: set-hook -g 'after-bind-key[named]' 'display-message global-named'
     zz exit: 0
@@ -1044,7 +1044,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
     COMMAND EXIT-CLASS: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 15
     OUT: divergence
     --- zz OUT step 15
@@ -1060,7 +1060,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
      message-line 0
     TOPO: clean
     GEO: clean
-    
+
     ## Step 16
     COMMAND: out: show-options -g after-bind-key
     zz exit: 0
@@ -1078,7 +1078,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
     OUT: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 17
     COMMAND: out: show-options -gH after-bind-key
     zz exit: 0
@@ -1100,7 +1100,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
      0
     TOPO: clean
     GEO: clean
-    
+
     ## Step 20
     COMMAND: set-hook 'after-bind-key[local]' 'display-message local'
     zz exit: 0
@@ -1112,7 +1112,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
     COMMAND EXIT-CLASS: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 21
     COMMAND: out: show-options -A after-bind-key
     zz exit: 0
@@ -1146,7 +1146,7 @@ smoke/display-menu-shortcut-grammar: 3 step(s), 1 TOPO divergence(s), 0 GEO dive
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 3
     COMMAND: out: show-environment -g DISPLAY_MENU_SHORTCUT_GRAMMAR
     zz exit: 0
@@ -1165,7 +1165,7 @@ smoke/display-menu-shortcut-grammar: 3 step(s), 1 TOPO divergence(s), 0 GEO dive
     +unknown variable: DISPLAY_MENU_SHORTCUT_GRAMMAR
     TOPO: clean
     GEO: clean
-    
+
     SUMMARY steps=3 topo_divergences=1 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=2
 [1;36m==>[0m running smoke/copy-mode-refresh
 smoke/copy-mode-refresh: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
@@ -1271,7 +1271,7 @@ lane2-store: 193 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT diver
      message-line 0
     TOPO: clean
     GEO: clean
-    
+
     ## Step 36
     COMMAND: out: show-options -gw
     zz exit: 0
@@ -1311,7 +1311,7 @@ lane2-store: 193 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT diver
      message-line 4
     TOPO: clean
     GEO: clean
-    
+
     SUMMARY steps=193 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=2 warn_divergences=0
 [1;36m==>[0m retrying smoke/source-replay-diagnostics alone
 smoke/source-replay-diagnostics: 60 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
@@ -1332,7 +1332,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
      message-line 0
     TOPO: clean
     GEO: clean
-    
+
     ## Step 3
     COMMAND: out: show-options -gH
     zz exit: 0
@@ -1372,7 +1372,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
      message-line 0
     TOPO: clean
     GEO: clean
-    
+
     ## Step 4
     COMMAND: out: show-options -gHv
     zz exit: 0
@@ -1386,7 +1386,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
         1
         0
         any
-        
+
         /bin/bash
         80x24
         off
@@ -1412,7 +1412,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
      0
     TOPO: clean
     GEO: clean
-    
+
     ## Step 5
     COMMAND: out: show-options -sH
     zz exit: 0
@@ -1452,7 +1452,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
      message-line* 0
     TOPO: clean
     GEO: clean
-    
+
     ## Step 8
     COMMAND: out: show-options -pAH
     zz exit: 0
@@ -1492,7 +1492,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
      message-line 0
     TOPO: clean
     GEO: clean
-    
+
     ## Step 13
     COMMAND: set-hook -g 'after-bind-key[0]' 'display-message global-zero'
     zz exit: 0
@@ -1504,7 +1504,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
     COMMAND EXIT-CLASS: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 14
     COMMAND: set-hook -g 'after-bind-key[named]' 'display-message global-named'
     zz exit: 0
@@ -1516,7 +1516,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
     COMMAND EXIT-CLASS: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 15
     OUT: divergence
     --- zz OUT step 15
@@ -1532,7 +1532,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
      message-line 0
     TOPO: clean
     GEO: clean
-    
+
     ## Step 16
     COMMAND: out: show-options -g after-bind-key
     zz exit: 0
@@ -1550,7 +1550,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
     OUT: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 17
     COMMAND: out: show-options -gH after-bind-key
     zz exit: 0
@@ -1572,7 +1572,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
      0
     TOPO: clean
     GEO: clean
-    
+
     ## Step 20
     COMMAND: set-hook 'after-bind-key[local]' 'display-message local'
     zz exit: 0
@@ -1584,7 +1584,7 @@ show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT
     COMMAND EXIT-CLASS: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 21
     COMMAND: out: show-options -A after-bind-key
     zz exit: 0
@@ -1761,7 +1761,7 @@ smoke/status-background-jobs: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 2
     COMMAND: out: show-environment -g ZZ_STATUS_BACKGROUND_JOBS
     zz exit: 0
@@ -1783,7 +1783,7 @@ smoke/status-background-jobs: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=1
 [1;36m==>[0m running command-alias
 command-alias: 16 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
@@ -1855,7 +1855,7 @@ smoke/cli-chain-parse-abort: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 3
     COMMAND: out: show-environment -g CLI_RUNTIME_ORDER
     zz exit: 0
@@ -1872,7 +1872,7 @@ smoke/cli-chain-parse-abort: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=0
 [1;36m==>[0m running smoke/send-keys-control
 smoke/send-keys-control: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
@@ -1901,7 +1901,7 @@ smoke/status-background-jobs: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 2
     COMMAND: out: show-environment -g ZZ_STATUS_BACKGROUND_JOBS
     zz exit: 0
@@ -1923,7 +1923,7 @@ smoke/status-background-jobs: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=1
 [1;36m==>[0m retrying smoke/cli-chain-parse-abort alone
 smoke/cli-chain-parse-abort: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 0 WARN divergence(s)
@@ -1937,7 +1937,7 @@ smoke/cli-chain-parse-abort: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 3
     COMMAND: out: show-environment -g CLI_RUNTIME_ORDER
     zz exit: 0
@@ -1954,7 +1954,7 @@ smoke/cli-chain-parse-abort: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=0
 
 # tmux compatibility summary
@@ -2076,7 +2076,7 @@ smoke/plugin-runtime-resurrect-restore: 2 step(s), 0 TOPO divergence(s), 0 GEO d
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 2
     COMMAND: out: show-environment -g ZZ_RESURRECT_RESTORE
     zz exit: 0
@@ -2098,7 +2098,7 @@ smoke/plugin-runtime-resurrect-restore: 2 step(s), 0 TOPO divergence(s), 0 GEO d
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=1
 [1;36m==>[0m running split-window-zoom-hidden-width
 split-window-zoom-hidden-width: 21 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
@@ -2156,7 +2156,7 @@ smoke/plugin-runtime-oh-my-tmux: 4 step(s), 0 TOPO divergence(s), 0 GEO divergen
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 4
     COMMAND: out: show-environment -g ZZ_OH_MY_TMUX_RUNTIME
     zz exit: 0
@@ -2173,7 +2173,7 @@ smoke/plugin-runtime-oh-my-tmux: 4 step(s), 0 TOPO divergence(s), 0 GEO divergen
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     SUMMARY steps=4 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=1
 [1;36m==>[0m running smoke/hooks-pane-focus-clients
 smoke/hooks-pane-focus-clients: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
@@ -2215,7 +2215,7 @@ smoke/source-file-diagnostics: 12 step(s), 0 TOPO divergence(s), 0 GEO divergenc
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 3
     COMMAND: out: show-environment -g SOURCE_MISS
     zz exit: 1
@@ -2234,7 +2234,7 @@ smoke/source-file-diagnostics: 12 step(s), 0 TOPO divergence(s), 0 GEO divergenc
     -unknown variable: SOURCE_MISS
     TOPO: clean
     GEO: clean
-    
+
     ## Step 4
     COMMAND: out: show-environment -g SOURCE_QUIET
     zz exit: 1
@@ -2253,7 +2253,7 @@ smoke/source-file-diagnostics: 12 step(s), 0 TOPO divergence(s), 0 GEO divergenc
     -unknown variable: SOURCE_QUIET
     TOPO: clean
     GEO: clean
-    
+
     ## Step 5
     COMMAND: out: show-environment -g SOURCE_MIXED
     zz exit: 1
@@ -2272,7 +2272,7 @@ smoke/source-file-diagnostics: 12 step(s), 0 TOPO divergence(s), 0 GEO divergenc
     -unknown variable: SOURCE_MIXED
     TOPO: clean
     GEO: clean
-    
+
     ## Step 6
     COMMAND: out: show-environment -g SOURCE_MALFORMED
     zz exit: 1
@@ -2291,7 +2291,7 @@ smoke/source-file-diagnostics: 12 step(s), 0 TOPO divergence(s), 0 GEO divergenc
     -unknown variable: SOURCE_MALFORMED
     TOPO: clean
     GEO: clean
-    
+
     ## Step 7
     COMMAND: out: show-environment -g SOURCE_MALFORMED_QUIET
     zz exit: 1
@@ -2310,7 +2310,7 @@ smoke/source-file-diagnostics: 12 step(s), 0 TOPO divergence(s), 0 GEO divergenc
     -unknown variable: SOURCE_MALFORMED_QUIET
     TOPO: clean
     GEO: clean
-    
+
     ## Step 8
     COMMAND: out: show-environment -g SOURCE_NESTED_MISS
     zz exit: 1
@@ -2329,7 +2329,7 @@ smoke/source-file-diagnostics: 12 step(s), 0 TOPO divergence(s), 0 GEO divergenc
     -unknown variable: SOURCE_NESTED_MISS
     TOPO: clean
     GEO: clean
-    
+
     ## Step 9
     COMMAND: out: show-environment -g SOURCE_NESTED_QUIET
     zz exit: 1
@@ -2348,7 +2348,7 @@ smoke/source-file-diagnostics: 12 step(s), 0 TOPO divergence(s), 0 GEO divergenc
     -unknown variable: SOURCE_NESTED_QUIET
     TOPO: clean
     GEO: clean
-    
+
     ## Step 10
     COMMAND: out: show-environment -g SOURCE_RUNTIME
     zz exit: 1
@@ -2367,7 +2367,7 @@ smoke/source-file-diagnostics: 12 step(s), 0 TOPO divergence(s), 0 GEO divergenc
     -unknown variable: SOURCE_RUNTIME
     TOPO: clean
     GEO: clean
-    
+
     ## Step 11
     COMMAND: out: show-environment -g SOURCE_RUNTIME_OUTER
     zz exit: 1
@@ -2386,7 +2386,7 @@ smoke/source-file-diagnostics: 12 step(s), 0 TOPO divergence(s), 0 GEO divergenc
     -unknown variable: SOURCE_RUNTIME_OUTER
     TOPO: clean
     GEO: clean
-    
+
     ## Step 12
     COMMAND: out: show-environment -g SOURCE_DEFAULT_ORDER
     zz exit: 1
@@ -2405,7 +2405,7 @@ smoke/source-file-diagnostics: 12 step(s), 0 TOPO divergence(s), 0 GEO divergenc
     -unknown variable: SOURCE_DEFAULT_ORDER
     TOPO: clean
     GEO: clean
-    
+
     SUMMARY steps=12 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=11 warn_divergences=10
 [1;36m==>[0m running smoke/args-parse-confirm-before
 smoke/args-parse-confirm-before: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
@@ -2473,7 +2473,7 @@ smoke/plugin-runtime-resurrect-restore: 2 step(s), 0 TOPO divergence(s), 0 GEO d
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     ## Step 2
     COMMAND: out: show-environment -g ZZ_RESURRECT_RESTORE
     zz exit: 0
@@ -2495,7 +2495,7 @@ smoke/plugin-runtime-resurrect-restore: 2 step(s), 0 TOPO divergence(s), 0 GEO d
     SMOKE STDERR: clean
     TOPO: clean
     GEO: clean
-    
+
     SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=1
 [1;36m==>[0m retrying smoke/plugin-runtime-oh-my-tmux alone
 smoke/plugin-runtime-oh-my-tmux: 4 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)

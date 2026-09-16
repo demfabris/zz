@@ -106,7 +106,7 @@ note  capture-flags recorded, not asserted: capture.rich-transports, accepted: z
       exit tmux: 0  zz: 2
       stdout differs
         1d0
-        < 
+        <
       stderr differs
         0a1
         > unsupported command: capture-pane -H
@@ -126,7 +126,7 @@ note  capture-line-numbers recorded, not asserted: capture.rich-transports, acce
       exit tmux: 0  zz: 2
       stdout differs
         1d0
-        < 
+        <
       stderr differs
         0a1
         > unsupported command: capture-pane -P
@@ -278,16 +278,16 @@ ok    lock-command-store
         > $ printf 'SCENE-%s\n' %0
         > SCENE-%0
         > $
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
         12,23d23
         < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L /dev/pts/6 (sort: name) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
         < M-bM-^TM-^B^[[39m^[[49m $ printf 'SCENE-%s\n' %0                                                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
@@ -327,8 +327,8 @@ DIFF  client-tree-usage
         > $ printf 'SCENE-%s\n' %0
         > SCENE-%0
         > $
-        > 
-        > 
+        >
+        >
         9,13d13
         <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m           ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
         <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
@@ -363,23 +363,23 @@ ok    clock-mode-closed
         > $ printf 'SCENE-%s\n' %0
         > SCENE-%0
         > $
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
         12,23d23
         < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
         < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
@@ -412,7 +412,7 @@ ok    customize-mode-closed
         > SCENE-%0
         > $
         22,23d23
-        < 
+        <
         < ^[[38;2;13;13;13m(search) ^[[39m^[[49m
         cursor tmux: 9,22 flag=1 pane=80x24 shape=default
         cursor zz:   2,2 flag=1 pane=80x24 shape=default
@@ -452,25 +452,25 @@ note  suspend-client: the tmux screen never settled within 6 seconds
         > SCENE-%0
         > $
         1a5,24
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
         > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
         cursor tmux: 0,0 flag=1 pane=80x24 shape=default
         cursor zz:   2,2 flag=1 pane=80x24 shape=default
@@ -598,7 +598,7 @@ note  capture-flags recorded, not asserted: capture.rich-transports, accepted: z
       exit tmux: 0  zz: 1
       stdout differs
         1d0
-        < 
+        <
       stderr differs
         0a1
         > unsupported command: capture-pane -H
@@ -618,7 +618,7 @@ note  capture-line-numbers recorded, not asserted: capture.rich-transports, acce
       exit tmux: 0  zz: 1
       stdout differs
         1d0
-        < 
+        <
       stderr differs
         0a1
         > unsupported command: capture-pane -P
@@ -770,16 +770,16 @@ ok    lock-command-store
         > $ printf 'SCENE-%s\n' %0
         > SCENE-%0
         > $
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
         12,23d23
         < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L /dev/pts/57 (sort: name) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
         < M-bM-^TM-^B^[[39m^[[49m $ printf 'SCENE-%s\n' %0                                                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
@@ -815,8 +815,8 @@ ok    client-tree-usage
         > $ printf 'SCENE-%s\n' %0
         > SCENE-%0
         > $
-        > 
-        > 
+        >
+        >
         9,13d13
         <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m           ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m
         <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
@@ -851,23 +851,23 @@ ok    clock-mode-closed
         > $ printf 'SCENE-%s\n' %0
         > SCENE-%0
         > $
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
         12,23d23
         < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
         < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
@@ -900,7 +900,7 @@ ok    customize-mode-closed
         > SCENE-%0
         > $
         22,23d23
-        < 
+        <
         < ^[[38;2;13;13;13m(search) ^[[39m^[[49m
         cursor tmux: 9,22 flag=1 pane=80x24 shape=default
         cursor zz:   2,2 flag=1 pane=80x24 shape=default
@@ -938,25 +938,25 @@ note  suspend-client: the tmux screen never settled within 6 seconds
         > SCENE-%0
         > $
         1a5,24
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
         > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
         cursor tmux: 0,0 flag=1 pane=80x24 shape=default
         cursor zz:   2,2 flag=1 pane=80x24 shape=default
@@ -1084,7 +1084,7 @@ note  capture-flags recorded, not asserted: capture.rich-transports, accepted: z
       exit tmux: 0  zz: 1
       stdout differs
         1d0
-        < 
+        <
       stderr differs
         0a1
         > unsupported command: capture-pane -H
@@ -1104,7 +1104,7 @@ note  capture-line-numbers recorded, not asserted: capture.rich-transports, acce
       exit tmux: 0  zz: 1
       stdout differs
         1d0
-        < 
+        <
       stderr differs
         0a1
         > unsupported command: capture-pane -P
@@ -1256,16 +1256,16 @@ ok    lock-command-store
         > $ printf 'SCENE-%s\n' %0
         > SCENE-%0
         > $
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
         12,23d23
         < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L /dev/pts/51 (sort: name) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
         < M-bM-^TM-^B^[[39m^[[49m $ printf 'SCENE-%s\n' %0                                                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
@@ -1301,8 +1301,8 @@ ok    client-tree-usage
         > $ printf 'SCENE-%s\n' %0
         > SCENE-%0
         > $
-        > 
-        > 
+        >
+        >
         9,13d13
         <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m           ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m
         <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
@@ -1337,23 +1337,23 @@ ok    clock-mode-closed
         > $ printf 'SCENE-%s\n' %0
         > SCENE-%0
         > $
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
         12,23d23
         < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
         < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
@@ -1386,7 +1386,7 @@ ok    customize-mode-closed
         > SCENE-%0
         > $
         22,23d23
-        < 
+        <
         < ^[[38;2;13;13;13m(search) ^[[39m^[[49m
         cursor tmux: 9,22 flag=1 pane=80x24 shape=default
         cursor zz:   2,2 flag=1 pane=80x24 shape=default
@@ -1424,25 +1424,25 @@ note  suspend-client: the tmux screen never settled within 6 seconds
         > SCENE-%0
         > $
         1a5,24
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
         > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
         cursor tmux: 0,0 flag=1 pane=80x24 shape=default
         cursor zz:   2,2 flag=1 pane=80x24 shape=default
@@ -1570,7 +1570,7 @@ note  capture-flags recorded, not asserted: capture.rich-transports, accepted: z
       exit tmux: 0  zz: 1
       stdout differs
         1d0
-        < 
+        <
       stderr differs
         0a1
         > unsupported command: capture-pane -H
@@ -1590,7 +1590,7 @@ note  capture-line-numbers recorded, not asserted: capture.rich-transports, acce
       exit tmux: 0  zz: 1
       stdout differs
         1d0
-        < 
+        <
       stderr differs
         0a1
         > unsupported command: capture-pane -P
@@ -1742,16 +1742,16 @@ ok    lock-command-store
         > $ printf 'SCENE-%s\n' %0
         > SCENE-%0
         > $
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
         12,23d23
         < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L /dev/pts/53 (sort: name) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
         < M-bM-^TM-^B^[[39m^[[49m $ printf 'SCENE-%s\n' %0                                                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
@@ -1787,8 +1787,8 @@ ok    client-tree-usage
         > $ printf 'SCENE-%s\n' %0
         > SCENE-%0
         > $
-        > 
-        > 
+        >
+        >
         9,13d13
         <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m           ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m
         <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
@@ -1823,23 +1823,23 @@ ok    clock-mode-closed
         > $ printf 'SCENE-%s\n' %0
         > SCENE-%0
         > $
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
         12,23d23
         < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
         < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
@@ -1872,7 +1872,7 @@ ok    customize-mode-closed
         > SCENE-%0
         > $
         22,23d23
-        < 
+        <
         < ^[[38;2;13;13;13m(search) ^[[39m^[[49m
         cursor tmux: 9,22 flag=1 pane=80x24 shape=default
         cursor zz:   2,2 flag=1 pane=80x24 shape=default
@@ -1910,25 +1910,25 @@ note  suspend-client: the tmux screen never settled within 6 seconds
         > SCENE-%0
         > $
         1a5,24
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
-        > 
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
+        >
         > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
         cursor tmux: 0,0 flag=1 pane=80x24 shape=default
         cursor zz:   2,2 flag=1 pane=80x24 shape=default

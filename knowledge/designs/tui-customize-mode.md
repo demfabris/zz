@@ -33,7 +33,8 @@ uses the bottom twelve rows. The option metadata comes from the pinned
 The sibling zz-knobs lane can add an explicit `z` action that reveals a collapsed
 `zz TUI Options` root after the pin's sections. `MuxEngine::customize_rows` is the
 row assembly point; `CustomizeMode` owns the visibility flag and `customize_key`
-owns the action. The default tree has only the pin's roots. This keeps the decoded
+owns the action. The pin assigns row shortcuts to digits and Meta-letters; plain `z` is not a
+customize or mode-tree action. The default tree has only the pin's roots. This keeps the decoded
 pin comparison exact at every default checkpoint, even when the sibling adds its
 rows. The sibling must make the entry discoverable in help and test the revealed
 tree as a zz extension. It must not mask extra rows in the pin comparison.
@@ -63,3 +64,10 @@ are explicitly refused. Search, filtering, navigation and arbitrary option edits
 have not all received pin screen comparisons. The zz section belongs to the
 sibling lane. Actual GUI, web and remote SSH suspend behavior was not exercised;
 the no-tty policy was tested in the daemon and compared with a pin control client.
+
+Source inspection also identifies a remote limitation. The built-in SSH endpoint
+uses `EndpointFactsScope::PortableTerminalSize` in
+`crates/zz-daemon/src/client.rs`, which omits the client tty. It therefore takes
+the suspend handler's no-tty no-op path. The process-signal implementation covers
+a TUI connected to a local daemon; it does not suspend a local TUI through the
+built-in SSH transport. No live SSH suspension proof was run.

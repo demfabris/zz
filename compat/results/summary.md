@@ -104,7 +104,7 @@
 | stderr-parity | 14 | yes | 0 | yes | yes | yes |
 | strict-key-validation | 40 | yes | 0 | yes | yes | yes |
 | switch-client | 6 | yes | 0 | yes | yes | yes |
-| targets | 16 | yes | 0 | yes | yes | yes |
+| targets | 20 | yes | 0 | yes | yes | yes |
 | update-environment | 6 | yes | 0 | yes | yes | yes |
 | windows | 9 | yes | 0 | yes | yes | yes |
 | zoom | 5 | yes | 0 | yes | yes | yes |

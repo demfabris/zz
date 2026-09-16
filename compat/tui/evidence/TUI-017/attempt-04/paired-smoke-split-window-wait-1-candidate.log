@@ -1,0 +1,73 @@
+# Scenario: smoke/split-window-wait
+# Source: /home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/split-window-wait.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: run-shell 'sh ~/split-window-wait.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    exit-three rc=3 panes=[%1]
+    success rc=0 panes=[%1]
+    signal rc=143 panes=[%1]
+    printed rc=5 panes=[%1]
+    printed | 1
+    hooked rc=2 panes=[%1]
+    hooked | splitwait:0.1
+    hooked | HOOK
+    hooked | AFTER
+    ordered rc=0 marker=present
+    ordered | AFTER
+    parked returned=[] panes=1
+    parked-after rc=0 panes=[%1]
+tmux stdout:
+    exit-three rc=3 panes=[%1]
+    success rc=0 panes=[%1]
+    signal rc=143 panes=[%1]
+    printed rc=5 panes=[%1]
+    printed | 1
+    hooked rc=2 panes=[%1]
+    hooked | splitwait:0.1
+    hooked | HOOK
+    hooked | AFTER
+    ordered rc=0 marker=present
+    ordered | AFTER
+    parked returned=[] panes=2
+    parked-after rc=0 panes=[%1]
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: divergence
+--- zz SMOKE STDOUT step 1
++++ tmux SMOKE STDOUT step 1
+@@ -9,5 +9,5 @@
+ hooked | AFTER
+ ordered rc=0 marker=present
+ ordered | AFTER
+-parked returned=[] panes=1
++parked returned=[] panes=2
+ parked-after rc=0 panes=[%1]
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g SPLIT_WINDOW_WAIT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SPLIT_WINDOW_WAIT=reached-end
+tmux stdout:
+    SPLIT_WINDOW_WAIT=reached-end
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=1

@@ -1074,19 +1074,20 @@
         "crates/zz/tests/cli_binary.rs",
         "crates/zz/src/command/palette.rs",
         "knowledge/tmux/commands.md",
-        "compat/tui/verify-claims.py"
+        "compat/tui/verify-claims.py",
+        "knowledge/protocol/index.md"
       ],
       "acceptance": [
         "Implement choose-client so the raw TUI draws the pin's client mode: the row's key column, the client name and the `#{t/p:client_activity}: session #{session_name}` text, the preview of that client's current pane, the info preview `i` raises, the sort orders name, size, creation and activity, the filter, the help box, and d, D, x, X, t, T, C-t and Enter with the pin's `detach-client -t '%%'` default command. Flip compat/tui-choosers.sh's client-tree-open to asserted with a --self-check sabotage.",
         "Implement clock-mode, customize-mode and switch-mode on the same mode surface, each compared whole-screen against the pin at 80x24 and after the mode ends, and compare suspend-client and server-access exactly: either the pin's behaviour or a refusal whose exit status, stdout and stderr match a measured pin refusal.",
         "Every entry keeps its exact stdout, stderr and exit status in compat/tui-client-commands.sh, and each command closed here closes its item in commands.native-client-tools with a dated measurement."
       ],
-      "evidence_note": "Cycle 11 modes proof pass, 2026-09-16, rebased onto be5709df. Clock and switch modes use a pane-owned stack, restore suspended surfaces, and consume command-injected keys before PTY delivery; copy-mode -q cancels them. Own pinned-outer-tmux probes verify mode depth, restored screens, shell contents, switch -F and Enter templates, formatted server-access identities, and duplicate-window ordering. The full roster exposed two further defects: BTab/KPEnter were split into literal characters, and CLI preflight changed known tmux syntax errors to status 2. This pass fixes both. Three full client-command runs pass 139 asserted comparisons and retain 30 attributed records, with TUI-014=2 and unattributed=0. Seconds clock faces now assert at 24-with-seconds and 12-with-seconds with paired sampling inside a single second; each has a one-sided colour sabotage. The noattr unit test passes and fails after removing its base_cell fix. Full measurements, failed runs, final command results, and complete footprint are in compat/tui/evidence/TUI-014/attempt-06/. This replaces the superseded attempt-04 claim that all default window-row cells matched. The default window style tail, switch navigation/filter/mouse, refused -k/-Z lifecycle variants, and both copy/pane-mode ordering variants remain measured under clients.interactive-refresh. Clause 2's final two entries, customize-mode-open and suspend-client, remain measured TUI-014 records for the sibling customize lane under fabrico's 2026-09-16 ruling. The obligation remains active; no proof here covers those commands or the registered variants. Final production revision 5036e22f passes all seven requested package suites and the retained-output live verifier (139/30 client commands, 78/0 choosers). The full 198-row delta completed 2331 steps with zero unrun rows, 187 zero-divergence rows, two documented known-divergence rows and nine failures after retry. The batch is partial; see the exact residuals and binary/revision boundaries in attempt-06/notes.md. An inherited-shell chooser cache mismatch and one earlier verifier assertion failure are retained, not erased by passing reruns.",
+      "evidence_note": "Cycle 11 modes proof pass, 2026-09-16, rebased onto be5709df. Clock and switch modes use a pane-owned stack, restore suspended surfaces, and consume command-injected keys before PTY delivery; copy-mode -q cancels them. Own pinned-outer-tmux probes verify mode depth, restored screens, shell contents, switch -F and Enter templates, formatted server-access identities, and duplicate-window ordering. The full roster exposed two further defects: BTab/KPEnter were split into literal characters, and CLI preflight changed known tmux syntax errors to status 2. This pass fixes both. Three full client-command runs pass 139 asserted comparisons and retain 30 attributed records, with TUI-014=2 and unattributed=0. Seconds clock faces now assert at 24-with-seconds and 12-with-seconds with paired sampling inside a single second; each has a one-sided colour sabotage. The noattr unit test passes and fails after removing its base_cell fix. Full measurements, failed runs, final command results, and complete footprint are in compat/tui/evidence/TUI-014/attempt-06/. This replaces the superseded attempt-04 claim that all default window-row cells matched. The default window style tail, switch navigation/filter/mouse, refused -k/-Z lifecycle variants, and both copy/pane-mode ordering variants remain measured under clients.interactive-refresh. Clause 2's final two entries, customize-mode-open and suspend-client, remain measured TUI-014 records for the sibling customize lane under fabrico's 2026-09-16 ruling. The obligation remains active; no proof here covers those commands or the registered variants. Final production revision 5036e22f passes all seven requested package suites and the retained-output live verifier (139/30 client commands, 78/0 choosers). The full 198-row delta completed 2331 steps with zero unrun rows, 187 zero-divergence rows, two documented known-divergence rows and nine failures after retry. The batch is partial; see the exact residuals and binary/revision boundaries in attempt-06/notes.md. An inherited-shell chooser cache mismatch and one earlier verifier assertion failure are retained, not erased by passing reruns. Correction attempt-07 supersedes the wire claim: v0.10.0 released 103, so the PaneSnapshot.mode tail append now uses unreleased 104 with both decimal pins and both 0x68 byte pins. Frozen v103 history is unchanged. Both switch window comparators resolve sort keys before sorting and skip orphan sessions; a regression test and the pinned alpha/cli/zulu capture pass. The v104 live verifier passes 139/30 client commands and 78/0 choosers; every client-command sabotage is caught. Protocol tests, all seven crates clippy, formatting, wire-version.py and compat/check.sh pass. A full daemon run had one terminal-capture timeout; its isolated rerun and the full four-thread retry pass (938 library tests). All outputs remain in attempt-07. The exact added-Rust-comment count against origin/main is zero. Historical corpus and other fixture runs remain protocol-103 evidence; they were not rerun for this correction.",
       "next_action": "Sibling customize lane: implement and flip customize-mode-open and suspend-client with sabotages. Independently review the modes proofs and full declared footprint. Reconcile the nine corpus failures with their CLI/source-replay, lock-default, plugin/runtime-facts and status owners; retain all measured interactive-refresh and socket-ACL variants. Do not mark TUI-014 verified before its last two clause-2 entries are proved.",
       "proof": {
-        "revision": "5036e22fb73cca08a5c8a54eb06a4be5a0a5c8e1",
+        "revision": "2740ec94a1f713a46fd4b356394a3fec2ccebf7a",
         "tmux_commit": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
-        "environment": "Alienware Linux, 2026-09-16; pinned outer tmux; 80x24 and fixture resize geometries; isolated HOME/XDG_CONFIG_HOME; final chooser/screen/verifier runs use SHELL=/bin/sh. Frozen modes/corpus binary maps to f884b266; final binary maps to 5036e22f. Capped Cargo scopes and two shared slots. Active partial proof with retained failures; see notes.md.",
+        "environment": "Alienware Linux, 2026-09-16; pinned outer tmux; 80x24 and fixture resize geometries; isolated HOME/XDG_CONFIG_HOME; final chooser/screen/verifier runs use SHELL=/bin/sh. Frozen modes/corpus binary maps to f884b266; final binary maps to 5036e22f. Capped Cargo scopes and two shared slots. Active partial proof with retained failures; see notes.md. Correction attempt-07: same be5709df base, protocol 104, frozen zz-modes-v104 binary, SHELL=/bin/sh; full daemon retry uses RUST_TEST_THREADS=4. Earlier artifacts remain historical protocol-103 evidence.",
         "commands": [
           "ZZ_BIN=target/debug/zz-modes-proof TMUX_BIN=compat/.cache/tmux-src/tmux compat/tui-client-commands.sh (three runs and --self-check)",
           "SHELL=/bin/sh ZZ_BIN=target/debug/zz-modes-proof TMUX_BIN=compat/.cache/tmux-src/tmux compat/tui-choosers.sh (and --self-check)",
@@ -1100,7 +1101,13 @@
           "/tmp/zz-cargo.sh clippy -p zz-protocol -p zz-mux -p zz-daemon -p zz-tui -p zz-client -p zz-client-ffi -p zz --all-targets --all-features -- -D warnings",
           "/tmp/zz-cargo.sh clippy -p zz --all-targets --all-features -- -D warnings",
           "/tmp/zz-cargo.sh fmt --all -- --check",
-          "compat/check.sh (PATH adapter routes internal Cargo through /tmp/zz-cargo.sh)"
+          "compat/check.sh (PATH adapter routes internal Cargo through /tmp/zz-cargo.sh)",
+          "SHELL=/bin/sh ZZ_BIN=target/debug/zz-modes-v104 TMUX_BIN=compat/.cache/tmux-src/tmux bash compat/tui/evidence/TUI-014/attempt-06/defect-probe.sh",
+          "SHELL=/bin/sh python3 compat/tui/verify-claims.py --run TUI-014 --zz target/debug/zz-modes-v104 --output-dir compat/tui/evidence/TUI-014/attempt-07/verifier",
+          "SHELL=/bin/sh ZZ_BIN=target/debug/zz-modes-v104 TMUX_BIN=compat/.cache/tmux-src/tmux compat/tui-client-commands.sh --self-check",
+          "python3 compat/wire-version.py",
+          "RUST_TEST_THREADS=4 /tmp/zz-cargo.sh test -p zz-daemon",
+          "/tmp/zz-cargo.sh test -p zz-protocol"
         ],
         "artifacts": [
           "compat/tui/evidence/TUI-014/attempt-06/notes.md",
@@ -1128,7 +1135,29 @@
           "compat/tui/evidence/TUI-014/attempt-06/compat-check-final.txt",
           "compat/tui/evidence/TUI-014/attempt-06/corpus-summary.json",
           "compat/tui/evidence/TUI-014/attempt-06/corpus-final-details.txt",
-          "compat/tui/evidence/TUI-014/attempt-06/footprint.txt"
+          "compat/tui/evidence/TUI-014/attempt-06/footprint.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/notes.md",
+          "compat/tui/evidence/TUI-014/attempt-07/environment.json",
+          "compat/tui/evidence/TUI-014/attempt-07/commands.json",
+          "compat/tui/evidence/TUI-014/attempt-07/binary-revision.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/binary-sha256.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/source-checks.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/added-comments.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/tie-order.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/defect-probe.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/client-self-check.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/verify-claims.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/protocol-tests.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/switch-filtered.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/daemon-tests.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/daemon-timeout-filtered.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/daemon-tests-retry.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/clippy.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/fmt-final.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/wire-version.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/compat-check.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/footprint.txt",
+          "compat/tui/evidence/TUI-014/attempt-07/compat-check-final.txt"
         ],
         "review": "compat/tui/evidence/TUI-014/attempt-06/review.md"
       }

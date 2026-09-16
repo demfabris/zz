@@ -1,0 +1,83 @@
+ok    probe-baseline
+ok    probe-injected-x
+ok    probe-injected-mode
+ok    probe-injected-shell
+ok    probe-injected-BTab
+ok    probe-injected-BTab-shell
+ok    probe-injected-KPEnter
+ok    probe-injected-KPEnter-shell
+ok    probe-chooser-flag-status
+ok    probe-chooser-arity-status
+ok    probe-refresh-argument-status
+ok    probe-cancel-clock
+ok    probe-cancel-state
+ok    probe-stack-switch
+ok    probe-stack-depth
+ok    probe-restored-clock
+ok    probe-stack-exit
+ok    probe-stack-shell
+ok    probe-switch-format
+ok    probe-switch-format-closed
+ok    probe-switch-window-ties
+ok    probe-switch-window-ties-closed
+ok    probe-switch-template
+ok    probe-template-effect
+ok    probe-formatted-identity
+      case probe-switch-kill
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > switch-mode -k and -Z are not implemented (TUI-014)
+      screen differs
+        1c1,3
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m2 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mwin^[[0m^[[48;2;184;134;11m
+        ---
+        > $ printf 'SCENE-%s\n' %0
+        > SCENE-%0
+        > $
+        10,12c12
+        < 
+        < ^[[38;2;13;13;13m(search) ^[[39m^[[49m
+        < ^[[38;2;184;134;11mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@^[[38;2;179;179;179mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+        ---
+        > ^[[38;2;154;205;50mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@^[[38;2;179;179;179mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+        cursor tmux: 9,10 flag=1 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        4c4
+        < P cli:0.0 mode=1/switch-mode 80x11 ptitle
+        ---
+        > P cli:0.0 mode=0/ 80x11 ptitle
+note  probe-switch-kill recorded, not asserted: TUI-014: -k remains explicitly rejected and measured
+      case probe-switch-kill-effect
+      stdout differs
+        1a2
+        > 1
+      screen differs
+        0a1,2
+        > $ printf 'SCENE-%s\n' %0
+        > SCENE-%0
+        10,13c12,13
+        < 
+        < 
+        < 
+        < 
+        ---
+        > ^[[38;2;154;205;50mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@^[[38;2;179;179;179mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+        > ^[[39m$
+        cursor tmux: 2,0 flag=1 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        2c2
+        < W cli:0 win * 1
+        ---
+        > W cli:0 win * 2
+        4c4,5
+        < P cli:0.0 mode=0/ 80x23 alienware
+        ---
+        > P cli:0.0 mode=0/ 80x11 ptitle
+        > P cli:0.1 mode=0/ 80x11 alienware
+note  probe-switch-kill-effect recorded, not asserted: TUI-014: pin kills the source pane on Escape; zz retains it
+probe complete: 25 asserted, 0 failures, 2 recorded
+
+exit_status=0

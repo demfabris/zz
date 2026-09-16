@@ -14204,6 +14204,7 @@ mod tests {
             &mut terminal,
             &mut renames,
             &mut bar,
+            &mut None,
         );
         pointer_context(&terminal, None, column, row, word_separators).expect("pointer context")
     }

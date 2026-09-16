@@ -1,0 +1,1 @@
+The initial ledger-update script used d['obligations'] after writing notes and gate-handoff.md. It raised KeyError: 'obligations' before changing campaign.json. The follow-up uses the existing items key.

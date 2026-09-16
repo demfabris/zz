@@ -1,0 +1,48 @@
+2026-09-16T16:15:32Z START wire tip=9f5dabd854e85bd1d38e4feaf9935e05f8958168 python3 compat/wire-version.py 
+2026-09-16T16:15:32Z END wire exit=0
+2026-09-16T16:15:32Z START fmt tip=9f5dabd854e85bd1d38e4feaf9935e05f8958168 /tmp/zz-cargo.sh fmt --all 
+2026-09-16T16:15:37Z END fmt exit=0
+2026-09-16T16:15:42Z START build tip=9f5dabd854e85bd1d38e4feaf9935e05f8958168 /tmp/zz-cargo.sh build -p zz 
+2026-09-16T16:16:14Z START test-protocol tip=9f5dabd854e85bd1d38e4feaf9935e05f8958168 /tmp/zz-cargo.sh test -p zz-protocol 
+2026-09-16T16:16:44Z END build exit=0
+2026-09-16T16:17:10Z START streams-closing tip=753c8497781e54dd6b4717e0e0e1243d2857737f env ZZ_BIN=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz compat/tui-command-streams.sh 
+2026-09-16T16:17:29Z END test-protocol exit=0
+2026-09-16T16:17:29Z START compat-check tip=753c8497781e54dd6b4717e0e0e1243d2857737f compat/check.sh 
+2026-09-16T16:18:17Z START delta-list tip=753c8497781e54dd6b4717e0e0e1243d2857737f env ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz compat/run.sh --delta origin/main...HEAD --commands source-file\,load-buffer\,save-buffer\,show-buffer\,command-alias\,send-keys\,send-text\,agent-send\,display-message\,split-window --list 
+2026-09-16T16:18:17Z END delta-list exit=0
+2026-09-16T16:20:06Z START fetch tip=753c8497781e54dd6b4717e0e0e1243d2857737f git fetch origin 
+2026-09-16T16:20:06Z END fetch exit=0
+2026-09-16T16:20:06Z START rebase tip=753c8497781e54dd6b4717e0e0e1243d2857737f git rebase origin/main 
+2026-09-16T16:20:06Z END rebase exit=0
+2026-09-16T16:20:06Z START remote-main tip=753c8497781e54dd6b4717e0e0e1243d2857737f git ls-remote origin refs/heads/main 
+2026-09-16T16:20:07Z END remote-main exit=0
+2026-09-16T16:25:01Z END streams-closing exit=0
+2026-09-16T16:25:01Z START streams-self-check tip=753c8497781e54dd6b4717e0e0e1243d2857737f env ZZ_BIN=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz compat/tui-command-streams.sh --self-check 
+2026-09-16T16:28:55Z END streams-self-check exit=0
+2026-09-16T16:28:55Z START client-commands tip=753c8497781e54dd6b4717e0e0e1243d2857737f env ZZ_BIN=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz compat/tui-client-commands.sh 
+2026-09-16T16:29:17Z END compat-check exit=0
+2026-09-16T16:29:17Z START clippy tip=753c8497781e54dd6b4717e0e0e1243d2857737f /tmp/zz-cargo.sh clippy -p zz-daemon -p zz-mux -p zz-protocol -p zz --all-targets --all-features -- -D warnings 
+2026-09-16T16:29:37Z END clippy exit=0
+2026-09-16T16:29:37Z START fmt-final tip=753c8497781e54dd6b4717e0e0e1243d2857737f /tmp/zz-cargo.sh fmt --all 
+2026-09-16T16:29:42Z END fmt-final exit=0
+2026-09-16T16:30:42Z START test-cli-stream tip=753c8497781e54dd6b4717e0e0e1243d2857737f /tmp/zz-cargo.sh test -p zz --test cli_binary caller_stream_ -- --test-threads=1 
+2026-09-16T16:31:13Z END test-cli-stream exit=0
+2026-09-16T16:32:12Z END client-commands exit=1
+2026-09-16T16:32:12Z START client-self-check tip=753c8497781e54dd6b4717e0e0e1243d2857737f env ZZ_BIN=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz compat/tui-client-commands.sh --self-check 
+2026-09-16T16:32:54Z END client-self-check exit=0
+2026-09-16T16:32:54Z START attached-client tip=753c8497781e54dd6b4717e0e0e1243d2857737f env ZZ_BIN=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz compat/attached-client.sh 
+2026-09-16T16:35:18Z START tracker tip=753c8497781e54dd6b4717e0e0e1243d2857737f python3 compat/tui/tracker.py check 
+2026-09-16T16:35:18Z END tracker exit=0
+2026-09-16T16:43:45Z END attached-client exit=0
+2026-09-16T16:43:45Z START verify-claims tip=753c8497781e54dd6b4717e0e0e1243d2857737f env ZZ_BIN=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz python3 compat/tui/verify-claims.py --run TUI-018 --zz /home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz 
+2026-09-16T16:44:33Z START wire-final tip=753c8497781e54dd6b4717e0e0e1243d2857737f python3 compat/wire-version.py 
+2026-09-16T16:44:33Z END wire-final exit=0
+2026-09-16T16:44:33Z START tracker-final tip=753c8497781e54dd6b4717e0e0e1243d2857737f python3 compat/tui/tracker.py check 
+2026-09-16T16:44:33Z END tracker-final exit=0
+2026-09-16T16:44:33Z START compat-check-final tip=753c8497781e54dd6b4717e0e0e1243d2857737f compat/check.sh 
+2026-09-16T16:45:04Z START tracker-updated tip=753c8497781e54dd6b4717e0e0e1243d2857737f python3 compat/tui/tracker.py check 
+2026-09-16T16:45:04Z END tracker-updated exit=0
+2026-09-16T16:49:33Z END compat-check-final exit=0
+2026-09-16T16:54:04Z END verify-claims exit=1
+2026-09-16T16:54:42Z START tracker-delivery tip=753c8497781e54dd6b4717e0e0e1243d2857737f python3 compat/tui/tracker.py check 
+2026-09-16T16:54:42Z END tracker-delivery exit=0

@@ -2,14 +2,14 @@
 type: Design Plan
 title: Command stream channel
 description: "One bounded channel for the caller's standard input and output on a command client: a single reader with a single cap, one byte-preserving carrier on the invocation, and three named sinks, so `source-file -`, `display-message -I`, `split-window -I`, `load-buffer -` and `save-buffer -` share a transport instead of owning five."
-status: "Agreed and built 2026-09-14 for TUI-018, milestone 5 of the tmux superset roadmap; carried on protocol 103"
+status: "Built for TUI-018; deferred reader acquisition and control read-error continuation added 2026-09-16 on protocol 104; awaiting independent campaign review"
 resource: crates/zz-protocol/src/message.rs
 tags:
 - tmux
 - compatibility
 - protocol
 - cli
-timestamp: 2026-09-14T18:00:00-03:00
+timestamp: 2026-09-16T18:00:00-03:00
 ---
 
 # Why
@@ -25,14 +25,17 @@ where the bytes would go, and `display-message -I` has no argument slot at all.
 
 One reader, one cap, one carrier, three sinks.
 
-**The reader** is `read_stdin_payload` in `crates/zz/src/lib.rs`. It runs at most once per
-invocation, before the command is sent, when the resolver below identifies a sink or file replay.
-For file replay it reads redirected stdin; it does not wait on an interactive terminal. Nothing else
-in the CLI reads standard input for a command.
+**The reader** is `read_command_stdin` in `crates/zz-daemon/src/client.rs`. The CLI opts in
+through `CommandClient::enable_stdin`; each command request carries `stdin_available`.
+The daemon asks for `ClientFileOperation::ReadStdin` when a sink executes, including sinks
+inside aliases and sourced files. Earlier members finish before the read starts. A sourced file
+without a reader ignores open or oversized stdin. During a pending read, the CLI handles SIGTERM
+by exiting 0; disconnect wakes the daemon's file waiter and cancels the remaining command queue.
 
-**The cap** is `MAX_AGENT_SEND_BYTES` (1 MiB), the same bound the agent and buffer payloads already
-carry. The reader takes `cap + 1` bytes and refuses the whole invocation if the last one arrives, so
-an over-long stream fails before the server sees a byte and nothing is half-applied.
+**The cap** is `MAX_AGENT_SEND_BYTES` (1 MiB). The reader takes at most `cap + 1` bytes and
+refuses that reader if the last byte arrives. Earlier state changes remain applied. Unused bytes
+never reach the cap check. The runtime diagnostic uses `ServerError::InvalidCommand`, with exit 1;
+it does not introduce a zz-native usage error.
 
 **The carrier** is `CommandInvocation::stdin`, an `Option<RawText>` appended to the invocation in
 protocol 103. `RawText` keeps the exact bytes beside a lossy `String`, so a payload that is not
@@ -43,8 +46,7 @@ it: a stream is not an argument, and the server log records the command the call
 
 An expanded command alias keeps this carrier on its group invocation. Each member shares one
 caller stream: the first reader consumes the bytes and a later reader receives the in-process
-`CommandInvocation.stdin_spent` marker. Serde skips that marker; the wire remains at protocol 103
-with no new field. The mux group executor accounts for emitted stream effects, and the daemon's
+`CommandInvocation.stdin_spent` marker. Serde skips that marker. Protocol 104 adds the availability flag and deferred read operation. The mux group executor accounts for emitted stream effects, and the daemon's
 prepared group queue routes the carrier after parsing the members. A nonreader leaves it available.
 The daemon keeps the stream in the invoking client's `CommandStreams` request record, which it
 removes when producing the response. Replayed files and alias members use that same record through
@@ -52,9 +54,8 @@ removes when producing the response. Replayed files and alias members use that s
 
 **The sinks** are what the payload is for. `command_stdin_sink` in `crates/zz-daemon/src/daemon.rs`
 is the one resolver; it takes a canonical command name and its arguments and answers at most one
-sink, and both the CLI and the daemon ask it rather than matching on names of their own.
-`ConfigReplay` preserves redirected bytes for readers in a sourced file without consuming them.
-It accepts binary bytes because a replayed alias may load a buffer or feed an empty pane.
+sink. The daemon asks it when each command executes. `ConfigReplay` leaves the caller stream
+available for readers in the sourced file. Each actual reader chooses whether to accept binary bytes.
 
 | sink | commands | what the payload becomes | bytes |
 |---|---|---|---|
@@ -76,7 +77,7 @@ knows whether to add the terminating newline. `save-buffer -` is a raw claim.
 The `Config` sink is the one that refuses them, because a configuration file is text; the reader
 rejects a non-UTF-8 payload for that sink with the same message it uses for `send-text`.
 
-**Backpressure** is the cap, enforced at the reader, before the connection carries anything. zz
+**Backpressure** is the cap, enforced at the reader before the connection carries payload bytes. zz
 refuses a stream larger than 1 MiB where pinned tmux streams it in 16 KiB acknowledged chunks with
 no total bound. That is a deliberate difference: a caller stream is an argument-shaped payload - a
 configuration, a message, a pane's seed text, a paste buffer - and bulk file transfer through a
@@ -84,12 +85,10 @@ command client is a workload zz does not serve, because an unbounded stream lets
 daemon memory without limit. Decided 2026-09-14 by the orchestrator under fabrico's TUI parity
 contract of 2026-09-09; reversible.
 
-**Cancellation** is the end of the stream. A caller that closes standard input early ends the read;
-what arrived is the payload, and the command runs on it. A caller that dies before the invocation is
-sent sends nothing and the server never sees a request, which is why the reader runs before the
-request and not beside it. There is no half-applied state to unwind: the `Config` sink parses the
-whole payload before applying a command from it, and the `PaneInput` sink writes bytes the pane
-would have printed anyway.
+**Cancellation** follows EOF or client disconnect. EOF completes the pending payload; the
+reader then runs on those bytes. SIGTERM during the read exits the command client with status 0,
+matching the pin. Disconnect releases the daemon's file waiter and prevents the payload and
+following group members from running. State from members that finished before the read remains.
 
 **Process lifetime** is the daemon's, never the caller's. The `PaneInput` sink writes into a pane
 that has no child process at all: pinned tmux's `-I` forms require `PANE_EMPTY` and answer
@@ -101,12 +100,10 @@ server started.
 
 # What the existing three become
 
-Direct `load-buffer -`, `send-text -` and `agent-send -` calls still append their payload to the
-command arguments. The CLI resolves an alias group's first stream sink in member order and keeps
-its payload on the group's stdin carrier. After preparing the members, the daemon appends raw
-Argument bytes to the first reader's arguments with the same `append_stdin_payload` helper the
-CLI uses. It does not format those bytes into the command body: arbitrary bytes and the member's
-argument boundary must survive preparation.
+The daemon acquires `load-buffer -`, `send-text -` and `agent-send -` payloads through the same
+request path as source and pane input. It uses `append_stdin_payload` to append Argument bytes
+after the member's argument boundary. It does not format those bytes into an alias body.
+Programmatic invocations can still carry an explicit payload in `CommandInvocation::stdin`.
 
 A later `load-buffer -` reports `Bad file descriptor: -` and raises the caller's exit status to 1,
 while following members still run, matching the pin's asynchronous read completion. A later

@@ -579,6 +579,7 @@ use CommandValueKind::{
 };
 
 static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
+    ("customize-mode", "[-kNZ] [-F format] [-f filter] [-t target-pane]"),
     (
         "break-pane",
         "[-abdPW] [-F format] [-n window-name] [-s src-pane] [-t dst-window] [-x width] [-y height] [-X x-position] [-Y y-position]",
@@ -728,9 +729,6 @@ pub static POSITIONAL_MINIMUMS: &[(&str, usize)] = &[
 pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
     "new-pane",
     "newp",
-    "customize-mode",
-    "suspend-client",
-    "suspendc",
     "link-window",
     "linkw",
     "unlink-window",
@@ -738,23 +736,6 @@ pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
 ];
 
 static UNIMPLEMENTED_TMUX_COMMAND_SPECS: &[CommandSpec] = &[
-    CommandSpec {
-        name: "customize-mode",
-        aliases: &[],
-        description: "Unsupported tmux command",
-        usage: "[-kNZ] [-F format] [-f filter] [-t target-pane]",
-        options: &[
-            CommandOptionSpec::unsupported_value("-F"),
-            CommandOptionSpec::unsupported_flag("-N"),
-            CommandOptionSpec::unsupported_flag("-Z"),
-            CommandOptionSpec::unsupported_value("-f"),
-            CommandOptionSpec::unsupported_flag("-k"),
-            CommandOptionSpec::unsupported_value("-t"),
-            CommandOptionSpec::unsupported_flag("-y"),
-        ],
-        positionals: &[],
-        variadic: None,
-    },
     CommandSpec {
         name: "link-window",
         aliases: &["linkw"],
@@ -808,15 +789,6 @@ static UNIMPLEMENTED_TMUX_COMMAND_SPECS: &[CommandSpec] = &[
         ],
         positionals: &[],
         variadic: Some(FreeForm),
-    },
-    CommandSpec {
-        name: "suspend-client",
-        aliases: &["suspendc"],
-        description: "Unsupported tmux command",
-        usage: "[-t target-client]",
-        options: &[CommandOptionSpec::unsupported_value("-t")],
-        positionals: &[],
-        variadic: None,
     },
     CommandSpec {
         name: "unlink-window",
@@ -1532,6 +1504,15 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         description: "Check whether a session exists",
         usage: "[-t target-session]",
         options: &[CommandOptionSpec::value("-t", Session, "target session")],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "suspend-client",
+        aliases: &["suspendc"],
+        description: "Suspend a terminal client",
+        usage: "[-t target-client]",
+        options: &[CommandOptionSpec::value("-t", FreeForm, "target client")],
         positionals: &[],
         variadic: None,
     },
@@ -2461,6 +2442,23 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         variadic: None,
     },
     CommandSpec {
+        name: "customize-mode",
+        aliases: &[],
+        description: "Edit terminal options",
+        usage: "[-kNyZ] [-F format] [-f filter] [-t target-pane]",
+        options: &[
+            CommandOptionSpec::value("-F", FreeForm, "format or filter"),
+            CommandOptionSpec::flag("-N", "mode option"),
+            CommandOptionSpec::flag("-Z", "mode option"),
+            CommandOptionSpec::value("-f", FreeForm, "format or filter"),
+            CommandOptionSpec::flag("-k", "mode option"),
+            CommandOptionSpec::value("-t", Pane, "target pane"),
+            CommandOptionSpec::flag("-y", "mode option"),
+        ],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
         name: "clock-mode",
         aliases: &[],
         description: "Show the clock in a pane",
@@ -3129,15 +3127,15 @@ mod tests {
                 usage_overrides.insert(spec.name);
             }
         }
-        assert_eq!(implemented, 87);
-        assert_eq!(aliases, 74);
-        assert_eq!(flag_shapes.values().sum::<usize>(), 528);
+        assert_eq!(implemented, 89);
+        assert_eq!(aliases, 75);
+        assert_eq!(flag_shapes.values().sum::<usize>(), 536);
         assert_eq!(
             flag_shapes,
-            BTreeMap::from([("none", 297), ("optional", 8), ("required", 223)])
+            BTreeMap::from([("none", 301), ("optional", 8), ("required", 227)])
         );
-        assert_eq!((supported, unsupported), (503, 25));
-        assert_eq!(usage_overrides.len(), 21);
+        assert_eq!((supported, unsupported), (511, 25));
+        assert_eq!(usage_overrides.len(), 22);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES
@@ -3156,7 +3154,7 @@ mod tests {
             .into_iter()
             .map(|command| (command.name.clone(), command))
             .collect::<BTreeMap<_, _>>();
-        assert_eq!(UNIMPLEMENTED_TMUX_COMMAND_SPECS.len(), 5);
+        assert_eq!(UNIMPLEMENTED_TMUX_COMMAND_SPECS.len(), 3);
         for spec in UNIMPLEMENTED_TMUX_COMMAND_SPECS {
             let command = &oracle[spec.name];
             assert_eq!(spec.aliases, command.aliases, "aliases for {}", spec.name);
@@ -4413,6 +4411,8 @@ mod tests {
             "display-panes",
             "clear-history",
             "clock-mode",
+            "customize-mode",
+            "suspend-client",
             "switch-mode",
             "bind-key",
             "unbind-key",

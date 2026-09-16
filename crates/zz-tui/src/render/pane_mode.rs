@@ -266,6 +266,19 @@ fn switch_surface(
 
 pub(super) fn surface(mode: &PaneMode, rect: Rect, theme: &ThemeColours) -> ModeSurface {
     match mode {
+        PaneMode::Customize {
+            state,
+            presentation,
+            offset,
+        } => {
+            let (grid, (x, y, cursor_visible)) =
+                super::chooser::customize_surface(state, presentation, *offset, rect);
+            ModeSurface {
+                grid,
+                cursor: (x, y),
+                cursor_visible,
+            }
+        }
         PaneMode::Clock { time, colour } => clock_surface(time, colour, rect, theme),
         PaneMode::Switch {
             rows,

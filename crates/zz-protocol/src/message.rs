@@ -2152,6 +2152,9 @@ pub enum InputMessage {
         #[serde(default)]
         status_range_start: Option<u16>,
     },
+    ClientSuspendState {
+        suspended: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

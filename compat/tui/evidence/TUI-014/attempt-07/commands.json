@@ -1,0 +1,91 @@
+{
+  "fixture_environment": {
+    "SHELL": "/bin/sh",
+    "ZZ_BIN": "target/debug/zz-modes-v104",
+    "ZZ_COMPAT_ZZ": "target/debug/zz-modes-v104",
+    "TMUX_BIN": "compat/.cache/tmux-src/tmux"
+  },
+  "cargo_environment": {
+    "CARGO_HOME": "/home/demfabris/.cargo",
+    "RUSTUP_HOME": "/home/demfabris/.rustup",
+    "ZZ_CARGO_CAP": "7G",
+    "PATH_adapter": "attempt-06/capped-bin"
+  },
+  "commands": [
+    {
+      "name": "build",
+      "command": "ZZ_CARGO_CAP=7G ZZ_CARGO_JOBS=4 /tmp/zz-cargo.sh build -p zz",
+      "output": "build.txt"
+    },
+    {
+      "name": "filtered",
+      "command": "HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config /tmp/zz-cargo.sh test -p zz-daemon --lib switch_mode_window_order_skips_orphan_sessions",
+      "output": "switch-filtered.txt"
+    },
+    {
+      "name": "protocol",
+      "command": "/tmp/zz-cargo.sh test -p zz-protocol",
+      "output": "protocol-tests.txt"
+    },
+    {
+      "name": "daemon",
+      "command": "HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config /tmp/zz-cargo.sh test -p zz-daemon",
+      "output": "daemon-tests.txt"
+    },
+    {
+      "name": "clippy",
+      "command": "/tmp/zz-cargo.sh clippy -p zz-protocol -p zz-mux -p zz-daemon -p zz-tui -p zz-client -p zz-client-ffi -p zz --all-targets --all-features -- -D warnings",
+      "output": "clippy.txt"
+    },
+    {
+      "name": "fmt",
+      "command": "/tmp/zz-cargo.sh fmt --all -- --check",
+      "output": "fmt-final.txt"
+    },
+    {
+      "name": "wire",
+      "command": "python3 compat/wire-version.py",
+      "output": "wire-version.txt"
+    },
+    {
+      "name": "compat",
+      "command": "compat/check.sh",
+      "output": "compat-check.txt"
+    },
+    {
+      "name": "probe",
+      "command": "bash compat/tui/evidence/TUI-014/attempt-06/defect-probe.sh",
+      "output": "defect-probe.txt"
+    },
+    {
+      "name": "self-check",
+      "command": "compat/tui-client-commands.sh --self-check",
+      "output": "client-self-check.txt"
+    },
+    {
+      "name": "verifier",
+      "command": "python3 compat/tui/verify-claims.py --run TUI-014 --zz target/debug/zz-modes-v104 --output-dir compat/tui/evidence/TUI-014/attempt-07/verifier",
+      "output": "verify-claims.txt"
+    },
+    {
+      "name": "timeout-isolated",
+      "command": "HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config /tmp/zz-cargo.sh test -p zz-daemon --lib default_shell_rejects_invalid_values_and_unset_controls_the_child_shell",
+      "output": "daemon-timeout-filtered.txt"
+    },
+    {
+      "name": "daemon-retry",
+      "command": "HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config RUST_TEST_THREADS=4 /tmp/zz-cargo.sh test -p zz-daemon",
+      "output": "daemon-tests-retry.txt"
+    },
+    {
+      "name": "compat-final",
+      "command": "compat/check.sh",
+      "output": "compat-check-final.txt"
+    },
+    {
+      "name": "knowledge",
+      "command": "python3 .agents/skills/okf/scripts/okf.py validate knowledge",
+      "output": "okf.txt"
+    }
+  ]
+}

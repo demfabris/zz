@@ -96732,6 +96732,14 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
+                &CommandInvocation::new("set-option", ["-g", "repeat-time", "60000"]),
+            )
+            .expect("keep the repeat table active while checking client scope");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
                 &CommandInvocation::new("switch-client", ["-t", "B"]),
             )
             .expect("switch to B");

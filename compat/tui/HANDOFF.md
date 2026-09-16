@@ -126,8 +126,14 @@ verified (its record says so in its own words). Today's position:
   --output-last-message <report> - < <prompt>`, detached; the completion marker is
   `CODEX-DONE exit N` appended by the launcher (a lane's own shell echoes `exit $rc` lines, so match
   the marker, not `exit`). The provider can refuse mid-run ("Selected model is at capacity"): the
-  worktree keeps the uncommitted work, and `codex exec resume --last - < <resume-prompt>` from the
-  worktree continues the session. Codex has no message channel; corrections go through a resume.
+  worktree keeps the uncommitted work, and a resume from the worktree continues the session.
+  Codex has no message channel; corrections go through a resume. **Resume by explicit session
+  id, never `--last`**: `--last` is the newest session across the whole box, so with lanes in
+  parallel it resumes whichever lane spoke most recently, not yours (measured 2026-09-16, when
+  it would have sent the modes correction into the capture-fix lane). `codex exec resume` also
+  rejects `-C`, so `cd` into the worktree first. Map a worktree to its session with
+  `find ~/.codex/sessions -name '*.jsonl'` and the `"cwd"` in each file's header; the id is the
+  filename after the `rollout-<timestamp>-` prefix.
   A Codex lane took 59 minutes for a fix the Claude lane before it could not finish in 90, and its
   reviews found real bugs on every branch they read.
 - **Combine gates** when two reviewed branches wait (menus-3 plus context landed in one push).

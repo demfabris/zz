@@ -1,0 +1,51 @@
+# Scenario: smoke/daemon-invalid-flags
+# Source: /home/demfabris/dev/zz-c11-alias/compat/scenarios/smoke/daemon-invalid-flags.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: out: set-environment -gu DAEMON_INVALID_FLAGS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: run-shell 'sh ~/daemon-invalid-flags.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g DAEMON_INVALID_FLAGS
+zz exit: 1
+tmux exit: 0
+zz stderr:
+    unknown variable: DAEMON_INVALID_FLAGS
+tmux stderr:
+    <empty>
+tmux stdout:
+    DAEMON_INVALID_FLAGS=clean
+OUT QUERY: failure
+SMOKE STDERR: divergence
+--- zz SMOKE STDERR step 3
++++ tmux SMOKE STDERR step 3
+@@ -1 +0,0 @@
+-unknown variable: DAEMON_INVALID_FLAGS
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=1

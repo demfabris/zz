@@ -1,0 +1,108 @@
+{
+  "selected_rows": 222,
+  "completed_rows": 166,
+  "completed_steps": 2056,
+  "complete": false,
+  "unrun_rows": [
+    "command-alias.txt",
+    "copy-mode-cursor-view.txt",
+    "copy-mode-goto-line.txt",
+    "copy-mode-previous-bracket.txt",
+    "copy-mode-recentre.txt",
+    "copy-mode-scroll-exit.txt",
+    "copy-mode-selection-lifecycle.txt",
+    "copy-mode-stock-action-keys.txt",
+    "if-shell-background-order.txt",
+    "native-prefix-isolation.txt",
+    "send-keys-repeat.txt",
+    "send-keys-reset.txt",
+    "smoke/display-popup-style-refresh.txt",
+    "smoke/environment-bytes.txt",
+    "smoke/focus-follows-mouse.txt",
+    "smoke/format-environment-loop-context.txt",
+    "smoke/format-modifier-client-loop.txt",
+    "smoke/format-modifier-interrogate.txt",
+    "smoke/format-pane-process.txt",
+    "smoke/format-trace.txt",
+    "smoke/fpp-init.txt",
+    "smoke/hooks-pane-focus.txt",
+    "smoke/jobs-display-popup-environment.txt",
+    "smoke/keys-prefix-attached.txt",
+    "smoke/keys-prefix-stock.txt",
+    "smoke/keys-table-lifecycle.txt",
+    "smoke/launcher-installed-layout.txt",
+    "smoke/own-conf.txt",
+    "smoke/pane-border-lines.txt",
+    "smoke/pane-border-zorder.txt",
+    "smoke/pane-engine-knobs-input.txt",
+    "smoke/pane-runtime-facts.txt",
+    "smoke/plugin-runtime-continuum.txt",
+    "smoke/plugin-runtime-oh-my-tmux.txt",
+    "smoke/plugin-runtime-tpm-install.txt",
+    "smoke/plugin-runtime-yank.txt",
+    "smoke/positional-minimums.txt",
+    "smoke/remain-on-exit-format.txt",
+    "smoke/resurrect-save.txt",
+    "smoke/send-keys-control.txt",
+    "smoke/sensible.txt",
+    "smoke/source-file-control.txt",
+    "smoke/source-file-diagnostics.txt",
+    "smoke/source-replay-diagnostics.txt",
+    "smoke/status-background-jobs.txt",
+    "smoke/terminal-facts.txt",
+    "smoke/tui-client-input-backpressure.txt",
+    "smoke/yank.txt",
+    "source-file-format.txt",
+    "source-file-output.txt",
+    "split-window-zoom-hidden-width.txt",
+    "split-window-zoom.txt",
+    "splits-sized.txt",
+    "stderr-parity.txt",
+    "strict-key-validation.txt",
+    "zoom.txt"
+  ],
+  "unexpected_rows": [],
+  "shards": [
+    {
+      "label": "corpus-complete-0",
+      "selected_rows": 105,
+      "exit_status": null
+    },
+    {
+      "label": "corpus-complete-1",
+      "selected_rows": 104,
+      "exit_status": null
+    },
+    {
+      "label": "corpus-complete-extra",
+      "selected_rows": 13,
+      "exit_status": null
+    }
+  ],
+  "first_pass_failures": [
+    "lane2-store",
+    "smoke/alias-group-forgery",
+    "smoke/args-parse-choosers",
+    "smoke/daemon-invalid-flags",
+    "smoke/plugin-runtime-resurrect-restore",
+    "smoke/positional-maximums",
+    "show-options-hooks",
+    "smoke/cli-chain-parse-abort",
+    "smoke/command-flag-errors"
+  ],
+  "failed_after_retry": [],
+  "known_divergences": [
+    {
+      "row": "known/known-pane-scrollbar-columns",
+      "tuple": "0 2 0 1 0"
+    },
+    {
+      "row": "known/known-main-preset-two-panes",
+      "tuple": "0 1 0 0 0"
+    },
+    {
+      "row": "known/known-spread-mixed",
+      "tuple": "0 1 0 0 0"
+    }
+  ]
+}

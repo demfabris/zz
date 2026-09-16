@@ -392,7 +392,7 @@ post-admission callback provenance and daemon-authoritative `Attached` reconnect
 alias child-vector field. TUI-018 later shares caller stdin with the first reader across group
 members and command-client config replay. A spent source reader resumes the queue after reporting
 its error, and raw alias stdout retains the child writer claim. See the
-[command stream channel](../designs/command-stream-channel.md).
+[command stream channel](/designs/command-stream-channel.md).
 The next worker claims the dispatch-board front from published `origin/main`.
 
 Protocol v84 closes all six runtime rules

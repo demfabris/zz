@@ -1,0 +1,8 @@
+0 tmux ['new-session', '-d', '-s', 'p', 'sleep 60'] 0 b'' b''
+0 tmux ['show-options', '-gqv', '@boot-input'] 0 b'' b''
+0 tmux ['show-options', '-gqv', '@boot-ready'] 0 b'yes\n' b''
+0 tmux ['kill-server'] 0 b'' b''
+0 zz ['new-session', '-d', '-s', 'p', 'sleep 60'] 0 b'' b''
+0 zz ['show-options', '-gqv', '@boot-input'] 0 b'' b''
+0 zz ['show-options', '-gqv', '@boot-ready'] 0 b'yes\n' b''
+0 zz ['kill-server'] 0 b'' b''

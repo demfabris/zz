@@ -1,0 +1,127 @@
+caller stream forms at 80x24 (pin tmux, cap 1048576 bytes)
+ok    source-file-applies
+ok    source-file-applied-value
+ok    source-file-closed-stdin
+ok    source-file-unknown-command
+ok    source-file-cancelled-midline
+ok    source-file-parse-only
+ok    source-file-verbose
+ok    source-file-quiet
+ok    source-file-twice-one-stream
+ok    source-file-twice-one-stream-value
+ok    source-file-dash-and-missing-path
+ok    source-file-empty-stream
+ok    display-message-into-a-running-pane
+ok    split-window-builds-and-writes
+ok    display-message-into-the-empty-pane
+compat/tui-command-streams.sh: line 496: warning: command substitution: ignored null byte in input
+ok    display-message-binary-bytes
+ok    display-message-closed-stdin
+ok    display-message-missing-target
+ok    pane-input-restored
+ok    split-window-prints-the-new-pane
+ok    split-window-print-restored
+ok    split-window-with-a-command
+ok    split-window-closed-stdin
+ok    split-window-restored
+ok    load-buffer-binary-stdin
+ok    save-buffer-binary-stdout
+ok    save-buffer-binary-append
+ok    save-buffer-missing-buffer
+ok    buffer-deleted
+      case source-file-alias-group-two-members
+      stderr differs
+        1c1
+        < Bad file descriptor: -
+        ---
+        > source-file from standard input is not supported
+      state differs
+        5c5
+        < O @zzcs-one kappa
+        ---
+        > O @zzcs-one eta
+DIFF  source-file-alias-group-two-members
+      case source-file-alias-group-two-members-value
+      stdout differs (tmux 6 bytes, zz 4 bytes)
+        1c1
+        < kappa
+        ---
+        > eta
+      state differs
+        5c5
+        < O @zzcs-one kappa
+        ---
+        > O @zzcs-one eta
+DIFF  source-file-alias-group-two-members-value
+ok    source-file-alias-single-member
+ok    source-file-alias-single-member-value
+      case load-buffer-alias-group-source-second
+      stderr differs
+        1c1
+        < Bad file descriptor: -
+        ---
+        > load-buffer from standard input requires a command client stdin payload
+      state differs
+        3d2
+        < B zzcsalias 9
+DIFF  load-buffer-alias-group-source-second
+      case load-buffer-alias-group-source-second-value
+      exit tmux: 0  zz: 1
+      stdout differs (tmux 9 bytes, zz 0 bytes)
+        1d0
+        < aM-CM-)bM-^?c^@d
+      stderr differs
+        0a1
+        > no buffer zzcsalias
+      state differs
+        3d2
+        < B zzcsalias 9
+DIFF  load-buffer-alias-group-source-second-value
+      case load-buffer-alias-group-two-readers
+      stdout differs (tmux 12 bytes, zz 0 bytes)
+        1d0
+        < after-error
+      stderr differs
+        1c1
+        < Bad file descriptor: -
+        ---
+        > load-buffer from standard input requires a command client stdin payload
+      state differs
+        3d2
+        < B zzcsalias 9
+DIFF  load-buffer-alias-group-two-readers
+      case load-buffer-alias-group-two-readers-value
+      exit tmux: 0  zz: 1
+      stdout differs (tmux 9 bytes, zz 0 bytes)
+        1d0
+        < aM-CM-)bM-^?c^@d
+      stderr differs
+        0a1
+        > no buffer zzcsalias
+      state differs
+        3d2
+        < B zzcsalias 9
+DIFF  load-buffer-alias-group-two-readers-value
+      case load-buffer-alias-group-reader-last
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > load-buffer from standard input requires a command client stdin payload
+      state differs
+        3d2
+        < B zzcsalias 9
+DIFF  load-buffer-alias-group-reader-last
+      case load-buffer-alias-group-reader-last-value
+      exit tmux: 0  zz: 1
+      stdout differs (tmux 9 bytes, zz 0 bytes)
+        1d0
+        < aM-CM-)bM-^?c^@d
+      stderr differs
+        0a1
+        > no buffer zzcsalias
+      state differs
+        3d2
+        < B zzcsalias 9
+DIFF  load-buffer-alias-group-reader-last-value
+unknown buffer: zzcsalias
+error: zz refused alias buffer cleanup

@@ -1,0 +1,176 @@
+self-check: one deliberate one-sided difference per channel, plus two equivalences
+ok    self-check equivalence: the same command on both sides
+      case stdout-sabotage
+      stdout differs (tmux 0 bytes, zz 9 bytes)
+        0a1
+        > SABOTAGE
+ok    self-check stdout, an option on one side only
+ok    self-check exit and stderr, a buffer missing on both sides
+      case exit-sabotage-present
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 8 bytes)
+        0a1
+        > SABOTAGE
+        \ No newline at end of file
+      stderr differs
+        1d0
+        < no buffer zzcs-sabotage
+      state differs
+        2a3
+        > B zzcs-sabotage 8
+ok    self-check exit and stderr, a buffer one side does not have
+      case state-sabotage
+      state differs
+        1a2
+        > S zzcs-sab 1
+        2a4
+        > P zzcs-sab:0.0 dead=0 process=yes 80x24
+        9a12
+        > C 0 $|
+ok    self-check state, a session on one side only
+      case content-sabotage
+      state differs
+        12c12
+        < C 1 
+        ---
+        > C 1 ONE-SIDED|
+ok    self-check pane content, bytes written into one side only
+      case source-file-alias-group-two-members
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < Bad file descriptor: -
+ok    self-check source-file-alias-group-two-members: second reader removed on zz
+      case source-file-alias-group-two-members-value
+      stdout differs (tmux 6 bytes, zz 9 bytes)
+        1c1
+        < kappa
+        ---
+        > sabotage
+      state differs
+        5c5
+        < O @zzcs-one kappa
+        ---
+        > O @zzcs-one sabotage
+ok    self-check source-file-alias-group-two-members-value: zz option changed
+      case load-buffer-alias-group-source-second
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < Bad file descriptor: -
+ok    self-check load-buffer-alias-group-source-second: source reader removed on zz
+      case load-buffer-alias-group-source-second-value
+      stdout differs (tmux 9 bytes, zz 9 bytes)
+        1c1
+        < aM-CM-)bM-^?c^@d
+        ---
+        > zM-CM-)bM-^?c^@d
+ok    self-check load-buffer-alias-group-source-second-value: one byte changed on zz
+      case load-buffer-alias-group-two-readers
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < Bad file descriptor: -
+ok    self-check load-buffer-alias-group-two-readers: second reader removed on zz
+      case load-buffer-alias-group-two-readers-value
+      stdout differs (tmux 9 bytes, zz 9 bytes)
+        1c1
+        < aM-CM-)bM-^?c^@d
+        ---
+        > zM-CM-)bM-^?c^@d
+ok    self-check load-buffer-alias-group-two-readers-value: one byte changed on zz
+      case load-buffer-alias-group-reader-last
+      stdout differs (tmux 7 bytes, zz 9 bytes)
+        1c1
+        < before
+        ---
+        > sabotage
+ok    self-check load-buffer-alias-group-reader-last: first member output changed on zz
+      case load-buffer-alias-group-reader-last-value
+      stdout differs (tmux 9 bytes, zz 9 bytes)
+        1c1
+        < aM-CM-)bM-^?c^@d
+        ---
+        > zM-CM-)bM-^?c^@d
+ok    self-check load-buffer-alias-group-reader-last-value: one byte changed on zz
+      case alias-source-spent-source-continues
+      stdout differs (tmux 6 bytes, zz 0 bytes)
+        1d0
+        < after
+      state differs
+        3c3
+        < O @zzcs-after yes
+        ---
+        > O @zzcs-after 
+ok    self-check alias-source-spent-source-continues: altered alias member on zz
+      case alias-source-spent-source-continues-state
+      state differs
+        3c3
+        < O @zzcs-after yes
+        ---
+        > O @zzcs-after 
+ok    self-check alias-source-spent-source-continues-state: altered alias member on zz
+      case alias-buffer-spent-source-continues
+      stdout differs (tmux 6 bytes, zz 0 bytes)
+        1d0
+        < after
+      state differs
+        4c4
+        < O @zzcs-after yes
+        ---
+        > O @zzcs-after 
+ok    self-check alias-buffer-spent-source-continues: altered alias member on zz
+      case alias-buffer-spent-source-continues-state
+      state differs
+        4c4
+        < O @zzcs-after yes
+        ---
+        > O @zzcs-after 
+ok    self-check alias-buffer-spent-source-continues-state: altered alias member on zz
+      case alias-pane-spent-source-continues
+      stdout differs (tmux 6 bytes, zz 0 bytes)
+        1d0
+        < after
+      state differs
+        4c4
+        < O @zzcs-after yes
+        ---
+        > O @zzcs-after 
+ok    self-check alias-pane-spent-source-continues: altered alias member on zz
+      case alias-pane-spent-source-continues-state
+      state differs
+        5c5
+        < O @zzcs-after yes
+        ---
+        > O @zzcs-after 
+ok    self-check alias-pane-spent-source-continues-state: altered alias member on zz
+wait that ran out: the extra zz pane is gone for alias-pane-restored (case alias-pane-restored)
+--- zz state ---
+S cs 1
+P cs:0.0 dead=0 process=yes 80x6
+P cs:0.1 dead=0 process=no 80x17
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+C 0 $|
+C 1 set -g @zzcs-replay applied|
+--- tmux state ---
+S cs 1
+P cs:0.0 dead=0 process=yes 80x6
+P cs:0.1 dead=0 process=no 80x5
+P cs:0.2 dead=0 process=no 80x11
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one 
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+C 0 $|
+C 1 set -g @zzcs-replay applied|
+C 2 set -g @zzcs-replay applied|
+error: the extra zz pane is gone for alias-pane-restored did not happen within 10 seconds

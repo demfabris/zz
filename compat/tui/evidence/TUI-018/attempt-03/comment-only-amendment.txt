@@ -1,0 +1,14 @@
+diff --git a/compat/tui-command-streams.sh b/compat/tui-command-streams.sh
+index 0b5a6522..50a7781a 100755
+--- a/compat/tui-command-streams.sh
++++ b/compat/tui-command-streams.sh
+@@ -61,8 +61,7 @@
+ # each channel - stdout, stderr with the exit status, the session state and the
+ # pane content that carries a PaneInput sink's proof - and requires the
+ # comparison to catch each one in that channel, plus two equivalences it must
+-# NOT report. Alias cases remove one reader or change one byte on the zz side
+-# and check the specific exit, stderr, stdout or option-state channel.
++# NOT report.
+ set -eEuo pipefail
+ export ZZ_TRAY=0
+ 

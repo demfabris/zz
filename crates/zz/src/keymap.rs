@@ -122,6 +122,7 @@ fn app_key_binding(chord: &ChromeChord) -> Option<KeyBinding> {
         ChromeAction::SplitDown => chord.binding(crate::menus::SplitDown, None),
         ChromeAction::Detach => chord.binding(crate::menus::Detach, None),
         ChromeAction::ToggleSidebar => chord.binding(crate::menus::ToggleSidebar, None),
+        ChromeAction::OpenCommandPalette => chord.binding(crate::menus::OpenCommandPalette, None),
         _ => return None,
     })
 }
@@ -310,6 +311,8 @@ mod tests {
         assert_eq!(
             audited(ChromeProfile::DesktopApple, UI_TABLE),
             expected([
+                ("cmd-k", "open-command-palette"),
+                ("cmd-p", "open-command-palette"),
                 ("cmd-n", "new-session"),
                 ("cmd-shift-n", "new-window"),
                 ("cmd-d", "split-right"),
@@ -324,6 +327,8 @@ mod tests {
         assert_eq!(
             audited(ChromeProfile::Desktop, UI_TABLE),
             expected([
+                ("ctrl-shift-k", "open-command-palette"),
+                ("ctrl-shift-p", "open-command-palette"),
                 ("ctrl-=", "ui-zoom-in"),
                 ("ctrl-+", "ui-zoom-in"),
                 ("ctrl--", "ui-zoom-out"),

@@ -199,7 +199,7 @@ impl SettingsView {
                                 .child("Prefix +"),
                         )
                         .child(
-                            div().w(px(65.0)).child(
+                            div().w(px(KEY_INPUT_WIDTH)).child(
                                 Input::new(&row.key)
                                     .small()
                                     .disabled(disabled)
@@ -209,7 +209,6 @@ impl SettingsView {
                         .child(
                             Button::new(("settings-split-kind", index))
                                 .small()
-                                .w(px(120.0))
                                 .label(label)
                                 .dropdown_caret(true)
                                 .disabled(disabled)

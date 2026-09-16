@@ -980,6 +980,7 @@ pub struct MuxClient {
     command_output: Option<CommandOutputModel>,
     command_prompt_revision: u64,
     choose_tree_revision: u64,
+    choose_tree_closed_revision: u64,
     choose_buffer_revision: u64,
     display_panes_revision: u64,
     popup_revision: u64,
@@ -1103,6 +1104,7 @@ impl MuxClient {
             command_output: None,
             command_prompt_revision: 0,
             choose_tree_revision: 0,
+            choose_tree_closed_revision: 0,
             choose_buffer_revision: 0,
             display_panes_revision: 0,
             popup_revision: 0,
@@ -2501,6 +2503,11 @@ impl MuxClient {
     }
 
     #[must_use]
+    pub(crate) fn choose_tree_closed_revision(&self) -> u64 {
+        self.choose_tree_closed_revision
+    }
+
+    #[must_use]
     pub(crate) fn choose_buffer(&self) -> Option<&ChooseBufferState> {
         self.core.choose_buffer()
     }
@@ -3033,6 +3040,7 @@ impl MuxClient {
         self.command_prompt_revision = self.command_prompt_revision.wrapping_add(1).max(1);
         self.command_output = None;
         self.choose_tree_revision = self.choose_tree_revision.wrapping_add(1).max(1);
+        self.choose_tree_closed_revision = self.choose_tree_revision;
         self.choose_buffer_revision = self.choose_buffer_revision.wrapping_add(1).max(1);
         self.display_panes_revision = self.display_panes_revision.wrapping_add(1).max(1);
         if let Some(pane) = self.popup_pane.take() {
@@ -3791,6 +3799,9 @@ impl MuxClient {
             }
             CoreEvent::ChooseTreeChanged => {
                 self.choose_tree_revision = self.choose_tree_revision.wrapping_add(1).max(1);
+                if self.core.choose_tree().is_none() {
+                    self.choose_tree_closed_revision = self.choose_tree_revision;
+                }
             }
             CoreEvent::ChooseBufferChanged => {
                 self.choose_buffer_revision = self.choose_buffer_revision.wrapping_add(1).max(1);
@@ -7010,6 +7021,89 @@ mod tests {
                 && mux.core.attached_session() == Some(remote_session)
         });
         local_daemon.stop();
+    }
+
+    #[gpui::test]
+    fn chooser_close_revision_survives_following_open_and_tracks_resets(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(DaemonError::Thread("chooser close revision".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            mux.update(cx, |mux, cx| {
+                assert_eq!(mux.choose_tree_closed_revision(), 0);
+                seed_choose_tree(mux);
+                let state = mux.choose_tree().cloned().unwrap();
+                let publish = |mux: &mut MuxClient, payload, cx: &mut Context<MuxClient>| {
+                    mux.handle_message(
+                        HostId::LOCAL,
+                        ProtocolMessage::Event(zz_protocol::Event {
+                            sequence: 1,
+                            payload,
+                        }),
+                        cx,
+                    );
+                };
+                publish(
+                    mux,
+                    EventPayload::ChooseTree {
+                        state: Some(state.clone()),
+                    },
+                    cx,
+                );
+                let opened = mux.choose_tree_revision();
+                publish(
+                    mux,
+                    EventPayload::ChooseTreeUpdate {
+                        search: None,
+                        selected: 0,
+                    },
+                    cx,
+                );
+                assert!(mux.choose_tree_revision() > opened);
+                assert_eq!(mux.choose_tree_closed_revision(), 0);
+                publish(mux, EventPayload::ChooseTree { state: None }, cx);
+                let closed = mux.choose_tree_closed_revision();
+                assert_eq!(closed, mux.choose_tree_revision());
+                assert!(closed > opened);
+                publish(
+                    mux,
+                    EventPayload::ChooseTree {
+                        state: Some(state.clone()),
+                    },
+                    cx,
+                );
+                assert!(mux.choose_tree().is_some());
+                assert!(mux.choose_tree_revision() > closed);
+                assert_eq!(mux.choose_tree_closed_revision(), closed);
+
+                mux.reset_session_state(cx);
+                assert!(mux.choose_tree().is_none());
+                let reset = mux.choose_tree_closed_revision();
+                assert!(reset > closed);
+                assert_eq!(reset, mux.choose_tree_revision());
+                publish(mux, EventPayload::ChooseTree { state: Some(state) }, cx);
+                mux.handle_message(
+                    HostId::LOCAL,
+                    ProtocolMessage::Attached {
+                        session: SessionId(1),
+                        snapshot: MuxSnapshot::default(),
+                        read_only: false,
+                        client_flags: String::new(),
+                    },
+                    cx,
+                );
+                assert!(mux.choose_tree().is_none());
+                assert!(mux.choose_tree_closed_revision() > reset);
+                assert_eq!(
+                    mux.choose_tree_closed_revision(),
+                    mux.choose_tree_revision()
+                );
+            });
+        });
     }
 
     #[gpui::test]

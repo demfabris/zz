@@ -1,4 +1,10 @@
 pub mod floating;
+mod palette;
+
+pub use palette::{
+    PalettePill, PaletteRow, PaletteStatus, command_palette_empty, command_palette_entry,
+    command_palette_section, command_palette_tree_entry, unified_command_palette_input,
+};
 
 use crate::{
     ActiveTheme as _, CHROME_GAP, Colorize as _, Sizable as _, StyledExt as _,
@@ -8,13 +14,13 @@ use crate::{
     tag::Tag,
 };
 use gpui::{
-    AnyElement, App, CursorStyle, ElementId, Entity, IntoElement, Keystroke, ParentElement as _,
-    Pixels, RenderOnce, SharedString, Styled as _, div, prelude::*, px,
+    AnyElement, App, ElementId, Entity, IntoElement, Keystroke, ParentElement as _, Pixels,
+    RenderOnce, SharedString, Styled as _, div, prelude::*, px,
 };
 
 pub const COMMAND_PALETTE_MAX_WIDTH: f32 = 560.0;
-pub const COMMAND_PALETTE_INSET: f32 = 4.0;
-pub const COMMAND_PALETTE_ROW_HEIGHT: f32 = 40.0;
+pub const COMMAND_PALETTE_INSET: f32 = 8.0;
+pub const COMMAND_PALETTE_ROW_HEIGHT: f32 = 28.0;
 
 /// The palette surface's radius: the theme's, opened by
 /// [`COMMAND_PALETTE_INSET`] to stay concentric with the children's corners.
@@ -37,15 +43,18 @@ pub fn command_palette_input(
     let font_family = font_family.into();
     Input::new(input)
         .w_full()
-        .small()
-        .h(px(28.0))
-        .px(px(13.0))
+        .appearance(false)
+        .h(px(40.0))
+        .px(px(14.0))
+        .py(px(8.0))
+        .gap(px(8.0))
         .font_family(font_family.clone())
         .text_size(crate::rems_from_px(12.0))
+        .line_height(px(16.0))
         .prefix(
             div()
                 .font_family(font_family)
-                .text_size(crate::rems_from_px(11.0))
+                .text_size(crate::rems_from_px(12.0))
                 .text_color(cx.theme().foreground)
                 .child(prompt.into()),
         )
@@ -59,58 +68,20 @@ pub fn command_palette_row(
     detail: impl Into<SharedString>,
     badge: Option<AnyElement>,
     selected: bool,
-    selection_background: gpui::Hsla,
-    font_family: impl Into<SharedString>,
+    cx: &App,
 ) -> ListItem {
-    let detail = detail.into();
-    ListItem::new(id)
-        .w_full()
-        .h(px(COMMAND_PALETTE_ROW_HEIGHT))
-        .py(px(2.0))
-        .cursor(CursorStyle::PointingHand)
-        .selected(selected)
-        .when(selected, |row| row.bg(selection_background))
-        .child(
-            div()
-                .w_full()
-                .min_w_0()
-                .flex()
-                .items_center()
-                .gap(px(10.0))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .gap(px(2.0))
-                        .child(
-                            div()
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .text_ellipsis()
-                                .font_family(font_family.into())
-                                .text_size(crate::rems_from_px(13.0))
-                                .line_height(px(16.0))
-                                .child(label.into()),
-                        )
-                        .when(!detail.is_empty(), |column| {
-                            column.child(
-                                div()
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .text_size(crate::rems_from_px(12.0))
-                                    .line_height(px(16.0))
-                                    .opacity(if selected { 1.0 } else { 0.8 })
-                                    .child(detail),
-                            )
-                        }),
-                )
-                .when_some(badge, |row, badge| {
-                    row.child(div().flex_none().child(badge))
-                }),
-        )
+    palette::palette_entry(
+        id,
+        &PaletteRow {
+            label: label.into(),
+            detail: detail.into(),
+            ..Default::default()
+        },
+        selected,
+        badge,
+        None,
+        cx,
+    )
 }
 
 pub fn command_kind_badge(
@@ -128,6 +99,7 @@ pub fn command_kind_badge(
 #[derive(IntoElement)]
 pub struct CommandPaletteSurface {
     input: AnyElement,
+    usage: Option<SharedString>,
     rows: Option<AnyElement>,
     hints: Vec<PaletteHint>,
     revision: u64,
@@ -137,6 +109,7 @@ impl CommandPaletteSurface {
     pub fn new(input: impl IntoElement, revision: u64) -> Self {
         Self {
             input: input.into_any_element(),
+            usage: None,
             rows: None,
             hints: Vec::new(),
             revision,
@@ -154,6 +127,13 @@ impl CommandPaletteSurface {
         self.hints = hints.into_iter().collect();
         self
     }
+
+    #[must_use]
+    pub fn usage(mut self, usage: impl Into<SharedString>) -> Self {
+        let usage = usage.into();
+        self.usage = (!usage.is_empty()).then_some(usage);
+        self
+    }
 }
 
 impl RenderOnce for CommandPaletteSurface {
@@ -169,27 +149,47 @@ impl RenderOnce for CommandPaletteSurface {
             .popover_style(cx)
             .rounded(command_palette_radius(cx))
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(div().p(px(COMMAND_PALETTE_INSET)).child(self.input))
+            .child(self.input)
+            .children(self.usage.map(|usage| {
+                div()
+                    .h(px(24.0))
+                    .min_w_0()
+                    .flex_none()
+                    .px(px(18.0))
+                    .pb(px(8.0))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .text_size(crate::rems_from_px(10.0))
+                    .line_height(px(16.0))
+                    .text_color(cx.theme().foreground.muted())
+                    .child(usage)
+            }))
             .children(self.rows.map(|rows| {
                 div()
                     .px(px(COMMAND_PALETTE_INSET))
+                    .pt(px(2.0))
                     .pb(px(COMMAND_PALETTE_INSET))
                     .child(rows)
             }))
             .child(
                 div()
-                    .h(px(34.0))
+                    .min_h(px(32.0))
                     .flex_none()
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .justify_end()
-                    .gap(px(12.0))
-                    .px(px(10.0))
+                    .gap(px(14.0))
+                    .px(px(18.0))
+                    .py(px(8.0))
                     .border_t(px(0.5))
                     .border_color(cx.theme().foreground.opacity(0.1))
-                    .text_size(crate::rems_from_px(9.0))
+                    .text_size(crate::rems_from_px(10.0))
+                    .line_height(px(16.0))
                     .text_color(cx.theme().foreground.muted())
-                    .children(self.hints.into_iter().map(palette_hint)),
+                    .children(self.hints.into_iter().map(|hint| palette_hint(hint, cx))),
             );
         crate::widget::foundation::surface_enter(
             surface,
@@ -199,8 +199,25 @@ impl RenderOnce for CommandPaletteSurface {
     }
 }
 
-fn palette_hint(hint: PaletteHint) -> impl IntoElement {
-    palette_shortcut_hint([hint.key], hint.label)
+fn palette_hint(hint: PaletteHint, cx: &App) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(5.0))
+        .whitespace_nowrap()
+        .child(
+            div()
+                .text_color(cx.theme().foreground)
+                .child(match hint.key {
+                    "up down" | "up/down" => "↑↓".to_owned(),
+                    "left right" | "left/right" => "←→".to_owned(),
+                    "escape" => "esc".to_owned(),
+                    "enter" => "↵".to_owned(),
+                    key => Keystroke::parse(key)
+                        .map_or_else(|_| key.to_owned(), |key| Kbd::format(&key)),
+                }),
+        )
+        .child(hint.label)
 }
 
 /// Keyboard shortcut hint styling, shared with palette-adjacent surfaces.

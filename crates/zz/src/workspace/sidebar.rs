@@ -17,7 +17,7 @@ use zz_ui::navigation::{
     WORKSPACE_TREE_CONTENT_INSET as TREE_CONTENT_INSET,
     WORKSPACE_TREE_INDENT_WIDTH as TREE_INDENT_WIDTH,
     WORKSPACE_TREE_MARKER_SLOT_WIDTH as TREE_MARKER_SLOT_WIDTH,
-    WORKSPACE_TREE_NODE_ICON_SIZE as TREE_NODE_ICON_SIZE,
+    WORKSPACE_TREE_NODE_ICON_SIZE as TREE_NODE_ICON_SIZE, WORKSPACE_TREE_ROW_HEIGHT,
     sidebar::{
         TreeNavigation, TreeNavigationResult, TreeNavigationRow, tree_action_strip,
         tree_host_indicator, tree_host_marker, tree_navigation, tree_node_marker,
@@ -609,7 +609,15 @@ impl WorkspaceSidebar {
             .on_click(move |_, window, cx| {
                 close_sidebar.update(cx, |sidebar, cx| sidebar.close_settings(window, cx));
             });
-        let mut items = vec![back.into_any_element()];
+        let mut items = vec![
+            div()
+                .flex()
+                .flex_none()
+                .h(px(WORKSPACE_TREE_ROW_HEIGHT))
+                .items_center()
+                .child(back)
+                .into_any_element(),
+        ];
         let mut current_group = None;
         for &section in &crate::profile::profile(cx).settings_sections {
             let group = section.navigation_group();
@@ -636,7 +644,6 @@ impl WorkspaceSidebar {
             .w_full()
             .gap(px(2.0))
             .px(px(6.0))
-            .pt(px(6.0))
             .children(items)
             .into_any_element()
     }

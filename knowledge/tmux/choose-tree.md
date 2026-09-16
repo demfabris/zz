@@ -4,34 +4,52 @@ title: Sidebar navigation and native choosers
 description: Persistent sidebar navigation for sessions and windows plus daemon-owned pane and paste-buffer choosers, with tmux-style keyboard movement and activation.
 resource: crates/zz-mux/src/command.rs
 tags: [tmux, choose-tree, choose-buffer, chooser, overlay]
-timestamp: 2026-07-30T21:21:06Z
+timestamp: 2026-09-15T22:16:59Z
 ---
 
 # Overview
 
-zz has two distinct navigation surfaces. `focus-sidebar` opens the persistent workspace tree. In
+`focus-sidebar` opens the persistent workspace tree. In
 titlebar mode the tree leaves the layout and the native status bar appears in the title bar; focusing the
-sidebar raises the same tree as a slideover. The default `C-b s` and `C-b w` bindings call this
-zz-native command.
+sidebar raises the same tree as a slideover. The default prefix is `C-b`; `s` runs
+`choose-tree -Zs` and `w` runs `choose-tree -Zw`, as defined in `KeyTables::default` in
+`crates/zz-protocol/src/key.rs`.
 
-Every `choose-tree` form and a `choose-buffer` invocation with at least one stored buffer opens a
-tmux-style chooser rendered as a daemon-owned native GPUI overlay, not terminal escape content. In
+On desktop, `choose-tree -s` and `choose-tree -w` open the
+[unified palette](/concepts/command-palette.md) in Navigate mode. Both publish
+`ChooseTreeKind::Windows`. The palette preserves the daemon's initial expansion and selection:
+`prefix s` opens collapsed sessions with the current session selected, while `prefix w` opens
+expanded sessions with the current window selected. Sessions expand to windows, windows expand
+to panes, and rows at all three levels remain selectable. Requests with `ChooseTreeKind::Panes`
+or `ChooseTreeKind::Clients`, plus `choose-buffer` with at least one stored buffer, retain their
+dedicated GPUI overlays.
+
+The palette retains daemon source indices and custom row text. Enter activates the selected
+source index, and dismissal closes the daemon chooser, preserving command templates and zoom
+restoration. Search reveals collapsed descendants through sequential `Select` and `Expand`
+actions, waiting for each expansion in the published state before continuing. Clearing search
+restores only the branches expanded for that search. Backspace on an empty search closes the
+daemon chooser and returns to the default palette without replacing its input or replaying the
+opening animation. These operations use the existing protocol.
+
+The daemon owns chooser state for both desktop presentations. In
 [`crates/zz-mux`](/crates/zz-mux.md), the effects carry the target pane, chooser shape,
 filter, parsed sort order, and optional selection command. The [server](/crates/zz-daemon.md) builds a snapshot
 (`ChooseTreeState` / `ChooseBufferState`, defined in [protocol](/crates/zz-protocol.md)) and the
-[app](/crates/zz.md) paints it above the invoking terminal *or* browser pane. The overlay blocks
+[app](/crates/zz.md) renders the corresponding palette or chooser above the workspace. The overlay blocks
 input from leaking into the covered pane, follows live mux mutations, survives protocol resync, can
 activate targets in another session, and closes when its underlying data empties.
 
 # choose-tree hierarchy and flags
 
-`choose-tree` chooses a `ChooseTreeKind`, selected by flag:
+`choose-tree` chooses a `ChooseTreeKind` and daemon-side initial hierarchy by flag. The desktop
+Navigate palette preserves the hierarchy of the `-s` and `-w` forms:
 
-| Invocation | `ChooseTreeKind` | Initial view |
+| Invocation | `ChooseTreeKind` | Initial daemon view |
 | --- | --- | --- |
 | `choose-tree` (default) | `Panes` | full `$session → @window → %pane` hierarchy, including terminal, browser, and Agent pane types |
-| `choose-tree -s` | `Windows` | session rows, each expandable through windows to panes |
-| `choose-tree -w` | `Windows` | expanded sessions with window rows, each window expandable to panes |
+| `choose-tree -s` | `Windows` | collapsed session rows; source session selected; each session expandable through windows to panes |
+| `choose-tree -w` | `Windows` | expanded sessions with collapsed window rows; source window selected; each window expandable to panes |
 
 Supported flags are `-s`, `-w`, `-Z` (zoom), `-t` (target pane), `-f` (format filter), `-K`
 (per-row shortcut-key format), `-N` (no preview), `-O` (sort order), and `-r` (reverse). One `-N`
@@ -113,15 +131,14 @@ a `depth`, an optional `pane_kind` (`ChooseTreePaneKind::Terminal`/`Browser`/`Ag
 | Search | `SearchStart{reverse}`, `SearchAppend`, `SearchBackspace`, `SearchAccept`, `SearchCancel`, `SearchNext{reverse}` |
 | Exit | `Close` |
 
-In the GPUI overlay these map to: arrow keys or `hjkl` navigate and collapse/expand, Enter or
-double-click activates, `/` and `?` search, `n`/`N` repeat the search, `q`/Escape closes. Custom
-row formats (`-F`), `-G`/`-h`/`-k`/`-y`, tagging, previews beyond the
-already-previewless `-N` form,
-kill/swap actions, and `choose-client` are explicitly unsupported.
+In the dedicated pane/client GPUI overlay these map to: arrow keys or `hjkl` navigate and
+collapse/expand, Enter or double-click activates, `/` and `?` search, `n`/`N` repeat the search,
+and `q`/Escape closes. The Navigate palette uses its Input for search and Left/Right for tree
+navigation, while preserving the daemon activation and close actions described above.
 
 # choose-buffer
 
-`choose-buffer` (default `C-b =`) accepts `-Z`, `-t`, `-f`, `-K`, `-N`, `-O`, and `-r` and opens a
+`choose-buffer` (default `prefix =`) accepts `-Z`, `-t`, `-f`, `-K`, `-N`, `-O`, and `-r` and opens a
 sibling overlay over the daemon's global paste-buffer store. Its wire model is deliberately
 bounded: `ChooseBufferItem` holds only a
 `name`, a single-line `preview`, `size_bytes`, and `created_unix_seconds`; full buffer contents stay
@@ -144,6 +161,7 @@ integration, and broader presentation behavior remain unsupported.
 | `crates/zz-mux/src/command.rs` | `focus_sidebar`, `choose_tree`, and `choose_buffer` validation plus their effects. |
 | `crates/zz-daemon/src/daemon.rs` | Chooser state, live selection, template substitution, action execution, and error delivery. |
 | `crates/zz-protocol/src/message.rs` | `FocusSidebar`, `ChooseTreeKind`, `ChooseTreeItem`/`State`/`Action`, and choose-buffer types. |
+| `crates/zz/src/command/palette.rs` | Desktop Navigate tree adapter, source-index activation, and search expansion/restoration. |
 | `crates/zz/src/workspace/sidebar.rs` | Persistent tree projection, titlebar-mode slideover, focus/reveal lifecycle, vim-style navigation, selection, and activation. |
 
 # Related

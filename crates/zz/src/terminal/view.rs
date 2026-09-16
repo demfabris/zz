@@ -2951,12 +2951,10 @@ mod tests {
             ("ctrl-shift-f", ChromeAction::TerminalSearch),
             ("ctrl-shift-c", ChromeAction::TerminalCopy),
             ("ctrl-shift-a", ChromeAction::TerminalSelectAll),
-            ("ctrl-shift-k", ChromeAction::TerminalClearHistory),
             ("ctrl-shift-v", ChromeAction::TerminalPaste),
             ("cmd-f", ChromeAction::TerminalSearch),
             ("cmd-c", ChromeAction::TerminalCopy),
             ("cmd-a", ChromeAction::TerminalSelectAll),
-            ("cmd-k", ChromeAction::TerminalClearHistory),
             ("cmd-v", ChromeAction::TerminalPaste),
         ] {
             assert_eq!(chrome_action(source), Some(action), "{source}");

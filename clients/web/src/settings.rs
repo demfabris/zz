@@ -887,7 +887,7 @@ impl WebClient {
                 )
                 .disabled(true)
                 .control(
-                    div().w(px(120.0)).flex_none().child(
+                    div().flex_none().child(
                         Select::new(&self.settings_controls.search_engine)
                             .small()
                             .placeholder("Unavailable")

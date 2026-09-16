@@ -63,7 +63,11 @@ use crate::{
     browser::view::BrowserView,
     chooser::buffer::ChooseBufferView,
     chooser::tree::ChooseTreeView,
-    command::{confirm::ConfirmView, menu::MenuView, palette::CommandPaletteView},
+    command::{
+        confirm::ConfirmView,
+        menu::MenuView,
+        palette::{CommandPaletteEvent, CommandPaletteView, PaletteMode},
+    },
     config::{self, AgentConfig, frame_content_corner_radius},
     diagnostics,
     editor::EditorView,
@@ -581,6 +585,9 @@ pub struct AppView {
     choose_buffer: Option<Entity<ChooseBufferView>>,
     display_panes: Option<Entity<DisplayPanesView>>,
     command_palette: Option<Entity<CommandPaletteView>>,
+    local_palette_prompt_revision: Option<u64>,
+    local_palette_chooser_revision: Option<u64>,
+    pending_palette_chooser_close: Option<u64>,
     pane_indicators: BTreeMap<PaneId, PaneIndicator>,
     focused_pane: Option<(PaneId, EntityId)>,
     focused_overlay: Option<OverlayKind>,
@@ -620,6 +627,13 @@ impl AppView {
         }
         let mut observed_revision = AppRevision::for_mux(mux.read(cx));
         let mut observed_snapshot = mux.read(cx).snapshot();
+        let mut observed_palette_fleet: Vec<(
+            HostId,
+            String,
+            crate::mux::hosts::HostState,
+            Option<u64>,
+        )> = Vec::new();
+        let mut observed_palette_agents = Vec::new();
         cx.observe_in(&mux, window, move |view, mux, window, cx| {
             view.drain_gui_requests(cx);
             let snapshot = mux.read(cx).snapshot();
@@ -633,6 +647,54 @@ impl AppView {
             if revision_changed {
                 observed_revision = revision;
                 view.register_agent_panes(cx);
+            }
+            if let Some(palette) = &view.command_palette {
+                let fleet_changed = !mux
+                    .read(cx)
+                    .fleet_hosts()
+                    .map(|(id, name, state, snapshot)| {
+                        (
+                            id,
+                            name,
+                            state,
+                            snapshot.map(|snapshot| snapshot.generation),
+                        )
+                    })
+                    .eq(observed_palette_fleet
+                        .iter()
+                        .map(|(id, name, state, generation)| {
+                            (*id, name.as_str(), state, *generation)
+                        }));
+                let current_snapshot = mux.read(cx).snapshot();
+                let agent_statuses = || {
+                    current_snapshot
+                        .sessions
+                        .iter()
+                        .flat_map(|session| &session.windows)
+                        .flat_map(|window| window.panes.values())
+                        .filter(|pane| matches!(pane.kind, PaneKindSnapshot::Agent(_)))
+                        .map(|pane| (pane.id, mux.read(cx).agent_attention_status(pane.id)))
+                };
+                let agents_changed = !agent_statuses().eq(observed_palette_agents.iter().copied());
+                if fleet_changed || agents_changed || revision_changed || snapshot_arrived {
+                    observed_palette_agents = agent_statuses().collect();
+                    observed_palette_fleet = mux
+                        .read(cx)
+                        .fleet_hosts()
+                        .map(|(id, name, state, snapshot)| {
+                            (
+                                id,
+                                name.to_owned(),
+                                state.clone(),
+                                snapshot.map(|snapshot| snapshot.generation),
+                            )
+                        })
+                        .collect();
+                    palette.update(cx, |palette, cx| {
+                        palette.refresh(window, cx);
+                        cx.notify();
+                    });
+                }
             }
             if revision_changed || snapshot_arrived {
                 view.synchronize_panes(window, cx);
@@ -796,6 +858,9 @@ impl AppView {
             choose_buffer: None,
             display_panes: None,
             command_palette: None,
+            local_palette_prompt_revision: None,
+            local_palette_chooser_revision: None,
+            pending_palette_chooser_close: None,
             pane_indicators: BTreeMap::new(),
             focused_pane: None,
             focused_overlay: None,
@@ -834,7 +899,19 @@ impl AppView {
         if self.reconcile_dialog_prefix(window, cx) {
             return;
         }
+        if crate::keymap::resolve(cx, zz_client::UI_TABLE, &event.keystroke)
+            == Some(zz_client::ChromeAction::OpenCommandPalette)
+        {
+            self.open_command_palette(None, window, cx);
+            cx.stop_propagation();
+            return;
+        }
         if self.popup.is_some() || self.menu.is_some() || self.confirm.is_some() {
+            return;
+        }
+        if self.command_palette.as_ref().is_some_and(|palette| {
+            palette.read(cx).is_local() || palette.read(cx).is_window_chooser()
+        }) {
             return;
         }
         if self.sidebar.read(cx).route() == WorkspaceRoute::Settings {
@@ -862,10 +939,8 @@ impl AppView {
         }
         let (armed, claimed) = {
             let mux = self.mux.read(cx);
-            (
-                mux.prefix_armed(),
-                mux.claims_prefix_input(&terminal_key_input(keystroke, TerminalKeyAction::Press)),
-            )
+            let input = terminal_key_input(keystroke, TerminalKeyAction::Press);
+            (mux.prefix_armed(), mux.claims_prefix_input(&input))
         };
         if !claimed {
             return;
@@ -950,6 +1025,86 @@ impl AppView {
 
     fn active_pane(&self, cx: &App) -> Option<PaneId> {
         self.mux.read(cx).active_pane()
+    }
+
+    fn open_command_palette(
+        &mut self,
+        mode: Option<PaletteMode>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.popup.is_some() || self.menu.is_some() || self.confirm.is_some() {
+            return;
+        }
+        let mux = self.mux.clone();
+        mux.update(cx, |mux, _| mux.send_prefix_cancel());
+        self.local_palette_prompt_revision = Some(mux.read(cx).command_prompt_revision());
+        self.local_palette_chooser_revision = Some(mux.read(cx).choose_tree_revision());
+        if mux.read(cx).command_prompt().is_some() {
+            mux.read(cx).send_input(InputMessage::CommandPrompt {
+                action: zz_protocol::CommandPromptAction::Close,
+            });
+        }
+        if mux.read(cx).choose_tree().is_some() {
+            mux.read(cx).send_input(InputMessage::ChooseTree {
+                action: zz_protocol::ChooseTreeAction::Close,
+            });
+        }
+        let palette = cx.new(|cx| CommandPaletteView::new_unified(mux, mode, window, cx));
+        self.observe_command_palette(&palette, window, cx);
+        palette.read(cx).focus(cx).focus(window, cx);
+        self.command_palette = Some(palette);
+        self.focused_overlay = Some(OverlayKind::CommandPalette);
+        self.synchronized_signature = None;
+        cx.notify();
+    }
+
+    fn observe_command_palette(
+        &self,
+        palette: &Entity<CommandPaletteView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.subscribe_in(palette, window, |view, palette, event, window, cx| {
+            if view.command_palette.as_ref() != Some(palette) || palette.read(cx).is_finished() {
+                return;
+            }
+            match event {
+                CommandPaletteEvent::ReturnToDefault => {
+                    view.pending_palette_chooser_close =
+                        Some(view.mux.read(cx).choose_tree_closed_revision());
+                    view.local_palette_prompt_revision =
+                        Some(view.mux.read(cx).command_prompt_revision());
+                    view.local_palette_chooser_revision = None;
+                    palette.update(cx, |palette, cx| palette.return_to_default(window, cx));
+                    view.synchronized_signature = None;
+                    cx.notify();
+                }
+            }
+        })
+        .detach();
+        cx.observe_in(palette, window, move |view, palette, window, cx| {
+            if view.command_palette.as_ref() != Some(&palette)
+                || !palette.read(cx).is_local()
+                || !palette.read(cx).is_finished()
+            {
+                return;
+            }
+            view.command_palette = None;
+            view.local_palette_prompt_revision = None;
+            view.local_palette_chooser_revision = None;
+            view.focused_overlay = None;
+            view.synchronized_signature = None;
+            if view.sidebar.read(cx).route() == WorkspaceRoute::Settings {
+                if let Some(settings) = view.sidebar.read(cx).settings_view() {
+                    settings.read(cx).focus().focus(window, cx);
+                }
+            } else {
+                view.focus_active_pane(window, cx);
+            }
+            cx.notify();
+        })
+        .detach();
     }
 
     #[cfg_attr(target_os = "ios", allow(dead_code))]
@@ -1129,6 +1284,12 @@ impl AppView {
         let command_prompt_revision = mux.command_prompt_revision();
         let choose_tree = mux.choose_tree().cloned();
         let choose_tree_revision = mux.choose_tree_revision();
+        if self
+            .pending_palette_chooser_close
+            .is_some_and(|closed_revision| closed_revision != mux.choose_tree_closed_revision())
+        {
+            self.pending_palette_chooser_close = None;
+        }
         let choose_buffer = mux.choose_buffer().cloned();
         let choose_buffer_revision = mux.choose_buffer_revision();
         let display_panes = mux.display_panes().cloned();
@@ -1376,8 +1537,21 @@ impl AppView {
         }
 
         match command_prompt.as_ref() {
+            Some(_)
+                if self.command_palette.as_ref().is_some_and(|palette| {
+                    palette.read(cx).is_local()
+                        && self.local_palette_prompt_revision == Some(command_prompt_revision)
+                }) =>
+            {
+                if let Some(palette) = &self.command_palette {
+                    palette.update(cx, |palette, cx| palette.refresh(window, cx));
+                }
+            }
             Some(state) => {
-                if self.command_palette.is_none() {
+                if self.command_palette.as_ref().is_none_or(|palette| {
+                    palette.read(cx).is_local() || palette.read(cx).is_window_chooser()
+                }) {
+                    self.local_palette_prompt_revision = None;
                     let mux = self.mux.clone();
                     let snapshot = Arc::clone(&snapshot);
                     self.command_palette = Some(cx.new(|cx| {
@@ -1397,14 +1571,59 @@ impl AppView {
                     });
                 }
             }
+            None if choose_tree
+                .as_ref()
+                .is_some_and(|state| state.kind == zz_protocol::ChooseTreeKind::Windows)
+                && self.pending_palette_chooser_close.is_none()
+                && !self.command_palette.as_ref().is_some_and(|palette| {
+                    palette.read(cx).is_local()
+                        && self.local_palette_chooser_revision == Some(choose_tree_revision)
+                }) =>
+            {
+                let state = choose_tree.as_ref().expect("window chooser state");
+                if self
+                    .command_palette
+                    .as_ref()
+                    .is_none_or(|palette| !palette.read(cx).is_window_chooser())
+                {
+                    self.local_palette_prompt_revision = None;
+                    self.local_palette_chooser_revision = None;
+                    let mux = self.mux.clone();
+                    let palette = cx.new(|cx| {
+                        CommandPaletteView::new_window_chooser(
+                            mux,
+                            state,
+                            choose_tree_revision,
+                            window,
+                            cx,
+                        )
+                    });
+                    self.observe_command_palette(&palette, window, cx);
+                    self.command_palette = Some(palette);
+                }
+                if let Some(palette) = &self.command_palette {
+                    palette.update(cx, |palette, cx| {
+                        palette.synchronize_window_chooser(state, choose_tree_revision, window, cx);
+                    });
+                }
+            }
             None => {
-                if self.command_palette.take().is_some() {
+                if let Some(palette) = self
+                    .command_palette
+                    .as_ref()
+                    .filter(|palette| palette.read(cx).is_local())
+                {
+                    palette.update(cx, |palette, cx| palette.refresh(window, cx));
+                } else if self.command_palette.take().is_some() {
                     self.focused_pane = None;
                 }
             }
         }
 
-        match choose_tree.as_ref() {
+        match choose_tree
+            .as_ref()
+            .filter(|state| state.kind != zz_protocol::ChooseTreeKind::Windows)
+        {
             Some(state) => {
                 if self.choose_tree.is_none() {
                     let mux = self.mux.clone();
@@ -1565,7 +1784,13 @@ impl AppView {
                 && self.focused_pane.map(|(pane, _)| pane) != Some(active)
         });
         self.audit_pane_focus("pass", window, cx);
-        let floating_input = self.popup.is_some() || self.menu.is_some() || self.confirm.is_some();
+        let floating_input = self.popup.is_some()
+            || self.menu.is_some()
+            || self.confirm.is_some()
+            || self
+                .command_palette
+                .as_ref()
+                .is_some_and(|palette| palette.read(cx).is_local());
         let overlay = (route == WorkspaceRoute::App || floating_input)
             .then(|| self.visible_overlay(cx))
             .flatten();
@@ -2924,7 +3149,7 @@ impl Render for AppView {
             diagnostics::elapsed_us(started),
         );
 
-        let pane_margin = if active_window.is_none() && route == WorkspaceRoute::App {
+        let pane_margin = if route == WorkspaceRoute::Settings || active_window.is_none() {
             px(0.)
         } else {
             config::pane_margin(cx)
@@ -2946,14 +3171,14 @@ impl Render for AppView {
                 self.choose_buffer
                     .clone()
                     .map(IntoElement::into_any_element),
-                self.command_palette
-                    .clone()
-                    .map(IntoElement::into_any_element),
             ]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>()
         };
+        if let Some(palette) = &self.command_palette {
+            overlays.push(palette.clone().into_any_element());
+        }
         if let Some(popup) = self.popup_overlay(canvas_origin, window, cx) {
             overlays.push(popup);
         }
@@ -2991,6 +3216,16 @@ impl Render for AppView {
         );
         layout_corners.round_div(
             app_workspace_surface("app-root", content, overlays, cx)
+                .on_action(
+                    cx.listener(|view, _: &crate::menus::OpenCommandPalette, window, cx| {
+                        view.open_command_palette(None, window, cx);
+                    }),
+                )
+                .on_action(
+                    cx.listener(|view, _: &crate::menus::ChooseWindow, window, cx| {
+                        view.open_command_palette(Some(PaletteMode::Window), window, cx);
+                    }),
+                )
                 .capture_any_mouse_down(cx.listener(Self::on_menu_mouse_down))
                 .capture_any_mouse_up(cx.listener(Self::on_menu_mouse_up))
                 .capture_any_mouse_up(cx.listener(Self::on_split_mouse_up))
@@ -3721,7 +3956,7 @@ mod tests {
             ],
             search: None,
             selected: 0,
-            kind: zz_protocol::ChooseTreeKind::Windows,
+            kind: zz_protocol::ChooseTreeKind::Panes,
             filter_no_matches: false,
             prompt: String::new(),
             help: false,
@@ -3761,6 +3996,267 @@ mod tests {
             }],
             colour: None,
             active_colour: None,
+        }
+    }
+
+    #[gpui::test]
+    fn local_palette_survives_mux_updates_and_reopens_with_both_shortcuts(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            zz_ui::init(cx);
+            crate::keymap::install(&[], config::DEFAULT_BROWSER_ELEMENT_SELECTOR_HOTKEY, cx);
+        });
+        let (workspace, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                BrowserController::new(Err(zz_browser::BrowserError::AlreadyShutdown), cx)
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread(
+                        "palette lifecycle".to_owned(),
+                    )),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), one_pane_snapshot(1), cx);
+        });
+        cx.run_until_parked();
+        let shortcuts = if cfg!(any(target_os = "macos", target_os = "ios")) {
+            ["cmd-k", "cmd-p"]
+        } else {
+            ["ctrl-shift-k", "ctrl-shift-p"]
+        };
+        for shortcut in shortcuts {
+            cx.simulate_keystrokes(shortcut);
+            cx.run_until_parked();
+            let palette = workspace.read_with(cx, |workspace, cx| {
+                let palette = workspace.command_palette.clone().expect("palette opened");
+                assert!(palette.read(cx).is_local());
+                assert!(workspace.mux.read(cx).command_prompt().is_none());
+                palette
+            });
+            mux.update(cx, |mux, cx| {
+                mux.attach_snapshot_for_test(SessionId(0), one_pane_snapshot(2), cx);
+            });
+            cx.run_until_parked();
+            workspace.read_with(cx, |workspace, _| {
+                assert_eq!(workspace.command_palette.as_ref(), Some(&palette));
+            });
+            cx.simulate_keystrokes(shortcut);
+            cx.run_until_parked();
+            workspace.read_with(cx, |workspace, _| {
+                assert_ne!(workspace.command_palette.as_ref(), Some(&palette));
+            });
+            cx.simulate_keystrokes("escape");
+            cx.run_until_parked();
+            workspace.read_with(cx, |workspace, _| {
+                assert!(workspace.command_palette.is_none());
+            });
+        }
+        let sidebar = workspace.read_with(cx, |workspace, _| workspace.sidebar.clone());
+        sidebar.update_in(cx, WorkspaceSidebar::open_settings);
+        cx.run_until_parked();
+        let settings_focus = sidebar.read_with(cx, |sidebar, cx| {
+            sidebar.settings_view().unwrap().read(cx).focus()
+        });
+        for shortcut in shortcuts {
+            cx.simulate_keystrokes(shortcut);
+            cx.simulate_keystrokes(shortcut);
+            cx.simulate_keystrokes("escape");
+            cx.run_until_parked();
+            assert!(cx.update(|window, cx| settings_focus.contains_focused(window, cx)));
+        }
+    }
+
+    #[gpui::test]
+    fn daemon_window_chooser_uses_palette_and_preserves_selection_actions(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            zz_ui::init(cx);
+            crate::keymap::install(&[], config::DEFAULT_BROWSER_ELEMENT_SELECTOR_HOTKEY, cx);
+        });
+        let (workspace, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                BrowserController::new(Err(zz_browser::BrowserError::AlreadyShutdown), cx)
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("window palette".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        let input = mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), one_pane_snapshot(1), cx);
+            mux.record_input_for_test()
+        });
+        let sequence = Cell::new(0);
+        let publish = |state, cx: &mut gpui::VisualTestContext| {
+            sequence.set(sequence.get() + 1);
+            mux.update(cx, |mux, cx| {
+                mux.handle_message_for_test(
+                    zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                        sequence: sequence.get(),
+                        payload: zz_protocol::EventPayload::ChooseTree { state },
+                    }),
+                    cx,
+                );
+            });
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                _ = window.draw(cx);
+            });
+        };
+        let mut state = choose_tree_state_for_test();
+        state.kind = zz_protocol::ChooseTreeKind::Windows;
+        state.items[0].flags =
+            zz_protocol::ChooseTreeItem::HAS_CHILDREN | zz_protocol::ChooseTreeItem::EXPANDED;
+        state.items[1].label = "1:build".to_owned();
+        state.items[1].depth = 1;
+        let mut logs = state.items[1].clone();
+        logs.label = "2:logs".to_owned();
+        logs.target = zz_protocol::ChooseTreeTarget::Window(WindowId(1));
+        state.items.push(logs);
+        state.selected = 2;
+        publish(Some(state.clone()), cx);
+        assert!(!input.borrow().iter().any(|message| matches!(
+            message,
+            InputMessage::ChooseTree {
+                action: zz_protocol::ChooseTreeAction::ExpandAll
+            }
+        )));
+        assert!(cx.debug_bounds("choose-tree-overlay").is_none());
+        assert!(cx.debug_bounds("command-palette-overlay").is_some());
+        let palette = workspace.read_with(cx, |workspace, cx| {
+            assert!(workspace.choose_tree.is_none());
+            let palette = workspace.command_palette.clone().expect("window palette");
+            assert!(palette.read(cx).is_window_chooser());
+            palette
+        });
+        assert!(cx.update(|window, cx| palette.read(cx).focus(cx).is_focused(window)));
+        input.borrow_mut().clear();
+        cx.simulate_input("logs");
+        cx.run_until_parked();
+        assert!(input.borrow().is_empty(), "search stays in the palette");
+        state.items.insert(0, state.items[0].clone());
+        publish(Some(state.clone()), cx);
+        assert_eq!(
+            workspace.read_with(cx, |workspace, _| workspace.command_palette.clone()),
+            Some(palette)
+        );
+        cx.simulate_keystrokes("enter");
+        assert!(input.borrow().iter().any(|message| matches!(
+            message,
+            InputMessage::ChooseTree {
+                action: zz_protocol::ChooseTreeAction::ActivateIndex(3)
+            }
+        )));
+        publish(None, cx);
+        assert!(workspace.read_with(cx, |workspace, _| workspace.command_palette.is_none()));
+        publish(Some(state.clone()), cx);
+        input.borrow_mut().clear();
+        cx.simulate_keystrokes("escape");
+        assert!(input.borrow().iter().any(|message| matches!(
+            message,
+            InputMessage::ChooseTree {
+                action: zz_protocol::ChooseTreeAction::Close
+            }
+        )));
+        publish(None, cx);
+        publish(Some(state.clone()), cx);
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+            "cmd-k"
+        } else {
+            "ctrl-shift-k"
+        });
+        publish(None, cx);
+        assert!(workspace.read_with(cx, |workspace, cx| {
+            workspace
+                .command_palette
+                .as_ref()
+                .is_some_and(|palette| palette.read(cx).is_local())
+        }));
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        for dismiss_immediately in [false, true] {
+            publish(Some(state.clone()), cx);
+            let original = workspace.read_with(cx, |workspace, _| {
+                workspace.command_palette.clone().unwrap()
+            });
+            input.borrow_mut().clear();
+            cx.simulate_input("x");
+            cx.run_until_parked();
+            cx.simulate_keystrokes("backspace");
+            cx.run_until_parked();
+            assert!(original.read_with(cx, |palette, _| palette.is_window_chooser()));
+            cx.simulate_keystrokes("backspace");
+            cx.run_until_parked();
+            assert!(original.read_with(cx, |palette, _| palette.is_local()
+                && !palette.is_window_chooser()));
+            assert_eq!(
+                workspace.read_with(cx, |workspace, _| workspace.command_palette.clone()),
+                Some(original.clone())
+            );
+            assert!(cx.update(|window, cx| original.read(cx).focus(cx).is_focused(window)));
+            assert_eq!(
+                input
+                    .borrow()
+                    .iter()
+                    .filter(|message| matches!(
+                        message,
+                        InputMessage::ChooseTree {
+                            action: zz_protocol::ChooseTreeAction::Close
+                        }
+                    ))
+                    .count(),
+                1
+            );
+            if dismiss_immediately {
+                cx.simulate_keystrokes("escape");
+                cx.run_until_parked();
+            }
+            publish(Some(state.clone()), cx);
+            assert_eq!(
+                workspace.read_with(cx, |workspace, _| workspace.command_palette.clone()),
+                (!dismiss_immediately).then_some(original.clone())
+            );
+            if dismiss_immediately {
+                mux.update(cx, |mux, cx| {
+                    for state in [None, Some(state.clone())] {
+                        sequence.set(sequence.get() + 1);
+                        mux.handle_message_for_test(
+                            zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                                sequence: sequence.get(),
+                                payload: zz_protocol::EventPayload::ChooseTree { state },
+                            }),
+                            cx,
+                        );
+                    }
+                });
+                cx.run_until_parked();
+            } else {
+                publish(None, cx);
+                assert_eq!(
+                    workspace.read_with(cx, |workspace, _| workspace.command_palette.clone()),
+                    Some(original.clone())
+                );
+                publish(Some(state.clone()), cx);
+            }
+            workspace.read_with(cx, |workspace, cx| {
+                let current = workspace.command_palette.as_ref().unwrap();
+                assert_ne!(current, &original);
+                assert!(current.read(cx).is_window_chooser());
+            });
+            cx.simulate_keystrokes("escape");
+            publish(None, cx);
         }
     }
 

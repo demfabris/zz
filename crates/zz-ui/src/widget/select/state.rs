@@ -263,7 +263,6 @@ impl<D: SelectDelegate> SelectState<D> {
         let open = self.menu.is_some();
         let button = Button::new("select-trigger")
             .tab_stop(false)
-            .w_full()
             .with_size(self.options.size)
             .label(title)
             .dropdown_caret(true)
@@ -364,7 +363,7 @@ mod tests {
         ) -> impl gpui::IntoElement {
             use crate::Sizable as _;
             use gpui::{ParentElement as _, Styled as _};
-            gpui::div().w(gpui::px(200.0)).child(
+            gpui::div().flex().w(gpui::px(200.0)).child(
                 super::super::Select::new(&self.state)
                     .small()
                     .disabled(self.disabled),
@@ -409,6 +408,7 @@ mod tests {
             _ = window.draw(cx);
         });
         let bounds = state.read_with(cx, |state, _| state.trigger_bounds);
+        assert!(bounds.size.width < gpui::px(200.0));
         cx.simulate_mouse_move(bounds.center(), None, gpui::Modifiers::default());
         cx.simulate_click(bounds.center(), gpui::Modifiers::default());
         assert!(state.read_with(cx, |state, _| state.menu.is_some()));
@@ -422,6 +422,12 @@ mod tests {
         );
         assert_eq!(*events.borrow(), vec![Some("vi".into())]);
         assert!(state.read_with(cx, |state, _| state.menu.is_none()));
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(
+            state.read_with(cx, |state, _| state.trigger_bounds.size.width) < bounds.size.width
+        );
         cx.simulate_click(bounds.center(), gpui::Modifiers::default());
         cx.simulate_keystrokes("down escape");
         assert_eq!(events.borrow().len(), 1);
@@ -460,7 +466,15 @@ mod tests {
         let (preview, cx) = cx.add_window_view(|window, cx| Preview {
             state: cx.new(|cx| {
                 SelectState::new(
-                    (0..1000).map(|ix| format!("Font {ix}")).collect(),
+                    (0..1000)
+                        .map(|ix| {
+                            if ix == 500 {
+                                "A much wider font family in the middle of the list".into()
+                            } else {
+                                format!("Font {ix}")
+                            }
+                        })
+                        .collect(),
                     Some(IndexPath::new(999)),
                     window,
                     cx,
@@ -489,6 +503,10 @@ mod tests {
                     quad.background == gpui::solid_background(cx.theme().selection_background())
                 })
                 .expect("selected font row");
+            assert!(
+                selected.bounds.size.width.0
+                    > f32::from(bounds.size.width) * window.scale_factor() * 2.0
+            );
             assert!(
                 selected
                     .content_mask

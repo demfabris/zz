@@ -4,7 +4,7 @@ title: UI design conventions
 description: The component, palette, and styling rules that keep zz application chrome consistent and theme-aware.
 resource: crates/zz/src/command/palette.rs
 tags: [ui, gpui, zz-ui, theme, chrome, clippy]
-timestamp: 2026-09-09T00:00:00Z
+timestamp: 2026-09-16T00:17:40Z
 ---
 
 # Overview
@@ -54,8 +54,17 @@ The browser client in `clients/web` (`just web`) uses the shared GPUI components
    descriptions, counts, and timestamps brighten to the normal foreground.
    Their requested radius reaches the renderer without adaptive compression; the cap keeps
    them short of full pills. Menu containers keep the window's adaptive squircle shape. Open submenu parent rows use a dim neutral highlight; leaf selections keep the
-   accent. Selected shortcut labels and icons brighten to the full foreground. The command palette places 13px monospace names above 12px descriptions in 40px
-   rows. It omits the repeated COMMAND badge while retaining history, option, and value badges.
+   accent. Selected shortcut labels and icons brighten to the full foreground. The command palette matches dropdown typography with 12px medium labels, 10px descriptions, 16px line heights,
+   26px selectable rows, and 2px gaps. It is at most 560px wide, with 8px list gutters,
+   a 40px bare Input, 12px search text and inline Tag pills, and a 10px footer. Matched characters
+   use semibold foreground; breadcrumb prefixes stay muted until selected. Host status dots
+   use success, warning, or muted foreground; session/window running-agent summaries use accent dots.
+   Agent pane rows use shared vendor icons and text status without a duplicate dot. All palette
+   colors and corners follow the current Chroma theme. `PaletteRow::icon` and
+   `PaletteRow::expanded` supply tree icons and disclosure state; `command_palette_tree_entry`
+   gives the disclosure a toggle handler separate from row activation. Workspace and Navigate
+   render selectable session/window/pane trees with these shared rows. Search flattens matching
+   descendants into breadcrumbs. Shared row builders also render daemon command and value prompts.
 6. Use one translucent signal instead of competing fills. Sidebar pointer hover, keyboard selection,
    mux focus, Settings navigation, and clickable native status windows use `workspace_row_highlight`, a
    `background.washed(2)` tint that preserves the desktop blur. Neutral buttons (Default, Secondary,
@@ -139,9 +148,10 @@ Menus, select dropdowns, command palettes, and file/history/tree pickers share
 `StyledExt::popover_style`: an opaque `background.raised(2)` surface, the shared half-pixel edge,
 and a soft outer shadow scaled by the shadow-strength setting. Menus use 4px gutters, 26px
 rows (20px for Small menus), 12px text, and half-pixel separators inset from the surface edge.
-Picker search fields use the shared Input surface. Command palettes use 4px gutters and a
-28px inset search field; row and container radii remain separate so Full mode rounds rows
-without turning the menu or its selections into capsules.
+Picker search fields use the shared Input surface. Command palettes embed a bare shared Input
+inside their raised container, with inline mode, host, and command Tag pills. They use 8px list
+gutters; the container radius adds that inset to the theme radius. Rows retain the inset menu
+radius, so the configured corner setting reaches both the surface and its contents.
 
 The browser action menu puts the current profile and page zoom together. Its zoom stepper reads
 live page zoom from the browser view, stays open after each click, and preserves the existing
@@ -156,7 +166,7 @@ shared dialog surface is similarly compact: 400px default width, 12px gutters, 1
 description, and Small action buttons. Explicitly sized content dialogs such as the attachment
 preview retain their own width.
 
-Native tree and paste-buffer choosers use `zz-ui::chooser::ChooserModal`: 600px and 640px
+Dedicated pane/client tree and paste-buffer choosers use `zz-ui::chooser::ChooserModal`: 600px and 640px
 maximum widths, 40px rows, 12px header/footer gutters, and the shared compact close button.
 The surface grows with its row count up to ten visible rows and scrolls within the available
 window height. It sits near the top of the workspace like the command palette. Tree rows use
@@ -164,6 +174,9 @@ the shared navigation icons, a muted target ID after the label, and a small chec
 entries. Their selection uses `workspace_row_highlight`; the header and footer share the body
 color. The outer radius adds the 4px row inset to the theme radius. The Commands & choosers
 catalog includes the complete modal alongside the individual rows and search footer.
+Daemon `choose-tree -s` and `choose-tree -w` requests use the compact Navigate palette instead,
+preserving their initial tree expansion and selection. See the
+[palette contract](/concepts/command-palette.md) for navigation and search behavior.
 
 **A toast is that same surface.** `widget/overlay/notification.rs` imports the width, gutter and two
 text sizes from `widget/overlay/dialog.rs` rather than restating them, so the two things that
@@ -294,13 +307,11 @@ theme,” `Ghostty` → “From Ghostty,” `Override` → “Overridden.” Tho
 appearance provenance; chrome colors carry the client-local `Default`/`Overridden` provenance
 instead, with “Preset” shown when an otherwise-unset root inherits from the selected family.
 
-`ThemeColor` holds six palette roots plus the per-mode scrim. The accent is reserved for five
-places: the checked `Switch` track, the selected tile ring in `settings::appearance`, the active
-pane border and its inset glow (`pane_border_color`, `pane_focus_glow`), and the Agent composer's
-send button (`ButtonVariant::Accent`), and the effort picker's filled pills; new controls do not reach for it. Only the blurred pane glow
-paints it translucent: a saturated color at partial alpha over a plane blends to brown in gamma
-space, so the tile's selection and focus rings are two opaque 1px strokes with a 1px gap rather
-than a border plus a spread glow. `border()` is an opaque Oklab mix
+`ThemeColor` holds six palette roots plus the per-mode scrim. Selected menu, list, and picker
+rows use the opaque accent through `selection_highlight`. The accent also marks checked switches,
+selected tiles, active-pane borders and glow, keyboard focus, the Agent send button, effort pills,
+and palette mode prefixes and running-agent dots. Use the shared component treatment for these
+roles instead of choosing a separate highlight color. `border()` is an opaque Oklab mix
 of 86% background and 14% foreground at the default contrast. Other colors derive through `Colorize` at paint time, so
 overriding a root needs no parallel token table kept in step. Views read
 `cx.theme()` and never receive a copied palette or local color literals.

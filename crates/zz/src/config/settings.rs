@@ -13,7 +13,8 @@ use std::{
 
 use gpui::{
     AnyElement, App, ClipboardItem, Context, Entity, FocusHandle, Focusable, IntoElement,
-    KeyBinding, Render, SharedString, Subscription, Window, div, img, prelude::*, px,
+    KeyBinding, Render, SharedString, Subscription, Window, WindowControlArea, div, img,
+    prelude::*, px,
 };
 use zz_ui::{
     ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, IndexPath, Sizable as _,
@@ -45,7 +46,7 @@ use crate::{
     theme::{
         ChromeColor, ChromePresetId, ThemeModeSetting, chrome_presets, inherited_chrome_colors,
     },
-    window::toast,
+    window::{drag::window_drag_handle, toast},
     workspace::add_host,
 };
 use zz_browser::SearchProvider;
@@ -73,6 +74,7 @@ pub(crate) const KEYBIND: &str = "cmd-,";
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
 pub(crate) const KEYBIND: &str = "ctrl-,";
 const CONTROL_WIDTH: f32 = 120.0;
+const KEY_INPUT_WIDTH: f32 = 65.0;
 const CONFIG_EDITOR_FONT_SIZE: f32 = 12.0;
 const CONFIG_EDITOR_PADDING: f32 = 2.0;
 const APP_ICON_PREVIEW_SIZE: f32 = 48.0;
@@ -1114,7 +1116,7 @@ impl SettingsView {
             self.observed_ui_font.provenance,
         ))
         .control(
-            div().w(px(220.0)).flex_none().child(
+            div().flex_none().child(
                 Select::new(&self.ui_font_family)
                     .small()
                     .placeholder(
@@ -1210,7 +1212,7 @@ impl SettingsView {
                         search.provenance,
                     ))
                     .control(
-                        div().w(px(CONTROL_WIDTH)).flex_none().child(
+                        div().flex_none().child(
                             Select::new(&self.browser_search_provider)
                                 .small()
                                 .bg(settings_control_fill(cx)),
@@ -1337,7 +1339,8 @@ impl SettingsView {
                 .child(
                     Button::new("settings-add-host")
                         .small()
-                        .primary()
+                        .accent()
+                        .text_color(cx.theme().foreground)
                         .label("Add")
                         .on_click(cx.listener(|settings, _, window, cx| {
                             settings.submit_add_host(window, cx);
@@ -1364,6 +1367,34 @@ impl SettingsView {
     fn advanced_section(resolved: &AppConfig, cx: &Context<Self>) -> AnyElement {
         Self::scroll_column("settings-advanced")
             .child(settings_page_description(SettingsSection::Advanced, cx))
+            .child(
+                SettingsStack::titled("Command palette")
+                    .child(Self::palette_choice_setting(
+                        ConfigKey::PaletteWindowLayout,
+                        "Navigation layout",
+                        "Show sessions, windows, and panes as a tree or a flat list.",
+                        resolved.palette_window_layout.value.as_str(),
+                        resolved.palette_window_layout.provenance,
+                        &[("grouped", "Tree"), ("flat", "Flat")],
+                        cx,
+                    ))
+                    .child(Self::palette_choice_setting(
+                        ConfigKey::PaletteHostPrefix,
+                        "Host prefix",
+                        "Type this character in an empty palette to browse hosts.",
+                        resolved.palette_host_prefix.value.as_str(),
+                        resolved.palette_host_prefix.provenance,
+                        &[("~", "~"), ("#", "#")],
+                        cx,
+                    ))
+                    .child(Self::boolean_setting(
+                        ConfigKey::PaletteShowKeys,
+                        "Command shortcuts",
+                        "Show keyboard shortcuts beside commands.",
+                        resolved.palette_show_keys,
+                        cx,
+                    )),
+            )
             .when(crate::profile::profile(cx).has_tray, |column| {
                 column.child(SettingsStack::titled("Tray").child(Self::boolean_setting(
                     ConfigKey::Tray,
@@ -1428,6 +1459,43 @@ impl SettingsView {
                 },
             )
             .into_any_element()
+    }
+
+    fn palette_choice_setting(
+        key: ConfigKey,
+        title: &'static str,
+        description: &'static str,
+        value: &'static str,
+        provenance: ConfigProvenance,
+        choices: &'static [(&'static str, &'static str)],
+        cx: &Context<Self>,
+    ) -> SettingEntry {
+        let label = choices
+            .iter()
+            .find(|(choice, _)| *choice == value)
+            .map_or(value, |(_, label)| *label);
+        SettingEntry::new(title, description)
+            .title_actions(key_annotations(key, provenance))
+            .control(
+                Button::new(format!("settings-{}", key.as_str()))
+                    .small()
+                    .label(label)
+                    .dropdown_caret(true)
+                    .bg(settings_control_fill(cx))
+                    .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
+                        choices.iter().fold(menu, |menu, &(choice, label)| {
+                            menu.item(PopupMenuItem::new(label).checked(choice == value).on_click(
+                                move |_, _, cx| {
+                                    if let Err(error) = set_config_key(key, choice) {
+                                        report_write_error("set", key.as_str(), &error, cx);
+                                    } else {
+                                        refresh_settings_preview(key, cx);
+                                    }
+                                },
+                            ))
+                        })
+                    }),
+            )
     }
 
     /// `Option` mirrors the iOS variant, which has no update surface.
@@ -1978,12 +2046,33 @@ impl Render for SettingsView {
         div()
             .id("settings-route")
             .track_focus(&self.focus_handle)
+            .relative()
             .flex()
             .size_full()
             .min_w_0()
             .min_h_0()
             .overflow_hidden()
             .text_color(cx.theme().foreground)
+            .when(
+                !zz_ui::draws_window_controls(window)
+                    && !window.is_fullscreen()
+                    && !crate::profile::profile(cx).fixed_window,
+                |this| {
+                    this.child(window_drag_handle(
+                        "settings-top-drag",
+                        div()
+                            .id("settings-top-strip")
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right_0()
+                            .h(zz_ui::TITLE_BAR_HEIGHT)
+                            .window_control_area(WindowControlArea::Drag),
+                        window,
+                        cx,
+                    ))
+                },
+            )
             .child(content)
     }
 }
@@ -2014,7 +2103,6 @@ fn numeric_control(input: &Entity<InputState>, cx: &App) -> gpui::Div {
 
 fn select_control(select: &Entity<SelectState<Vec<SettingsSelectItem>>>, cx: &App) -> gpui::Div {
     div()
-        .w(px(CONTROL_WIDTH))
         .flex_none()
         .child(Select::new(select).small().bg(settings_control_fill(cx)))
 }
@@ -2318,6 +2406,9 @@ fn refresh_settings_preview(key: ConfigKey, cx: &mut App) {
         && !matches!(
             key,
             ConfigKey::WidgetCornerRadius
+                | ConfigKey::PaletteWindowLayout
+                | ConfigKey::PaletteHostPrefix
+                | ConfigKey::PaletteShowKeys
                 | ConfigKey::StatusShowSession
                 | ConfigKey::StatusBadges
                 | ConfigKey::StatusAgents
@@ -2428,6 +2519,9 @@ fn numeric_config_value(config: &AppConfig, key: ConfigKey) -> f32 {
         ConfigKey::WindowCornerRadius => config.window_corner_radius.value,
         ConfigKey::EditorFontSize => config.editor_font_size.value,
         ConfigKey::UseSystemTitlebar
+        | ConfigKey::PaletteWindowLayout
+        | ConfigKey::PaletteHostPrefix
+        | ConfigKey::PaletteShowKeys
         | ConfigKey::WindowBackgroundBlur
         | ConfigKey::Animations
         | ConfigKey::Tray

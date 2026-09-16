@@ -56,7 +56,7 @@ impl CommandPaletteView {
         cx: &mut Context<Self>,
     ) -> Self {
         let placeholder = match state.kind {
-            CommandPromptKind::Command => "Type a tmux command…",
+            CommandPromptKind::Command => "Type a zz command…",
             CommandPromptKind::Value => "Enter a value…",
         };
         let initial_cursor =
@@ -234,7 +234,7 @@ impl CommandPaletteView {
         self.navigation_engaged = true;
         self.selected = Some(selected);
         self.scroll_handle
-            .scroll_to_item(selected, ScrollStrategy::Center);
+            .scroll_to_item(selected, ScrollStrategy::Nearest);
         cx.notify();
     }
 
@@ -370,10 +370,10 @@ impl CommandPaletteView {
         suggestion: CompletionSuggestion,
         index: usize,
         selected: bool,
-        selection_background: gpui::Hsla,
         palette: Entity<Self>,
         font: gpui::SharedString,
-    ) -> impl IntoElement {
+        cx: &App,
+    ) -> gpui::Div {
         let hover_palette = palette.clone();
         let click_palette = palette;
         let kind = suggestion.kind;
@@ -385,8 +385,7 @@ impl CommandPaletteView {
                 command_kind_badge(Self::kind_label(kind), font.clone()).into_any_element()
             }),
             selected,
-            selection_background,
-            font,
+            cx,
         )
         .on_mouse_enter(move |_, _, cx| {
             hover_palette.update(cx, |palette, cx| {
@@ -403,6 +402,7 @@ impl CommandPaletteView {
             });
             cx.stop_propagation();
         })
+        .map(|row| div().h(px(COMMAND_PALETTE_ROW_HEIGHT)).child(row))
     }
 }
 
@@ -419,7 +419,6 @@ impl Render for CommandPaletteView {
         } else {
             "apply"
         };
-        let selection_background = cx.theme().selection_background();
         let suggestions: Arc<[CompletionSuggestion]> = self.suggestions.clone().into();
         let palette = cx.entity();
         let rows_palette = palette.clone();
@@ -427,7 +426,7 @@ impl Render for CommandPaletteView {
         let rows = uniform_list(
             "command-palette-suggestions",
             suggestions.len(),
-            cx.processor(move |_, range: Range<usize>, _, _| {
+            cx.processor(move |_, range: Range<usize>, _, cx| {
                 range
                     .filter_map(|index| {
                         suggestions.get(index).cloned().map(|suggestion| {
@@ -435,9 +434,9 @@ impl Render for CommandPaletteView {
                                 suggestion,
                                 index,
                                 selection_visible && selected == Some(index),
-                                selection_background,
                                 rows_palette.clone(),
                                 font.clone(),
+                                cx,
                             )
                         })
                     })

@@ -39,6 +39,7 @@ pub enum ChromeAction {
     ToggleSidebar,
     ClosePane,
     OpenSettings,
+    OpenCommandPalette,
     UiZoomIn,
     UiZoomOut,
     UiZoomReset,
@@ -96,6 +97,7 @@ impl ChromeAction {
             Self::ToggleSidebar => "toggle-sidebar",
             Self::ClosePane => "close-pane",
             Self::OpenSettings => "open-settings",
+            Self::OpenCommandPalette => "open-command-palette",
             Self::UiZoomIn => "ui-zoom-in",
             Self::UiZoomOut => "ui-zoom-out",
             Self::UiZoomReset => "ui-zoom-reset",
@@ -158,6 +160,7 @@ impl ChromeAction {
             "toggle-sidebar" => Self::ToggleSidebar,
             "close-pane" => Self::ClosePane,
             "open-settings" => Self::OpenSettings,
+            "open-command-palette" => Self::OpenCommandPalette,
             "ui-zoom-in" => Self::UiZoomIn,
             "ui-zoom-out" => Self::UiZoomOut,
             "ui-zoom-reset" => Self::UiZoomReset,
@@ -378,8 +381,6 @@ const DESKTOP_DEFAULTS: &[ChromeDefault] = &[
     (TERMINAL_TABLE, "D-c", ChromeAction::TerminalCopy),
     (TERMINAL_TABLE, "C-S-a", ChromeAction::TerminalSelectAll),
     (TERMINAL_TABLE, "D-a", ChromeAction::TerminalSelectAll),
-    (TERMINAL_TABLE, "C-S-k", ChromeAction::TerminalClearHistory),
-    (TERMINAL_TABLE, "D-k", ChromeAction::TerminalClearHistory),
     (TERMINAL_TABLE, "C-S-v", ChromeAction::TerminalPaste),
     (TERMINAL_TABLE, "D-v", ChromeAction::TerminalPaste),
     (BROWSER_TABLE, "C-Tab", ChromeAction::BrowserNextTab),
@@ -389,6 +390,8 @@ const DESKTOP_DEFAULTS: &[ChromeDefault] = &[
 /// Desktop chrome on Apple platforms, where the browser conventions are
 /// Safari's.
 const DESKTOP_COMMAND_DEFAULTS: &[ChromeDefault] = &[
+    (UI_TABLE, "D-k", ChromeAction::OpenCommandPalette),
+    (UI_TABLE, "D-p", ChromeAction::OpenCommandPalette),
     (UI_TABLE, "D-n", ChromeAction::NewSession),
     (UI_TABLE, "D-S-n", ChromeAction::NewWindow),
     (UI_TABLE, "D-d", ChromeAction::SplitRight),
@@ -437,6 +440,8 @@ const DESKTOP_COMMAND_DEFAULTS: &[ChromeDefault] = &[
 
 /// Desktop chrome everywhere else, where the browser conventions are Chrome's.
 const DESKTOP_CONTROL_DEFAULTS: &[ChromeDefault] = &[
+    (UI_TABLE, "C-S-k", ChromeAction::OpenCommandPalette),
+    (UI_TABLE, "C-S-p", ChromeAction::OpenCommandPalette),
     (UI_TABLE, "C-=", ChromeAction::UiZoomIn),
     (UI_TABLE, "C-+", ChromeAction::UiZoomIn),
     (UI_TABLE, "C--", ChromeAction::UiZoomOut),

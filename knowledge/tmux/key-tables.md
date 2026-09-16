@@ -209,16 +209,17 @@ Prefix table (partial, the canonical zz set):
 
 ## Default-prefix compatibility boundary
 
-The default zz prefix table keeps native split pickers (`%`, `"`), sidebar focus (`s`, `w`),
-reload (`r`), and last-output sending (`e`). On 2026-09-05, `keys.prefix-stock-commands` adopted the
+The default zz prefix table binds `%`/`"` to `split-window -h`/`split-window` and `s`/`w` to
+`choose-tree -Zs`/`choose-tree -Zw`, as defined in `KeyTables::default`. It also binds `r` to
+`reload-config` and `e` to `send-last-output`. On 2026-09-05, `keys.prefix-stock-commands` adopted the
 pin's commands for `x`, `&`, `]`, `?`, `d`, `PPage`, `f`, `.`, `(`, `)`, `L`, `m`, `M`, `i`, `~`,
 `#`, `-`, `'`, `M-n`, and `M-p`. `x` and `&` now ask for confirmation; `]` requests bracketed paste;
 `?` lists binding notes; `d` detaches the current client. The stored commands are differentially
 checked by `smoke/keys-prefix-stock`; `smoke/keys-prefix-attached` proves confirmation, paste bytes,
 and detach with real clients on both binaries.
 
-The table has 76 bindings against the pin's 92, with `e` the one zz-only key. These 17 stock keys
-remain absent: `*`, `/`, `<`, `>`, `@`, `BTab`, `C`, `C-z`, `D`, `DC`, `S-Down`, `S-Left`,
+The table has 77 bindings against the pin's 92, with `e` the one zz-only key; `D` runs
+`choose-client -Z`. These 16 stock keys remain absent: `*`, `/`, `<`, `>`, `@`, `BTab`, `C`, `C-z`, `DC`, `S-Down`, `S-Left`,
 `S-Right`, `S-Up`, `Tab`, `g`, and `t`. `keys.default-prefix` enumerates the native chrome and
 viewport choices behind these omissions. It also retains the text differences for `$`, `,`,
 `0` through `9`, and the tiled-only resize bindings `C-Up`, `C-Down`, `C-Left`, `C-Right`,

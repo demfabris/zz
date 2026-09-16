@@ -100,6 +100,13 @@ impl Default for PaneKindAvailability {
     }
 }
 
+impl PaneKindAvailability {
+    pub fn allows_command(self, name: &str) -> bool {
+        (self.browser || !BROWSER_COMMANDS.contains(&name))
+            && (self.agent || !AGENT_COMMANDS.contains(&name))
+    }
+}
+
 pub fn complete_command(
     input: &str,
     cursor: usize,
@@ -285,10 +292,7 @@ fn add_commands(
     availability: PaneKindAvailability,
 ) {
     for (order, spec) in command_specs().enumerate() {
-        if !availability.browser && BROWSER_COMMANDS.contains(&spec.name) {
-            continue;
-        }
-        if !availability.agent && AGENT_COMMANDS.contains(&spec.name) {
+        if !availability.allows_command(spec.name) {
             continue;
         }
         let Some((rank, matched_alias)) = command_rank(spec, query, order) else {

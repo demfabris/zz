@@ -102,6 +102,9 @@ pub struct AgentConfig {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConfigKey {
+    PaletteWindowLayout,
+    PaletteHostPrefix,
+    PaletteShowKeys,
     UseSystemTitlebar,
     WindowCornerRadius,
     WindowBackgroundBlur,
@@ -147,6 +150,9 @@ pub enum ConfigKey {
 impl ConfigKey {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::PaletteWindowLayout => "palette-window-layout",
+            Self::PaletteHostPrefix => "palette-host-prefix",
+            Self::PaletteShowKeys => "palette-show-keys",
             Self::UseSystemTitlebar => "use-system-titlebar",
             Self::WindowCornerRadius => "window-corner-radius",
             Self::WindowBackgroundBlur => "window-background-blur",
@@ -193,6 +199,9 @@ impl ConfigKey {
 
     pub fn parse(key: &str) -> Option<Self> {
         match key {
+            "palette-window-layout" => Some(Self::PaletteWindowLayout),
+            "palette-host-prefix" => Some(Self::PaletteHostPrefix),
+            "palette-show-keys" => Some(Self::PaletteShowKeys),
             "use-system-titlebar" => Some(Self::UseSystemTitlebar),
             "window-corner-radius" => Some(Self::WindowCornerRadius),
             "window-background-blur" => Some(Self::WindowBackgroundBlur),
@@ -254,6 +263,9 @@ impl ConfigKey {
             Self::WindowCornerRadius => Some((0.0, MAX_WINDOW_CORNER_RADIUS)),
             Self::EditorFontSize => Some((MIN_EDITOR_FONT_SIZE, MAX_EDITOR_FONT_SIZE)),
             Self::UseSystemTitlebar
+            | Self::PaletteWindowLayout
+            | Self::PaletteHostPrefix
+            | Self::PaletteShowKeys
             | Self::WindowBackgroundBlur
             | Self::Animations
             | Self::Tray
@@ -340,8 +352,66 @@ impl Default for UiFontConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PaletteWindowLayout {
+    #[default]
+    Grouped,
+    Flat,
+}
+
+impl PaletteWindowLayout {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Grouped => "grouped",
+            Self::Flat => "flat",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "grouped" => Some(Self::Grouped),
+            "flat" => Some(Self::Flat),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PaletteHostPrefix {
+    #[default]
+    Tilde,
+    Hash,
+}
+
+impl PaletteHostPrefix {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Tilde => "~",
+            Self::Hash => "#",
+        }
+    }
+
+    pub const fn as_char(self) -> char {
+        match self {
+            Self::Tilde => '~',
+            Self::Hash => '#',
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "~" => Some(Self::Tilde),
+            "#" => Some(Self::Hash),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AppConfig {
+    pub palette_window_layout: ConfigValue<PaletteWindowLayout>,
+    pub palette_host_prefix: ConfigValue<PaletteHostPrefix>,
+    pub palette_show_keys: ConfigValue<bool>,
     pub use_system_titlebar: ConfigValue<bool>,
     pub window_corner_radius: ConfigValue<f32>,
     pub window_background_blur: ConfigValue<bool>,
@@ -387,6 +457,9 @@ impl Default for AppConfig {
     fn default() -> Self {
         let status_bar = StatusBarSettings::default();
         Self {
+            palette_window_layout: ConfigValue::from_default(PaletteWindowLayout::Grouped),
+            palette_host_prefix: ConfigValue::from_default(PaletteHostPrefix::Tilde),
+            palette_show_keys: ConfigValue::from_default(true),
             use_system_titlebar: ConfigValue::from_default(DEFAULT_USE_SYSTEM_TITLEBAR),
             window_corner_radius: ConfigValue::from_default(DEFAULT_WINDOW_CORNER_RADIUS),
             window_background_blur: ConfigValue::from_default(DEFAULT_WINDOW_BACKGROUND_BLUR),
@@ -441,6 +514,7 @@ impl AppConfig {
 
     fn boolean_value_mut(&mut self, key: ConfigKey) -> Option<&mut ConfigValue<bool>> {
         match key {
+            ConfigKey::PaletteShowKeys => Some(&mut self.palette_show_keys),
             ConfigKey::UseSystemTitlebar => Some(&mut self.use_system_titlebar),
             ConfigKey::WindowBackgroundBlur => Some(&mut self.window_background_blur),
             ConfigKey::Animations => Some(&mut self.animations),
@@ -463,6 +537,8 @@ impl AppConfig {
             ConfigKey::EditorVimMode => Some(&mut self.editor_vim_mode),
             ConfigKey::BrowserEgress => Some(&mut self.browser_egress),
             ConfigKey::WindowCornerRadius
+            | ConfigKey::PaletteWindowLayout
+            | ConfigKey::PaletteHostPrefix
             | ConfigKey::PaneBackgroundOpacity
             | ConfigKey::PaneGlowStrength
             | ConfigKey::PaneInactiveOpacity
@@ -895,6 +971,36 @@ pub fn parse_config(source: &str, system_font_family: &str) -> ParsedConfig {
             continue;
         }
 
+        if key == ConfigKey::PaletteWindowLayout {
+            let target = &mut parsed.config.palette_window_layout;
+            target.provenance = ConfigProvenance::Override;
+            match PaletteWindowLayout::parse(value) {
+                Some(layout) => target.value = layout,
+                None => parsed.diagnostics.push(ConfigDiagnostic {
+                    line: line_number,
+                    message: "invalid `palette-window-layout`: expected grouped or flat".to_owned(),
+                }),
+            }
+            continue;
+        }
+
+        if key == ConfigKey::PaletteHostPrefix {
+            let target = &mut parsed.config.palette_host_prefix;
+            target.provenance = ConfigProvenance::Override;
+            match parse_config_string(value)
+                .ok()
+                .as_deref()
+                .and_then(PaletteHostPrefix::parse)
+            {
+                Some(prefix) => target.value = prefix,
+                None => parsed.diagnostics.push(ConfigDiagnostic {
+                    line: line_number,
+                    message: "invalid `palette-host-prefix`: expected ~ or \"#\"".to_owned(),
+                }),
+            }
+            continue;
+        }
+
         if key == ConfigKey::UiFontFamily {
             let target = &mut parsed.ui_font.family;
             target.provenance = ConfigProvenance::Override;
@@ -987,6 +1093,9 @@ pub fn parse_config(source: &str, system_font_family: &str) -> ParsedConfig {
             ConfigKey::ShadowStrength => &mut parsed.config.shadow_strength,
             ConfigKey::EditorFontSize => &mut parsed.config.editor_font_size,
             ConfigKey::UseSystemTitlebar
+            | ConfigKey::PaletteWindowLayout
+            | ConfigKey::PaletteHostPrefix
+            | ConfigKey::PaletteShowKeys
             | ConfigKey::WindowBackgroundBlur
             | ConfigKey::Animations
             | ConfigKey::Tray
@@ -1837,6 +1946,57 @@ pub mod settings;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn palette_preferences_validate_and_preserve_hash_prefix() {
+        let defaults = parse_config("", "monospace");
+        assert_eq!(
+            defaults.config.palette_window_layout.value,
+            PaletteWindowLayout::Grouped
+        );
+        assert_eq!(
+            defaults.config.palette_host_prefix.value,
+            PaletteHostPrefix::Tilde
+        );
+        assert!(defaults.config.palette_show_keys.value);
+
+        let source =
+            "palette-window-layout = flat\npalette-host-prefix = #\npalette-show-keys = off\n";
+        let parsed = parse_config(source, "monospace");
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        assert_eq!(
+            parsed.config.palette_window_layout.value,
+            PaletteWindowLayout::Flat
+        );
+        assert_eq!(
+            parsed.config.palette_host_prefix.value,
+            PaletteHostPrefix::Hash
+        );
+        assert!(!parsed.config.palette_show_keys.value);
+        let edited = edit_config_source(source, "palette-host-prefix", Some("~"));
+        assert_eq!(
+            parse_config(&edited, "monospace")
+                .config
+                .palette_host_prefix
+                .value,
+            PaletteHostPrefix::Tilde
+        );
+
+        let invalid = parse_config(
+            "palette-window-layout = grid\npalette-host-prefix = !\npalette-show-keys = maybe\n",
+            "monospace",
+        );
+        assert_eq!(invalid.diagnostics.len(), 3);
+        assert_eq!(
+            invalid.config.palette_window_layout.value,
+            PaletteWindowLayout::Grouped
+        );
+        assert_eq!(
+            invalid.config.palette_host_prefix.value,
+            PaletteHostPrefix::Tilde
+        );
+        assert!(invalid.config.palette_show_keys.value);
+    }
 
     #[test]
     fn configuration_discovery_keeps_build_identities_separate() {

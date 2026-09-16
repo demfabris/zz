@@ -321,6 +321,18 @@ pub(crate) fn browser_egress_enabled(cx: &App) -> bool {
     resolved_config(cx).browser_egress.value
 }
 
+pub(crate) fn palette_window_layout(cx: &App) -> PaletteWindowLayout {
+    resolved_config(cx).palette_window_layout.value
+}
+
+pub(crate) fn palette_host_prefix(cx: &App) -> char {
+    resolved_config(cx).palette_host_prefix.value.as_char()
+}
+
+pub(crate) fn palette_show_keys(cx: &App) -> bool {
+    resolved_config(cx).palette_show_keys.value
+}
+
 /// Whether the experimental agent pane is enabled. Blocks creating new agent
 /// panes while off; existing ones keep rendering. Always false in a build
 /// without the `agent-pane` cargo feature.

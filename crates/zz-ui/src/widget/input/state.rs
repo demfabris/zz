@@ -280,6 +280,18 @@ impl InputState {
 }
 
 impl InputState {
+    pub fn set_placeholder(
+        &mut self,
+        placeholder: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
+        let placeholder = placeholder.into();
+        if self.placeholder != placeholder {
+            self.placeholder = placeholder;
+            cx.notify();
+        }
+    }
+
     #[must_use]
     pub fn value(&self) -> SharedString {
         self.text.clone()

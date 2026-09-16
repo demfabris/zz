@@ -23,6 +23,8 @@ gpui::actions!(
     [
         NewSession,
         NewWindow,
+        OpenCommandPalette,
+        ChooseWindow,
         SplitRight,
         SplitDown,
         NewBrowserPane,
@@ -193,6 +195,9 @@ fn menu_tree(sessions: &BTreeSet<String>, show_fps: bool) -> Vec<Menu> {
             MenuItem::action("Clear Scrollback", ClearScrollback),
         ]),
         Menu::new("View").items([
+            MenuItem::action("Command Palette…", OpenCommandPalette),
+            MenuItem::action("Choose Window…", ChooseWindow),
+            MenuItem::separator(),
             MenuItem::action("Toggle Sidebar", ToggleSidebar),
             MenuItem::separator(),
             MenuItem::action("Zoom Pane", ZoomPane),

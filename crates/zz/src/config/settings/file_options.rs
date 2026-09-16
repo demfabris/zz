@@ -377,16 +377,16 @@ impl SettingsView {
                 )
                 .into_any_element()
             } else if let Some(select) = &row.select {
-                select_control(select, cx)
-                    .when(matches!(row.key.name(), "theme" | "cursor-style"), |this| {
-                        this.w(px(240.0))
-                    })
-                    .into_any_element()
+                select_control(select, cx).into_any_element()
             } else if row.numeric {
                 numeric_control(&row.input, cx).into_any_element()
             } else {
                 div()
                     .w(px(200.0))
+                    .when(
+                        matches!(row.key, FileKey::Mux(MuxOptionKey::Prefix)),
+                        |this| this.w(px(KEY_INPUT_WIDTH)),
+                    )
                     .child(Input::new(&row.input).small().bg(settings_control_fill(cx)))
                     .into_any_element()
             };

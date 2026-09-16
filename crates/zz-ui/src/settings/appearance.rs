@@ -1,4 +1,5 @@
 use super::{SettingsSelectItem, StackPosition};
+use crate::scroll::{GUTTER_WIDTH, Scrollbar, ScrollbarShow};
 use crate::select::{SelectItem as _, SelectState};
 use crate::{ActiveTheme as _, Colorize as _, ThemeColor, ThemeMode};
 use gpui::{
@@ -302,13 +303,12 @@ impl RenderOnce for PickerStrip {
         let edge = || div().flex_none().w(px(STRIP_INSET - TILE_GAP - TILE_HALO));
         let key_scroll = scroll.clone();
         let key_select = Rc::clone(&select);
-        div()
+        let tiles = div()
             .id(id)
             .track_focus(&focus)
             .track_scroll(&scroll)
             .flex()
             .gap(px(TILE_GAP))
-            .mx(px(-STRIP_INSET))
             .overflow_x_scroll()
             .restrict_scroll_to_axis()
             .on_key_down(move |event, window, cx| {
@@ -341,7 +341,26 @@ impl RenderOnce for PickerStrip {
                         .on_click(move |_, window, cx| select(index, window, cx))
                     }),
             )
-            .child(edge())
+            .child(edge());
+
+        div()
+            .flex()
+            .flex_col()
+            .mx(px(-STRIP_INSET))
+            .mb(px(-8.0))
+            .child(tiles)
+            .child(
+                div()
+                    .relative()
+                    .flex_none()
+                    .h(GUTTER_WIDTH)
+                    .mx(px(STRIP_INSET))
+                    .child(
+                        Scrollbar::horizontal(&scroll)
+                            .id((id, 2usize))
+                            .scrollbar_show(ScrollbarShow::Always),
+                    ),
+            )
     }
 }
 
@@ -494,12 +513,16 @@ mod tests {
                 .flex_col()
                 .gap(px(20.0))
                 .px(px(STRIP_INSET))
-                .child(strip(
-                    "first-strip",
-                    0,
-                    "first-strip-tile",
-                    self.picked.clone(),
-                ))
+                .child(
+                    div()
+                        .debug_selector(|| "first-strip-container".to_string())
+                        .child(strip(
+                            "first-strip",
+                            0,
+                            "first-strip-tile",
+                            self.picked.clone(),
+                        )),
+                )
                 .child(strip(
                     "second-strip",
                     1,
@@ -557,6 +580,16 @@ mod tests {
         cx.simulate_keystrokes("right");
         assert_eq!(picked.get(), Some((1, 2)));
         cx.simulate_keystrokes("left");
+        assert_eq!(picked.get(), Some((1, 0)));
+
+        let first_scrolled = cx.debug_bounds("first-strip-tile").unwrap();
+        let first_strip = cx.debug_bounds("first-strip-container").unwrap();
+        cx.simulate_click(
+            point(first_strip.left() + px(4.0), first_strip.bottom() - px(1.0)),
+            Modifiers::default(),
+        );
+        draw(cx);
+        assert!(cx.debug_bounds("first-strip-tile").unwrap().left() > first_scrolled.left());
         assert_eq!(picked.get(), Some((1, 0)));
     }
 }

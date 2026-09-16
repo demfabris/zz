@@ -30,6 +30,18 @@ pub struct Choice {
 
 fn value(parsed: &ParsedConfig, key: ConfigKey) -> (Value, ConfigProvenance) {
     match key {
+        ConfigKey::PaletteWindowLayout => {
+            let setting = &parsed.config.palette_window_layout;
+            (json!(setting.value.as_str()), setting.provenance)
+        }
+        ConfigKey::PaletteHostPrefix => {
+            let setting = &parsed.config.palette_host_prefix;
+            (json!(setting.value.as_str()), setting.provenance)
+        }
+        ConfigKey::PaletteShowKeys => {
+            let setting = &parsed.config.palette_show_keys;
+            (json!(setting.value), setting.provenance)
+        }
         ConfigKey::UseSystemTitlebar => {
             let setting = &parsed.config.use_system_titlebar;
             (json!(setting.value), setting.provenance)
@@ -211,6 +223,8 @@ fn hex([r, g, b, a]: [f32; 4]) -> String {
 }
 fn choices(key: ConfigKey) -> Vec<Choice> {
     let pairs: Vec<(&str, &str)> = match key {
+        ConfigKey::PaletteWindowLayout => vec![("grouped", "Grouped"), ("flat", "Flat")],
+        ConfigKey::PaletteHostPrefix => vec![("~", "~"), ("#", "#")],
         ConfigKey::ThemeMode => vec![("system", "System"), ("light", "Light"), ("dark", "Dark")],
         ConfigKey::AppIcon => vec![
             ("automatic", "Automatic"),
@@ -257,6 +271,9 @@ fn section(key: ConfigKey) -> &'static str {
         | ConfigKey::BrowserSearchProvider
         | ConfigKey::BrowserEgress => "browser",
         ConfigKey::Tray
+        | ConfigKey::PaletteWindowLayout
+        | ConfigKey::PaletteHostPrefix
+        | ConfigKey::PaletteShowKeys
         | ConfigKey::ShowFps
         | ConfigKey::QuitDaemonOnExit
         | ConfigKey::AutoRestartStaleDaemon
@@ -292,6 +309,9 @@ fn title(key: ConfigKey) -> String {
 pub fn settings(parsed: &ParsedConfig) -> Vec<Setting> {
     let defaults = ParsedConfig::default();
     [
+        ConfigKey::PaletteWindowLayout,
+        ConfigKey::PaletteHostPrefix,
+        ConfigKey::PaletteShowKeys,
         ConfigKey::UseSystemTitlebar,
         ConfigKey::WindowCornerRadius,
         ConfigKey::WindowBackgroundBlur,

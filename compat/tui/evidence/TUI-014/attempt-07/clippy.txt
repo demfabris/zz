@@ -1,0 +1,16 @@
+    Checking zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-protocol)
+   Compiling cef-dll-sys v152.2.0+152.0.6
+    Checking cef v152.2.0+152.0.6
+    Checking zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-mux)
+    Checking zz-client v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-client)
+    Checking zz-ui v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-ui)
+    Checking zz-browser v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-browser)
+    Checking zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-daemon)
+    Checking zz-chrome-import v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-chrome-import)
+    Checking zz-config v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-config)
+    Checking zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-tui)
+    Checking zz v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz)
+    Checking zz-client-ffi v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-client-ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 25.27s
+
+exit_status=0

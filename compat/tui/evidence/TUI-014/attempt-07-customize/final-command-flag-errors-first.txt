@@ -1,0 +1,45 @@
+# Scenario: smoke/command-flag-errors
+# Source: /home/demfabris/dev/zz-c11-customize/compat/scenarios/smoke/command-flag-errors.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: out: set-environment -gu COMMAND_FLAG_ERRORS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: run-shell 'sh ~/command-flag-errors.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g COMMAND_FLAG_ERRORS
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    unknown variable: COMMAND_FLAG_ERRORS
+tmux stderr:
+    unknown variable: COMMAND_FLAG_ERRORS
+OUT QUERY: failure
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=0

@@ -1,0 +1,15 @@
+{
+  "command": [
+    "/tmp/zz-cargo.sh",
+    "rustc",
+    "-p",
+    "zz",
+    "--bin",
+    "zz",
+    "--",
+    "-o",
+    "/home/demfabris/dev/zz-c11-customize/target/debug/zz-customize-final"
+  ],
+  "exit": 0,
+  "seconds": 1249.7
+}

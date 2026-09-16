@@ -1,0 +1,11 @@
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-mux)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 23.44s
+     Running unittests src/lib.rs (target/debug/deps/zz_mux-eed3ba838a6892ab)
+
+running 2 tests
+test command::customize::tests::customize_edits_a_number_and_preserves_the_selected_option ... ok
+test command::customize::tests::customize_cycles_flags_and_choices_in_the_local_scope ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 534 filtered out; finished in 0.18s
+

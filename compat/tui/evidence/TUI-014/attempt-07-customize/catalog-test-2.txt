@@ -1,0 +1,25 @@
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-mux)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 35.60s
+     Running unittests src/lib.rs (target/debug/deps/zz_daemon-7a6e412177cab2ac)
+
+running 1 test
+test daemon::tests::every_upstream_command_spelling_has_exact_flag_diagnostics_before_state_or_effects ... FAILED
+
+failures:
+
+---- daemon::tests::every_upstream_command_spelling_has_exact_flag_diagnostics_before_state_or_effects stdout ----
+
+thread 'daemon::tests::every_upstream_command_spelling_has_exact_flag_diagnostics_before_state_or_effects' (2287421) panicked at crates/zz-daemon/src/daemon.rs:68223:9:
+assertion `left == right` failed
+  left: 421
+ right: 426
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    daemon::tests::every_upstream_command_spelling_has_exact_flag_diagnostics_before_state_or_effects
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 937 filtered out; finished in 4.51s
+
+error: test failed, to rerun pass `-p zz-daemon --lib`

@@ -1,0 +1,24 @@
+{
+  "command": [
+    "/tmp/zz-cargo.sh",
+    "test",
+    "-p",
+    "zz-daemon",
+    "--lib",
+    "switch_client_key_table_and_formats_are_client_local"
+  ],
+  "launcher": [
+    "bash",
+    "-c",
+    "RANDOM=\"$1\"; shift; source /tmp/zz-cargo.sh \"$@\"",
+    "zz-cargo-slot",
+    "1",
+    "test",
+    "-p",
+    "zz-daemon",
+    "--lib",
+    "switch_client_key_table_and_formats_are_client_local"
+  ],
+  "exit": 0,
+  "seconds": 20.6
+}

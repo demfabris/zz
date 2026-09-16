@@ -1,0 +1,35 @@
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-mux)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 20.52s
+     Running unittests src/lib.rs (target/debug/deps/zz_mux-eed3ba838a6892ab)
+
+running 11 tests
+test compat_manifest_tests::missing_copy_actions_keep_their_behavior_item_open ... ok
+test compat_manifest_tests::args_parse_gaps_match_the_pinned_oracle ... ok
+test compat_manifest_tests::positional_maximum_runtime_inventory_matches_the_pin ... ok
+test compat_manifest_tests::command_flag_fixture_matches_the_pin ... ok
+test compat_manifest_tests::daemon_invalid_flag_runtime_inventory_matches_the_pin ... ok
+test compat_manifest_tests::positional_minimum_runtime_inventory_matches_the_pin ... ok
+test compat_manifest_tests::scoped_format_contexts_and_modifiers_match_the_pinned_oracle ... ok
+test compat_manifest_tests::stock_copy_mode_action_keys_render_the_pinned_binding ... ok
+test compat_manifest_tests::option_format_hook_and_default_key_items_match_pinned_inventories ... FAILED
+test compat_manifest_tests::tmux_option_consumer_partition_matches_pinned_inventory ... ok
+test compat_manifest_tests::command_and_flag_gaps_match_the_pinned_oracle ... ok
+
+failures:
+
+---- compat_manifest_tests::option_format_hook_and_default_key_items_match_pinned_inventories stdout ----
+
+thread 'compat_manifest_tests::option_format_hook_and_default_key_items_match_pinned_inventories' (2172202) panicked at crates/zz-mux/src/compat_manifest_tests.rs:1381:5:
+assertion `left == right` failed: zz default binding count changed
+  left: 366
+ right: 347
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    compat_manifest_tests::option_format_hook_and_default_key_items_match_pinned_inventories
+
+test result: FAILED. 10 passed; 1 failed; 0 ignored; 0 measured; 525 filtered out; finished in 0.08s
+
+error: test failed, to rerun pass `-p zz-mux --lib`

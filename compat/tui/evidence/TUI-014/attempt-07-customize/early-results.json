@@ -1,0 +1,70 @@
+{
+  "focused-probe-1": {
+    "exit": 1,
+    "checks": 12,
+    "failures": 10
+  },
+  "focused-probe-2": {
+    "exit": 1,
+    "checks": 12,
+    "failures": 1
+  },
+  "focused-probe-3": {
+    "exit": 0,
+    "checks": 12,
+    "failures": 0
+  },
+  "client-self-check-1": {
+    "exit": 0,
+    "result": "every sabotage was caught in its own channel and both equivalences passed"
+  },
+  "clippy-1": {
+    "exit": 101,
+    "result": "implicit_clone and redundant_closure_for_method_calls in customize.rs"
+  },
+  "clippy-2": {
+    "exit": 0
+  },
+  "manifest-tests-1": {
+    "exit": 101,
+    "passed": 7,
+    "failed": 4
+  },
+  "manifest-tests-2": {
+    "exit": 101,
+    "passed": 10,
+    "failed": 1
+  },
+  "catalog-test-1": {
+    "exit": 101,
+    "result": "stale spelling count"
+  },
+  "catalog-test-2": {
+    "exit": 101,
+    "result": "required argument count 421, expected 426"
+  },
+  "client-run-1": {
+    "exit": 0,
+    "asserted": 141,
+    "recorded": 28,
+    "TUI-014": 0,
+    "unattributed": 0
+  },
+  "manifest-tests-3": {
+    "exit": 143,
+    "result": "canceled while waiting on build directory lock; no tests ran"
+  },
+  "catalog-test-3": {
+    "exit": 143,
+    "result": "canceled waiting for shared compile slot; no tests ran"
+  },
+  "packages-1": {
+    "exit": 101,
+    "targets_failed": [
+      "zz-daemon --lib (936 passed, 2 failed)",
+      "zz-mux --test hunt_claims (59 passed, 1 failed)",
+      "zz-protocol --lib (223 passed, 4 failed)"
+    ],
+    "zz-tui": "212 passed"
+  }
+}

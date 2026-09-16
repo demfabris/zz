@@ -1,0 +1,1022 @@
+[
+  {
+    "scenario": "alerts",
+    "sha256": "9c5bafada5cf60d082301dd6abff4e96fbb437a3a61f5a4a1573f003b881a10d",
+    "path": "corpus-logs/alerts.9c5bafada5cf.log"
+  },
+  {
+    "scenario": "aliases-multi-body",
+    "sha256": "9b0aaf927a2b8dddcf830a7c3d6f8e47429e5468f41c59388734d4961eedd41d",
+    "path": "corpus-logs/aliases-multi-body.9b0aaf927a2b.log"
+  },
+  {
+    "scenario": "base-index",
+    "sha256": "18ce99a16cb63f7914aeabd4fad43ea40ec4ee3214c5d599aec21e9570e7d8e2",
+    "path": "corpus-logs/base-index.18ce99a16cb6.log"
+  },
+  {
+    "scenario": "buffer-path-format",
+    "sha256": "c4fae0365577a445ffebda65ae06f8d87dda9784e9b15bb8ae1c35333689ba10",
+    "path": "corpus-logs/buffer-path-format.c4fae0365577.log"
+  },
+  {
+    "scenario": "capture-pane",
+    "sha256": "d05b13e590397f6359362b7c48bfeb4b8e7236492a19f7b5de22cc98a838909d",
+    "path": "corpus-logs/capture-pane.d05b13e59039.log"
+  },
+  {
+    "scenario": "census-hooks",
+    "sha256": "b1e11552039e8f3275b1d39bba2b222987114c232e104348a1ddb56d1a528eb8",
+    "path": "corpus-logs/census-hooks.b1e11552039e.log"
+  },
+  {
+    "scenario": "census-options",
+    "sha256": "2cbf50a9311764e1594683586aa73974d13fa9dec56b1bafeaf2bf3401211577",
+    "path": "corpus-logs/census-options.2cbf50a93117.log"
+  },
+  {
+    "scenario": "command-alias",
+    "sha256": "f79697c36b220df27ae50e2b6263d57d7e1940f288c7980538220db95b305b16",
+    "path": "corpus-logs/command-alias.f79697c36b22.log"
+  },
+  {
+    "scenario": "command-item-format",
+    "sha256": "a6aa76bb1c2833e95bc7183073b1a3eb1ffa6762cd21395d9978c2895d95d486",
+    "path": "corpus-logs/command-item-format.a6aa76bb1c28.log"
+  },
+  {
+    "scenario": "copy-mode-bindings",
+    "sha256": "2f67cf382c2cf90236377810bfcc5daeaed352d9cc633eda9266ad3cf270a50a",
+    "path": "corpus-logs/copy-mode-bindings.2f67cf382c2c.log"
+  },
+  {
+    "scenario": "copy-mode-cursor-view",
+    "sha256": "ca883092ce3339b864ad9ab664f039599bb09899f1fc97b7a1fcd2e08b2efbb8",
+    "path": "corpus-logs/copy-mode-cursor-view.ca883092ce33.log"
+  },
+  {
+    "scenario": "copy-mode-goto-line",
+    "sha256": "0a886a96cdbf05bc6ea9e8c6db0fe3012d65199532ddf2d86c4718152249406a",
+    "path": "corpus-logs/copy-mode-goto-line.0a886a96cdbf.log"
+  },
+  {
+    "scenario": "copy-mode-previous-bracket",
+    "sha256": "b54ed995a18265f04f43a0ae7f2c448e9ba94f1cd9d62a9d8014cdbc3068d6fe",
+    "path": "corpus-logs/copy-mode-previous-bracket.b54ed995a182.log"
+  },
+  {
+    "scenario": "copy-mode-recentre",
+    "sha256": "b3dc460abca61eaf07f0778e1c3bd940c5f207831b2c2fa8acdaf49a2e422940",
+    "path": "corpus-logs/copy-mode-recentre.b3dc460abca6.log"
+  },
+  {
+    "scenario": "copy-mode-scroll-exit",
+    "sha256": "1ffadc00ff6b59c3a6968073a67c820ad95f43b31b5c58185bc4e75b5e962578",
+    "path": "corpus-logs/copy-mode-scroll-exit.1ffadc00ff6b.log"
+  },
+  {
+    "scenario": "copy-mode-selection-lifecycle",
+    "sha256": "92e80d29a17c32d95ea8aa1d9b880af7f1dbfba28f896685bb94769d2ad1cdd5",
+    "path": "corpus-logs/copy-mode-selection-lifecycle.92e80d29a17c.log"
+  },
+  {
+    "scenario": "copy-mode-stock-action-keys",
+    "sha256": "19ab05c325d462e640302c883c402240f419181358417c992e9f01d257639c4f",
+    "path": "corpus-logs/copy-mode-stock-action-keys.19ab05c325d4.log"
+  },
+  {
+    "scenario": "daemon-command-item-format",
+    "sha256": "2e241ba40e3938af1b71563f7efec99f2aab329e3f188ee7243b6340ec541b41",
+    "path": "corpus-logs/daemon-command-item-format.2e241ba40e39.log"
+  },
+  {
+    "scenario": "display-panes-format",
+    "sha256": "95b0e08748dbeea3e59f714d90a5746d6cf6f7c8e7bf172cd11d9aeecac42455",
+    "path": "corpus-logs/display-panes-format.95b0e08748db.log"
+  },
+  {
+    "scenario": "format-expansion-output-clamp",
+    "sha256": "cf24edc548ae930e002933e957ee556cfa63b0300d44787c0ca7148fd4d87999",
+    "path": "corpus-logs/format-expansion-output-clamp.cf24edc548ae.log"
+  },
+  {
+    "scenario": "format-flags",
+    "sha256": "14f015f648e71751f058981f8c296260e38fc4821347f24364fdc6fc79c60f94",
+    "path": "corpus-logs/format-flags.14f015f648e7.log"
+  },
+  {
+    "scenario": "format-modifier-option-loop",
+    "sha256": "f7e709584dc5b944c54a276a421b170a180e3707374c58b9f3edd97f5e629bff",
+    "path": "corpus-logs/format-modifier-option-loop.f7e709584dc5.log"
+  },
+  {
+    "scenario": "format-modifier-width",
+    "sha256": "0891856c48e2395131df208d88ec98f4a0b3a67d2615b8a0e781d1d58a5e0f4c",
+    "path": "corpus-logs/format-modifier-width.0891856c48e2.log"
+  },
+  {
+    "scenario": "format-option-loop-context",
+    "sha256": "7055b50348071f4398239ec2f694fce7197b5ffc5ae254c9700fba7cf395d1ce",
+    "path": "corpus-logs/format-option-loop-context.7055b5034807.log"
+  },
+  {
+    "scenario": "format-window-neighbour-user-options",
+    "sha256": "14a81c8fb19099c0b495a3df73b4bb5a666b6577dae37db79fe2d1a16c694506",
+    "path": "corpus-logs/format-window-neighbour-user-options.14a81c8fb190.log"
+  },
+  {
+    "scenario": "formats-values",
+    "sha256": "6ce814f85bbb2b2bfc52b2fc384c7291957a3172b9682ec31bbbda2e201246a6",
+    "path": "corpus-logs/formats-values.6ce814f85bbb.log"
+  },
+  {
+    "scenario": "honest-knobs-c1-errors",
+    "sha256": "55a5468d6e3aa64c8687a4ada841a5bc8d95b1bc56c29b2ec3c092e239de30e5",
+    "path": "corpus-logs/honest-knobs-c1-errors.55a5468d6e3a.log"
+  },
+  {
+    "scenario": "honest-knobs-c1-readback",
+    "sha256": "f702ae0580ec7a68d0038be35fe5b9c3104f1149f7ac03fe47cac4b23148bcda",
+    "path": "corpus-logs/honest-knobs-c1-readback.f702ae0580ec.log"
+  },
+  {
+    "scenario": "known/known-pane-scrollbar-columns",
+    "sha256": "82e32e122a946093a369796b16eaa8c848081c6eeb50929acab6c3d17732839d",
+    "path": "corpus-logs/known/known-pane-scrollbar-columns.82e32e122a94.log"
+  },
+  {
+    "scenario": "known/known-terminal-runtime",
+    "sha256": "c0ac2c95c930cbb0ec64bb1f78bd5e62625042717b5af566b06b9a3d6178f0e4",
+    "path": "corpus-logs/known/known-terminal-runtime.c0ac2c95c930.log"
+  },
+  {
+    "scenario": "lane2-store",
+    "sha256": "d8b0a8d1696fc759e9719191ebc16c7784de5d3d1fa3033ba1700ade7f8f1ad7",
+    "path": "corpus-logs/lane2-store.d8b0a8d1696f.log"
+  },
+  {
+    "scenario": "list-keys-padding",
+    "sha256": "e1401563bd121ecaf9acf4df97486fca5be2a8d8d22dabc296cbfa2b43a3cd08",
+    "path": "corpus-logs/list-keys-padding.e1401563bd12.log"
+  },
+  {
+    "scenario": "manual-window-size-transition",
+    "sha256": "fa0d2c18fde2660e1640b4079606fb8ec465221dfa8e7c5b954f3f0489fe03a6",
+    "path": "corpus-logs/manual-window-size-transition.fa0d2c18fde2.log"
+  },
+  {
+    "scenario": "micro-flags",
+    "sha256": "599b991b3f71fb8fed97cb46727aade6f99d726c106987f5a1d3de482f33e735",
+    "path": "corpus-logs/micro-flags.599b991b3f71.log"
+  },
+  {
+    "scenario": "mru-activity",
+    "sha256": "0403467fca903bb98b918aa87f99acefb235c4d48b1a52921b60ccb3f7891b26",
+    "path": "corpus-logs/mru-activity.0403467fca90.log"
+  },
+  {
+    "scenario": "native-prefix-isolation",
+    "sha256": "941f80d0fa7eb6fab4048a673046dd9386e34ed93dd172e3210306ab967da851",
+    "path": "corpus-logs/native-prefix-isolation.941f80d0fa7e.log"
+  },
+  {
+    "scenario": "new-session-environment",
+    "sha256": "f6a10ae7f44e339a43ac6d4ef3e68e27424563bc6f1fe4443f8219ca746d3bb8",
+    "path": "corpus-logs/new-session-environment.f6a10ae7f44e.log"
+  },
+  {
+    "scenario": "option-name-formats",
+    "sha256": "3c00b95b90e62040111cab3c0043dce3b91957e1df1bb966a0d3bf283b1291f6",
+    "path": "corpus-logs/option-name-formats.3c00b95b90e6.log"
+  },
+  {
+    "scenario": "options-readback",
+    "sha256": "f92fad302b4b073519c3f8166514b4108bd87ef39660836ca89cb999442f8851",
+    "path": "corpus-logs/options-readback.f92fad302b4b.log"
+  },
+  {
+    "scenario": "pane-border-span-owner",
+    "sha256": "dc7c6619f97e46ed987c826d6e3abfb7ab0915be11fbd21f95cee3a469701dce",
+    "path": "corpus-logs/pane-border-span-owner.dc7c6619f97e.log"
+  },
+  {
+    "scenario": "pane-exact-target-prefix",
+    "sha256": "a2ce891da92c7908bf004f5fa9941214342b97c3731584b3b2d78ed06539289e",
+    "path": "corpus-logs/pane-exact-target-prefix.a2ce891da92c.log"
+  },
+  {
+    "scenario": "pane-spawn-options",
+    "sha256": "a348675f1a5dd17c553b2968983d00cecc9dfc5188a918456121b2c36667f82f",
+    "path": "corpus-logs/pane-spawn-options.a348675f1a5d.log"
+  },
+  {
+    "scenario": "pane-spawn-retain",
+    "sha256": "10a1aa0615ffc874d508f95fc282abb755d4e5c50cab8c47536bbc79e73bb358",
+    "path": "corpus-logs/pane-spawn-retain.10a1aa0615ff.log"
+  },
+  {
+    "scenario": "prefix2",
+    "sha256": "ce2d5e649f104fbb4f1d9306a9984d69dcf5939def5c7fb7b5f2ae05b81af9fe",
+    "path": "corpus-logs/prefix2.ce2d5e649f10.log"
+  },
+  {
+    "scenario": "renderer-styles",
+    "sha256": "48ddc7566c52531a8ca938aa76fd1ed9c64cbe8a0e34214d22eef61fc2d57dba",
+    "path": "corpus-logs/renderer-styles.48ddc7566c52.log"
+  },
+  {
+    "scenario": "send-keys-repeat",
+    "sha256": "4a95d6842a1c20a96002f53bda7fe93c375c4ce289729b6b8ae0b7604eb57609",
+    "path": "corpus-logs/send-keys-repeat.4a95d6842a1c.log"
+  },
+  {
+    "scenario": "send-keys-reset",
+    "sha256": "344cf4b825c81e28cf4d6a98f29edb1732522521b112b0645deac8e69c93584b",
+    "path": "corpus-logs/send-keys-reset.344cf4b825c8.log"
+  },
+  {
+    "scenario": "show-options-hooks",
+    "sha256": "5c233823152753b446927cbffdeaa18dfe8aaf972ac519f2fa83cd0107749ffa",
+    "path": "corpus-logs/show-options-hooks.5c2338231527.log"
+  },
+  {
+    "scenario": "smoke/alias-group-forgery",
+    "sha256": "707122abce2983cd11497bc134cd57d555f3007220bb7c08cda326bd9f02b175",
+    "path": "corpus-logs/smoke/alias-group-forgery.707122abce29.log"
+  },
+  {
+    "scenario": "smoke/args-parse-bind-key",
+    "sha256": "2f107d7255212535bdbfe111936100c9ff899eae7c27832c1b498c5cda0a3b7b",
+    "path": "corpus-logs/smoke/args-parse-bind-key.2f107d725521.log"
+  },
+  {
+    "scenario": "smoke/args-parse-choosers",
+    "sha256": "341c5c25d4bb523c817cd06b04ba57f22a7dc4fbfba85a9ce839e729a18687c3",
+    "path": "corpus-logs/smoke/args-parse-choosers.341c5c25d4bb.log"
+  },
+  {
+    "scenario": "smoke/args-parse-command-prompt",
+    "sha256": "c7e66538b874be9b91c4fbed85900b68f553944cf2b742c1542fce984c7f29d3",
+    "path": "corpus-logs/smoke/args-parse-command-prompt.c7e66538b874.log"
+  },
+  {
+    "scenario": "smoke/args-parse-confirm-before",
+    "sha256": "f3aea39d95e7f98958aa88fe30a9d8cf7256bb729cbd2e043e25742137a4b1ff",
+    "path": "corpus-logs/smoke/args-parse-confirm-before.f3aea39d95e7.log"
+  },
+  {
+    "scenario": "smoke/args-parse-display-menu",
+    "sha256": "0b4c3b48162a4cb6c7ae7b939102334f16e0994997d1bc2edd9890c63a19d7e1",
+    "path": "corpus-logs/smoke/args-parse-display-menu.0b4c3b48162a.log"
+  },
+  {
+    "scenario": "smoke/args-parse-display-panes",
+    "sha256": "2c85e5462eca5d67119ff408b39595006a53cf0ec205c58089eb46d0f274d2e1",
+    "path": "corpus-logs/smoke/args-parse-display-panes.2c85e5462eca.log"
+  },
+  {
+    "scenario": "smoke/args-parse-if-shell",
+    "sha256": "af4f8dee855dbe4b37ee10e591c0263ca2dedd58cf2f29f8864524b853a29eae",
+    "path": "corpus-logs/smoke/args-parse-if-shell.af4f8dee855d.log"
+  },
+  {
+    "scenario": "smoke/args-parse-run-shell",
+    "sha256": "0a6b4747182bd12769c29b3fff7767527a40209dabb7f022ac101240918649fe",
+    "path": "corpus-logs/smoke/args-parse-run-shell.0a6b4747182b.log"
+  },
+  {
+    "scenario": "smoke/args-parse-set-hook",
+    "sha256": "f9d8bac6cd07a1ae367cc6f89b7c9d020317164d52e0e61490461005bc1351d0",
+    "path": "corpus-logs/smoke/args-parse-set-hook.f9d8bac6cd07.log"
+  },
+  {
+    "scenario": "smoke/args-parse-set-option",
+    "sha256": "984b918703bbf6f0812bf92fe64e4903a4f2de08cfaab6a98cd77b30db984eeb",
+    "path": "corpus-logs/smoke/args-parse-set-option.984b918703bb.log"
+  },
+  {
+    "scenario": "smoke/buffer-clipboard-write",
+    "sha256": "2a30406325d18ed21dbab970f91bf30bb2c92f378c54f04f2438e12322aa8837",
+    "path": "corpus-logs/smoke/buffer-clipboard-write.2a30406325d1.log"
+  },
+  {
+    "scenario": "smoke/buffer-standard-streams",
+    "sha256": "1649d2fad3127706f2be354cc0ab8d5ce86953409adfb6a853748b472a801cdb",
+    "path": "corpus-logs/smoke/buffer-standard-streams.1649d2fad312.log"
+  },
+  {
+    "scenario": "smoke/cheap-flags",
+    "sha256": "102868552747bf9de8a19840392de69e5536c23e6e0f4e87f7ca8ad1559a92ab",
+    "path": "corpus-logs/smoke/cheap-flags.102868552747.log"
+  },
+  {
+    "scenario": "smoke/chooser-buffer-confirm-flag",
+    "sha256": "9b37f880deb5e41af27108687a30d19895973363b2888d6d7307c1fe2a7672f3",
+    "path": "corpus-logs/smoke/chooser-buffer-confirm-flag.9b37f880deb5.log"
+  },
+  {
+    "scenario": "smoke/chooser-buffer-vocabulary",
+    "sha256": "1ae9e9b460a36a0bf6619ee3dfb7311024c30e920e9883dc959f34dc52f26ba0",
+    "path": "corpus-logs/smoke/chooser-buffer-vocabulary.1ae9e9b460a3.log"
+  },
+  {
+    "scenario": "smoke/chooser-kill-keys",
+    "sha256": "c73d197e01ec8f104f25da200bf3a5a2d81ec22c344439482c6e6e2358b286bc",
+    "path": "corpus-logs/smoke/chooser-kill-keys.c73d197e01ec.log"
+  },
+  {
+    "scenario": "smoke/chooser-kill-on-exit",
+    "sha256": "0e5271b95e98f9c461fdc143f1c8e32d93468bde017a9146880c35bfe86437f2",
+    "path": "corpus-logs/smoke/chooser-kill-on-exit.0e5271b95e98.log"
+  },
+  {
+    "scenario": "smoke/chooser-row-flags",
+    "sha256": "f43c274b2bf623e665af9844df3437d95d7d22fe931dcb8a257d3db998009c73",
+    "path": "corpus-logs/smoke/chooser-row-flags.f43c274b2bf6.log"
+  },
+  {
+    "scenario": "smoke/chooser-tree-vocabulary",
+    "sha256": "576ad88e8d518bbe93be6566a635b2366aad958d627cefa629824c1f4bcee88e",
+    "path": "corpus-logs/smoke/chooser-tree-vocabulary.576ad88e8d51.log"
+  },
+  {
+    "scenario": "smoke/clear-history-hyperlinks",
+    "sha256": "2e7ee89158ed9d9c2ae0691ef0f43de08747167a12314ada0f249d65c7db5932",
+    "path": "corpus-logs/smoke/clear-history-hyperlinks.2e7ee89158ed.log"
+  },
+  {
+    "scenario": "smoke/cli-chain-parse-abort",
+    "sha256": "67f4f9772eecc3c32723b9b02f34460ce078fa0590fb063b02920a098689b855",
+    "path": "corpus-logs/smoke/cli-chain-parse-abort.67f4f9772eec.log"
+  },
+  {
+    "scenario": "smoke/cli-output-bytes",
+    "sha256": "c2823cfb3a8ae1beb96dcf87edc6bc7aaeceecdc9dd9e5ab4acd5587ab04c0ff",
+    "path": "corpus-logs/smoke/cli-output-bytes.c2823cfb3a8a.log"
+  },
+  {
+    "scenario": "smoke/client-exit-actions",
+    "sha256": "2bcd78cc0a416d82cc63dc2611ca4b391a1f23ac5abf83a783b5ba7159485975",
+    "path": "corpus-logs/smoke/client-exit-actions.2bcd78cc0a41.log"
+  },
+  {
+    "scenario": "smoke/client-non-utf8-cwd",
+    "sha256": "fd3c778cf3c8a44accd76acce40dc2cc281cd2d9cbbc4a1ddf540330550e8a0d",
+    "path": "corpus-logs/smoke/client-non-utf8-cwd.fd3c778cf3c8.log"
+  },
+  {
+    "scenario": "smoke/client-resized-context",
+    "sha256": "893bf4a8df14c1f7a98b9f50a1a0b364fbe074270aacb9d45748ed3fa1a9d01f",
+    "path": "corpus-logs/smoke/client-resized-context.893bf4a8df14.log"
+  },
+  {
+    "scenario": "smoke/client-utf8-sanitizer",
+    "sha256": "59e1b4a4bee355515b8562c36e6a9f6bcd266a2e7f64d7afed65066070ea0b77",
+    "path": "corpus-logs/smoke/client-utf8-sanitizer.59e1b4a4bee3.log"
+  },
+  {
+    "scenario": "smoke/command-flag-errors",
+    "sha256": "869f1c4e9342ffe26726a47452d16c5a1ed0707ea6ba48d1257563d662ce92d4",
+    "path": "corpus-logs/smoke/command-flag-errors.869f1c4e9342.log"
+  },
+  {
+    "scenario": "smoke/command-prompt-chain",
+    "sha256": "50e0c1237057a904259d85a169a3161ce37cddb8d6269cf10b11864d2c886ee1",
+    "path": "corpus-logs/smoke/command-prompt-chain.50e0c1237057.log"
+  },
+  {
+    "scenario": "smoke/command-prompt-chain",
+    "sha256": "7fc876fe3c00ef544e2cea243afba85f7ac647cd062555adf943e43aab204ad4",
+    "path": "corpus-logs/smoke/command-prompt-chain.7fc876fe3c00.log"
+  },
+  {
+    "scenario": "smoke/command-prompt-editing",
+    "sha256": "090d30dad19f76bbacfe3782f56a780a0f7989d4f1b83cc40d05fcbb7cff0046",
+    "path": "corpus-logs/smoke/command-prompt-editing.090d30dad19f.log"
+  },
+  {
+    "scenario": "smoke/command-prompt-editing",
+    "sha256": "88964f15b76165b3852c0b22730c55b3d66da5c643373c22b17418aad3fa0e9c",
+    "path": "corpus-logs/smoke/command-prompt-editing.88964f15b761.log"
+  },
+  {
+    "scenario": "smoke/command-prompt-target",
+    "sha256": "2a7bca3b75da904b8ceba1484377cda904339738f235178231b534ada572926e",
+    "path": "corpus-logs/smoke/command-prompt-target.2a7bca3b75da.log"
+  },
+  {
+    "scenario": "smoke/config-alias-parse-unit",
+    "sha256": "ed1fa5af5b9890bd58803572e04a9a0fcdc747ef66d9c82e29d8b65dec386e90",
+    "path": "corpus-logs/smoke/config-alias-parse-unit.ed1fa5af5b98.log"
+  },
+  {
+    "scenario": "smoke/config-chain-parse-abort",
+    "sha256": "960f250ed02a0575a8e642f19b874f1c56d9c9a499404caa7ce9b475f8d7d69a",
+    "path": "corpus-logs/smoke/config-chain-parse-abort.960f250ed02a.log"
+  },
+  {
+    "scenario": "smoke/config-discovery-explicit",
+    "sha256": "c5419a4a6ac8847cfdeed18c653076dc89bbdd172386307e97235ac99c428398",
+    "path": "corpus-logs/smoke/config-discovery-explicit.c5419a4a6ac8.log"
+  },
+  {
+    "scenario": "smoke/config-discovery-launcher",
+    "sha256": "7c499600200e8d3f04591740c2bb330fa5c3967d39cfc3c63acf6ad8a17e719f",
+    "path": "corpus-logs/smoke/config-discovery-launcher.7c499600200e.log"
+  },
+  {
+    "scenario": "smoke/config-discovery",
+    "sha256": "4af079e0b98196a07b82ebd0c8f123152c273f31e67a65ef8273b909addf31dc",
+    "path": "corpus-logs/smoke/config-discovery.4af079e0b981.log"
+  },
+  {
+    "scenario": "smoke/config-grammar",
+    "sha256": "4bc5fffa1685c4e102d23e1d1ada5f55d0e069dbed0e5531ad61912f32d4d3d5",
+    "path": "corpus-logs/smoke/config-grammar.4bc5fffa1685.log"
+  },
+  {
+    "scenario": "smoke/config-non-utf8-byte-matrix",
+    "sha256": "da16f982ed51cf1f89b47adc22c0c224d9c5581b52b31d2a13d4fb9320533d73",
+    "path": "corpus-logs/smoke/config-non-utf8-byte-matrix.da16f982ed51.log"
+  },
+  {
+    "scenario": "smoke/config-non-utf8-file-bytes",
+    "sha256": "8b39e286350a56c73371af63578fa0ee045a239c3cc42f093c6292fd848f55a0",
+    "path": "corpus-logs/smoke/config-non-utf8-file-bytes.8b39e286350a.log"
+  },
+  {
+    "scenario": "smoke/continuum-init",
+    "sha256": "329a4b7368a7306e1906d2530e852befb21e1bcf19c6f29eaf02d4168caee9fa",
+    "path": "corpus-logs/smoke/continuum-init.329a4b7368a7.log"
+  },
+  {
+    "scenario": "smoke/control-alias-prepare",
+    "sha256": "be85a1c28df93e324297f131315a4b35b0db46b7f6888d313c21370cf50e0fb0",
+    "path": "corpus-logs/smoke/control-alias-prepare.be85a1c28df9.log"
+  },
+  {
+    "scenario": "smoke/control-eof-drain",
+    "sha256": "b65232c0155dfe3a62b18bc0c72628758fa84ae279138f3891d8c72c0c524d35",
+    "path": "corpus-logs/smoke/control-eof-drain.b65232c0155d.log"
+  },
+  {
+    "scenario": "smoke/control-hard-loss",
+    "sha256": "59c3b7d29a8399c368fda10157e36bfb0061779df40ffad657992def69b4e3d4",
+    "path": "corpus-logs/smoke/control-hard-loss.59c3b7d29a83.log"
+  },
+  {
+    "scenario": "smoke/control-notify",
+    "sha256": "a21124134f56e19d2fdb46aebfa636e4ec401c22f251017b9c7414c5ae56cc72",
+    "path": "corpus-logs/smoke/control-notify.a21124134f56.log"
+  },
+  {
+    "scenario": "smoke/control-tilde-environment",
+    "sha256": "50c5ff025c10b178a26112b1c094a9296f4b5cee0b2f059e00249869688a9e28",
+    "path": "corpus-logs/smoke/control-tilde-environment.50c5ff025c10.log"
+  },
+  {
+    "scenario": "smoke/copy-mode-command-errors",
+    "sha256": "ced708b4dd6e7821ecee89b87107bad2fb57ca8113a43d499b97bfac2f33dad0",
+    "path": "corpus-logs/smoke/copy-mode-command-errors.ced708b4dd6e.log"
+  },
+  {
+    "scenario": "smoke/copy-mode-copy-line",
+    "sha256": "253f6afbc2f512eb5ea70719ef0b13f8eeb55304c57b6011f6fcf634846f1094",
+    "path": "corpus-logs/smoke/copy-mode-copy-line.253f6afbc2f5.log"
+  },
+  {
+    "scenario": "smoke/copy-mode-formats",
+    "sha256": "e37e7d0ff86bd62ebc5c1cc1a03aec775d87a7f413da0252cb35ef51f937d272",
+    "path": "corpus-logs/smoke/copy-mode-formats.e37e7d0ff86b.log"
+  },
+  {
+    "scenario": "smoke/copy-mode-kill-on-exit",
+    "sha256": "a16f7532ed47b52da0b74a97883a7b1da033a022a4c75d157ca35881b7b8a914",
+    "path": "corpus-logs/smoke/copy-mode-kill-on-exit.a16f7532ed47.log"
+  },
+  {
+    "scenario": "smoke/copy-mode-mode-keys-tail",
+    "sha256": "92c5f230100a15beccbb90307d1fb3fd74b34310af5804fb936d209635f466ce",
+    "path": "corpus-logs/smoke/copy-mode-mode-keys-tail.92c5f230100a.log"
+  },
+  {
+    "scenario": "smoke/copy-mode-mode-keys",
+    "sha256": "dd5c2903d9487adf2150304883de9c5b99190e0ff20c7aad78d3fb0d5edb5272",
+    "path": "corpus-logs/smoke/copy-mode-mode-keys.dd5c2903d948.log"
+  },
+  {
+    "scenario": "smoke/copy-mode-prompt-bindings",
+    "sha256": "13aa6fce4d67a20b72dd3fbc9e31dd6bc6df42202582ff1bd848fff1c6c98c31",
+    "path": "corpus-logs/smoke/copy-mode-prompt-bindings.13aa6fce4d67.log"
+  },
+  {
+    "scenario": "smoke/copy-mode-refresh",
+    "sha256": "4a11b2d04bd0447f23fc5389e8b81b0fb8297e58ba3a9a5620cda30004569bf5",
+    "path": "corpus-logs/smoke/copy-mode-refresh.4a11b2d04bd0.log"
+  },
+  {
+    "scenario": "smoke/copy-mode-search",
+    "sha256": "723c0f4a91eccbac8e94af3eafe2590a3da05b9c84c2d5b7135b19c10906b98f",
+    "path": "corpus-logs/smoke/copy-mode-search.723c0f4a91ec.log"
+  },
+  {
+    "scenario": "smoke/copy-mode-source-pane",
+    "sha256": "9f765357a3706f8051bc2de799e15209b24b75e831a2f794346c35611c9ab799",
+    "path": "corpus-logs/smoke/copy-mode-source-pane.9f765357a370.log"
+  },
+  {
+    "scenario": "smoke/copy-selection-clipboard-bytes",
+    "sha256": "582a6341787b0ec7728e9c0149795cbecb0740feff19145611f059aec8dc6bee",
+    "path": "corpus-logs/smoke/copy-selection-clipboard-bytes.582a6341787b.log"
+  },
+  {
+    "scenario": "smoke/daemon-invalid-flags",
+    "sha256": "e753ecbeb55ba8b3367c47c95469692ffed88e6c209e7fee86cc44f814789fd1",
+    "path": "corpus-logs/smoke/daemon-invalid-flags.e753ecbeb55b.log"
+  },
+  {
+    "scenario": "smoke/default-client-command",
+    "sha256": "721ef7ccd5c8624d413406b1d410c82b3fad82e5c2e132cbc018cb0fc508218d",
+    "path": "corpus-logs/smoke/default-client-command.721ef7ccd5c8.log"
+  },
+  {
+    "scenario": "smoke/display-menu-action-queue",
+    "sha256": "e21d1e21355a84eba5d5bcc2a90f40f14d2c9dbe5a9969be245a13ce5479658c",
+    "path": "corpus-logs/smoke/display-menu-action-queue.e21d1e21355a.log"
+  },
+  {
+    "scenario": "smoke/display-menu-cell-layout",
+    "sha256": "f55e6c1ed0c54d7080d2494cdbfca952823a2e4b534ac4b1abff9d22c22c1d4c",
+    "path": "corpus-logs/smoke/display-menu-cell-layout.f55e6c1ed0c5.log"
+  },
+  {
+    "scenario": "smoke/display-menu-mouse",
+    "sha256": "b2feb473abc96ec146b4dcfa608f0a84567cd81c621a658ec0c7306fec552603",
+    "path": "corpus-logs/smoke/display-menu-mouse.b2feb473abc9.log"
+  },
+  {
+    "scenario": "smoke/display-menu-paste",
+    "sha256": "5e980c4b2650c46fcc8d0f3bc9a9cf2856a992d4da87774e6adedcad80c704a4",
+    "path": "corpus-logs/smoke/display-menu-paste.5e980c4b2650.log"
+  },
+  {
+    "scenario": "smoke/display-menu-resize-lifecycle",
+    "sha256": "dcab00130e2b1e1e921db37027bd38d69101b4c9021883417008c888bd587eff",
+    "path": "corpus-logs/smoke/display-menu-resize-lifecycle.dcab00130e2b.log"
+  },
+  {
+    "scenario": "smoke/display-menu-shortcut-grammar",
+    "sha256": "2be8f5f9419d1ba56d25494cd2e6f9608f3a9dcea227d6a8f978dca9f598b9fd",
+    "path": "corpus-logs/smoke/display-menu-shortcut-grammar.2be8f5f9419d.log"
+  },
+  {
+    "scenario": "smoke/display-menu-style-refresh",
+    "sha256": "edc77d655e46b94278e72b2d3061797534d8b3e888e54dfcbc5cac1b215cda51",
+    "path": "corpus-logs/smoke/display-menu-style-refresh.edc77d655e46.log"
+  },
+  {
+    "scenario": "smoke/display-message-client-aliases",
+    "sha256": "2d37ab4c7387994ddee53e245160ed5eefec0915ded93bdddcbd2e3b664b1d6f",
+    "path": "corpus-logs/smoke/display-message-client-aliases.2d37ab4c7387.log"
+  },
+  {
+    "scenario": "smoke/display-panes-template",
+    "sha256": "f40b329b1874aae366c74a2162afca6de6c9ec2b054d7da4380bc21f49e414b0",
+    "path": "corpus-logs/smoke/display-panes-template.f40b329b1874.log"
+  },
+  {
+    "scenario": "smoke/display-popup-drag",
+    "sha256": "7659aeb3ad835e94f411374a847322783b5cf24e42e77fd502c4ea65a1398dc7",
+    "path": "corpus-logs/smoke/display-popup-drag.7659aeb3ad83.log"
+  },
+  {
+    "scenario": "smoke/display-popup-kitty-noresize",
+    "sha256": "2473dec3eda1d59995d87c9bca1fc3b42e443cbf1eb2a58f07f1b418cf20dca5",
+    "path": "corpus-logs/smoke/display-popup-kitty-noresize.2473dec3eda1.log"
+  },
+  {
+    "scenario": "smoke/display-popup-kitty",
+    "sha256": "77bf4260ad5df07527dce39851b6173aac6186f08d0e47f4ee4ce1cdf6d8a159",
+    "path": "corpus-logs/smoke/display-popup-kitty.77bf4260ad5d.log"
+  },
+  {
+    "scenario": "smoke/display-popup-menu-policy",
+    "sha256": "99ecf8393b107b0d1c6fb75fe7fcc59b380c334b27a69c4afc92b382a67df626",
+    "path": "corpus-logs/smoke/display-popup-menu-policy.99ecf8393b10.log"
+  },
+  {
+    "scenario": "smoke/display-popup-menu",
+    "sha256": "82a24f6be574a6b6652b9dd323e5b52d08f10b86cfd204936d1cd3c9e4b4110a",
+    "path": "corpus-logs/smoke/display-popup-menu.82a24f6be574.log"
+  },
+  {
+    "scenario": "smoke/display-popup-resize-lifecycle",
+    "sha256": "d0f9cb694bf133080bd99528c09b358256a6666b3c7efd4addebb631db2ef7dd",
+    "path": "corpus-logs/smoke/display-popup-resize-lifecycle.d0f9cb694bf1.log"
+  },
+  {
+    "scenario": "smoke/display-popup-style-refresh",
+    "sha256": "8c3c1956bf7a4a9ee6f47438b4a8f5b254bdf1b97c35d698feee4baf56d006d4",
+    "path": "corpus-logs/smoke/display-popup-style-refresh.8c3c1956bf7a.log"
+  },
+  {
+    "scenario": "smoke/display-popup-to-pane",
+    "sha256": "ead4c59a1550d8ec943c8367e2f3b16522d6e0dd0967dfb56c71818bd0e14e16",
+    "path": "corpus-logs/smoke/display-popup-to-pane.ead4c59a1550.log"
+  },
+  {
+    "scenario": "smoke/environment-bytes",
+    "sha256": "91b21dcb1ebdc79e5d4157a35847fd24504b26071b5961c5df0fb266ff6ec1da",
+    "path": "corpus-logs/smoke/environment-bytes.91b21dcb1ebd.log"
+  },
+  {
+    "scenario": "smoke/fixture-conf",
+    "sha256": "34fdaa1926852d3bfb931ff855b4ff4dd592d5a58030b76d3b7b9abe7d94058c",
+    "path": "corpus-logs/smoke/fixture-conf.34fdaa192685.log"
+  },
+  {
+    "scenario": "smoke/focus-follows-mouse",
+    "sha256": "1d1e9d3844272dd72f756eff8149cd978588022a341977a1adafa9ee937081c9",
+    "path": "corpus-logs/smoke/focus-follows-mouse.1d1e9d384427.log"
+  },
+  {
+    "scenario": "smoke/format-client-loop-context",
+    "sha256": "3bff857f17bdf76a005c8c9ae89fcae93433f26d5f24299bcf152fe460bc6ac2",
+    "path": "corpus-logs/smoke/format-client-loop-context.3bff857f17bd.log"
+  },
+  {
+    "scenario": "smoke/format-environment-loop-context",
+    "sha256": "fe1ce160c7ab7c9c1d74ef9af6a981b408a4ef420dadc9e9b4520912b63983d2",
+    "path": "corpus-logs/smoke/format-environment-loop-context.fe1ce160c7ab.log"
+  },
+  {
+    "scenario": "smoke/format-listing",
+    "sha256": "18b71ea0d9fa11d1cc24df4713b1949809e080adb4060872a2089b25e11d5980",
+    "path": "corpus-logs/smoke/format-listing.18b71ea0d9fa.log"
+  },
+  {
+    "scenario": "smoke/format-modifier-client-loop",
+    "sha256": "bdc6be0f64881f98c80eb1e77ac83a21c5d5b51a59b3b2da66baf04291390b66",
+    "path": "corpus-logs/smoke/format-modifier-client-loop.bdc6be0f6488.log"
+  },
+  {
+    "scenario": "smoke/format-modifier-environment-loop",
+    "sha256": "17c0ac6b55b86f7e8cac52ad5bde255582f65bbdc3ec1b72d18230da258a8f96",
+    "path": "corpus-logs/smoke/format-modifier-environment-loop.17c0ac6b55b8.log"
+  },
+  {
+    "scenario": "smoke/format-modifier-interrogate",
+    "sha256": "e069a004d60d2039ae262fadad37c58dea5ef6b3c142503cb107e8a6a9360ef5",
+    "path": "corpus-logs/smoke/format-modifier-interrogate.e069a004d60d.log"
+  },
+  {
+    "scenario": "smoke/format-monitor-hooks",
+    "sha256": "e9bfb958006909c35ba8e949ca1430b1dc916c2d438a0032c37ab3eec62f3305",
+    "path": "corpus-logs/smoke/format-monitor-hooks.e9bfb9580069.log"
+  },
+  {
+    "scenario": "smoke/format-pane-process",
+    "sha256": "580bc69da7b5ad174a68add8496201d4f657e98eb5f1408df2375f6b3c214288",
+    "path": "corpus-logs/smoke/format-pane-process.580bc69da7b5.log"
+  },
+  {
+    "scenario": "smoke/format-pane-progress",
+    "sha256": "adab18d823c87c58e6544fe6e15a6e040bc47783ddf0bc2f8d99c9d07f0214d6",
+    "path": "corpus-logs/smoke/format-pane-progress.adab18d823c8.log"
+  },
+  {
+    "scenario": "smoke/format-trace",
+    "sha256": "41b6d2c845a5f93a05c2b5624083faf39362cab4d951579aaac72a0ff2a43e93",
+    "path": "corpus-logs/smoke/format-trace.41b6d2c845a5.log"
+  },
+  {
+    "scenario": "smoke/format-window-bigger",
+    "sha256": "33f0a4e1aa51041887939697fab949c2460bda396c56ef10a4228f138692722a",
+    "path": "corpus-logs/smoke/format-window-bigger.33f0a4e1aa51.log"
+  },
+  {
+    "scenario": "smoke/fpp-init",
+    "sha256": "c23a50a9a5f01103f96fe66b69136aa3aaba6cf2b220aacdc962bb9b01a5cb3c",
+    "path": "corpus-logs/smoke/fpp-init.c23a50a9a5f0.log"
+  },
+  {
+    "scenario": "smoke/hooks-pane-focus-clients",
+    "sha256": "52b7e75bfbe6e2dd92f96a85bb514bc39e6a78e2c594cc7fefa8adca38f41d16",
+    "path": "corpus-logs/smoke/hooks-pane-focus-clients.52b7e75bfbe6.log"
+  },
+  {
+    "scenario": "smoke/hooks-pane-focus",
+    "sha256": "4cff28aa2d5fe01fd8f764e2f57630d2b12ecbe630eed8448b9aa48a98e3af36",
+    "path": "corpus-logs/smoke/hooks-pane-focus.4cff28aa2d5f.log"
+  },
+  {
+    "scenario": "smoke/jobs-command-environment",
+    "sha256": "75839ae4245b0bd04d0a9ff1cb08181d43f986ba7b731f9266617b24f6076014",
+    "path": "corpus-logs/smoke/jobs-command-environment.75839ae4245b.log"
+  },
+  {
+    "scenario": "smoke/jobs-command-environment",
+    "sha256": "c603cbd7e64fd7afab73e6e039c5ebb2dfad47daa196d271fbb01367d553cea5",
+    "path": "corpus-logs/smoke/jobs-command-environment.c603cbd7e64f.log"
+  },
+  {
+    "scenario": "smoke/jobs-display-popup-environment",
+    "sha256": "05275b173826cebb21d63bfbc368c402e136be30b7c1a4bd7538d09f0d67b9bb",
+    "path": "corpus-logs/smoke/jobs-display-popup-environment.05275b173826.log"
+  },
+  {
+    "scenario": "smoke/jobs-shell-job-cwd",
+    "sha256": "e3d5cf42920448b8f54c127f0ee62ded20188893ec3125cf92bc7c09c3b5f1ab",
+    "path": "corpus-logs/smoke/jobs-shell-job-cwd.e3d5cf429204.log"
+  },
+  {
+    "scenario": "smoke/keys-prefix-attached",
+    "sha256": "7ff73f4716518c2f083d39e31c48c6d126fbf66e6c5e378c78dd4ff52357c936",
+    "path": "corpus-logs/smoke/keys-prefix-attached.7ff73f471651.log"
+  },
+  {
+    "scenario": "smoke/keys-prefix-remainder",
+    "sha256": "041db35519bfd75f7c115ce16b87d07933f2cdb4d9273aaa1655e4512f215ae9",
+    "path": "corpus-logs/smoke/keys-prefix-remainder.041db35519bf.log"
+  },
+  {
+    "scenario": "smoke/keys-prefix-stock",
+    "sha256": "af764715d270b82b0e46d9c6c3b2dd5378651758aa4c432a85124fc88bec8514",
+    "path": "corpus-logs/smoke/keys-prefix-stock.af764715d270.log"
+  },
+  {
+    "scenario": "smoke/keys-shift-attached",
+    "sha256": "bd1b86cf08408ec0220fd42b87d7c4a58f2ed8b99cfc1e660b7631835a6723b7",
+    "path": "corpus-logs/smoke/keys-shift-attached.bd1b86cf0840.log"
+  },
+  {
+    "scenario": "smoke/keys-table-lifecycle",
+    "sha256": "86b2d3afdfa5ff8b375989f50e1b14eddda33d8d4d750f9665c86b97b050c901",
+    "path": "corpus-logs/smoke/keys-table-lifecycle.86b2d3afdfa5.log"
+  },
+  {
+    "scenario": "smoke/kill-filters",
+    "sha256": "d649b966a796780261012ab6252d8837df948f8bf408bc64106cd06c98f637e8",
+    "path": "corpus-logs/smoke/kill-filters.d649b966a796.log"
+  },
+  {
+    "scenario": "smoke/launcher-installed-layout",
+    "sha256": "c98aa54bea5efea72b80cfbee0feebf6c41bbbec2f375dd7d247f26f296d54a2",
+    "path": "corpus-logs/smoke/launcher-installed-layout.c98aa54bea5e.log"
+  },
+  {
+    "scenario": "smoke/oh-my-tmux",
+    "sha256": "b5846d9d39f36404421c8b6db287f74dff847ea755f68fceb188ade01d94b221",
+    "path": "corpus-logs/smoke/oh-my-tmux.b5846d9d39f3.log"
+  },
+  {
+    "scenario": "smoke/own-conf",
+    "sha256": "2bc3d3864a4784a157aae2ac662560b0db552279a088b7aadef4cdd28a1066af",
+    "path": "corpus-logs/smoke/own-conf.2bc3d3864a47.log"
+  },
+  {
+    "scenario": "smoke/pane-border-indicators",
+    "sha256": "fb3bf9d832221504efde489e74f907ffcd657db2c73c43dfa2597a26ceeef330",
+    "path": "corpus-logs/smoke/pane-border-indicators.fb3bf9d83222.log"
+  },
+  {
+    "scenario": "smoke/pane-border-lines",
+    "sha256": "e27821f94ea7f93ba5a7eb6bdc9bfbfc601b93ede2fb24c7de4f9ac4611969ef",
+    "path": "corpus-logs/smoke/pane-border-lines.e27821f94ea7.log"
+  },
+  {
+    "scenario": "smoke/pane-border-status",
+    "sha256": "e8dcba3e9a60235c24764d7adc93717d38a0703590b5d2cf0309c0b40db20287",
+    "path": "corpus-logs/smoke/pane-border-status.e8dcba3e9a60.log"
+  },
+  {
+    "scenario": "smoke/pane-border-zorder",
+    "sha256": "00d67fc09bc76cd7b90d10e40f5a6588b40eb59f3ea83fa576b1d76a6acbb5c7",
+    "path": "corpus-logs/smoke/pane-border-zorder.00d67fc09bc7.log"
+  },
+  {
+    "scenario": "smoke/pane-colours-palette",
+    "sha256": "f205a4f654b541c84ba6d692e6f56f7cb962cd33962df01b5416c9a56e19c5d4",
+    "path": "corpus-logs/smoke/pane-colours-palette.f205a4f654b5.log"
+  },
+  {
+    "scenario": "smoke/pane-engine-knobs-input",
+    "sha256": "176f8388395a524c971b4f9ca9602f578c62f7c1b44b34ede694a3d32836d34d",
+    "path": "corpus-logs/smoke/pane-engine-knobs-input.176f8388395a.log"
+  },
+  {
+    "scenario": "smoke/pane-engine-knobs",
+    "sha256": "f2d9ab00ec4edc794b21a070d5e8f7d7a9278f58d1c2d179ad96a9a7be000793",
+    "path": "corpus-logs/smoke/pane-engine-knobs.f2d9ab00ec4e.log"
+  },
+  {
+    "scenario": "smoke/pane-runtime-facts",
+    "sha256": "f804f8dd8933b7f8ffe3cb48a75e02ba72f35a366f938a39e3411510a023192e",
+    "path": "corpus-logs/smoke/pane-runtime-facts.f804f8dd8933.log"
+  },
+  {
+    "scenario": "smoke/pane-tmux-path",
+    "sha256": "1551efabcd8ff2b5430e78b3436aad53f8a95c080637bed6e8a9f2a554ac1cfe",
+    "path": "corpus-logs/smoke/pane-tmux-path.1551efabcd8f.log"
+  },
+  {
+    "scenario": "smoke/plugin-runtime-continuum",
+    "sha256": "0fbf2c88e58b74ebccdd17ee367a77ba3e3000cb7e0cca839922557c9191ae38",
+    "path": "corpus-logs/smoke/plugin-runtime-continuum.0fbf2c88e58b.log"
+  },
+  {
+    "scenario": "smoke/plugin-runtime-continuum",
+    "sha256": "3d266406881e1905cb9b85196a3a47efdb032d1fae210b1107a21b99a8a2a5e8",
+    "path": "corpus-logs/smoke/plugin-runtime-continuum.3d266406881e.log"
+  },
+  {
+    "scenario": "smoke/plugin-runtime-fpp",
+    "sha256": "0df735399095610f759cced2c3018c09579ed827876805e042029233eedf484d",
+    "path": "corpus-logs/smoke/plugin-runtime-fpp.0df735399095.log"
+  },
+  {
+    "scenario": "smoke/plugin-runtime-oh-my-tmux",
+    "sha256": "9e78212f1e0f84a1b33159cb6c35fdbda584ffaba3bf91566abb481871f621e7",
+    "path": "corpus-logs/smoke/plugin-runtime-oh-my-tmux.9e78212f1e0f.log"
+  },
+  {
+    "scenario": "smoke/plugin-runtime-resurrect-restore",
+    "sha256": "afbd6e7064abd2d0d2edb967b305636c3a0579e747eb7cf26bf303bb24488212",
+    "path": "corpus-logs/smoke/plugin-runtime-resurrect-restore.afbd6e7064ab.log"
+  },
+  {
+    "scenario": "smoke/plugin-runtime-tpm-install",
+    "sha256": "4c10b7f7e4cf1977c1fecabe6f0184129da5f5402297dcaade365da6e8dc3b68",
+    "path": "corpus-logs/smoke/plugin-runtime-tpm-install.4c10b7f7e4cf.log"
+  },
+  {
+    "scenario": "smoke/plugin-runtime-vim-tmux-navigator",
+    "sha256": "c6b75b1ebaeb4eabcad0f3be9f93790ee41587908c84f53235b821233d1d0dd1",
+    "path": "corpus-logs/smoke/plugin-runtime-vim-tmux-navigator.c6b75b1ebaeb.log"
+  },
+  {
+    "scenario": "smoke/plugin-runtime-yank",
+    "sha256": "1b4f592a676b78704b1525e5fe2fc8e0ffaffaeba368ea9c5541f87609d46a2d",
+    "path": "corpus-logs/smoke/plugin-runtime-yank.1b4f592a676b.log"
+  },
+  {
+    "scenario": "smoke/positional-maximums",
+    "sha256": "8ce725444fc60dc679cfd3850eebc2ea40f1019c385356d7611e94e3d0db535d",
+    "path": "corpus-logs/smoke/positional-maximums.8ce725444fc6.log"
+  },
+  {
+    "scenario": "smoke/positional-minimums",
+    "sha256": "4853382d265bea6093c67cbacfb1a193b0a5bb62de5c0bcc99f797e1d97e123a",
+    "path": "corpus-logs/smoke/positional-minimums.4853382d265b.log"
+  },
+  {
+    "scenario": "smoke/refresh-status",
+    "sha256": "51d0b08988469117f6b8f29706414a074b0a3237a68e462719a7eabe9bcd4f3e",
+    "path": "corpus-logs/smoke/refresh-status.51d0b0898846.log"
+  },
+  {
+    "scenario": "smoke/remain-on-exit-format",
+    "sha256": "849071c220d9754605ab998152e1ccc14a04722c9496acbf739dccc01db1e9d7",
+    "path": "corpus-logs/smoke/remain-on-exit-format.849071c220d9.log"
+  },
+  {
+    "scenario": "smoke/resurrect-init",
+    "sha256": "55bd78e6a18786f2d434c4fe695dd3b4110841d8d415e5d34d86186244a9fe05",
+    "path": "corpus-logs/smoke/resurrect-init.55bd78e6a187.log"
+  },
+  {
+    "scenario": "smoke/resurrect-save",
+    "sha256": "6c1dccf8db60aac6246e9df2ce77e0cca534d97bd018c3bbabbac0da3858b5fe",
+    "path": "corpus-logs/smoke/resurrect-save.6c1dccf8db60.log"
+  },
+  {
+    "scenario": "smoke/send-keys-client-selection",
+    "sha256": "eeeb2dac88a525489fb00d436bcb0435e32ee23f7f85ebf0436961a653fee674",
+    "path": "corpus-logs/smoke/send-keys-client-selection.eeeb2dac88a5.log"
+  },
+  {
+    "scenario": "smoke/send-keys-control",
+    "sha256": "53a9c9d0923e28d0a9e158284a79b38a807ee9defddf775b8a9a9bd1c9e40af0",
+    "path": "corpus-logs/smoke/send-keys-control.53a9c9d0923e.log"
+  },
+  {
+    "scenario": "smoke/send-keys-inject",
+    "sha256": "d3715e0da28ad1064de2fd0baaf5c22a557a09f628218ec8ecd99aca8da046ff",
+    "path": "corpus-logs/smoke/send-keys-inject.d3715e0da28a.log"
+  },
+  {
+    "scenario": "smoke/sensible",
+    "sha256": "0b1bbbd57634985217aad15f58f4b450a36ac88f7cd49d329db08f846f0ac0b6",
+    "path": "corpus-logs/smoke/sensible.0b1bbbd57634.log"
+  },
+  {
+    "scenario": "smoke/source-file-byte-name",
+    "sha256": "7615f2704d9cf1b793ffaf70833dee9402955c84fefa3949742c670c6da6b2df",
+    "path": "corpus-logs/smoke/source-file-byte-name.7615f2704d9c.log"
+  },
+  {
+    "scenario": "smoke/source-file-control",
+    "sha256": "41ed96f21b574766c882ea0887ee1e12b6d892f8a8ebec5591c183ed2f8769d0",
+    "path": "corpus-logs/smoke/source-file-control.41ed96f21b57.log"
+  },
+  {
+    "scenario": "smoke/source-file-depth",
+    "sha256": "349bd2fc711fef7a2247563b7df8c663359f0c9298199b350450f2645819180f",
+    "path": "corpus-logs/smoke/source-file-depth.349bd2fc711f.log"
+  },
+  {
+    "scenario": "smoke/source-file-diagnostics",
+    "sha256": "f9372b968195b62ce4aa048748ca5dda8e9e1f2a11f7fc87a0d178882fc1cc94",
+    "path": "corpus-logs/smoke/source-file-diagnostics.f9372b968195.log"
+  },
+  {
+    "scenario": "smoke/source-file-tilde",
+    "sha256": "c3414e3d8292c0ac1043f07b3a23b33d0529c8f564c8e960d8d27f2336b8455f",
+    "path": "corpus-logs/smoke/source-file-tilde.c3414e3d8292.log"
+  },
+  {
+    "scenario": "smoke/source-replay-diagnostics",
+    "sha256": "9e8650562d81de8ba0dabd377b6f663173421cddcc8b42f18177ef50ce5f508a",
+    "path": "corpus-logs/smoke/source-replay-diagnostics.9e8650562d81.log"
+  },
+  {
+    "scenario": "smoke/split-window-wait",
+    "sha256": "7908ca620153722bf545c16d14f1da11bb7e91a8297c3fe5278490f8ba7a89dd",
+    "path": "corpus-logs/smoke/split-window-wait.7908ca620153.log"
+  },
+  {
+    "scenario": "smoke/status-background-jobs",
+    "sha256": "0c53a9a9ac9d479f2749fb84c44da0007636130d0408864527dcc68dc141014f",
+    "path": "corpus-logs/smoke/status-background-jobs.0c53a9a9ac9d.log"
+  },
+  {
+    "scenario": "smoke/status-background-jobs",
+    "sha256": "91c730cf56043bac505d29f31862ba134de7fb20ff0f1c51180a19c74df9e019",
+    "path": "corpus-logs/smoke/status-background-jobs.91c730cf5604.log"
+  },
+  {
+    "scenario": "smoke/status-keys-editor-default",
+    "sha256": "140bc74b6ec0dc61daa7bf190606bd099174b1cd5568ff5f6b0e0634acc7e7d0",
+    "path": "corpus-logs/smoke/status-keys-editor-default.140bc74b6ec0.log"
+  },
+  {
+    "scenario": "smoke/terminal-facts",
+    "sha256": "42aba3534afdd2b93f92add05719f9b385a94c7e217540bd446d8e8dbea4bdca",
+    "path": "corpus-logs/smoke/terminal-facts.42aba3534afd.log"
+  },
+  {
+    "scenario": "smoke/tpm-init",
+    "sha256": "2b0bde0db2ad73ad0b315559ccd4a4a897f3bafd73dd05d45b6ff312ef4d3a08",
+    "path": "corpus-logs/smoke/tpm-init.2b0bde0db2ad.log"
+  },
+  {
+    "scenario": "smoke/tui-client-input-backpressure",
+    "sha256": "2495eb6c56f058f40af78eab061dc65b6e78c60c29253ff2e0e16a180322e9bc",
+    "path": "corpus-logs/smoke/tui-client-input-backpressure.2495eb6c56f0.log"
+  },
+  {
+    "scenario": "smoke/vim-tmux-navigator",
+    "sha256": "b66e17941606e50b674f6719b30effeb1afb514f4f81a730575d29aa3366fec1",
+    "path": "corpus-logs/smoke/vim-tmux-navigator.b66e17941606.log"
+  },
+  {
+    "scenario": "smoke/yank",
+    "sha256": "14039f938e6ab73dd73b6a10aa8ce4c0914483684ec39750fe9364122fc01ad0",
+    "path": "corpus-logs/smoke/yank.14039f938e6a.log"
+  },
+  {
+    "scenario": "source-file-current-file",
+    "sha256": "a8a9781fd8c9fd92a302b33b989e7f35198270efa3606e279a876cecea400bcb",
+    "path": "corpus-logs/source-file-current-file.a8a9781fd8c9.log"
+  },
+  {
+    "scenario": "source-file-format",
+    "sha256": "1f6c97dabdc0530bb549a379880d429a84b85c6808a30f8946ebe42a90a8fa6e",
+    "path": "corpus-logs/source-file-format.1f6c97dabdc0.log"
+  },
+  {
+    "scenario": "source-file-output",
+    "sha256": "4f419ee18753a0fbff45ad4c2e3fba203f592665805d410ce34915bb9c78f1eb",
+    "path": "corpus-logs/source-file-output.4f419ee18753.log"
+  },
+  {
+    "scenario": "status-options",
+    "sha256": "8078e4ca10b239f8d120032a3e8f5879ebb9ab726702c45c1b33c60e5c2e86bb",
+    "path": "corpus-logs/status-options.8078e4ca10b2.log"
+  },
+  {
+    "scenario": "stderr-parity",
+    "sha256": "f20b5a45705c0bf1f31f5946ab90bc286493941c4d5e59b9b899a5309d531fc9",
+    "path": "corpus-logs/stderr-parity.f20b5a45705c.log"
+  },
+  {
+    "scenario": "strict-key-validation",
+    "sha256": "99b2ec547789de0d9bba0d8b62122ee762f28a7288699d407143dd52988b82e4",
+    "path": "corpus-logs/strict-key-validation.99b2ec547789.log"
+  },
+  {
+    "scenario": "update-environment",
+    "sha256": "e13aa1f912d1b7cc1c687f71ce8e90d12f1755b028688e6b6a5827d2a5497bc3",
+    "path": "corpus-logs/update-environment.e13aa1f912d1.log"
+  }
+]

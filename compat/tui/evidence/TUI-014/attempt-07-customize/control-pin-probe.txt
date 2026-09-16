@@ -1,0 +1,2 @@
+control state S< alive True
+stdout b'%begin 1789576516 308 0\n%end 1789576516 308 0\n%window-add @0\n%sessions-changed\n%session-changed $0 control\n%output %0 \\033[?2004hsh-5.3$ \n%begin 1789576517 314 1\n%end 1789576517 314 1\n%begin 1789576517 315 1\nCONTROL-ALIVE\n%end 1789576517 315 1\n%begin 1789576517 316 1\n%end 1789576517 316 1\n%exit\n' stderr b'' exit 0

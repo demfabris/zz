@@ -13,7 +13,11 @@ export const meta = {
 // checks it against every lesson an earlier cycle paid for.
 
 const SLOTS = 3;        // at most three agents; the two cargo slots still cap compiles at two
-const ORDER = ['capture-11', 'alias-2', 'modes-12', 'customize', 'capture-residuals', 'zz-knobs'];
+// exitcode gates FIRST: main is red without it (three asserted cases in
+// compat/tui-client-commands.sh), so no other branch can prove itself against a green main,
+// and it touches catalog.rs and message.rs which modes-12 and alias-2 also carry.
+const ORDER = ['exitcode', 'alias-2', 'modes-12', 'capture-12', 'customize',
+               'capture-residuals', 'zz-knobs'];
 
 const COMMON = `
 ZONES. A lane's zones are drawn around its OBLIGATION, across whatever crates it needs, not
@@ -84,6 +88,23 @@ const LANES = [
       '(selected and offset are rebuilt as 0), while the choose-tree engine has the tree but is ' +
       'per-client - and records the choice in knowledge/designs. Flip customize-mode-open and ' +
       'suspend-client from recorded to asserted, which takes TUI-014 to zero records.',
+  },
+  {
+    key: 'exitcode', obligation: 'TUI-011', from: 'origin/main',
+    push: 'campaign/tui-exitcode',
+    batch: 'v0.10.0 applied zz\'s own CLI exit-code contract (2 = usage error) to the ' +
+      'tmux-compatible command path, so every tmux usage error exits 2 where the pin exits 1 ' +
+      '(eight of eight measured). Three asserted cases are red on main. fabrico ruled on ' +
+      '2026-09-16 to split the contracts: the tmux path keeps the pin\'s status, zz\'s own verbs ' +
+      'and extensions keep 2. The split is per error, not per command, because list-panes carries ' +
+      'both a tmux flag surface and zz\'s --json.',
+  },
+  {
+    key: 'capture-12', obligation: 'TUI-017', from: 'campaign/tui-capture-11',
+    push: 'campaign/tui-capture-12',
+    batch: 'The four must-fix findings that rejected capture-11: compound targets cli:= , =: and ' +
+      ':.%2 still failing, erased backgrounds counting toward the -J/-T text extent, SpacerHead ' +
+      'skipped at a wide-character wrap boundary, and -C capture losing tabs with no owned record.',
   },
   {
     key: 'capture-residuals', obligation: 'TUI-015', from: 'campaign/tui-capture-11',

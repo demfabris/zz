@@ -1521,7 +1521,7 @@ fn finish_control_return<W: Write>(
     }
     let _ = client.detach();
     if input_error.is_none() && !state.parked_queue_released {
-        drain_before_exit(receiver, state, output)?;
+        drain_before_exit(receiver, state, output, pending_stdin)?;
     }
     finish_exit(
         output,
@@ -1540,6 +1540,7 @@ fn drain_before_exit<W: Write>(
     receiver: &mpsc::Receiver<MainEvent>,
     state: &mut ControlState,
     output: &mut ControlWriter<W>,
+    pending_stdin: &mut VecDeque<StdinEvent>,
 ) -> io::Result<()> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
@@ -1552,8 +1553,8 @@ fn drain_before_exit<W: Write>(
                     return Ok(());
                 }
             }
-            Ok(_) => {}
-            Err(_) => return Ok(()),
+            Ok(MainEvent::Stdin(input)) => pending_stdin.push_back(input),
+            Ok(MainEvent::Disconnected) | Err(_) => return Ok(()),
         }
     }
 }
@@ -4025,6 +4026,23 @@ mod tests {
             render_subscription_changed("session-watch", session, None, None, None, "value"),
             "%subscription-changed session-watch $1 - - - : value"
         );
+    }
+
+    #[test]
+    fn exit_drain_keeps_wait_exit_acknowledgements() {
+        let (sender, receiver) = mpsc::sync_channel(32);
+        sender
+            .send(MainEvent::Stdin(StdinEvent::Line(String::new())))
+            .unwrap();
+        sender.send(MainEvent::Stdin(StdinEvent::Eof)).unwrap();
+        drop(sender);
+        let mut pending = VecDeque::new();
+        let mut state = ControlState::default();
+        let mut output = ControlWriter::new(Vec::new(), false);
+        drain_before_exit(&receiver, &mut state, &mut output, &mut pending).unwrap();
+        assert_eq!(pending.len(), 2);
+        wait_for_exit_input(&receiver, &mut pending);
+        assert!(matches!(pending.pop_front(), Some(StdinEvent::Eof)));
     }
 
     #[test]

@@ -677,7 +677,9 @@ impl CommandPaletteView {
                 cx.notify();
             }
             PaletteAction::Command(spec) => {
-                if target_kind(spec).is_some() {
+                if complete {
+                    self.set_query(format!("{} ", spec.name), window, cx);
+                } else if target_kind(spec).is_some() {
                     if let Some(unified) = &mut self.unified {
                         unified.mode = Some(PaletteMode::Command);
                         unified.command = Some(spec);
@@ -2270,6 +2272,7 @@ mod tests {
             cx.update(|_, cx| palette.read(cx).input.read(cx).value().to_string()),
             "new-window "
         );
+        assert!(!palette.read_with(cx, |palette, _| palette.finishing));
         assert!(cx.update(|window, cx| palette.read(cx).focus(cx).is_focused(window)));
     }
 

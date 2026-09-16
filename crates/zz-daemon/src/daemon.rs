@@ -14034,6 +14034,7 @@ impl Shared {
                     if let Some(line) = screen
                         .lines()
                         .rev()
+                        .skip_while(|line| line.trim().is_empty())
                         .take(parsed.tail.unwrap_or(usize::MAX))
                         .find(|line| match condition {
                             PaneWaitCondition::Until(text) => line.contains(text),
@@ -63522,6 +63523,45 @@ set-option -g @alias-mixed-next yes
             error,
             DaemonError::CommandExit { exit_code: 124, .. }
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_pane_tail_skips_the_blank_rows_below_the_cursor() {
+        let (shared, client, target) =
+            send_text_fixture("waittailblank", "printf 'zz-ready\\r\\n'; exec /bin/cat");
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("send-text", ["-t", &target, "--no-enter", "tailneedle"]),
+            )
+            .expect("send-text");
+        wait_for_capture(&shared, client, &target, |screen| {
+            screen.trim_end().ends_with("tailneedle")
+        });
+        let execution = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "wait-pane",
+                    [
+                        "-t",
+                        &target,
+                        "--until",
+                        "tailneedle",
+                        "--tail",
+                        "1",
+                        "--timeout",
+                        "0",
+                    ],
+                ),
+            )
+            .expect("the last non-empty line holds the needle");
+        assert_eq!(execution.output.to_string().trim_end(), "tailneedle");
     }
 
     #[cfg(unix)]

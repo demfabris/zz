@@ -115,6 +115,29 @@ def rule_cargo_wrapper(text):
     return True, "cargo slot-and-cap wrapper present"
 
 
+def rule_compile_parallelism(text):
+    """Two cargo slots are not two compiles.
+
+    Earned by cycle 11: the documented wrapper ends `cargo ... --jobs 3`, so the
+    two-slot flock still allowed six concurrent rustc. With five lanes up on the
+    15 GB alienware box, free memory fell to 491 MB, memory pressure spiked, and
+    the harness killed the orchestrator's background waits to reclaim memory.
+    Peak compile parallelism is slots x jobs, and a runner has to say so.
+    """
+    jobs = re.search(r"--jobs[ =](\d+)", text)
+    if jobs is None:
+        return False, "the cargo wrapper must pin --jobs; without it cargo uses every core"
+    slots = re.search(r"const SLOTS = (\d+)", text)
+    n = int(jobs.group(1))
+    if not re.search(r"slots x jobs|slots \* jobs|peak compile parallelism", text, re.I):
+        return False, ("the runner must state that peak compile parallelism is slots x jobs, "
+                       "not the slot count")
+    if slots and int(slots.group(1)) * n > 6:
+        return False, (f"{slots.group(1)} slots x {n} jobs is up to "
+                       f"{int(slots.group(1)) * n} concurrent rustc; this box thrashed at 3")
+    return True, f"compile parallelism bounded at 2 slots x {n} jobs"
+
+
 def rule_every_fixture(text):
     here = Path(__file__).resolve().parent.parent
     have = sorted(f.name for f in here.glob("tui-*.sh"))
@@ -193,6 +216,10 @@ RULES = [
      rule_slots),
     ("cargo-caps", "the same crash: an uncapped cargo can take the whole machine down",
      rule_cargo_wrapper),
+    ("compile-parallelism",
+     "cycle 11: two cargo slots running --jobs 3 each allowed six concurrent rustc and squeezed "
+     "the 15 GB box until the harness killed the orchestrator's background waits",
+     rule_compile_parallelism),
     ("every-fixture",
      "cycle 10: the gate's fixture list had gone three cycles without picking up tui-mouse.sh, "
      "tui-client-commands.sh or tui-superset.sh, so nothing ran them but the lane that owned them",

@@ -35,9 +35,12 @@ the memory cap and the two shared slots. Use cargo test -p <pkg> --lib <name> wh
 the full package only before the commit that closes an item.
 
 CARGO. Every cargo command goes through /tmp/zz-cargo.sh, which wraps systemd-run --user --scope
-with MemoryMax plus a flock on one of two shared zz-cargo-slot- locks. Five uncapped lanes drove
-this box out of memory on 2026-09-11. compat/run.sh builds zz outside those slots, so lanes set
-ZZ_COMPAT_ZZ to a built binary and it invokes cargo zero times.
+with MemoryMax=4G plus a flock on one of two shared zz-cargo-slot- locks and pins --jobs 2. Five
+uncapped lanes drove this box out of memory on 2026-09-11. Note that peak compile parallelism is
+slots x jobs, not the slot count: this cycle ran two slots at --jobs 3, which allows six concurrent
+rustc, and with five lanes up free memory fell to 491 MB and the harness killed the orchestrator's
+background waits. Two slots at --jobs 2 is the ceiling for this box. compat/run.sh builds zz
+outside those slots, so lanes set ZZ_COMPAT_ZZ to a built binary and it invokes cargo zero times.
 
 CORPUS. A lane that removes or changes a zz-only screen string must grep compat/scenarios for it;
 twice a presentation change landed that a corpus row still contradicted. Every lane and every

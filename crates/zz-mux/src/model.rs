@@ -2324,6 +2324,22 @@ impl MuxState {
                 .strip_prefix('=')
                 .map_or((target, false), |target| (target, true))
         };
+        if target.starts_with('%') {
+            let pane = target
+                .parse::<PaneId>()
+                .ok()
+                .and_then(|pane| self.window_for_pane(pane))
+                .ok_or_else(|| ServerError::PaneNotFound(target.to_owned()))?;
+            return Ok(self.windows[&pane].session);
+        }
+        if target.starts_with('@') {
+            return target
+                .parse::<WindowId>()
+                .ok()
+                .and_then(|window| self.windows.get(&window))
+                .map(|window| window.session)
+                .ok_or_else(|| ServerError::WindowNotFound(target.to_owned()));
+        }
         if target.starts_with('$') {
             let id = target
                 .parse::<SessionId>()
@@ -4901,6 +4917,31 @@ mod tests {
         assert!(matches!(missing, ServerError::SessionNotFound(target) if target == "nope"));
         let malformed = state.resolve_session(Some("$nope"), None).unwrap_err();
         assert!(matches!(malformed, ServerError::SessionNotFound(target) if target == "$nope"));
+    }
+
+    #[test]
+    fn session_targets_accept_pane_and_window_ids() {
+        let mut state = MuxState::default();
+        let (work, work_window, work_pane) = state.create_session("work").unwrap();
+        let (other, ..) = state.create_session("other").unwrap();
+        assert_eq!(
+            state
+                .resolve_session(Some(&work_pane.to_string()), Some(other))
+                .unwrap(),
+            work
+        );
+        assert_eq!(
+            state
+                .resolve_session(Some(&work_window.to_string()), Some(other))
+                .unwrap(),
+            work
+        );
+        let missing_pane = state.resolve_session(Some("%99"), None).unwrap_err();
+        assert!(matches!(missing_pane, ServerError::PaneNotFound(target) if target == "%99"));
+        let missing_window = state.resolve_session(Some("@99"), None).unwrap_err();
+        assert!(matches!(missing_window, ServerError::WindowNotFound(target) if target == "@99"));
+        let malformed = state.resolve_session(Some("%x"), None).unwrap_err();
+        assert!(matches!(malformed, ServerError::PaneNotFound(target) if target == "%x"));
     }
 
     #[test]

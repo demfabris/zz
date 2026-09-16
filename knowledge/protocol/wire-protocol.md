@@ -682,24 +682,6 @@ invocation rather than in `args` for the commands whose payload is not an argume
 the server log still records the command the caller typed. See
 [the command stream channel](/designs/command-stream-channel.md) for the sinks and the bound.
 
-v103 also appends `mode: Option<PaneMode>` to `PaneSnapshot` after `border_status_text`, the
-server-owned pane mode `wp->modes` holds. `None` is a pane in no such mode; `PaneMode::Clock {
-time, colour }` is `window_clock_mode`, carrying the `tim` string `window_clock_draw_screen`
-formatted from `clock-mode-style` and the `clock-mode-colour` option value the client resolves the
-way `style_parse_colour` resolves it into `gc.fg`. It rides the pane snapshot rather than a client
-event because the mode belongs to the pane: every client attached to the window draws the same
-face, one that attaches later gets it with its first snapshot, and a clientless `list-panes` reads
-`#{pane_in_mode}` and `#{pane_mode}` from the daemon's own map. The daemon republishes the snapshot
-on the whole second, the way `window_clock_timer_callback` redraws. The raw TUI is the consumer
-half and it shipped in the same push; the GPUI, iOS and web clients read the field for nothing and
-keep the pane's own presentation. Copy mode is not here - it stays on each client's terminal view.
-`PaneMode::Switch { rows, selected, offset, selection_style, prompt, prompt_style }` is
-`window_switch_mode`: the server expands one row per session, or per window under `-w`, through
-`WINDOW_SWITCH_DEFAULT_FORMAT` and sends each with its `#[...]` markup intact, beside the resolved
-`mode-style` the current row is drawn over and the `message-style` `prompt_draw` gives the
-`(search)` prompt on the pane's last row. Appending a variant to `PaneMode` is a tail append like
-any other, and both halves ship together.
-
 # Versioning & compatibility
 
 - **`PROTOCOL_VERSION: u16 = 104`** is stamped into every frame's envelope and re-checked inside
@@ -714,6 +696,25 @@ any other, and both halves ship together.
   `NativeInvalidCommand` preserves the runtime phase when bind-key or untyped confirm-before
   constructs an invalid native callback, while retaining native usage exit 2.
   v103 shipped in zz 0.10.0, so these builds require v104 on both sides of the connection.
+  This unreleased version also appends `mode: Option<PaneMode>` after `PaneSnapshot.border_status_text` with
+  `#[serde(default)]`; no existing field moves. The field carries the server-owned pane mode
+  `wp->modes` holds. `None` is a pane in no such mode; `PaneMode::Clock {
+  time, colour }` is `window_clock_mode`, carrying the `tim` string `window_clock_draw_screen`
+  formatted from `clock-mode-style` and the `clock-mode-colour` option value the client resolves the
+  way `style_parse_colour` resolves it into `gc.fg`. It rides the pane snapshot rather than a client
+  event because the mode belongs to the pane: every client attached to the window draws the same
+  face, one that attaches later gets it with its first snapshot, and a clientless `list-panes` reads
+  `#{pane_in_mode}` and `#{pane_mode}` from the daemon's own map. The daemon republishes the snapshot
+  on the whole second, the way `window_clock_timer_callback` redraws. The raw TUI is the consumer
+  half and ships with the daemon; the GPUI, iOS and web clients ignore the field and
+  keep the pane's own presentation. Copy mode is not here - it stays on each client's terminal view.
+  `PaneMode::Switch { rows, selected, offset, selection_style, prompt, prompt_style }` is
+  `window_switch_mode`: the server expands one row per session, or per window under `-w`, through
+  `WINDOW_SWITCH_DEFAULT_FORMAT` and sends each with its `#[...]` markup intact, beside the resolved
+  `mode-style` the current row is drawn over and the `message-style` `prompt_draw` gives the
+  `(search)` prompt on the pane's last row. Appending a variant to `PaneMode` is a tail append like
+  any other, and both halves ship together.
+
 - v103 carries the pin's pane prompt and the terminal name a client learned after the hello.
   `CommandPromptState` appends `pane: Option<PaneId>` after `no_freeze`: `command-prompt -P` is
   `window_pane_set_prompt`, so the prompt hangs on the pane the command targeted rather than on the

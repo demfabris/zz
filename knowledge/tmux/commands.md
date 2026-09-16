@@ -529,7 +529,7 @@ to tmux's `capture-pane`. Execution remains daemon-owned.
 | `show-agent-permission` | `[-t %N]` . print the oldest pending permission as JSON; exit 1 when none is pending. |
 | `agent-respond` | `[-t %N] (--allow \| --deny \| --option ID) [REQUEST_ID]` . answer the oldest or named request and print the option ID. `--allow` prefers allow-once. Interactive clients cannot invoke it. |
 | `send-last-output` | `-t %N` . route a terminal pane's last completed command and output (OSC 133 marks) into the window's most recently focused Agent pane. Bound to `<prefix> e`. |
-| `show-last-output` | `-t %N` . the read twin: print that same fenced `%N $ command` block to the caller instead of routing it, so a script or an agent reads a terminal's last result without a capture-and-regex dance. Same OSC 133 requirement and 200-line / 256 KiB cap. Accepts an Agent pane too: its transcript projection frames every turn with OSC 133 marks, so the block is the last prompt and reply. |
+| `show-last-output` | `-t %N` . the read twin: print that same fenced `%N $ command` block to the caller instead of routing it, so a script or an agent reads a terminal's last result without a capture-and-regex dance. Same OSC 133 requirement and 200-line / 256 KiB cap. When known, an `exit: <n>` line follows the header. Accepts an Agent pane too: its transcript projection frames every turn with OSC 133 marks, so the block is the last prompt and reply. |
 | `wait-pane` | `[-t %N] [--idle MS \| --until TEXT \| --regex RE] [--timeout SECS] [--tail N]` . wait for one condition in a terminal pane. Default: 500 ms without output after observation starts, with no output on success. Text and regex searches join wrapped visible lines and print the matching line; `--tail` restricts the search to the last N logical lines. Timeout defaults to 60 seconds and exits 124; invalid regex syntax exits 2. Command and Control clients only. |
 | `run-pane` | `[-t %N] [--timeout SECS] [--] COMMAND...` . join words with single spaces and paste one command line into a POSIX terminal shell, verify its echo, then submit. Random markers identify the output and child exit code without shell integration. Capture includes scrollback, capped to the last 10,000 logical lines. Timeout defaults to 120 seconds, prints partial output, and exits 125 while the command continues. Command and Control clients only. |
 | `send-text` | `-t %N [--no-enter] [--timeout MS] TEXT` . deliver TEXT to a TUI in a terminal pane the way `send-keys -l … Enter` cannot: paste it (bracketed iff the app enabled DECSET 2004 — the actor decides), poll `capture` until the text's tail, or a `[Pasted text` collapse marker, is on screen, then press Enter. No echo within `--timeout` (default 2000 ms) is a non-zero exit with nothing submitted. Honors `pane_input_off` and `synchronize-panes` like `paste-buffer`. |
@@ -540,6 +540,10 @@ Agent panes answer the read verbs like terminals: each owns a PTY-free shadow te
 projection of its transcript, so `capture-pane`, `show-last-output`, `pipe-pane`, and the
 activity/bell alerts work on `%agent` with no agent-specific grammar (see
 [the projection design](/designs/agent-pane-projection.md)). Input verbs still refuse them.
+
+The zz-native format `#{pane_last_command_status}` reports the last completed command's
+OSC 133 exit code on terminal and Agent panes, or an empty string when unknown.
+A new prompt keeps the previous code; a completion without a code clears it.
 
 The composer form of `agent-send` and `capture-browser` are **round trips**: the daemon publishes
 the request to the attached GUI and parks the calling command thread on

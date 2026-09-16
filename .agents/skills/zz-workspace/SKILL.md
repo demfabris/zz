@@ -36,6 +36,8 @@ zz list-panes -F '#{pane_id} #{pane_kind} #{agent_state} #{@agent_state}'
 ```
 
 `#{pane_kind}` is `terminal`, `agent`, `browser`, `editor`, or `picker`.
+`#{pane_last_command_status}` is the last completed command's exit code, or empty
+when unknown; terminal and Agent panes report it from OSC 133 marks.
 `#{@name}` reads a user option from pane, window, session, then global scope.
 
 ## Verbs
@@ -96,6 +98,7 @@ Output is capped at 200 lines or 256 KiB with a truncation note.
 
 Print that last command and output under a `%N $ command` header, with the same
 OSC 133 requirement and caps. For an Agent pane, read its last prompt and reply.
+When known, an `exit: <n>` line follows the header.
 
 ### `zz wait-pane [-t %N] [--idle MS | --until TEXT | --regex RE] [--timeout SECS] [--tail N]`
 

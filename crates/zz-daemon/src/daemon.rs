@@ -13422,7 +13422,8 @@ impl Shared {
         context: &ExecutionContext,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
-        let (pane, capture) = self.capture_last_command_for("send-last-output", context, args)?;
+        let (pane, capture, status) =
+            self.capture_last_command_for("send-last-output", context, args)?;
         let agent = self
             .inner
             .lock()
@@ -13432,7 +13433,7 @@ impl Shared {
             .ok_or_else(|| {
                 ServerError::MissingTarget(format!("no agent pane in the window holding {pane}"))
             })?;
-        self.deliver_to_agent(agent, last_command_block(pane, &capture), false)?;
+        self.deliver_to_agent(agent, last_command_block(pane, &capture, status), false)?;
         Ok(Execution {
             output: format!("sent the last command from {pane} to {agent}").into(),
             effects: Vec::new(),
@@ -13446,9 +13447,10 @@ impl Shared {
         context: &ExecutionContext,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
-        let (pane, capture) = self.capture_last_command_for("show-last-output", context, args)?;
+        let (pane, capture, status) =
+            self.capture_last_command_for("show-last-output", context, args)?;
         Ok(Execution {
-            output: last_command_block(pane, &capture).into(),
+            output: last_command_block(pane, &capture, status).into(),
             effects: Vec::new(),
         })
     }
@@ -13788,7 +13790,7 @@ impl Shared {
         verb: &str,
         context: &ExecutionContext,
         args: &[RawText],
-    ) -> Result<(PaneId, LastCommandCapture), DaemonError> {
+    ) -> Result<(PaneId, LastCommandCapture, Option<i32>), DaemonError> {
         let target = parse_target_only_args(verb, args)?;
         let (pane, terminal, is_agent) = {
             let inner = self.inner.lock();
@@ -13844,7 +13846,7 @@ impl Shared {
             ))
             .into());
         }
-        Ok((pane, capture))
+        Ok((pane, capture, terminal.last_command_status()))
     }
 
     fn capture_browser(
@@ -40116,7 +40118,7 @@ fn fenced_block(header: &str, text: &str) -> String {
     format!("{header}\n{fence}\n{text}\n{fence}")
 }
 
-fn last_command_block(pane: PaneId, capture: &LastCommandCapture) -> String {
+fn last_command_block(pane: PaneId, capture: &LastCommandCapture, status: Option<i32>) -> String {
     let mut body = String::new();
     if capture.truncated_rows > 0 {
         let _ = writeln!(
@@ -40126,7 +40128,11 @@ fn last_command_block(pane: PaneId, capture: &LastCommandCapture) -> String {
         );
     }
     body.push_str(&capture.output);
-    fenced_block(&format!("{pane} $ {}", capture.command), &body)
+    let mut header = format!("{pane} $ {}", capture.command);
+    if let Some(status) = status {
+        let _ = write!(header, "\nexit: {status}");
+    }
+    fenced_block(&header, &body)
 }
 
 /// Whether `zz agent-send` must read its payload from standard input.
@@ -40389,6 +40395,8 @@ zz list-panes -F '#{pane_id} #{pane_kind} #{agent_state} #{@agent_state}'
 ```
 
 `#{pane_kind}` is `terminal`, `agent`, `browser`, `editor`, or `picker`.
+`#{pane_last_command_status}` is the last completed command's exit code, or empty
+when unknown; terminal and Agent panes report it from OSC 133 marks.
 `#{@name}` reads a user option from pane, window, session, then global scope.
 
 ## Verbs
@@ -40449,6 +40457,7 @@ Output is capped at 200 lines or 256 KiB with a truncation note.
 
 Print that last command and output under a `%N $ command` header, with the same
 OSC 133 requirement and caps. For an Agent pane, read its last prompt and reply.
+When known, an `exit: <n>` line follows the header.
 
 ### `zz wait-pane [-t %N] [--idle MS | --until TEXT | --regex RE] [--timeout SECS] [--tail N]`
 
@@ -72470,6 +72479,52 @@ set-option -g @alias-mixed-next yes
             DaemonError::Server(ServerError::InvalidCommand(message))
                 if message.contains("show-last-output needs") && message.contains("OSC 133")
         ));
+    }
+
+    #[test]
+    fn show_last_output_includes_only_known_command_status() {
+        let shared = Arc::new(Shared::new(1));
+        let terminal = Arc::new(TerminalSession::spawn_empty_with_appearance(
+            64,
+            Arc::new(TerminalAppearance::default()),
+        ));
+        let (session, window, pane) = {
+            let mut inner = shared.inner.lock();
+            let ids = inner
+                .engine
+                .state
+                .create_session("exit-status")
+                .expect("session");
+            inner.terminals.insert(ids.2, Arc::clone(&terminal));
+            ids
+        };
+        let context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        assert!(terminal.feed(Arc::from(
+            b"\x1b]133;A\x07$ \x1b]133;B\x07false\x1b]133;C\x07\r\nfailed\r\n".as_slice()
+        )));
+        assert_eq!(
+            shared
+                .show_last_output(&context, &[])
+                .expect("unknown exit status")
+                .output,
+            format!("{pane} $ false\n```\nfailed\n```")
+        );
+        assert!(terminal.feed(Arc::from(b"\x1b]133;D;1\x07\x1b]133;A\x07$ ".as_slice())));
+        assert_eq!(
+            shared
+                .show_last_output(&context, &[])
+                .expect("failed command")
+                .output,
+            format!("{pane} $ false\nexit: 1\n```\nfailed\n```")
+        );
+        assert!(terminal.feed(Arc::from(b"\x1b]133;D\x07".as_slice())));
+        assert_eq!(
+            shared
+                .show_last_output(&context, &[])
+                .expect("cleared exit status")
+                .output,
+            format!("{pane} $ false\n```\nfailed\n```")
+        );
     }
 
     #[test]

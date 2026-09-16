@@ -302,6 +302,7 @@ impl EngineFilter {
         terminal: &mut Terminal<'_, '_>,
         renames: &mut Vec<String>,
         bar: &mut Option<ProgressBar>,
+        last_command_status: &mut Option<Option<i32>>,
     ) {
         while !bytes.is_empty() {
             match self.state {
@@ -381,7 +382,7 @@ impl EngineFilter {
                     }
                 }
                 EngineState::Osc => {
-                    bytes = self.write_osc(bytes, terminal, bar);
+                    bytes = self.write_osc(bytes, terminal, bar, last_command_status);
                 }
                 EngineState::Rename => {
                     let byte = bytes[0];
@@ -497,6 +498,7 @@ impl EngineFilter {
         bytes: &'b [u8],
         terminal: &mut Terminal<'_, '_>,
         bar: &mut Option<ProgressBar>,
+        last_command_status: &mut Option<Option<i32>>,
     ) -> &'b [u8] {
         let end = bytes
             .iter()
@@ -509,12 +511,12 @@ impl EngineFilter {
         };
         if terminator == 0x1b {
             terminal.vt_write(&bytes[..end]);
-            self.finish_osc(bar);
+            self.finish_osc(bar, last_command_status);
             self.state = EngineState::Escape;
             return &bytes[end + 1..];
         }
         terminal.vt_write(&bytes[..=end]);
-        self.finish_osc(bar);
+        self.finish_osc(bar, last_command_status);
         self.state = EngineState::Ground;
         &bytes[end + 1..]
     }
@@ -533,12 +535,18 @@ impl EngineFilter {
         osc.extend(bytes.iter().copied().filter(|byte| *byte >= 0x20));
     }
 
-    /// `input_exit_osc` routes 9 to `input_osc_9`, whose OSC 9;4 grammar is the
-    /// only OSC the filter reads.
-    fn finish_osc(&mut self, bar: &mut Option<ProgressBar>) {
+    fn finish_osc(
+        &mut self,
+        bar: &mut Option<ProgressBar>,
+        last_command_status: &mut Option<Option<i32>>,
+    ) {
         let Some(osc) = self.osc.take() else {
             return;
         };
+        if let Some(status) = parse_osc_command_status(&osc) {
+            *last_command_status = Some(status);
+            return;
+        }
         let Some((state, progress)) = parse_osc_progress(&osc) else {
             return;
         };
@@ -559,6 +567,15 @@ impl EngineFilter {
         }
         self.title.clear();
     }
+}
+
+fn parse_osc_command_status(payload: &[u8]) -> Option<Option<i32>> {
+    let rest = payload.strip_prefix(b"133;D")?;
+    if rest.is_empty() {
+        return Some(None);
+    }
+    let status = std::str::from_utf8(rest.strip_prefix(b";")?).ok()?;
+    Some(Some(status.parse().ok()?))
 }
 
 /// `input_exit_osc` reads the leading digits as the OSC number, which must be
@@ -1050,8 +1067,7 @@ impl Default for CaptureOptions {
 }
 
 /// The last completed command and its output, read from the OSC 133 marks
-/// libghostty records on rows and cells. `133;D` exit status is not exposed
-/// by the Rust API, so it is absent.
+/// libghostty records on rows and cells.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LastCommandCapture {
     pub command: String,
@@ -1258,6 +1274,7 @@ struct PublishedViewports {
     copy_facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>,
     frozen: Option<Arc<FrozenHistory>>,
     bar: ProgressBar,
+    last_command_status: Option<i32>,
     facts: TerminalFacts,
     search_string: String,
 }
@@ -1270,6 +1287,7 @@ impl PublishedViewports {
             copy_facts: HashMap::new(),
             frozen: None,
             bar: ProgressBar::default(),
+            last_command_status: None,
             facts: TerminalFacts::default(),
             search_string: String::new(),
         }
@@ -1780,6 +1798,11 @@ impl TerminalSession {
     #[must_use]
     pub fn progress_bar(&self) -> ProgressBar {
         self.latest.read().bar
+    }
+
+    #[must_use]
+    pub fn last_command_status(&self) -> Option<i32> {
+        self.latest.read().last_command_status
     }
 
     #[must_use]
@@ -3921,6 +3944,10 @@ impl Publisher {
         self.latest.write().bar = bar;
     }
 
+    fn set_last_command_status(&self, status: Option<i32>) {
+        self.latest.write().last_command_status = status;
+    }
+
     fn publish(&self, viewport: TerminalViewport) {
         let viewport = Arc::new(viewport);
         {
@@ -4378,6 +4405,7 @@ fn run_output_view(
         write_output_view_content(&mut terminal, title, text);
     }
     let mut raw_output_tap: Option<(u64, Sender<Arc<[u8]>>)> = None;
+    let mut engine_filter = EngineFilter::default();
 
     let mut render_state = RenderState::new()?;
     let mut row_iterator = RowIterator::new()?;
@@ -4713,7 +4741,22 @@ fn run_output_view(
                     if let Some(token) = tap_raw_output_arc(&mut raw_output_tap, &bytes) {
                         publisher.raw_output_tap_closed(token)?;
                     }
-                    terminal.vt_write(&bytes);
+                    let mut bar = None;
+                    let mut last_command_status = None;
+                    engine_filter.write(
+                        &bytes,
+                        EngineKnobs::default(),
+                        &mut terminal,
+                        &mut Vec::new(),
+                        &mut bar,
+                        &mut last_command_status,
+                    );
+                    if let Some(bar) = bar {
+                        publisher.set_progress_bar(bar);
+                    }
+                    if let Some(status) = last_command_status {
+                        publisher.set_last_command_status(status);
+                    }
                     publisher.mark_output_activity();
                     publish_active_views(
                         &mut terminal,
@@ -5182,6 +5225,7 @@ fn run_terminal(
     let mut engine_filter = EngineFilter::default();
     let mut engine_renames = Vec::new();
     let mut engine_bar: Option<ProgressBar> = None;
+    let mut engine_last_command_status: Option<Option<i32>> = None;
     let mut active_views = ActiveTerminalViews::new();
     let mut inactive_views = InactiveTerminalViews::new();
     let mut generations = ViewportGenerations::new()?;
@@ -5327,6 +5371,9 @@ fn run_terminal(
         }
         if let Some(bar) = engine_bar.take() {
             publisher.set_progress_bar(bar);
+        }
+        if let Some(status) = engine_last_command_status.take() {
+            publisher.set_last_command_status(status);
         }
 
         let mut deadline = Instant::now() + IDLE_SLEEP;
@@ -6094,6 +6141,7 @@ fn run_terminal(
                                         knobs: engine_knobs,
                                         renames: &mut engine_renames,
                                         bar: &mut engine_bar,
+                                        last_command_status: &mut engine_last_command_status,
                                     },
                                     &read_buffer[..length],
                                 );
@@ -6155,6 +6203,7 @@ fn run_terminal(
                                         knobs: engine_knobs,
                                         renames: &mut engine_renames,
                                         bar: &mut engine_bar,
+                                        last_command_status: &mut engine_last_command_status,
                                     },
                                     &mut raw_output_tap,
                                     buffer,
@@ -6190,6 +6239,7 @@ fn run_terminal(
                         knobs: engine_knobs,
                         renames: &mut engine_renames,
                         bar: &mut engine_bar,
+                        last_command_status: &mut engine_last_command_status,
                     },
                     &mut raw_output_parse_backlog,
                     &mut raw_output_parse_backlog_bytes,
@@ -6222,6 +6272,7 @@ fn run_terminal(
                             knobs: engine_knobs,
                             renames: &mut engine_renames,
                             bar: &mut engine_bar,
+                            last_command_status: &mut engine_last_command_status,
                         },
                         &mut raw_output_tap,
                         buffer,
@@ -6266,6 +6317,9 @@ fn run_terminal(
                 complete_view_search(&mut terminal, view)?;
             }
             publisher.set_facts(engine_filter.facts(&terminal)?);
+            if let Some(status) = engine_last_command_status.take() {
+                publisher.set_last_command_status(status);
+            }
             let status = exit_status.take().expect("checked above");
             let signal = status.signal().and_then(signal_number);
             publisher.set_completion(TerminalProcessExit {
@@ -12654,6 +12708,7 @@ struct EngineOutput<'a> {
     renames: &'a mut Vec<String>,
     /// The pane's progress bar, set only by an OSC 9;4 that moved it.
     bar: &'a mut Option<ProgressBar>,
+    last_command_status: &'a mut Option<Option<i32>>,
 }
 
 fn feed_pty_output(
@@ -12667,9 +12722,17 @@ fn feed_pty_output(
         knobs,
         renames,
         bar,
+        last_command_status,
     } = engine;
     passthrough.write(bytes, |unwrapped| {
-        filter.write(unwrapped, *knobs, terminal, renames, bar);
+        filter.write(
+            unwrapped,
+            *knobs,
+            terminal,
+            renames,
+            bar,
+            last_command_status,
+        );
     })
 }
 
@@ -14043,6 +14106,7 @@ mod tests {
                     &mut terminal,
                     &mut renames,
                     &mut bar,
+                    &mut None,
                 );
             }
             assert_eq!(
@@ -14061,6 +14125,7 @@ mod tests {
                 &mut terminal,
                 &mut renames,
                 &mut bar,
+                &mut None,
             );
             filter.write(
                 &[b'x'; 80],
@@ -14068,6 +14133,7 @@ mod tests {
                 &mut terminal,
                 &mut renames,
                 &mut bar,
+                &mut None,
             );
             assert_eq!(
                 filter.facts(&terminal).expect("primary facts"),
@@ -14315,7 +14381,14 @@ mod tests {
         let mut renames = Vec::new();
         let mut bar = None;
         for chunk in chunks {
-            filter.write(chunk, knobs, &mut terminal, &mut renames, &mut bar);
+            filter.write(
+                chunk,
+                knobs,
+                &mut terminal,
+                &mut renames,
+                &mut bar,
+                &mut None,
+            );
         }
         let revision = ModeRevision::capture(&mut terminal).expect("revision");
         let rows = revision.total_rows();
@@ -14381,6 +14454,77 @@ mod tests {
                 progress: 10,
             }
         );
+    }
+
+    #[test]
+    fn engine_filter_tracks_command_status_until_the_next_completion() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 20,
+            rows: 4,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        let mut filter = EngineFilter::default();
+        let mut status = None;
+        for (payload, expected) in [
+            ("133;D;7", Some(Some(7))),
+            ("133;A", None),
+            ("133;B", None),
+            ("133;C", None),
+            ("0;title", None),
+            ("9;4;1;50", None),
+            ("133;D;garbage", None),
+            ("133;D;", None),
+            ("133;D;2147483648", None),
+            ("133;D;7;extra", None),
+            ("133;D;0", Some(Some(0))),
+            ("133;D;-1", Some(Some(-1))),
+            ("133;D", Some(None)),
+        ] {
+            let mut update = None;
+            filter.write(
+                format!("\x1b]{payload}\x07").as_bytes(),
+                EngineKnobs::default(),
+                &mut terminal,
+                &mut Vec::new(),
+                &mut None,
+                &mut update,
+            );
+            assert_eq!(update, expected, "{payload}");
+            if let Some(value) = update {
+                status = value;
+            }
+            if expected.is_none() {
+                assert_eq!(status, Some(7), "{payload}");
+            }
+        }
+        assert_eq!(status, None);
+    }
+
+    #[test]
+    fn engine_filter_reads_command_status_across_writes() {
+        let bytes = b"\x1b]133;D;7\x1b\\";
+        for split in 1..bytes.len() {
+            let mut terminal = Terminal::new(TerminalOptions {
+                cols: 20,
+                rows: 4,
+                max_scrollback: 16,
+            })
+            .expect("terminal");
+            let mut filter = EngineFilter::default();
+            let mut status = None;
+            for chunk in [&bytes[..split], &bytes[split..]] {
+                filter.write(
+                    chunk,
+                    EngineKnobs::default(),
+                    &mut terminal,
+                    &mut Vec::new(),
+                    &mut None,
+                    &mut status,
+                );
+            }
+            assert_eq!(status, Some(Some(7)), "split at {split}");
+        }
     }
 
     /// The same probe's edges. From `9;4;1;50`, the pin answered
@@ -14544,6 +14688,7 @@ mod tests {
                 &mut terminal,
                 &mut renames,
                 &mut None,
+                &mut None,
             );
         }
         assert_eq!(terminal.cursor_x().expect("cursor"), 6);
@@ -14621,6 +14766,7 @@ mod tests {
                     knobs: EngineKnobs::default(),
                     renames: &mut renames,
                     bar: &mut bar,
+                    last_command_status: &mut None,
                 };
                 let started = Instant::now();
                 for chunk in input.chunks(65536) {
@@ -18792,6 +18938,33 @@ mod tests {
     }
 
     #[test]
+    fn session_reports_the_last_completed_command_status() {
+        let session = TerminalSession::spawn_empty_with_appearance(
+            64,
+            Arc::new(TerminalAppearance::default()),
+        );
+        assert_eq!(session.last_command_status(), None);
+        for (bytes, command, status) in [
+            (
+                b"\x1b]133;A\x07$ \x1b]133;B\x07one\x1b]133;C\x07\r\nout-one\r\n\x1b]133;D;0\x07\x1b]133;A\x07$ ".as_slice(),
+                "one",
+                Some(0),
+            ),
+            (
+                b"\x1b]133;B\x07two --flag\x1b]133;C\x07\r\nout-two\r\nmore-two\r\n\x1b]133;D;1\x07\x1b]133;A\x07$ ".as_slice(),
+                "two --flag",
+                Some(1),
+            ),
+            (b"\x1b]133;D\x07".as_slice(), "two --flag", None),
+        ] {
+            assert!(session.feed(Arc::from(bytes)));
+            let capture = session.capture_last_command().expect("last command");
+            assert_eq!(capture.command, command);
+            assert_eq!(session.last_command_status(), status);
+        }
+    }
+
+    #[test]
     fn scroll_on_clear_keeps_the_prompt_mark_of_the_erased_origin_row() {
         let mut terminal = Terminal::new(TerminalOptions {
             cols: 20,
@@ -18813,6 +18986,7 @@ mod tests {
                 &mut terminal,
                 &mut renames,
                 &mut bar,
+                &mut None,
             );
         }
         let capture = capture_last_command(&terminal).expect("marks survive the scroll");
@@ -21899,6 +22073,7 @@ preexec_functions+=(__zz_fixture_preexec)
         let first = wait_for_last_command(&session, |capture| capture.command == "echo hi");
         assert_eq!(first.output, "hi");
         assert_eq!(first.truncated_rows, 0);
+        assert_eq!(session.last_command_status(), Some(0));
 
         let bytes = submit("\n", "zz-fixture-3:0> ");
         assert!(!bytes.contains("\x1b]133;C"), "{bytes:?}");
@@ -21912,6 +22087,7 @@ preexec_functions+=(__zz_fixture_preexec)
         completed(&bytes, 1);
         let failed = wait_for_last_command(&session, |capture| capture.command == "false");
         assert_eq!(failed.output, "");
+        assert_eq!(session.last_command_status(), Some(1));
 
         let bytes = submit("echo one; echo two\n", "zz-fixture-5:0> ");
         completed(&bytes, 0);

@@ -1864,6 +1864,15 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                     _ => u8::from(facts.mouse_tracking).to_string(),
                 })
             }
+            "pane_last_command_status" => Some(
+                context
+                    .pane_id
+                    .parse()
+                    .ok()
+                    .and_then(|pane| self.facts.terminals.get(&pane))
+                    .and_then(|terminal| terminal.last_command_status())
+                    .map_or_else(String::new, |status| status.to_string()),
+            ),
             "pane_pb_progress" => Some(
                 pane_progress_bar(self.facts, &context.pane_id)?
                     .progress
@@ -2419,6 +2428,54 @@ mod tests {
                     ":"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn last_command_status_format_reports_codes_and_claims_unknown_values() {
+        let pane = PaneId(9);
+        let terminal = Arc::new(TerminalSession::spawn_empty_with_appearance(
+            64,
+            Arc::new(zz_terminal::TerminalAppearance::default()),
+        ));
+        let facts = FormatHookFacts {
+            terminals: Arc::new(BTreeMap::from([(pane, Arc::clone(&terminal))])),
+            ..FormatHookFacts::default()
+        };
+        let mut hooks = DaemonFormatHooks::command(&facts);
+        let context = StatusContext {
+            pane_id: pane.to_string(),
+            ..StatusContext::default()
+        };
+        for (bytes, expected) in [
+            (b"".as_slice(), ""),
+            (b"\x1b]133;D;7\x07".as_slice(), "7"),
+            (b"\x1b]133;A\x07".as_slice(), "7"),
+            (b"\x1b]133;D;0\x07".as_slice(), "0"),
+            (b"\x1b]133;D\x07".as_slice(), ""),
+        ] {
+            assert!(terminal.feed(Arc::from(bytes)));
+            terminal
+                .capture(zz_terminal::CaptureOptions::default())
+                .expect("processed output");
+            assert_eq!(
+                hooks.variable("pane_last_command_status", &context),
+                Some(expected.to_owned())
+            );
+            assert_eq!(
+                zz_mux::expand_format_values("#{pane_last_command_status}", &context, &mut hooks),
+                expected
+            );
+        }
+        for pane_id in ["%99", ""] {
+            let context = StatusContext {
+                pane_id: pane_id.to_owned(),
+                ..StatusContext::default()
+            };
+            assert_eq!(
+                hooks.variable("pane_last_command_status", &context),
+                Some(String::new())
+            );
         }
     }
 

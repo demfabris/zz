@@ -2,7 +2,6 @@ compat/scenarios/capture-pane.txt
 compat/scenarios/smoke/fixtures/command-flag-errors.sh
 compat/tmux-gaps.json
 compat/tui-client-commands.sh
-compat/tui/HANDOFF.md
 compat/tui/campaign.json
 compat/tui/evidence/TUI-015/attempt-01/01-tui-client-commands-run.txt
 compat/tui/evidence/TUI-015/attempt-01/02-tui-client-commands-self-check.txt
@@ -93,6 +92,7 @@ compat/tui/evidence/TUI-017/attempt-03/44-final-tracker.txt
 compat/tui/evidence/TUI-017/attempt-03/45-final-claims.txt
 compat/tui/evidence/TUI-017/attempt-03/46-final-wire.txt
 compat/tui/evidence/TUI-017/attempt-03/47-source-whitespace.txt
+compat/tui/evidence/TUI-017/attempt-03/48-current-main-wire.txt
 compat/tui/evidence/TUI-017/attempt-03/cargo-adapter.py
 compat/tui/evidence/TUI-017/attempt-03/corpus-observations.jsonl
 compat/tui/evidence/TUI-017/attempt-03/corpus-retries.json
@@ -109,6 +109,7 @@ compat/tui/evidence/TUI-017/attempt-03/initial-exits.json
 compat/tui/evidence/TUI-017/attempt-03/main-comparison.py
 compat/tui/evidence/TUI-017/attempt-03/main-corpus-observations.json
 compat/tui/evidence/TUI-017/attempt-03/main-environment.txt
+compat/tui/evidence/TUI-017/attempt-03/main-ref-at-delivery.json
 compat/tui/evidence/TUI-017/attempt-03/notes.md
 compat/tui/evidence/TUI-017/attempt-03/probe.py
 compat/tui/evidence/TUI-017/attempt-03/retain-corpus.py
@@ -117,10 +118,7 @@ compat/tui/evidence/TUI-017/attempt-03/rich-transports-probe.sh
 compat/tui/evidence/TUI-017/attempt-03/run.py
 compat/tui/evidence/TUI-017/attempt-03/runs.jsonl
 compat/tui/evidence/TUI-017/attempt-03/summarize-corpus.py
-compat/tui/lint-runner.py
-compat/tui/run-11.js
 compat/tui/verify-claims.py
-compat/wire-version.py
 crates/zz-daemon/src/daemon.rs
 crates/zz-mux/src/command.rs
 crates/zz-mux/src/model.rs

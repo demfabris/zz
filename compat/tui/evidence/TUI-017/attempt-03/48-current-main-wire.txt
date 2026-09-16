@@ -1,0 +1,4 @@
+command: ["python3", "-c", "from pathlib import Path; import subprocess; source=subprocess.check_output([\"git\",\"show\",\"e40a13e1:compat/wire-version.py\"],text=True); exec(compile(source,\"compat/wire-version.py\",\"exec\"),{\"__name__\":\"__main__\",\"__file__\":str(Path(\"compat/wire-version.py\").resolve())})"]
+wire-version: 103 matches v0.10.0 and the wire is unchanged (11 sources watched)
+
+exit_status: 0

@@ -248,3 +248,15 @@ This is a partial worker delivery. The requested target and capture regressions
 pass, tabs have named ordinary records, and the header comment nit is removed.
 The shared fixture, both --run claim checks, and the delta corpus are not green.
 Both obligations remain at review pending the gate and unresolved failure triage.
+
+## Moving shared main ref
+
+The first rebase and every candidate measurement use be5709df. Other sessions
+advanced the shared origin/main ref during this run, first to 47c05300 and then
+to e40a13e1. The latter includes new daemon and target work. Those later changes
+were not rebased into this measured candidate; the gate must account for them.
+A pre-push check caught that a two-dot staged footprint had accidentally included
+main-only files. The final footprint uses the actual three-dot merge base and
+contains only this branch's complete file list. The newer all-payload wire guard
+from e40a13e1 also passes against this tree (48, exit 0); it explicitly excludes
+CLI metadata in catalog.rs.

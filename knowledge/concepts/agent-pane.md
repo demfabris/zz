@@ -281,11 +281,16 @@ window. Both verbs are daemon-side commands like `capture-pane`; see
 [the command set](/tmux/commands.md).
 
 Use `#{agent_state}` to read the daemon's phase: `starting`, `idle`, `working`, `blocked`, or
-`failed`. `#{agent_pending_permission}` returns `1` or `0` for an agent. Both return an empty
-string for other pane kinds. These variables work in pane listings, display messages, status
-formats, hooks, and control-mode `refresh-client -B` subscriptions. The daemon signals the sticky
-`agent_state@%N` wait channel when the phase or pending permission changes; repeated publication
-of the same state does not signal it.
+`failed`. `#{agent_pending_permission}` returns `1` or `0` for an agent and an empty string
+for other pane kinds. For terminal panes, `#{agent_state}` reads the inherited `@agent_state`
+user option, or an empty string when unset; other pane kinds return an empty string.
+Terminal panes running a listed agent CLI get `working`/`idle` from the OSC 9;4
+progress bar through `#{agent_state}` and `@agent_state`. `@agent-progress-commands`
+sets the whitespace- or comma-separated list of command basenames (default `claude`).
+These variables work in pane listings, display messages, status
+formats, hooks, and control-mode `refresh-client -B` subscriptions. For native Agent panes, the
+daemon signals the sticky `agent_state@%N` wait channel when the phase or pending permission
+changes; repeated publication of the same state does not signal it.
 
 ```sh
 zz list-panes -F '#{pane_id} #{agent_state}'

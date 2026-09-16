@@ -61,11 +61,11 @@ use zz_protocol::{
 use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
     CaptureBoundary, CaptureOptions, ClipboardTarget, Color, ColourClass, CursorBlinkPolicy,
-    CursorStyle, EngineKnobs, LastCommandCapture, PasteBufferAction, RawOutputTapError,
-    TerminalAppearance, TerminalCaptureError, TerminalColorScheme, TerminalDiffScratch,
-    TerminalEvent, TerminalEvents, TerminalMode, TerminalPalette, TerminalSession, TerminalSize,
-    TerminalSpawn, TerminalViewId, TerminalViewport, WordSeparators, apply_appearance_overrides,
-    parse_x11_color, prepare_paste_buffer,
+    CursorStyle, EngineKnobs, LastCommandCapture, PasteBufferAction, ProgressBarState,
+    RawOutputTapError, TerminalAppearance, TerminalCaptureError, TerminalColorScheme,
+    TerminalDiffScratch, TerminalEvent, TerminalEvents, TerminalMode, TerminalPalette,
+    TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId, TerminalViewport, WordSeparators,
+    apply_appearance_overrides, parse_x11_color, prepare_paste_buffer,
 };
 
 #[cfg(feature = "agent")]
@@ -22547,6 +22547,7 @@ impl Shared {
                     .pane(pane)
                     .is_some_and(|pane| matches!(pane.kind, PaneKind::Agent(_)));
                 let mut previous_foreground = None::<Option<u32>>;
+                let mut previous_bar_state = ProgressBarState::Hidden;
                 let mut current_command = String::new();
                 let mut diff_scratch = TerminalDiffScratch::default();
                 let mut mode_memo = BTreeMap::new();
@@ -22579,6 +22580,16 @@ impl Shared {
                                     &current_command,
                                     output_activity,
                                 );
+                                let bar_state = terminal.progress_bar().state;
+                                if !projects_agent && previous_bar_state != bar_state {
+                                    previous_bar_state = bar_state;
+                                    shared.synchronize_pane_progress(
+                                        pane,
+                                        &terminal,
+                                        &current_command,
+                                        bar_state,
+                                    );
+                                }
                             }
                             let referenced_images = current
                                 .iter()
@@ -22900,6 +22911,71 @@ impl Shared {
             .terminals
             .get(&pane)
             .is_some_and(|current| Arc::ptr_eq(current, terminal))
+    }
+
+    fn synchronize_pane_progress(
+        self: &Arc<Self>,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+        current_command: &str,
+        bar_state: ProgressBarState,
+    ) {
+        let value = match bar_state {
+            ProgressBarState::Indeterminate => "working",
+            ProgressBarState::Hidden => "idle",
+            ProgressBarState::Normal | ProgressBarState::Error | ProgressBarState::Paused => return,
+        };
+        let Some(command) = Path::new(current_command)
+            .file_name()
+            .and_then(OsStr::to_str)
+        else {
+            return;
+        };
+        let target = pane.to_string();
+        {
+            let inner = self.inner.lock();
+            if !inner
+                .terminals
+                .get(&pane)
+                .is_some_and(|current| Arc::ptr_eq(current, terminal))
+                || !matches!(
+                    inner.engine.state.pane(pane).map(|pane| &pane.kind),
+                    Some(PaneKind::Terminal)
+                )
+            {
+                return;
+            }
+            let Some(window) = inner.engine.state.window_for_pane(pane) else {
+                return;
+            };
+            let session = inner.engine.state.windows[&window].session.to_string();
+            let window = window.to_string();
+            let facts = inner.engine.format_facts();
+            let commands = facts
+                .user_option(&target, &window, &session, "@agent-progress-commands")
+                .unwrap_or("claude");
+            if !commands
+                .split(|character: char| character.is_whitespace() || character == ',')
+                .any(|listed| !listed.is_empty() && listed == command)
+                || facts.user_option(&target, &window, &session, "@agent_state") == Some(value)
+            {
+                return;
+            }
+        }
+        if let Err(error) = self.execute(
+            ClientId(u64::MAX),
+            ClientKind::Command,
+            &mut ExecutionContext::default(),
+            &CommandInvocation::new(
+                "set-option",
+                ["-p", "-t", target.as_str(), "@agent_state", value],
+            ),
+        ) {
+            log::warn!(
+                target: "zz_daemon::diagnostics::terminal",
+                "progress state update failed pane={pane} state={value} error={error}"
+            );
+        }
     }
 
     fn synchronize_pane_title(
@@ -40547,7 +40623,10 @@ The bundled adapters pin `claude-agent-acp@0.76.0` and `codex-acp@1.11.0`.
 
 ## State and waiting
 
-Read native Agent state and permission presence through formats:
+Read native Agent state and permission presence through formats.
+Terminal panes running a listed agent CLI get `working`/`idle` from the OSC 9;4
+progress bar through `#{agent_state}` and `@agent_state`. `@agent-progress-commands`
+sets the whitespace- or comma-separated list of command basenames (default `claude`).
 
 ```sh
 zz list-panes -F '#{pane_id} #{agent_state} #{agent_pending_permission}'
@@ -67907,6 +67986,287 @@ set-option -g @alias-mixed-next yes
         assert!(shared.inner.lock().wait_channels["@fleet@global-session"].woken);
         run(&["set-option", "-s", "@daemon", "up"]).expect("server");
         assert!(shared.inner.lock().wait_channels["@daemon@server"].woken);
+    }
+
+    #[cfg(unix)]
+    fn progress_bar_pane(shared: &Arc<Shared>) -> (PaneId, String) {
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(1),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "progress", QUIET_PANE_COMMAND],
+                ),
+            )
+            .expect("session");
+        let pane = context.pane.expect("pane");
+        wait_for_pane_runtime_facts(shared, &[pane]);
+        let command = shared
+            .execute(
+                ClientId(1),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-p", "#{pane_current_command}"]),
+            )
+            .expect("current command")
+            .output
+            .trim()
+            .to_owned();
+        assert!(!command.is_empty());
+        (pane, command)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn progress_bar_transitions_write_agent_state_for_listed_commands() {
+        let shared = Arc::new(Shared::new(1));
+        register_wait_clients(&shared, [1, 2]);
+        let (pane, command) = progress_bar_pane(&shared);
+        let target = pane.to_string();
+        let channel = format!("@agent_state@{pane}");
+        let run = |args: &[&str]| {
+            shared
+                .execute(
+                    ClientId(1),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                )
+                .expect("command")
+        };
+        run(&[
+            "set-option",
+            "-p",
+            "-t",
+            &target,
+            "@agent-progress-commands",
+            &command,
+        ]);
+        run(&[
+            "set-hook",
+            "-g",
+            "@option-changed",
+            "set-option -gF @progress-observed '#{hook_option}:#{hook_target}'",
+        ]);
+        for (osc, expected) in [("3", "working"), ("0", "idle")] {
+            let parked = Arc::clone(&shared);
+            let wait_channel = channel.clone();
+            let (completed, completion) = mpsc::channel();
+            let waiter = thread::spawn(move || {
+                completed
+                    .send(parked.wait_for(ClientId(2), ClientKind::Command, &[wait_channel.into()]))
+                    .expect("wait completion");
+            });
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !shared
+                .inner
+                .lock()
+                .wait_channels
+                .get(&channel)
+                .is_some_and(|channel| !channel.waiters.is_empty())
+            {
+                assert!(Instant::now() < deadline, "waiter did not park");
+                thread::sleep(Duration::from_millis(10));
+            }
+            run(&[
+                "send-keys",
+                "-t",
+                &target,
+                &format!("printf '\\033]9;4;{osc}\\007'"),
+                "Enter",
+            ]);
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while run(&["show-options", "-p", "-qv", "-t", &target, "@agent_state"])
+                .output
+                .trim()
+                != expected
+            {
+                assert!(
+                    Instant::now() < deadline,
+                    "agent state did not become {expected}"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            completion
+                .recv_timeout(Duration::from_secs(10))
+                .expect("progress transition did not wake waiter")
+                .expect("wait-for");
+            waiter.join().expect("waiter");
+            assert_eq!(
+                read_global_option(&shared, "@progress-observed").trim(),
+                format!("@agent_state:{pane}")
+            );
+            let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+            for state in [
+                ProgressBarState::Normal,
+                ProgressBarState::Error,
+                ProgressBarState::Paused,
+            ] {
+                shared.synchronize_pane_progress(pane, &terminal, &command, state);
+            }
+            shared.synchronize_pane_progress(
+                pane,
+                &terminal,
+                &command,
+                terminal.progress_bar().state,
+            );
+            assert!(
+                !shared
+                    .inner
+                    .lock()
+                    .wait_channels
+                    .get(&channel)
+                    .is_some_and(|channel| channel.woken),
+                "writing the same state must not signal again"
+            );
+        }
+        shared.request_shutdown();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn progress_bar_transitions_are_ignored_for_unlisted_commands() {
+        let shared = Arc::new(Shared::new(1));
+        let (pane, command) = progress_bar_pane(&shared);
+        let target = pane.to_string();
+        let run = |args: &[&str]| {
+            shared
+                .execute(
+                    ClientId(1),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                )
+                .expect("command")
+        };
+        let unlisted = format!("{command}-unlisted");
+        run(&[
+            "set-option",
+            "-p",
+            "-t",
+            &target,
+            "@agent-progress-commands",
+            &unlisted,
+        ]);
+        for (osc, state) in [
+            ("3", ProgressBarState::Indeterminate),
+            ("0", ProgressBarState::Hidden),
+        ] {
+            let title = format!("progress-{osc}");
+            run(&[
+                "send-keys",
+                "-t",
+                &target,
+                &format!("printf '\\033]9;4;{osc}\\007\\033]0;{title}\\007'"),
+                "Enter",
+            ]);
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while run(&["display-message", "-p", "-t", &target, "#{pane_title}"])
+                .output
+                .trim()
+                != title
+            {
+                assert!(
+                    Instant::now() < deadline,
+                    "watcher did not observe progress output"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(
+                shared.inner.lock().terminals[&pane].progress_bar().state,
+                state
+            );
+            assert!(
+                run(&["show-options", "-p", "-qv", "-t", &target, "@agent_state"])
+                    .output
+                    .is_empty()
+            );
+            assert!(
+                !shared
+                    .inner
+                    .lock()
+                    .wait_channels
+                    .contains_key(&format!("@agent_state@{pane}"))
+            );
+        }
+        shared.request_shutdown();
+    }
+
+    #[test]
+    fn agent_state_format_falls_back_to_the_user_option_for_terminal_panes() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .inner
+            .lock()
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "state-format"]),
+            )
+            .expect("mux session");
+        let terminal = context.pane.expect("terminal").to_string();
+        let run = |args: &[&str]| {
+            shared
+                .execute(
+                    ClientId(1),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                )
+                .expect("command")
+        };
+        run(&["set-option", "-g", "@agent_state", "idle"]);
+        assert_eq!(
+            run(&["display-message", "-p", "-t", &terminal, "#{agent_state}"]).output,
+            "idle"
+        );
+        run(&[
+            "set-option",
+            "-p",
+            "-t",
+            &terminal,
+            "@agent_state",
+            "working",
+        ]);
+        assert_eq!(
+            run(&["display-message", "-p", "-t", &terminal, "#{agent_state}"]).output,
+            "working"
+        );
+        assert_eq!(
+            run(&[
+                "display-message",
+                "-p",
+                "-t",
+                &terminal,
+                "#{agent_pending_permission}"
+            ])
+            .output
+            .trim(),
+            ""
+        );
+        {
+            let mut inner = shared.inner.lock();
+            for command in [
+                CommandInvocation::new("set-option", ["-g", "experimental-agent-pane", "on"]),
+                CommandInvocation::new("split-picker", [] as [&str; 0]),
+                CommandInvocation::new("select-pane-kind", ["agent"]),
+            ] {
+                inner
+                    .engine
+                    .execute(&mut context, &command)
+                    .expect("agent setup");
+            }
+        }
+        let agent = context.pane.expect("agent").to_string();
+        run(&["set-option", "-p", "-t", &agent, "@agent_state", "working"]);
+        assert_eq!(
+            run(&["display-message", "-p", "-t", &agent, "#{agent_state}"]).output,
+            "starting"
+        );
     }
 
     #[test]

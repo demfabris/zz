@@ -1699,7 +1699,22 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                 .to_owned(),
             ),
             "agent_state" | "agent_pending_permission" => {
-                if self.facts.mux.pane_kind(&context.pane_id) != Some("agent") {
+                let pane_kind = self.facts.mux.pane_kind(&context.pane_id);
+                if name == "agent_state" && pane_kind == Some("terminal") {
+                    return Some(
+                        self.facts
+                            .mux
+                            .user_option(
+                                &context.pane_id,
+                                &context.window_id,
+                                &context.session_id,
+                                "@agent_state",
+                            )
+                            .unwrap_or_default()
+                            .to_owned(),
+                    );
+                }
+                if pane_kind != Some("agent") {
                     return Some(String::new());
                 }
                 let state = context

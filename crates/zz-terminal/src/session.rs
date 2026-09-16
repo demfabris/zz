@@ -5310,6 +5310,12 @@ fn run_terminal(
         let pending_window_due = pasted_image_bindings
             .next_deadline()
             .is_some_and(|deadline| deadline <= now);
+        if let Some(bar) = engine_bar.take() {
+            publisher.set_progress_bar(bar);
+        }
+        if let Some(status) = engine_last_command_status.take() {
+            publisher.set_last_command_status(status);
+        }
         if output_pending
             && (reader_eof
                 || pending_window_due
@@ -5368,12 +5374,6 @@ fn run_terminal(
         }
         for name in engine_renames.drain(..) {
             publisher.rename_window(name)?;
-        }
-        if let Some(bar) = engine_bar.take() {
-            publisher.set_progress_bar(bar);
-        }
-        if let Some(status) = engine_last_command_status.take() {
-            publisher.set_last_command_status(status);
         }
 
         let mut deadline = Instant::now() + IDLE_SLEEP;
@@ -14524,6 +14524,57 @@ mod tests {
                 );
             }
             assert_eq!(status, Some(Some(7)), "split at {split}");
+    #[cfg(unix)]
+    #[test]
+    fn progress_bar_is_visible_on_the_frame_carrying_the_osc() {
+        let session = TerminalSession::spawn(
+            DEFAULT_HISTORY_LIMIT,
+            Arc::new(TerminalAppearance::default()),
+            TerminalSpawn {
+                shell: Some("/bin/sh".to_owned()),
+                command: Some(vec![
+                    "stty -echo; printf READY; while read -r state; do printf '\\033]9;4;%s\\007\\033[2J\\033[Hprogress:%s' \"$state\" \"$state\"; done"
+                        .to_owned(),
+                ]),
+                ..TerminalSpawn::default()
+            },
+        );
+        wait_for_test_viewport(&session, |viewport| {
+            let mut contents = String::new();
+            for cell in viewport.cells.iter() {
+                viewport.push_glyph(*cell, &mut contents);
+            }
+            contents.contains("READY")
+        });
+        let events = session.events();
+        while events.try_recv().is_ok() {}
+
+        for (digit, expected) in [
+            (3, ProgressBarState::Indeterminate),
+            (0, ProgressBarState::Hidden),
+            (3, ProgressBarState::Indeterminate),
+            (0, ProgressBarState::Hidden),
+        ] {
+            session.send_text(format!("{digit}\n").as_str());
+            let marker = format!("progress:{digit}");
+            let deadline = Instant::now() + Duration::from_secs(30);
+            loop {
+                assert!(Instant::now() < deadline, "missing frame for {marker}");
+                if let Ok(TerminalEvent::ViewportReady { .. }) = events.try_recv() {
+                    let latest = session.latest.read();
+                    let viewport = &latest.fallback;
+                    let mut contents = String::new();
+                    for cell in viewport.cells.iter() {
+                        viewport.push_glyph(*cell, &mut contents);
+                    }
+                    if contents.contains(&marker) {
+                        assert_eq!(latest.bar.state, expected);
+                        break;
+                    }
+                } else {
+                    thread::yield_now();
+                }
+            }
         }
     }
 

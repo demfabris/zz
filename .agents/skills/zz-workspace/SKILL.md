@@ -188,7 +188,10 @@ The bundled adapters pin `claude-agent-acp@0.76.0` and `codex-acp@1.11.0`.
 
 ## State and waiting
 
-Read native Agent state and permission presence through formats:
+Read native Agent state and permission presence through formats.
+Terminal panes running a listed agent CLI get `working`/`idle` from the OSC 9;4
+progress bar through `#{agent_state}` and `@agent_state`. `@agent-progress-commands`
+sets the whitespace- or comma-separated list of command basenames (default `claude`).
 
 ```sh
 zz list-panes -F '#{pane_id} #{agent_state} #{agent_pending_permission}'

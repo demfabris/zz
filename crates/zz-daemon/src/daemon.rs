@@ -37868,29 +37868,24 @@ fn switch_mode_target(inner: &ServerState, pane: PaneId) -> Option<(String, Exec
         let mut entries = state
             .windows
             .iter()
-            .map(|(window, entry)| (entry.name.clone(), *window, entry.session, entry.index))
+            .filter_map(|(window, entry)| {
+                let session = state.sessions.get(&entry.session)?;
+                Some((
+                    (entry.name.clone(), session.name.clone(), entry.index),
+                    *window,
+                    entry.session,
+                    entry.active_pane,
+                ))
+            })
             .collect::<Vec<_>>();
-        entries.sort_by(|left, right| {
-            left.0
-                .cmp(&right.0)
-                .then_with(|| {
-                    state.sessions[&left.2]
-                        .name
-                        .cmp(&state.sessions[&right.2].name)
-                })
-                .then(left.3.cmp(&right.3))
-        });
-        let (_, window, session, index) = entries.into_iter().next()?;
-        let name = state.sessions.get(&session)?.name.clone();
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
+        let ((_, name, index), window, session, active_pane) = entries.into_iter().next()?;
         return Some((
             format!("={name}:{index}."),
-            ExecutionContext::new(
-                Some(session),
-                Some(window),
-                state.windows.get(&window).map(|entry| entry.active_pane),
-            ),
+            ExecutionContext::new(Some(session), Some(window), Some(active_pane)),
         ));
     }
+
     let mut names = state
         .sessions
         .values()
@@ -89254,6 +89249,42 @@ bind - split-window -v -c "#{pane_current_path}"
             .state
             .create_session(name)
             .expect("create switch-client session")
+    }
+
+    #[test]
+    fn switch_mode_window_order_skips_orphan_sessions() {
+        let shared = Shared::new(1);
+        let (cli, cli_window, pane) = switch_test_session(&shared, "cli");
+        let (alpha, alpha_window, _) = switch_test_session(&shared, "alpha");
+        let (_, zulu_window, _) = switch_test_session(&shared, "zulu");
+        let mut inner = shared.inner.lock();
+        for window in [cli_window, alpha_window, zulu_window] {
+            inner.engine.state.windows.get_mut(&window).unwrap().name = "win".into();
+        }
+        inner.pane_modes.insert(
+            pane,
+            vec![PaneModeRequest::Switch {
+                windows: true,
+                format: None,
+                template: None,
+            }],
+        );
+        assert_eq!(
+            chooser_presentation::switch_rows(&inner, true, Some("#{session_name}")),
+            ["alpha", "cli", "zulu"]
+        );
+        assert_eq!(switch_mode_target(&inner, pane).unwrap().0, "=alpha:0.");
+        inner.engine.state.sessions.remove(&alpha);
+        assert_eq!(
+            chooser_presentation::switch_rows(&inner, true, Some("#{session_name}")),
+            ["cli", "zulu"]
+        );
+        assert_eq!(switch_mode_target(&inner, pane).unwrap().0, "=cli:0.");
+        inner.engine.state.sessions.remove(&cli);
+        assert_eq!(switch_mode_target(&inner, pane).unwrap().0, "=zulu:0.");
+        inner.engine.state.sessions.clear();
+        assert!(chooser_presentation::switch_rows(&inner, true, None).is_empty());
+        assert!(switch_mode_target(&inner, pane).is_none());
     }
 
     #[test]

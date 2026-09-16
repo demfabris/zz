@@ -564,22 +564,16 @@ pub(super) fn switch_rows(inner: &ServerState, windows: bool, format: Option<&st
             .state
             .windows
             .iter()
-            .map(|(window, entry)| (entry.name.clone(), *window, entry.session))
+            .filter_map(|(window, entry)| {
+                let session = engine.state.sessions.get(&entry.session)?;
+                Some((
+                    (entry.name.clone(), session.name.clone(), entry.index),
+                    *window,
+                    entry.session,
+                ))
+            })
             .collect::<Vec<_>>();
-        entries.sort_by(|left, right| {
-            left.0
-                .cmp(&right.0)
-                .then_with(|| {
-                    engine.state.sessions[&left.2]
-                        .name
-                        .cmp(&engine.state.sessions[&right.2].name)
-                })
-                .then_with(|| {
-                    engine.state.windows[&left.1]
-                        .index
-                        .cmp(&engine.state.windows[&right.1].index)
-                })
-        });
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
         return entries
             .into_iter()
             .map(|(_, window, session)| {

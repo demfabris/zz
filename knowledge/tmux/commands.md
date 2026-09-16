@@ -5,8 +5,7 @@ description: "MuxEngine, the tmux-style command executor: canonical names + alia
 resource: crates/zz-mux/src/command.rs
 tags: [tmux, commands, mux-engine, targets, effects]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-09-03
-last_updated_by: Claude
+last_updated: 2026-09-15
 ---
 
 # Cycle-16 checkpoint
@@ -55,6 +54,42 @@ error.
 `catalog.rs` is the shared renderer-free source for canonical names, aliases, descriptions,
 accepted usage strings, flags/options, and completion value kinds; `canonical_command` and the native
 [command palette](/concepts/command-palette.md) both consume it.
+
+# CLI contract
+
+Use `zz --help` or the `help` verb for the command catalog. Use `zz <verb> --help`
+for a command's description, usage, options, and positional arguments; aliases
+and unique prefixes work too. These help forms need no daemon and exit 0. An
+unknown verb exits 2. Global `-h` keeps the tmux usage banner, and command `-h`
+flags keep their tmux meaning.
+
+Add `--json` to `list-sessions`, `list-windows`, `list-panes`, or `list-clients`
+for one JSON object per row in the same order as text output. Keys are the format
+variable names for that entity; values are strings with the same expansion as
+`#{name}`, including empty strings for unavailable values. Pane rows include
+`pane_kind`, `agent_state`, `agent_pending_permission`, `browser_url`,
+`pane_pb_state`, and `pane_pb_progress`. Use `show-options --json` for one object
+mapping option names to value strings in the selected scope. Combining `-F` and
+`--json` is a usage error.
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | Success. |
+| 1 | Command failure, missing daemon, or connection loss. |
+| 2 | Usage error: unknown verb, invalid flag, missing argument, or malformed value. |
+| 3 | Blocked or unable to answer now, including `agent-send --on-block fail`. |
+| 124 | Wait timed out, including `agent-send --timeout`. |
+| 125 | Reserved for the `run-pane` timeout. |
+
+Commands that set an explicit exit code keep that code.
+
+The client handles help and exit codes in `crates/zz/src/lib.rs` (`run_command_mode`,
+`exit_code_for`). The catalog in `crates/zz-protocol/src/catalog.rs` supplies help
+and declared long options; `ServerError::exit_code` in `crates/zz-protocol/src/message.rs`
+classifies server errors. Format enumeration lives in `crates/zz-mux/src/formats.rs`
+(`StatusContext::scoped_format_values`). The daemon handles client rows and agent
+wait timeouts in `crates/zz-daemon/src/daemon.rs` (`list_clients`,
+`submit_agent_prompt_and_wait`).
 
 # Argument parsing and `-t` targets
 

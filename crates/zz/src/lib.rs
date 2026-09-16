@@ -230,15 +230,15 @@ fn run_startup(socket_path: PathBuf) -> Startup {
         Ok(arguments) => arguments,
         Err(ApplicationArgumentError::Message(error)) => {
             eprintln!("zz: {error}");
-            return Startup::Exit(ExitCode::FAILURE);
+            return Startup::Exit(exit_code_for(CliFailure::Usage));
         }
         Err(ApplicationArgumentError::Raw(error)) => {
             eprintln!("{error}");
-            return Startup::Exit(ExitCode::FAILURE);
+            return Startup::Exit(exit_code_for(CliFailure::Usage));
         }
         Err(ApplicationArgumentError::Usage) => {
             eprintln!("{TMUX_USAGE}");
-            return Startup::Exit(ExitCode::FAILURE);
+            return Startup::Exit(exit_code_for(CliFailure::Usage));
         }
     };
     let ApplicationArguments {
@@ -272,11 +272,11 @@ fn run_startup(socket_path: PathBuf) -> Startup {
     if control_mode != 0 && shell_command.is_none() {
         if host.is_some() {
             eprintln!("zz: --host is not supported with control mode");
-            return Startup::Exit(ExitCode::FAILURE);
+            return Startup::Exit(exit_code_for(CliFailure::Usage));
         }
         if implicit_tmux_conflict {
             eprintln!("{FOREIGN_TMUX_ERROR}");
-            return Startup::Exit(ExitCode::FAILURE);
+            return Startup::Exit(exit_code_for(CliFailure::Runtime));
         }
         return Startup::Exit(control_mode::run(
             &socket_path,
@@ -373,7 +373,7 @@ pub fn run() -> ExitCode {
                  build it with `cargo xtask bundle-cef --release --output dist/zz`, then run \
                  `open dist/zz/zz.app`"
             );
-            return ExitCode::FAILURE;
+            return exit_code_for(CliFailure::Runtime);
         }
     }
     ExitCode::from(finish_bootstrap(
@@ -401,7 +401,7 @@ pub fn run() -> ExitCode {
                  build it with `cargo xtask bundle-cef --release --output dist\\zz`, then run \
                  `dist\\zz\\zz.exe`"
             );
-            ExitCode::FAILURE
+            exit_code_for(CliFailure::Runtime)
         }
     }
 }
@@ -596,7 +596,8 @@ fn application_arguments(
             host = Some(name.into());
         } else if parsing_tmux_options && argument == "--" {
             parsing_tmux_options = false;
-        } else if parsing_tmux_options && matches!(argument.as_str(), "--version" | "--kill-server")
+        } else if parsing_tmux_options
+            && matches!(argument.as_str(), "--version" | "--kill-server" | "--help")
         {
             parsing_tmux_options = false;
             remaining.push(argument);
@@ -827,7 +828,7 @@ fn run_command_mode(
     if let Some(shell_command) = shell_command {
         if implicit_tmux_conflict && host.is_none() {
             eprintln!("{FOREIGN_TMUX_ERROR}");
-            return Some(ExitCode::FAILURE);
+            return Some(exit_code_for(CliFailure::Runtime));
         }
         return Some(run_tmux_shell_command(
             socket_path,
@@ -850,15 +851,31 @@ fn run_command_mode(
     let Some(invocation) = command_chain.first().cloned() else {
         if host.is_some() {
             eprintln!("zz: --host requires a command");
-            return Some(ExitCode::FAILURE);
+            return Some(exit_code_for(CliFailure::Usage));
         }
         return None;
     };
     let command = invocation.name.clone();
+    if command == "--help" || command == "help" {
+        print!("{}", top_level_help());
+        return Some(ExitCode::SUCCESS);
+    }
+    if invocation.args.iter().any(|argument| argument == "--help") {
+        return Some(match command_help(&command) {
+            Ok(help) => {
+                print!("{help}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("{}", server_error_message(&error));
+                exit_code_for(CliFailure::Server(&error))
+            }
+        });
+    }
     if command == "app" {
         if host.is_some() || !invocation.args.is_empty() || command_chain.len() != 1 {
             eprintln!("{NATIVE_APP_USAGE}");
-            return Some(ExitCode::FAILURE);
+            return Some(exit_code_for(CliFailure::Usage));
         }
         return None;
     }
@@ -879,7 +896,7 @@ fn run_command_mode(
                 }
                 Err(usage) => {
                     eprintln!("zz: {usage}");
-                    ExitCode::FAILURE
+                    exit_code_for(CliFailure::Usage)
                 }
             },
         );
@@ -887,7 +904,7 @@ fn run_command_mode(
 
     if host.is_some() && matches!(command.as_str(), "daemon" | "proxy" | "fleet") {
         eprintln!("zz: --host is not supported for `{command}`");
-        return Some(ExitCode::FAILURE);
+        return Some(exit_code_for(CliFailure::Usage));
     }
 
     if command == "daemon" {
@@ -895,7 +912,7 @@ fn run_command_mode(
             Ok(bootstrap) => bootstrap,
             Err(error) => {
                 eprintln!("zz daemon: {}", error.message());
-                return Some(ExitCode::FAILURE);
+                return Some(exit_code_for(CliFailure::Usage));
             }
         };
         let mut daemon =
@@ -913,7 +930,7 @@ fn run_command_mode(
                 Ok(()) | Err(DaemonError::AlreadyRunning(_)) => ExitCode::SUCCESS,
                 Err(error) => {
                     eprintln!("zz daemon: {error}");
-                    ExitCode::FAILURE
+                    exit_code_for(CliFailure::Runtime)
                 }
             },
         );
@@ -924,7 +941,7 @@ fn run_command_mode(
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("zz proxy: {error}");
-                ExitCode::FAILURE
+                exit_code_for(CliFailure::Runtime)
             }
         });
     }
@@ -946,7 +963,15 @@ fn run_command_mode(
                 }
                 Err(error) => {
                     eprintln!("zz: {error}");
-                    ExitCode::FAILURE
+                    exit_code_for(
+                        if error.starts_with("usage:")
+                            || error == "ssh destination must not start with `-`"
+                        {
+                            CliFailure::Usage
+                        } else {
+                            CliFailure::Runtime
+                        },
+                    )
                 }
             },
         );
@@ -954,7 +979,7 @@ fn run_command_mode(
 
     if implicit_tmux_conflict && host.is_none() {
         eprintln!("{FOREIGN_TMUX_ERROR}");
-        return Some(ExitCode::FAILURE);
+        return Some(exit_code_for(CliFailure::Runtime));
     }
 
     if command == "--kill-server" {
@@ -983,16 +1008,15 @@ fn run_command_mode(
         let static_commands = if native_attach_spelling {
             if let Err(error) = parse_native_attach_arguments(command_chain[0].args.clone()) {
                 print_native_attach_argument_error(error);
-                return Some(ExitCode::FAILURE);
+                return Some(exit_code_for(CliFailure::Usage));
             }
             &command_chain[1..]
         } else {
             &command_chain
         };
-        if zz_mux::validate_static_command_chain(static_commands).is_err() {
-            let error = preparation_error.expect("missing preparation error");
-            eprintln!("{}", format_local_command_error(socket_path, error));
-            return Some(ExitCode::FAILURE);
+        if let Err(error) = zz_mux::validate_static_command_chain(static_commands) {
+            eprintln!("{}", server_error_message(&error));
+            return Some(exit_code_for(CliFailure::Server(&error)));
         }
     }
 
@@ -1003,7 +1027,7 @@ fn run_command_mode(
     {
         let error = preparation_error.expect("missing preparation error");
         eprintln!("{}", format_local_command_error(socket_path, error));
-        return Some(ExitCode::FAILURE);
+        return Some(exit_code_for(CliFailure::Runtime));
     }
 
     if prepared.is_none()
@@ -1017,7 +1041,7 @@ fn run_command_mode(
             return Some(if nested_label_new_session {
                 ExitCode::SUCCESS
             } else {
-                ExitCode::FAILURE
+                exit_code_for(CliFailure::Runtime)
             });
         }
         let (mut client, spawned_server_id) =
@@ -1025,7 +1049,7 @@ fn run_command_mode(
                 Ok(connected) => connected,
                 Err(error) => {
                     eprintln!("{}", format_local_command_error(socket_path, error));
-                    return Some(ExitCode::FAILURE);
+                    return Some(exit_code_for(CliFailure::Runtime));
                 }
             };
         let commands = match spawned_server_id {
@@ -1038,7 +1062,7 @@ fn run_command_mode(
             Ok(commands) => commands,
             Err(error) => {
                 eprintln!("{}", command_error_message(&error));
-                return Some(ExitCode::FAILURE);
+                return Some(exit_code_for(CliFailure::Daemon(&error)));
             }
         };
         prepared = Some(PreparedCliCommandChain { client, commands });
@@ -1058,7 +1082,7 @@ fn run_command_mode(
             Ok(commands) => prepared = Some(commands),
             Err(error) => {
                 eprintln!("{error}");
-                return Some(ExitCode::FAILURE);
+                return Some(exit_code_for(CliFailure::Runtime));
             }
         }
     }
@@ -1066,10 +1090,9 @@ fn run_command_mode(
     if let Some(error) = prepared
         .as_ref()
         .and_then(|prepared| prepared_command_error(&prepared.commands))
-        .map(server_error_message)
     {
-        eprintln!("{error}");
-        return Some(ExitCode::FAILURE);
+        eprintln!("{}", server_error_message(error));
+        return Some(exit_code_for(CliFailure::Server(error)));
     }
 
     if command == "kill-server" && host.is_none() && prepared.is_none() {
@@ -1100,7 +1123,7 @@ fn run_command_mode(
             },
             Err(error) => {
                 eprintln!("zz: {error}");
-                return Some(ExitCode::FAILURE);
+                return Some(exit_code_for(CliFailure::Runtime));
             }
         }
     }
@@ -1147,7 +1170,7 @@ fn run_command_mode(
                     Ok(()) => ExitCode::SUCCESS,
                     Err(error) => {
                         eprintln!("{error}");
-                        ExitCode::FAILURE
+                        exit_code_for(CliFailure::Runtime)
                     }
                 }
             }
@@ -1155,7 +1178,7 @@ fn run_command_mode(
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
                     eprintln!("{error}");
-                    ExitCode::FAILURE
+                    exit_code_for(CliFailure::Runtime)
                 }
             },
         });
@@ -1175,12 +1198,12 @@ fn run_command_mode(
             Ok(options) => options,
             Err(error) => {
                 print_native_attach_argument_error(error);
-                return Some(ExitCode::FAILURE);
+                return Some(exit_code_for(CliFailure::Usage));
             }
         };
         if options.restart_daemon && host.is_some() {
             eprintln!("zz: --restart-daemon is only supported for the local daemon");
-            return Some(ExitCode::FAILURE);
+            return Some(exit_code_for(CliFailure::Usage));
         }
         // -x has no RunOptions field: route it through the real attach command so
         // the daemon sees the flag that picks the parent-hangup eviction.
@@ -1231,7 +1254,7 @@ fn run_command_mode(
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("{error}");
-                ExitCode::FAILURE
+                exit_code_for(CliFailure::Runtime)
             }
         });
     }
@@ -1243,7 +1266,7 @@ fn run_command_mode(
         return Some(if nested_label_new_session {
             ExitCode::SUCCESS
         } else {
-            ExitCode::FAILURE
+            exit_code_for(CliFailure::Runtime)
         });
     }
     let connected = match prepared {
@@ -1261,7 +1284,7 @@ fn run_command_mode(
         Ok(connected) => connected,
         Err(error) => {
             eprintln!("{error}");
-            return Some(ExitCode::FAILURE);
+            return Some(exit_code_for(CliFailure::Runtime));
         }
     };
     let mut output_writer = CommandOutputWriter::default();
@@ -1289,11 +1312,11 @@ fn run_command_mode(
             Err((_, DaemonError::CommandFailed { output, error })) => {
                 output_writer.print(&output, false);
                 eprintln!("{}", command_error_message(&error));
-                Some(ExitCode::FAILURE)
+                Some(exit_code_for(CliFailure::Runtime))
             }
             Err((_, error)) => {
                 eprintln!("{}", command_error_message(&error));
-                Some(ExitCode::FAILURE)
+                Some(exit_code_for(CliFailure::Daemon(&error)))
             }
         };
     }
@@ -1311,13 +1334,121 @@ fn run_command_mode(
         Err(DaemonError::CommandFailed { output, error }) => {
             output_writer.print(&output, false);
             eprintln!("{}", command_error_message(&error));
-            Some(ExitCode::FAILURE)
+            Some(exit_code_for(CliFailure::Runtime))
         }
         Err(error) => {
             eprintln!("{}", command_error_message(&error));
-            Some(ExitCode::FAILURE)
+            Some(exit_code_for(CliFailure::Daemon(&error)))
         }
     }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn top_level_help() -> String {
+    use std::fmt::Write as _;
+
+    let mut help = String::from("usage: zz [global flags] <command> [flags]\n\nzz verbs\n");
+    for name in zz_protocol::NATIVE_COMMAND_NAMES {
+        if let Some(spec) = catalog_command_spec(name) {
+            let _ = writeln!(help, "  {}  {}", spec.name, spec.description);
+        }
+    }
+    help.push_str("\ntmux commands\n");
+    for spec in zz_protocol::command_specs()
+        .filter(|spec| !zz_protocol::NATIVE_COMMAND_NAMES.contains(&spec.name))
+    {
+        let _ = writeln!(help, "  {}{}", spec.name, help_aliases(spec));
+    }
+    help.push_str("\nnot implemented\n");
+    for name in zz_protocol::CommandSpec::UNIMPLEMENTED_TMUX_COMMANDS {
+        let _ = writeln!(help, "  {name}");
+    }
+    help.push_str("\nRun zz tools for the agent guide.\n");
+    help
+}
+
+#[cfg(not(target_os = "ios"))]
+fn help_aliases(spec: &zz_protocol::CommandSpec) -> String {
+    if spec.aliases.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", spec.aliases.join(", "))
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn help_value(kind: zz_protocol::CommandValueKind) -> &'static str {
+    use zz_protocol::CommandValueKind;
+
+    match kind {
+        CommandValueKind::FreeForm => "value",
+        CommandValueKind::Session => "session",
+        CommandValueKind::Window => "window",
+        CommandValueKind::Pane => "pane",
+        CommandValueKind::Layout => "layout",
+        CommandValueKind::PaneKind => "pane-kind",
+        CommandValueKind::KeyTable => "key-table",
+        CommandValueKind::SetOption => "option",
+        CommandValueKind::Boolean => "boolean",
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn command_help(command: &str) -> Result<String, ServerError> {
+    use std::fmt::Write as _;
+
+    let spec = match zz_protocol::resolve_command(command) {
+        zz_protocol::CommandResolution::Canonical(name) => catalog_command_spec(name),
+        zz_protocol::CommandResolution::Unimplemented(name) => {
+            zz_protocol::unimplemented_tmux_command_spec(name)
+        }
+        zz_protocol::CommandResolution::Ambiguous(message) => {
+            return Err(ServerError::CommandParse(message));
+        }
+        zz_protocol::CommandResolution::Unknown => None,
+    }
+    .ok_or_else(|| ServerError::CommandParse(format!("unknown command: {command}")))?;
+    let mut help = format!(
+        "{}{}\n{}\nusage: zz {} {}\n",
+        spec.name,
+        help_aliases(spec),
+        spec.description,
+        spec.name,
+        spec.usage,
+    );
+    if !spec.options.is_empty() {
+        help.push_str("\noptions\n");
+    }
+    for option in spec.options {
+        let value = if option.optional_value {
+            " [value]".to_owned()
+        } else {
+            option
+                .value
+                .map(|kind| format!(" <{}>", help_value(kind)))
+                .unwrap_or_default()
+        };
+        let unsupported = if option.unsupported {
+            " (not supported)"
+        } else {
+            ""
+        };
+        let _ = writeln!(
+            help,
+            "  {}{value}  {}{unsupported}",
+            option.name, option.description
+        );
+    }
+    if !spec.positionals.is_empty() || spec.variadic.is_some() {
+        help.push_str("\npositionals\n");
+        for kind in spec.positionals {
+            let _ = writeln!(help, "  <{}>", help_value(*kind));
+        }
+        if let Some(kind) = spec.variadic {
+            let _ = writeln!(help, "  <{}>...", help_value(kind));
+        }
+    }
+    Ok(help)
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1595,7 +1726,7 @@ fn run_tmux_shell_command(
     let start_server = !no_start_server;
     if let Some(error) = tmux_label_creation_error(socket_path, socket_source, start_server) {
         eprintln!("{}", error.message);
-        return ExitCode::FAILURE;
+        return exit_code_for(CliFailure::Runtime);
     }
     let mut client = match host.map_or_else(
         || {
@@ -1607,7 +1738,7 @@ fn run_tmux_shell_command(
         Ok(client) => client,
         Err(error) => {
             eprintln!("{error}");
-            return ExitCode::FAILURE;
+            return exit_code_for(CliFailure::Runtime);
         }
     };
     let shell = match client.execute(CommandInvocation::new(
@@ -1617,7 +1748,7 @@ fn run_tmux_shell_command(
         Ok(shell) => shell.trim_end_matches('\n').to_owned(),
         Err(error) => {
             eprintln!("{}", command_error_message(&error));
-            return ExitCode::FAILURE;
+            return exit_code_for(CliFailure::Daemon(&error));
         }
     };
     let mut process = Command::new(&shell);
@@ -1646,10 +1777,10 @@ fn run_tmux_shell_command(
         Ok(status) => status
             .code()
             .and_then(|code| u8::try_from(code).ok())
-            .map_or(ExitCode::FAILURE, ExitCode::from),
+            .map_or(exit_code_for(CliFailure::Runtime), ExitCode::from),
         Err(error) => {
             eprintln!("zz: could not run {shell}: {error}");
-            ExitCode::FAILURE
+            exit_code_for(CliFailure::Runtime)
         }
     }
 }
@@ -1998,6 +2129,30 @@ fn print_command_error(output: &str) {
 }
 
 #[cfg(not(target_os = "ios"))]
+enum CliFailure<'a> {
+    Usage,
+    Runtime,
+    Server(&'a ServerError),
+    Daemon(&'a DaemonError),
+}
+
+#[cfg(not(target_os = "ios"))]
+fn exit_code_for(error: CliFailure<'_>) -> ExitCode {
+    ExitCode::from(match error {
+        CliFailure::Usage => 2,
+        CliFailure::Runtime => 1,
+        CliFailure::Server(error) => error.exit_code(),
+        CliFailure::Daemon(error) => match error {
+            DaemonError::Server(error) => error.exit_code(),
+            DaemonError::InsertedCommandParse(_) => 2,
+            DaemonError::CommandExit { exit_code, .. }
+            | DaemonError::ReportedCommandExit { exit_code, .. } => *exit_code,
+            _ => 1,
+        },
+    })
+}
+
+#[cfg(not(target_os = "ios"))]
 fn command_error_message(error: &DaemonError) -> String {
     match error {
         DaemonError::CommandFailed { error, .. } => command_error_message(error),
@@ -2043,11 +2198,15 @@ fn run_kill_server(
         }
         Err(error) if daemon_is_missing(&error) => {
             eprintln!("{}", format_local_command_error(path, error));
-            return ExitCode::FAILURE;
+            return exit_code_for(CliFailure::Runtime);
         }
         Err(error) => error,
     };
 
+    if let DaemonError::Server(error) = &failure {
+        eprintln!("{}", server_error_message(error));
+        return exit_code_for(CliFailure::Server(error));
+    }
     recover_kill_server_failure(path, &failure)
 }
 
@@ -2057,7 +2216,7 @@ fn run_host_kill_server(host: &str, args: impl IntoIterator<Item = RawText>) -> 
         Ok(client) => client,
         Err(error) => {
             eprintln!("zz: {error}");
-            return ExitCode::FAILURE;
+            return exit_code_for(CliFailure::Runtime);
         }
     };
     match client.execute_prepared_streams(CommandInvocation::new("kill-server", args)) {
@@ -2069,11 +2228,11 @@ fn run_host_kill_server(host: &str, args: impl IntoIterator<Item = RawText>) -> 
         Err(DaemonError::CommandFailed { output, error }) => {
             print_command_output(&output);
             eprintln!("{}", command_error_message(&error));
-            ExitCode::FAILURE
+            exit_code_for(CliFailure::Runtime)
         }
         Err(error) => {
             eprintln!("{}", command_error_message(&error));
-            ExitCode::FAILURE
+            exit_code_for(CliFailure::Daemon(&error))
         }
     }
 }
@@ -2092,7 +2251,7 @@ fn recover_kill_server_failure(path: &Path, failure: &DaemonError) -> ExitCode {
         }
         Err(recovery) => {
             eprintln!("zz: {failure}; recovery failed: {recovery}");
-            ExitCode::FAILURE
+            exit_code_for(CliFailure::Runtime)
         }
     }
 }
@@ -2887,6 +3046,38 @@ mod tests {
     use zz_daemon::DaemonError;
     use zz_mux::{CommandAliasResolution, ExecutionContext, MuxEngine};
     use zz_protocol::{CommandInvocation, PreparedCommand, PreparedCommandResult, ServerError};
+
+    #[test]
+    fn cli_exit_contract_preserves_explicit_status_and_classifies_errors() {
+        use super::{CliFailure, exit_code_for};
+        use std::process::ExitCode;
+
+        for code in [0, 1, 2, 3, 124, 125, 255] {
+            let error = DaemonError::CommandExit {
+                output: RawText::default(),
+                exit_code: code,
+            };
+            assert_eq!(
+                exit_code_for(CliFailure::Daemon(&error)),
+                ExitCode::from(code)
+            );
+        }
+        let usage = ServerError::InvalidCommand("invalid regular expression".to_owned());
+        assert_eq!(exit_code_for(CliFailure::Server(&usage)), ExitCode::from(2));
+        let failed = DaemonError::CommandFailed {
+            output: "partial output".into(),
+            error: Box::new(DaemonError::Server(usage)),
+        };
+        assert_eq!(
+            exit_code_for(CliFailure::Daemon(&failed)),
+            ExitCode::from(1)
+        );
+        let disconnected = DaemonError::Io(io::Error::from(io::ErrorKind::BrokenPipe));
+        assert_eq!(
+            exit_code_for(CliFailure::Daemon(&disconnected)),
+            ExitCode::from(1)
+        );
+    }
 
     #[test]
     fn tmux_import_hint_only_when_cli_spawns_without_mux_config() {

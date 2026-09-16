@@ -23,10 +23,11 @@ Explicit values in `agent-command` config take precedence over these defaults.
 
 Use stable IDs: `%N` for a pane, `@N` for a window, `$N` for a session. Pass the
 bare ID: `-t %3` works everywhere, while `-t work:%3` and other session-prefixed
-guesses fail with `can't find window`. Discover verbs with `zz list-commands` (add
-a verb name for its usage line); the `--help` flag prints only the tmux usage
-banner. Never run the binary without a verb (`zz` alone, or with only global flags
-such as `-T`): that launches the desktop app. Pane options need `-p`:
+guesses fail with `can't find window`. Discover verbs with `zz --help`, or use
+`zz <verb> --help` for its options and arguments. You can also use
+`zz list-commands` (add a verb name for its usage line). Never run the binary
+without a verb (`zz` alone, or with only global flags such as `-T`): that launches
+the desktop app. Pane options need `-p`:
 `zz set-option -p -t %3 @name reviewer`.
 
 ```sh
@@ -39,6 +40,34 @@ zz list-panes -F '#{pane_id} #{pane_kind} #{agent_state} #{@agent_state}'
 `#{pane_last_command_status}` is the last completed command's exit code, or empty
 when unknown; terminal and Agent panes report it from OSC 133 marks.
 `#{@name}` reads a user option from pane, window, session, then global scope.
+
+## CLI contract
+
+Use `zz --help` or the `help` verb for the command catalog. Use `zz <verb> --help`
+for a command's description, usage, options, and positional arguments; aliases
+and unique prefixes work too. These help forms need no daemon and exit 0. An
+unknown verb exits 2. Global `-h` keeps the tmux usage banner, and command `-h`
+flags keep their tmux meaning.
+
+Add `--json` to `list-sessions`, `list-windows`, `list-panes`, or `list-clients`
+for one JSON object per row in the same order as text output. Keys are the format
+variable names for that entity; values are strings with the same expansion as
+`#{name}`, including empty strings for unavailable values. Pane rows include
+`pane_kind`, `agent_state`, `agent_pending_permission`, `browser_url`,
+`pane_pb_state`, and `pane_pb_progress`. Use `show-options --json` for one object
+mapping option names to value strings in the selected scope. Combining `-F` and
+`--json` is a usage error.
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | Success. |
+| 1 | Command failure, missing daemon, or connection loss. |
+| 2 | Usage error: unknown verb, invalid flag, missing argument, or malformed value. |
+| 3 | Blocked or unable to answer now, including `agent-send --on-block fail`. |
+| 124 | Wait timed out, including `agent-send --timeout`. |
+| 125 | Reserved for the `run-pane` timeout. |
+
+Commands that set an explicit exit code keep that code.
 
 ## Verbs
 

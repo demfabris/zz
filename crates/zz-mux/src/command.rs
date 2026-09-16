@@ -5030,12 +5030,22 @@ impl MuxEngine {
                 }
             }
             let mut row_hooks = RowFormatHooks { inner: hooks, line };
-            output.push(expand_format_with_hooks(
-                format,
-                self,
-                format_context,
-                &mut row_hooks,
-            ));
+            output.push(if options.has("--json") {
+                let values = self.format_status_context_with_format_client(
+                    format_context.session,
+                    format_context.window,
+                    format_context.pane,
+                    format_context.active_session,
+                    format_context.format_client,
+                );
+                RawText::from(
+                    values
+                        .scoped_format_values("session", &mut row_hooks)
+                        .to_string(),
+                )
+            } else {
+                expand_format_with_hooks(format, self, format_context, &mut row_hooks)
+            });
         }
         Ok(Execution::output(RawText::join(&output, b"\n")))
     }
@@ -5511,12 +5521,22 @@ impl MuxEngine {
                 }
             }
             let mut row_hooks = RowFormatHooks { inner: hooks, line };
-            output.push(expand_format_with_hooks(
-                format,
-                self,
-                format_context,
-                &mut row_hooks,
-            ));
+            output.push(if options.has("--json") {
+                let values = self.format_status_context_with_format_client(
+                    format_context.session,
+                    format_context.window,
+                    format_context.pane,
+                    format_context.active_session,
+                    format_context.format_client,
+                );
+                RawText::from(
+                    values
+                        .scoped_format_values("window", &mut row_hooks)
+                        .to_string(),
+                )
+            } else {
+                expand_format_with_hooks(format, self, format_context, &mut row_hooks)
+            });
         }
         Ok(Execution::output(RawText::join(&output, b"\n")))
     }
@@ -7161,12 +7181,22 @@ impl MuxEngine {
                     }
                 }
                 let mut row_hooks = RowFormatHooks { inner: hooks, line };
-                output.push(expand_format_with_hooks(
-                    format,
-                    self,
-                    format_context,
-                    &mut row_hooks,
-                ));
+                output.push(if options.has("--json") {
+                    let values = self.format_status_context_with_format_client(
+                        format_context.session,
+                        format_context.window,
+                        format_context.pane,
+                        format_context.active_session,
+                        format_context.format_client,
+                    );
+                    RawText::from(
+                        values
+                            .scoped_format_values("pane", &mut row_hooks)
+                            .to_string(),
+                    )
+                } else {
+                    expand_format_with_hooks(format, self, format_context, &mut row_hooks)
+                });
             }
         }
         let output = RawText::join(&output, b"\n");
@@ -10037,7 +10067,7 @@ impl MuxEngine {
         }
         let Some(argument) = positional.first() else {
             let target = self.hook_listing_target(context, &options)?;
-            let mut lines = Vec::new();
+            let mut lines = ShownOptions::default();
             if let Some(stored) = self.hook_table(target) {
                 for name in Self::hook_names_for_target(target) {
                     if let Some(hook) = stored.get(name) {
@@ -10045,7 +10075,7 @@ impl MuxEngine {
                     }
                 }
             }
-            return Ok(Execution::output(lines.join("\n")));
+            return Ok(Execution::output(lines.lines.join("\n")));
         };
         let (argument, _) = self.expand_hook_name(context, &options, argument, hooks)?;
         let parsed = parse_tmux_option(&argument)
@@ -10112,10 +10142,10 @@ impl MuxEngine {
         let Some(hook) = hook else {
             return Ok(Execution::default());
         };
-        let mut lines = Vec::new();
+        let mut lines = ShownOptions::default();
         let index = parsed.index.map(ArrayIndex::parse);
         push_shown_hook(&mut lines, table_option.name, hook, index.as_ref());
-        Ok(Execution::output(lines.join("\n")))
+        Ok(Execution::output(lines.lines.join("\n")))
     }
 
     fn expand_hook_name(
@@ -10533,7 +10563,7 @@ impl MuxEngine {
                 Err(_) if options.has("-q") => return Ok(Execution::default()),
                 Err(error) => return Err(error),
             };
-            let mut lines = Vec::new();
+            let mut lines = ShownOptions::new(options.has("--json"));
             if let Some(values) = self.user_options_at_target(target) {
                 for (name, value) in values {
                     push_shown_option(&mut lines, name, value, true, false, value_only);
@@ -10630,7 +10660,7 @@ impl MuxEngine {
             if let Some((value, inherited)) =
                 self.user_option_readback(target, parsed.name, include_inherited)
             {
-                let mut lines = Vec::new();
+                let mut lines = ShownOptions::new(options.has("--json"));
                 let name = indexed_option_name(parsed.name, parsed.index.as_deref());
                 push_shown_option(&mut lines, &name, value, true, inherited, value_only);
                 return Ok(Execution::output(shown_options_output(&lines)));
@@ -10644,7 +10674,7 @@ impl MuxEngine {
         }
         if is_native_option(parsed.name) {
             let (value, is_string) = self.native_option_readback(parsed.name);
-            let mut lines = Vec::new();
+            let mut lines = ShownOptions::new(options.has("--json"));
             let name = indexed_option_name(parsed.name, parsed.index.as_deref());
             push_shown_option(&mut lines, &name, &value, is_string, false, value_only);
             return Ok(Execution::output(shown_options_output(&lines)));
@@ -10676,7 +10706,7 @@ impl MuxEngine {
                     Err(error) => return Err(error),
                 };
                 let requested = parsed.index.map(ArrayIndex::parse);
-                let mut lines = Vec::new();
+                let mut lines = ShownOptions::new(options.has("--json"));
                 if tmux_option_is_hook(option.name) {
                     if let Some((hook, inherited)) =
                         self.hook_array_readback(target, option.name, include_inherited)
@@ -10723,7 +10753,7 @@ impl MuxEngine {
         else {
             return Ok(Execution::default());
         };
-        let mut lines = Vec::new();
+        let mut lines = ShownOptions::new(options.has("--json"));
         let name = indexed_option_name(option.name, parsed.index.as_deref());
         push_shown_option(
             &mut lines,
@@ -13901,16 +13931,38 @@ fn tmux_option_value_is_string(option: TmuxOption) -> bool {
         || tmux_stored_scalar(option.name).is_some_and(|metadata| metadata.kind.is_string())
 }
 
+#[derive(Default)]
+struct ShownOptions {
+    lines: Vec<String>,
+    values: Option<BTreeMap<String, String>>,
+}
+
+impl ShownOptions {
+    fn new(json: bool) -> Self {
+        Self {
+            lines: Vec::new(),
+            values: json.then(BTreeMap::new),
+        }
+    }
+
+    fn record(&mut self, name: &str, value: &str) {
+        if let Some(values) = &mut self.values {
+            values.insert(name.to_owned(), value.to_owned());
+        }
+    }
+}
+
 fn push_shown_option(
-    lines: &mut Vec<String>,
+    lines: &mut ShownOptions,
     name: &str,
     value: &str,
     is_string: bool,
     inherited: bool,
     value_only: bool,
 ) {
+    lines.record(name, value);
     if value_only {
-        lines.push(value.to_owned());
+        lines.lines.push(value.to_owned());
         return;
     }
     let name = if inherited {
@@ -13923,11 +13975,11 @@ fn push_shown_option(
     } else {
         value.to_owned()
     };
-    lines.push(format!("{name} {value}"));
+    lines.lines.push(format!("{name} {value}"));
 }
 
 fn push_shown_array(
-    lines: &mut Vec<String>,
+    lines: &mut ShownOptions,
     name: &str,
     array: &StringArray,
     requested: Option<&ArrayIndex>,
@@ -13948,8 +14000,9 @@ fn push_shown_array(
         return;
     }
     if array.is_empty() {
+        lines.record(name, "");
         if !value_only {
-            lines.push(if inherited {
+            lines.lines.push(if inherited {
                 format!("{name}*")
             } else {
                 name.to_owned()
@@ -13963,9 +14016,12 @@ fn push_shown_array(
     }
 }
 
-fn shown_options_output(lines: &[String]) -> String {
-    let mut output = lines.join("\n");
-    if lines.last().is_some_and(String::is_empty) {
+fn shown_options_output(lines: &ShownOptions) -> String {
+    if let Some(values) = &lines.values {
+        return serde_json::to_string(values).expect("option values serialize");
+    }
+    let mut output = lines.lines.join("\n");
+    if lines.lines.last().is_some_and(String::is_empty) {
         output.push('\n');
     }
     output
@@ -17470,7 +17526,7 @@ fn global_hook_table(scope: TmuxOptionScope) -> HookTable {
 }
 
 fn push_shown_hook(
-    lines: &mut Vec<String>,
+    lines: &mut ShownOptions,
     name: &str,
     hook: &HookArray,
     requested: Option<&ArrayIndex>,
@@ -17479,7 +17535,7 @@ fn push_shown_hook(
 }
 
 fn push_shown_hook_option(
-    lines: &mut Vec<String>,
+    lines: &mut ShownOptions,
     name: &str,
     hook: &HookArray,
     requested: Option<&ArrayIndex>,
@@ -17500,8 +17556,9 @@ fn push_shown_hook_option(
         return;
     }
     if hook.is_empty() {
+        lines.record(name, "");
         if !value_only {
-            lines.push(if inherited && mark_inherited_empty {
+            lines.lines.push(if inherited && mark_inherited_empty {
                 format!("{name}*")
             } else {
                 name.to_owned()

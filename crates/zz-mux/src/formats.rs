@@ -1460,6 +1460,81 @@ pub fn delegated_format_variable_names() -> impl Iterator<Item = &'static str> {
     })
 }
 
+const PANE_HOOK_FORMAT_VARIABLES: [&str; 6] = [
+    "pane_kind",
+    "agent_state",
+    "agent_pending_permission",
+    "browser_url",
+    "pane_pb_state",
+    "pane_pb_progress",
+];
+
+impl StatusContext {
+    pub fn scoped_format_values(
+        &self,
+        scope: &str,
+        hooks: &mut impl StatusHooks,
+    ) -> serde_json::Value {
+        let scope = match scope {
+            "session" => FormatScope::Session,
+            "window" => FormatScope::Window,
+            "pane" => FormatScope::Pane,
+            "client" => FormatScope::Client,
+            _ => return serde_json::Value::Object(serde_json::Map::new()),
+        };
+        let context = ResolvedFormatContext {
+            values: self.clone(),
+            has_session: !self.session_id.is_empty()
+                || !self.session_name.is_empty()
+                || self.active_window_index.is_some(),
+            has_window: !self.window_id.is_empty()
+                || !self.window_name.is_empty()
+                || self.window_width.is_some(),
+            has_pane: !self.pane_id.is_empty()
+                || !self.pane_title.is_empty()
+                || self.pane_width.is_some(),
+            format_type: match scope {
+                FormatScope::Session => FormatType::Session,
+                FormatScope::Window => FormatType::Window,
+                FormatScope::Pane => FormatType::Pane,
+                _ => FormatType::None,
+            },
+        };
+        let mut expander = Expander {
+            context: &context,
+            hooks,
+            time: false,
+            job_tag: FormatJobTag::None,
+            client_row: None,
+            trace: None,
+        };
+        serde_json::Value::Object(
+            FORMAT_VARIABLES
+                .iter()
+                .filter(|variable| {
+                    variable.scope == scope
+                        || (scope == FormatScope::Pane && variable.scope == FormatScope::Terminal)
+                })
+                .map(|variable| variable.name)
+                .chain(
+                    PANE_HOOK_FORMAT_VARIABLES
+                        .into_iter()
+                        .filter(|_| scope == FormatScope::Pane),
+                )
+                .map(|name| {
+                    let value = expander
+                        .lookup(name, &ModifierFlags::default())
+                        .unwrap_or_default();
+                    (
+                        name.to_owned(),
+                        serde_json::Value::String(value.to_string()),
+                    )
+                })
+                .collect(),
+        )
+    }
+}
+
 fn optional_display<T: ToString>(value: Option<T>) -> Cow<'static, str> {
     value.map_or(Cow::Borrowed(""), |value| Cow::Owned(value.to_string()))
 }
@@ -4862,6 +4937,99 @@ mod tests {
 
     fn expand(format: &str) -> String {
         expand_status(format, &context(), &mut Stub)
+    }
+
+    #[test]
+    fn scoped_pane_values_include_terminal_and_native_names_without_session_names() {
+        let values = context().scoped_format_values("pane", &mut Stub);
+        assert_eq!(
+            values.get("pane_id").and_then(serde_json::Value::as_str),
+            Some("%7")
+        );
+        assert!(values.get("alternate_on").is_some());
+        assert!(values.get("pane_kind").is_some());
+        assert_eq!(
+            values
+                .get("pane_format")
+                .and_then(serde_json::Value::as_str),
+            Some("1")
+        );
+        assert!(values.get("session_name").is_none());
+        assert_eq!(
+            values
+                .get("agent_state")
+                .and_then(serde_json::Value::as_str),
+            Some("")
+        );
+    }
+
+    #[test]
+    fn scoped_values_match_list_format_expansion() {
+        let mut engine = MuxEngine::default();
+        let (session, window, pane) = engine.state.create_session("work").unwrap();
+        for (scope, format_type) in [
+            ("session", FormatType::Session),
+            ("window", FormatType::Window),
+            ("pane", FormatType::Pane),
+        ] {
+            let format_context = FormatContext {
+                session: Some(session),
+                window: (format_type != FormatType::Session).then_some(window),
+                pane: (format_type == FormatType::Pane).then_some(pane),
+                active_session: Some(session),
+                format_client: FormatClient::NoClient,
+                format_type,
+            };
+            let context = format_context.resolve(&engine).values;
+            let values = context.scoped_format_values(scope, &mut Stub);
+            for (name, value) in values.as_object().unwrap() {
+                assert_eq!(
+                    value.as_str().unwrap(),
+                    expand_format_with_hooks(
+                        &format!("#{{{name}}}"),
+                        &engine,
+                        format_context,
+                        &mut Stub,
+                    )
+                    .to_string(),
+                    "{scope}: {name}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn scoped_values_resolve_hooks_before_context_values() {
+        struct Hooks;
+
+        impl StatusHooks for Hooks {
+            fn strftime(&mut self, _literal: &str) -> String {
+                String::new()
+            }
+
+            fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
+                String::new()
+            }
+
+            fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
+                match name {
+                    "pane_id" => Some("%42".to_owned()),
+                    "pane_kind" => Some("agent".to_owned()),
+                    _ => None,
+                }
+            }
+        }
+
+        let context = context();
+        let values = context.scoped_format_values("pane", &mut Hooks);
+        for name in ["pane_id", "pane_kind", "pane_dead_time", "agent_state"] {
+            assert_eq!(
+                values[name].as_str().unwrap(),
+                expand_format_values(&format!("#{{{name}}}"), &context, &mut Hooks)
+            );
+        }
+        assert_eq!(values["pane_id"], "%42");
+        assert_eq!(values["pane_kind"], "agent");
     }
 
     /// utf8.c `utf8_sanitize`, measured on tmux d77c9dc6 through a client whose

@@ -242,6 +242,37 @@ fn parse_tmux_options_with_command<'a>(
             break;
         }
 
+        if let Some(option) = spec
+            .options
+            .iter()
+            .find(|option| option.name.starts_with("--") && option.name == argument.as_str())
+        {
+            let value = args
+                .get(index)
+                .filter(|value| !option.optional_value || !optional_value_starts_option(value));
+            if (option.value.is_some() || option.attached_value) && !option.optional_value
+                || option.optional_value && value.is_some()
+            {
+                let value = value.ok_or_else(|| {
+                    ServerError::CommandParse(format!(
+                        "command {}: {} expects an argument",
+                        spec.name, option.name
+                    ))
+                })?;
+                if command.is_some_and(|command| command.argument_is_command_block(index)) {
+                    return Err(ServerError::CommandParse(format!(
+                        "command {}: {} argument must be a string",
+                        spec.name, option.name
+                    )));
+                }
+                options.push(TmuxOption::Value(option.name, value));
+                index += 1;
+            } else {
+                options.push(TmuxOption::Flag(option.name));
+            }
+            continue;
+        }
+
         for (offset, flag) in argument[1..].char_indices() {
             if flag == '?' {
                 return Err(ServerError::CommandParse(format!(
@@ -315,6 +346,16 @@ fn parse_tmux_options_with_command<'a>(
             }
             options.push(TmuxOption::Flag(option.name));
         }
+    }
+    if options.contains(&TmuxOption::Flag("--json"))
+        && options
+            .iter()
+            .any(|option| matches!(option, TmuxOption::Value("-F", _)))
+    {
+        return Err(ServerError::CommandParse(format!(
+            "command {}: --json cannot be combined with -F",
+            spec.name
+        )));
     }
     Ok(TmuxOptionParse {
         options,
@@ -514,6 +555,7 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
     ),
     ("kill-session", "[-aCg] [-f filter] [-t target-session]"),
     ("list-buffers", "[-F format] [-f filter] [-O order]"),
+    ("list-sessions", "[-r] [-F format] [-f filter] [-O order]"),
     (
         "list-clients",
         "[-F format] [-f filter] [-O order][-t target-session]",
@@ -540,6 +582,7 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
         "[-MTZ] [-D lines] [-L columns] [-R columns] [-U lines] [-x width] [-y height] [-t target-pane]",
     ),
     ("select-pane", "[-DdeLlMmRUZ] [-T title] [-t target-pane]"),
+    ("show-options", "[-AgHpqsvw] [-t target-pane] [option]"),
     (
         "split-window",
         "[-bdefhIklPvWZ] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",
@@ -1338,8 +1381,9 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "list-sessions",
         aliases: &["ls"],
         description: "List sessions",
-        usage: "[-r] [-F format] [-f filter] [-O order]",
+        usage: "[--json] [-r] [-F format] [-f filter] [-O order]",
         options: &[
+            CommandOptionSpec::flag("--json", "one JSON object per line"),
             CommandOptionSpec::value("-F", FreeForm, "output format"),
             CommandOptionSpec::value("-f", FreeForm, "filter"),
             CommandOptionSpec::value("-O", FreeForm, "sort order"),
@@ -1417,8 +1461,9 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "list-clients",
         aliases: &["lsc"],
         description: "List attached clients",
-        usage: "[-r] [-F format] [-f filter] [-O order] [-t target-session]",
+        usage: "[--json] [-r] [-F format] [-f filter] [-O order] [-t target-session]",
         options: &[
+            CommandOptionSpec::flag("--json", "one JSON object per line"),
             CommandOptionSpec::value("-F", FreeForm, "output format"),
             CommandOptionSpec::value("-t", Session, "target session"),
             CommandOptionSpec::value("-f", FreeForm, "filter"),
@@ -1495,8 +1540,9 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "list-windows",
         aliases: &["lsw"],
         description: "List windows",
-        usage: "[-ar] [-F format] [-f filter] [-O order] [-t target-session]",
+        usage: "[--json] [-ar] [-F format] [-f filter] [-O order] [-t target-session]",
         options: &[
+            CommandOptionSpec::flag("--json", "one JSON object per line"),
             CommandOptionSpec::value("-t", Session, "target session"),
             CommandOptionSpec::value("-F", FreeForm, "output format"),
             CommandOptionSpec::flag("-a", "list windows from every session"),
@@ -1946,8 +1992,9 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "list-panes",
         aliases: &["lsp"],
         description: "List panes",
-        usage: "[-asr] [-F format] [-f filter] [-O order] [-t target-window]",
+        usage: "[--json] [-asr] [-F format] [-f filter] [-O order] [-t target-window]",
         options: &[
+            CommandOptionSpec::flag("--json", "one JSON object per line"),
             CommandOptionSpec::value("-t", Window, "target window"),
             CommandOptionSpec::value("-F", FreeForm, "output format"),
             CommandOptionSpec::value("-f", FreeForm, "filter"),
@@ -2450,8 +2497,9 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "show-options",
         aliases: &["show"],
         description: "Show server, session, window, or pane options",
-        usage: "[-AgHpqsvw] [-t target-pane] [option]",
+        usage: "[--json] [-AgHpqsvw] [-t target-pane] [option]",
         options: &[
+            CommandOptionSpec::flag("--json", "one JSON object per line"),
             CommandOptionSpec::flag("-A", "include inherited values"),
             CommandOptionSpec::flag("-g", "global scope"),
             CommandOptionSpec::flag("-H", "include hooks"),
@@ -2874,6 +2922,7 @@ mod tests {
     fn catalog_flag_shapes(spec: &CommandSpec) -> BTreeMap<String, String> {
         spec.options
             .iter()
+            .filter(|option| !option.name.starts_with("--"))
             .map(|option| {
                 let arity = if option.optional_value {
                     "optional"
@@ -2917,7 +2966,11 @@ mod tests {
             for arity in command.flags.values() {
                 *flag_shapes.entry(arity).or_default() += 1;
             }
-            for option in spec.options {
+            for option in spec
+                .options
+                .iter()
+                .filter(|option| !option.name.starts_with("--"))
+            {
                 if option.unsupported {
                     unsupported += 1;
                 } else {
@@ -2950,7 +3003,7 @@ mod tests {
             BTreeMap::from([("none", 287), ("optional", 8), ("required", 220)])
         );
         assert_eq!((supported, unsupported), (490, 25));
-        assert_eq!(usage_overrides.len(), 18);
+        assert_eq!(usage_overrides.len(), 20);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES
@@ -3050,6 +3103,92 @@ mod tests {
                 .expect_err("missing unsupported value")
                 .tmux_message(),
             "command detach-client: -E expects an argument"
+        );
+    }
+
+    #[test]
+    fn tmux_declared_long_options_are_accepted() {
+        for name in [
+            "list-sessions",
+            "list-windows",
+            "list-panes",
+            "list-clients",
+            "show-options",
+        ] {
+            let spec = command_spec(name).expect("JSON command");
+            let arguments = owned(&["--json"]);
+            assert_eq!(
+                parse_tmux_options(spec, &arguments).expect("declared long option"),
+                TmuxOptionParse {
+                    options: vec![TmuxOption::Flag("--json")],
+                    positionals: &[],
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn tmux_json_rejects_custom_formats() {
+        for name in [
+            "list-sessions",
+            "list-windows",
+            "list-panes",
+            "list-clients",
+        ] {
+            let spec = command_spec(name).expect("JSON list command");
+            for arguments in [owned(&["-Fx", "--json"]), owned(&["--json", "-F", "x"])] {
+                assert_eq!(
+                    parse_tmux_options(spec, &arguments)
+                        .expect_err("conflicting output formats")
+                        .tmux_message(),
+                    format!("command {name}: --json cannot be combined with -F")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tmux_undeclared_long_options_remain_invalid() {
+        for (name, argument) in [
+            ("list-panes", "--nope"),
+            ("list-panes", "--json=true"),
+            ("display-message", "--json"),
+        ] {
+            let spec = command_spec(name).expect("tmux command");
+            let arguments = owned(&[argument]);
+            assert_eq!(
+                parse_tmux_options(spec, &arguments)
+                    .expect_err("undeclared long option")
+                    .tmux_message(),
+                format!("command {name}: invalid flag --")
+            );
+        }
+    }
+
+    #[test]
+    fn tmux_short_flag_clusters_are_unchanged() {
+        const OPTIONS: &[CommandOptionSpec] = &[
+            CommandOptionSpec::flag("-a", "first"),
+            CommandOptionSpec::flag("-b", "second"),
+            CommandOptionSpec::flag("-c", "third"),
+            CommandOptionSpec::flag("--json", "one JSON object per line"),
+        ];
+        let spec = CommandSpec {
+            options: OPTIONS,
+            ..*command_spec("list-panes").expect("list-panes")
+        };
+        let arguments = owned(&["-abc", "--json"]);
+        assert_eq!(
+            parse_tmux_options(&spec, &arguments).expect("short flag cluster"),
+            TmuxOptionParse {
+                options: vec![
+                    TmuxOption::Flag("-a"),
+                    TmuxOption::Flag("-b"),
+                    TmuxOption::Flag("-c"),
+                    TmuxOption::Flag("--json"),
+                ],
+                positionals: &[],
+            }
         );
     }
 

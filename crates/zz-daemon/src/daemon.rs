@@ -13956,8 +13956,25 @@ impl Shared {
         name: &str,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
-        let parsed = parse_buffer_command_args(name, args, &['F', 'f', 'O', 't'], &['r'])?;
-        require_no_positionals(name, &parsed)?;
+        let spec = zz_protocol::catalog_command_spec("list-clients").expect("list-clients spec");
+        let options = zz_protocol::parse_tmux_options(spec, args)?;
+        spec.validate_positional_maximum(options.positionals.len())?;
+        let mut parsed = ParsedBufferCommandArgs::default();
+        let mut json = false;
+        for option in options.options {
+            match option {
+                zz_protocol::TmuxOption::Flag("--json") => json = true,
+                zz_protocol::TmuxOption::Flag("-r") => {
+                    parsed.flags.insert('r');
+                }
+                zz_protocol::TmuxOption::Value(name, value) => {
+                    if let Some(option) = name.chars().nth(1) {
+                        parsed.values.insert(option, value.to_owned());
+                    }
+                }
+                _ => {}
+            }
+        }
         let mut inner = self.inner.lock();
         let target = parsed
             .value('t')
@@ -14049,7 +14066,14 @@ impl Shared {
                 DaemonFormatHooks::command_with_optional_variables(&facts, Some(&variables))
                     .with_option_engine(&inner.engine)
                     .with_command_item(name);
-            output.push(expand_format_bytes(format, &format_context, &mut hooks));
+            output.push(if json {
+                format_context
+                    .scoped_format_values("client", &mut hooks)
+                    .to_string()
+                    .into()
+            } else {
+                expand_format_bytes(format, &format_context, &mut hooks)
+            });
         }
         Ok(Execution {
             output: RawText::join(&output, b"\n"),
@@ -27245,13 +27269,17 @@ impl Shared {
         }
         let result = match timeout {
             Some(timeout) => reply.recv_timeout(timeout).map_err(|error| match error {
-                crossbeam_channel::RecvTimeoutError::Timeout => {
-                    ServerError::InvalidCommand(format!(
+                crossbeam_channel::RecvTimeoutError::Timeout => DaemonError::CommandExit {
+                    output: format!(
                         "{pane}: no reply within {} seconds; the turn is still running",
                         timeout.as_secs()
-                    ))
+                    )
+                    .into(),
+                    exit_code: 124,
+                },
+                crossbeam_channel::RecvTimeoutError::Disconnected => {
+                    ServerError::PaneExited(pane).into()
                 }
-                crossbeam_channel::RecvTimeoutError::Disconnected => ServerError::PaneExited(pane),
             })?,
             None => reply.recv().map_err(|_| ServerError::PaneExited(pane))?,
         };
@@ -40458,10 +40486,11 @@ Explicit values in `agent-command` config take precedence over these defaults.
 
 Use stable IDs: `%N` for a pane, `@N` for a window, `$N` for a session. Pass the
 bare ID: `-t %3` works everywhere, while `-t work:%3` and other session-prefixed
-guesses fail with `can't find window`. Discover verbs with `zz list-commands` (add
-a verb name for its usage line); the `--help` flag prints only the tmux usage
-banner. Never run the binary without a verb (`zz` alone, or with only global flags
-such as `-T`): that launches the desktop app. Pane options need `-p`:
+guesses fail with `can't find window`. Discover verbs with `zz --help`, or use
+`zz <verb> --help` for its options and arguments. You can also use
+`zz list-commands` (add a verb name for its usage line). Never run the binary
+without a verb (`zz` alone, or with only global flags such as `-T`): that launches
+the desktop app. Pane options need `-p`:
 `zz set-option -p -t %3 @name reviewer`.
 
 ```sh
@@ -40474,6 +40503,34 @@ zz list-panes -F '#{pane_id} #{pane_kind} #{agent_state} #{@agent_state}'
 `#{pane_last_command_status}` is the last completed command's exit code, or empty
 when unknown; terminal and Agent panes report it from OSC 133 marks.
 `#{@name}` reads a user option from pane, window, session, then global scope.
+
+## CLI contract
+
+Use `zz --help` or the `help` verb for the command catalog. Use `zz <verb> --help`
+for a command's description, usage, options, and positional arguments; aliases
+and unique prefixes work too. These help forms need no daemon and exit 0. An
+unknown verb exits 2. Global `-h` keeps the tmux usage banner, and command `-h`
+flags keep their tmux meaning.
+
+Add `--json` to `list-sessions`, `list-windows`, `list-panes`, or `list-clients`
+for one JSON object per row in the same order as text output. Keys are the format
+variable names for that entity; values are strings with the same expansion as
+`#{name}`, including empty strings for unavailable values. Pane rows include
+`pane_kind`, `agent_state`, `agent_pending_permission`, `browser_url`,
+`pane_pb_state`, and `pane_pb_progress`. Use `show-options --json` for one object
+mapping option names to value strings in the selected scope. Combining `-F` and
+`--json` is a usage error.
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | Success. |
+| 1 | Command failure, missing daemon, or connection loss. |
+| 2 | Usage error: unknown verb, invalid flag, missing argument, or malformed value. |
+| 3 | Blocked or unable to answer now, including `agent-send --on-block fail`. |
+| 124 | Wait timed out, including `agent-send --timeout`. |
+| 125 | Reserved for the `run-pane` timeout. |
+
+Commands that set an explicit exit code keep that code.
 
 ## Verbs
 

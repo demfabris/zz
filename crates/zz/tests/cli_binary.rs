@@ -38,12 +38,82 @@ fn unknown_tmux_flag_uses_tmux_usage_shape() {
         .arg("-8")
         .output()
         .expect("run zz with an unknown tmux flag");
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
     assert_eq!(
         output.stderr,
         format!("zz: unknown option -- 8\n{TMUX_USAGE}").as_bytes()
     );
+}
+
+#[test]
+fn catalog_help_is_available_without_a_daemon() {
+    for arguments in [
+        &["--help"][..],
+        &["help"][..],
+        &["list-panes", "--help"][..],
+        &["lsp", "--help"][..],
+        &["list-pan", "--help"][..],
+    ] {
+        let (home, mut zz) = isolated_zz();
+        let socket = home.path().join("absent.sock");
+        let output = zz
+            .arg("-S")
+            .arg(&socket)
+            .args(arguments)
+            .output()
+            .expect("run catalog help");
+        assert_eq!(output.status.code(), Some(0), "{arguments:?}");
+        assert!(output.stderr.is_empty(), "{arguments:?}");
+        let help = String::from_utf8(output.stdout).expect("UTF-8 help");
+        if arguments.len() == 1 {
+            assert!(help.contains("agent-send"));
+            assert!(help.contains("tmux commands"));
+            assert!(help.contains("not implemented"));
+        } else {
+            assert!(help.contains("list-panes"));
+            assert!(help.contains("-F"));
+            assert!(help.contains("--json"));
+        }
+        assert!(!socket.exists());
+    }
+}
+
+#[test]
+fn invalid_cli_arguments_exit_two_without_a_daemon() {
+    for (arguments, expected) in [
+        (&["bogus-verb"][..], "unknown command: bogus-verb"),
+        (&["bogus-verb", "--help"][..], "unknown command: bogus-verb"),
+        (&["split-window", "--nope"][..], "invalid flag"),
+        (&["-Z"][..], "unknown option -- Z"),
+        (&["list-sessions", "-F", "x", "--json"][..], "--json"),
+    ] {
+        let (home, mut zz) = isolated_zz();
+        let socket = home.path().join("absent.sock");
+        let output = zz
+            .env_remove("TMUX")
+            .arg("-S")
+            .arg(&socket)
+            .args(arguments)
+            .output()
+            .expect("run invalid CLI arguments");
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+        assert!(output.stdout.is_empty(), "{arguments:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(expected),
+            "{arguments:?}"
+        );
+        assert!(!socket.exists());
+    }
+}
+
+#[test]
+fn short_help_retains_tmux_usage() {
+    let (_home, mut zz) = isolated_zz();
+    let output = zz.arg("-h").output().expect("run zz -h");
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stdout, TMUX_USAGE.as_bytes());
+    assert!(output.stderr.is_empty());
 }
 
 #[cfg(unix)]
@@ -328,6 +398,47 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn pane_json_contains_format_ids_and_native_kind() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            eprintln!("SKIPPED: Unix socket binding is unavailable");
+            return;
+        }
+        let created = fixture.run(&["new-session", "-d", "-s", "json"]);
+        assert_eq!(created.status.code(), Some(0));
+        let output = fixture.run(&["list-panes", "--json"]);
+        assert_eq!(output.status.code(), Some(0));
+        assert!(output.stderr.is_empty());
+        let text = String::from_utf8(output.stdout).expect("UTF-8 JSON output");
+        let rows = text.lines().collect::<Vec<_>>();
+        assert_eq!(rows.len(), 1);
+        let row: serde_json::Value = serde_json::from_str(rows[0]).expect("pane JSON object");
+        assert_eq!(row["pane_id"], "%0");
+        assert_eq!(row["pane_kind"], "terminal");
+        assert!(
+            row.as_object()
+                .unwrap()
+                .values()
+                .all(serde_json::Value::is_string)
+        );
+    }
+
+    #[test]
+    fn json_and_format_conflict_exits_two_with_a_daemon() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            eprintln!("SKIPPED: Unix socket binding is unavailable");
+            return;
+        }
+        let created = fixture.run(&["new-session", "-d", "-s", "json-conflict"]);
+        assert_eq!(created.status.code(), Some(0));
+        let output = fixture.run(&["list-sessions", "-F", "x", "--json"]);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("--json"));
+    }
+
+    #[test]
     fn new_session_immediately_after_kill_server_starts_a_fresh_daemon() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
@@ -578,11 +689,11 @@ mod daemon_autostart {
         assert_eq!(created.status.code(), Some(0));
 
         let clientless = fixture.run(&["switch-client", "-t", "w"]);
-        assert_eq!(clientless.status.code(), Some(1));
+        assert_eq!(clientless.status.code(), Some(2));
         assert_eq!(clientless.stderr, b"no current client\n");
 
         let unknown = fixture.run(&["switch-client", "-c", "bogus:", "-t", "w"]);
-        assert_eq!(unknown.status.code(), Some(1));
+        assert_eq!(unknown.status.code(), Some(2));
         assert_eq!(unknown.stderr, b"can't find client: bogus\n");
     }
 
@@ -604,7 +715,7 @@ mod daemon_autostart {
         ]);
 
         let conditional = fixture.run(&["if-shell", "-F", "1", "new-session -s conditional"]);
-        assert_eq!(conditional.status.code(), Some(1));
+        assert_eq!(conditional.status.code(), Some(2));
         assert_eq!(
             conditional.stderr,
             b"open terminal failed: not a terminal\n"
@@ -1697,7 +1808,7 @@ mod daemon_autostart {
             .args(["list-keys", "-T", "reload-stale", "z"])
             .output()
             .expect("query stale reload key");
-        assert_eq!(stale.status.code(), Some(1));
+        assert_eq!(stale.status.code(), Some(2));
         assert!(stale.stdout.is_empty());
         assert_eq!(stale.stderr, b"table reload-stale doesn't exist\n");
         let loaded = fixture
@@ -1715,7 +1826,7 @@ mod daemon_autostart {
             ])
             .output()
             .expect("query reloaded key");
-        assert_eq!(loaded.status.code(), Some(1));
+        assert_eq!(loaded.status.code(), Some(2));
         assert!(loaded.stdout.is_empty());
         assert_eq!(loaded.stderr, b"table reload-loaded doesn't exist\n");
     }
@@ -1746,7 +1857,7 @@ mod daemon_autostart {
         }
 
         let created = fixture.run(&["new-session", "-s", "headless"]);
-        assert_eq!(created.status.code(), Some(1));
+        assert_eq!(created.status.code(), Some(2));
         assert!(created.stdout.is_empty());
         assert_eq!(created.stderr, b"open terminal failed: not a terminal\n");
 
@@ -1813,7 +1924,7 @@ mod daemon_autostart {
             .read_to_end(&mut stderr)
             .expect("read TTY error stderr");
 
-        assert_eq!(status.code(), Some(1));
+        assert_eq!(status.code(), Some(2));
         assert!(stdout.is_empty());
         assert_eq!(stderr, b"width too small\n");
 
@@ -1834,12 +1945,12 @@ mod daemon_autostart {
         assert_eq!(first.status.code(), Some(0));
 
         let detached_duplicate = fixture.run(&["new-session", "-d", "-s", "dup"]);
-        assert_eq!(detached_duplicate.status.code(), Some(1));
+        assert_eq!(detached_duplicate.status.code(), Some(2));
         assert!(detached_duplicate.stdout.is_empty());
         assert_eq!(detached_duplicate.stderr, b"duplicate session: dup\n");
 
         let attaching_duplicate = fixture.run(&["new-session", "-s", "dup"]);
-        assert_eq!(attaching_duplicate.status.code(), Some(1));
+        assert_eq!(attaching_duplicate.status.code(), Some(2));
         assert!(attaching_duplicate.stdout.is_empty());
         assert_eq!(attaching_duplicate.stderr, b"duplicate session: dup\n");
     }
@@ -1855,7 +1966,7 @@ mod daemon_autostart {
         assert_eq!(existing.status.code(), Some(0));
 
         let attaching = fixture.run(&["new-session", "-A", "-d", "-s", "existing"]);
-        assert_eq!(attaching.status.code(), Some(1));
+        assert_eq!(attaching.status.code(), Some(2));
         assert!(attaching.stdout.is_empty());
         assert_eq!(attaching.stderr, b"open terminal failed: not a terminal\n");
 
@@ -2586,7 +2697,7 @@ mod daemon_autostart {
             assert_eq!(output.stderr, b"open terminal failed: not a terminal\n");
 
             let positional = fixture.run(&[command, "named", "-@"]);
-            assert_eq!(positional.status.code(), Some(1));
+            assert_eq!(positional.status.code(), Some(2));
             assert!(positional.stdout.is_empty());
             assert_eq!(
                 positional.stderr,
@@ -2674,7 +2785,11 @@ mod daemon_autostart {
                 let mut invocation = vec![command];
                 invocation.extend_from_slice(arguments);
                 let output = fixture.run(&invocation);
-                assert_eq!(output.status.code(), Some(1), "{invocation:?}");
+                assert_eq!(
+                    output.status.code(),
+                    Some(if arguments == ["-x"] { 1 } else { 2 }),
+                    "{invocation:?}"
+                );
                 assert!(output.stdout.is_empty(), "{invocation:?}");
                 assert_eq!(output.stderr, expected, "{invocation:?}");
             }
@@ -2979,12 +3094,12 @@ mod daemon_autostart {
             ";",
             "broken",
         ]);
-        assert_eq!(rejected.status.code(), Some(1));
+        assert_eq!(rejected.status.code(), Some(2));
         assert!(rejected.stdout.is_empty());
         assert_eq!(rejected.stderr, b"unknown command: broken\n");
 
         let marker = fixture.run(&["show-environment", "-g", "CLI_CHAIN_BEFORE"]);
-        assert_eq!(marker.status.code(), Some(1));
+        assert_eq!(marker.status.code(), Some(2));
         assert!(marker.stdout.is_empty());
         assert_eq!(marker.stderr, b"unknown variable: CLI_CHAIN_BEFORE\n");
 
@@ -3038,12 +3153,12 @@ mod daemon_autostart {
             let mut arguments = vec!["set-environment", "-g", marker, "mutated", ";"];
             arguments.extend_from_slice(later);
             let rejected = fixture.run(&arguments);
-            assert_eq!(rejected.status.code(), Some(1), "{marker}");
+            assert_eq!(rejected.status.code(), Some(2), "{marker}");
             assert!(rejected.stdout.is_empty(), "{marker}");
             assert_eq!(rejected.stderr, expected, "{marker}");
 
             let marker_output = fixture.run(&["show-environment", "-g", marker]);
-            assert_eq!(marker_output.status.code(), Some(1), "{marker}");
+            assert_eq!(marker_output.status.code(), Some(2), "{marker}");
             assert!(marker_output.stdout.is_empty(), "{marker}");
             assert_eq!(
                 marker_output.stderr,
@@ -3077,7 +3192,7 @@ mod daemon_autostart {
         assert!(before.stderr.is_empty());
 
         let after = fixture.run(&["show-environment", "-g", "CLI_RUNTIME_AFTER"]);
-        assert_eq!(after.status.code(), Some(1));
+        assert_eq!(after.status.code(), Some(2));
         assert!(after.stdout.is_empty());
         assert_eq!(after.stderr, b"unknown variable: CLI_RUNTIME_AFTER\n");
     }
@@ -3137,7 +3252,33 @@ mod daemon_autostart {
                 return;
             }
             let output = fixture.run(arguments);
-            assert_missing(&output, &fixture.missing_message());
+            if arguments == &["-N", "attach"] || arguments == &["-N", "attach-session"] {
+                assert_missing(&output, &fixture.missing_message());
+            } else {
+                let expected = match arguments.last().copied() {
+                    Some("frobnicate") => "unknown command: frobnicate",
+                    Some("-F") => "command list-sessions: -F expects an argument",
+                    Some("-Z") if arguments.contains(&"lscm") => {
+                        "command list-commands: unknown flag -Z"
+                    }
+                    Some("-Z") if arguments.contains(&"clock-mode") => {
+                        "command clock-mode: unknown flag -Z"
+                    }
+                    Some("-Z") => "command list-sessions: unknown flag -Z",
+                    Some("extra") if arguments.contains(&"suspendc") => {
+                        "command suspend-client: too many arguments (need at most 0)"
+                    }
+                    Some("extra") => "command list-sessions: too many arguments (need at most 0)",
+                    _ => unreachable!("covered cold invocation"),
+                };
+                assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+                assert!(output.stdout.is_empty(), "{arguments:?}");
+                assert_eq!(
+                    output.stderr,
+                    format!("{expected}\n").as_bytes(),
+                    "{arguments:?}"
+                );
+            }
             fixture.assert_not_started();
         }
     }
@@ -3175,7 +3316,9 @@ mod daemon_autostart {
         )
         .expect("write startup alias");
         let output = fixture.run(&["go"]);
-        assert_missing(&output, &fixture.missing_message());
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        assert_eq!(output.stderr, b"unknown command: go\n");
         fixture.assert_not_started();
     }
 
@@ -3237,7 +3380,7 @@ mod daemon_autostart {
         });
         let output = fixture.run(&["new-session", "-d", "-s", "before-reset", ";", "frobnicate"]);
         fake.join().expect("join fake listener");
-        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());
         assert!(!output.stderr.is_empty());
         fixture.assert_not_started();
@@ -3259,7 +3402,7 @@ mod daemon_autostart {
             )
             .expect("write startup alias");
             let output = fixture.run(&["new-session", "-d", "-s", "before", ";", "list-sessions"]);
-            assert_eq!(output.status.code(), Some(1));
+            assert_eq!(output.status.code(), Some(2));
             assert!(output.stdout.is_empty());
             assert_eq!(output.stderr, b"unknown command: frobnicate\n");
             fixture.assert_stopped();
@@ -3889,7 +4032,7 @@ mod daemon_autostart {
         ];
         for (arguments, expected) in cases {
             let output = fixture.run(arguments);
-            assert_eq!(output.status.code(), Some(1), "{arguments:?}");
+            assert_eq!(output.status.code(), Some(2), "{arguments:?}");
             assert!(output.stdout.is_empty(), "{arguments:?}");
             assert_eq!(
                 output.stderr,
@@ -3903,7 +4046,7 @@ mod daemon_autostart {
         assert!(first.stdout.is_empty());
         assert!(first.stderr.is_empty());
         let duplicate = fixture.run(&["set", "-go", "@once", "second"]);
-        assert_eq!(duplicate.status.code(), Some(1));
+        assert_eq!(duplicate.status.code(), Some(2));
         assert!(duplicate.stdout.is_empty());
         assert_eq!(duplicate.stderr, b"already set: @once\n");
     }
@@ -3916,15 +4059,16 @@ mod daemon_autostart {
         }
         let created = fixture.run(&["new-session", "-d", "-s", "error-shapes"]);
         assert_eq!(created.status.code(), Some(0));
-        for (arguments, expected) in [
+        for (arguments, expected, exit_code) in [
             (
                 &["kill-session", "-t", "bogus"] as &[&str],
                 b"can't find session: bogus\n" as &[u8],
+                1,
             ),
-            (&["wibble"], b"unknown command: wibble\n"),
+            (&["wibble"], b"unknown command: wibble\n", 2),
         ] {
             let output = fixture.run(arguments);
-            assert_eq!(output.status.code(), Some(1));
+            assert_eq!(output.status.code(), Some(exit_code));
             assert!(output.stdout.is_empty());
             assert_eq!(output.stderr, expected);
         }
@@ -5497,7 +5641,7 @@ mod daemon_autostart {
                 &[&startup],
                 &["show-environment", "-g", "CONFIG_BYTE_STARTUP"],
             );
-            assert_eq!(shown.status.code(), Some(1));
+            assert_eq!(shown.status.code(), Some(2));
             assert!(shown.stdout.is_empty());
             assert_eq!(shown.stderr, b"unknown variable: CONFIG_BYTE_STARTUP\n");
             fixture.run_with_configs(&[&startup], &["kill-server"]);

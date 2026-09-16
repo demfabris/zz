@@ -302,7 +302,7 @@ impl EngineFilter {
         terminal: &mut Terminal<'_, '_>,
         renames: &mut Vec<String>,
         bar: &mut Option<ProgressBar>,
-        last_command_status: &mut Option<Option<i32>>,
+        last_command_status: &mut Option<CommandStatusUpdate>,
     ) {
         while !bytes.is_empty() {
             match self.state {
@@ -498,7 +498,7 @@ impl EngineFilter {
         bytes: &'b [u8],
         terminal: &mut Terminal<'_, '_>,
         bar: &mut Option<ProgressBar>,
-        last_command_status: &mut Option<Option<i32>>,
+        last_command_status: &mut Option<CommandStatusUpdate>,
     ) -> &'b [u8] {
         let end = bytes
             .iter()
@@ -538,7 +538,7 @@ impl EngineFilter {
     fn finish_osc(
         &mut self,
         bar: &mut Option<ProgressBar>,
-        last_command_status: &mut Option<Option<i32>>,
+        last_command_status: &mut Option<CommandStatusUpdate>,
     ) {
         let Some(osc) = self.osc.take() else {
             return;
@@ -569,13 +569,28 @@ impl EngineFilter {
     }
 }
 
-fn parse_osc_command_status(payload: &[u8]) -> Option<Option<i32>> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommandStatusUpdate {
+    Unknown,
+    Exit(i32),
+}
+
+impl CommandStatusUpdate {
+    fn code(self) -> Option<i32> {
+        match self {
+            Self::Unknown => None,
+            Self::Exit(code) => Some(code),
+        }
+    }
+}
+
+fn parse_osc_command_status(payload: &[u8]) -> Option<CommandStatusUpdate> {
     let rest = payload.strip_prefix(b"133;D")?;
     if rest.is_empty() {
-        return Some(None);
+        return Some(CommandStatusUpdate::Unknown);
     }
     let status = std::str::from_utf8(rest.strip_prefix(b";")?).ok()?;
-    Some(Some(status.parse().ok()?))
+    Some(CommandStatusUpdate::Exit(status.parse().ok()?))
 }
 
 /// `input_exit_osc` reads the leading digits as the OSC number, which must be
@@ -4755,7 +4770,7 @@ fn run_output_view(
                         publisher.set_progress_bar(bar);
                     }
                     if let Some(status) = last_command_status {
-                        publisher.set_last_command_status(status);
+                        publisher.set_last_command_status(status.code());
                     }
                     publisher.mark_output_activity();
                     publish_active_views(
@@ -5225,7 +5240,7 @@ fn run_terminal(
     let mut engine_filter = EngineFilter::default();
     let mut engine_renames = Vec::new();
     let mut engine_bar: Option<ProgressBar> = None;
-    let mut engine_last_command_status: Option<Option<i32>> = None;
+    let mut engine_last_command_status: Option<CommandStatusUpdate> = None;
     let mut active_views = ActiveTerminalViews::new();
     let mut inactive_views = InactiveTerminalViews::new();
     let mut generations = ViewportGenerations::new()?;
@@ -5314,7 +5329,7 @@ fn run_terminal(
             publisher.set_progress_bar(bar);
         }
         if let Some(status) = engine_last_command_status.take() {
-            publisher.set_last_command_status(status);
+            publisher.set_last_command_status(status.code());
         }
         if output_pending
             && (reader_eof
@@ -6318,7 +6333,7 @@ fn run_terminal(
             }
             publisher.set_facts(engine_filter.facts(&terminal)?);
             if let Some(status) = engine_last_command_status.take() {
-                publisher.set_last_command_status(status);
+                publisher.set_last_command_status(status.code());
             }
             let status = exit_status.take().expect("checked above");
             let signal = status.signal().and_then(signal_number);
@@ -12708,7 +12723,7 @@ struct EngineOutput<'a> {
     renames: &'a mut Vec<String>,
     /// The pane's progress bar, set only by an OSC 9;4 that moved it.
     bar: &'a mut Option<ProgressBar>,
-    last_command_status: &'a mut Option<Option<i32>>,
+    last_command_status: &'a mut Option<CommandStatusUpdate>,
 }
 
 fn feed_pty_output(
@@ -14467,7 +14482,7 @@ mod tests {
         let mut filter = EngineFilter::default();
         let mut status = None;
         for (payload, expected) in [
-            ("133;D;7", Some(Some(7))),
+            ("133;D;7", Some(CommandStatusUpdate::Exit(7))),
             ("133;A", None),
             ("133;B", None),
             ("133;C", None),
@@ -14477,9 +14492,9 @@ mod tests {
             ("133;D;", None),
             ("133;D;2147483648", None),
             ("133;D;7;extra", None),
-            ("133;D;0", Some(Some(0))),
-            ("133;D;-1", Some(Some(-1))),
-            ("133;D", Some(None)),
+            ("133;D;0", Some(CommandStatusUpdate::Exit(0))),
+            ("133;D;-1", Some(CommandStatusUpdate::Exit(-1))),
+            ("133;D", Some(CommandStatusUpdate::Unknown)),
         ] {
             let mut update = None;
             filter.write(
@@ -14492,7 +14507,7 @@ mod tests {
             );
             assert_eq!(update, expected, "{payload}");
             if let Some(value) = update {
-                status = value;
+                status = value.code();
             }
             if expected.is_none() {
                 assert_eq!(status, Some(7), "{payload}");
@@ -14523,7 +14538,14 @@ mod tests {
                     &mut status,
                 );
             }
-            assert_eq!(status, Some(Some(7)), "split at {split}");
+            assert_eq!(
+                status,
+                Some(CommandStatusUpdate::Exit(7)),
+                "split at {split}"
+            );
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn progress_bar_is_visible_on_the_frame_carrying_the_osc() {

@@ -136,6 +136,35 @@
       "reason": "Independent GUI clients and per-client sizing are core zz behavior. Widened 2026-09-02 for semantic:per-client-active-pane, relocated from clients.active-pane, which is now empty. The pin really does keep a per-client active pane: `refresh-client -f active-pane` sets CLIENT_ACTIVEPANE, `server_client_set_pane` stores the pane on a per-client-and-window record and `server_client_get_pane` reads it back, feeding target resolution through `cmd_find_from_client`, the active border and highlight in screen-redraw.c and window-border.c, `run-shell` with no target, and the tty cursor. Measured on a throwaway pin server with two attached 80x24 pty clients and a two-pane window. The flag is retained and reported: `#{client_flags}` answers `attached,focused,active-pane,UTF-8` for the client that asked and `attached,focused,UTF-8` for the other, which zz already matches. What the measurement adds is how little of it is observable in the format layer: `format_cb_pane_active` compares `ft->wp` with `wp->window->active`, so `#{pane_active}` and every `list-panes` row stay window-global on the pin too, and a per-client selection never shows up there. It is also unreachable from the CLI: `cmd_select_pane_exec` takes the per-client branch only when `cmdq_get_client(item)` has a session, and a command client's session is NULL, so `select-pane -t %1` typed on the command line moved the WINDOW's active pane from %0 to %1 and moved the rows with it even while an attached client carried the flag. Only a command running on the attached client's own queue reaches `server_client_set_pane`. The product stance: in zz the pane a window is on is model state, one shared fact that every client sees and that the snapshot carries, while per-client view state - the focused window, the client size, copy and view mode, the chooser and the sidebar - already lives on the client, which is what semantic:per-client-current-window in this group settles. Adding a per-client active pane would move a model field into the view layer and split pane targeting per client, and zz's answer is that clients differ by which WINDOW they look at, not by which pane inside it is active. The flag stays retained and reported so scripts that set it are not refused. Reopen only if zz moves the active pane out of the mux model. Widened 2026-09-06 for semantic:popup-underlay-focus-events, measured by the proof-debt lane while closing a hole in compat/attached-client.sh: the popup underlay probe waited for the focus pair on the tmux side only, and its byte assertion passed on zz precisely BECAUSE nothing arrived, so the zz side proved nothing. With focus-events on and a display-popup opened over a pane whose program has set DECSET 1004, the pin writes the focus-out sequence ESC [ O (27 91 79) to the covered pane when the popup takes focus and ESC [ I (27 91 73) when it gives focus back, three pairs across the probe's three popups; zz writes neither byte, and the covered pane's next read is the ordinary z (122) the probe types at the end. The victim is any pane program that acts on focus, vim's autoread being the common one: opening a popup over vim on the pin makes vim recheck the file, and on zz it does not. The stance stays native and no zz code changed here: focus is a per-client fact in zz and a popup is a client overlay, not a window the pane loses focus to. What changed is the proof - compat/attached-client.sh now waits on BOTH sides, positively on the pin through wait_for_pane_marker and as a bounded absence on zz through assert_pane_marker_absent, and assert_popup_underlay_result counts the focus markers against the side's own focus_pairs (6 on the pin, 0 on zz) instead of accepting the shared final byte alone. Reopen if zz grows a server-owned notion of a pane losing focus to an overlay."
     },
     {
+      "id": "commands.json-output",
+      "title": "Keep --json on the list verbs a zz-only flag",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
+      "impact": [
+        "scripts"
+      ],
+      "owner": "protocol",
+      "items": [
+        "extension-flag:list-clients:--json",
+        "extension-flag:list-panes:--json",
+        "extension-flag:list-sessions:--json",
+        "extension-flag:list-windows:--json",
+        "extension-flag:show-options:--json"
+      ],
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/formats.rs",
+        "resource:knowledge/tmux/commands.md"
+      ],
+      "acceptance": [
+        "A declared `--json` flag on list-sessions, list-windows, list-panes, list-clients, and show-options emits one JSON object per row built from the entity's format variables, while any undeclared long token on a tmux verb keeps the pin's `invalid flag --` error."
+      ],
+      "depends_on": [],
+      "reason": "Added 2026-09-15 for agents that read the workspace as data. The pin has no long options at all: cmd_parse splits every `-abc` token into single letters and reports anything else as `invalid flag --`, so a `--json` spelling can never collide with a tmux flag, and the parser only accepts long tokens that the verb's own catalog spec declares. Values stay strings with the same expansion as `#{name}`, so the JSON is the format layer, not a second data model."
+    },
+    {
       "id": "commands.native-client-tools",
       "title": "Use native client tools",
       "decision": "native",
@@ -192,6 +221,7 @@
         "native-command:new-browser",
         "native-command:reload-config",
         "native-command:restart-agent-pane",
+        "native-command:run-pane",
         "native-command:select-pane-kind",
         "native-command:send-last-output",
         "native-command:send-text",
@@ -206,7 +236,8 @@
         "native-command:split-agent",
         "native-command:split-browser",
         "native-command:split-picker",
-        "native-command:tools"
+        "native-command:tools",
+        "native-command:wait-pane"
       ],
       "evidence": [
         "resource:crates/zz-protocol/src/catalog.rs",
@@ -216,7 +247,7 @@
         "Every zz-native exact command name and alias remains explicitly classified and does not equal a tmux exact spelling."
       ],
       "depends_on": [],
-      "reason": "The GUI superset needs its own names so tmux spellings can keep frozen tmux meaning. Pin citation added 2026-09-06. The pin's whole command namespace is one array, cmd_table in cmd.c, which holds 92 entries at d77c9dc6 and is what compat/tmux-oracle.json's commands list is derived from; a name that is not in it is not a tmux command, and tmux has no vendor-prefix convention that would let a superset hide inside it. Measured: every one of zz's 23 native command names is absent from that array and from every entry's alias list, which crates/zz-mux/src/compat_manifest_tests.rs re-checks against the oracle on every registry edit. The product stance is that the superset is additive and audited: a zz-native name may never equal a tmux exact spelling or alias, so a config written for tmux keeps tmux meaning and a zz name can never be shadowed into one. Re-measured 2026-09-13 (TUI-012 attempt-01): the array holds 25 names, not the 23 this reason counted when it was written, and every one of them is reachable from a raw TUI by its declared name with no compatibility profile and no activation flag - compat/tui-superset.sh's names group walks NATIVE_COMMAND_NAMES itself and requires each name not to answer `unknown command`. That landing closes no item here: the pin has no counterpart for any of these names, so there is no pin behaviour for the raw TUI to start honouring, and the group stays accepted for the GUI and for the TUI alike."
+      "reason": "The GUI superset needs its own names so tmux spellings can keep frozen tmux meaning. Pin citation added 2026-09-06. The pin's whole command namespace is one array, cmd_table in cmd.c, which holds 92 entries at d77c9dc6 and is what compat/tmux-oracle.json's commands list is derived from; a name that is not in it is not a tmux command, and tmux has no vendor-prefix convention that would let a superset hide inside it. Measured: every one of zz's 23 native command names is absent from that array and from every entry's alias list, which crates/zz-mux/src/compat_manifest_tests.rs re-checks against the oracle on every registry edit. The product stance is that the superset is additive and audited: a zz-native name may never equal a tmux exact spelling or alias, so a config written for tmux keeps tmux meaning and a zz name can never be shadowed into one. Re-measured 2026-09-13 (TUI-012 attempt-01): the array holds 25 names, not the 23 this reason counted when it was written, and every one of them is reachable from a raw TUI by its declared name with no compatibility profile and no activation flag - compat/tui-superset.sh's names group walks NATIVE_COMMAND_NAMES itself and requires each name not to answer `unknown command`. That landing closes no item here: the pin has no counterpart for any of these names, so there is no pin behaviour for the raw TUI to start honouring, and the group stays accepted for the GUI and for the TUI alike. Re-measured 2026-09-15: wait-pane and run-pane joined the array (27 names), both absent from the pin's cmd_table and alias lists."
     },
     {
       "id": "config.background-if-shell-race",

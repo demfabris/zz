@@ -469,7 +469,6 @@ mod daemon_autostart {
             "ls",
             "list-panes",
             "show-options",
-            "source-file",
             "kill-server",
             "--kill-server",
         ] {
@@ -477,6 +476,14 @@ mod daemon_autostart {
             assert_missing(&output, &fixture.missing_message());
             fixture.assert_not_started();
         }
+        let output = fixture.run(&["source-file"]);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            output.stderr,
+            b"command source-file: too few arguments (need at least 1)\n"
+        );
+        fixture.assert_not_started();
     }
 
     #[test]
@@ -689,11 +696,11 @@ mod daemon_autostart {
         assert_eq!(created.status.code(), Some(0));
 
         let clientless = fixture.run(&["switch-client", "-t", "w"]);
-        assert_eq!(clientless.status.code(), Some(2));
+        assert_eq!(clientless.status.code(), Some(1));
         assert_eq!(clientless.stderr, b"no current client\n");
 
         let unknown = fixture.run(&["switch-client", "-c", "bogus:", "-t", "w"]);
-        assert_eq!(unknown.status.code(), Some(2));
+        assert_eq!(unknown.status.code(), Some(1));
         assert_eq!(unknown.stderr, b"can't find client: bogus\n");
     }
 
@@ -715,7 +722,7 @@ mod daemon_autostart {
         ]);
 
         let conditional = fixture.run(&["if-shell", "-F", "1", "new-session -s conditional"]);
-        assert_eq!(conditional.status.code(), Some(2));
+        assert_eq!(conditional.status.code(), Some(1));
         assert_eq!(
             conditional.stderr,
             b"open terminal failed: not a terminal\n"
@@ -1808,7 +1815,7 @@ mod daemon_autostart {
             .args(["list-keys", "-T", "reload-stale", "z"])
             .output()
             .expect("query stale reload key");
-        assert_eq!(stale.status.code(), Some(2));
+        assert_eq!(stale.status.code(), Some(1));
         assert!(stale.stdout.is_empty());
         assert_eq!(stale.stderr, b"table reload-stale doesn't exist\n");
         let loaded = fixture
@@ -1826,7 +1833,7 @@ mod daemon_autostart {
             ])
             .output()
             .expect("query reloaded key");
-        assert_eq!(loaded.status.code(), Some(2));
+        assert_eq!(loaded.status.code(), Some(1));
         assert!(loaded.stdout.is_empty());
         assert_eq!(loaded.stderr, b"table reload-loaded doesn't exist\n");
     }
@@ -1857,7 +1864,7 @@ mod daemon_autostart {
         }
 
         let created = fixture.run(&["new-session", "-s", "headless"]);
-        assert_eq!(created.status.code(), Some(2));
+        assert_eq!(created.status.code(), Some(1));
         assert!(created.stdout.is_empty());
         assert_eq!(created.stderr, b"open terminal failed: not a terminal\n");
 
@@ -1924,7 +1931,7 @@ mod daemon_autostart {
             .read_to_end(&mut stderr)
             .expect("read TTY error stderr");
 
-        assert_eq!(status.code(), Some(2));
+        assert_eq!(status.code(), Some(1));
         assert!(stdout.is_empty());
         assert_eq!(stderr, b"width too small\n");
 
@@ -1945,12 +1952,12 @@ mod daemon_autostart {
         assert_eq!(first.status.code(), Some(0));
 
         let detached_duplicate = fixture.run(&["new-session", "-d", "-s", "dup"]);
-        assert_eq!(detached_duplicate.status.code(), Some(2));
+        assert_eq!(detached_duplicate.status.code(), Some(1));
         assert!(detached_duplicate.stdout.is_empty());
         assert_eq!(detached_duplicate.stderr, b"duplicate session: dup\n");
 
         let attaching_duplicate = fixture.run(&["new-session", "-s", "dup"]);
-        assert_eq!(attaching_duplicate.status.code(), Some(2));
+        assert_eq!(attaching_duplicate.status.code(), Some(1));
         assert!(attaching_duplicate.stdout.is_empty());
         assert_eq!(attaching_duplicate.stderr, b"duplicate session: dup\n");
     }
@@ -1966,7 +1973,7 @@ mod daemon_autostart {
         assert_eq!(existing.status.code(), Some(0));
 
         let attaching = fixture.run(&["new-session", "-A", "-d", "-s", "existing"]);
-        assert_eq!(attaching.status.code(), Some(2));
+        assert_eq!(attaching.status.code(), Some(1));
         assert!(attaching.stdout.is_empty());
         assert_eq!(attaching.stderr, b"open terminal failed: not a terminal\n");
 
@@ -3099,7 +3106,7 @@ mod daemon_autostart {
         assert_eq!(rejected.stderr, b"unknown command: broken\n");
 
         let marker = fixture.run(&["show-environment", "-g", "CLI_CHAIN_BEFORE"]);
-        assert_eq!(marker.status.code(), Some(2));
+        assert_eq!(marker.status.code(), Some(1));
         assert!(marker.stdout.is_empty());
         assert_eq!(marker.stderr, b"unknown variable: CLI_CHAIN_BEFORE\n");
 
@@ -3158,7 +3165,7 @@ mod daemon_autostart {
             assert_eq!(rejected.stderr, expected, "{marker}");
 
             let marker_output = fixture.run(&["show-environment", "-g", marker]);
-            assert_eq!(marker_output.status.code(), Some(2), "{marker}");
+            assert_eq!(marker_output.status.code(), Some(1), "{marker}");
             assert!(marker_output.stdout.is_empty(), "{marker}");
             assert_eq!(
                 marker_output.stderr,
@@ -3192,7 +3199,7 @@ mod daemon_autostart {
         assert!(before.stderr.is_empty());
 
         let after = fixture.run(&["show-environment", "-g", "CLI_RUNTIME_AFTER"]);
-        assert_eq!(after.status.code(), Some(2));
+        assert_eq!(after.status.code(), Some(1));
         assert!(after.stdout.is_empty());
         assert_eq!(after.stderr, b"unknown variable: CLI_RUNTIME_AFTER\n");
     }
@@ -4032,7 +4039,7 @@ mod daemon_autostart {
         ];
         for (arguments, expected) in cases {
             let output = fixture.run(arguments);
-            assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+            assert_eq!(output.status.code(), Some(1), "{arguments:?}");
             assert!(output.stdout.is_empty(), "{arguments:?}");
             assert_eq!(
                 output.stderr,
@@ -4046,7 +4053,7 @@ mod daemon_autostart {
         assert!(first.stdout.is_empty());
         assert!(first.stderr.is_empty());
         let duplicate = fixture.run(&["set", "-go", "@once", "second"]);
-        assert_eq!(duplicate.status.code(), Some(2));
+        assert_eq!(duplicate.status.code(), Some(1));
         assert!(duplicate.stdout.is_empty());
         assert_eq!(duplicate.stderr, b"already set: @once\n");
     }
@@ -5641,7 +5648,7 @@ mod daemon_autostart {
                 &[&startup],
                 &["show-environment", "-g", "CONFIG_BYTE_STARTUP"],
             );
-            assert_eq!(shown.status.code(), Some(2));
+            assert_eq!(shown.status.code(), Some(1));
             assert!(shown.stdout.is_empty());
             assert_eq!(shown.stderr, b"unknown variable: CONFIG_BYTE_STARTUP\n");
             fixture.run_with_configs(&[&startup], &["kill-server"]);

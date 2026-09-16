@@ -23,9 +23,10 @@ Explicit values in `agent-command` config take precedence over these defaults.
 
 Use stable IDs: `%N` for a pane, `@N` for a window, `$N` for a session. Pass the
 bare ID: `-t %3` works everywhere, while `-t work:%3` and other session-prefixed
-guesses fail with `can't find window`. Discover verbs with `zz --help`, or use
-`zz <verb> --help` for its options and arguments. You can also use
-`zz list-commands` (add a verb name for its usage line). Never run the binary
+guesses fail with `can't find window`. Discover verbs with the top-level help
+(the `--help` flag alone, or the `help` verb), or use `zz <verb> --help` for a
+verb's options and arguments. `zz list-commands` also works (add a verb name for
+its usage line). Never run the binary
 without a verb (`zz` alone, or with only global flags such as `-T`): that launches
 the desktop app. Pane options need `-p`:
 `zz set-option -p -t %3 @name reviewer`.
@@ -43,9 +44,9 @@ when unknown; terminal and Agent panes report it from OSC 133 marks.
 
 ## CLI contract
 
-Use `zz --help` or the `help` verb for the command catalog. Use `zz <verb> --help`
-for a command's description, usage, options, and positional arguments; aliases
-and unique prefixes work too. These help forms need no daemon and exit 0. An
+The `--help` flag alone, or the `help` verb, prints the command catalog. Use
+`zz <verb> --help` for a command's description, usage, options, and positional
+arguments; aliases and unique prefixes work too. These help forms need no daemon and exit 0. An
 unknown verb exits 2. Global `-h` keeps the tmux usage banner, and command `-h`
 flags keep their tmux meaning.
 

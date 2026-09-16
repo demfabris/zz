@@ -60,7 +60,7 @@ ITEM_PATTERNS = [
     ),
     re.compile(r"^native-command:[a-z0-9][a-z0-9-]*$"),
     re.compile(r"^native-alias:[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*$"),
-    re.compile(r"^extension-flag:[a-z0-9][a-z0-9-]*:-[A-Za-z0-9]$"),
+    re.compile(r"^extension-flag:[a-z0-9][a-z0-9-]*:-(?:[A-Za-z0-9]|-[a-z][a-z0-9-]*)$"),
     re.compile(r"^args-parse:[a-z0-9][a-z0-9-]*$"),
     re.compile(r"^(semantic|presentation|protocol):[a-z0-9][a-z0-9._-]*$"),
 ]

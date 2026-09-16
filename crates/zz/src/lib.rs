@@ -1092,7 +1092,7 @@ fn run_command_mode(
         .and_then(|prepared| prepared_command_error(&prepared.commands))
     {
         eprintln!("{}", server_error_message(error));
-        return Some(exit_code_for(CliFailure::Server(error)));
+        return Some(exit_code_for(CliFailure::Usage));
     }
 
     if command == "kill-server" && host.is_none() && prepared.is_none() {
@@ -2129,6 +2129,7 @@ fn print_command_error(output: &str) {
 }
 
 #[cfg(not(target_os = "ios"))]
+#[derive(Clone, Copy)]
 enum CliFailure<'a> {
     Usage,
     Runtime,
@@ -3062,8 +3063,23 @@ mod tests {
                 ExitCode::from(code)
             );
         }
-        let usage = ServerError::InvalidCommand("invalid regular expression".to_owned());
+        let usage = ServerError::CommandParse("command list-panes: invalid flag --".to_owned());
         assert_eq!(exit_code_for(CliFailure::Server(&usage)), ExitCode::from(2));
+        let unsupported = ServerError::UnsupportedCommand("unknown command: bogus".to_owned());
+        assert_eq!(
+            exit_code_for(CliFailure::Server(&unsupported)),
+            ExitCode::from(2)
+        );
+        let runtime = ServerError::InvalidCommand("duplicate session: dup".to_owned());
+        assert_eq!(
+            exit_code_for(CliFailure::Server(&runtime)),
+            ExitCode::from(1)
+        );
+        let missing = ServerError::InvalidTarget("can't find window: 9".to_owned());
+        assert_eq!(
+            exit_code_for(CliFailure::Server(&missing)),
+            ExitCode::from(1)
+        );
         let failed = DaemonError::CommandFailed {
             output: "partial output".into(),
             error: Box::new(DaemonError::Server(usage)),

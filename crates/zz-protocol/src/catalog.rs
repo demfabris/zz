@@ -884,7 +884,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         name: "run-pane",
         aliases: &[],
         description: "Run a command in a POSIX terminal shell and return its output and exit code",
-        usage: "[-t target-pane] [--timeout SECS] [--] COMMAND...",
+        usage: "[-t target-pane] [--timeout SECS] COMMAND...",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target terminal pane"),
             CommandOptionSpec::value(

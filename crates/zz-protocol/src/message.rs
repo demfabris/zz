@@ -1985,11 +1985,7 @@ impl ServerError {
     #[must_use]
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::InvalidCommand(message) if message == "server exited unexpectedly" => 1,
-            Self::InvalidTarget(_)
-            | Self::UnsupportedCommand(_)
-            | Self::InvalidCommand(_)
-            | Self::CommandParse(_) => 2,
+            Self::UnsupportedCommand(_) | Self::CommandParse(_) => 2,
             Self::PostAdmissionCallback(error) => error.exit_code(),
             _ => 1,
         }

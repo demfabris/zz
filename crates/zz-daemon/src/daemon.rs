@@ -13687,7 +13687,7 @@ impl Shared {
             let (captured, exit_code) = run_pane_result(&screen, &marker, collecting);
             if let Some(captured) = captured {
                 collecting = true;
-                output = captured.to_owned();
+                captured.clone_into(&mut output);
             }
             if let Some(exit_code) = exit_code {
                 return if exit_code == 0 {
@@ -13972,7 +13972,7 @@ impl Shared {
                         parsed.values.insert(option, value.to_owned());
                     }
                 }
-                _ => {}
+                zz_protocol::TmuxOption::Flag(_) => {}
             }
         }
         let mut inner = self.inner.lock();
@@ -39963,7 +39963,7 @@ fn parse_wait_pane_args(args: &[RawText]) -> Result<ParsedWaitPane, ServerError>
     let mut parsed = ParsedWaitPane {
         target: None,
         condition: PaneWaitCondition::Idle(Duration::from_millis(500)),
-        timeout: Duration::from_secs(60),
+        timeout: Duration::from_mins(1),
         tail: None,
     };
     let mut condition_set = false;
@@ -40042,7 +40042,7 @@ struct ParsedRunPane {
 fn parse_run_pane_args(args: &[RawText]) -> Result<ParsedRunPane, ServerError> {
     let mut parsed = ParsedRunPane {
         target: None,
-        timeout: Duration::from_secs(120),
+        timeout: Duration::from_mins(2),
         command: String::new(),
     };
     let mut index = 0;
@@ -40125,7 +40125,10 @@ fn run_pane_result<'a>(
             && let Ok(code) = code.parse::<u8>()
         {
             let segment = &screen[start.unwrap_or(capture_start)..offset];
-            return (Some(segment.strip_suffix('\n').unwrap_or(segment)), Some(code));
+            return (
+                Some(segment.strip_suffix('\n').unwrap_or(segment)),
+                Some(code),
+            );
         }
         offset += line.len();
     }
@@ -40486,9 +40489,10 @@ Explicit values in `agent-command` config take precedence over these defaults.
 
 Use stable IDs: `%N` for a pane, `@N` for a window, `$N` for a session. Pass the
 bare ID: `-t %3` works everywhere, while `-t work:%3` and other session-prefixed
-guesses fail with `can't find window`. Discover verbs with `zz --help`, or use
-`zz <verb> --help` for its options and arguments. You can also use
-`zz list-commands` (add a verb name for its usage line). Never run the binary
+guesses fail with `can't find window`. Discover verbs with the top-level help
+(the `--help` flag alone, or the `help` verb), or use `zz <verb> --help` for a
+verb's options and arguments. `zz list-commands` also works (add a verb name for
+its usage line). Never run the binary
 without a verb (`zz` alone, or with only global flags such as `-T`): that launches
 the desktop app. Pane options need `-p`:
 `zz set-option -p -t %3 @name reviewer`.
@@ -40506,9 +40510,9 @@ when unknown; terminal and Agent panes report it from OSC 133 marks.
 
 ## CLI contract
 
-Use `zz --help` or the `help` verb for the command catalog. Use `zz <verb> --help`
-for a command's description, usage, options, and positional arguments; aliases
-and unique prefixes work too. These help forms need no daemon and exit 0. An
+The `--help` flag alone, or the `help` verb, prints the command catalog. Use
+`zz <verb> --help` for a command's description, usage, options, and positional
+arguments; aliases and unique prefixes work too. These help forms need no daemon and exit 0. An
 unknown verb exits 2. Global `-h` keeps the tmux usage banner, and command `-h`
 flags keep their tmux meaning.
 
@@ -68118,12 +68122,12 @@ set-option -g @alias-mixed-next yes
                     .expect("wait completion");
             });
             let deadline = Instant::now() + Duration::from_secs(10);
-            while !shared
+            while shared
                 .inner
                 .lock()
                 .wait_channels
                 .get(&channel)
-                .is_some_and(|channel| !channel.waiters.is_empty())
+                .is_none_or(|channel| channel.waiters.is_empty())
             {
                 assert!(Instant::now() < deadline, "waiter did not park");
                 thread::sleep(Duration::from_millis(10));

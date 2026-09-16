@@ -1737,6 +1737,8 @@ pub struct CommandInvocation {
     stdin: Option<RawText>,
     #[serde(skip)]
     stdin_spent: bool,
+    #[serde(default)]
+    stdin_available: bool,
 }
 
 impl CommandInvocation {
@@ -1753,6 +1755,7 @@ impl CommandInvocation {
             expanded_alias_group: false,
             stdin: None,
             stdin_spent: false,
+            stdin_available: false,
         }
     }
 
@@ -1760,6 +1763,15 @@ impl CommandInvocation {
     pub fn set_stdin(&mut self, stdin: impl Into<RawText>) {
         self.stdin = Some(stdin.into());
         self.stdin_spent = false;
+    }
+
+    pub fn set_stdin_available(&mut self, available: bool) {
+        self.stdin_available = available;
+    }
+
+    #[must_use]
+    pub const fn stdin_available(&self) -> bool {
+        self.stdin_available
     }
 
     pub fn set_stdin_spent(&mut self) {
@@ -3883,6 +3895,9 @@ pub enum ClientFileOperation {
         #[serde(deserialize_with = "deserialize_client_file_bytes")]
         data: Vec<u8>,
     },
+    ReadStdin {
+        binary: bool,
+    },
 }
 
 /// One file operation the daemon asks its invoking client to perform. `path` is
@@ -4838,6 +4853,25 @@ mod tests {
         })
         .expect("oversized shape");
         assert!(postcard::from_bytes::<super::ChooseTreeItem>(&oversized).is_err());
+    }
+
+    #[test]
+    fn deferred_stdin_availability_and_request_roundtrip() {
+        let mut command = super::CommandInvocation::new("source-file", ["config"]);
+        assert!(!command.stdin_available());
+        command.set_stdin_available(true);
+        let bytes = postcard::to_stdvec(&command).expect("encode available stream");
+        assert_eq!(
+            postcard::from_bytes::<super::CommandInvocation>(&bytes).expect("decode stream"),
+            command
+        );
+        let request = super::ClientFileOperation::ReadStdin { binary: true };
+        let bytes = postcard::to_stdvec(&request).expect("encode stdin request");
+        assert_eq!(bytes, [2, 1]);
+        assert_eq!(
+            postcard::from_bytes::<super::ClientFileOperation>(&bytes).expect("decode request"),
+            request
+        );
     }
 
     #[test]

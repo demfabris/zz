@@ -5937,6 +5937,7 @@ impl Shared {
         command: &CommandInvocation,
         prepared: bool,
     ) -> CommandResponse {
+        let stdin_available = kind == ClientKind::Command && command.stdin_available();
         let (command, blocked) = match self.prepare_command_request(client, command, prepared) {
             Ok(prepared) => prepared,
             Err(error) => {
@@ -5965,6 +5966,7 @@ impl Shared {
                 inner.command_streams.insert(
                     client,
                     CommandStreams {
+                        stdin_available,
                         stdin: (kind == ClientKind::Command)
                             .then(|| command.stdin().cloned().map(SourceStream::Bytes))
                             .flatten(),
@@ -6540,7 +6542,7 @@ impl Shared {
         client_terminal: ClientTerminal,
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
-        let streamed_command = self.command_with_caller_stdin(client, context, command);
+        let streamed_command = self.command_with_caller_stdin(client, context, command)?;
         let command = streamed_command.as_ref().unwrap_or(command);
         if MuxEngine::is_command_alias_group(command) {
             let detached = queue_execution.is_some_and(|execution| execution.detached);
@@ -10028,6 +10030,7 @@ impl Shared {
         let mut source_path_error = false;
         let mut source_path_matched = false;
         let mut control_source_errors = Vec::new();
+        let mut control_source_read_errors = Vec::new();
         let mut control_source_matched = false;
         let mut source_verbose_output = RawText::default();
         let mut source_replay_output = RawText::default();
@@ -10065,15 +10068,21 @@ impl Shared {
                     });
                     continue;
                 }
-                let text = if request.stdin.is_some() {
+                let read_failure = request.stdin.is_some() || source_kind == ClientKind::Control;
+                let text = if read_failure {
                     spent_source_stream_error()
                 } else {
                     STANDARD_INPUT_SOURCE_WARNING.to_owned()
                 };
-                if request.stdin.is_some() {
+                if read_failure {
                     reported_source_failure = true;
                 } else {
                     source_path_error = true;
+                }
+                if read_failure && control_target.is_some() {
+                    control_source_read_errors.push(text);
+                    self.record_command_failure(control_client.unwrap_or(source_client));
+                    continue;
                 }
                 if captured_control_source {
                     control_source_errors.push(text.clone());
@@ -10166,6 +10175,12 @@ impl Shared {
                 source_command_error,
             );
             control_source_errors.clear();
+        }
+        for output in control_source_read_errors {
+            self.publish_to_client(
+                control_client.unwrap_or(source_client),
+                EventPayload::ControlCommandOutput { output },
+            );
         }
         if source_invocation && queue_execution.is_some_and(CommandQueueExecution::is_draining) {
             self.enter_queue_shutdown_phase();
@@ -24847,26 +24862,53 @@ impl Shared {
     }
 
     fn command_with_caller_stdin(
-        &self,
+        self: &Arc<Self>,
         client: ClientId,
         context: &ExecutionContext,
         command: &CommandInvocation,
-    ) -> Option<CommandInvocation> {
-        let sink = command_stdin_sink(canonical_command(&command.name), &command.args)?;
+    ) -> Result<Option<CommandInvocation>, DaemonError> {
+        let Some(sink) = command_stdin_sink(canonical_command(&command.name), &command.args) else {
+            return Ok(None);
+        };
         if sink == CommandStdinSink::ConfigReplay {
-            return None;
+            return Ok(None);
         }
-        let mut inner = self.inner.lock();
-        let streams = inner
-            .command_streams
-            .get_mut(&context.replay_client().unwrap_or(client))?;
-        let stdin = streams.stdin.as_mut()?;
+        let client = context.replay_client().unwrap_or(client);
+        let (stdin, available) = {
+            let mut inner = self.inner.lock();
+            let Some(streams) = inner.command_streams.get_mut(&client) else {
+                return Ok(None);
+            };
+            let stdin = streams.stdin.take();
+            let available = std::mem::take(&mut streams.stdin_available);
+            if stdin.is_some() || available {
+                streams.stdin = Some(SourceStream::Spent);
+            }
+            (stdin, available)
+        };
+        let stdin = if stdin.is_none() && available {
+            let bytes = self
+                .client_file_operation(
+                    Some(client),
+                    Path::new("-"),
+                    ClientFileOperation::ReadStdin {
+                        binary: sink.accepts_binary(),
+                    },
+                )
+                .ok_or_else(|| ServerError::InvalidCommand(spent_source_stream_error()))??;
+            Some(SourceStream::Bytes(RawText::from_bytes(bytes)))
+        } else {
+            stdin
+        };
+        let Some(stdin) = stdin else {
+            return Ok(None);
+        };
         let mut command = command.clone();
-        match std::mem::replace(stdin, SourceStream::Spent) {
+        match stdin {
             SourceStream::Bytes(bytes) => command.set_stdin(bytes),
             SourceStream::Spent => command.set_stdin_spent(),
         }
-        Some(command)
+        Ok(Some(command))
     }
 
     /// Name which of the pin's two stdout writers claimed this Command
@@ -26948,7 +26990,7 @@ impl Shared {
                         .lock()
                         .command_streams
                         .get(&client)
-                        .is_some_and(|streams| streams.stdin.is_some())
+                        .is_some_and(|streams| streams.stdin.is_some() || streams.stdin_available)
                 });
             if routed_name == "source-file" && !caller_source_stream {
                 let source_effects = {
@@ -29420,6 +29462,7 @@ impl ConfigLoadReport {
 
 #[derive(Default)]
 struct CommandStreams {
+    stdin_available: bool,
     stdin: Option<SourceStream>,
     stdout_write: (usize, StdoutClaim),
     stdout: String,
@@ -43132,6 +43175,114 @@ mod tests {
 
     use super::*;
     use crate::{CommandClient, InteractiveClient};
+
+    #[test]
+    fn caller_stdin_request_waits_for_the_alias_reader() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, Arc::clone(&mailbox));
+        let _writer = ClientWriterRegistrationGuard::new(&shared, client, Arc::clone(&mailbox));
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "command-alias[80]",
+                        "deferred=set -g @before yes ; source-file - ; set -g @after yes",
+                    ],
+                ),
+            )
+            .expect("alias");
+        take_reliable_messages(&mailbox);
+        let mut command = CommandInvocation::new("deferred", [] as [&str; 0]);
+        command.set_stdin_available(true);
+        let worker = Arc::clone(&shared);
+        let pending = thread::spawn(move || {
+            worker.execute_command_request(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                1,
+                &command,
+            )
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let request = loop {
+            if let Some(request) =
+                take_reliable_messages(&mailbox)
+                    .into_iter()
+                    .find_map(|message| {
+                        if let ProtocolMessage::ClientFileRequest(request) = message {
+                            Some(request)
+                        } else {
+                            None
+                        }
+                    })
+            {
+                break request;
+            }
+            assert!(Instant::now() < deadline, "reader never requested stdin");
+            thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(
+            request.operation,
+            ClientFileOperation::ReadStdin { binary: false }
+        );
+        assert_eq!(read_global_option(&shared, "@before"), "yes");
+        assert_eq!(read_global_option(&shared, "@after"), "");
+        shared.complete_client_file(
+            client,
+            ClientFileResponse {
+                request_id: request.request_id,
+                data: b"set -g @payload yes\n".to_vec(),
+                error: None,
+            },
+        );
+        assert!(matches!(
+            pending.join().expect("command worker"),
+            CommandResponse::Success { exit_code: 0, .. }
+        ));
+        assert_eq!(read_global_option(&shared, "@payload"), "yes");
+        assert_eq!(read_global_option(&shared, "@after"), "yes");
+    }
+
+    #[test]
+    fn control_source_stdin_read_failure_keeps_alias_continuation() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared.execute(client, ClientKind::Control, &mut ExecutionContext::default(),
+            &CommandInvocation::new("set-option", ["-s", "command-alias[80]",
+                "controlstream=source-file - ; display-message -p after ; set -g @after yes"])).expect("alias");
+        take_reliable_messages(&mailbox);
+        let response = shared.execute_command_request(
+            client,
+            ClientKind::Control,
+            &mut ExecutionContext::default(),
+            1,
+            &control_stdin_command("controlstream", [] as [&str; 0]),
+        );
+        assert!(
+            matches!(response, CommandResponse::Success { .. }),
+            "{response:?}"
+        );
+        assert_eq!(read_global_option(&shared, "@after"), "yes");
+        let messages = take_reliable_messages(&mailbox);
+        assert!(messages.iter().any(|message| matches!(message,
+            ProtocolMessage::Event(Event { payload: EventPayload::ControlCommandOutput { output }, .. })
+                if output == "Bad file descriptor: -")), "{messages:?}");
+        let guards = control_command_guards(messages);
+        assert!(
+            guards.iter().any(|(text, _, _)| text == "after"),
+            "{guards:?}"
+        );
+    }
 
     #[test]
     fn one_resolver_answers_every_command_stream_sink() {

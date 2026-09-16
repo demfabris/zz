@@ -1,7 +1,7 @@
 ---
 type: Rust Crate
 title: zz crate (the GPUI client)
-description: The long-lived GPUI desktop client. Reconciles recursive pane layouts and hosts stable terminal, Chromium browser, and native Agent pane entities.
+description: The long-lived GPUI desktop client, linking zz-cli for CLI dispatch, daemon spawning, and terminal attach, and hosting terminal, Chromium browser, and native Agent panes.
 resource: crates/zz/src/lib.rs
 tags: [gpui, crate, client, terminal, browser, agent, ui]
 timestamp: 2026-09-09T00:00:00Z
@@ -9,8 +9,10 @@ timestamp: 2026-09-09T00:00:00Z
 
 # Overview
 
-`zz` (package and binary name `zz`) is the **long-lived GPUI desktop client**. It never owns
-mux state itself: it holds a socket/named-pipe connection to the daemon
+`zz` (package and binary name `zz`) is the **long-lived GPUI desktop client**. It links
+[`zz-cli`](/crates/zz-cli.md) for CLI dispatch, daemon spawning, and terminal attach.
+The GUI uses `daemon_executable` to spawn the sibling `cli`; the headless binary spawns itself.
+It never owns mux state itself: it holds a socket/named-pipe connection to the daemon
 (`zz_daemon::InteractiveClient`, wrapped by `mux::client::MuxClient`), a set of local Chromium
 sessions (`zz_browser::BrowserRuntime`, wrapped by `browser::controller::BrowserController`), and
 and a viewport onto the daemon's ACP runtimes (`agent::AgentController`), then reconciles them against
@@ -44,14 +46,15 @@ the daemon spawns and owns the ACP child, and this crate reduces the stream it p
    control passes straight into `zz_browser::bootstrap()` without touching diagnostics, the mux
    client, or a window (this is the path CEF's renderer/GPU/zygote processes take when they re-exec
    the same `zz` executable).
-2. **`daemon` command** . runs `zz_daemon::Daemon::run_foreground()` in place (used when the app
-   auto-spawns its own daemon, and by `cargo run -p zz -- daemon`).
+2. **`daemon` command** . delegates to `zz-cli` to run `zz_daemon::Daemon::run_foreground()`.
+   The GUI auto-starts the daemon from its sibling `cli`, the bundled headless binary.
 3. **`proxy` command** . `zz_daemon::run_socket_proxy`, the stdio socket proxy used by in-process
    ssh (iOS russh, Windows-port shape).
 4. **`attach` command** . hands off to [`zz-tui`](/designs/tui-client.md): a raw-terminal client
    that speaks the same wire protocol (`zz attach [session]`).
-5. **`app` command** . reserves exact `zz app` for GUI startup. The installed macOS launcher asks
-   Launch Services for a new process; the Linux launcher spawns the bundled executable and returns.
+5. **`app` command** . reserves exact `zz app` for GUI startup. The installed headless binary asks
+   Launch Services for a new macOS process or spawns the Linux desktop executable and returns.
+   On a headless install it explains that the desktop app is not installed.
 6. **CLI command mode** . any other leading argument (`list-panes`, `split-window`, `kill-server`,
    …) is sent through a short-lived `zz_daemon::CommandClient` to an existing or freshly spawned
    daemon. A read-only command can leave a newly spawned daemon empty; the first explicit
@@ -77,8 +80,8 @@ the daemon spawns and owns the ACP child, and this crate reduces the stream it p
 
 `ZZ_SOCKET` supplies the implicit zz endpoint. `TMUX` remains compatibility metadata and never
 selects transport. A tmux-compatible CLI command with `TMUX` but no `ZZ_SOCKET` or explicit socket
-selector exits before it can send a zz handshake to a real tmux server. The installed launchers
-turn bare `zz` into `new-session -A`: an empty daemon creates and attaches session `0`, while a live
+selector exits before it can send a zz handshake to a real tmux server. The headless binary
+turns bare `zz` into `new-session -A`: an empty daemon creates and attaches session `0`, while a live
 daemon attaches its current session. Explicit `attach` keeps tmux's `no sessions` failure on an
 empty daemon.
 
@@ -737,7 +740,6 @@ without either being wrong, and neither replaces CEF's own frame-rate ceilings.
 | Binary | Role |
 |--------|------|
 | `zz_helper` | The CEF **subprocess entrypoint** on every desktop bundle. One line: calls `zz_browser::run_subprocess()` and exits with its code. CEF's multi-process model needs a plain, minimal executable to re-exec as renderer/GPU/zygote/utility processes; `Cargo.toml`'s `[package.metadata.cef.bundle] helper_name = "zz_helper"` tells `zz-xtask` to ship it. macOS nests copies of it into the Helper.app roles. (On Linux `zz` itself can also serve this role via `--type=`, but the bundle uses the dedicated helper for the renderer sandbox.) |
-| `zz_cli` | The **`PATH` launcher**, shipped as `Contents/MacOS/cli` on macOS and `/usr/lib/zz/cli` on Linux. Bare `zz` becomes `attach`; other tmux-shaped commands exec the sibling `zz` unchanged. Exact `zz app` opens a new macOS application process or spawns the Linux bundle. The macOS indirection also preserves the bundle identity and CEF framework lookup when Homebrew or `just install mac` symlinks the launcher onto `PATH`. See [the bundle playbook](/playbooks/build-cef-bundle.md). |
 | `zz_browser_fixture` | A deterministic, loopback-only plain-TCP HTTP server (default port 9324, no CEF/GPUI/external network) used as a manual browser smoke-test target. Serves a fixture page with a BGRA color-channel proof, text input, title mutation, same-session navigation, a long scroll area, and persistent cookie/`localStorage` counters. |
 
 # Key files
@@ -746,8 +748,8 @@ without either being wrong, and neither replaces CEF's own frame-rate ceilings.
 |------|------|
 | `crates/zz/src/main.rs` | Process entrypoint; calls `zz::run()` |
 | `crates/zz/src/lib.rs` | `zz::run()` . CEF-subprocess/daemon/CLI/GUI mode dispatch, final-leaf routing for prepared alias groups, window creation, app-quit/window-close shutdown wiring |
-| `crates/zz/src/control_mode.rs` | `-C` preparation and command loop, direct and per-child guard framing, source events, deferred output/exit ordering, sticky return status |
-| `crates/zz/src/fleet.rs` | `zz fleet add <name> <ssh-destination>` / `list` / `remove` . each one config-file edit, sharing `Endpoint::parse` and `config::validate_fleet_host` with the GUI dialog |
+| `crates/zz-cli/src/control_mode.rs` | `-C` preparation and command loop, direct and per-child guard framing, source events, deferred output/exit ordering, sticky return status |
+| `crates/zz-cli/src/fleet.rs` | `zz fleet add <name> <ssh-destination>` / `list` / `remove` . each one config-file edit, sharing `Endpoint::parse` and `config::validate_fleet_host` with the GUI dialog |
 | `crates/zz/src/macos_app.rs` | macOS application/window actions, native app menu, and standard command-key bindings |
 | `crates/zz/src/config/mod.rs` | Platform-aware bounded `zz/config` discovery/parsing, `host-<name>` fleet entries and their add/remove/republish helpers, the client-side ACP working directory, ordered daemon overrides (the three agent adapter keys among them), per-knob provenance, and comment-preserving atomic edits |
 | `crates/zz/src/keymap.rs` | Bridges `ChromeKeymap` defaults and `chrome-keybind`/`chrome-unbind` overrides into GPUI bindings and action resolution |
@@ -788,10 +790,10 @@ without either being wrong, and neither replaces CEF's own frame-rate ceilings.
 | `crates/zz/src/file_picker.rs` | Feature-gated fuzzy path picker shared by Agent and Editor panes |
 | `crates/zz/src/user_data.rs` | Platform user-data location and user-only file/directory permission policy |
 | `crates/zz/src/bin/zz_helper.rs` | CEF subprocess entrypoint binary |
-| `crates/zz/src/bin/zz_cli.rs` | The macOS and Linux `PATH` launcher; dispatches `app`, maps a bare invocation to `new-session -A`, and execs the sibling bundle executable for tmux commands |
+| `crates/zz-cli/src/lib.rs` | Shared CLI dispatch, daemon spawning, and terminal attach; its `zz_cli` binary occupies the bundle's `cli` slot |
 | `crates/zz/src/bin/zz_browser_fixture.rs` | Loopback HTTP fixture server for manual browser smoke tests |
 | `crates/zz/build.rs` | Linux-only: adds `$ORIGIN` rpath so the bundled CEF runtime libraries are found next to the executable |
-| `crates/zz/Cargo.toml` | Declares the `zz`/`zz_helper`/`zz_cli`/`zz_browser_fixture` binaries and the `cef.bundle.helper_name` metadata `zz-xtask` reads |
+| `crates/zz/Cargo.toml` | Declares the `zz`/`zz_helper`/`zz_browser_fixture` binaries and the `cef.bundle.helper_name` metadata `zz-xtask` reads |
 
 # Related
 

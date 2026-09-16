@@ -33,7 +33,7 @@ impl Daemon {
         let config = root.join("empty.conf");
         std::fs::write(&config, b"").expect("empty mux config");
 
-        let process = Command::new(env!("CARGO_BIN_EXE_zz"))
+        let process = Command::new(env!("CARGO_BIN_EXE_zz_cli"))
             .arg("-f")
             .arg(&config)
             .arg("-S")
@@ -103,7 +103,7 @@ impl Daemon {
     }
 
     pub fn run_in(&self, directory: &Path, arguments: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_zz"))
+        Command::new(env!("CARGO_BIN_EXE_zz_cli"))
             .arg("-f")
             .arg(&self.config)
             .arg("-S")

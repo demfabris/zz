@@ -45,7 +45,7 @@ adds no implicit geometry or renderer state here.
 
 `ClientCore` accepts and ignores the Control-only v77 `ControlCommandGuard` event, including its
 frame flags and independent sticky-status bit. It does not own `-C`
-frame rendering, stdin ordering, or process exit state; `crates/zz/src/control_mode.rs` owns those
+frame rendering, stdin ordering, or process exit state; `crates/zz-cli/src/control_mode.rs` owns those
 front-end concerns. That front end now closes `control-mode.source-file-exit-status` by retaining the
 pin's bounded retval. A Return captured during a preceding non-detach command precedes later queued
 stdin, while a Return observed during self-detach is discarded when the caller receives its own

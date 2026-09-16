@@ -3,6 +3,7 @@ members = [
     "crates/zz",
     "crates/zz-browser",
     "crates/zz-chrome-import",
+    "crates/zz-cli",
     "crates/zz-client",
     "crates/zz-config",
     "crates/zz-client-ffi",

@@ -98,9 +98,12 @@ reload_linux() {
 
     capture_clients "$client_path"
     ZZ_DEV_BUILD=1 cargo build -p zz --bin zz ${ZZ_CARGO_FEATURES:+--features "$ZZ_CARGO_FEATURES"}
+    ZZ_DEV_BUILD=1 cargo build -p zz-cli --bin zz_cli
     cp "$target_dir/debug/zz" "$client_path.$$"
     mv -f "$client_path.$$" "$client_path"
-    bash "$ROOT/scripts/link-dev-cli.sh" "$client_path"
+    cp "$target_dir/debug/zz_cli" "$target_dir/debug/cli.$$"
+    mv -f "$target_dir/debug/cli.$$" "$target_dir/debug/cli"
+    bash "$ROOT/scripts/link-dev-cli.sh" "$target_dir/debug/cli" "$client_path"
     setsid -f "$client_path" app
     stop_old_clients
 }

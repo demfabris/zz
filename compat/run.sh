@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds zz and the pinned tmux reference, runs the differential scenario
+# Builds zz-cli and the pinned tmux reference, runs the differential scenario
 # corpus, writes compat/results/summary.md after the attached fixture passes,
 # or checks that canonical summary for drift. A row that fails is re-run once,
 # alone, after the corpus; only a row red twice fails the run.
@@ -8,7 +8,7 @@
 #   compat/run.sh windows panes
 #   compat/run.sh --strict-geometry
 #   compat/run.sh --check-summary | --strict-geometry --attached-client
-#   ZZ_COMPAT_ZZ=path/to/zz compat/run.sh ...   (skip the build, use that binary)
+#   ZZ_COMPAT_ZZ=path/to/zz_cli compat/run.sh ...   (skip the build, use that binary)
 #   compat/run.sh --delta origin/main..HEAD --commands split-window,new-window
 #   compat/run.sh --delta origin/main..HEAD --list   (print selection, run nothing)
 set -euo pipefail
@@ -397,15 +397,15 @@ if [ -n "${ZZ_COMPAT_ZZ:-}" ]; then
   ZZ_BIN="$ZZ_COMPAT_ZZ"
   [ -x "$ZZ_BIN" ] || die "ZZ_COMPAT_ZZ is not an executable: $ZZ_BIN"
   [ -x "$(dirname -- "$ZZ_BIN")/zz_cli" ] ||
-    warn "no zz_cli beside $ZZ_BIN; launcher scenarios will fail"
+    warn "no zz_cli beside $ZZ_BIN; installed layout scenarios will fail"
   log "using prebuilt zz: $ZZ_BIN"
 else
-  log "building zz"
+  log "building zz-cli"
   (
     cd "$REPO_DIR"
-    cargo build -p zz
+    cargo build -p zz-cli
   )
-  ZZ_BIN="$REPO_DIR/target/debug/zz"
+  ZZ_BIN="$REPO_DIR/target/debug/zz_cli"
   [ -x "$ZZ_BIN" ] || die "cargo build did not produce $ZZ_BIN"
 fi
 

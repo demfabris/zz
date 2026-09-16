@@ -9,7 +9,7 @@ fn isolated_zz() -> (tempfile::TempDir, Command) {
         .prefix("zz-cli-env-")
         .tempdir_in("/tmp")
         .expect("temporary CLI home");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_zz"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_zz_cli"));
     command
         .env("HOME", directory.path())
         .env("XDG_CONFIG_HOME", directory.path());
@@ -159,7 +159,7 @@ mod daemon_autostart {
         home: PathBuf,
     }
 
-    struct CargoLauncher {
+    struct InstalledLayout {
         _directory: tempfile::TempDir,
         path: PathBuf,
     }
@@ -200,7 +200,7 @@ mod daemon_autostart {
         }
 
         fn command(&self) -> Command {
-            self.command_from(Path::new(env!("CARGO_BIN_EXE_zz")))
+            self.command_from(Path::new(env!("CARGO_BIN_EXE_zz_cli")))
         }
 
         fn run(&self, arguments: &[&str]) -> Output {
@@ -211,7 +211,7 @@ mod daemon_autostart {
         }
 
         fn run_with_configs(&self, configs: &[&Path], arguments: &[&str]) -> Output {
-            let mut command = Command::new(Path::new(env!("CARGO_BIN_EXE_zz")));
+            let mut command = Command::new(Path::new(env!("CARGO_BIN_EXE_zz_cli")));
             command
                 .env("HOME", &self.home)
                 .env("XDG_CONFIG_HOME", &self.home);
@@ -280,18 +280,20 @@ mod daemon_autostart {
         }
     }
 
-    impl CargoLauncher {
+    impl InstalledLayout {
         fn new() -> Self {
             let directory = tempfile::Builder::new()
-                .prefix("zz launcher fixture ")
+                .prefix("zz installed layout fixture ")
                 .tempdir_in("/tmp")
-                .expect("temporary launcher directory");
+                .expect("temporary installed layout directory");
             let install = directory.path().join("installed zz with spaces");
-            std::fs::create_dir_all(&install).expect("create launcher install directory");
-            let path = install.join("cli");
-            std::fs::copy(env!("CARGO_BIN_EXE_zz_cli"), &path).expect("copy Cargo launcher");
-            std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_zz"), install.join("zz"))
-                .expect("link Cargo zz executable");
+            std::fs::create_dir_all(&install).expect("create installed layout directory");
+            let cli = install.join("cli");
+            std::fs::copy(env!("CARGO_BIN_EXE_zz_cli"), &cli).expect("copy headless executable");
+            let bin = directory.path().join("bin");
+            std::fs::create_dir_all(&bin).expect("create installed bin directory");
+            let path = bin.join("zz");
+            std::os::unix::fs::symlink(&cli, &path).expect("link installed zz executable");
             assert!(path.to_string_lossy().contains(' '));
             Self {
                 _directory: directory,
@@ -3697,12 +3699,12 @@ mod daemon_autostart {
     }
 
     #[test]
-    fn cargo_launcher_pair_routes_bare_new_and_attach_across_empty_and_existing_daemons() {
+    fn installed_layout_routes_bare_new_and_attach_across_empty_and_existing_daemons() {
         let Ok((master, slave)) = open_pty() else {
             return;
         };
         drop((master, slave));
-        let launcher = CargoLauncher::new();
+        let installed_layout = InstalledLayout::new();
         let cases = [
             ("bare-empty", &[][..], false, &["0"][..]),
             ("bare-existing", &[][..], true, &["existing"][..]),
@@ -3740,7 +3742,7 @@ mod daemon_autostart {
                     String::from_utf8_lossy(&created.stderr)
                 );
             }
-            let mut command = launcher.command(&fixture);
+            let mut command = installed_layout.command(&fixture);
             command.args(arguments);
             let (rendered, captured, early_status) =
                 capture_command_until(command, &[b"\x1b[?1049h"], 80);
@@ -3767,7 +3769,11 @@ mod daemon_autostart {
         if !local_socket_bind_available(&fixture.socket) {
             return;
         }
-        let explicit = launcher.command(&fixture).arg("attach").output().unwrap();
+        let explicit = installed_layout
+            .command(&fixture)
+            .arg("attach")
+            .output()
+            .unwrap();
         assert_eq!(explicit.status.code(), Some(1));
         assert!(explicit.stdout.is_empty());
         assert_eq!(explicit.stderr, b"no sessions\n");
@@ -3791,7 +3797,7 @@ mod daemon_autostart {
             ))
             .env("HOME", &fixture.home)
             .env("XDG_CONFIG_HOME", &fixture.home)
-            .env("ZZ_BIN", env!("CARGO_BIN_EXE_zz"))
+            .env("ZZ_BIN", env!("CARGO_BIN_EXE_zz_cli"))
             .env("ZZ_CONF", &fixture.config)
             .env("ZZ_TEST_SOCKET", &fixture.socket);
         let (rendered, captured, early_status) =
@@ -3982,7 +3988,7 @@ mod daemon_autostart {
 
         let nested_attach = format!(
             "{} -f {} -S {} attach",
-            env!("CARGO_BIN_EXE_zz"),
+            env!("CARGO_BIN_EXE_zz_cli"),
             fixture.config.display(),
             fixture.socket.display(),
         );
@@ -4258,7 +4264,7 @@ mod daemon_autostart {
             .arg("-c")
             .arg(r#""$1" -f "$2" -S "$3" ls || "$1" -f "$2" -S "$3" new-session -d"#)
             .arg("zz-ls-or-new")
-            .arg(env!("CARGO_BIN_EXE_zz"))
+            .arg(env!("CARGO_BIN_EXE_zz_cli"))
             .arg(&fixture.config)
             .arg(&fixture.socket)
             .output()
@@ -4302,7 +4308,7 @@ mod daemon_autostart {
         let base = root.join(format!("tmux-{}", rustix::process::getuid().as_raw()));
         let socket = base.join("a/b");
         let run = |label: &str, arguments: &[&str]| {
-            Command::new(env!("CARGO_BIN_EXE_zz"))
+            Command::new(env!("CARGO_BIN_EXE_zz_cli"))
                 .env("HOME", directory.path())
                 .env("XDG_CONFIG_HOME", directory.path())
                 .env("TMUX_TMPDIR", directory.path())

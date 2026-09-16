@@ -13,6 +13,7 @@ set -eu
 
 repo=demfabris/zz
 channel=stable
+headless=0
 version=
 prefix=
 tmp=
@@ -25,11 +26,13 @@ has() { command -v "$1" >/dev/null 2>&1; }
 
 usage() {
     cat <<'EOF'
-usage: install.sh [--beta] [--version <version>] [--prefix <dir>]
+usage: install.sh [--beta] [--headless] [--version <version>] [--prefix <dir>]
 
   --beta               newest release including betas (default: newest stable)
+  --headless           install only the headless zz: CLI and daemon, no desktop app;
+                       Linux and macOS; into <prefix>/bin (default prefix: ~/.local)
   --version <version>  an exact release, for example 0.3.0 or 0.3.0-beta.2
-  --prefix <dir>       Linux: unpack the tarball here instead of using apt (default: ~/.local)
+  --prefix <dir>       headless or Linux tarball prefix; bypass apt (default: ~/.local)
 EOF
 }
 
@@ -37,6 +40,7 @@ parse_arguments() {
     while [ $# -gt 0 ]; do
         case "$1" in
             --beta) channel=beta ;;
+            --headless) headless=1 ;;
             --version) [ $# -ge 2 ] || die "--version needs a value"; version="$2"; shift ;;
             --version=*) version="${1#*=}" ;;
             --prefix) [ $# -ge 2 ] || die "--prefix needs a value"; prefix="$2"; shift ;;
@@ -236,6 +240,28 @@ install_linux_tarball() {
     say "open it from your launcher or run: zz"
 }
 
+install_headless() {
+    case "$(uname -s)/$(uname -m)" in
+        Linux/x86_64|Linux/amd64) os=linux; arch=x86_64 ;;
+        Linux/aarch64|Linux/arm64) os=linux; arch=aarch64 ;;
+        Darwin/arm64) os=macos; arch=arm64 ;;
+        *) die "headless zz ships for Linux x86_64/aarch64 and macOS arm64 only" ;;
+    esac
+    prefix="${prefix:-$HOME/.local}"
+    asset="zz-$version-headless-$os-$arch.tar.gz"
+    download "$asset"
+
+    tar -xzf "$tmp/$asset" -C "$tmp" "${asset%.tar.gz}/zz"
+    binary="$tmp/${asset%.tar.gz}/zz"
+    [ -f "$binary" ] || die "the tarball carries no zz binary"
+    mkdir -p "$prefix/bin"
+    rm -f "$prefix/bin/zz"
+    cp "$binary" "$prefix/bin/zz"
+    chmod 0755 "$prefix/bin/zz"
+    say "installed headless zz $version -> $prefix/bin/zz"
+    on_path "$prefix/bin" || warn "$prefix/bin is not on your PATH; add it to run zz from a shell"
+}
+
 install_linux() {
     case "$(uname -m)" in
         x86_64|amd64) arch=x86_64 ;;
@@ -261,6 +287,11 @@ main() {
     say "zz $version"
     tmp="$(mktemp -d "${TMPDIR:-/tmp}/zz-install.XXXXXX")"
     trap cleanup EXIT
+
+    if [ "$headless" -eq 1 ]; then
+        install_headless
+        return
+    fi
 
     case "$(uname -s)" in
         Darwin) install_macos ;;

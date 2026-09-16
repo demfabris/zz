@@ -82,6 +82,7 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           echo "ZZ_VERSION=$version" >> "$GITHUB_ENV"
           echo "ZZ_DMG=dist/zz-$version-macos-arm64.dmg" >> "$GITHUB_ENV"
+          echo "ZZ_HEADLESS=dist/zz-$version-headless-macos-arm64.tar.gz" >> "$GITHUB_ENV"
 
       - uses: mlugg/setup-zig@v2.2.1
         with:
@@ -151,17 +152,27 @@ jobs:
       - name: Build, sign, package, and notarize
         run: scripts/release-macos.sh release "$ZZ_VERSION"
 
-      - name: Checksum the disk image
+      - name: Build the headless binary
+        run: cargo build --release -p zz-cli
+
+      - name: Package the headless tarball
+        run: scripts/package-headless.sh target/release/zz_cli "$ZZ_HEADLESS"
+
+      - name: Checksum the release artifacts
         shell: bash
         run: |
           (cd dist && shasum -a 256 "$(basename "$ZZ_DMG")" > "$(basename "$ZZ_DMG").sha256")
-          cat "$ZZ_DMG.sha256"
+          (cd dist && shasum -a 256 "$(basename "$ZZ_HEADLESS")" > "$(basename "$ZZ_HEADLESS").sha256")
+          cat "$ZZ_DMG.sha256" "$ZZ_HEADLESS.sha256"
 
-      - name: Attach the disk image to the GitHub release
+      - name: Attach the artifacts to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
-        run: gh release upload "$GITHUB_REF_NAME" "$ZZ_DMG" "$ZZ_DMG.sha256" --clobber
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            "$ZZ_DMG" "$ZZ_DMG.sha256" \
+            "$ZZ_HEADLESS" "$ZZ_HEADLESS.sha256" --clobber
 
       - name: Remove the signing keychain
         if: ${{ always() && env.ZZ_KEYCHAIN != '' }}
@@ -199,6 +210,7 @@ jobs:
             echo "ZZ_TARBALL=dist/zz-$version-linux-${{ matrix.arch }}.tar.gz"
             echo "ZZ_APPIMAGE=dist/zz-$version-linux-${{ matrix.arch }}.AppImage"
             echo "ZZ_DEB=dist/zz-$version-linux-${{ matrix.arch }}.deb"
+            echo "ZZ_HEADLESS=dist/zz-$version-headless-linux-${{ matrix.arch }}.tar.gz"
           } >> "$GITHUB_ENV"
 
       - name: Install Linux dependencies
@@ -218,6 +230,12 @@ jobs:
 
       - name: Build the CEF bundle
         run: cargo xtask bundle-cef --release --output dist/zz
+
+      - name: Build the headless binary
+        run: cargo build --release -p zz-cli
+
+      - name: Package the headless tarball
+        run: scripts/package-headless.sh target/release/zz_cli "$ZZ_HEADLESS"
 
       - name: Download verified AppImage tools
         run: scripts/fetch-appimage-tools.sh
@@ -241,7 +259,8 @@ jobs:
           (cd dist && sha256sum "$(basename "$ZZ_TARBALL")" > "$(basename "$ZZ_TARBALL").sha256")
           (cd dist && sha256sum "$(basename "$ZZ_APPIMAGE")" > "$(basename "$ZZ_APPIMAGE").sha256")
           (cd dist && sha256sum "$(basename "$ZZ_DEB")" > "$(basename "$ZZ_DEB").sha256")
-          cat "$ZZ_TARBALL.sha256" "$ZZ_APPIMAGE.sha256" "$ZZ_DEB.sha256"
+          (cd dist && sha256sum "$(basename "$ZZ_HEADLESS")" > "$(basename "$ZZ_HEADLESS").sha256")
+          cat "$ZZ_TARBALL.sha256" "$ZZ_APPIMAGE.sha256" "$ZZ_DEB.sha256" "$ZZ_HEADLESS.sha256"
 
       - name: Attach the artifacts to the GitHub release
         env:
@@ -251,7 +270,8 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" \
             "$ZZ_TARBALL" "$ZZ_TARBALL.sha256" \
             "$ZZ_APPIMAGE" "$ZZ_APPIMAGE.sha256" \
-            "$ZZ_DEB" "$ZZ_DEB.sha256" --clobber
+            "$ZZ_DEB" "$ZZ_DEB.sha256" \
+            "$ZZ_HEADLESS" "$ZZ_HEADLESS.sha256" --clobber
 
   windows:
     name: Windows x64

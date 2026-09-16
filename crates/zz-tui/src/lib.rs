@@ -21,9 +21,6 @@ use std::{
     fmt,
     io::{self, IsTerminal as _, Write as _},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
-    thread,
-    time::{Duration, Instant},
 };
 
 use zz_daemon::{
@@ -37,8 +34,6 @@ use zz_protocol::{
 
 use crate::browser::BrowserFrameProvider;
 
-const USAGE: &str =
-    "usage: zz-tui [--socket <path> | --host <name>] attach [--restart-daemon] [session]";
 const MANUAL_RESTART_HINT: &str = "run 'zz kill-server' to restart it (sessions will be lost)";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -222,13 +217,6 @@ fn run_new_session_commands<'a>(
     }
 }
 
-pub fn run_cli(arguments: impl IntoIterator<Item = String>) -> Result<(), Error> {
-    let options = parse_arguments(arguments)?;
-    let reconnect =
-        |path: &Path, client_has_terminal| spawn_and_connect_daemon(path, client_has_terminal);
-    run(RunRequest::from(&options).with_local_reconnect(&reconnect))
-}
-
 struct ResolvedRun {
     endpoint: Endpoint,
     local_endpoint: Endpoint,
@@ -366,70 +354,6 @@ fn write_command_output(sink: &mut impl io::Write, output: &[u8]) -> io::Result<
     Ok(())
 }
 
-fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> Result<RunOptions, Error> {
-    let mut options = RunOptions::default();
-    let mut socket_overridden = false;
-    let mut positional = Vec::new();
-    let mut arguments = arguments.into_iter();
-    while let Some(argument) = arguments.next() {
-        match argument.as_str() {
-            "--host" => {
-                options.host = Some(
-                    arguments
-                        .next()
-                        .filter(|name| !name.is_empty())
-                        .ok_or_else(|| Error::message("--host requires a name"))?,
-                );
-            }
-            "--socket" => {
-                options.socket_path = PathBuf::from(
-                    arguments
-                        .next()
-                        .filter(|path| !path.is_empty())
-                        .ok_or_else(|| Error::message("--socket requires a path"))?,
-                );
-                socket_overridden = true;
-            }
-            "--restart-daemon" => options.restart_daemon = true,
-            _ if argument.starts_with("--host=") => {
-                let name = argument.trim_start_matches("--host=");
-                if name.is_empty() {
-                    return Err(Error::message("--host requires a name"));
-                }
-                options.host = Some(name.to_owned());
-            }
-            _ if argument.starts_with("--socket=") => {
-                let path = argument.trim_start_matches("--socket=");
-                if path.is_empty() {
-                    return Err(Error::message("--socket requires a path"));
-                }
-                options.socket_path = PathBuf::from(path);
-                socket_overridden = true;
-            }
-            _ if argument.starts_with('-') => return Err(Error::message(USAGE)),
-            _ => positional.push(argument),
-        }
-    }
-    if socket_overridden && options.host.is_some() {
-        return Err(Error::message(
-            "--host cannot be used together with --socket",
-        ));
-    }
-    if options.restart_daemon && options.host.is_some() {
-        return Err(Error::message(
-            "--restart-daemon is only supported for the local daemon",
-        ));
-    }
-    let [command, session @ ..] = positional.as_slice() else {
-        return Err(Error::message(USAGE));
-    };
-    if command != "attach" || session.len() > 1 {
-        return Err(Error::message(USAGE));
-    }
-    options.session = session.first().cloned();
-    Ok(options)
-}
-
 fn initial_connection(
     endpoint: &Endpoint,
     local_socket: &Path,
@@ -560,39 +484,6 @@ fn attach_preflight_arguments(target: Option<&str>) -> Vec<String> {
     target.map_or_else(Vec::new, |target| vec!["-t".to_owned(), target.to_owned()])
 }
 
-fn spawn_and_connect_daemon(
-    path: &Path,
-    client_has_terminal: bool,
-) -> Result<InteractiveClient, DaemonError> {
-    let executable = std::env::current_exe()
-        .ok()
-        .and_then(|executable| executable.parent().map(|directory| directory.join("zz")))
-        .filter(|executable| executable.is_file())
-        .unwrap_or_else(|| PathBuf::from("zz"));
-    let mut command = Command::new(executable);
-    command.arg("--socket").arg(path).arg("daemon");
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt as _;
-
-        command.process_group(0);
-    }
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-
-    let deadline = Instant::now() + Duration::from_secs(3);
-    loop {
-        match InteractiveClient::connect_terminal_surface_without_theme(path, client_has_terminal) {
-            Ok(client) => return Ok(client),
-            Err(error) if Instant::now() >= deadline => return Err(error),
-            Err(_) => thread::sleep(Duration::from_millis(20)),
-        }
-    }
-}
-
 fn resolve_endpoint(
     options: &RunOptions,
     hosts: &[zz_daemon::HostEntry],
@@ -636,52 +527,6 @@ mod tests {
         let mut unterminated = Vec::new();
         write_command_output(&mut unterminated, b"a\xffb").unwrap();
         assert_eq!(unterminated, b"a\xffb\n");
-    }
-
-    #[test]
-    fn cli_accepts_local_and_named_host_attach_forms() {
-        let local = parse_arguments(["attach".to_owned(), "work".to_owned()]).unwrap();
-        assert_eq!(local.session.as_deref(), Some("work"));
-        assert!(local.host.is_none());
-        assert!(!local.restart_daemon);
-        assert!(!local.detach_others);
-
-        let remote =
-            parse_arguments(["--host".to_owned(), "box".to_owned(), "attach".to_owned()]).unwrap();
-        assert_eq!(remote.host.as_deref(), Some("box"));
-        assert!(remote.session.is_none());
-
-        let restart = parse_arguments([
-            "attach".to_owned(),
-            "--restart-daemon".to_owned(),
-            "work".to_owned(),
-        ])
-        .unwrap();
-        assert!(restart.restart_daemon);
-        assert_eq!(restart.session.as_deref(), Some("work"));
-    }
-
-    #[test]
-    fn cli_rejects_conflicting_or_extra_arguments() {
-        assert!(
-            parse_arguments([
-                "--host=box".to_owned(),
-                "--socket=/tmp/zz.sock".to_owned(),
-                "attach".to_owned(),
-            ])
-            .is_err()
-        );
-        assert!(
-            parse_arguments(["attach".to_owned(), "one".to_owned(), "two".to_owned(),]).is_err()
-        );
-        assert!(
-            parse_arguments([
-                "--host=box".to_owned(),
-                "--restart-daemon".to_owned(),
-                "attach".to_owned(),
-            ])
-            .is_err()
-        );
     }
 
     #[test]

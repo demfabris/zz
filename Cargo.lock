@@ -11333,16 +11333,13 @@ dependencies = [
  "chrono",
  "core-foundation 0.10.1",
  "core-video",
- "crossbeam-channel",
  "env_logger",
  "fff-search",
  "gpui",
  "gpui_platform",
  "ignore",
  "image",
- "interprocess",
  "ksni",
- "libc",
  "log",
  "mimalloc",
  "neo_frizbee",
@@ -11352,11 +11349,9 @@ dependencies = [
  "parking_lot",
  "pollster 1.0.1",
  "raw-window-handle",
- "rustix",
  "semver",
  "serde",
  "serde_json",
- "sha2 0.11.0",
  "smallvec",
  "sysinfo 0.39.6",
  "tempfile",
@@ -11368,6 +11363,7 @@ dependencies = [
  "x11rb",
  "zz-browser",
  "zz-chrome-import",
+ "zz-cli",
  "zz-client",
  "zz-config",
  "zz-daemon",
@@ -11430,6 +11426,28 @@ dependencies = [
  "windows 0.62.2",
  "zeroize",
  "zz-browser",
+]
+
+[[package]]
+name = "zz-cli"
+version = "0.10.0"
+dependencies = [
+ "env_logger",
+ "libc",
+ "log",
+ "mimalloc",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sysinfo 0.39.6",
+ "tempfile",
+ "windows 0.62.2",
+ "zz-config",
+ "zz-daemon",
+ "zz-mux",
+ "zz-protocol",
+ "zz-terminal",
+ "zz-tui",
 ]
 
 [[package]]

@@ -33,13 +33,19 @@ elif name == "cargo":
         print(json.dumps({"target_directory": str(root / "target")}))
     else:
         (root / "build.json").write_text(json.dumps({"args": args, "env": dict(os.environ)}))
-        binary = root / ("dist/zz-dev/zz Dev.app/Contents/MacOS/zz" if args[0] == "xtask" else "target/debug/zz")
-        binary.parent.mkdir(parents=True, exist_ok=True)
-        binary.write_text("""#!/usr/bin/env python3
+        if args[0] == "xtask":
+            binaries = [root / "dist/zz-dev/zz Dev.app/Contents/MacOS/zz", root / "dist/zz-dev/zz Dev.app/Contents/MacOS/cli"]
+        elif "zz_cli" in args:
+            binaries = [root / "target/debug/zz_cli"]
+        else:
+            binaries = [root / "target/debug/zz"]
+        for binary in binaries:
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            binary.write_text("""#!/usr/bin/env python3
 import json, os, pathlib, sys
 pathlib.Path(os.environ["TEST_ROOT"], "launch.json").write_text(json.dumps({"args": sys.argv[1:], "env": dict(os.environ)}))
 """)
-        binary.chmod(0o755)
+            binary.chmod(0o755)
 '''
 
 
@@ -50,7 +56,7 @@ class DevelopmentLaunchTests(unittest.TestCase):
             link.parent.mkdir(parents=True)
             link.write_text("existing command")
             result = subprocess.run(
-                ["bash", str(SCRIPTS / "link-dev-cli.sh"), "/tmp/dev-executable"],
+                ["bash", str(SCRIPTS / "link-dev-cli.sh"), "/tmp/dev-executable", "/tmp/dev-gui-executable"],
                 env=dict(os.environ, HOME=directory), capture_output=True, timeout=10,
             )
             self.assertNotEqual(result.returncode, 0)

@@ -1,0 +1,40 @@
+[package]
+name = "zz-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+
+[[bin]]
+name = "zz_cli"
+path = "src/main.rs"
+
+[dependencies]
+env_logger.workspace = true
+log.workspace = true
+mimalloc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sysinfo.workspace = true
+zz-config = { path = "../zz-config" }
+zz-daemon = { path = "../zz-daemon" }
+zz-mux = { path = "../zz-mux" }
+zz-protocol = { path = "../zz-protocol" }
+zz-terminal = { path = "../zz-terminal" }
+zz-tui = { path = "../zz-tui" }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+rustix.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = ["Win32_System_Console"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -748,7 +748,7 @@ sequence and asserts the explicit rename against the unfiltered stream. Claude's
 read-only review returned MERGE-READY after the first round found both test issues.
 
 - Linux: gate `startup_directory_environment` and its tests in
-  `crates/zz/src/bin/zz_cli.rs` with the same macOS cfg as `launch_application`.
+  `crates/zz-cli/src/lib.rs` with the same macOS cfg as `launch_application`.
 - Windows: resolve the `gpu-allocator` and `windows` crate
   `ResourceCategory: From<&D3D12_RESOURCE_DESC>` mismatch at the registry dependency edge.
   `gpu-allocator 0.28.0` resolves `windows 0.59.0`, while `wgpu-hal 30.0.0` resolves
@@ -957,7 +957,7 @@ findings after rerunning those gates.
    `read_only_clients` that nothing enforces — it also spuriously reports `ignore-size` in
    `client_flags`.
 
-Use the phase-8 PTY fixture in `crates/zz/tests/cli_binary.rs` to prove that styled status
+Use the phase-8 PTY fixture in `crates/zz-cli/tests/cli_binary.rs` to prove that styled status
 content contains no literal `#[`, top status occupies row zero, `mouse off` emits no
 `?1003h`, and nested attach prints the pinned refusal.
 
@@ -2118,7 +2118,7 @@ pane visibility). The harness (phase 2) does not wait for this.
   skeleton + framing. Protocol v65: `ClientKind::Control` appended (attach
   rights + event subscription + Command-style output routing, no frames, no
   input, no color scheme; never-wedge on interactive-only commands).
-  `crates/zz/src/control_mode.rs`: -C/-CC argv counting, CMD_STARTSERVER-
+  `crates/zz-cli/src/control_mode.rs`: -C/-CC argv counting, CMD_STARTSERVER-
   gated autostart (pin-probed: `-C ls` neither starts nor frames; bare `-C`
   = new-session and does), connect failure = bare stderr with no framing,
   `%begin/%end/%error <t> <n> <f>` (f=0 argv / f=1 stdin; per-client

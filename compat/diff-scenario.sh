@@ -53,9 +53,9 @@ esac
 if grep -Eq '^[[:space:]]*shim:[[:space:]]*$' "$SCENARIO_FILE"; then
   SMOKE_MODE=1
 fi
-# A launcher scenario runs the zz side the way an installed zz runs: the `zz`
-# launcher on PATH with no --socket and no ZZ_SOCKET, the default socket under
-# a scratch XDG_RUNTIME_DIR, and no harness `tmux` shim in front of the panes.
+# An installed layout scenario runs through the `zz` symlink on PATH with
+# no --socket and no ZZ_SOCKET, the default socket under a scratch
+# XDG_RUNTIME_DIR, and no harness `tmux` wrapper in front of the panes.
 LAUNCHER_MODE=0
 if grep -Eq '^[[:space:]]*launcher:[[:space:]]*$' "$SCENARIO_FILE"; then
   SMOKE_MODE=1
@@ -260,7 +260,7 @@ prepare_smoke() {
     "$ZZ_HOME/.tmux/bin"
   if [ "$LAUNCHER_MODE" -eq 1 ]; then
     [ -x "$(dirname -- "$ZZ_BIN")/zz_cli" ] ||
-      die "launcher scenario needs zz_cli beside $ZZ_BIN (cargo build -p zz)"
+      die "installed layout scenario needs zz_cli beside $ZZ_BIN for the zz symlink on PATH (cargo build -p zz-cli)"
     mkdir -p "$LAUNCHER_BIN" "$LAUNCHER_RUNTIME"
     ln -s "$(dirname -- "$ZZ_BIN")/zz_cli" "$LAUNCHER_BIN/zz"
   fi

@@ -20,9 +20,9 @@ survive GUI detach while keeping the mux state a single source of truth.
 
 | Process | Owns | Lifetime |
 |---------|------|----------|
-| Daemon ([server](/crates/zz-daemon.md)) | mux state, PTYs, terminal frame fanout, IPC listener | persistent; survives GUI detach; exits on `kill-server`, or once it has **zero sessions and zero interactive clients**; dies on crash, logout, reboot |
+| Daemon ([server](/crates/zz-daemon.md)), running from the headless binary (`cli` in a bundle install, `zz` on a headless install) | mux state, PTYs, terminal frame fanout, IPC listener | persistent; survives GUI detach; exits on `kill-server`, or once it has **zero sessions and zero interactive clients**; dies on crash, logout, reboot |
 | GUI client ([app](/crates/zz.md)) | GPUI windows, rendering, local CEF sessions, ACP controller/session reducers | attached to at most one session; a session takes as many clients as devices attach |
-| CLI client | one short-lived command (`list-sessions`, `send-keys`, …) | request/response, then exits |
+| CLI client ([headless binary](/crates/zz-cli.md)) | one short-lived command (`list-sessions`, `send-keys`, …) | request/response, then exits |
 | CEF browser process | Chromium main/GPU/renderer/utility (zygote) tree | spawned inside a GUI process; not kept alive without a GUI |
 | ACP agent process | Codex or Claude Code reached over stdio JSON-RPC; one process and ACP session belong to one Agent pane | spawned when the pane appears; replaced on provider/config changes; stopped with the pane or daemon |
 
@@ -36,13 +36,15 @@ opt-in `quit-daemon-on-exit` key makes app quit send `kill-server` regardless. S
 every one of them, so an attached client still never has the daemon die under it. See
 [session persistence](/concepts/session-persistence.md).
 
-A GUI process auto-starts a daemon if none is running, then attaches as a client. `zz app` is the
-one command that opens it; a command line with no command word is a tmux client and runs
+A GUI process auto-starts a daemon from its sibling `cli` if none is running, then attaches as a
+client. The headless binary spawns itself as the daemon. `zz app` is the
+one command that opens the GUI; a command line with no command word is a tmux client and runs
 `default-client-command` (`new-session -A` by default) through the raw-terminal path, whether it
-reaches the executable through the installed launcher or directly. Two launches open the GUI
+reaches the executable through the installed `zz` symlink or directly. Two launches open the GUI
 without the verb because they cannot pass one: LaunchServices on macOS (Finder, the Dock, `open`),
 which the executable recognizes by its launchd parent, and the Windows bundle, which ships no CLI
-launcher. The launcher's own `zz app` passes `--args app` through `open -n` as well.
+entrypoint. The headless binary's `zz app` passes `--args app` through `open` as well, so a hidden running
+instance is reopened rather than duplicated.
 On Unix the spawned daemon gets its own session, so Ctrl+C or a closing tty in the launching
 terminal never signals the daemon and its sessions. The daemon initially has no session unless
 config created one; the GUI's actual empty-target Interactive attach lazily creates numeric session

@@ -29,6 +29,7 @@ release tarball under `~/.local` with no root at all: `~/.local/bin/zz`,
 checked against the release's `.sha256`.
 
 ```sh
+curl -fsSL https://zzmux.sh/install.sh | sh -s -- --headless   # CLI + daemon only, for hosts you ssh into
 curl -fsSL https://zzmux.sh/install.sh | sh -s -- --beta            # newest beta
 curl -fsSL https://zzmux.sh/install.sh | sh -s -- --version 0.3.0   # a specific release
 curl -fsSL https://zzmux.sh/install.sh | sh -s -- --prefix /opt/zz  # Linux: tarball, this prefix
@@ -315,7 +316,8 @@ bridges a `zz proxy` over stdio instead.) Your keys, your agent, and your
 `~/.ssh/config` aliases all apply. Nothing to pair, no port to open.
 
 On the remote you need two things: ssh access, and `zz` on the login shell's
-`PATH`. The protocol version has to match exactly on both ends.
+`PATH`. The headless install is all a remote needs and pulls in no display libraries.
+The protocol version has to match exactly on both ends.
 
 Browser panes always render on your machine, but a pane opened while you are
 attached to a remote host sends its traffic back out through that host, so

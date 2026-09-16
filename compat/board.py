@@ -53,7 +53,7 @@ ZONES = {
     "config-parser": ["crates/zz-mux/src/parser.rs"],
     "daemon-core": ["crates/zz-daemon/src/daemon.rs"],
     "daemon-status": ["crates/zz-daemon/src/status.rs"],
-    "control-client": ["crates/zz/src/control_mode.rs"],
+    "control-client": ["crates/zz-cli/src/control_mode.rs"],
     "client-core": ["crates/zz-client/src/"],
     "raw-tui": ["crates/zz-tui/src/"],
     "terminal-engine": ["crates/zz-terminal/src/"],
@@ -64,7 +64,7 @@ ZONES = {
     ],
     "protocol-key": ["crates/zz-protocol/src/key.rs"],
     "protocol-catalog": ["crates/zz-protocol/src/catalog.rs"],
-    "desktop-gpui": ["crates/zz/src/ (control_mode.rs belongs to control-client)"],
+    "desktop-gpui": ["crates/zz/src/ (control mode lives in crates/zz-cli, owned by control-client)"],
     "main-lock": [],
     "triage-lock": [],
 }

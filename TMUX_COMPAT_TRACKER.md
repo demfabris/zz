@@ -1287,7 +1287,7 @@ prerequisite. A source audit found three bounded chunks with separate production
 
 | Front | Worktree and branch | Tracker contract | Exclusive production and test zone |
 | --- | --- | --- | --- |
-| Control response | `$HOME/dev/zz-tmux-control`, `codex/tmux-control-10ah` | Slice 10ah: `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order` | `crates/zz-daemon/src/daemon.rs`, `crates/zz/src/control_mode.rs`, and Control sections of `crates/zz/tests/cli_binary.rs` |
+| Control response | `$HOME/dev/zz-tmux-control`, `codex/tmux-control-10ah` | Slice 10ah: `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order` | `crates/zz-daemon/src/daemon.rs`, `crates/zz-cli/src/control_mode.rs`, and Control sections of `crates/zz-cli/tests/cli_binary.rs` |
 | Config parser | `$HOME/dev/zz-tmux-config`, `codex/tmux-config-edges` | `config.parser-edge-cases` and its three tilde-expansion items | `crates/zz-mux/src/parser.rs`, `crates/zz-mux/Cargo.toml`, `Cargo.lock`, plus the config-grammar scenario and fixture |
 | Key grammar | `$HOME/dev/zz-tmux-keys`, `codex/tmux-key-validation` | `keys.strict-validation` | `crates/zz-mux/src/command.rs` plus a dedicated key-validation scenario and fixture |
 
@@ -1363,7 +1363,7 @@ residual. All three candidates passed independent review before integration.
 
 | Front | State | Worktree and branch | Tracker contract | Exclusive production and proof zone |
 | --- | --- | --- | --- | --- |
-| Control output | Closed after one review repair | `$HOME/dev/zz-tmux-control-output`, `codex/tmux-control-10ai` | Slice 10ai: `control-mode.exit-pane-output/semantic:control-mode-exit-pane-output-discard` | `crates/zz/src/control_mode.rs`, focused tests in that file, Control sections of `crates/zz/tests/cli_binary.rs`, and one unique Control scenario or fixture |
+| Control output | Closed after one review repair | `$HOME/dev/zz-tmux-control-output`, `codex/tmux-control-10ai` | Slice 10ai: `control-mode.exit-pane-output/semantic:control-mode-exit-pane-output-discard` | `crates/zz-cli/src/control_mode.rs`, focused tests in that file, Control sections of `crates/zz-cli/tests/cli_binary.rs`, and one unique Control scenario or fixture |
 | Shell-job cwd | Closed after attached-client proof | `$HOME/dev/zz-tmux-job-cwd`, `codex/tmux-job-cwd` | `jobs.shell-job-cwd/semantic:command-shell-job-cwd` and `semantic:status-shell-job-cwd` | `crates/zz-daemon/src/daemon.rs`, `crates/zz-daemon/src/status.rs`, focused daemon tests, and one unique shell-job-cwd scenario or fixture |
 | DEL identity | Closed after transport repair | `$HOME/dev/zz-tmux-key-del`, `codex/tmux-key-del` | `keys.literal-delete-identity/semantic:literal-delete-key-identity` | `crates/zz-mux/src/command.rs`, the strict-key scenario and fixture, focused mux tests, and live prefix and backspace byte capture |
 
@@ -1386,7 +1386,7 @@ below.
 
 | Front | Role and state | Tracker contract | Exclusive production and proof zone |
 | --- | --- | --- | --- |
-| `W3-CONTROL-DIAGNOSTICS` | Historical editor brief; superseded | Close `control-mode.diagnostic-typing/semantic:control-mode-typed-config-diagnostics` | `crates/zz-protocol/src/message.rs`, `crates/zz-protocol/tests/hunt_claims.rs`, config-diagnostic publication and tests in `crates/zz-daemon/src/daemon.rs`, `crates/zz/src/control_mode.rs`, focused Control tests in `crates/zz/tests/cli_binary.rs`, and uniquely named `control-config-diagnostic-typing` scenario and fixture files |
+| `W3-CONTROL-DIAGNOSTICS` | Historical editor brief; superseded | Close `control-mode.diagnostic-typing/semantic:control-mode-typed-config-diagnostics` | `crates/zz-protocol/src/message.rs`, `crates/zz-protocol/tests/hunt_claims.rs`, config-diagnostic publication and tests in `crates/zz-daemon/src/daemon.rs`, `crates/zz-cli/src/control_mode.rs`, focused Control tests in `crates/zz-cli/tests/cli_binary.rs`, and uniquely named `control-config-diagnostic-typing` scenario and fixture files |
 | `W3-COPY-ACTIONS-1` | Historical editor brief; superseded | Close only `semantic:copy-mode-action-vocabulary`; the six behavior items remain in `copy-mode.action-fidelity` | `crates/zz-mux/src/command.rs`, `crates/zz-mux/src/compat_manifest_tests.rs`, `compat/tmux-oracle.py`, `compat/tmux-oracle.json`, the relevant structural code in `compat/tmux-tracker.py`, and `compat/check.sh` |
 | `W3-FORMATS-SPLIT` | Historical read-only brief; superseded | Produce the implementation split for `formats.context-producer-fidelity` and `formats.modifier-fidelity`; close nothing | Read any relevant source, oracle, and tracker material; edit no file and create no commit |
 

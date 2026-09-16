@@ -1,6 +1,5 @@
-use zz_daemon::Endpoint;
-
-use crate::config::{self, RejectedHost};
+use zz_config::{remove_fleet_host, write_fleet_host};
+use zz_daemon::{Endpoint, RejectedHost, configured_fleet_hosts, validate_fleet_host};
 
 const FLEET_USAGE: &str = "usage: zz fleet add <name> <ssh-destination>\n       zz fleet list [-F <format>]\n       zz fleet remove <name>";
 const FLEET_ADD_USAGE: &str = "usage: zz fleet add <name> <ssh-destination>";
@@ -33,8 +32,8 @@ pub(crate) struct ForgetOutcome {
 }
 
 pub(crate) fn forget_host(name: &str) -> Result<ForgetOutcome, String> {
-    let (hosts, rejected) = config::configured_fleet_hosts()
-        .map_err(|error| format!("could not read zz/config: {error}"))?;
+    let (hosts, rejected) =
+        configured_fleet_hosts().map_err(|error| format!("could not read zz/config: {error}"))?;
     let endpoint = hosts
         .iter()
         .find(|host| host.name == name)
@@ -59,7 +58,7 @@ pub(crate) fn forget_host(name: &str) -> Result<ForgetOutcome, String> {
         return Err(format!("unknown fleet host `{name}`; known hosts: {known}"));
     };
 
-    let config_removed = config::remove_fleet_host(name)
+    let config_removed = remove_fleet_host(name)
         .map_err(|error| format!("could not remove host-{name} from zz/config: {error}"))?;
 
     Ok(ForgetOutcome {
@@ -78,8 +77,8 @@ fn parse_fleet_list(arguments: &[String]) -> Result<Option<&str>, String> {
 }
 
 fn fleet_list(format: Option<&str>) -> Result<String, String> {
-    let (hosts, rejected) = config::configured_fleet_hosts()
-        .map_err(|error| format!("could not read zz/config: {error}"))?;
+    let (hosts, rejected) =
+        configured_fleet_hosts().map_err(|error| format!("could not read zz/config: {error}"))?;
     let rows = hosts
         .into_iter()
         .map(|host| (host.name, host.endpoint.to_string()))
@@ -164,7 +163,7 @@ fn parse_fleet_add(arguments: &[String]) -> Result<FleetAddArguments, String> {
     }
     let endpoint = format!("ssh://{destination}");
     Endpoint::parse(&endpoint).map_err(|error| error.to_string())?;
-    config::validate_fleet_host(name, &endpoint)?;
+    validate_fleet_host(name, &endpoint)?;
     Ok(FleetAddArguments {
         name: name.clone(),
         endpoint,
@@ -172,7 +171,7 @@ fn parse_fleet_add(arguments: &[String]) -> Result<FleetAddArguments, String> {
 }
 
 fn fleet_add(arguments: &FleetAddArguments) -> Result<String, String> {
-    config::write_fleet_host(&arguments.name, &arguments.endpoint)
+    write_fleet_host(&arguments.name, &arguments.endpoint)
         .map_err(|error| format!("could not write zz/config: {error}"))?;
     Ok(format!("host-{} = {}", arguments.name, arguments.endpoint))
 }

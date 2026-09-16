@@ -25,10 +25,8 @@ cask "zz" do
   depends_on macos: :big_sur
 
   app "zz.app"
-  # macOS resolves an app bundle from the path the executable was launched with
-  # and does not follow symlinks doing it, so a symlink to Contents/MacOS/zz
-  # would start zz with no Info.plist. `cli` is a launcher that canonicalizes
-  # itself and execs the real executable from inside the bundle.
+  # `cli` is the headless zz (CLI and daemon) that the app bundles.
+  # The `zz` symlink on PATH points to it; `zz app` opens the desktop app.
   binary "#{appdir}/zz.app/Contents/MacOS/cli", target: "zz"
 
   zap trash: [

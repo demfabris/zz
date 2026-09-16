@@ -68,6 +68,7 @@ One command on macOS (Apple Silicon) and Linux:
 
 ```sh
 curl -fsSL https://zzmux.sh/install.sh | sh
+curl -fsSL https://zzmux.sh/install.sh | sh -s -- --headless   # CLI + daemon only, for hosts you ssh into
 ```
 
 It picks the route for the machine: the notarized app into `/Applications`

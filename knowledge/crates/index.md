@@ -3,6 +3,7 @@
 
 * [zz-browser crate](zz-browser.md) - Browser-neutral abstraction over CEF Alloy off-screen rendering. Owns CEF init, named private request contexts, page zoom, input, lifecycle, and frame mailboxes.
 * [zz-chrome-import crate](zz-chrome-import.md) - Store-agnostic Google Chrome data import - profile discovery, cookie snapshot/decryption, and read-only history extraction - isolating the app's only sqlite/crypto/keychain dependencies.
+* [zz-cli crate](zz-cli.md) - Headless CLI, daemon entrypoint, and terminal attach client shared with the desktop app.
 * [zz-client-ffi crate](zz-client-ffi.md) - Native client C ABI for transport, terminal viewports, Agent transcripts, settings, and chrome bindings.
 * [zz-client crate](zz-client.md) - Renderer-free client state, effects, chrome keymaps, and normalized pane geometry shared by native and terminal skins.
 * [zz-daemon crate](zz-daemon.md) - The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions and Agent-pane ACP adapter children, and the fan-out engine that streams coalesced terminal frames and agent transcripts to attached and short-lived clients over a socket or named pipe.
@@ -10,11 +11,12 @@
 * [zz-protocol crate](zz-protocol.md) - The stable, versioned wire vocabulary (IDs, framing, control messages, packed terminal lanes, and mux snapshots) shared by every zz client and the daemon.
 * [zz-terminal crate](zz-terminal.md) - The per-pane terminal engine that owns a PTY child and every libghostty-vt object on a worker thread and publishes immutable renderer-neutral frames.
 * [zz-xtask crate](zz-xtask.md) - Workspace build task that assembles and validates desktop CEF bundles across Linux, macOS, and Windows.
-* [zz crate (the GPUI client)](zz.md) - The long-lived GPUI desktop client. Reconciles recursive pane layouts and hosts stable terminal, Chromium browser, and native Agent pane entities.
+* [zz crate (the GPUI client)](zz.md) - The long-lived GPUI desktop client, linking zz-cli for CLI dispatch, daemon spawning, and terminal attach, and hosting terminal, Chromium browser, and native Agent panes.
 <!-- okf:listing:end -->
 
 Workspace members without a crate page here: `zz-ui` (maintained gpui-component fork), `zz-tui`
-(`zz attach`). The native Swift iPhone client lives under `clients/ios`, outside the Cargo workspace.
+(the library behind `zz attach`). The native Swift iPhone client lives under `clients/ios`, outside
+the Cargo workspace.
 `zz-web` serves the [browser client](/playbooks/browser-client.md), whose GPUI/WASM frontend lives
 in the separate `clients/web` workspace.
 The map in

@@ -151,7 +151,7 @@ Acceptance:
 Sources:
 
 - `crates/zz/src/lib.rs`
-- `crates/zz/src/bin/zz_cli.rs`
+- `crates/zz-cli/src/lib.rs`
 - `crates/zz-protocol/src/key.rs`
 - `crates/zz-client/src/chrome.rs`
 - `crates/zz-tui/src/input.rs`

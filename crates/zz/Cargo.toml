@@ -28,11 +28,6 @@ path = "src/bin/zz_helper.rs"
 required-features = ["desktop"]
 
 [[bin]]
-name = "zz_cli"
-path = "src/bin/zz_cli.rs"
-required-features = ["desktop"]
-
-[[bin]]
 name = "zz_browser_fixture"
 path = "src/bin/zz_browser_fixture.rs"
 required-features = ["desktop"]
@@ -43,6 +38,7 @@ path = "src/bin/zz_external_texture_fixture.rs"
 required-features = ["desktop"]
 
 [dependencies]
+zz-cli = { path = "../zz-cli" }
 zz-config = { path = "../zz-config" }
 agent-client-protocol = { workspace = true, optional = true }
 async-channel.workspace = true
@@ -68,17 +64,10 @@ zz-mux = { path = "../zz-mux" }
 zz-protocol = { path = "../zz-protocol" }
 zz-ui = { path = "../zz-ui", features = ["editor", "tree-sitter"] }
 
-[target.'cfg(unix)'.dependencies]
-libc.workspace = true
-rustix.workspace = true
-
 [target.'cfg(not(target_os = "ios"))'.dependencies]
-crossbeam-channel.workspace = true
 gpui_platform.workspace = true
-interprocess.workspace = true
 mimalloc.workspace = true
 semver = "1"
-sha2.workspace = true
 wgpu.workspace = true
 zz-browser = { path = "../zz-browser" }
 zz-chrome-import = { path = "../zz-chrome-import" }

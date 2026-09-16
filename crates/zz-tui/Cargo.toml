@@ -9,10 +9,6 @@ publish = false
 
 [lib]
 
-[[bin]]
-name = "zz-tui"
-path = "src/main.rs"
-
 [dependencies]
 async-signal.workspace = true
 base64.workspace = true

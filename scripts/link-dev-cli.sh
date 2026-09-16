@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-executable="${1:?expected the absolute path to the development executable}"
+executable="${1:?expected the absolute path to the headless development executable}"
+gui_executable="${2:?expected the absolute path to the GUI development executable}"
 link="$HOME/.local/bin/zz-dev"
 if [[ -e "$link" && ! -L "$link" ]]; then
     echo "error: $link already exists and is not a symlink" >&2
@@ -14,7 +15,7 @@ if [[ "$(uname -s)" == Linux ]]; then
     data_dir="${XDG_DATA_HOME:-$HOME/.local/share}"
     mkdir -p "$data_dir/icons/hicolor/scalable/apps" "$data_dir/applications"
     cp "$root/assets/linux/hicolor/scalable/apps/zz-dev.svg" "$data_dir/icons/hicolor/scalable/apps/zz-dev.svg"
-    desktop_executable="${executable//\\/\\\\}"
+    desktop_executable="${gui_executable//\\/\\\\}"
     desktop_executable="${desktop_executable//\"/\\\"}"
     desktop_executable="${desktop_executable//\$/\\\$}"
     desktop_executable="${desktop_executable//\`/\\\`}"

@@ -123,11 +123,16 @@ jobs:
         if: runner.os == 'Linux'
         timeout-minutes: 15
         run: |
-          cargo build -p zz
-          compat/attached-client.sh target/debug/zz "$(compat/fetch-tmux.sh)"
+          cargo build -p zz-cli
+          compat/attached-client.sh target/debug/zz_cli "$(compat/fetch-tmux.sh)"
 
       - name: Build and validate CEF bundle
         run: cargo xtask bundle-cef --release --output target/cef-bundle
+
+      - name: Headless binary stays GUI-free
+        shell: bash
+        run: |
+          cargo tree -p zz-cli -e normal --prefix none | grep -Eq '^(gpui|gpui_platform|wgpu|cef|zz-ui|zz-browser|zz-chrome-import) ' && { echo "zz-cli links GUI crates"; exit 1; } || true
 
       - name: Smoke packaged macOS CLI
         if: runner.os == 'macOS'

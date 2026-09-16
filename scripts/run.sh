@@ -61,10 +61,13 @@ export ZZ_LOG_DIR="$ROOT/logs"
 
 if [[ "$PLATFORM" == "linux" ]]; then
     ZZ_DEV_BUILD=1 cargo build -p zz --bin zz ${ZZ_CARGO_FEATURES:+--features "$ZZ_CARGO_FEATURES"}
+    ZZ_DEV_BUILD=1 cargo build -p zz-cli --bin zz_cli
     target_dir="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
     cp "$target_dir/debug/zz" "$target_dir/debug/zz-dev.$$"
     mv -f "$target_dir/debug/zz-dev.$$" "$target_dir/debug/zz-dev"
-    bash "$ROOT/scripts/link-dev-cli.sh" "$target_dir/debug/zz-dev"
+    cp "$target_dir/debug/zz_cli" "$target_dir/debug/cli.$$"
+    mv -f "$target_dir/debug/cli.$$" "$target_dir/debug/cli"
+    bash "$ROOT/scripts/link-dev-cli.sh" "$target_dir/debug/cli" "$target_dir/debug/zz-dev"
     exec "$target_dir/debug/zz-dev" ${VERBOSE:+"$VERBOSE"} app
 fi
 
@@ -76,7 +79,7 @@ if [[ "$version" != "$zig_version" ]]; then
 fi
 
 ZZ_DEV_BUILD=1 cargo xtask bundle-cef --output dist/zz-dev
-bash "$ROOT/scripts/link-dev-cli.sh" "$ROOT/dist/zz-dev/zz Dev.app/Contents/MacOS/zz"
+bash "$ROOT/scripts/link-dev-cli.sh" "$ROOT/dist/zz-dev/zz Dev.app/Contents/MacOS/cli" "$ROOT/dist/zz-dev/zz Dev.app/Contents/MacOS/zz"
 
 if [[ "$VERBOSE" == "--verbose" ]]; then
     "$ROOT/dist/zz-dev/zz Dev.app/Contents/MacOS/zz" --verbose app >/dev/null 2>&1 &

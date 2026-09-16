@@ -361,7 +361,7 @@ Config command-name and lexer diagnostics remain generic Warning events on the
 `%config-error` classification path.
 
 `zz-client::ClientCore` accepts and ignores `ControlCommandGuard` and `ControlSourceFile`;
-`crates/zz/src/control_mode.rs` renders both Control-only events. The daemon preflights every declared
+`crates/zz-cli/src/control_mode.rs` renders both Control-only events. The daemon preflights every declared
 path for one source command before recursion, so a
 three-level parser replay publishes the root missing-path guard, middle missing-path guard, and leaf
 output guard once each. The Control front end combines guards with `CommandResponse` and `Detached`

@@ -340,7 +340,7 @@ fn merged_features(cli: Option<&str>) -> Option<OsString> {
 fn build_linux_binaries(release: bool, features: Option<&str>) -> Result<PathBuf, Box<dyn Error>> {
     println!("Building {APP_NAME} and {CLI_NAME}...");
     let mut command = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
-    command.arg("build");
+    command.args(["build", "-p", "zz", "-p", "zz-cli"]);
     if release {
         command.arg("--release");
     }
@@ -650,7 +650,7 @@ fn build_macos_binaries(
 ) -> Result<PathBuf, Box<dyn Error>> {
     println!("Building {APP_NAME}, {MACOS_HELPER_NAME}, and {CLI_NAME}...");
     let mut command = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
-    command.arg("build");
+    command.args(["build", "-p", "zz", "-p", "zz-cli"]);
     profile.configure_cargo(&mut command);
     if let Some(features) = merged_features(features) {
         command.arg("--features").arg(features);

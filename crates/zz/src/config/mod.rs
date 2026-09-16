@@ -9,7 +9,7 @@ use gpui::{App, Corners, Global, Hsla, Pixels, WindowBackgroundAppearance, Windo
 use zz_browser::SearchProvider;
 use zz_client::StatusBarSettings;
 use zz_daemon::{Endpoint, InteractiveClient};
-pub(crate) use zz_daemon::{HostEntry, RejectedHost, configured_fleet_hosts, validate_fleet_host};
+pub(crate) use zz_daemon::{HostEntry, validate_fleet_host};
 use zz_protocol::{CommandInvocation, ConfigOverrideEntry, PROTOCOL_VERSION};
 
 use crate::{

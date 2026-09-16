@@ -11,11 +11,11 @@ binary="$target/Contents/MacOS/zz"
 
 [[ -d "$bundle/Contents" ]] || die "application bundle does not exist: $bundle (run: just build mac)"
 
-# The GUI instance of the installed bundle, and only that: the daemon runs the
-# same binary (`… --socket … daemon --bootstrap-server-id …`), so do CLI
-# invocations and agent adapters, and all of those must survive the swap. The daemon keeps the sessions and, unlike the
-# GUI, never loads CEF helpers by bundle path, so it is safe with its binary
-# unlinked. dist/zz-dev instances don't match either.
+# The GUI instance of the installed bundle, and only that: the daemon runs
+# from `cli` beside the GUI, as do CLI invocations and agent adapters. Those
+# processes must survive the swap. The daemon keeps the sessions and never
+# loads CEF helpers by bundle path, so it is safe with its binary unlinked.
+# dist/zz-dev instances don't match either.
 gui_pids() {
     pgrep -f "^$binary" 2>/dev/null | while read -r pid; do
         case "$(ps -o command= -p "$pid" 2>/dev/null)" in
@@ -37,7 +37,7 @@ if [[ -n "$(gui_pids)" ]]; then
     [[ -n "$(gui_pids)" ]] && die "zz did not quit; close it and rerun"
 fi
 
-# Symlink the bundle's `cli` launcher, never the real binary: macOS resolves
+# Symlink the bundle's headless `cli`: macOS resolves
 # the app bundle from the launch path without following symlinks, so a
 # symlinked `zz` would run with no Info.plist and no CEF framework beside it.
 install_cli_link() {

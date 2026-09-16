@@ -272,7 +272,7 @@ What `bundle-cef` does, in order:
 | `third_party/cef/ARTIFACTS.md` | Reviewable mirror of the archive name + SHA-1 fetched from CEF's index per Rust target |
 | `third_party/cef/LICENSE.txt` | Installed into every bundle as `CEF_LICENSE.txt` |
 | `Cargo.toml` | `cef = "=152.2.0"` workspace pin that `download-cef` resolves |
-| `crates/zz/src/bin/zz_cli.rs` | The macOS and Linux `PATH` launcher; maps bare launch to `new-session -A` and reserves `zz app` for the GUI |
+| `crates/zz-cli/src/lib.rs` | The macOS and Linux `PATH` launcher; maps bare launch to `new-session -A` and reserves `zz app` for the GUI |
 | `.github/workflows/ci.yml` | Exercises `bundle-cef` on `ubuntu-24.04`, `macos-15`, `windows-2025` |
 | `.github/workflows/release.yml` | Tag-driven macOS, Linux, and Windows publication; prerelease channel gating |
 | `release.toml` + `scripts/release.sh` | Dry-run-first workspace SemVer bump, one release commit, annotated tag, and push |

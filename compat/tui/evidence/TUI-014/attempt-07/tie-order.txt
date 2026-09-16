@@ -1,0 +1,3 @@
+tmux: alpha:win, cli:win, zulu:win
+zz: alpha:win, cli:win, zulu:win
+asserted_equal=true

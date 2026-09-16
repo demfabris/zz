@@ -24,6 +24,11 @@ is alive, and whose `updatedAt` falls within 24 hours. If it finds one, it posts
 command payload to that record's socket. Stdin, the `--context` header, and the 1 MiB payload
 limit retain their existing command behavior.
 
+Claude Code fills its `tmux` field by running `tmux display-message` itself, so zz's tmux wrapper
+must be first on the pane PATH after the user's startup files.
+The bundled bash and zsh integration re-pins `ZZ_TMUX_SHIM_DIR` there so Claude Code can identify
+the pane.
+
 Both plain `agent-send` and `--submit` send a message on this route; Claude Code has no remote
 composer draft. `--wait` collects a reply through a temporary daemon peer, as described below.
 Without a matching Claude Code terminal peer, the daemon checks for Codex as described below,

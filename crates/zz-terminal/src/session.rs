@@ -22201,6 +22201,102 @@ preexec_functions+=(__zz_fixture_preexec)
     }
 
     #[cfg(unix)]
+    fn shell_integration_restores_tmux_directory_after_startup(shell: &str) {
+        if !std::path::Path::new(shell).is_file() {
+            eprintln!("skipping shell integration fixture: {shell} is not installed");
+            return;
+        }
+        if matches!(
+            std::env::var("ZZ_SHELL_INTEGRATION")
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase()
+                .as_str(),
+            "none" | "false" | "0"
+        ) {
+            eprintln!("skipping shell integration fixture: ZZ_SHELL_INTEGRATION disables it");
+            return;
+        }
+        let temporary = tempfile::tempdir().expect("shell integration fixture home");
+        let home = temporary.path();
+        let tmux_directory = home.join("tmux");
+        std::fs::create_dir(&tmux_directory).expect("tmux directory");
+        let startup = r#"export PATH="/usr/bin:$HOME/bin:$PATH"
+PS1='zz-path-fixture> '
+"#;
+        let startup_file = if shell.ends_with("bash") {
+            ".bash_profile"
+        } else {
+            ".zlogin"
+        };
+        std::fs::write(home.join(startup_file), startup).expect("isolated shell startup");
+        let path = std::env::join_paths([
+            tmux_directory.as_path(),
+            std::path::Path::new("/usr/bin"),
+            std::path::Path::new("/bin"),
+        ])
+        .expect("fixture PATH");
+        let session = TerminalSession::spawn(
+            DEFAULT_HISTORY_LIMIT,
+            Arc::new(TerminalAppearance::default()),
+            TerminalSpawn {
+                shell: Some(shell.to_owned()),
+                working_directory: Some(home.to_path_buf()),
+                env: vec![
+                    ("HOME".into(), Some(home.as_os_str().to_owned())),
+                    ("PATH".into(), Some(path)),
+                    (
+                        "ZZ_TMUX_SHIM_DIR".into(),
+                        Some(tmux_directory.as_os_str().to_owned()),
+                    ),
+                    (
+                        "HISTFILE".into(),
+                        Some(home.join("history").into_os_string()),
+                    ),
+                    ("ZZ_ZSH_ZDOTDIR".into(), Some(home.as_os_str().to_owned())),
+                    ("PROMPT_COMMAND".into(), None),
+                    ("PS1".into(), None),
+                    ("PS0".into(), None),
+                ],
+                ..TerminalSpawn::default()
+            },
+        );
+        session.attach_view(TerminalViewId(145));
+        wait_for_test_capture(&session, |capture| capture.contains("zz-path-fixture>"));
+        let command = "printf '%s\\n' \"${PATH%%:*}\"";
+        session.send_text(&format!("{command}\n"));
+        wait_for_test_capture(&session, |capture| {
+            capture.matches("zz-path-fixture>").count() == 2
+        });
+        let capture = wait_for_last_command(&session, |capture| capture.command == command);
+        assert_eq!(capture.output, tmux_directory.to_string_lossy());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bash_shell_integration_restores_tmux_directory_after_startup() {
+        let candidates: &[&str] = if cfg!(target_os = "macos") {
+            &["/opt/homebrew/bin/bash", "/usr/local/bin/bash"]
+        } else {
+            &["/bin/bash", "/usr/bin/bash"]
+        };
+        let Some(shell) = candidates
+            .iter()
+            .find(|shell| std::path::Path::new(shell).is_file())
+        else {
+            eprintln!("skipping bash shell integration fixture: no supported bash installed");
+            return;
+        };
+        shell_integration_restores_tmux_directory_after_startup(shell);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn zsh_shell_integration_restores_tmux_directory_after_startup() {
+        shell_integration_restores_tmux_directory_after_startup("/bin/zsh");
+    }
+
+    #[cfg(unix)]
     #[test]
     fn shell_integration_updates_title_and_working_directory() {
         let shell = std::env::var("SHELL").unwrap_or_default();

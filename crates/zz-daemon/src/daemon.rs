@@ -70533,6 +70533,7 @@ set-option -g @alias-mixed-next yes
             .engine
             .seed_global_environment([("PATH", "/modeled/bin:/modeled/sbin")]);
         let shim = TmuxShimGuard::install(executable).expect("install tmux executable path");
+        let expected_directory = shim.directory.clone();
         let expected_path = std::env::join_paths([
             shim.directory.clone(),
             PathBuf::from("/modeled/bin"),
@@ -70575,6 +70576,10 @@ set-option -g @alias-mixed-next yes
                     .flatten()
             };
             assert_eq!(value("PATH"), Some(OsStr::new(&expected_path)));
+            assert_eq!(
+                value(crate::TMUX_SHIM_DIRECTORY_ENVIRONMENT_VARIABLE),
+                Some(expected_directory.as_os_str())
+            );
             assert_eq!(
                 value(crate::TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE),
                 Some(directory.path().join("fake-zz").as_os_str())

@@ -41,6 +41,10 @@ if [[ -n ${ZZ_BASH_INJECT-} ]]; then
   builtin unset __zz_startup_file
 fi
 
+if [[ -n ${ZZ_TMUX_SHIM_DIR-} && -d $ZZ_TMUX_SHIM_DIR && ${PATH%%:*} != "$ZZ_TMUX_SHIM_DIR" ]]; then
+  builtin export PATH="$ZZ_TMUX_SHIM_DIR:$PATH"
+fi
+
 __zz_write_title() {
   builtin local __zz_value="${1-}"
   __zz_value=${__zz_value//$'\n'/ }

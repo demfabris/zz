@@ -53,6 +53,9 @@ _zz_title_preexec() {
 _zz_install_title_hooks() {
   local zz_status=$?
   emulate -L zsh
+  if [[ -n ${ZZ_TMUX_SHIM_DIR-} && -d $ZZ_TMUX_SHIM_DIR && ${PATH%%:*} != "$ZZ_TMUX_SHIM_DIR" ]]; then
+    path=("$ZZ_TMUX_SHIM_DIR" $path)
+  fi
   typeset -ga precmd_functions preexec_functions
   precmd_functions=(${precmd_functions:#_zz_install_title_hooks})
   (( ${precmd_functions[(I)_zz_title_precmd]} )) || precmd_functions+=(_zz_title_precmd)

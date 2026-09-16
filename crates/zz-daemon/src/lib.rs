@@ -32,6 +32,8 @@ const PARENT_CLAUDE_SESSION_ENVIRONMENT: &[&str] = &[
 const COLD_START_PREPARE_ABORT_COMMAND: &str = "__zz-cold-start-prepare-abort";
 #[cfg(feature = "daemon")]
 const TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE: &str = "ZZ_TMUX_EXECUTABLE";
+#[cfg(feature = "daemon")]
+const TMUX_SHIM_DIRECTORY_ENVIRONMENT_VARIABLE: &str = "ZZ_TMUX_SHIM_DIR";
 
 // iOS uses the in-process russh tunnel, leaving the spawned-ssh and askpass halves unreachable.
 #[cfg(feature = "agent")]
@@ -153,13 +155,17 @@ fn tmux_shim_environment(
     };
     let paths = std::iter::once(tmux_shim.to_path_buf())
         .chain(path.into_iter().flat_map(std::env::split_paths));
-    let mut environment = Vec::with_capacity(2);
+    let mut environment = Vec::with_capacity(3);
     if let Ok(path) = std::env::join_paths(paths) {
         environment.push(("PATH".into(), path));
     }
     environment.push((
         TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE.into(),
         zz_executable.as_os_str().to_owned(),
+    ));
+    environment.push((
+        TMUX_SHIM_DIRECTORY_ENVIRONMENT_VARIABLE.into(),
+        tmux_shim.as_os_str().to_owned(),
     ));
     environment
 }
@@ -200,7 +206,9 @@ fn configure_shell_job_environment(
     for (name, value) in environment {
         if matches!(
             name.as_str(),
-            STARTUP_REENTRY_ENVIRONMENT_VARIABLE | TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE
+            STARTUP_REENTRY_ENVIRONMENT_VARIABLE
+                | TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE
+                | TMUX_SHIM_DIRECTORY_ENVIRONMENT_VARIABLE
         ) {
             continue;
         }
@@ -356,6 +364,52 @@ fn shell_process(command: &str) -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "daemon")]
+    #[test]
+    fn tmux_shim_environment_exports_directory_and_shell_jobs_skip_stale_values() {
+        let directory = Path::new("private-tmux");
+        let executable = Path::new("zz");
+        let environment = tmux_shim_environment(Some(directory), Some(executable), None);
+        assert!(environment.contains(&(
+            TMUX_SHIM_DIRECTORY_ENVIRONMENT_VARIABLE.into(),
+            directory.as_os_str().to_owned(),
+        )));
+        assert!(environment.contains(&(
+            TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE.into(),
+            executable.as_os_str().to_owned(),
+        )));
+
+        let inherited = [
+            (
+                TMUX_SHIM_DIRECTORY_ENVIRONMENT_VARIABLE.into(),
+                Some("stale-directory".into()),
+            ),
+            (
+                TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE.into(),
+                Some("stale-executable".into()),
+            ),
+        ];
+        for startup in [false, true] {
+            let mut process = Command::new("unused");
+            configure_shell_job_environment(
+                &mut process,
+                &inherited,
+                "tmux-256color",
+                startup,
+                "socket,1,0",
+                OsStr::new("socket"),
+                None,
+                None,
+            );
+            for name in [
+                TMUX_SHIM_DIRECTORY_ENVIRONMENT_VARIABLE,
+                TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE,
+            ] {
+                assert!(process.get_envs().all(|(key, _)| key != name));
+            }
+        }
+    }
 
     #[test]
     fn classifier_finds_protocol_versions_through_error_sources() {

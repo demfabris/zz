@@ -21,13 +21,27 @@ import subprocess
 import sys
 from pathlib import Path
 
-WIRE = "crates/zz-protocol/src/message.rs"
+WIRE_DIR = "crates/zz-protocol/src"
+# Every serialized payload source in the protocol crate is wire. The guard used to
+# watch message.rs alone, which is how cycle 11 pushed a PaneSnapshot.mode append in
+# snapshot.rs onto a released 103 and got a green check. New files are watched by
+# default, because a guard that has to be told about each one fails open.
+NOT_WIRE = {"catalog.rs", "lib.rs"}
 VERSION = re.compile(r"pub const PROTOCOL_VERSION: u16 = (\d+);")
 
 
 def git(root, *args):
     out = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
     return out.stdout
+
+
+def wire_files(root):
+    here = sorted(
+        f"{WIRE_DIR}/{p.name}"
+        for p in (root / WIRE_DIR).glob("*.rs")
+        if p.name not in NOT_WIRE
+    )
+    return here
 
 
 def version_in(text):
@@ -55,8 +69,9 @@ def main():
         return 0
     tag = tags[0]
 
-    released = version_in(git(root, "show", f"{tag}:{WIRE}"))
-    here = version_in((root / WIRE).read_text(encoding="utf-8"))
+    version_file = f"{WIRE_DIR}/message.rs"
+    released = version_in(git(root, "show", f"{tag}:{version_file}"))
+    here = version_in((root / version_file).read_text(encoding="utf-8"))
     if released is None or here is None:
         print(f"wire-version: cannot read PROTOCOL_VERSION at {tag} or in the tree")
         return 1
@@ -68,12 +83,21 @@ def main():
         print(f"wire-version: the tree says {here} but {tag} shipped {released}")
         return 1
 
-    changed = meaningful(git(root, "diff", tag, "--", WIRE))
+    watched = wire_files(root)
+    changed = []
+    dirty = []
+    for path in watched:
+        lines = meaningful(git(root, "diff", tag, "--", path))
+        if lines:
+            dirty.append(path)
+            changed.extend(lines)
     if not changed:
-        print(f"wire-version: {here} matches {tag} and the wire is unchanged")
+        print(f"wire-version: {here} matches {tag} and the wire is unchanged "
+              f"({len(watched)} sources watched)")
         return 0
 
-    print(f"wire-version: {WIRE} changed since {tag}, which shipped PROTOCOL_VERSION {here},")
+    print(f"wire-version: {', '.join(dirty)} changed since {tag}, which shipped "
+          f"PROTOCOL_VERSION {here},")
     print(f"  but the tree still says {here}. A released version cannot take appends: two builds")
     print(f"  would both claim {here} and disagree about the bytes.")
     print(f"  Set PROTOCOL_VERSION to {here + 1}, move this cycle's appends into a v{here + 1}")

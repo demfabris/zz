@@ -134,6 +134,13 @@ verified (its record says so in its own words). Today's position:
   rejects `-C`, so `cd` into the worktree first. Map a worktree to its session with
   `find ~/.codex/sessions -name '*.jsonl'` and the `"cwd"` in each file's header; the id is the
   filename after the `rollout-<timestamp>-` prefix.
+  A lane can also be killed mid-run by the provider's safety classifier: on 2026-09-16 an alias
+  reviewer wrote a general-purpose Python runner that executed an arbitrary command through
+  `subprocess`, set environment variables and logged exit codes, and the run died with "This content
+  was flagged for possible cybersecurity risk" after 400k tokens, leaving the session unresumable
+  ("thread not found"). Tell reviewers to measure with the repo's own fixtures, `diff-scenario.sh`,
+  `run.sh --delta` and plain shell with `xxd`/`cmp`, and not to build bespoke process-runners - which
+  is also easier for a gate to reproduce.
   A Codex lane took 59 minutes for a fix the Claude lane before it could not finish in 90, and its
   reviews found real bugs on every branch they read.
 - **Combine gates** when two reviewed branches wait (menus-3 plus context landed in one push).

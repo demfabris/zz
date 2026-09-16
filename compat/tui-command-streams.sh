@@ -61,8 +61,7 @@
 # each channel - stdout, stderr with the exit status, the session state and the
 # pane content that carries a PaneInput sink's proof - and requires the
 # comparison to catch each one in that channel, plus two equivalences it must
-# NOT report. Alias cases remove one reader or change one byte on the zz side
-# and check the specific exit, stderr, stdout or option-state channel.
+# NOT report.
 set -eEuo pipefail
 export ZZ_TRAY=0
 
@@ -433,8 +432,8 @@ drop_extra_panes() {
   local side pane
   CASE_LABEL="$name"
   for side in zz tmux; do
-    for pane in $(side_command "$side" list-panes -a -F '#{pane_index}' | awk '$1 > 0'); do
-      side_command "$side" kill-pane -t "=$SESSION:$WINDOW_NAME.$pane" >/dev/null 2>&1 || true
+    for pane in $(side_command "$side" list-panes -t "=$SESSION:$WINDOW_NAME" -F '#{pane_index} #{pane_id}' | awk '$1 > 0 {print $2}'); do
+      side_command "$side" kill-pane -t "$pane" >/dev/null 2>&1 || true
     done
     wait_for "the extra $side pane is gone for $name" pane_count_is "$side" 1
   done

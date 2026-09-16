@@ -90,7 +90,13 @@ config files into the corresponding `zz-dev` directory if you want your existing
 The default dev socket is `$XDG_RUNTIME_DIR/zz-dev/default.sock`, or
 `<system temporary directory>/zz-dev-$USER/default.sock` when XDG_RUNTIME_DIR is unset.
 The launcher clears inherited socket, pane, session, tmux, and startup context, so running it from
-an installed zz pane cannot select that pane's daemon. Dev terminal jobs receive the dev socket.
+an installed zz pane cannot select that pane's daemon. The daemon also drops a parent Claude Code
+session's identity variables (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`,
+`CLAUDE_CODE_SESSION_ATTENDED`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_EXECPATH`,
+`CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_PID`, and `CLAUDE_EFFORT`)
+from the environment it hands to panes, so Claude Code started inside zz does not inherit a nested
+child session identity; explicit `-e` or `set-environment` values still apply.
+Dev terminal jobs receive the dev socket.
 Explicit socket arguments on direct CLI invocations still work.
 
 Desktop dev runs also link `~/.local/bin/zz-dev` to the development executable for SSH clients.

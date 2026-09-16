@@ -328,6 +328,11 @@ fn terminal_shell_for_session(
 
 fn daemon_environment() -> Vec<(String, String)> {
     let mut environment = std::env::vars_os()
+        .filter(|(name, _)| {
+            !crate::PARENT_CLAUDE_SESSION_ENVIRONMENT
+                .iter()
+                .any(|candidate| name == *candidate)
+        })
         .map(|(name, value)| {
             (
                 name.to_string_lossy().into_owned(),
@@ -364,9 +369,14 @@ fn terminal_environment_for_session(
                 "TERM" | "TERM_PROGRAM" | "TERM_PROGRAM_VERSION" | "COLORTERM"
             )
     });
-    Ok(environment
-        .into_iter()
-        .map(|(name, value)| (name.to_os_string(), value.map(|value| value.to_os_string())))
+    Ok(crate::PARENT_CLAUDE_SESSION_ENVIRONMENT
+        .iter()
+        .map(|name| (OsString::from(*name), None))
+        .chain(
+            environment.into_iter().map(|(name, value)| {
+                (name.to_os_string(), value.map(|value| value.to_os_string()))
+            }),
+        )
         .collect())
 }
 
@@ -74134,6 +74144,157 @@ set-option -g @alias-mixed-next yes
 
     #[cfg(unix)]
     #[test]
+    fn inherited_claude_session_environment_does_not_reach_terminal_spawn() {
+        const CHILD: &str = "ZZ_TEST_PARENT_CLAUDE_SESSION_ENVIRONMENT";
+        if std::env::var_os(CHILD).is_none() {
+            let mut child = std::process::Command::new(
+                std::env::current_exe().expect("test binary"),
+            )
+            .args([
+                "--exact",
+                "daemon::tests::inherited_claude_session_environment_does_not_reach_terminal_spawn",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CHILD, "1")
+            .envs(
+                crate::PARENT_CLAUDE_SESSION_ENVIRONMENT
+                    .iter()
+                    .map(|name| (*name, "1")),
+            )
+            .env("CLAUDE_CODE_SESSION_ID", "abc")
+            .spawn()
+            .expect("isolated environment regression");
+            let deadline = Instant::now() + Duration::from_secs(30);
+            loop {
+                if let Some(status) = child.try_wait().expect("poll environment regression") {
+                    assert!(status.success());
+                    return;
+                }
+                if Instant::now() >= deadline {
+                    child.kill().expect("stop stalled environment regression");
+                    child.wait().expect("reap stalled environment regression");
+                    panic!("isolated environment regression stalled");
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        assert_eq!(std::env::var("CLAUDE_CODE_CHILD_SESSION").unwrap(), "1");
+        assert_eq!(std::env::var("CLAUDE_CODE_SESSION_ID").unwrap(), "abc");
+        let shared = Arc::new(Shared::configured_with_boot_environment(
+            1,
+            Arc::new(TerminalAppearance::default()),
+            AppearanceProvenance::default(),
+            false,
+            std::env::temp_dir().join("zz-test-paste"),
+            std::env::temp_dir().join("zz-test.sock"),
+            None,
+            "/usr/bin/vi",
+            daemon_environment(),
+        ));
+        let mut context = ExecutionContext::default();
+        for name in crate::PARENT_CLAUDE_SESSION_ENVIRONMENT {
+            assert!(matches!(
+                shared.execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-environment", ["-g", *name]),
+                ),
+                Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                    if message == format!("unknown variable: {name}")
+            ));
+        }
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-d", "-s", "scrubbed-environment", "--", "/bin/sh", "-c",
+                        "printf 'CHILD=[%s] SESSION=[%s] ZZ_PANE=[%s]\\n' \"${CLAUDE_CODE_CHILD_SESSION-}\" \"${CLAUDE_CODE_SESSION_ID-}\" \"$ZZ_PANE\"; sleep 30",
+                    ],
+                ),
+            )
+            .expect("session");
+        let pane = context.pane.expect("terminal pane");
+        let expected = format!("CHILD=[] SESSION=[] ZZ_PANE=[{pane}]");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let captured = shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("capture-pane", ["-p", "-t", &pane.to_string()]),
+                )
+                .expect("capture terminal")
+                .output;
+            if captured.contains(&expected) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "inherited Claude session environment reached terminal spawn: {captured:?}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn terminal_environment_scrubs_before_explicit_values_and_preserves_claude_settings() {
+        let mut engine = MuxEngine::default();
+        let settings = [
+            ("CLAUDE_CODE_EXECUTABLE", "/opt/claude"),
+            ("CLAUDE_CONFIG_DIR", "/tmp/claude-config"),
+            ("CLAUDE_CODE_DISABLE_TERMINAL_TITLE", "1"),
+            ("ANTHROPIC_API_KEY", "test-key"),
+            ("ANTHROPIC_BASE_URL", "https://example.invalid"),
+        ];
+        engine.seed_global_environment(settings);
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "claude-settings"]),
+            )
+            .expect("session");
+        for args in [
+            vec!["-g", "CLAUDE_CODE_CHILD_SESSION", "global"],
+            vec!["CLAUDE_CODE_SESSION_ID", "session"],
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new("set-environment", args),
+                )
+                .expect("explicit Claude session environment");
+        }
+        let environment = terminal_environment_for_session(&engine, context.session.unwrap())
+            .expect("terminal environment");
+        let removals = crate::PARENT_CLAUDE_SESSION_ENVIRONMENT
+            .iter()
+            .map(|name| (OsString::from(*name), None))
+            .collect::<Vec<_>>();
+        assert_eq!(&environment[..removals.len()], removals.as_slice());
+        let overlay = &environment[removals.len()..];
+        for (name, value) in settings.into_iter().chain([
+            ("CLAUDE_CODE_CHILD_SESSION", "global"),
+            ("CLAUDE_CODE_SESSION_ID", "session"),
+        ]) {
+            assert!(overlay.contains(&(name.into(), Some(value.into()))));
+            assert!(!overlay.contains(&(name.into(), None)));
+        }
+        for (name, _) in settings {
+            assert!(!environment.contains(&(name.into(), None)));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn seeded_global_environment_and_session_markers_reach_terminal_spawn() {
         let shared = Arc::new(Shared::new(1));
         shared.inner.lock().engine.seed_global_environment([
@@ -74474,6 +74635,8 @@ set-option -g @alias-mixed-next yes
                         "SPLIT_ONLY=first",
                         "-e",
                         "SPLIT_ONLY=last",
+                        "-e",
+                        "CLAUDE_CODE_CHILD_SESSION=1",
                         "--",
                         "sleep",
                         "30",
@@ -74492,6 +74655,16 @@ set-option -g @alias-mixed-next yes
         {
             let inner = shared.inner.lock();
             let environment = &inner.terminal_spawns[&split_pane].env;
+            let scrub = environment
+                .iter()
+                .position(|entry| entry == &("CLAUDE_CODE_CHILD_SESSION".into(), None))
+                .expect("inherited Claude session removal");
+            let explicit = environment
+                .iter()
+                .rposition(|(name, _)| name == "CLAUDE_CODE_CHILD_SESSION")
+                .expect("explicit Claude session value");
+            assert!(scrub < explicit);
+            assert_eq!(environment[explicit].1.as_deref(), Some(OsStr::new("1")));
             assert_eq!(
                 environment.iter().rev().find_map(|(name, value)| {
                     (name == "SPLIT_ONLY").then_some(value.as_deref())

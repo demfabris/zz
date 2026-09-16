@@ -16,6 +16,19 @@ use zz_protocol::{ProtocolError, RawText, ServerError};
 
 const STARTUP_REENTRY_CAPABILITY_PREFIX: &str = "zz-startup-reentry=";
 const STARTUP_REENTRY_ENVIRONMENT_VARIABLE: &str = "ZZ_STARTUP_REENTRY";
+#[cfg(feature = "daemon")]
+const PARENT_CLAUDE_SESSION_ENVIRONMENT: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_PID",
+    "CLAUDE_EFFORT",
+];
 const COLD_START_PREPARE_ABORT_COMMAND: &str = "__zz-cold-start-prepare-abort";
 #[cfg(feature = "daemon")]
 const TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE: &str = "ZZ_TMUX_EXECUTABLE";

@@ -474,10 +474,6 @@ PER_PROCESS_NUMBERS='s|/dev/pts/[0-9][0-9]*|/dev/pts/N|g;s|fd=[0-9][0-9]*|fd=N|g
 # second to turn over, then settle, so the comparison that follows runs inside a
 # second that has just started. This is a wall clock, not a fixture event: the
 # boundary is what is being waited for, and the wait is bounded at four seconds.
-# It is enough for the two faces that change once a minute, which is why the
-# asserted cases below are clock-mode-style 24 and 12. The two -with-seconds
-# faces change under the capture pair itself once the box is loaded, so they are
-# measured by the lane's own probe rather than asserted here.
 align_clock_face() {
   local start now attempt
   start="$(date +%S)"
@@ -530,6 +526,35 @@ run_both() {
   done
 }
 
+capture_seconds_pair() {
+  local before_zz before_tmux start now attempt poll
+  for ((attempt = 0; attempt < 8; attempt++)); do
+    before_zz="$(styled_screen_of zz)"
+    before_tmux="$(styled_screen_of tmux)"
+    start="$(date +%s)"
+    for ((poll = 0; poll < 150; poll++)); do
+      now="$(date +%s)"
+      [ "$now" != "$start" ] && break
+      sleep 0.01
+    done
+    [ "$now" != "$start" ] || continue
+    sleep 0.2
+    for ((poll = 0; poll < 100; poll++)); do
+      zz_screen="$(styled_screen_of zz)"
+      tmux_screen="$(styled_screen_of tmux)"
+      zz_cursor="$(cursor_tuple zz)"
+      tmux_cursor="$(cursor_tuple tmux)"
+      [ "$(date +%s)" = "$now" ] || break
+      if [ "$zz_screen" != "$before_zz" ] && [ "$tmux_screen" != "$before_tmux" ]; then
+        printf 'clock capture %s: both faces redrew; screen and cursor pair stayed inside epoch second %s\n' "$CASE_LABEL" "$now"
+        return 0
+      fi
+      sleep 0.01
+    done
+  done
+  die "could not capture both seconds faces after redraw within one second"
+}
+
 compare_channels() {
   local name="$1"
   local zz_rc tmux_rc zz_state tmux_state zz_screen tmux_screen zz_cursor tmux_cursor
@@ -537,10 +562,14 @@ compare_channels() {
   tmux_rc="$(cat "$SCRATCH_DIR/tmux.rc")"
   zz_state="$(state_of zz)"
   tmux_state="$(state_of tmux)"
-  zz_screen="$(styled_screen_of zz)"
-  tmux_screen="$(styled_screen_of tmux)"
-  zz_cursor="$(cursor_tuple zz)"
-  tmux_cursor="$(cursor_tuple tmux)"
+  if [ "$CASE_CLOCK_FACE" -eq 2 ]; then
+    capture_seconds_pair
+  else
+    zz_screen="$(styled_screen_of zz)"
+    tmux_screen="$(styled_screen_of tmux)"
+    zz_cursor="$(cursor_tuple zz)"
+    tmux_cursor="$(cursor_tuple tmux)"
+  fi
   LAST_EXIT_DIFFERED=0
   LAST_STDOUT_DIFFERED=0
   LAST_STDERR_DIFFERED=0
@@ -1262,6 +1291,13 @@ client_tool_cases() {
   CASE_CLOCK_FACE=1
   case_run clock-mode-twelve same '' -- clock-mode -t PANE
   restore_case clock-mode-twelve-closed
+  local clock_style
+  for clock_style in 24-with-seconds 12-with-seconds; do
+    set_window_on_both clock-mode-style "$clock_style"
+    CASE_CLOCK_FACE=2
+    case_run "clock-mode-$clock_style" same '' -- clock-mode -t PANE
+    restore_case "clock-mode-$clock_style-closed"
+  done
   run_on_both set-option -gwu clock-mode-colour
   run_on_both set-option -gwu clock-mode-style
   CASE_NEEDLE_MODE=1
@@ -1598,6 +1634,21 @@ run_self_check() {
     die 'the outer tmux refused send-keys'
   wait_for 'the one-sided clock ended' pane_in_mode zz 0
 
+  local clock_style
+  for clock_style in 24-with-seconds 12-with-seconds; do
+    set_window_on_both clock-mode-style "$clock_style"
+    run_both clock-mode -t PANE
+    zz_command set-option -gw clock-mode-colour red >/dev/null
+    CASE_CLOCK_FACE=2
+    self_check_run "seconds-$clock_style-sabotage" display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+    self_check_expect "$clock_style one-sided colour changes the synchronized screen" \
+      exit=0 stdout=0 stderr=0 screen=1 state=0
+    CASE_CLOCK_FACE=0
+    run_both copy-mode -q -t PANE
+    run_on_both set-option -gwu clock-mode-colour
+  done
+  run_on_both set-option -gwu clock-mode-style
+
   run_both clock-mode -t PANE
   run_both send-keys -t PANE x
   zz_command clock-mode -t "$(active_pane zz)" >/dev/null
@@ -1640,6 +1691,45 @@ run_self_check() {
   tmux_outer_command send-keys -t "=$OUTER_SESSION:zz" Escape ||
     die 'the outer tmux refused send-keys'
   wait_for 'the one-sided switch mode ended' pane_in_mode zz 0
+
+  run_both switch-mode -F 'REVIEW-#{session_name}' -t PANE
+  zz_command copy-mode -q -t "$(active_pane zz)" >/dev/null
+  zz_command switch-mode -F 'WRONG-#{session_name}' -t "$(active_pane zz)" >/dev/null
+  self_check_run switch-format-sabotage display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+  self_check_expect 'a discarded switch format changes the rows' \
+    exit=0 stdout=0 stderr=0 screen=1 state=0
+  run_both copy-mode -q -t PANE
+
+  run_both switch-mode -t PANE 'set-option -g @review-command yes'
+  zz_command copy-mode -q -t "$(active_pane zz)" >/dev/null
+  zz_command switch-mode -t "$(active_pane zz)" 'set-option -g @review-command wrong' >/dev/null
+  for side in tmux zz; do
+    tmux_outer_command send-keys -t "=$OUTER_SESSION:$side" Enter
+    wait_for "the $side template mode ended" pane_in_mode "$side" 0
+  done
+  self_check_run switch-template-sabotage show-options -gv @review-command
+  self_check_expect 'a changed Enter template changes its command effect' \
+    exit=0 stdout=1 stderr=0 screen=0 state=0
+  run_on_both set-option -gu @review-command
+
+  run_on_both new-session -d -s alpha -n "$WINDOW_NAME" -x 80 -y 24 "$INNER_SHELL"
+  run_on_both new-session -d -s zulu -n "$WINDOW_NAME" -x 80 -y 24 "$INNER_SHELL"
+  run_both switch-mode -w -F '#{session_name}:#{window_name}' -t PANE
+  zz_command copy-mode -q -t "$(active_pane zz)" >/dev/null
+  zz_command switch-mode -w -F '#{?#{==:#{session_name},alpha},cli,#{?#{==:#{session_name},cli},alpha,#{session_name}}}:#{window_name}' -t "$(active_pane zz)" >/dev/null
+  self_check_run switch-order-sabotage display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+  self_check_expect 'swapped tied window labels change the screen' \
+    exit=0 stdout=0 stderr=0 screen=1 state=0
+  run_both copy-mode -q -t PANE
+  run_on_both kill-session -t '=alpha'
+  run_on_both kill-session -t '=zulu'
+
+  run_on_both set-option -g @review-identity nobody
+  zz_command set-option -g @review-identity zzcc-missing-identity >/dev/null
+  self_check_run formatted-identity-sabotage server-access '#{@review-identity}'
+  self_check_expect 'a wrong expanded identity reaches exit and stderr' \
+    exit=1 stdout=0 stderr=1 screen=0 state=0
+  run_on_both set-option -gu @review-identity
 
   # the attached screen: one space typed at the zz client's prompt. capture-pane
   # trims trailing blanks, so this reaches the comparison through the cursor,

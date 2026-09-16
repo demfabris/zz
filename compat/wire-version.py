@@ -104,6 +104,10 @@ def main():
     print(f"  entry in knowledge/protocol/wire-protocol.md's version history, and update the two")
     print(f"  assertions that pin the number (crates/zz-protocol/src/message.rs and")
     print(f"  crates/zz-protocol/tests/hunt_claims.rs).")
+    print(f"  If the change is provably shape-neutral - a #[serde(skip)] field, an impl block, or a")
+    print(f"  #[cfg(test)] module - it does not need the bump. This guard reads the diff, not the")
+    print(f"  encoding, so prove it with a round-trip test asserting the serialized bytes equal those")
+    print(f"  of a value without the change, the way CommandInvocation::stdin_spent does, and say so.")
     print(f"  {len(changed)} changed line(s), first few:")
     for line in changed[:6]:
         print(f"    {line}")

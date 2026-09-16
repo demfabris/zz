@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v103)
+title: zz wire protocol (v104)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 103`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 104`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (103) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (104) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -676,29 +676,30 @@ invocation rather than in `args` for the commands whose payload is not an argume
 the server log still records the command the caller typed. See
 [the command stream channel](/designs/command-stream-channel.md) for the sinks and the bound.
 
-v103 also appends `mode: Option<PaneMode>` to `PaneSnapshot` after `border_status_text`, the
-server-owned pane mode `wp->modes` holds. `None` is a pane in no such mode; `PaneMode::Clock {
-time, colour }` is `window_clock_mode`, carrying the `tim` string `window_clock_draw_screen`
-formatted from `clock-mode-style` and the `clock-mode-colour` option value the client resolves the
-way `style_parse_colour` resolves it into `gc.fg`. It rides the pane snapshot rather than a client
-event because the mode belongs to the pane: every client attached to the window draws the same
-face, one that attaches later gets it with its first snapshot, and a clientless `list-panes` reads
-`#{pane_in_mode}` and `#{pane_mode}` from the daemon's own map. The daemon republishes the snapshot
-on the whole second, the way `window_clock_timer_callback` redraws. The raw TUI is the consumer
-half and it shipped in the same push; the GPUI, iOS and web clients read the field for nothing and
-keep the pane's own presentation. Copy mode is not here - it stays on each client's terminal view.
-`PaneMode::Switch { rows, selected, offset, selection_style, prompt, prompt_style }` is
-`window_switch_mode`: the server expands one row per session, or per window under `-w`, through
-`WINDOW_SWITCH_DEFAULT_FORMAT` and sends each with its `#[...]` markup intact, beside the resolved
-`mode-style` the current row is drawn over and the `message-style` `prompt_draw` gives the
-`(search)` prompt on the pane's last row. Appending a variant to `PaneMode` is a tail append like
-any other, and both halves ship together.
-
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 103`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 104`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v104 is unreleased. v103 shipped in zz 0.10.0 and its encoding is frozen.
+  It appends `mode: Option<PaneMode>` after `PaneSnapshot.border_status_text` with
+  `#[serde(default)]`; no existing field moves. The field carries the server-owned pane mode
+  `wp->modes` holds. `None` is a pane in no such mode; `PaneMode::Clock {
+  time, colour }` is `window_clock_mode`, carrying the `tim` string `window_clock_draw_screen`
+  formatted from `clock-mode-style` and the `clock-mode-colour` option value the client resolves the
+  way `style_parse_colour` resolves it into `gc.fg`. It rides the pane snapshot rather than a client
+  event because the mode belongs to the pane: every client attached to the window draws the same
+  face, one that attaches later gets it with its first snapshot, and a clientless `list-panes` reads
+  `#{pane_in_mode}` and `#{pane_mode}` from the daemon's own map. The daemon republishes the snapshot
+  on the whole second, the way `window_clock_timer_callback` redraws. The raw TUI is the consumer
+  half and ships with the daemon; the GPUI, iOS and web clients ignore the field and
+  keep the pane's own presentation. Copy mode is not here - it stays on each client's terminal view.
+  `PaneMode::Switch { rows, selected, offset, selection_style, prompt, prompt_style }` is
+  `window_switch_mode`: the server expands one row per session, or per window under `-w`, through
+  `WINDOW_SWITCH_DEFAULT_FORMAT` and sends each with its `#[...]` markup intact, beside the resolved
+  `mode-style` the current row is drawn over and the `message-style` `prompt_draw` gives the
+  `(search)` prompt on the pane's last row. Appending a variant to `PaneMode` is a tail append like
+  any other, and both halves ship together.
 - v103 carries the pin's pane prompt and the terminal name a client learned after the hello.
   `CommandPromptState` appends `pane: Option<PaneId>` after `no_freeze`: `command-prompt -P` is
   `window_pane_set_prompt`, so the prompt hangs on the pane the command targeted rather than on the

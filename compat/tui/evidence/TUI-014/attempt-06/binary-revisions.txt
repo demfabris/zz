@@ -1,0 +1,6 @@
+TUI and corpus frozen binary: target/debug/zz-modes-proof
+Production source revision: f884b2669301a393235a82e83571d16cd84d6c80
+Built while the CLI status fix was uncommitted; that exact production change is now f884b266. Subsequent 901cec5d changes desktop palette completion and settings test drawing only. A later control wait-exit correction requires its own rebuilt binary and live verification. The full corpus started against the frozen modes binary; this file does not relabel it as a later build.
+5554e0f0a18ac379a90889b069220f22125778f532f7c9248e01af099ae58c6b  target/debug/zz-modes-final
+Final binary source revision: 5036e22fb73cca08a5c8a54eb06a4be5a0a5c8e1
+Final live verifier uses target/debug/zz-modes-final (SHELL=/bin/sh). All seven requested package suites pass after the wait-exit fix; see six-package-tests.txt and zz-package-tests-control-fixed.txt.

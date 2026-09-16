@@ -1,0 +1,25 @@
+   Compiling rusty-fork v0.3.1
+   Compiling merman-core v0.6.2
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-mux)
+   Compiling proptest v1.10.0 (https://github.com/proptest-rs/proptest?rev=3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b#3dca198a)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-daemon)
+   Compiling gpui v0.2.2 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling merman-render v0.6.2
+   Compiling gpui_wgpu v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling gpui_linux v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling merman v0.6.2
+   Compiling zz-ui v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-ui)
+   Compiling zz-config v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-config)
+   Compiling gpui_platform v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-tui)
+   Compiling zz v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 38s
+     Running tests/cli_binary.rs (target/debug/deps/cli_binary-2f7f85c9fce73adb)
+
+running 1 test
+test daemon_autostart::pane_mode_syntax_errors_keep_the_pinned_exit_status_with_a_daemon ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 130 filtered out; finished in 1.43s
+
+
+EXIT 0

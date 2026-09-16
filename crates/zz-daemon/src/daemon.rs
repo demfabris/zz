@@ -5222,6 +5222,8 @@ impl Shared {
                         next_tick = Instant::now() + CONTROL_SUBSCRIPTION_INTERVAL;
                         shared.refresh_control_subscriptions();
                         shared.run_format_monitors();
+                        #[cfg(all(feature = "agent", unix))]
+                        shared.sync_claude_peer_states();
                     }
                     let intervals = {
                         let inner = shared.inner.lock();
@@ -8284,6 +8286,8 @@ impl Shared {
                             Self::wake_pane_exit_wait(&inner, *pane, 0);
                             inner.terminals.remove(pane);
                             inner.last_output.remove(pane);
+                            #[cfg(all(feature = "agent", unix))]
+                            inner.claude_peer_states.remove(pane);
                             inner.terminal_spawns.remove(pane);
                             inner.terminal_geometries.remove(pane);
                             inner.paste_uploads.retain(|_, upload| upload.pane != *pane);
@@ -22991,7 +22995,27 @@ impl Shared {
             if !commands
                 .split(|character: char| character.is_whitespace() || character == ',')
                 .any(|listed| !listed.is_empty() && listed == command)
-                || facts.user_option(&target, &window, &session, "@agent_state") == Some(value)
+            {
+                return;
+            }
+        }
+        self.write_pane_agent_state(pane, value);
+    }
+
+    fn write_pane_agent_state(self: &Arc<Self>, pane: PaneId, value: &str) {
+        let target = pane.to_string();
+        {
+            let inner = self.inner.lock();
+            let Some(window) = inner.engine.state.window_for_pane(pane) else {
+                return;
+            };
+            let session = inner.engine.state.windows[&window].session.to_string();
+            if inner.engine.format_facts().user_option(
+                &target,
+                &window.to_string(),
+                &session,
+                "@agent_state",
+            ) == Some(value)
             {
                 return;
             }
@@ -23007,7 +23031,7 @@ impl Shared {
         ) {
             log::warn!(
                 target: "zz_daemon::diagnostics::terminal",
-                "progress state update failed pane={pane} state={value} error={error}"
+                "agent state update failed pane={pane} state={value} error={error}"
             );
         }
     }
@@ -26869,6 +26893,94 @@ impl Shared {
     }
 
     #[cfg(all(feature = "agent", unix))]
+    fn sync_claude_peer_states(self: &Arc<Self>) {
+        use crate::agent::claude_peers;
+
+        if self.agent_stopped.load(Ordering::Acquire) {
+            return;
+        }
+        let mut records = match claude_peers::read_records() {
+            Ok(records) => records,
+            Err(error) => {
+                log::warn!(target: "zz::agent", "could not read Claude peers: {error}");
+                return;
+            }
+        };
+        records.retain(|record| record.zz.is_none());
+        let panes = {
+            let inner = self.inner.lock();
+            inner
+                .engine
+                .state
+                .windows
+                .values()
+                .flat_map(|window| window.panes.iter())
+                .filter_map(|(pane, state)| {
+                    matches!(state.kind, PaneKind::Terminal).then_some(*pane)
+                })
+                .collect::<Vec<_>>()
+        };
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        for pane in panes {
+            let target = pane.to_string();
+            let value = claude_peers::record_for_pane(&records, &target)
+                .filter(|record| {
+                    let updated_at = if record.status_updated_at == 0 {
+                        record.updated_at
+                    } else {
+                        record.status_updated_at
+                    };
+                    !record.status.is_empty()
+                        && now.checked_sub(updated_at).is_some_and(|age| {
+                            u128::from(age) <= Duration::from_mins(10).as_millis()
+                        })
+                })
+                .map(|record| {
+                    if record.status == "busy" {
+                        "working"
+                    } else {
+                        "idle"
+                    }
+                });
+            let value = {
+                let mut inner = self.inner.lock();
+                let Some(window) = inner.engine.state.window_for_pane(pane) else {
+                    continue;
+                };
+                let session = inner.engine.state.windows[&window].session.to_string();
+                if inner.engine.format_facts().user_option(
+                    &target,
+                    &window.to_string(),
+                    &session,
+                    "@agent-peer-state",
+                ) == Some("off")
+                {
+                    continue;
+                }
+                match value {
+                    Some(value) => {
+                        if inner.claude_peer_states.get(&pane).map(String::as_str) == Some(value) {
+                            continue;
+                        }
+                        inner.claude_peer_states.insert(pane, value.to_owned());
+                        value
+                    }
+                    None => {
+                        if inner.claude_peer_states.remove(&pane).is_none() {
+                            continue;
+                        }
+                        "idle"
+                    }
+                }
+            };
+            self.write_pane_agent_state(pane, value);
+        }
+    }
+
+    #[cfg(all(feature = "agent", unix))]
     fn update_terminal_peer(self: &Arc<Self>, pane: PaneId) {
         use crate::agent::claude_peers::{self, PeerEvent, PeerInbox, PeerKind, PeerMetadata};
 
@@ -28752,6 +28864,8 @@ struct ServerState {
     deferred_control_refresh: bool,
     terminals: BTreeMap<PaneId, Arc<TerminalSession>>,
     last_output: BTreeMap<PaneId, Instant>,
+    #[cfg(all(feature = "agent", unix))]
+    claude_peer_states: BTreeMap<PaneId, String>,
     terminal_spawns: BTreeMap<PaneId, TerminalSpawn>,
     next_command_output_id: u64,
     command_outputs: BTreeMap<ClientId, CommandOutputSession>,
@@ -40698,6 +40812,9 @@ Read native Agent state and permission presence through formats.
 Terminal panes running a listed agent CLI get `working`/`idle` from the OSC 9;4
 progress bar through `#{agent_state}` and `@agent_state`. `@agent-progress-commands`
 sets the whitespace- or comma-separated list of command basenames (default `claude`).
+A terminal pane running Claude Code gets `working`/`idle` from Claude Code's own
+session status in its peer registry once per second. Set `@agent-peer-state off`
+at pane, window, session, or global scope to disable these updates.
 
 ```sh
 zz list-panes -F '#{pane_id} #{agent_state} #{agent_pending_permission}'
@@ -72415,6 +72532,243 @@ set-option -g @alias-mixed-next yes
                 )
             }));
         }
+    }
+
+    #[cfg(all(feature = "agent", unix))]
+    fn with_claude_peer_status(
+        test: &str,
+        check: impl FnOnce(&Arc<Shared>, PaneId, &Path, serde_json::Value),
+    ) {
+        const CHILD: &str = "ZZ_TEST_CLAUDE_PEER_STATUS";
+        if std::env::var_os(CHILD).is_none() {
+            let directory = tempfile::tempdir().expect("peer registry directory");
+            let mut child =
+                std::process::Command::new(std::env::current_exe().expect("test binary"))
+                    .args([
+                        "--exact",
+                        &format!("daemon::tests::{test}"),
+                        "--nocapture",
+                        "--test-threads=1",
+                    ])
+                    .env(CHILD, "1")
+                    .env("CLAUDE_CONFIG_DIR", directory.path())
+                    .spawn()
+                    .expect("isolated peer status regression");
+            let deadline = Instant::now() + Duration::from_secs(30);
+            loop {
+                if let Some(status) = child.try_wait().expect("poll peer status regression") {
+                    assert!(status.success());
+                    return;
+                }
+                if Instant::now() >= deadline {
+                    child.kill().expect("stop stalled peer status regression");
+                    child.wait().expect("reap stalled peer status regression");
+                    panic!("isolated peer status regression stalled");
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+        let directory = PathBuf::from(std::env::var_os("CLAUDE_CONFIG_DIR").expect("peer config"));
+        let shared = Arc::new(Shared::new(1));
+        register_wait_clients(&shared, [1, 2]);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(1),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "claude-status"]),
+            )
+            .expect("terminal session");
+        let pane = context.pane.expect("terminal pane");
+        let terminal = shared.inner.lock().terminals[&pane].clone();
+        wait_for_terminal_identity(&terminal);
+        let pid = terminal.process_id().expect("shell pid");
+        let start = std::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "lstart="])
+            .env("TZ", "UTC")
+            .output()
+            .expect("process start");
+        assert!(start.status.success());
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_millis() as u64;
+        let record = serde_json::json!({
+            "pid": pid, "sessionId": "peer-status-test", "cwd": directory,
+            "startedAt": now, "procStart": String::from_utf8_lossy(&start.stdout).trim(),
+            "version": "2.1.273", "peerProtocol": 1, "peerFeatures": [],
+            "kind": "interactive", "entrypoint": "cli",
+            "pidDomain": if cfg!(target_os = "macos") { "darwin" } else { "linux" },
+            "tmux": format!("claude-status:@0.{pane}"),
+            "messagingSocketPath": directory.join("peer.sock"),
+            "name": "terminal-peer", "status": "idle", "updatedAt": now,
+            "statusUpdatedAt": now
+        });
+        fs::create_dir_all(directory.join("sessions")).expect("registry");
+        let path = directory.join("sessions").join(format!("{pid}.json"));
+        check(&shared, pane, &path, record);
+        shared.request_shutdown();
+    }
+
+    #[cfg(all(feature = "agent", unix))]
+    #[test]
+    fn claude_peer_status_drives_agent_state_for_terminal_panes() {
+        with_claude_peer_status(
+            "claude_peer_status_drives_agent_state_for_terminal_panes",
+            |shared, pane, path, mut record| {
+                let target = pane.to_string();
+                let channel = format!("@agent_state@{pane}");
+                let run = |args: &[&str]| {
+                    shared
+                        .execute(
+                            ClientId(1),
+                            ClientKind::Command,
+                            &mut ExecutionContext::default(),
+                            &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                        )
+                        .expect("command")
+                };
+                run(&[
+                    "set-hook",
+                    "-g",
+                    "@option-changed",
+                    "set-option -gF @peer-observed '#{hook_option}:#{hook_target}'",
+                ]);
+                for (status, expected) in [("busy", "working"), ("idle", "idle")] {
+                    record["status"] = status.into();
+                    fs::write(path, serde_json::to_vec(&record).expect("record JSON"))
+                        .expect("peer record");
+                    let parked = Arc::clone(shared);
+                    let wait_channel = channel.clone();
+                    let (completed, completion) = mpsc::channel();
+                    let waiter = thread::spawn(move || {
+                        completed
+                            .send(parked.wait_for(
+                                ClientId(2),
+                                ClientKind::Command,
+                                &[wait_channel.into()],
+                            ))
+                            .expect("wait completion");
+                    });
+                    let deadline = Instant::now() + Duration::from_secs(10);
+                    while shared
+                        .inner
+                        .lock()
+                        .wait_channels
+                        .get(&channel)
+                        .is_none_or(|channel| channel.waiters.is_empty())
+                    {
+                        assert!(Instant::now() < deadline, "waiter did not park");
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    shared.sync_claude_peer_states();
+                    assert_eq!(
+                        run(&["show-options", "-p", "-qv", "-t", &target, "@agent_state"])
+                            .output
+                            .trim(),
+                        expected
+                    );
+                    completion
+                        .recv_timeout(Duration::from_secs(10))
+                        .expect("peer status transition did not wake waiter")
+                        .expect("wait-for");
+                    waiter.join().expect("waiter");
+                    assert_eq!(
+                        read_global_option(shared, "@peer-observed").trim(),
+                        format!("@agent_state:{pane}")
+                    );
+                }
+                shared.sync_claude_peer_states();
+                assert!(
+                    !shared
+                        .inner
+                        .lock()
+                        .wait_channels
+                        .get(&channel)
+                        .is_some_and(|channel| channel.woken),
+                    "unchanged peer status must not signal again"
+                );
+                fs::remove_file(path).expect("remove peer record");
+                shared.sync_claude_peer_states();
+                assert_eq!(
+                    run(&["show-options", "-p", "-qv", "-t", &target, "@agent_state"])
+                        .output
+                        .trim(),
+                    "idle"
+                );
+                assert!(!shared.inner.lock().claude_peer_states.contains_key(&pane));
+            },
+        );
+    }
+
+    #[cfg(all(feature = "agent", unix))]
+    #[test]
+    fn claude_peer_status_respects_the_opt_out() {
+        with_claude_peer_status(
+            "claude_peer_status_respects_the_opt_out",
+            |shared, pane, path, mut record| {
+                let target = pane.to_string();
+                record["status"] = "busy".into();
+                fs::write(path, serde_json::to_vec(&record).expect("record JSON"))
+                    .expect("peer record");
+                shared
+                    .execute(
+                        ClientId(1),
+                        ClientKind::Command,
+                        &mut ExecutionContext::default(),
+                        &CommandInvocation::new(
+                            "set-option",
+                            ["-p", "-t", &target, "@agent-peer-state", "off"],
+                        ),
+                    )
+                    .expect("disable peer state");
+                shared.sync_claude_peer_states();
+                let state = shared
+                    .execute(
+                        ClientId(1),
+                        ClientKind::Command,
+                        &mut ExecutionContext::default(),
+                        &CommandInvocation::new(
+                            "show-options",
+                            ["-p", "-qv", "-t", &target, "@agent_state"],
+                        ),
+                    )
+                    .expect("read agent state");
+                assert!(state.output.is_empty());
+                assert!(!shared.inner.lock().claude_peer_states.contains_key(&pane));
+            },
+        );
+    }
+
+    #[cfg(all(feature = "agent", unix))]
+    #[test]
+    fn stale_claude_peer_status_is_ignored() {
+        with_claude_peer_status(
+            "stale_claude_peer_status_is_ignored",
+            |shared, pane, path, mut record| {
+                record["status"] = "busy".into();
+                record["statusUpdatedAt"] = (record["updatedAt"].as_u64().expect("timestamp")
+                    - Duration::from_hours(1).as_millis() as u64)
+                    .into();
+                fs::write(path, serde_json::to_vec(&record).expect("record JSON"))
+                    .expect("peer record");
+                shared.sync_claude_peer_states();
+                let state = shared
+                    .execute(
+                        ClientId(1),
+                        ClientKind::Command,
+                        &mut ExecutionContext::default(),
+                        &CommandInvocation::new(
+                            "show-options",
+                            ["-p", "-qv", "-t", &pane.to_string(), "@agent_state"],
+                        ),
+                    )
+                    .expect("read agent state");
+                assert!(state.output.is_empty());
+                assert!(!shared.inner.lock().claude_peer_states.contains_key(&pane));
+            },
+        );
     }
 
     #[cfg(all(feature = "agent", unix))]

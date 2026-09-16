@@ -287,6 +287,9 @@ user option, or an empty string when unset; other pane kinds return an empty str
 Terminal panes running a listed agent CLI get `working`/`idle` from the OSC 9;4
 progress bar through `#{agent_state}` and `@agent_state`. `@agent-progress-commands`
 sets the whitespace- or comma-separated list of command basenames (default `claude`).
+A terminal pane running Claude Code gets `working`/`idle` from Claude Code's own
+session status in its peer registry once per second. Set `@agent-peer-state off`
+at pane, window, session, or global scope to disable these updates.
 These variables work in pane listings, display messages, status
 formats, hooks, and control-mode `refresh-client -B` subscriptions. For native Agent panes, the
 daemon signals the sticky `agent_state@%N` wait channel when the phase or pending permission

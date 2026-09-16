@@ -154,7 +154,7 @@ def structural(items, problems):
                             f"so its claim cannot be re-measured; add it to FIXTURES")
 
 
-def run_fixtures(ids, items, problems, zz=None):
+def run_fixtures(ids, items, problems, zz=None, output_dir=None):
     by_id = {i["id"]: i for i in items}
     gaps = accepted_gaps(ROOT)
     env = dict(os.environ)
@@ -168,6 +168,8 @@ def run_fixtures(ids, items, problems, zz=None):
                         f"of the revision under test.")
         return
     env["ZZ_BIN"] = str(binary)
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
     print(f"  comparing {binary}")
     for pid in ids:
         item = by_id.get(pid)
@@ -182,6 +184,13 @@ def run_fixtures(ids, items, problems, zz=None):
             print(f"  running {rel} for {pid} ...", flush=True)
             r = subprocess.run(["bash", str(path)], capture_output=True, text=True,
                                cwd=str(ROOT), env=env, timeout=1800)
+            if output_dir is not None:
+                prefix = output_dir / f"{pid}-{path.stem}"
+                prefix.with_suffix(".stdout.txt").write_text(r.stdout or "", encoding="utf-8")
+                prefix.with_suffix(".stderr.txt").write_text(r.stderr or "", encoding="utf-8")
+                prefix.with_suffix(".result.txt").write_text(
+                    f"command: bash {path}\nZZ_BIN={binary}\nexit: {r.returncode}\n",
+                    encoding="utf-8")
             tail = (r.stdout or "").strip().splitlines()
             last = tail[-1] if tail else "(no output)"
             if r.returncode != 0:
@@ -211,6 +220,8 @@ def main(argv):
                     help="the zz binary to compare (the fixtures default to REPO/target/debug/zz "
                          "and ignore ZZ_COMPAT_ZZ, so an orchestrator worktree with no target "
                          "directory must pass this)")
+    ap.add_argument("--output-dir", type=Path,
+                    help="retain each live fixture's stdout, stderr, command and exit status")
     args = ap.parse_args(argv[1:])
     data = json.loads(LEDGER.read_text(encoding="utf-8"))
     items = data["items"]
@@ -222,7 +233,7 @@ def main(argv):
     if args.run is not None:
         targets = args.run or verified
         print(f"re-measuring: {', '.join(targets)}")
-        run_fixtures(targets, items, problems, args.zz)
+        run_fixtures(targets, items, problems, args.zz, args.output_dir)
     print()
     if problems:
         print(f"{len(problems)} problem(s):")

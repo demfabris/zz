@@ -1127,7 +1127,9 @@ fn run_command_mode(
                 .and_then(prepared_command_reads_stdin)
         },
     );
-    if let Some(sink) = stdin_sink {
+    if let Some(sink) = stdin_sink
+        .filter(|sink| *sink != CommandStdinSink::ConfigReplay || !std::io::stdin().is_terminal())
+    {
         match read_stdin_payload(sink.accepts_binary()) {
             Ok(payload) => match (sink.is_argument(), prepared.as_mut()) {
                 (true, Some(prepared)) => {

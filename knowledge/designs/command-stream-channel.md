@@ -26,8 +26,9 @@ where the bytes would go, and `display-message -I` has no argument slot at all.
 One reader, one cap, one carrier, three sinks.
 
 **The reader** is `read_stdin_payload` in `crates/zz/src/lib.rs`. It runs at most once per
-invocation, before the command is sent, and only when the resolver below says the command has a
-sink. Nothing else in the CLI reads standard input for a command.
+invocation, before the command is sent, when the resolver below identifies a sink or file replay.
+For file replay it reads redirected stdin; it does not wait on an interactive terminal. Nothing else
+in the CLI reads standard input for a command.
 
 **The cap** is `MAX_AGENT_SEND_BYTES` (1 MiB), the same bound the agent and buffer payloads already
 carry. The reader takes `cap + 1` bytes and refuses the whole invocation if the last one arrives, so
@@ -45,10 +46,15 @@ caller stream: the first reader consumes the bytes and a later reader receives t
 `CommandInvocation.stdin_spent` marker. Serde skips that marker; the wire remains at protocol 103
 with no new field. The mux group executor accounts for emitted stream effects, and the daemon's
 prepared group queue routes the carrier after parsing the members. A nonreader leaves it available.
+The daemon keeps the stream in the invoking client's `CommandStreams` request record, which it
+removes when producing the response. Replayed files and alias members use that same record through
+`ExecutionContext::replay_client`; they cannot restart or duplicate the reader.
 
 **The sinks** are what the payload is for. `command_stdin_sink` in `crates/zz-daemon/src/daemon.rs`
 is the one resolver; it takes a canonical command name and its arguments and answers at most one
 sink, and both the CLI and the daemon ask it rather than matching on names of their own.
+`ConfigReplay` preserves redirected bytes for readers in a sourced file without consuming them.
+It accepts binary bytes because a replayed alias may load a buffer or feed an empty pane.
 
 | sink | commands | what the payload becomes | bytes |
 |---|---|---|---|
@@ -61,7 +67,7 @@ sink, and both the CLI and the daemon ask it rather than matching on names of th
 **Standard input** is the reader above. A command with no sink never reads it, so a pipe into
 `zz list-sessions` is still the caller's own business.
 
-**Standard output** is the half that already existed and is unchanged: the daemon answers with
+**Standard output** uses the existing response: the daemon answers with
 `CommandResponse::Success { output: RawText, stdout_claim }`, and `StdoutClaim` says which of the
 pin's two writers - `cmdq_print` or a raw `file_write` on `-` - owned the stream, so the client
 knows whether to add the terminating newline. `save-buffer -` is a raw claim.
@@ -104,12 +110,23 @@ argument boundary must survive preparation.
 
 A later `load-buffer -` reports `Bad file descriptor: -` and raises the caller's exit status to 1,
 while following members still run, matching the pin's asynchronous read completion. A later
-`source-file -` receives `SourceStream::Spent` through the mux's existing source-file effect.
+`source-file -` receives `SourceStream::Spent` through the mux's existing source-file effect. The
+daemon reports that read failure and resumes the queue, preserving later stdout and state changes.
+A missing source path still aborts the alias group.
+
+An alias carries its members' stdout ownership to the response. A raw buffer writer keeps its
+unterminated bytes and bypasses text sanitization; subsequent print output cannot reclaim that writer.
+File replay keeps `RawText` through its transcript instead of converting it to a lossy string. A
+second raw writer reports EBADF, matching the existing file-replay rule. Each child records its
+latest writer with a sequence number, so a later print-only alias does not inherit an earlier
+alias's raw classification.
 
 # What this does not do
 
 - No chunked or acknowledged transport. The payload is bounded, so it is one message.
 - No streaming *out*: a command's stdout is one response, as it already was.
 - No `-I` on any command pinned tmux does not give it to, and no zz-only stream forms.
-- `source-file -` inside a configuration file stays refused: a config being loaded has no caller and
-  therefore no stream, which is the same reason the pin reads nothing there.
+- A daemon-start configuration has no caller stream and refuses `source-file -`. A command client
+  sourcing a file retains its bounded stream throughout replay, including aliases and nested files.
+  The first reader consumes it; later readers receive the spent marker. Attached and Control
+  clients do not acquire a command-client stdin stream.

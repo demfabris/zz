@@ -3076,14 +3076,18 @@ mod daemon_autostart {
                     "set-option",
                     "-s",
                     "command-alias[40]",
-                    "stream=display-message -p before ; source-file - ; source-file -",
+                    "stream=display-message -p before ; source-file - ; source-file - ; display-message -p after ; set -g @after yes",
                 ])
                 .status
                 .success()
         );
         let output = fixture.run_with_stdin(&["stream"], b"set -ag @stream once\n");
         assert_eq!(output.status.code(), Some(1));
-        assert_eq!(output.stdout, b"before\n");
+        assert_eq!(output.stdout, b"before\nafter\n");
+        assert_eq!(
+            fixture.run(&["show-options", "-gqv", "@after"]).stdout,
+            b"yes\n"
+        );
         assert_eq!(output.stderr, b"Bad file descriptor: -\n");
         assert_eq!(
             fixture.run(&["show-options", "-gqv", "@stream"]).stdout,
@@ -3103,8 +3107,14 @@ mod daemon_autostart {
                 .status
                 .success()
         );
-        let payload = b"a\xff\0z\n";
+        let payload = b"a\xff\0z";
         for (body, stdout, stderr, status) in [
+            (
+                "load-buffer -b alias - ; save-buffer -b alias -",
+                &b"a\xff\0z"[..],
+                &b""[..],
+                0,
+            ),
             ("load-buffer -b alias -", &b""[..], &b""[..], 0),
             (
                 "load-buffer -b alias - ; source-file -",
@@ -3179,6 +3189,91 @@ mod daemon_autostart {
                 .run(&["list-buffers", "-F", "#{buffer_name}"])
                 .stdout
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn caller_stream_file_replay_keeps_one_reader_across_aliases_and_nested_files() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "stream"])
+                .status
+                .success()
+        );
+        let child = write_source(fixture._directory.path(), "child.conf", "stream\n");
+        let parent = write_source(
+            fixture._directory.path(),
+            "parent.conf",
+            &format!("source-file {child}\n"),
+        );
+        for (body, status, stderr) in [
+            ("source-file -", 0, &b""[..]),
+            ("set -g @nonreader yes ; source-file -", 0, &b""[..]),
+            (
+                "source-file - ; source-file - ; set -g @after yes",
+                1,
+                &b"Bad file descriptor: -\n"[..],
+            ),
+        ] {
+            assert!(
+                fixture
+                    .run(&["set", "-s", "command-alias[40]", &format!("stream={body}")])
+                    .status
+                    .success()
+            );
+            for path in [&child, &parent] {
+                assert!(fixture.run(&["set", "-gu", "@stream"]).status.success());
+                let output =
+                    fixture.run_with_stdin(&["source-file", path], b"set -ag @stream once\n");
+                assert_eq!(output.status.code(), Some(status), "{body}: {output:?}");
+                assert_eq!(output.stdout, b"", "{body}");
+                assert_eq!(output.stderr, stderr, "{body}");
+                assert_eq!(
+                    fixture.run(&["show-options", "-gqv", "@stream"]).stdout,
+                    b"once\n"
+                );
+            }
+        }
+        assert!(
+            fixture
+                .run(&[
+                    "set",
+                    "-s",
+                    "command-alias[40]",
+                    "stream=load-buffer -b file-stream - ; save-buffer -b file-stream -"
+                ])
+                .status
+                .success()
+        );
+        assert!(
+            fixture
+                .run(&[
+                    "set",
+                    "-s",
+                    "command-alias[41]",
+                    "tail=display-message -p ignored ; set -g @tail yes"
+                ])
+                .status
+                .success()
+        );
+        let with_tail = write_source(
+            fixture._directory.path(),
+            "with-tail.conf",
+            "stream\ntail\n",
+        );
+        for path in [&child, &parent, &with_tail] {
+            let output = fixture.run_with_stdin(&["source-file", path], b"a\xff\0z");
+            assert_eq!(output.status.code(), Some(0), "{output:?}");
+            assert_eq!(output.stdout, b"a\xff\0z");
+            assert!(output.stderr.is_empty());
+        }
+        assert_eq!(
+            fixture.run(&["show-options", "-gqv", "@after"]).stdout,
+            b"yes\n"
         );
     }
 

@@ -113,6 +113,8 @@ pub struct CommandOutcome {
 }
 
 pub struct CommandClient {
+    stdin_enabled: bool,
+    stdin_spent: bool,
     reader: ProtocolReceiver<LocalStream>,
     writer: ProtocolSender<LocalStream>,
     hello: ServerHello,
@@ -207,6 +209,8 @@ impl CommandClient {
 
     fn from_connected((reader, writer, hello): Connected<LocalStream>) -> Self {
         Self {
+            stdin_enabled: false,
+            stdin_spent: false,
             reader,
             writer,
             hello,
@@ -225,6 +229,10 @@ impl CommandClient {
     #[must_use]
     pub fn server_hello(&self) -> &ServerHello {
         &self.hello
+    }
+
+    pub fn enable_stdin(&mut self) {
+        self.stdin_enabled = true;
     }
 
     pub fn wait_for_disconnect(mut self) {
@@ -269,6 +277,8 @@ impl CommandClient {
         command: CommandInvocation,
         prepared: bool,
     ) -> Result<CommandOutcome, DaemonError> {
+        let mut command = command;
+        command.set_stdin_available(self.stdin_enabled);
         let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
         self.writer
             .send(&ProtocolMessage::CommandRequest(CommandRequest {
@@ -308,10 +318,24 @@ impl CommandClient {
                     };
                 }
                 ProtocolMessage::ClientFileRequest(request) => {
+                    let response =
+                        if let ClientFileOperation::ReadStdin { binary } = request.operation {
+                            let result = if self.stdin_enabled && !self.stdin_spent {
+                                self.stdin_spent = true;
+                                read_command_stdin(binary)
+                            } else {
+                                Err(crate::strerror_text(&io::Error::from_raw_os_error(9)))
+                            };
+                            ClientFileResponse {
+                                request_id: request.request_id,
+                                data: result.as_ref().cloned().unwrap_or_default(),
+                                error: result.err(),
+                            }
+                        } else {
+                            answer_client_file(&request)
+                        };
                     self.writer
-                        .send(&ProtocolMessage::ClientFileResponse(answer_client_file(
-                            &request,
-                        )))?;
+                        .send(&ProtocolMessage::ClientFileResponse(response))?;
                 }
                 _ => {}
             }
@@ -1616,12 +1640,66 @@ pub fn short_device_name() -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Do the one bounded file operation the daemon asked for, on this client's own
-/// host. The daemon has already expanded the path against this client's working
-/// directory, so nothing here resolves anything.
+fn read_command_stdin(binary: bool) -> Result<Vec<u8>, String> {
+    #[cfg(all(unix, feature = "daemon"))]
+    let _signal = StdinReadSignal::install().map_err(|error| error.to_string())?;
+    let limit = zz_protocol::MAX_AGENT_SEND_BYTES;
+    let mut payload = Vec::new();
+    io::stdin()
+        .lock()
+        .take(limit as u64 + 1)
+        .read_to_end(&mut payload)
+        .map_err(|error| format!("could not read standard input: {error}"))?;
+    if payload.len() > limit {
+        return Err(format!("standard input exceeds {limit} bytes"));
+    }
+    if !binary && std::str::from_utf8(&payload).is_err() {
+        return Err("could not read standard input: stream did not contain valid UTF-8".to_owned());
+    }
+    Ok(payload)
+}
+
+#[cfg(all(unix, feature = "daemon"))]
+struct StdinReadSignal(async_channel::Sender<()>);
+
+#[cfg(all(unix, feature = "daemon"))]
+impl StdinReadSignal {
+    fn install() -> io::Result<Self> {
+        use futures_lite::StreamExt as _;
+        let mut signals = async_signal::Signals::new([async_signal::Signal::Term])?;
+        let (stop, stopped) = async_channel::bounded(1);
+        std::thread::Builder::new()
+            .name("zz-stdin-signal".to_owned())
+            .spawn(move || {
+                futures_lite::future::block_on(futures_lite::future::or(
+                    async {
+                        if signals.next().await.is_some() {
+                            std::process::exit(0);
+                        }
+                    },
+                    async {
+                        let _ = stopped.recv().await;
+                    },
+                ));
+            })?;
+        Ok(Self(stop))
+    }
+}
+
+#[cfg(all(unix, feature = "daemon"))]
+impl Drop for StdinReadSignal {
+    fn drop(&mut self) {
+        let _ = self.0.try_send(());
+    }
+}
+
 fn answer_client_file(request: &ClientFileRequest) -> ClientFileResponse {
     let path = PathBuf::from(&request.path);
     let (data, error) = match &request.operation {
+        ClientFileOperation::ReadStdin { .. } => (
+            Vec::new(),
+            Some(crate::strerror_text(&io::Error::from_raw_os_error(9))),
+        ),
         ClientFileOperation::Read => match read_client_file(&path) {
             Ok(data) => (data, None),
             Err(error) => (Vec::new(), Some(error)),

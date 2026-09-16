@@ -1,3 +1,5 @@
+#[cfg(all(test, not(target_os = "ios")))]
+use zz_daemon::{CommandStdinSink, append_stdin_payload};
 mod agent;
 mod app_icon;
 mod app_shell;
@@ -61,17 +63,17 @@ use zz_browser::{BrowserBootstrap, BrowserError, BrowserRuntime};
 use zz_daemon::default_socket_path;
 #[cfg(not(target_os = "ios"))]
 use zz_daemon::{
-    CommandClient, CommandOutcome, CommandStdinSink, Daemon, Endpoint, append_stdin_payload,
-    classify_local_connect_error, terminate_incompatible_daemon,
+    CommandClient, CommandOutcome, Daemon, Endpoint, classify_local_connect_error,
+    terminate_incompatible_daemon,
 };
 use zz_daemon::{DaemonError, InteractiveClient};
 #[cfg(not(target_os = "ios"))]
 use zz_mux::MuxEngine;
 #[cfg(not(target_os = "ios"))]
 use zz_protocol::{
-    CommandInvocation, MAX_AGENT_SEND_BYTES, MAX_CLIENT_WORKING_DIRECTORY_BYTES, PROTOCOL_VERSION,
-    PreparedCommand, PreparedCommandResult, RawText, ServerError, ServerHello, StdoutClaim,
-    canonical_command, catalog_command_spec,
+    CommandInvocation, MAX_CLIENT_WORKING_DIRECTORY_BYTES, PROTOCOL_VERSION, PreparedCommand,
+    PreparedCommandResult, RawText, ServerError, ServerHello, StdoutClaim, canonical_command,
+    catalog_command_spec,
 };
 use zz_terminal::TerminalColorScheme;
 #[cfg(not(target_os = "ios"))]
@@ -1118,37 +1120,6 @@ fn run_command_mode(
         return Some(run_kill_server(socket_path, invocation.args, false));
     }
 
-    let stdin_sink = prepared.as_ref().map_or_else(
-        || command_reads_stdin(&command_chain[0]),
-        |prepared| {
-            prepared
-                .commands
-                .first()
-                .and_then(prepared_command_reads_stdin)
-        },
-    );
-    if let Some(sink) = stdin_sink
-        .filter(|sink| *sink != CommandStdinSink::ConfigReplay || !std::io::stdin().is_terminal())
-    {
-        match read_stdin_payload(sink.accepts_binary()) {
-            Ok(payload) => match (sink.is_argument(), prepared.as_mut()) {
-                (true, Some(prepared)) => {
-                    append_prepared_command_stdin_payload(&mut prepared.commands[0], payload);
-                }
-                (true, None) => {
-                    let canonical_name = canonical_command(&command_chain[0].name).to_owned();
-                    append_stdin_payload(&canonical_name, &mut command_chain[0].args, payload);
-                }
-                (false, Some(prepared)) => prepared.commands[0].invocation.set_stdin(payload),
-                (false, None) => command_chain[0].set_stdin(payload),
-            },
-            Err(error) => {
-                eprintln!("zz: {error}");
-                return Some(exit_code_for(CliFailure::Runtime));
-            }
-        }
-    }
-
     let new_session_tui = prepared.as_ref().map_or_else(
         || command_chain_uses_tui(&command_chain),
         |prepared| prepared_command_chain_uses_tui(&command_chain, &prepared.commands),
@@ -1307,6 +1278,7 @@ fn run_command_mode(
             return Some(exit_code_for(CliFailure::Runtime));
         }
     };
+    client.enable_stdin();
     let mut output_writer = CommandOutputWriter::default();
     if let Some(prepared_commands) = prepared_commands {
         let recover_kill = prepared_commands
@@ -1531,7 +1503,7 @@ fn prepared_command_error(commands: &[PreparedCommand]) -> Option<&ServerError> 
     })
 }
 
-#[cfg(not(target_os = "ios"))]
+#[cfg(all(test, not(target_os = "ios")))]
 fn prepared_command_reads_stdin(command: &PreparedCommand) -> Option<CommandStdinSink> {
     prepared_command_invocations(command)?
         .iter()
@@ -1544,7 +1516,7 @@ fn prepared_command_reads_stdin(command: &PreparedCommand) -> Option<CommandStdi
         })
 }
 
-#[cfg(not(target_os = "ios"))]
+#[cfg(all(test, not(target_os = "ios")))]
 fn append_prepared_command_stdin_payload(
     command: &mut PreparedCommand,
     payload: impl Into<RawText>,
@@ -1631,7 +1603,7 @@ fn attach_prefix_uses_tui(command: &str) -> bool {
         && !matches!(command, "attach" | "attach-session")
 }
 
-#[cfg(not(target_os = "ios"))]
+#[cfg(all(test, not(target_os = "ios")))]
 fn command_reads_stdin(invocation: &CommandInvocation) -> Option<CommandStdinSink> {
     zz_daemon::command_stdin_sink(canonical_command(&invocation.name), &invocation.args)
 }
@@ -1747,30 +1719,6 @@ fn run_tmux_shell_command(
             exit_code_for(CliFailure::Runtime)
         }
     }
-}
-
-#[cfg(not(target_os = "ios"))]
-fn read_stdin_payload(binary: bool) -> Result<RawText, String> {
-    use std::io::Read as _;
-
-    let limit = u64::try_from(MAX_AGENT_SEND_BYTES)
-        .unwrap_or(u64::MAX)
-        .saturating_add(1);
-    let mut payload = Vec::new();
-    std::io::stdin()
-        .lock()
-        .take(limit)
-        .read_to_end(&mut payload)
-        .map_err(|error| format!("could not read standard input: {error}"))?;
-    if payload.len() > MAX_AGENT_SEND_BYTES {
-        return Err(format!(
-            "standard input exceeds {MAX_AGENT_SEND_BYTES} bytes"
-        ));
-    }
-    if !binary && std::str::from_utf8(&payload).is_err() {
-        return Err("could not read standard input: stream did not contain valid UTF-8".to_owned());
-    }
-    Ok(RawText::from_bytes(payload))
 }
 
 #[cfg(not(target_os = "ios"))]

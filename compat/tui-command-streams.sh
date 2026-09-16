@@ -66,17 +66,19 @@ set -eEuo pipefail
 export ZZ_TRAY=0
 
 usage() {
-  printf 'usage: compat/tui-command-streams.sh [--self-check] [ZZ_BIN [TMUX_BIN]]\n' >&2
+  printf 'usage: compat/tui-command-streams.sh [--self-check] [--execution-check] [ZZ_BIN [TMUX_BIN]]\n' >&2
   printf '       ZZ_BIN=path TMUX_BIN=path compat/tui-command-streams.sh\n' >&2
 }
 
 COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "$COMPAT_DIR/.." && pwd)"
 SELF_CHECK=0
+EXECUTION_CHECK=0
 POSITIONAL=()
 for argument in "$@"; do
   case "$argument" in
   --self-check) SELF_CHECK=1 ;;
+  --execution-check) EXECUTION_CHECK=1 ;;
   -*)
     usage
     exit 2
@@ -198,7 +200,7 @@ wait_for() {
 
 # The options the config sink writes, read back by name so a case can prove the
 # stream was applied and not merely accepted.
-PROBE_OPTIONS=(@zzcs-after @zzcs-replay @zzcs-one @zzcs-two @zzcs-three @zzcs-parse @zzcs-cancel)
+PROBE_OPTIONS=(@zzcs-after @zzcs-replay @zzcs-one @zzcs-two @zzcs-three @zzcs-parse @zzcs-cancel @zzcs-before @zzcs-control)
 
 # Everything a caller stream can move, read the same way from both servers. A
 # pane's pid is never printed, only whether it has one: that is what an empty
@@ -322,11 +324,23 @@ run_both() {
 
 compare_channels() {
   local name="$1"
-  local zz_rc tmux_rc zz_state tmux_state
+  local zz_rc tmux_rc zz_state tmux_state side
   zz_rc="$(cat "$SCRATCH_DIR/zz.rc")"
   tmux_rc="$(cat "$SCRATCH_DIR/tmux.rc")"
   zz_state="$(state_of zz)"
   tmux_state="$(state_of tmux)"
+  if [ -n "${ZZ_STREAM_PROBES:-}" ]; then
+    {
+      printf 'case=%s\nzz_exit=%s\ntmux_exit=%s\n' "$name" "$zz_rc" "$tmux_rc"
+      for side in zz tmux; do
+        printf '%s stdout hex\n' "$side"
+        xxd -p "$SCRATCH_DIR/$side.out"
+        printf '%s stderr hex\n' "$side"
+        xxd -p "$SCRATCH_DIR/$side.err"
+      done
+      printf 'zz state\n%s\ntmux state\n%s\n' "$zz_state" "$tmux_state"
+    } >>"$ZZ_STREAM_PROBES"
+  fi
   LAST_EXIT_DIFFERED=0
   LAST_STDOUT_DIFFERED=0
   LAST_STDERR_DIFFERED=0
@@ -721,6 +735,157 @@ review_alias_cases() {
     "$SCRATCH_DIR/unterminated.bin" direct stdout
 }
 
+review_pending_case() {
+  local name="$1" shape="$2" channel="$3" side pid rc before attempt
+  local -a base command
+  for side in zz tmux; do
+    side_command "$side" set -gu @zzcs-before >/dev/null
+    side_command "$side" set -gu @zzcs-cancel >/dev/null
+    side_command "$side" set -gu @zzcs-replay >/dev/null
+    printf 'set -g @zzcs-replay yes\n' >"$SCRATCH_DIR/unused.conf"
+    local body='set -g @zzcs-before yes ; source-file - ; set -g @zzcs-cancel yes'
+    if [ "$SELF_CHECK" -eq 1 ] && [ "$side" = zz ]; then
+      case "$shape" in
+      unused-open|unused-large) printf 'source-file -\nset -g @zzcs-replay yes\n' >"$SCRATCH_DIR/unused.conf" ;;
+      alias-order|file-order) body='source-file - ; set -g @zzcs-before yes ; set -g @zzcs-cancel yes' ;;
+      esac
+    fi
+    side_command "$side" set -s 'command-alias[84]' "zzcs-pending=$body" >/dev/null
+    command=(zzcs-pending)
+    case "$shape" in
+    unused-*) command=(source-file "$SCRATCH_DIR/unused.conf") ;;
+    file-order) printf 'zzcs-pending\n' >"$SCRATCH_DIR/pending.conf"; command=(source-file "$SCRATCH_DIR/pending.conf") ;;
+    esac
+    if [ "$side" = zz ]; then
+      base=(env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE
+        HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_HOME/config" ZZ_LOG_DIR="$ZZ_LOG_DIR"
+        "$ZZ_BIN" --socket "$ZZ_SOCKET")
+    else
+      base=(env -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME="$TMUX_HOME"
+        XDG_CONFIG_HOME="$TMUX_HOME/config" "$TMUX_BIN" -L "$INNER_SOCKET_NAME")
+    fi
+    if [ "$shape" = unused-large ]; then
+      set +e
+      "${base[@]}" "${command[@]}" <"$SCRATCH_DIR/over-cap.bin" >"$SCRATCH_DIR/$side.out" 2>"$SCRATCH_DIR/$side.err"
+      rc=$?
+      set -e
+    else
+      mkfifo "$SCRATCH_DIR/pending-$side"
+      exec 9<>"$SCRATCH_DIR/pending-$side"
+      if [ "$shape" = unused-open ]; then
+        (exec timeout 3 "${base[@]}" "${command[@]}" <"$SCRATCH_DIR/pending-$side" 9>&-) >"$SCRATCH_DIR/$side.out" 2>"$SCRATCH_DIR/$side.err" &
+      else
+        (exec "${base[@]}" "${command[@]}" <"$SCRATCH_DIR/pending-$side" 9>&-) >"$SCRATCH_DIR/$side.out" 2>"$SCRATCH_DIR/$side.err" &
+      fi
+      pid=$!
+      if [ "$shape" != unused-open ]; then
+        printf 'set -g @zzcs-replay payload' >&9
+        before=''
+        for ((attempt = 0; attempt < 60; attempt++)); do
+          before="$(side_command "$side" show-options -gqv @zzcs-before)"
+          [ "$before" = yes ] && break
+          sleep 0.05
+        done
+        printf 'before-eof=%s\n' "$before" >"$SCRATCH_DIR/$side.order"
+        sleep 0.15
+        kill -TERM "$pid" || die "$side pending reader exited before SIGTERM"
+      fi
+      set +e
+      wait "$pid"
+      rc=$?
+      set -e
+      exec 9>&-
+      rm "$SCRATCH_DIR/pending-$side"
+      if [ "$shape" != unused-open ]; then
+        cat "$SCRATCH_DIR/$side.order" >>"$SCRATCH_DIR/$side.out"
+      fi
+    fi
+    if [ "$SELF_CHECK" -eq 1 ] && [ "$side" = zz ]; then
+      case "$shape" in
+      term-status) rc=143 ;;
+      term-payload) side_command "$side" set -g @zzcs-replay payload >/dev/null ;;
+      term-tail) side_command "$side" set -g @zzcs-cancel yes >/dev/null ;;
+      esac
+    fi
+    printf '%s\n' "$rc" >"$SCRATCH_DIR/$side.rc"
+  done
+  compare_channels "$name" || true
+  if [ "$SELF_CHECK" -eq 1 ]; then
+    self_check_expect "$name: $shape sabotage" "$channel=1"
+  else
+    CHECKS=$((CHECKS + 1))
+    local oracle=1
+    case "$shape" in
+    unused-*) [ "$(tmux_command show-options -gqv @zzcs-replay)" = yes ] || oracle=0 ;;
+    *)
+      [ "$(cat "$SCRATCH_DIR/tmux.out")" = before-eof=yes ] || oracle=0
+      [ -z "$(tmux_command show-options -gqv @zzcs-replay)" ] || oracle=0
+      [ -z "$(tmux_command show-options -gqv @zzcs-cancel)" ] || oracle=0
+      ;;
+    esac
+    if [ "$LAST_EXIT_DIFFERED$LAST_STDOUT_DIFFERED$LAST_STDERR_DIFFERED$LAST_STATE_DIFFERED" = 0000 ] &&
+      [ "$(cat "$SCRATCH_DIR/tmux.rc")" = 0 ] && [ "$oracle" = 1 ]; then
+      printf 'ok    %s\n' "$name"
+    else
+      FAILURES=$((FAILURES + 1))
+      printf 'DIFF  %s\n' "$name"
+    fi
+  fi
+  for side in zz tmux; do
+    side_command "$side" set -gu @zzcs-before >/dev/null
+    side_command "$side" set -gu @zzcs-cancel >/dev/null
+    side_command "$side" set -gu @zzcs-replay >/dev/null
+  done
+}
+
+review_control_case() {
+  local name="$1" channel="$2" side rc body
+  for side in zz tmux; do
+    side_command "$side" set -gu @zzcs-control >/dev/null
+    body='source-file - ; display-message -p after ; set -g @zzcs-control yes'
+    if [ "$SELF_CHECK" -eq 1 ] && [ "$side" = zz ]; then
+      case "$channel" in
+      stdout) body='source-file - ; set -g @zzcs-control yes' ;;
+      state) body='source-file - ; display-message -p after' ;;
+      esac
+    fi
+    side_command "$side" set -s 'command-alias[85]' "zzcs-control=$body" >/dev/null
+    set +e
+    side_command "$side" -C zzcs-control </dev/null >"$SCRATCH_DIR/$side.control" 2>"$SCRATCH_DIR/$side.err"
+    rc=$?
+    set -e
+    printf '%s\n' "$rc" >"$SCRATCH_DIR/$side.rc"
+    sed -E 's/^(%begin|%end|%error) [0-9]+ [0-9]+ /\1 TIME ID /' "$SCRATCH_DIR/$side.control" >"$SCRATCH_DIR/$side.out"
+  done
+  compare_channels "$name" || true
+  if [ "$SELF_CHECK" -eq 1 ]; then
+    self_check_expect "$name: removed continuation on zz" "$channel=1"
+  else
+    CHECKS=$((CHECKS + 1))
+    if [ "$LAST_EXIT_DIFFERED$LAST_STDOUT_DIFFERED$LAST_STDERR_DIFFERED$LAST_STATE_DIFFERED" = 0000 ]; then
+      printf 'ok    %s\n' "$name"
+    else
+      FAILURES=$((FAILURES + 1))
+      printf 'DIFF  %s\n' "$name"
+    fi
+  fi
+  for side in zz tmux; do
+    side_command "$side" set -gu @zzcs-control >/dev/null
+  done
+}
+
+review_execution_cases() {
+  review_pending_case file-unused-open-stdin unused-open exit
+  review_pending_case file-unused-oversized-stdin unused-large exit
+  review_pending_case alias-preceding-state-before-eof alias-order stdout
+  review_pending_case file-preceding-state-before-eof file-order stdout
+  review_pending_case pending-source-sigterm-status term-status exit
+  review_pending_case pending-source-sigterm-payload-unapplied term-payload state
+  review_pending_case pending-source-sigterm-tail-unapplied term-tail state
+  review_control_case control-source-read-error-continues-output stdout
+  review_control_case control-source-read-error-continues-state state
+}
+
 write_payloads() {
   printf 'a\303\251b\377c\000d\n' >"$SCRATCH_DIR/binary.bin"
   # The cap counts bytes, so these are built by size and never by line count.
@@ -753,6 +918,7 @@ run_cases() {
   alias_group_cases
   review_alias_cases
   startup_config_stream_case
+  review_execution_cases
   bound_cases
 
   if [ "$FAILURES" -ne 0 ]; then
@@ -924,6 +1090,7 @@ run_self_check() {
 
   review_alias_cases
   startup_config_stream_case
+  review_execution_cases
 
   # The second equivalence: with every sabotage withdrawn the comparison is
   # silent again, so none of the four above was a difference the scene kept.
@@ -942,7 +1109,13 @@ zz_command -f /dev/null daemon >"$SCRATCH_DIR/zz-daemon.out" 2>"$SCRATCH_DIR/zz-
 ZZ_PID=$!
 wait_for "zz daemon socket" test -S "$ZZ_SOCKET"
 
-if [ "$SELF_CHECK" -eq 1 ]; then
+if [ "$EXECUTION_CHECK" -eq 1 ]; then
+  build_scene
+  write_payloads
+  review_execution_cases
+  printf 'execution-check: %s asserted, %s failures, %s self-check failures\n' "$CHECKS" "$FAILURES" "$SELF_CHECK_FAILURES"
+  [ "$FAILURES" -eq 0 ] && [ "$SELF_CHECK_FAILURES" -eq 0 ]
+elif [ "$SELF_CHECK" -eq 1 ]; then
   run_self_check
 else
   run_cases

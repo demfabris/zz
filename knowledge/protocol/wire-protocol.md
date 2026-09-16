@@ -682,13 +682,15 @@ invocation rather than in `args` for the commands whose payload is not an argume
 the server log still records the command the caller typed. See
 [the command stream channel](/designs/command-stream-channel.md) for the sinks and the bound.
 
-v104 is unreleased. The cycle-11 alias correction advances the version after v0.10.0
-shipped v103. This lane adds no serialized payload fields or enum variants: the
-`CommandInvocation::stdin_spent` marker uses `#[serde(skip)]` and stays inside the daemon.
+v104 is unreleased. The cycle-11 alias correction appends
+`CommandInvocation.stdin_available: bool` with `#[serde(default)]` and
+`ClientFileOperation::ReadStdin { binary: bool }` after `Write`. A command client opts in to
+stdin requests. The daemon requests bytes when the reader executes, through the existing
+`ClientFileRequest` and bounded `ClientFileResponse` exchange. Unused stdin stays unread.
+`CommandInvocation::stdin_spent` uses `#[serde(skip)]` and stays inside the daemon;
 `caller_stream_spent_marker_stays_in_process` checks that absent and spent streams encode
-identically. The version advance follows the campaign correction and the release guard
-for changes to protocol source; it changes the envelope and hello version values.
-The v103 entries above describe the released layout and remain intact.
+identically. The protocol version remains 104, including main's three `ServerError::Native*`
+variants. The v103 entries above describe the released layout and remain intact.
 
 # Versioning & compatibility
 

@@ -1,0 +1,8 @@
+{
+  "command": [
+    "python3",
+    "compat/tui/evidence/TUI-014/attempt-07-customize/new-command-flags.py"
+  ],
+  "exit": 0,
+  "seconds": 0.6
+}

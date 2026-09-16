@@ -1,0 +1,142 @@
+[
+  {
+    "name": "refresh-pan-up",
+    "owner": "gap:clients.interactive-refresh",
+    "reason": "clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported"
+  },
+  {
+    "name": "refresh-pan-down",
+    "owner": "gap:clients.interactive-refresh",
+    "reason": "clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported"
+  },
+  {
+    "name": "refresh-pan-left",
+    "owner": "gap:clients.interactive-refresh",
+    "reason": "clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported"
+  },
+  {
+    "name": "refresh-pan-right",
+    "owner": "gap:clients.interactive-refresh",
+    "reason": "clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported"
+  },
+  {
+    "name": "refresh-pan-cursor",
+    "owner": "gap:clients.interactive-refresh",
+    "reason": "clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported"
+  },
+  {
+    "name": "refresh-clipboard",
+    "owner": "gap:clients.interactive-refresh",
+    "reason": "clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported"
+  },
+  {
+    "name": "refresh-adjustment",
+    "owner": "gap:clients.interactive-refresh",
+    "reason": "clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported"
+  },
+  {
+    "name": "capture-control",
+    "owner": "TUI-017",
+    "reason": "capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser"
+  },
+  {
+    "name": "capture-flags",
+    "owner": "TUI-017",
+    "reason": "capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser"
+  },
+  {
+    "name": "capture-hyperlinks",
+    "owner": "TUI-017",
+    "reason": "capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser"
+  },
+  {
+    "name": "capture-line-numbers",
+    "owner": "TUI-017",
+    "reason": "capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser"
+  },
+  {
+    "name": "capture-pending",
+    "owner": "TUI-017",
+    "reason": "capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser"
+  },
+  {
+    "name": "capture-grid",
+    "owner": "TUI-017",
+    "reason": "capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser"
+  },
+  {
+    "name": "messages-log",
+    "owner": "decided:TUI-016",
+    "reason": "DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. Measured 2026-09-14 on both sides: the pin names ANY tty-bearing client by that tty, including the attached terminal client whose attach-session row reads /dev/pts/<n>, and zz named none of them - it spelled every row by the device name the client sent, which for an interactive client is the hostname. That half is closed: the server log now names a client by its tty whenever it has one. What stays is the clientless CLI, which names a process that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked"
+  },
+  {
+    "name": "client-tree-open",
+    "owner": "gap:clients.interactive-refresh",
+    "reason": "clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer, while the pin exits 0 with no output and, alone among the three, opens no mode either: cmd_choose_tree_exec returns CMD_RETURN_NORMAL before window_pane_set_mode when server_client_how_many() == 0 (cmd-choose-tree.c), so the exit status and the error text are what diverge here, measured 2026-09-14. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open"
+  },
+  {
+    "name": "clock-over-copy",
+    "owner": "gap:clients.interactive-refresh",
+    "reason": "TUI-014: copy sessions remain per client; the pin stacks clock over copy and temporarily suspends the copy key table"
+  },
+  {
+    "name": "clock-over-copy-key",
+    "owner": "gap:clients.interactive-refresh",
+    "reason": "TUI-014: the pin consumes x in the top clock and restores copy; zz retains the client copy key table under its clock"
+  },
+  {
+    "name": "copy-over-clock",
+    "owner": "gap:clients.interactive-refresh",
+    "reason": "TUI-014: the pin displays copy above the suspended clock; zz keeps its pane clock above the per-client frozen copy view"
+  },
+  {
+    "name": "switch-mode-kill",
+    "owner": "gap:clients.interactive-refresh",
+    "reason": "TUI-014: -k kills the source pane when the pin mode exits; zz rejects this unbuilt lifecycle variant"
+  },
+  {
+    "name": "switch-mode-kill-exit",
+    "owner": "gap:clients.interactive-refresh",
+    "reason": "TUI-014: copy-mode -q closes the pin switch and kills zzcc-k; zz rejected -k and retains that session"
+  },
+  {
+    "name": "switch-mode-zoom",
+    "owner": "gap:clients.interactive-refresh",
+    "reason": "TUI-014: -Z opens a zoom-restoring switch mode on the pin; zz rejects this unbuilt lifecycle variant"
+  },
+  {
+    "name": "switch-mode-windows",
+    "owner": "gap:clients.interactive-refresh",
+    "reason": "clients.interactive-refresh, TUI-014: the window rows of switch-mode -w. The default window-row capture retains a style-tail difference; duplicate-name ordering is asserted separately with a plain format. The pin leaves the cells past a window row carrying the run that drew its last column - `#[dim]#{pane_title}#[default]` ends the row and the columns after it keep that cell - so capture-pane -e prints no reset after `ptitle` and prints `#[0m` at the head of the prompt row instead. zz leaves those columns at the default cell, so the reset lands at the end of the window row. Measured 2026-09-15 at 80x24; the session rows switch-mode opens by default are identical on all five channels and are asserted above as switch-mode"
+  },
+  {
+    "name": "switch-mode-duplicate-windows",
+    "owner": "gap:clients.interactive-refresh",
+    "reason": "clients.interactive-refresh, TUI-014: the window rows of switch-mode -w. The default window-row capture retains a style-tail difference; duplicate-name ordering is asserted separately with a plain format. The pin leaves the cells past a window row carrying the run that drew its last column - `#[dim]#{pane_title}#[default]` ends the row and the columns after it keep that cell - so capture-pane -e prints no reset after `ptitle` and prints `#[0m` at the head of the prompt row instead. zz leaves those columns at the default cell, so the reset lands at the end of the window row. Measured 2026-09-15 at 80x24; the session rows switch-mode opens by default are identical on all five channels and are asserted above as switch-mode"
+  },
+  {
+    "name": "server-access-add",
+    "owner": "gap:protocol.socket-acl",
+    "reason": "protocol.socket-acl, accepted as a permanent exclusion: the daemon socket is the invoking user at mode 0600, so zz keeps no peer identity and every other form of the command - the list, the lookups, the owner test, the flag conflicts, the deny of an entry that is not there and the no-action form - answers exactly as the pin does, measured 2026-09-15. Only admitting a second identity diverges - semantic:multi-user-socket-acl, the permanent exclusion this gap exists for: the pin stores the entry and exits 0, zz refuses it"
+  },
+  {
+    "name": "lock-server",
+    "owner": "TUI-015",
+    "reason": "CLI channels are asserted; screen/state remain recorded under options.lock-program. This run observes them identical, but changing that obligation is outside this lane."
+  },
+  {
+    "name": "lock-session",
+    "owner": "TUI-015",
+    "reason": "CLI channels are asserted; screen/state remain recorded under options.lock-program. This run observes them identical, but changing that obligation is outside this lane."
+  },
+  {
+    "name": "lock-client",
+    "owner": "TUI-015",
+    "reason": "CLI channels are asserted; screen/state remain recorded under options.lock-program. This run observes them identical, but changing that obligation is outside this lane."
+  },
+  {
+    "name": "lock-client-current",
+    "owner": "TUI-015",
+    "reason": "CLI channels are asserted; screen/state remain recorded under options.lock-program. This run observes them identical, but changing that obligation is outside this lane."
+  }
+]

@@ -1,0 +1,12 @@
+{
+  "command": [
+    "/tmp/zz-cargo.sh",
+    "test",
+    "-p",
+    "zz-daemon",
+    "--lib",
+    "positive_delay_shell_job_freezes_selected_client_working_directory"
+  ],
+  "exit": -15,
+  "seconds": 272.4
+}

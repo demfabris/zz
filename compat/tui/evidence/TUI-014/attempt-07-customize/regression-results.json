@@ -1,0 +1,87 @@
+[
+  {
+    "command": [
+      "/home/demfabris/dev/zz-c11-customize/compat/tui-choosers.sh",
+      "/home/demfabris/dev/zz-c11-customize/target/debug/zz",
+      "/home/demfabris/dev/zz-c11-customize/compat/.cache/tmux-src/tmux"
+    ],
+    "exit": 1,
+    "seconds": 567.3
+  },
+  {
+    "command": [
+      "/home/demfabris/dev/zz-c11-customize/compat/tui-choosers.sh",
+      "--self-check",
+      "/home/demfabris/dev/zz-c11-customize/target/debug/zz",
+      "/home/demfabris/dev/zz-c11-customize/compat/.cache/tmux-src/tmux"
+    ],
+    "exit": 0,
+    "seconds": 1067.0
+  },
+  {
+    "command": [
+      "/home/demfabris/dev/zz-c11-customize/compat/tui-copy-mode.sh",
+      "/home/demfabris/dev/zz-c11-customize/target/debug/zz",
+      "/home/demfabris/dev/zz-c11-customize/compat/.cache/tmux-src/tmux"
+    ],
+    "exit": 0,
+    "seconds": 550.7
+  },
+  {
+    "command": [
+      "/home/demfabris/dev/zz-c11-customize/compat/tui-copy-mode.sh",
+      "--self-check",
+      "/home/demfabris/dev/zz-c11-customize/target/debug/zz",
+      "/home/demfabris/dev/zz-c11-customize/compat/.cache/tmux-src/tmux"
+    ],
+    "exit": 0,
+    "seconds": 577.7
+  },
+  {
+    "command": [
+      "/home/demfabris/dev/zz-c11-customize/compat/tui-screen-diff.sh",
+      "/home/demfabris/dev/zz-c11-customize/target/debug/zz",
+      "/home/demfabris/dev/zz-c11-customize/compat/.cache/tmux-src/tmux"
+    ],
+    "exit": 0,
+    "seconds": 588.4
+  },
+  {
+    "command": [
+      "/home/demfabris/dev/zz-c11-customize/compat/tui-screen-diff.sh",
+      "--self-check",
+      "/home/demfabris/dev/zz-c11-customize/target/debug/zz",
+      "/home/demfabris/dev/zz-c11-customize/compat/.cache/tmux-src/tmux"
+    ],
+    "exit": 0,
+    "seconds": 331.1
+  },
+  {
+    "command": [
+      "/home/demfabris/dev/zz-c11-customize/compat/tui-overlays.sh",
+      "/home/demfabris/dev/zz-c11-customize/target/debug/zz",
+      "/home/demfabris/dev/zz-c11-customize/compat/.cache/tmux-src/tmux"
+    ],
+    "exit": 0,
+    "seconds": 61.9
+  },
+  {
+    "command": [
+      "/home/demfabris/dev/zz-c11-customize/compat/tui-overlays.sh",
+      "--self-check",
+      "/home/demfabris/dev/zz-c11-customize/target/debug/zz",
+      "/home/demfabris/dev/zz-c11-customize/compat/.cache/tmux-src/tmux"
+    ],
+    "exit": 0,
+    "seconds": 35.5
+  },
+  {
+    "command": [
+      "/home/demfabris/dev/zz-c11-customize/compat/attached-client.sh",
+      "/home/demfabris/dev/zz-c11-customize/target/debug/zz",
+      "/home/demfabris/dev/zz-c11-customize/compat/.cache/tmux-src/tmux"
+    ],
+    "exit": 0,
+    "seconds": 1053.6
+  }
+]

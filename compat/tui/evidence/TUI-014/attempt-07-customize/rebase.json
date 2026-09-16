@@ -1,0 +1,6 @@
+{
+  "base": "origin/campaign/tui-modes-12",
+  "revision": "b2c00bd26091523a167343b1d39f36c036662d07",
+  "modes_tip_in_main": false,
+  "old_base": "2e2dc5842e71a25d5872d3757c0e19f48758ad6a"
+}

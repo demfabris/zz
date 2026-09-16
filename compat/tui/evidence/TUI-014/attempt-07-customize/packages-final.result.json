@@ -1,0 +1,34 @@
+{
+  "command": [
+    "/tmp/zz-cargo.sh",
+    "test",
+    "--no-fail-fast",
+    "-p",
+    "zz-protocol",
+    "-p",
+    "zz-mux",
+    "-p",
+    "zz-daemon",
+    "-p",
+    "zz-tui",
+    "--",
+    "--test-threads=4"
+  ],
+  "launcher": [
+    "/tmp/zz-cargo.sh",
+    "test",
+    "--no-fail-fast",
+    "-p",
+    "zz-protocol",
+    "-p",
+    "zz-mux",
+    "-p",
+    "zz-daemon",
+    "-p",
+    "zz-tui",
+    "--",
+    "--test-threads=4"
+  ],
+  "exit": 101,
+  "seconds": 426.9
+}

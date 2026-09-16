@@ -1,0 +1,14 @@
+{
+  "command": [
+    "python3",
+    "compat/tui/verify-claims.py",
+    "--run",
+    "TUI-014",
+    "--zz",
+    "/home/demfabris/dev/zz-c11-customize/target/debug/zz",
+    "--output-dir",
+    "compat/tui/evidence/TUI-014/attempt-07-customize/verifier"
+  ],
+  "exit": 1,
+  "seconds": 1661.2
+}

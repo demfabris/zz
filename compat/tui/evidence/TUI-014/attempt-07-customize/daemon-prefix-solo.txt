@@ -1,0 +1,23 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.09s
+     Running unittests src/lib.rs (target/debug/deps/zz_daemon-7a6e412177cab2ac)
+
+running 1 test
+test daemon::tests::switch_client_key_table_and_formats_are_client_local ... FAILED
+
+failures:
+
+---- daemon::tests::switch_client_key_table_and_formats_are_client_local stdout ----
+
+thread 'daemon::tests::switch_client_key_table_and_formats_are_client_local' (2816139) panicked at crates/zz-daemon/src/daemon.rs:94748:13:
+assertion `left == right` failed
+  left: None
+ right: Some("prefix")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    daemon::tests::switch_client_key_table_and_formats_are_client_local
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 938 filtered out; finished in 2.11s
+
+error: test failed, to rerun pass `-p zz-daemon --lib`

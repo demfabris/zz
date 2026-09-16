@@ -1,0 +1,160 @@
+{
+  "rows": 199,
+  "steps": 2352,
+  "failed": [
+    "lane2-store",
+    "show-options-hooks",
+    "smoke/alias-group-forgery",
+    "smoke/cli-chain-parse-abort",
+    "smoke/command-flag-errors",
+    "smoke/command-prompt-chain",
+    "smoke/command-prompt-editing",
+    "smoke/jobs-command-environment",
+    "smoke/plugin-runtime-continuum",
+    "smoke/plugin-runtime-resurrect-restore",
+    "smoke/source-replay-diagnostics",
+    "smoke/status-background-jobs"
+  ],
+  "nonzero": [
+    {
+      "name": "known/known-pane-scrollbar-columns",
+      "counts": [
+        0,
+        2,
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "name": "known/known-terminal-runtime",
+      "counts": [
+        0,
+        0,
+        6,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "lane2-store",
+      "counts": [
+        0,
+        0,
+        0,
+        2,
+        0
+      ]
+    },
+    {
+      "name": "show-options-hooks",
+      "counts": [
+        0,
+        0,
+        0,
+        7,
+        0
+      ]
+    },
+    {
+      "name": "smoke/alias-group-forgery",
+      "counts": [
+        0,
+        0,
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "name": "smoke/cli-chain-parse-abort",
+      "counts": [
+        0,
+        0,
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "name": "smoke/command-flag-errors",
+      "counts": [
+        0,
+        0,
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "smoke/command-prompt-chain",
+      "counts": [
+        0,
+        0,
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "name": "smoke/command-prompt-editing",
+      "counts": [
+        0,
+        0,
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "name": "smoke/jobs-command-environment",
+      "counts": [
+        0,
+        0,
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "name": "smoke/plugin-runtime-continuum",
+      "counts": [
+        0,
+        0,
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "smoke/plugin-runtime-resurrect-restore",
+      "counts": [
+        0,
+        0,
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "smoke/source-replay-diagnostics",
+      "counts": [
+        0,
+        0,
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "name": "smoke/status-background-jobs",
+      "counts": [
+        0,
+        0,
+        0,
+        1,
+        1
+      ]
+    }
+  ]
+}

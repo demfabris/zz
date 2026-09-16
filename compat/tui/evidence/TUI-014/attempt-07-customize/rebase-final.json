@@ -1,0 +1,8 @@
+{
+  "modes": "b2c00bd26091523a167343b1d39f36c036662d07",
+  "main": "d1694e65da7552e8ebd53da2ce596ee8ffa748e9",
+  "modes_is_ancestor_of_main": false,
+  "chosen_base": "b2c00bd26091523a167343b1d39f36c036662d07",
+  "choice": "origin/campaign/tui-modes-12",
+  "action": "already rebased onto current modes head; no additional rebase needed"
+}

@@ -1,10 +1,10 @@
 ---
 type: Protocol
-title: zz wire protocol (v103)
+title: zz wire protocol (v104)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-08-31T00:00:00-03:00
+timestamp: 2026-09-16T00:00:00-03:00
 ---
 
 # Overview
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 103`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 104`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (103) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (104) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -676,9 +676,17 @@ invocation rather than in `args` for the commands whose payload is not an argume
 the server log still records the command the caller typed. See
 [the command stream channel](/designs/command-stream-channel.md) for the sinks and the bound.
 
+v104 is unreleased. The cycle-11 alias correction advances the version after v0.10.0
+shipped v103. This lane adds no serialized payload fields or enum variants: the
+`CommandInvocation::stdin_spent` marker uses `#[serde(skip)]` and stays inside the daemon.
+`caller_stream_spent_marker_stays_in_process` checks that absent and spent streams encode
+identically. The version advance follows the campaign correction and the release guard
+for changes to protocol source; it changes the envelope and hello version values.
+The v103 entries above describe the released layout and remain intact.
+
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 103`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 104`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
 - v103 carries the pin's pane prompt and the terminal name a client learned after the hello.

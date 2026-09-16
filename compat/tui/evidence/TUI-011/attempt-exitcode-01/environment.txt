@@ -1,0 +1,43 @@
+$ git rev-parse HEAD
+be5709dfcd9936d44519683e5da8dc6ab7748d96
+$ git status --short
+?? compat/tui/evidence/TUI-011/attempt-exitcode-01/
+$ uname -a
+Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+$ bash --version
+GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)
+Copyright (C) 2025 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+
+This is free software; you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+$ sh -c printf "TERM=%s SHELL=%s\n" "$TERM" "$SHELL"; stty size
+TERM=xterm-ghostty SHELL=/bin/bash
+stty: 'standard input': Inappropriate ioctl for device
+Pinned oracle: {"schema": 5, "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466", "version": "tmux next-3.8"}
+baseline sha256 95d46eaab17fd304d4a0b57e5226e840952ff669d77b9bd88cd941f64771c108 target/debug/zz
+baseline sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5 compat/.cache/tmux-src/tmux
+candidate sha256 00342101792f551a1ad3be5edc39b4431571a1318c574fb927fda1944d90bf63 target/debug/zz
+Build caps: /tmp/zz-cargo.sh defaults MemoryMax=5G MemorySwapMax=3G jobs=3, two shared flock slots.
+Test environment: HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup
+Fixture geometry: outer pinned tmux, 80x24 for client-command fixture; each side has its own HOME and socket.
+               total        used        free      shared  buff/cache   available
+Mem:            15Gi       8.3Gi       849Mi        10Mi       6.6Gi       7.1Gi
+Swap:           15Gi       6.4Gi       9.0Gi
+final proof sha256 94b3eb8833c9672cb1d506133c95e9504bd88327f73dd7e3df9253396565aaa7 target/debug/zz-exitcode-proof
+final proof sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5 compat/.cache/tmux-src/tmux
+Shared wrapper observed later with defaults MemoryMax=4G MemorySwapMax=2G jobs=2; subsequent calls use those defaults.
+b1b2a7748f09ec4a03593df67797f8df6c7c0c2d87a907d4863bad8676a56da3  target/exitcode-baseline-target/debug/zz
+b8ad94668742f9b9f348bdd0ecf928d6e201a45c0c65565dcaf753896e521c3c  target/debug/zz-exitcode-proof-v2
+final proof sha256 b8ad94668742f9b9f348bdd0ecf928d6e201a45c0c65565dcaf753896e521c3c target/debug/zz-exitcode-proof-v2
+final proof sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5 compat/.cache/tmux-src/tmux
+$ rustc --version
+rustc 1.97.0 (2d8144b78 2026-07-07)
+$ git rev-parse origin/main origin/campaign/tui-stream-alias-2 origin/campaign/tui-modes-12
+e40a13e1c981aa9b707a5a6a54f5e0267c751de9
+5ae3cef7d625893d53245a94a2bc8eff3dd017f1
+b2c00bd26091523a167343b1d39f36c036662d07
+final proof sha256 b1b2a7748f09ec4a03593df67797f8df6c7c0c2d87a907d4863bad8676a56da3 target/exitcode-baseline-target/debug/zz
+final proof sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5 compat/.cache/tmux-src/tmux
+Final source commit: 888be5af6edb71511961e6516049d7d59c585615
+Final fetched origin/main: e40a13e1c981aa9b707a5a6a54f5e0267c751de9

@@ -1,0 +1,9 @@
+2026-09-16T18:39:28-03:00
+Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+rustc 1.97.0 (2d8144b78 2026-07-07)
+3d6f16a50e3857929752f31e1e00228b41ca7d84
+d1694e65da7552e8ebd53da2ce596ee8ffa748e9
+aaf86edc28c00a2ee603103da0fccdb61d6502c07a29a72183c3a78f950077c0  target/debug/zz-alias-final
+df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  compat/.cache/tmux-src/tmux
+TERM=xterm-ghostty
+SHELL=/bin/bash

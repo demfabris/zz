@@ -1,0 +1,3 @@
+   Compiling zz-ui v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-ui)
+   Compiling zz v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 14.88s

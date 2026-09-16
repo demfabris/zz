@@ -1,0 +1,8 @@
+    Updating git repository `https://github.com/demfabris/zed`
+    Updating crates.io index
+    Updating git repository `https://github.com/uzaaft/libghostty-rs`
+    Updating git repository `https://github.com/zed-industries/scap`
+    Updating git repository `https://github.com/zed-industries/font-kit`
+    Updating git repository `https://github.com/proptest-rs/proptest`
+    Updating git repository `https://github.com/zed-industries/xim-rs.git`
+    Updating git repository `https://github.com/zed-industries/wasm_thread`

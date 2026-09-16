@@ -1,0 +1,6 @@
+base=d1694e65da7552e8ebd53da2ce596ee8ffa748e9
+code_revision=3d6f16a50e3857929752f31e1e00228b41ca7d84
+complete_three_dot_file_list_matches_staged_tree=true
+files=431
+command=cmp /tmp/zz-alias-staged-footprint.txt compat/tui/evidence/TUI-018/attempt-07/footprint.txt
+exit_status=0

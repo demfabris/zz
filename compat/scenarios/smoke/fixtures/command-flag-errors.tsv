@@ -11,6 +11,7 @@ clock-mode	-	-t	[-t target-pane]
 command-prompt	-	-I	[-1CbeFiklNP] [-I inputs] [-p prompts] [-t target-client] [-T prompt-type] [template]
 confirm-before	confirm	-c	[-by] [-c confirm-key] [-p prompt] [-t target-client] command
 copy-mode	-	-s	[-dekHMqSu] [-s src-pane] [-t target-pane]
+customize-mode	-	-F	[-kNZ] [-F format] [-f filter] [-t target-pane]
 delete-buffer	deleteb	-b	[-b buffer-name]
 detach-client	detach	-E	[-aP] [-E shell-command] [-s target-session] [-t target-client]
 display-menu	menu	-C	[-MO] [-b border-lines] [-c target-client] [-C starting-choice] [-H selected-style] [-s style] [-S border-style] [-t target-pane] [-T title] [-x position] [-y position] name [key] [command] ...
@@ -79,6 +80,7 @@ show-window-options	showw	-t	[-gv] [-t target-window] [option]
 source-file	source	-t	[-Fnqv] [-t target-pane] path ...
 split-window	splitw	-F	[-bdefhIklPvWZ] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]
 start-server	start	-	@EMPTY@
+suspend-client	suspendc	-t	[-t target-client]
 swap-pane	swapp	-s	[-dDUZ] [-s src-pane] [-t dst-pane]
 swap-window	swapw	-s	[-d] [-s src-window] [-t dst-window]
 switch-client	switchc	-O	[-ElnprZ] [-c target-client] [-t target-session] [-T key-table] [-O order]

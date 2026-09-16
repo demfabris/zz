@@ -47,6 +47,8 @@ enum MainEvent {
     },
     Resize,
     Signal,
+    Suspend,
+    Resume,
     /// The writer dropped output it could not paint and its block has cleared.
     Repaint,
 }
@@ -966,6 +968,33 @@ pub(crate) fn run(
                         .map_err(|error| error.to_string())?;
                 }
             }
+            MainEvent::Suspend => {
+                client
+                    .send_input(InputMessage::ClientSuspendState { suspended: true })
+                    .map_err(|error| error.to_string())?;
+                renderer.pause(true);
+                terminal.suspend();
+                #[cfg(unix)]
+                rustix::process::kill_process(
+                    rustix::process::getpid(),
+                    rustix::process::Signal::STOP,
+                )
+                .map_err(|error| error.to_string())?;
+            }
+            MainEvent::Resume => {
+                client
+                    .send_input(InputMessage::ClientSuspendState { suspended: false })
+                    .map_err(|error| error.to_string())?;
+                #[cfg(unix)]
+                terminal
+                    .resume(model.mouse_arming, extended_keys, focus_events)
+                    .map_err(|error| error.to_string())?;
+                renderer.pause(false);
+                renderer
+                    .paint(&model, true)
+                    .map_err(|error| error.to_string())?;
+                let _ = events.send(MainEvent::Resize);
+            }
             MainEvent::Signal => break Ok(TuiExit::Detached(attached_session_name(&model))),
             // tty_timer_callback's CLIENT_ALLREDRAWFLAGS: the terminal is
             // reading again after output was dropped, so the screen is redrawn
@@ -1486,8 +1515,15 @@ fn send_terminal_events(
 fn spawn_signal_reader(events: mpsc::Sender<MainEvent>) -> Result<(), String> {
     use async_signal::{Signal, Signals};
 
-    let mut signals = Signals::new([Signal::Hup, Signal::Int, Signal::Term, Signal::Winch])
-        .map_err(|error| error.to_string())?;
+    let mut signals = Signals::new([
+        Signal::Hup,
+        Signal::Int,
+        Signal::Term,
+        Signal::Winch,
+        Signal::Tstp,
+        Signal::Cont,
+    ])
+    .map_err(|error| error.to_string())?;
     thread::Builder::new()
         .name("zz-tui-signals".to_owned())
         .spawn(move || {
@@ -1498,6 +1534,16 @@ fn spawn_signal_reader(events: mpsc::Sender<MainEvent>) -> Result<(), String> {
                     match signal {
                         Ok(Signal::Winch) => {
                             if events.send(MainEvent::Resize).is_err() {
+                                break;
+                            }
+                        }
+                        Ok(Signal::Tstp) => {
+                            if events.send(MainEvent::Suspend).is_err() {
+                                break;
+                            }
+                        }
+                        Ok(Signal::Cont) => {
+                            if events.send(MainEvent::Resume).is_err() {
                                 break;
                             }
                         }
@@ -2169,6 +2215,25 @@ mod tests {
             focused_window: Some(window),
         }));
         (model, pane)
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn signal_reader_delivers_suspend_and_resume() {
+        let (events, incoming) = mpsc::channel();
+        spawn_signal_reader(events).unwrap();
+        rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::TSTP)
+            .unwrap();
+        assert!(matches!(
+            incoming.recv_timeout(Duration::from_secs(2)).unwrap(),
+            MainEvent::Suspend
+        ));
+        rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::CONT)
+            .unwrap();
+        assert!(matches!(
+            incoming.recv_timeout(Duration::from_secs(2)).unwrap(),
+            MainEvent::Resume
+        ));
     }
 
     #[test]

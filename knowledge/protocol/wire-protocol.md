@@ -162,6 +162,7 @@ introduced in v17): `Info | Success | Warning | Error`.
 | `Confirm` | `action: ConfirmAction::Reply(bool)`; answers the client's open `confirm-before` prompt |
 | `ClientTerminalSize` | `columns: u16`, `rows: u16`; current producer is the TUI terminal surface, which reports later outer-terminal resizes |
 | `ClientFocus` | `focused: bool`; reports client-window focus independently from pane/application focus |
+| `ClientSuspendState` | `suspended: bool`; reports terminal suspension and resumption |
 
 Every `Key`/`Text` resolves the per-client `KeyEngine` against the live key tables first; `Pass`
 reaches the synchronized Terminal/Browser sinks (Picker and Agent source panes have no sink and
@@ -700,6 +701,11 @@ the server log still records the command the caller typed. See
   `mode-style` the current row is drawn over and the `message-style` `prompt_draw` gives the
   `(search)` prompt on the pane's last row. Appending a variant to `PaneMode` is a tail append like
   any other, and both halves ship together.
+  `PaneMode::Customize { state, presentation, offset }` appends the per-pane option tree
+  using `ChooseTreeState` and `ChooserPresentation` on that same stack.
+  `InputMessage::ClientSuspendState { suspended }` is a tail variant in v104. The raw TUI
+  reports terminal suspension and resumption so client lists and attachment counts exclude
+  a stopped client while its connection and pane views survive.
 - v103 carries the pin's pane prompt and the terminal name a client learned after the hello.
   `CommandPromptState` appends `pane: Option<PaneId>` after `no_freeze`: `command-prompt -P` is
   `window_pane_set_prompt`, so the prompt hangs on the pane the command targeted rather than on the

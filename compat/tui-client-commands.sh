@@ -24,15 +24,12 @@
 #                             pane, redrawn every second        every attached client, with
 #                                                               clock-mode-colour and the
 #                                                               four clock-mode-style faces
-# customize-mode [-kNZ]     customize mode on the pane        hard-rejected                  CHILD TUI-014
-#   [-F -f -t]
 # switch-mode [-kswZ]       window_switch_mode on the target  the same pane mode, its rows   PROVED (the mode it
 #   [-F -t] [command]         pane: one row per session or       expanded from the same         opens and its Escape
 #                             window over a (search) prompt      default format, over the       teardown) + DECLARED
 #                                                                same prompt                    (the mode's own
 #                                                                                               movement, Enter target
 #                                                                                               and incremental filter)
-# suspend-client [-t]       SIGTSTP to the client process     hard-rejected                  CHILD TUI-014
 # server-access [-adglrw]   socket access control list, and    every lookup, ordering and     PROVED (-l and every
 #   [-t] [user|group]         the lookups, orderings and         refusal; the socket admits     refusal) + DECLARED
 #                             refusals around it                 its owner alone, so adding     (admitting a second
@@ -206,6 +203,7 @@ OUTER_HOME="$SCRATCH_DIR/outer-home"
 ZZ_LOG_DIR="$SCRATCH_DIR/zz-logs"
 CASE_LABEL=""
 ZZ_PID=""
+SUSPENDED_ZZ_PID=""
 FAILURES=0
 CHECKS=0
 RECORDS=0
@@ -250,6 +248,7 @@ cleanup() {
   local status=$?
   trap - EXIT ERR INT TERM
   set +e
+  if [ -n "$SUSPENDED_ZZ_PID" ]; then kill -CONT "$SUSPENDED_ZZ_PID" >/dev/null 2>&1; fi
   tmux_outer_command kill-server >/dev/null 2>&1
   zz_command kill-server >/dev/null 2>&1
   tmux_inner_command kill-server >/dev/null 2>&1
@@ -353,11 +352,12 @@ write_attach() {
   local side="$1"
   local destination="$2"
   printf '#!/usr/bin/env bash\n' >"$destination"
+  printf 'exec python3 %q ' "$COMPAT_DIR/tui-client-job.py" >>"$destination"
   if [ "$side" = zz ]; then
-    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL -u XDG_STATE_HOME HOME=%q XDG_CONFIG_HOME=%q ZZ_LOG_DIR=%q TMUX_TMPDIR=/tmp %q --socket %q attach-session -t %q\n' \
+    printf 'env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL -u XDG_STATE_HOME HOME=%q XDG_CONFIG_HOME=%q ZZ_LOG_DIR=%q TMUX_TMPDIR=/tmp %q --socket %q attach-session -t %q\n' \
       "$ZZ_HOME" "$ZZ_HOME/config" "$ZZ_LOG_DIR" "$ZZ_BIN" "$ZZ_SOCKET" "=$INNER_SESSION" >>"$destination"
   else
-    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL -u XDG_STATE_HOME HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q -L %q attach-session -t %q\n' \
+    printf 'env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL -u XDG_STATE_HOME HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q -L %q attach-session -t %q\n' \
       "$TMUX_HOME" "$TMUX_HOME/config" "$TMUX_BIN" "$INNER_SOCKET_NAME" "=$INNER_SESSION" >>"$destination"
   fi
   chmod +x "$destination"
@@ -856,7 +856,6 @@ window_pane_count() {
 }
 
 # --- the roster's cases -----------------------------------------------------
-NATIVE_CLIENT_TOOLS='commands.native-client-tools, accepted: the pin paints client chrome inside the target pane and zz answers each intent with a native surface. The raw TUI half is TUI-014'
 INTERACTIVE_REFRESH='clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported'
 LOCK_PROGRAM='options.lock-program, accepted: the pin spawns lock-command on the client tty and a daemon that only publishes frames cannot run a program on a client terminal'
 RICH_CAPTURE='capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser'
@@ -1089,7 +1088,7 @@ client_tool_cases() {
   run_on_both set-option -gwu clock-mode-colour
   run_on_both set-option -gwu clock-mode-style
   CASE_NEEDLE_MODE=1
-  case_run customize-mode-open record "$NATIVE_CLIENT_TOOLS" -- customize-mode -t PANE
+  case_run customize-mode-open same '' -- customize-mode -t PANE
   restore_case customize-mode-closed
   CASE_NEEDLE_MODE=1
   case_run switch-mode same '' -- switch-mode -t PANE
@@ -1153,7 +1152,9 @@ run_cases() {
   # client process, so the pin's attached client stops and its session loses
   # its client for the rest of the run. The measurement is worth a case; a
   # stopped client underneath every later case is not.
-  case_run suspend-client record "$NATIVE_CLIENT_TOOLS" -- suspend-client
+  SUSPENDED_ZZ_PID="$(zz_command list-clients -F '#{client_pid}')"
+  case_run suspend-client same '' -- suspend-client
+  wait_for 'the raw client is stopped' client_process_stopped "$SUSPENDED_ZZ_PID"
 
   if [ "$FAILURES" -ne 0 ]; then
     printf '%s of %s asserted comparisons differ, %s recorded (%s for a sibling lane, %s)\n' \
@@ -1193,6 +1194,10 @@ self_check_expect() {
   fi
   SELF_CHECK_FAILURES=$((SELF_CHECK_FAILURES + 1))
   printf 'FAIL  self-check %s: %s\n' "$name" "$outcome"
+}
+
+client_process_stopped() {
+  ps -o stat= -p "$1" | grep -q '^T'
 }
 
 self_check_run() {
@@ -1444,6 +1449,21 @@ run_self_check() {
 
   # The second equivalence: with every sabotage withdrawn the comparison is
   # silent again, so none of the five above was a difference the scene kept.
+  run_both customize-mode -t PANE
+  side_command zz send-keys -t "$(active_pane zz)" Right
+  self_check_run customize-sabotage display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+  self_check_expect 'customize expansion on one side changes the decoded tree' exit=0 stdout=0 stderr=0 screen=1 state=0
+  run_both copy-mode -q -t PANE
+
+  SUSPENDED_ZZ_PID="$(zz_command list-clients -F '#{client_pid}')"
+  zz_command suspend-client
+  wait_for 'the sabotaged raw client stops' client_process_stopped "$SUSPENDED_ZZ_PID"
+  self_check_run suspend-sabotage display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+  self_check_expect 'suspension on one side changes its screen and attachment state' exit=0 stdout=0 stderr=0 screen=1 state=1
+  kill -CONT "$SUSPENDED_ZZ_PID"
+  wait_for 'the suspended raw client resumes' client_attached zz
+  SUSPENDED_ZZ_PID=""
+
   self_check_run equivalence-after display-message -p -t PANE '#{window_index}.#{pane_index}'
   self_check_expect 'equivalence: every sabotage withdrawn' \
     exit=0 stdout=0 stderr=0 screen=0 state=0

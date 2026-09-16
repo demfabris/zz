@@ -73,6 +73,7 @@ struct State {
     queued: usize,
     failure: Option<(io::ErrorKind, String)>,
     closed: bool,
+    paused: bool,
     /// Set while paints are being thrown away instead of queued.
     blocked: bool,
     /// Bytes dropped since the current interval began.
@@ -101,6 +102,7 @@ impl TerminalWriter {
                 queued: 0,
                 failure: None,
                 closed: false,
+                paused: false,
                 blocked: false,
                 discarded: 0,
                 unblocked: false,
@@ -217,6 +219,22 @@ impl TerminalWriter {
         self.shared.work.notify_all();
     }
 
+    pub fn pause(&self, paused: bool) {
+        let _sink = self
+            .shared
+            .sink
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        state.paused = paused;
+        state.queue.clear();
+        state.queued = 0;
+    }
+
     #[cfg(test)]
     pub fn queued(&self) -> usize {
         self.shared
@@ -238,6 +256,14 @@ impl Shared {
 
     fn write_now(&self, bytes: &[u8]) -> io::Result<()> {
         let mut sink = self.sink.lock().unwrap_or_else(PoisonError::into_inner);
+        if self
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .paused
+        {
+            return Ok(());
+        }
         sink(bytes)
     }
 
@@ -371,6 +397,24 @@ mod tests {
         let error = reported.expect("the failed write surfaces on a later paint");
         assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
         assert!(error.to_string().contains("terminal went away"));
+    }
+
+    #[test]
+    fn suspension_drops_paints_until_the_terminal_is_reentered() {
+        let (wrote, written) = mpsc::channel::<Vec<u8>>();
+        let writer = TerminalWriter::spawn(Box::new(move |bytes| {
+            wrote.send(bytes.to_vec()).unwrap();
+            Ok(())
+        }));
+        writer.pause(true);
+        writer.submit(b"stale".to_vec()).unwrap();
+        assert!(written.recv_timeout(Duration::from_millis(100)).is_err());
+        writer.pause(false);
+        writer.submit(b"fresh".to_vec()).unwrap();
+        assert_eq!(
+            written.recv_timeout(Duration::from_secs(2)).unwrap(),
+            b"fresh"
+        );
     }
 
     #[test]

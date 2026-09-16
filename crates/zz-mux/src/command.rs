@@ -1,3 +1,6 @@
+mod customize;
+pub use customize::CustomizeMode;
+
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
@@ -1231,6 +1234,9 @@ pub enum MuxEffect {
         update_environment: bool,
     },
     Detach(DetachRequest),
+    SuspendClient {
+        target_client: Option<String>,
+    },
     SourceFile {
         path: RawText,
         quiet: bool,
@@ -1273,6 +1279,7 @@ pub enum MuxEffect {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PaneModeRequest {
     Clock,
+    Customize(Box<CustomizeMode>),
     Switch {
         windows: bool,
         format: Option<String>,
@@ -4556,6 +4563,7 @@ impl MuxEngine {
             "kill-session" => self.kill_session(context, &command.args, hooks)?,
             "attach-session" => self.attach_session(context, &command.args, hooks)?,
             "has-session" => self.has_session(context, &command.args)?,
+            "suspend-client" => self.suspend_client(&command.args)?,
             "detach-client" => self.detach_client(context, &command.args)?,
             "list-clients" | "refresh-client" | "show-messages" => {
                 parse_command_options(name, &command.args)?;
@@ -4615,6 +4623,7 @@ impl MuxEngine {
             "send-keys" => self.send_keys(context, &command.args, hooks)?,
             "send-prefix" => self.send_prefix(context, &command.args)?,
             "copy-mode" => self.copy_mode(context, &command.args)?,
+            "customize-mode" => self.customize_mode(context, &command.args)?,
             "clock-mode" => self.clock_mode(context, &command.args)?,
             "switch-mode" => self.switch_mode(context, command)?,
             "copy-mode-search-prompt" => self.copy_mode_search_prompt(context, &command.args)?,
@@ -5256,6 +5265,14 @@ impl MuxEngine {
                 .set_session_working_directory(session, PathBuf::from(working_directory))?;
         }
         Ok(())
+    }
+
+    fn suspend_client(&self, args: &[RawText]) -> Result<Execution, ServerError> {
+        let (options, positional) = parse_command_options("suspend-client", args)?;
+        reject_positionals("suspend-client", &positional)?;
+        Ok(Execution::effect(MuxEffect::SuspendClient {
+            target_client: options.value("-t").map(str::to_owned),
+        }))
     }
 
     fn detach_client(

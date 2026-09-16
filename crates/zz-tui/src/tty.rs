@@ -64,6 +64,7 @@ fn pixel_cell_extent(pixels: u16, cells: u16, fallback: u32) -> u32 {
 }
 
 pub(crate) struct TerminalGuard {
+    active: bool,
     pixel_mouse: bool,
     kitty_keyboard: bool,
     kitty_graphics: bool,
@@ -268,20 +269,32 @@ impl TerminalGuard {
         let file_probe = probe_file_path();
         remove_file_if_present(&file_probe)?;
         fs::write(&file_probe, [0_u8; 4])?;
-        let encoded_probe_path = STANDARD.encode(file_probe.as_os_str().as_encoded_bytes());
-        let mut raw = original.clone();
-        raw.make_raw();
-        if let Err(error) = rustix::termios::tcsetattr(io::stdin(), OptionalActions::Now, &raw) {
-            let _ = fs::remove_file(&file_probe);
-            return Err(error.into());
-        }
-        let guard = Self {
+        let mut guard = Self {
+            active: false,
             pixel_mouse: supports_pixel_mouse(),
             kitty_keyboard: supports_kitty_keyboard(),
             kitty_graphics: false,
             file_probe: Some(file_probe),
             original,
         };
+        guard.resume(mouse, extended_keys, focus_events)?;
+        Ok(guard)
+    }
+
+    #[cfg(unix)]
+    pub fn resume(
+        &mut self,
+        mouse: MouseArming,
+        extended_keys: bool,
+        focus_events: bool,
+    ) -> io::Result<()> {
+        if self.active {
+            return Ok(());
+        }
+        let mut raw = self.original.clone();
+        raw.make_raw();
+        rustix::termios::tcsetattr(io::stdin(), OptionalActions::Now, &raw)?;
+        self.active = true;
         EXTENDED_KEYS_OPTION.store(extended_keys, Ordering::Relaxed);
         TERMINAL_COLOURS.store(zz_daemon::client_terminal_colour_count(), Ordering::Relaxed);
         let mut output = io::stdout().lock();
@@ -290,24 +303,25 @@ impl TerminalGuard {
             output.write_all(FOCUS_EVENTS_ENABLE)?;
         }
         output.write_all(KEYPAD_TRANSMIT)?;
-        if mouse != MouseArming::Off {
-            output.write_all(&mouse_mode_sequence(mouse, guard.pixel_mouse))?;
-        }
+        output.write_all(&mouse_mode_sequence(mouse, self.pixel_mouse))?;
         output.write_all(b"\x1b[?2004h")?;
-        if guard.kitty_keyboard {
+        if self.kitty_keyboard {
             output.write_all(b"\x1b[>3u")?;
         }
-        write!(
-            output,
-            "\x1b_Gi={PROBE_IMAGE_ID},s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b_Gi={FILE_PROBE_IMAGE_ID},s=1,v=1,a=q,t=f,f=32;{encoded_probe_path}\x1b\\"
-        )?;
+        if let Some(file_probe) = &self.file_probe {
+            let encoded_probe_path = STANDARD.encode(file_probe.as_os_str().as_encoded_bytes());
+            write!(
+                output,
+                "\x1b_Gi={PROBE_IMAGE_ID},s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b_Gi={FILE_PROBE_IMAGE_ID},s=1,v=1,a=q,t=f,f=32;{encoded_probe_path}\x1b\\"
+            )?;
+        }
         output.write_all(TERMINAL_REQUESTS)?;
         output.write_all(THEME_SUBSCRIBE)?;
         output.write_all(b"\x1b[16t\x1b[2J")?;
         output.flush()?;
         drop(output);
         arm_extended_keys();
-        Ok(guard)
+        Ok(())
     }
 
     #[cfg(not(unix))]
@@ -341,9 +355,12 @@ impl TerminalGuard {
     }
 }
 
-impl Drop for TerminalGuard {
-    fn drop(&mut self) {
-        self.finish_file_probe();
+impl TerminalGuard {
+    pub fn suspend(&mut self) {
+        if !self.active {
+            return;
+        }
+        self.active = false;
         cleanup_frame_slot_files();
         let mut output = io::stdout().lock();
         let _ = output.write_all(b"\x1b[?2026l\x1b[0m\x1b]112\x07");
@@ -364,6 +381,13 @@ impl Drop for TerminalGuard {
         let _ = output.flush();
         #[cfg(unix)]
         let _ = rustix::termios::tcsetattr(io::stdin(), OptionalActions::Now, &self.original);
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        self.finish_file_probe();
+        self.suspend();
     }
 }
 

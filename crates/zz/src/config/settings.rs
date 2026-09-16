@@ -1399,9 +1399,9 @@ impl SettingsView {
                 column.child(SettingsStack::titled("Tray").child(Self::boolean_setting(
                     ConfigKey::Tray,
                     "Tray icon",
-                    "Show an icon while the local daemon runs, even after the app quits. \
-                     Click to show or hide the window, or reopen the app. \
-                     Quit zz in the tray menu stops the daemon and all sessions.",
+                    "Show an icon in the menu bar. \
+                     Closing the window or quitting while sessions run hides zz there instead of exiting. \
+                     Quit and Stop Sessions in the tray menu stops the daemon.",
                     resolved.tray,
                     cx,
                 )))

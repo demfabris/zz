@@ -1,238 +1,221 @@
-use std::{
-    path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    thread,
-    time::Duration,
-};
-
+use async_channel::Sender;
 use gpui::{AnyWindowHandle, App, Entity, Global, Task, WeakEntity};
-use interprocess::TryClone as _;
-use interprocess::local_socket::Stream;
-use parking_lot::Mutex;
+use zz_protocol::CommandInvocation;
 
 use crate::{
+    config::{self, AppConfig},
     mux::{
         client::MuxClient,
-        hosts::{HostId, HostState},
+        hosts::HostId,
         nav::{TreeTarget, activate_nav, activation_for_target},
     },
     workspace::{AppView, sidebar::WorkspaceSidebar},
 };
 
-use super::ipc::{self, DesktopEvent};
+use super::{
+    QuitAction, Tray, TrayEvent,
+    facts::{Source, TrayFacts, facts_from, menu},
+    quit_action,
+};
 
 #[derive(Default)]
 pub(crate) struct DesktopTray {
-    server_id: Option<u64>,
-    pub(crate) sidebar: Option<WeakEntity<WorkspaceSidebar>>,
-    pending: Option<DesktopEvent>,
+    tray: Option<Tray>,
+    source: Source,
+    facts: Option<TrayFacts>,
+    active: bool,
     available: bool,
+    pub(crate) window: Option<AnyWindowHandle>,
+    mux: Option<WeakEntity<MuxClient>>,
+    events: Option<Sender<TrayEvent>>,
+    pub(crate) sidebar: Option<WeakEntity<WorkspaceSidebar>>,
     pub(crate) stopping_daemon: bool,
-    cancel: Option<Arc<AtomicBool>>,
-    writer: Option<Arc<Mutex<Stream>>>,
     _task: Option<Task<()>>,
 }
 
-enum ConnectionEvent {
-    Writer(Stream),
-    Event(DesktopEvent),
-}
-
 impl Global for DesktopTray {}
-
-impl Drop for DesktopTray {
-    fn drop(&mut self) {
-        if let Some(cancel) = &self.cancel {
-            cancel.store(true, Ordering::Release);
-        }
-    }
-}
 
 impl DesktopTray {
     pub(crate) fn available(&self) -> bool {
         self.available
     }
+
+    fn publish(&self) {
+        self.source.set(menu(self.facts.as_ref(), self.active));
+        if let Some(backend) = &self.tray {
+            backend.set_attention(self.facts.as_ref().map_or(0, |facts| facts.attention.len()));
+        }
+    }
 }
 
-pub(crate) fn init_desktop(
-    mux: &Entity<MuxClient>,
-    socket: PathBuf,
-    window: AnyWindowHandle,
-    cx: &mut App,
-) {
-    reconnect(mux.clone(), socket.clone(), window, cx);
-    cx.observe(mux, move |mux, cx| {
-        reconnect(mux.clone(), socket.clone(), window, cx);
-        drain_pending(&mux, window, cx);
-    })
-    .detach();
-}
-
-fn reconnect(mux: Entity<MuxClient>, socket: PathBuf, window: AnyWindowHandle, cx: &mut App) {
-    let server_id = mux.read(cx).local_server_id();
-    if cx.global::<DesktopTray>().server_id == server_id {
-        return;
-    }
-    let was_available = cx.global::<DesktopTray>().available;
-    let tray = cx.global_mut::<DesktopTray>();
-    if tray.server_id.is_some() {
-        tray.pending = None;
-    }
-    if let Some(cancel) = tray.cancel.take() {
-        cancel.store(true, Ordering::Release);
-    }
-    tray._task.take();
-    let retired_writer = tray.writer.take();
-    tray.server_id = server_id;
-    tray.available = false;
-    if let Some(writer) = retired_writer {
-        cx.background_executor()
-            .spawn(async move {
-                let _ = ipc::disconnect(&mut writer.lock());
-            })
-            .detach();
-    }
-    if was_available {
-        show_if_hidden(window, cx);
-    }
-    let Some(server_id) = server_id else { return };
-    let path = ipc::endpoint(&socket, server_id);
-    let cancel = Arc::new(AtomicBool::new(false));
-    let worker_cancel = cancel.clone();
+pub(crate) fn init_desktop(mux: &Entity<MuxClient>, window: AnyWindowHandle, cx: &mut App) {
     let (events, receiver) = async_channel::unbounded();
-    if thread::Builder::new()
-        .name("zz-tray-desktop".into())
-        .spawn(move || {
-            loop {
-                let mut connected = None;
-                for attempt in 0..24 {
-                    if worker_cancel.load(Ordering::Acquire) || events.is_closed() {
-                        return;
-                    }
-                    if let Ok(mut stream) = ipc::connect(&path)
-                        && ipc::register(&mut stream).is_ok()
-                    {
-                        connected = Some(stream);
-                        break;
-                    }
-                    if attempt == 4 {
-                        super::host::start_desktop_helper(&socket, server_id);
-                    }
-                    thread::sleep(Duration::from_millis((50u64 << attempt.min(4)).min(500)));
-                }
-                let Some(mut stream) = connected else { return };
-                let Ok(writer) = stream.try_clone() else {
-                    return;
-                };
-                if events.try_send(ConnectionEvent::Writer(writer)).is_err() {
-                    return;
-                }
-                while let Ok(event) = ipc::receive(&mut stream) {
-                    if worker_cancel.load(Ordering::Acquire)
-                        || events.try_send(ConnectionEvent::Event(event)).is_err()
-                    {
-                        return;
-                    }
-                }
-                if events
-                    .try_send(ConnectionEvent::Event(DesktopEvent::Available(false)))
-                    .is_err()
-                {
-                    return;
-                }
-            }
-        })
-        .is_err()
-    {
-        return;
-    }
+    let event_mux = mux.clone();
     let task = cx.spawn(async move |cx| {
         while let Ok(event) = receiver.recv().await {
             cx.update(|cx| match event {
-                ConnectionEvent::Writer(writer) => {
-                    cx.global_mut::<DesktopTray>().writer = Some(Arc::new(Mutex::new(writer)));
-                    let _ = window.update(cx, |_, window, cx| {
-                        if window.is_window_active() {
-                            focused(cx);
-                        } else {
-                            inactive(cx);
-                        }
-                    });
-                }
-                ConnectionEvent::Event(DesktopEvent::Available(available)) => {
-                    let was_available = cx.global::<DesktopTray>().available;
-                    cx.global_mut::<DesktopTray>().available = available;
-                    if was_available && !available {
+                TrayEvent::Toggle => crate::toggle_from_tray(window, cx),
+                TrayEvent::Quit => quit_and_stop_sessions(&event_mux, cx),
+                TrayEvent::Available(available) => {
+                    let tray = cx.global_mut::<DesktopTray>();
+                    let was_available = tray.available;
+                    tray.available = available && tray.tray.is_some();
+                    if was_available && !tray.available {
                         show_if_hidden(window, cx);
                     }
                 }
-                ConnectionEvent::Event(DesktopEvent::Toggle) => crate::toggle_from_tray(window, cx),
-                ConnectionEvent::Event(DesktopEvent::Quit) => {
-                    cx.global_mut::<DesktopTray>().stopping_daemon = true;
-                    if let Some(writer) = cx.global::<DesktopTray>().writer.clone() {
-                        cx.background_executor()
-                            .spawn(async move {
-                                let _ = ipc::acknowledge_quit(&mut writer.lock());
-                            })
-                            .detach();
-                    }
-                    cx.quit();
-                }
-                ConnectionEvent::Event(event) => {
-                    if matches!(
-                        event,
-                        DesktopEvent::NewSession
-                            | DesktopEvent::SwitchSession(_)
-                            | DesktopEvent::FocusPane(_)
-                    ) {
-                        cx.global_mut::<DesktopTray>().pending = Some(event);
-                        drain_pending(&mux, window, cx);
-                    } else {
-                        handle_intent(event, &mux, window, cx);
-                    }
-                }
+                event => handle_intent(event, &event_mux, window, cx),
             });
         }
     });
     let tray = cx.global_mut::<DesktopTray>();
-    tray.cancel = Some(cancel);
+    tray.window = Some(window);
+    tray.mux = Some(mux.downgrade());
+    tray.events = Some(events);
     tray._task = Some(task);
+    tray.publish();
+    sync_enabled(cx);
+    refresh(mux, cx);
+    cx.observe(mux, |mux, cx| refresh(&mux, cx)).detach();
+    cx.observe_global::<AppConfig>(sync_enabled).detach();
 }
 
-fn drain_pending(mux: &Entity<MuxClient>, window: AnyWindowHandle, cx: &mut App) {
-    let ready = mux
-        .read(cx)
-        .fleet_hosts()
-        .any(|(host, _, state, snapshot)| {
-            host == HostId::LOCAL
-                && *state == HostState::Connected
-                && snapshot.is_some_and(|snapshot| snapshot.generation > 0)
-        });
-    if ready && let Some(event) = cx.global_mut::<DesktopTray>().pending.take() {
-        handle_intent(event, mux, window, cx);
+fn sync_enabled(cx: &mut App) {
+    let enabled = config::tray_enabled(cx);
+    let tray = cx.global_mut::<DesktopTray>();
+    if enabled == tray.tray.is_some() {
+        return;
+    }
+    if enabled {
+        if let Some(sender) = &tray.events {
+            tray.tray = super::spawn(sender.clone(), tray.source.clone());
+            tray.publish();
+        }
+    } else {
+        tray.tray.take();
+        tray.available = false;
+        if let Some(window) = tray.window {
+            show_if_hidden(window, cx);
+        }
     }
 }
 
-fn handle_intent(
-    event: DesktopEvent,
-    mux: &Entity<MuxClient>,
-    handle: AnyWindowHandle,
-    cx: &mut App,
-) {
-    let _ = handle.update(cx, |_, window, cx| {
+fn refresh(mux: &Entity<MuxClient>, cx: &mut App) {
+    let mux = mux.read(cx);
+    let snapshot = mux
+        .fleet_hosts()
+        .find_map(|(host, _, _, snapshot)| (host == HostId::LOCAL).then_some(snapshot).flatten());
+    let facts = facts_from(
+        snapshot,
+        |pane| mux.agent_attention_status(pane),
+        mux.stale_daemon().is_some(),
+    );
+    let tray = cx.global_mut::<DesktopTray>();
+    if tray.facts != facts {
+        tray.facts = facts;
+        tray.publish();
+    }
+}
+
+pub(crate) fn set_active(active: bool, cx: &mut App) {
+    let tray = cx.global_mut::<DesktopTray>();
+    if tray.active != active {
+        tray.active = active;
+        tray.publish();
+    }
+}
+
+pub(crate) fn hide(window: AnyWindowHandle, cx: &mut App) {
+    set_active(false, cx);
+    #[cfg(target_os = "macos")]
+    {
+        let _ = window;
+        cx.hide();
+        set_activation_policy(objc2_app_kit::NSApplicationActivationPolicy::Accessory);
+    }
+    #[cfg(not(target_os = "macos"))]
+    cx.defer(move |cx| {
+        let _ = window.update(cx, |_, window, _| window.set_window_visible(false));
+    });
+}
+
+pub(crate) fn show(window: AnyWindowHandle, cx: &mut App) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = window;
+        set_activation_policy(objc2_app_kit::NSApplicationActivationPolicy::Regular);
+        cx.activate(true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = window.update(cx, |_, window, _| {
         window.set_window_visible(true);
         window.activate_window();
-        cx.activate(true);
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn set_activation_policy(policy: objc2_app_kit::NSApplicationActivationPolicy) {
+    let Some(main_thread) = objc2::MainThreadMarker::new() else {
+        log::warn!("could not change macOS activation policy outside the main thread");
+        return;
+    };
+    let app = objc2_app_kit::NSApplication::sharedApplication(main_thread);
+    if !app.setActivationPolicy(policy) {
+        log::warn!("macOS rejected the activation policy");
+    }
+}
+
+pub(crate) fn has_sessions(mux: &Entity<MuxClient>, cx: &App) -> bool {
+    mux.read(cx).fleet_hosts().any(|(host, _, _, snapshot)| {
+        host == HostId::LOCAL && snapshot.is_some_and(|snapshot| !snapshot.sessions.is_empty())
+    })
+}
+
+pub(crate) fn hide_or_quit(mux: &Entity<MuxClient>, window: AnyWindowHandle, cx: &mut App) -> bool {
+    if quit_action(
+        config::tray_enabled(cx),
+        cx.global::<DesktopTray>().available(),
+        config::quit_daemon_on_exit(cx),
+        has_sessions(mux, cx),
+    ) == QuitAction::HideToTray
+    {
+        hide(window, cx);
+        true
+    } else {
+        false
+    }
+}
+
+pub(crate) fn quit_requested(cx: &mut App) {
+    let tray = cx.global::<DesktopTray>();
+    if let Some(window) = tray.window
+        && let Some(mux) = tray.mux.as_ref().and_then(WeakEntity::upgrade)
+        && hide_or_quit(&mux, window, cx)
+    {
+        return;
+    }
+    cx.quit();
+}
+
+fn quit_and_stop_sessions(mux: &Entity<MuxClient>, cx: &mut App) {
+    cx.global_mut::<DesktopTray>().stopping_daemon = true;
+    mux.read(cx).execute_on_host(
+        HostId::LOCAL,
+        CommandInvocation::new("kill-server", [] as [&str; 0]),
+    );
+    cx.quit();
+}
+
+fn handle_intent(event: TrayEvent, mux: &Entity<MuxClient>, handle: AnyWindowHandle, cx: &mut App) {
+    show(handle, cx);
+    let _ = handle.update(cx, |_, window, cx| {
         let sidebar = cx
             .global::<DesktopTray>()
             .sidebar
             .as_ref()
             .and_then(WeakEntity::upgrade);
         match event {
-            DesktopEvent::NewSession => {
+            TrayEvent::NewSession => {
                 if let Some(sidebar) = sidebar {
                     sidebar.update(cx, |sidebar, cx| sidebar.close_settings(window, cx));
                 }
@@ -242,7 +225,7 @@ fn handle_intent(
                     }
                 });
             }
-            DesktopEvent::SwitchSession(name) => {
+            TrayEvent::SwitchSession(name) => {
                 let session = mux
                     .read(cx)
                     .fleet_hosts()
@@ -264,88 +247,59 @@ fn handle_intent(
                     });
                 }
             }
-            DesktopEvent::FocusPane(pane) => {
-                let pane = pane
-                    .strip_prefix('%')
-                    .and_then(|pane| pane.parse().ok())
-                    .map(zz_protocol::PaneId);
-                if let Some(pane) = pane {
-                    let client = mux.read(cx);
-                    let owner = client.fleet_hosts().find_map(|(host, _, _, snapshot)| {
-                        if host != HostId::LOCAL {
-                            return None;
-                        }
-                        snapshot?.sessions.iter().find_map(|session| {
-                            session
-                                .windows
-                                .iter()
-                                .find(|window| window.panes.contains_key(&pane))
-                                .map(|window| (session.id, window.id))
-                        })
-                    });
-                    let activation = owner.and_then(|(session, window)| {
-                        activation_for_target(
-                            HostId::LOCAL,
-                            TreeTarget::Pane(pane),
-                            Some(session),
-                            Some(window),
-                            client.attached_host(),
-                            client.attached_session(),
-                            true,
-                        )
-                    });
-                    if let Some(activation) = activation {
-                        if let Some(sidebar) = sidebar {
-                            sidebar.update(cx, |sidebar, cx| sidebar.close_settings(window, cx));
-                        }
-                        activate_nav(mux, activation, cx);
+            TrayEvent::FocusPane(pane) => {
+                let client = mux.read(cx);
+                let owner = client.fleet_hosts().find_map(|(host, _, _, snapshot)| {
+                    if host != HostId::LOCAL {
+                        return None;
                     }
+                    snapshot?.sessions.iter().find_map(|session| {
+                        session
+                            .windows
+                            .iter()
+                            .find(|window| window.panes.contains_key(&pane))
+                            .map(|window| (session.id, window.id))
+                    })
+                });
+                let activation = owner.and_then(|(session, window)| {
+                    activation_for_target(
+                        HostId::LOCAL,
+                        TreeTarget::Pane(pane),
+                        Some(session),
+                        Some(window),
+                        client.attached_host(),
+                        client.attached_session(),
+                        true,
+                    )
+                });
+                if let Some(activation) = activation {
+                    if let Some(sidebar) = sidebar {
+                        sidebar.update(cx, |sidebar, cx| sidebar.close_settings(window, cx));
+                    }
+                    activate_nav(mux, activation, cx);
                 }
             }
-            DesktopEvent::OpenSettings => {
+            TrayEvent::OpenSettings => {
                 if let Some(sidebar) = sidebar {
                     sidebar.update(cx, |sidebar, cx| sidebar.open_settings(window, cx));
                 }
             }
-            DesktopEvent::OpenLogs => crate::diagnostics::open_logs(cx),
-            DesktopEvent::RestartDaemon => AppView::prompt_daemon_update(mux, window, cx),
+            TrayEvent::OpenLogs => crate::diagnostics::open_logs(cx),
+            TrayEvent::RestartDaemon => AppView::prompt_daemon_update(mux, window, cx),
             _ => {}
         }
     });
 }
 
-pub(crate) fn inactive(cx: &App) {
-    if let Some(writer) = cx.global::<DesktopTray>().writer.clone() {
-        cx.background_executor()
-            .spawn(async move {
-                let _ = ipc::inactive(&mut writer.lock());
-            })
-            .detach();
-    }
-}
-
-pub(crate) fn focused(cx: &App) {
-    if let Some(writer) = cx.global::<DesktopTray>().writer.clone() {
-        cx.background_executor()
-            .spawn(async move {
-                let _ = ipc::focus(&mut writer.lock());
-            })
-            .detach();
-    }
-}
-
-fn show_if_hidden(_window: AnyWindowHandle, cx: &mut App) {
+fn show_if_hidden(window: AnyWindowHandle, cx: &mut App) {
     #[cfg(target_os = "macos")]
-    if let Some(mtm) = objc2::MainThreadMarker::new()
-        && objc2_app_kit::NSApplication::sharedApplication(mtm).isHidden()
-    {
-        cx.activate(true);
-    }
+    let hidden = objc2::MainThreadMarker::new()
+        .is_some_and(|mtm| objc2_app_kit::NSApplication::sharedApplication(mtm).isHidden());
     #[cfg(not(target_os = "macos"))]
-    let _ = _window.update(cx, |_, window, _| {
-        if !window.is_window_visible() {
-            window.set_window_visible(true);
-            window.activate_window();
-        }
-    });
+    let hidden = window
+        .update(cx, |_, window, _| !window.is_window_visible())
+        .unwrap_or(false);
+    if hidden {
+        show(window, cx);
+    }
 }

@@ -132,7 +132,6 @@
 # prints both sides so the next lane has the measurement. It reaps every server
 # and daemon it starts.
 set -eEuo pipefail
-export ZZ_TRAY=0
 
 usage() {
   printf 'usage: compat/tui-overlays.sh [--self-check] [ZZ_BIN [TMUX_BIN]]\n' >&2

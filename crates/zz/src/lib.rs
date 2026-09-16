@@ -356,9 +356,6 @@ fn configure_application_working_directory() {
 #[cfg(not(any(target_os = "windows", target_os = "ios")))]
 #[must_use]
 pub fn run() -> ExitCode {
-    if let Some(exit) = tray::run_if_requested() {
-        return exit;
-    }
     #[cfg(unix)]
     if let Some(exit) = run_askpass_mode() {
         return exit;
@@ -390,9 +387,6 @@ pub fn run() -> ExitCode {
 #[cfg(target_os = "windows")]
 #[must_use]
 pub fn run() -> ExitCode {
-    if let Some(exit) = tray::run_if_requested() {
-        return exit;
-    }
     if let Some(exit) = run_askpass_mode() {
         return exit;
     }
@@ -425,9 +419,6 @@ pub extern "C" fn RunWinMain(
     sandbox_info: *mut core::ffi::c_void,
     _version_info: *mut core::ffi::c_void,
 ) -> i32 {
-    if let Some(exit) = tray::run_if_requested() {
-        return if exit == ExitCode::SUCCESS { 0 } else { 1 };
-    }
     if let Some(exit) = run_askpass_mode() {
         return if exit == ExitCode::SUCCESS { 0 } else { 1 };
     }
@@ -943,17 +934,13 @@ fn run_command_mode(
         if let Some(client_working_directory) = bootstrap.client_working_directory {
             daemon = daemon.with_initial_client_working_directory(client_working_directory);
         }
-        return Some(
-            match daemon.run_foreground_with_ready(|server_id| {
-                tray::start_daemon_helper(socket_path, server_id)
-            }) {
-                Ok(()) | Err(DaemonError::AlreadyRunning(_)) => ExitCode::SUCCESS,
-                Err(error) => {
-                    eprintln!("zz daemon: {error}");
-                    exit_code_for(CliFailure::Runtime)
-                }
-            },
-        );
+        return Some(match daemon.run_foreground() {
+            Ok(()) | Err(DaemonError::AlreadyRunning(_)) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("zz daemon: {error}");
+                exit_code_for(CliFailure::Runtime)
+            }
+        });
     }
 
     if command == "proxy" {
@@ -2621,7 +2608,17 @@ fn run_app(
     );
     let platform = gpui_platform::current_platform(false);
     let fonts = zz_ui::settings::appearance::AvailableFonts(platform.text_system());
-    gpui::Application::with_platform(platform)
+    let application = gpui::Application::with_platform(platform);
+    #[cfg(target_os = "macos")]
+    application.on_reopen(|cx| {
+        if let Some(window) = cx
+            .try_global::<tray::DesktopTray>()
+            .and_then(|tray| tray.window)
+        {
+            tray::show(window, cx);
+        }
+    });
+    application
         .with_assets(Assets)
         .run(move |cx: &mut App| {
             cx.set_global(fonts);
@@ -2694,7 +2691,7 @@ fn run_app(
                             cx,
                         )
                     });
-                    tray::init_desktop(&mux, socket_path.clone(), window.window_handle(), cx);
+                    tray::init_desktop(&mux, window.window_handle(), cx);
 
                     diagnostics::start_app_state_sampler(controller.clone(), mux.clone(), cx);
                     diagnostics::init_debug_mark(controller.clone(), mux.clone(), cx);
@@ -2765,13 +2762,10 @@ fn run_app(
                     let close_controller = controller.clone();
                     let close_agent_controller = agent_controller.clone();
                     let close_window_state = window_state.clone();
+                    let close_mux = mux.clone();
                     window.on_window_should_close(cx, move |window, cx| {
                         close_window_state.capture_and_flush(window, cx);
-                        if config::tray_enabled(cx) && cx.global::<tray::DesktopTray>().available() {
-                            #[cfg(target_os = "macos")]
-                            cx.hide();
-                            #[cfg(not(target_os = "macos"))]
-                            window.set_window_visible(false);
+                        if tray::hide_or_quit(&close_mux, window.window_handle(), cx) {
                             return false;
                         }
                         request_window_close(
@@ -2809,11 +2803,7 @@ fn run_app(
                     cx.new(|cx| {
                         let root = build_root(shell, window, cx);
                         cx.observe_window_activation(window, |_, window, cx| {
-                            if window.is_window_active() {
-                                tray::focused(cx);
-                            } else {
-                                tray::inactive(cx);
-                            }
+                            tray::set_active(window.is_window_active(), cx);
                         }).detach();
                         window::state::observe(observed_window_state, window, cx);
                         root
@@ -2834,25 +2824,8 @@ fn toggle_from_tray(main_window: gpui::AnyWindowHandle, cx: &mut App) {
         })
         .unwrap_or((true, false));
     match tray::toggle_action(visible, active) {
-        #[cfg(target_os = "macos")]
-        tray::ToggleAction::Hide => {
-            tray::inactive(cx);
-            cx.hide();
-        }
-        #[cfg(target_os = "macos")]
-        tray::ToggleAction::Raise | tray::ToggleAction::Show => cx.activate(true),
-        #[cfg(not(target_os = "macos"))]
-        tray::ToggleAction::Hide => {
-            tray::inactive(cx);
-            let _ = main_window.update(cx, |_, window, _| window.set_window_visible(false));
-        }
-        #[cfg(not(target_os = "macos"))]
-        tray::ToggleAction::Raise | tray::ToggleAction::Show => {
-            let _ = main_window.update(cx, |_, window, _| {
-                window.set_window_visible(true);
-                window.activate_window();
-            });
-        }
+        tray::ToggleAction::Hide => tray::hide(main_window, cx),
+        tray::ToggleAction::Raise | tray::ToggleAction::Show => tray::show(main_window, cx),
     }
 }
 

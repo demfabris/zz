@@ -217,7 +217,6 @@
 # copies its evidence into; without it a fresh /tmp directory is made and named
 # on stderr.
 set -eEuo pipefail
-export ZZ_TRAY=0
 
 usage() {
   printf 'usage: compat/tui-caps.sh [--self-check] [ZZ_BIN [TMUX_BIN]]\n' >&2

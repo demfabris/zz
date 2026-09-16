@@ -15,7 +15,6 @@
 # it exits 1 so a caller can gate on it, and prints both rows so the next
 # lane has the measurement.
 set -eEuo pipefail
-export ZZ_TRAY=0
 
 usage() {
   printf 'usage: compat/status-row.sh [ZZ_BIN [TMUX_BIN]]\n' >&2

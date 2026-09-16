@@ -63,7 +63,6 @@
 # comparison to catch each one in that channel, plus two equivalences it must
 # NOT report.
 set -eEuo pipefail
-export ZZ_TRAY=0
 
 usage() {
   printf 'usage: compat/tui-command-streams.sh [--self-check] [ZZ_BIN [TMUX_BIN]]\n' >&2

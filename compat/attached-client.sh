@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -eEuo pipefail
-export ZZ_TRAY=0
 set +B
 
 usage() {

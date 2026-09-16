@@ -1,25 +1,10 @@
-use std::{
-    io,
-    path::{Path, PathBuf},
-    process::{Command, Stdio},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-};
+use std::sync::Arc;
 
-use zz_daemon::CommandClient;
-use zz_protocol::CommandInvocation;
+use parking_lot::Mutex;
+use zz_client::AgentAttentionStatus;
+use zz_protocol::{MuxSnapshot, PaneId, PaneKindSnapshot};
 
 use super::TrayEvent;
-
-const SESSIONS: &str = "#{session_name}\t#{session_windows}\t#{session_attached}";
-const PANES: &str = "#{pane_id}\t#{session_name}\t#{window_index}\t#{pane_index}\t#{pane_kind}\t#{pane_title}\t#{agent_state}\t#{agent_pending_permission}";
-const START_TIME: &str = "#{start_time}";
-static MENU_FETCH: AtomicBool = AtomicBool::new(false);
-static POLL_FETCH: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Session {
@@ -30,28 +15,24 @@ pub(super) struct Session {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Attention {
-    pub pane: String,
+    pub pane: PaneId,
     pub session: String,
-    pub window: usize,
+    pub window: u32,
     pub title: String,
     pub permission: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(super) struct TrayFacts {
     pub sessions: Vec<Session>,
     pub attention: Vec<Attention>,
-    pub start_time: u64,
     pub update_available: bool,
 }
 
-#[derive(Clone)]
-pub(super) struct Source {
-    pub socket: PathBuf,
-    pub server_id: u64,
-    pub active: Arc<AtomicBool>,
-}
+#[derive(Clone, Default)]
+pub(super) struct Source(Arc<Mutex<Vec<MenuEntry>>>);
 
+#[derive(Clone)]
 pub(super) enum MenuEntry {
     Separator,
     Item {
@@ -73,9 +54,48 @@ impl MenuEntry {
 
 impl Source {
     pub fn menu(&self) -> Vec<MenuEntry> {
-        let facts = fetch(&self.socket, self.server_id, Duration::from_millis(300)).ok();
-        menu(facts.as_ref(), self.active.load(Ordering::Acquire))
+        self.0.lock().clone()
     }
+
+    pub fn set(&self, entries: Vec<MenuEntry>) {
+        *self.0.lock() = entries;
+    }
+}
+
+pub(super) fn facts_from(
+    snapshot: Option<&MuxSnapshot>,
+    attention: impl Fn(PaneId) -> Option<AgentAttentionStatus>,
+    stale: bool,
+) -> Option<TrayFacts> {
+    let snapshot = snapshot?;
+    let mut facts = TrayFacts {
+        sessions: Vec::new(),
+        attention: Vec::new(),
+        update_available: stale,
+    };
+    for session in &snapshot.sessions {
+        facts.sessions.push(Session {
+            name: session.name.clone(),
+            windows: session.windows.len(),
+            attached: !session.viewers.is_empty(),
+        });
+        for window in &session.windows {
+            for pane in window.panes.values() {
+                if matches!(pane.kind, PaneKindSnapshot::Agent(_))
+                    && attention(pane.id) == Some(AgentAttentionStatus::NeedsInput)
+                {
+                    facts.attention.push(Attention {
+                        pane: pane.id,
+                        session: session.name.clone(),
+                        window: window.index,
+                        title: pane.title.clone(),
+                        permission: true,
+                    });
+                }
+            }
+        }
+    }
+    Some(facts)
 }
 
 fn item(title: impl Into<String>, hint: impl Into<String>, action: Option<TrayEvent>) -> MenuEntry {
@@ -86,7 +106,7 @@ fn item(title: impl Into<String>, hint: impl Into<String>, action: Option<TrayEv
     }
 }
 
-fn menu(facts: Option<&TrayFacts>, active: bool) -> Vec<MenuEntry> {
+pub(super) fn menu(facts: Option<&TrayFacts>, active: bool) -> Vec<MenuEntry> {
     let mut menu = vec![
         item(
             if active { "Hide zz" } else { "Show zz" },
@@ -106,7 +126,7 @@ fn menu(facts: Option<&TrayFacts>, active: bool) -> Vec<MenuEntry> {
                     } else {
                         "waiting"
                     },
-                    Some(TrayEvent::FocusPane(pane.pane.clone())),
+                    Some(TrayEvent::FocusPane(pane.pane)),
                 ));
             }
             menu.push(MenuEntry::Separator);
@@ -127,23 +147,7 @@ fn menu(facts: Option<&TrayFacts>, active: bool) -> Vec<MenuEntry> {
     menu.push(item("New Session", "", Some(TrayEvent::NewSession)));
     menu.push(MenuEntry::Separator);
     if let Some(facts) = facts {
-        let uptime = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-            .saturating_sub(facts.start_time);
-        let duration = if uptime >= 86400 {
-            format!("{}d {}h", uptime / 86400, uptime % 86400 / 3600)
-        } else if uptime >= 3600 {
-            format!("{}h {}m", uptime / 3600, uptime % 3600 / 60)
-        } else {
-            format!("{}m", uptime / 60)
-        };
-        menu.push(item(
-            format!("zz {} · up {duration}", env!("CARGO_PKG_VERSION")),
-            "",
-            None,
-        ));
+        menu.push(item(format!("zz {}", env!("CARGO_PKG_VERSION")), "", None));
         if facts.update_available {
             menu.push(item(
                 "Restart Daemon to Update…",
@@ -164,258 +168,111 @@ fn menu(facts: Option<&TrayFacts>, active: bool) -> Vec<MenuEntry> {
     menu
 }
 
-fn invalid() -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, "invalid tray facts")
-}
-
-fn parse_sessions(output: &str) -> io::Result<Vec<Session>> {
-    output
-        .lines()
-        .map(|line| {
-            let fields: Vec<_> = line.split('\t').collect();
-            let [name, windows, attached] = fields.as_slice() else {
-                return Err(invalid());
-            };
-            if name.is_empty() {
-                return Err(invalid());
-            }
-            Ok(Session {
-                name: (*name).into(),
-                windows: windows.parse().map_err(|_| invalid())?,
-                attached: attached.parse::<usize>().map_err(|_| invalid())? > 0,
-            })
-        })
-        .collect()
-}
-
-fn parse_attention(output: &str) -> io::Result<Vec<Attention>> {
-    let mut attention = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
-    for line in output.lines() {
-        let fields: Vec<_> = line.split('\t').collect();
-        if fields.len() < 8 {
-            return Err(invalid());
-        }
-        let state = fields[fields.len() - 2];
-        let permission = fields[fields.len() - 1];
-        if fields[4] != "agent" || (state != "blocked" && permission != "1") {
-            continue;
-        }
-        fields[0]
-            .strip_prefix('%')
-            .ok_or_else(invalid)?
-            .parse::<u64>()
-            .map_err(|_| invalid())?;
-        if !seen.insert(fields[0]) {
-            continue;
-        }
-        attention.push(Attention {
-            pane: fields[0].into(),
-            session: fields[1].into(),
-            window: fields[2].parse().map_err(|_| invalid())?,
-            title: fields[5..fields.len() - 2].join(" "),
-            permission: permission == "1",
-        });
-    }
-    Ok(attention)
-}
-
-fn parse_start_time(output: &str) -> io::Result<u64> {
-    output.trim().parse().map_err(|_| invalid())
-}
-
-fn bounded<T: Send + 'static>(
-    flag: &'static AtomicBool,
-    budget: Duration,
-    work: impl FnOnce(Instant) -> io::Result<T> + Send + 'static,
-) -> io::Result<T> {
-    if flag
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::WouldBlock,
-            "tray fetch in progress",
-        ));
-    }
-    let deadline = Instant::now() + budget;
-    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-    let worker = thread::Builder::new()
-        .name("zz-tray-facts".into())
-        .spawn(move || {
-            struct Release(&'static AtomicBool);
-            impl Drop for Release {
-                fn drop(&mut self) {
-                    self.0.store(false, Ordering::Release);
-                }
-            }
-            let _release = Release(flag);
-            let _ = sender.send(work(deadline));
-        });
-    if let Err(error) = worker {
-        flag.store(false, Ordering::Release);
-        return Err(error);
-    }
-    receiver
-        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "tray fetch timed out"))?
-}
-
-fn connect(socket: &Path, server_id: u64) -> io::Result<CommandClient> {
-    let client = CommandClient::connect(socket).map_err(io::Error::other)?;
-    if client.server_hello().server_id != server_id {
-        return Err(io::Error::other("tray daemon changed"));
-    }
-    Ok(client)
-}
-
-fn execute(
-    client: &mut CommandClient,
-    name: &str,
-    args: &[&str],
-    deadline: Instant,
-) -> io::Result<String> {
-    if Instant::now() >= deadline {
-        return Err(io::Error::new(
-            io::ErrorKind::TimedOut,
-            "tray fetch timed out",
-        ));
-    }
-    client
-        .execute(CommandInvocation::new(name, args.iter().copied()))
-        .map_err(io::Error::other)
-}
-
-pub(super) fn fetch(socket: &Path, server_id: u64, budget: Duration) -> io::Result<TrayFacts> {
-    let socket = socket.to_path_buf();
-    bounded(&MENU_FETCH, budget, move |deadline| {
-        let mut client = connect(&socket, server_id)?;
-        let sessions = parse_sessions(&execute(
-            &mut client,
-            "list-sessions",
-            &["-F", SESSIONS],
-            deadline,
-        )?)?;
-        let attention = parse_attention(&execute(
-            &mut client,
-            "list-panes",
-            &["-a", "-F", PANES],
-            deadline,
-        )?)?;
-        let start_time = parse_start_time(&execute(
-            &mut client,
-            "display-message",
-            &["-p", START_TIME],
-            deadline,
-        )?)?;
-        let update_available =
-            disk_version(deadline).is_some_and(|disk| disk != env!("CARGO_PKG_VERSION"));
-        Ok(TrayFacts {
-            sessions,
-            attention,
-            start_time,
-            update_available,
-        })
-    })
-}
-
-pub(super) fn attention_count(
-    socket: &Path,
-    server_id: u64,
-    budget: Duration,
-) -> io::Result<usize> {
-    let socket = socket.to_path_buf();
-    bounded(&POLL_FETCH, budget, move |deadline| {
-        let mut client = connect(&socket, server_id)?;
-        Ok(parse_attention(&execute(
-            &mut client,
-            "list-panes",
-            &["-a", "-F", PANES],
-            deadline,
-        )?)?
-        .len())
-    })
-}
-
-fn disk_version(deadline: Instant) -> Option<String> {
-    if Instant::now() >= deadline {
-        return None;
-    }
-    let mut child = Command::new(std::env::current_exe().ok()?)
-        .arg("--version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => {
-                let output = child.wait_with_output().ok()?;
-                let text = String::from_utf8(output.stdout).ok()?;
-                return text.trim().strip_prefix("zz ").map(str::to_owned);
-            }
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(2)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn sessions_parse_attachment_counts_and_empty_output() {
-        assert_eq!(
-            parse_sessions("work\t2\t3\nsolo\t1\t0\n").unwrap(),
-            vec![
-                Session {
-                    name: "work".into(),
-                    windows: 2,
-                    attached: true
-                },
-                Session {
-                    name: "solo".into(),
-                    windows: 1,
-                    attached: false
-                }
-            ]
-        );
-        assert!(parse_sessions("").unwrap().is_empty());
-        assert!(parse_sessions("work\ttwo\t0\n").is_err());
-    }
+    fn snapshot_facts_include_sessions_and_only_agents_needing_input() {
+        use std::collections::BTreeMap;
+        use zz_protocol::{
+            AgentDescriptor, LayoutNode, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus,
+            PaneSnapshot, SessionId, SessionSnapshot, SessionViewer, WindowId, WindowSnapshot,
+        };
 
-    #[test]
-    fn attention_includes_blocked_and_permission_agents_once() {
-        let panes = "%1\twork\t0\t0\tagent\tBuild\tblocked\t0\n%2\twork\t1\t0\tagent\tReview\tidle\t1\n%3\twork\t1\t1\tagent\tBoth\tblocked\t1\n%4\twork\t1\t2\tagent\tBusy\tworking\t0\n%5\twork\t2\t0\tterminal\tShell\t\t\n";
-        let rows = parse_attention(panes).unwrap();
-        assert_eq!(rows.len(), 3);
+        let pane = |id, title: &str, kind| PaneSnapshot {
+            id: PaneId(id),
+            title: title.into(),
+            kind,
+            synchronized_input: false,
+            bell: false,
+            dead: false,
+            dead_status: None,
+            border_colour: None,
+            active_border_colour: None,
+            border_status_text: String::new(),
+        };
+        let terminal = pane(1, "Shell", PaneKindSnapshot::Terminal);
+        let approval = pane(
+            2,
+            "Review",
+            PaneKindSnapshot::Agent(AgentDescriptor::default()),
+        );
+        let working = pane(
+            3,
+            "Build",
+            PaneKindSnapshot::Agent(AgentDescriptor::default()),
+        );
+        let window = WindowSnapshot {
+            id: WindowId(1),
+            index: 7,
+            name: "main".into(),
+            automatic_rename: false,
+            active_pane: terminal.id,
+            zoomed_pane: None,
+            layout: LayoutNode::Pane(terminal.id),
+            panes: BTreeMap::from([
+                (terminal.id, terminal),
+                (approval.id, approval),
+                (working.id, working),
+            ]),
+            layout_dump: String::new(),
+            visible_layout_dump: String::new(),
+            status_label: String::new(),
+            activity: false,
+            pane_border_status: PaneBorderStatus::default(),
+            pane_border_lines: PaneBorderLines::default(),
+            pane_border_indicators: PaneBorderIndicators::default(),
+            pane_order: vec![PaneId(1), PaneId(2), PaneId(3)],
+            pane_z_order: vec![PaneId(1), PaneId(2), PaneId(3)],
+        };
+        let mut snapshot = MuxSnapshot {
+            generation: 1,
+            sessions: vec![SessionSnapshot {
+                id: SessionId(1),
+                name: "work".into(),
+                active_window: window.id,
+                viewers: vec![SessionViewer {
+                    name: "desktop".into(),
+                    window: window.id,
+                    is_self: true,
+                }],
+                windows: vec![window],
+            }],
+            focused_window: None,
+        };
+        let attention = |pane| {
+            Some(if pane == PaneId(3) {
+                AgentAttentionStatus::Working
+            } else {
+                AgentAttentionStatus::NeedsInput
+            })
+        };
+        let facts = facts_from(Some(&snapshot), attention, true).expect("snapshot facts");
         assert_eq!(
-            rows[0],
-            Attention {
-                pane: "%1".into(),
+            facts.sessions,
+            vec![Session {
+                name: "work".into(),
+                windows: 1,
+                attached: true
+            }]
+        );
+        assert_eq!(
+            facts.attention,
+            vec![Attention {
+                pane: PaneId(2),
                 session: "work".into(),
-                window: 0,
-                title: "Build".into(),
-                permission: false
-            }
+                window: 7,
+                title: "Review".into(),
+                permission: true
+            }]
         );
-        assert!(rows[1].permission && rows[2].permission);
-        assert!(parse_attention("").unwrap().is_empty());
-        assert!(parse_attention("broken").is_err());
-        assert_eq!(parse_attention("%1\twork\t0\t0\tagent\tBuild\tblocked\t0\n%1\tlinked\t1\t0\tagent\tBuild\tblocked\t0\n").unwrap().len(), 1);
-    }
-
-    #[test]
-    fn start_time_is_a_unix_timestamp() {
-        assert_eq!(parse_start_time("1750000000\n").unwrap(), 1_750_000_000);
-        assert!(parse_start_time("yesterday").is_err());
-        assert!(parse_start_time("").is_err());
+        assert!(facts.update_available);
+        snapshot.sessions[0].viewers.clear();
+        let detached = facts_from(Some(&snapshot), attention, false).expect("snapshot facts");
+        assert!(!detached.sessions[0].attached);
+        assert!(!detached.update_available);
+        assert!(facts_from(None, attention, true).is_none());
     }
 
     #[test]

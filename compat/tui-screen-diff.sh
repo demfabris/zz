@@ -86,7 +86,6 @@
 # A bounded wait that runs out dumps the same diagnostics the geometry fixture
 # dumps, into ZZ_SCREEN_DIAGNOSTICS_DIR or a fresh /tmp directory it names.
 set -eEuo pipefail
-export ZZ_TRAY=0
 
 usage() {
   printf 'usage: compat/tui-screen-diff.sh [--self-check] [ZZ_BIN [TMUX_BIN]]\n' >&2

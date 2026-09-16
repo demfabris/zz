@@ -96,7 +96,6 @@
 # run this fixture against a build from before the drop path and the undrained
 # key never lands.
 set -eEuo pipefail
-export ZZ_TRAY=0
 
 usage() {
   printf 'usage: compat/tui-output-backpressure.sh [--undrained S] [--deadline S]\n' >&2

@@ -90,7 +90,7 @@ impl Global for MenuSessions {}
 #[cfg(not(target_os = "ios"))]
 pub(crate) fn install(cx: &mut App) {
     #[cfg(not(target_os = "macos"))]
-    cx.on_action(|_: &Quit, cx| cx.quit());
+    cx.on_action(|_: &Quit, cx| crate::tray::quit_requested(cx));
     cx.set_global(MenuSessions::default());
     rebuild(cx);
     cx.observe_global::<ChromeState>(|cx| cx.defer(rebuild))

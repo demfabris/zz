@@ -127,8 +127,8 @@ survive a reboot, and it shuts itself down once no sessions and no clients
 remain.
 
 :::note
-With the tray icon on (the default), the window's close button hides zz to the
-tray rather than detaching. Quit properly to detach.
+With the tray icon on (the default), closing the window or quitting while sessions run
+hides zz to the tray. Quit and Stop Sessions in the tray menu stops the daemon.
 :::
 
 ## The model
@@ -365,7 +365,7 @@ mkdir -p ~/.config/zz && cp examples/config ~/.config/zz/config
 | `mode-keys` | `emacs` | `vi` or `emacs` in copy mode |
 | `history-limit` | `10000` | Scrollback lines, 0–1000000 |
 | `set-clipboard` | `external` | OSC 52 policy: `on`, `external`, `off` |
-| `tray` | `true` | Tray icon. Read once at startup |
+| `tray` | `true` | Tray icon. Applies live |
 | `quit-daemon-on-exit` | `false` | Kill sessions when the app quits |
 | `browser-search-provider` | `google` | `google`, `duckduckgo`, or `brave` |
 | `browser-egress` | `true` | Route a remote pane's traffic through its host |

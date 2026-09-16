@@ -803,13 +803,6 @@ pub fn load_config(path: &Path, system_font_family: &str) -> io::Result<ParsedCo
     read_config_source(path).map(|source| parse_config(&source, system_font_family))
 }
 
-#[cfg(not(target_os = "ios"))]
-pub fn tray_enabled_from_files(candidates: &[PathBuf]) -> bool {
-    discover_config_path(candidates)
-        .and_then(|path| load_config(&path, "").ok())
-        .map_or(DEFAULT_TRAY, |parsed| parsed.config.tray.value)
-}
-
 pub fn read_config_source(path: &Path) -> io::Result<String> {
     let file = File::open(path)?;
     let byte_limit = u64::try_from(MAX_CONFIG_BYTES).unwrap_or(u64::MAX - 1);

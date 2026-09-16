@@ -2,7 +2,6 @@
 # Runs one command corpus against zz and pinned tmux, comparing topology and
 # geometry after every command.
 set -euo pipefail
-export ZZ_TRAY=0
 set +B
 
 COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

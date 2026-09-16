@@ -12,7 +12,6 @@
 #   compat/run.sh --delta origin/main..HEAD --commands split-window,new-window
 #   compat/run.sh --delta origin/main..HEAD --list   (print selection, run nothing)
 set -euo pipefail
-export ZZ_TRAY=0
 
 COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "$COMPAT_DIR/.." && pwd)"

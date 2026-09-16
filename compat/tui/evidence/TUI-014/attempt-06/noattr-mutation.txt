@@ -1,0 +1,27 @@
+COMMAND /tmp/zz-cargo.sh test -p zz-tui --lib a_switch_row_keeps_its_dim_runs_over_the_selection_style
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-tui)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.59s
+     Running unittests src/lib.rs (target/debug/deps/zz_tui-17d6e9433ab965b6)
+
+running 1 test
+test render::pane_mode::tests::a_switch_row_keeps_its_dim_runs_over_the_selection_style ... FAILED
+
+failures:
+
+---- render::pane_mode::tests::a_switch_row_keeps_its_dim_runs_over_the_selection_style stdout ----
+
+thread 'render::pane_mode::tests::a_switch_row_keeps_its_dim_runs_over_the_selection_style' (161866) panicked at crates/zz-tui/src/render/pane_mode.rs:342:9:
+the row lost its dim runs: ESC[1;1HESC[0mESC[38;2;13;13;13mESC[48;2;184;134;11mcli ESC[0mESC[38;2;13;13;13mESC[48;2;184;134;11m2 windowsESC[0mESC[38;2;13;13;13mESC[48;2;184;134;11m attached ESC[0mESC[38;2;13;13;13mESC[48;2;184;134;11mwinESC[0mESC[39mESC[48;2;184;134;11mESC[KESC[0mESC[2;1HESC[0mESC[39mESC[49mESC[KESC[0mESC[3;1HESC[0mESC[39mESC[49mESC[KESC[0mESC[4;1HESC[0mESC[38;2;13;13;13mESC[48;2;184;134;11m(search) ESC[0mESC[39mESC[49mESC[KESC[0m
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    render::pane_mode::tests::a_switch_row_keeps_its_dim_runs_over_the_selection_style
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 209 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p zz-tui --lib`
+MUTATION_EXIT 101
+SOURCE_RESTORED
+
+EXIT 0

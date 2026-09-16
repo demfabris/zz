@@ -1,0 +1,2298 @@
+# Scenario: show-options-hooks
+# Source: /home/demfabris/dev/zz-c11-modes/compat/scenarios/show-options-hooks.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: tmux-only: set-option -g history-limit 10000
+zz exit: skipped
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: side-specific setup
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-options -g
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    activity-action other
+    assume-paste-time 1
+    base-index 0
+    bell-action any
+    default-command ''
+    default-shell /bin/bash
+    default-size 80x24
+    destroy-unattached off
+    detach-on-destroy on
+    display-panes-active-colour themered
+    display-panes-colour themeblue
+    display-panes-format "#[align=right]#{pane_width}x#{pane_height}"
+    display-panes-time 1000
+    display-time 750
+    focus-follows-mouse off
+    history-limit 10000
+    initial-repeat-time 0
+    key-table root
+    lock-after-time 0
+    lock-command "lock -np"
+    message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+    message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+    message-line 0
+    message-style "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"
+    mouse on
+    prefix C-b
+    prefix2 None
+    renumber-windows off
+    repeat-time 500
+    set-titles off
+    set-titles-string "#S:#I:#W - \"#T\" #{session_alerts}"
+    silence-action other
+    status on
+    status-bg default
+    status-fg default
+    status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+    status-format[1] "#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }"
+    status-format[2] "#[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }"
+    status-interval 15
+    status-justify left
+    status-keys emacs
+    status-left "[#{session_name}] "
+    status-left-length 10
+    status-left-style default
+    status-position bottom
+    status-right "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+    status-right-length 40
+    status-right-style default
+    status-style bg=themegreen,fg=themeblack
+    prompt-cursor-colour ''
+    prompt-command-cursor-colour ''
+    prompt-cursor-style default
+    prompt-command-cursor-style default
+    update-environment[0] DISPLAY
+    update-environment[1] KRB5CCNAME
+    update-environment[2] MSYSTEM
+    update-environment[3] SSH_ASKPASS
+    update-environment[4] SSH_AUTH_SOCK
+    update-environment[5] SSH_AGENT_PID
+    update-environment[6] SSH_CONNECTION
+    update-environment[7] WAYLAND_DISPLAY
+    update-environment[8] WINDOWID
+    update-environment[9] XAUTHORITY
+    update-environment[10] XDG_CURRENT_DESKTOP
+    update-environment[11] XDG_SESSION_DESKTOP
+    update-environment[12] XDG_SESSION_TYPE
+    visual-activity off
+    visual-bell off
+    visual-silence off
+    word-separators "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+tmux stdout:
+    activity-action other
+    assume-paste-time 1
+    base-index 0
+    bell-action any
+    default-command ''
+    default-shell /bin/bash
+    default-size 80x24
+    destroy-unattached off
+    detach-on-destroy on
+    display-panes-active-colour themered
+    display-panes-colour themeblue
+    display-panes-format "#[align=right]#{pane_width}x#{pane_height}"
+    display-panes-time 1000
+    display-time 750
+    focus-follows-mouse off
+    history-limit 10000
+    initial-repeat-time 0
+    key-table root
+    lock-after-time 0
+    lock-command vlock
+    message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+    message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+    message-line 0
+    message-style "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"
+    mouse on
+    prefix C-b
+    prefix2 None
+    renumber-windows off
+    repeat-time 500
+    set-titles off
+    set-titles-string "#S:#I:#W - \"#T\" #{session_alerts}"
+    silence-action other
+    status on
+    status-bg default
+    status-fg default
+    status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+    status-format[1] "#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }"
+    status-format[2] "#[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }"
+    status-interval 15
+    status-justify left
+    status-keys emacs
+    status-left "[#{session_name}] "
+    status-left-length 10
+    status-left-style default
+    status-position bottom
+    status-right "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+    status-right-length 40
+    status-right-style default
+    status-style bg=themegreen,fg=themeblack
+    prompt-cursor-colour ''
+    prompt-command-cursor-colour ''
+    prompt-cursor-style default
+    prompt-command-cursor-style default
+    update-environment[0] DISPLAY
+    update-environment[1] KRB5CCNAME
+    update-environment[2] MSYSTEM
+    update-environment[3] SSH_ASKPASS
+    update-environment[4] SSH_AUTH_SOCK
+    update-environment[5] SSH_AGENT_PID
+    update-environment[6] SSH_CONNECTION
+    update-environment[7] WAYLAND_DISPLAY
+    update-environment[8] WINDOWID
+    update-environment[9] XAUTHORITY
+    update-environment[10] XDG_CURRENT_DESKTOP
+    update-environment[11] XDG_SESSION_DESKTOP
+    update-environment[12] XDG_SESSION_TYPE
+    visual-activity off
+    visual-bell off
+    visual-silence off
+    word-separators "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+OUT: divergence
+--- zz OUT step 2
++++ tmux OUT step 2
+@@ -17,7 +17,7 @@
+ initial-repeat-time 0
+ key-table root
+ lock-after-time 0
+-lock-command "lock -np"
++lock-command vlock
+ message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+ message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+ message-line 0
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-options -gH
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    activity-action other
+    assume-paste-time 1
+    base-index 0
+    bell-action any
+    default-command ''
+    default-shell /bin/bash
+    default-size 80x24
+    destroy-unattached off
+    detach-on-destroy on
+    display-panes-active-colour themered
+    display-panes-colour themeblue
+    display-panes-format "#[align=right]#{pane_width}x#{pane_height}"
+    display-panes-time 1000
+    display-time 750
+    focus-follows-mouse off
+    history-limit 10000
+    initial-repeat-time 0
+    key-table root
+    lock-after-time 0
+    lock-command "lock -np"
+    message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+    message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+    message-line 0
+    message-style "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"
+    mouse on
+    prefix C-b
+    prefix2 None
+    renumber-windows off
+    repeat-time 500
+    set-titles off
+    set-titles-string "#S:#I:#W - \"#T\" #{session_alerts}"
+    silence-action other
+    status on
+    status-bg default
+    status-fg default
+    status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+    status-format[1] "#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }"
+    status-format[2] "#[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }"
+    status-interval 15
+    status-justify left
+    status-keys emacs
+    status-left "[#{session_name}] "
+    status-left-length 10
+    status-left-style default
+    status-position bottom
+    status-right "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+    status-right-length 40
+    status-right-style default
+    status-style bg=themegreen,fg=themeblack
+    prompt-cursor-colour ''
+    prompt-command-cursor-colour ''
+    prompt-cursor-style default
+    prompt-command-cursor-style default
+    update-environment[0] DISPLAY
+    update-environment[1] KRB5CCNAME
+    update-environment[2] MSYSTEM
+    update-environment[3] SSH_ASKPASS
+    update-environment[4] SSH_AUTH_SOCK
+    update-environment[5] SSH_AGENT_PID
+    update-environment[6] SSH_CONNECTION
+    update-environment[7] WAYLAND_DISPLAY
+    update-environment[8] WINDOWID
+    update-environment[9] XAUTHORITY
+    update-environment[10] XDG_CURRENT_DESKTOP
+    update-environment[11] XDG_SESSION_DESKTOP
+    update-environment[12] XDG_SESSION_TYPE
+    visual-activity off
+    visual-bell off
+    visual-silence off
+    word-separators "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+    after-bind-key
+    after-capture-pane
+    after-copy-mode
+    after-display-message
+    after-display-panes
+    after-kill-pane
+    after-list-buffers
+    after-list-clients
+    after-list-keys
+    after-list-panes
+    after-list-sessions
+    after-list-windows
+    after-load-buffer
+    after-lock-server
+    after-new-session
+    after-new-window
+    after-paste-buffer
+    after-pipe-pane
+    after-queue
+    after-refresh-client
+    after-rename-session
+    after-rename-window
+    after-resize-pane
+    after-resize-window
+    after-save-buffer
+    after-select-layout
+    after-select-pane
+    after-select-window
+    after-send-keys
+    after-set-buffer
+    after-set-environment
+    after-set-hook
+    after-set-option
+    after-show-environment
+    after-show-messages
+    after-show-options
+    after-split-window
+    after-unbind-key
+    alert-activity
+    alert-bell
+    alert-silence
+    client-active
+    client-attached
+    client-detached
+    client-focus-in
+    client-focus-out
+    client-resized
+    client-session-changed
+    client-light-theme
+    client-dark-theme
+    command-error
+    session-closed
+    session-created
+    session-renamed
+    session-window-changed
+    window-linked
+    window-unlinked
+tmux stdout:
+    activity-action other
+    assume-paste-time 1
+    base-index 0
+    bell-action any
+    default-command ''
+    default-shell /bin/bash
+    default-size 80x24
+    destroy-unattached off
+    detach-on-destroy on
+    display-panes-active-colour themered
+    display-panes-colour themeblue
+    display-panes-format "#[align=right]#{pane_width}x#{pane_height}"
+    display-panes-time 1000
+    display-time 750
+    focus-follows-mouse off
+    history-limit 10000
+    initial-repeat-time 0
+    key-table root
+    lock-after-time 0
+    lock-command vlock
+    message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+    message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+    message-line 0
+    message-style "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"
+    mouse on
+    prefix C-b
+    prefix2 None
+    renumber-windows off
+    repeat-time 500
+    set-titles off
+    set-titles-string "#S:#I:#W - \"#T\" #{session_alerts}"
+    silence-action other
+    status on
+    status-bg default
+    status-fg default
+    status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+    status-format[1] "#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }"
+    status-format[2] "#[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }"
+    status-interval 15
+    status-justify left
+    status-keys emacs
+    status-left "[#{session_name}] "
+    status-left-length 10
+    status-left-style default
+    status-position bottom
+    status-right "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+    status-right-length 40
+    status-right-style default
+    status-style bg=themegreen,fg=themeblack
+    prompt-cursor-colour ''
+    prompt-command-cursor-colour ''
+    prompt-cursor-style default
+    prompt-command-cursor-style default
+    update-environment[0] DISPLAY
+    update-environment[1] KRB5CCNAME
+    update-environment[2] MSYSTEM
+    update-environment[3] SSH_ASKPASS
+    update-environment[4] SSH_AUTH_SOCK
+    update-environment[5] SSH_AGENT_PID
+    update-environment[6] SSH_CONNECTION
+    update-environment[7] WAYLAND_DISPLAY
+    update-environment[8] WINDOWID
+    update-environment[9] XAUTHORITY
+    update-environment[10] XDG_CURRENT_DESKTOP
+    update-environment[11] XDG_SESSION_DESKTOP
+    update-environment[12] XDG_SESSION_TYPE
+    visual-activity off
+    visual-bell off
+    visual-silence off
+    word-separators "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+    after-bind-key
+    after-capture-pane
+    after-copy-mode
+    after-display-message
+    after-display-panes
+    after-kill-pane
+    after-list-buffers
+    after-list-clients
+    after-list-keys
+    after-list-panes
+    after-list-sessions
+    after-list-windows
+    after-load-buffer
+    after-lock-server
+    after-new-session
+    after-new-window
+    after-paste-buffer
+    after-pipe-pane
+    after-queue
+    after-refresh-client
+    after-rename-session
+    after-rename-window
+    after-resize-pane
+    after-resize-window
+    after-save-buffer
+    after-select-layout
+    after-select-pane
+    after-select-window
+    after-send-keys
+    after-set-buffer
+    after-set-environment
+    after-set-hook
+    after-set-option
+    after-show-environment
+    after-show-messages
+    after-show-options
+    after-split-window
+    after-unbind-key
+    alert-activity
+    alert-bell
+    alert-silence
+    client-active
+    client-attached
+    client-detached
+    client-focus-in
+    client-focus-out
+    client-resized
+    client-session-changed
+    client-light-theme
+    client-dark-theme
+    command-error
+    session-closed
+    session-created
+    session-renamed
+    session-window-changed
+    window-linked
+    window-unlinked
+OUT: divergence
+--- zz OUT step 3
++++ tmux OUT step 3
+@@ -17,7 +17,7 @@
+ initial-repeat-time 0
+ key-table root
+ lock-after-time 0
+-lock-command "lock -np"
++lock-command vlock
+ message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+ message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+ message-line 0
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: show-options -gHv
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    other
+    1
+    0
+    any
+    
+    /bin/bash
+    80x24
+    off
+    on
+    themered
+    themeblue
+    #[align=right]#{pane_width}x#{pane_height}
+    1000
+    750
+    off
+    10000
+    0
+    root
+    0
+    lock -np
+    bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}
+    #[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}
+    0
+    bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}
+    on
+    C-b
+    None
+    off
+    500
+    off
+    #S:#I:#W - "#T" #{session_alerts}
+    other
+    on
+    default
+    default
+    #[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]
+    #[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }
+    #[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }
+    15
+    left
+    emacs
+    [#{session_name}] 
+    10
+    default
+    bottom
+    #{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}"#{=21:pane_title}" %H:%M %d-%b-%y
+    40
+    default
+    bg=themegreen,fg=themeblack
+    
+    
+    default
+    default
+    DISPLAY
+    KRB5CCNAME
+    MSYSTEM
+    SSH_ASKPASS
+    SSH_AUTH_SOCK
+    SSH_AGENT_PID
+    SSH_CONNECTION
+    WAYLAND_DISPLAY
+    WINDOWID
+    XAUTHORITY
+    XDG_CURRENT_DESKTOP
+    XDG_SESSION_DESKTOP
+    XDG_SESSION_TYPE
+    off
+    off
+    off
+    !"#$%&'()*+,-./:;<=>?@[\]^`{|}~
+tmux stdout:
+    other
+    1
+    0
+    any
+    
+    /bin/bash
+    80x24
+    off
+    on
+    themered
+    themeblue
+    #[align=right]#{pane_width}x#{pane_height}
+    1000
+    750
+    off
+    10000
+    0
+    root
+    0
+    vlock
+    bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}
+    #[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}
+    0
+    bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}
+    on
+    C-b
+    None
+    off
+    500
+    off
+    #S:#I:#W - "#T" #{session_alerts}
+    other
+    on
+    default
+    default
+    #[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]
+    #[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }
+    #[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }
+    15
+    left
+    emacs
+    [#{session_name}] 
+    10
+    default
+    bottom
+    #{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}"#{=21:pane_title}" %H:%M %d-%b-%y
+    40
+    default
+    bg=themegreen,fg=themeblack
+    
+    
+    default
+    default
+    DISPLAY
+    KRB5CCNAME
+    MSYSTEM
+    SSH_ASKPASS
+    SSH_AUTH_SOCK
+    SSH_AGENT_PID
+    SSH_CONNECTION
+    WAYLAND_DISPLAY
+    WINDOWID
+    XAUTHORITY
+    XDG_CURRENT_DESKTOP
+    XDG_SESSION_DESKTOP
+    XDG_SESSION_TYPE
+    off
+    off
+    off
+    !"#$%&'()*+,-./:;<=>?@[\]^`{|}~
+OUT: divergence
+--- zz OUT step 4
++++ tmux OUT step 4
+@@ -17,7 +17,7 @@
+ 0
+ root
+ 0
+-lock -np
++vlock
+ bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}
+ #[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}
+ 0
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: show-options -sH
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    backspace C-?
+    buffer-limit 50
+    command-alias[0] split-pane=split-window
+    command-alias[1] splitp=split-window
+    command-alias[2] "server-info=show-messages -JT"
+    command-alias[3] "info=show-messages -JT"
+    command-alias[4] "choose-window=choose-tree -w"
+    command-alias[5] "choose-session=choose-tree -s"
+    codepoint-widths
+    copy-command ''
+    default-client-command new-session
+    default-terminal tmux-256color
+    editor /usr/bin/vi
+    escape-time 10
+    exit-empty on
+    exit-unattached off
+    extended-keys off
+    extended-keys-format xterm
+    focus-events off
+    get-clipboard buffer
+    history-file ''
+    input-buffer-size 1048576
+    message-limit 1000
+    prefix-timeout 0
+    prompt-history-limit 100
+    set-clipboard external
+    terminal-overrides[0] linux*:AX@
+    terminal-features[0] xterm*:clipboard:ccolour:cstyle:focus:title
+    terminal-features[1] screen*:title
+    terminal-features[2] rxvt*:ignorefkeys
+    theme detect
+    dark-theme-black "#{?#{e|>=:#{client_colours},256},gray5,black}"
+    dark-theme-white "#{?#{e|>=:#{client_colours},256},gray90,white}"
+    dark-theme-light-grey "#{?#{e|>=:#{client_colours},256},gray70,white}"
+    dark-theme-dark-grey "#{?#{e|>=:#{client_colours},256},gray15,black}"
+    dark-theme-green "#{?#{e|>=:#{client_colours},256},yellowgreen,green}"
+    dark-theme-yellow "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"
+    dark-theme-red "#{?#{e|>=:#{client_colours},256},indianred,red}"
+    dark-theme-blue "#{?#{e|>=:#{client_colours},256},skyblue3,blue}"
+    dark-theme-cyan "#{?#{e|>=:#{client_colours},256},cadetblue,cyan}"
+    dark-theme-magenta "#{?#{e|>=:#{client_colours},256},mediumpurple,magenta}"
+    light-theme-black "#{?#{e|>=:#{client_colours},256},gray10,black}"
+    light-theme-white "#{?#{e|>=:#{client_colours},256},gray95,white}"
+    light-theme-light-grey "#{?#{e|>=:#{client_colours},256},gray80,white}"
+    light-theme-dark-grey "#{?#{e|>=:#{client_colours},256},gray45,black}"
+    light-theme-green "#{?#{e|>=:#{client_colours},256},seagreen,green}"
+    light-theme-yellow "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"
+    light-theme-red "#{?#{e|>=:#{client_colours},256},indianred4,red}"
+    light-theme-blue "#{?#{e|>=:#{client_colours},256},steelblue,blue}"
+    light-theme-cyan "#{?#{e|>=:#{client_colours},256},darkcyan,cyan}"
+    light-theme-magenta "#{?#{e|>=:#{client_colours},256},purple4,magenta}"
+    user-keys
+    variation-selector-always-wide on
+tmux stdout:
+    backspace C-?
+    buffer-limit 50
+    command-alias[0] split-pane=split-window
+    command-alias[1] splitp=split-window
+    command-alias[2] "server-info=show-messages -JT"
+    command-alias[3] "info=show-messages -JT"
+    command-alias[4] "choose-window=choose-tree -w"
+    command-alias[5] "choose-session=choose-tree -s"
+    codepoint-widths
+    copy-command ''
+    default-client-command new-session
+    default-terminal tmux-256color
+    editor /usr/bin/vi
+    escape-time 10
+    exit-empty on
+    exit-unattached off
+    extended-keys off
+    extended-keys-format xterm
+    focus-events off
+    get-clipboard buffer
+    history-file ''
+    input-buffer-size 1048576
+    message-limit 1000
+    prefix-timeout 0
+    prompt-history-limit 100
+    set-clipboard external
+    terminal-overrides[0] linux*:AX@
+    terminal-features[0] xterm*:clipboard:ccolour:cstyle:focus:title
+    terminal-features[1] screen*:title
+    terminal-features[2] rxvt*:ignorefkeys
+    theme detect
+    dark-theme-black "#{?#{e|>=:#{client_colours},256},gray5,black}"
+    dark-theme-white "#{?#{e|>=:#{client_colours},256},gray90,white}"
+    dark-theme-light-grey "#{?#{e|>=:#{client_colours},256},gray70,white}"
+    dark-theme-dark-grey "#{?#{e|>=:#{client_colours},256},gray15,black}"
+    dark-theme-green "#{?#{e|>=:#{client_colours},256},yellowgreen,green}"
+    dark-theme-yellow "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"
+    dark-theme-red "#{?#{e|>=:#{client_colours},256},indianred,red}"
+    dark-theme-blue "#{?#{e|>=:#{client_colours},256},skyblue3,blue}"
+    dark-theme-cyan "#{?#{e|>=:#{client_colours},256},cadetblue,cyan}"
+    dark-theme-magenta "#{?#{e|>=:#{client_colours},256},mediumpurple,magenta}"
+    light-theme-black "#{?#{e|>=:#{client_colours},256},gray10,black}"
+    light-theme-white "#{?#{e|>=:#{client_colours},256},gray95,white}"
+    light-theme-light-grey "#{?#{e|>=:#{client_colours},256},gray80,white}"
+    light-theme-dark-grey "#{?#{e|>=:#{client_colours},256},gray45,black}"
+    light-theme-green "#{?#{e|>=:#{client_colours},256},seagreen,green}"
+    light-theme-yellow "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"
+    light-theme-red "#{?#{e|>=:#{client_colours},256},indianred4,red}"
+    light-theme-blue "#{?#{e|>=:#{client_colours},256},steelblue,blue}"
+    light-theme-cyan "#{?#{e|>=:#{client_colours},256},darkcyan,cyan}"
+    light-theme-magenta "#{?#{e|>=:#{client_colours},256},purple4,magenta}"
+    user-keys
+    variation-selector-always-wide on
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: show-options -gwH
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    cursor-colour ''
+    cursor-style default
+    menu-style bg=themedarkgrey,fg=themewhite
+    menu-selected-style bg=themeyellow,fg=themeblack
+    menu-border-style bg=themedarkgrey,fg=themelightgrey
+    menu-border-lines single
+    pane-status-current-style underscore
+    pane-status-style default
+    session-status-current-style underscore
+    session-status-style default
+    aggressive-resize off
+    allow-passthrough off
+    allow-rename off
+    allow-set-title on
+    alternate-screen on
+    automatic-rename on
+    automatic-rename-format "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}"
+    clock-mode-colour themeblue
+    clock-mode-style 24
+    copy-mode-match-style bg=themecyan,fg=themeblack
+    copy-mode-current-match-style bg=thememagenta,fg=themeblack
+    copy-mode-mark-style bg=themeyellow,fg=themeblack
+    copy-mode-position-format "#[align=right]#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}[#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}"
+    copy-mode-position-style "#{E:mode-style}"
+    copy-mode-selection-style "#{E:mode-style}"
+    copy-mode-current-line-number-style fg=themeyellow
+    copy-mode-line-number-style fg=themelightgrey,dim
+    copy-mode-line-numbers off
+    fill-character ''
+    main-pane-height 24
+    main-pane-width 80
+    mode-keys emacs
+    mode-style noattr,bg=themeyellow,fg=themeblack
+    monitor-activity off
+    monitor-bell on
+    monitor-silence 0
+    other-pane-height 0
+    other-pane-width 0
+    pane-active-border-style "fg=#{?pane_marked,thememagenta,#{?synchronize-panes,themered,#{?pane_in_mode,themeyellow,themegreen}}}"
+    pane-base-index 0
+    pane-border-format "#{?pane_active,#[reverse],}#{pane_index}#[default] \"#{pane_title}\"#{?#{mouse},#[align=right]#[range=control|7][#{?#{pane_floating_flag},t,f}]#[norange]#[range=control|8][#{?#{window_zoomed_flag},u,z}]#[norange]#[range=control|9][x]#[norange],}"
+    pane-border-indicators colour
+    pane-border-lines single
+    pane-border-status off
+    pane-border-style fg=themelightgrey
+    pane-colours
+    pane-scrollbars off
+    pane-scrollbars-timeout 500
+    pane-scrollbars-style bg=themedarkgrey,fg=themelightgrey,width=1,pad=0
+    pane-scrollbars-position right
+    popup-style bg=themedarkgrey,fg=themewhite
+    popup-border-style bg=themedarkgrey,fg=themelightgrey
+    popup-border-lines single
+    remain-on-exit off
+    remain-on-exit-format "Pane is dead (#{?#{!=:#{pane_dead_status},},status #{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},}, #{t:pane_dead_time})"
+    scroll-on-clear on
+    switch-mode-match-style "bg=cyan fg=black"
+    synchronize-panes off
+    tiled-layout-max-columns 0
+    tree-mode-border-style bg=themedarkgrey,fg=themelightgrey
+    tree-mode-preview-format "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}"
+    tree-mode-preview-style "fg=#{?#{||:#{&&:#{pane_format},#{pane_active}},#{&&:#{window_format},#{window_active}}},themered,themeblue}"
+    tree-mode-selection-style "#{E:mode-style}"
+    window-active-style default
+    window-pane-current-status-format "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+    window-pane-status-format "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+    window-size latest
+    window-style default
+    window-status-activity-style reverse
+    window-status-bell-style reverse
+    window-status-current-format "#I:#W#{?window_flags,#{window_flags}, }"
+    window-status-current-style underscore
+    window-status-format "#I:#W#{?window_flags,#{window_flags}, }"
+    window-status-last-style default
+    window-status-separator " "
+    window-status-style default
+    wrap-search on
+    xterm-keys on
+    pane-died
+    pane-exited
+    pane-focus-in
+    pane-focus-out
+    pane-mode-changed
+    pane-set-clipboard
+    pane-title-changed
+    window-layout-changed
+    window-pane-changed
+    window-renamed
+    window-resized
+tmux stdout:
+    cursor-colour ''
+    cursor-style default
+    menu-style bg=themedarkgrey,fg=themewhite
+    menu-selected-style bg=themeyellow,fg=themeblack
+    menu-border-style bg=themedarkgrey,fg=themelightgrey
+    menu-border-lines single
+    pane-status-current-style underscore
+    pane-status-style default
+    session-status-current-style underscore
+    session-status-style default
+    aggressive-resize off
+    allow-passthrough off
+    allow-rename off
+    allow-set-title on
+    alternate-screen on
+    automatic-rename on
+    automatic-rename-format "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}"
+    clock-mode-colour themeblue
+    clock-mode-style 24
+    copy-mode-match-style bg=themecyan,fg=themeblack
+    copy-mode-current-match-style bg=thememagenta,fg=themeblack
+    copy-mode-mark-style bg=themeyellow,fg=themeblack
+    copy-mode-position-format "#[align=right]#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}[#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}"
+    copy-mode-position-style "#{E:mode-style}"
+    copy-mode-selection-style "#{E:mode-style}"
+    copy-mode-current-line-number-style fg=themeyellow
+    copy-mode-line-number-style fg=themelightgrey,dim
+    copy-mode-line-numbers off
+    fill-character ''
+    main-pane-height 24
+    main-pane-width 80
+    mode-keys emacs
+    mode-style noattr,bg=themeyellow,fg=themeblack
+    monitor-activity off
+    monitor-bell on
+    monitor-silence 0
+    other-pane-height 0
+    other-pane-width 0
+    pane-active-border-style "fg=#{?pane_marked,thememagenta,#{?synchronize-panes,themered,#{?pane_in_mode,themeyellow,themegreen}}}"
+    pane-base-index 0
+    pane-border-format "#{?pane_active,#[reverse],}#{pane_index}#[default] \"#{pane_title}\"#{?#{mouse},#[align=right]#[range=control|7][#{?#{pane_floating_flag},t,f}]#[norange]#[range=control|8][#{?#{window_zoomed_flag},u,z}]#[norange]#[range=control|9][x]#[norange],}"
+    pane-border-indicators colour
+    pane-border-lines single
+    pane-border-status off
+    pane-border-style fg=themelightgrey
+    pane-colours
+    pane-scrollbars off
+    pane-scrollbars-timeout 500
+    pane-scrollbars-style bg=themedarkgrey,fg=themelightgrey,width=1,pad=0
+    pane-scrollbars-position right
+    popup-style bg=themedarkgrey,fg=themewhite
+    popup-border-style bg=themedarkgrey,fg=themelightgrey
+    popup-border-lines single
+    remain-on-exit off
+    remain-on-exit-format "Pane is dead (#{?#{!=:#{pane_dead_status},},status #{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},}, #{t:pane_dead_time})"
+    scroll-on-clear on
+    switch-mode-match-style "bg=cyan fg=black"
+    synchronize-panes off
+    tiled-layout-max-columns 0
+    tree-mode-border-style bg=themedarkgrey,fg=themelightgrey
+    tree-mode-preview-format "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}"
+    tree-mode-preview-style "fg=#{?#{||:#{&&:#{pane_format},#{pane_active}},#{&&:#{window_format},#{window_active}}},themered,themeblue}"
+    tree-mode-selection-style "#{E:mode-style}"
+    window-active-style default
+    window-pane-current-status-format "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+    window-pane-status-format "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+    window-size latest
+    window-style default
+    window-status-activity-style reverse
+    window-status-bell-style reverse
+    window-status-current-format "#I:#W#{?window_flags,#{window_flags}, }"
+    window-status-current-style underscore
+    window-status-format "#I:#W#{?window_flags,#{window_flags}, }"
+    window-status-last-style default
+    window-status-separator " "
+    window-status-style default
+    wrap-search on
+    xterm-keys on
+    pane-died
+    pane-exited
+    pane-focus-in
+    pane-focus-out
+    pane-mode-changed
+    pane-set-clipboard
+    pane-title-changed
+    window-layout-changed
+    window-pane-changed
+    window-renamed
+    window-resized
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: show-options -AH
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    activity-action* other
+    assume-paste-time* 1
+    base-index* 0
+    bell-action* any
+    default-command* ''
+    default-shell* /bin/bash
+    default-size* 80x24
+    destroy-unattached* off
+    detach-on-destroy* on
+    display-panes-active-colour* themered
+    display-panes-colour* themeblue
+    display-panes-format* "#[align=right]#{pane_width}x#{pane_height}"
+    display-panes-time* 1000
+    display-time* 750
+    focus-follows-mouse* off
+    history-limit* 10000
+    initial-repeat-time* 0
+    key-table* root
+    lock-after-time* 0
+    lock-command* "lock -np"
+    message-command-style* "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+    message-format* "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+    message-line* 0
+    message-style* "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"
+    mouse* on
+    prefix* C-b
+    prefix2* None
+    renumber-windows* off
+    repeat-time* 500
+    set-titles* off
+    set-titles-string* "#S:#I:#W - \"#T\" #{session_alerts}"
+    silence-action* other
+    status* on
+    status-bg* default
+    status-fg* default
+    status-format[0]* "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+    status-format[1]* "#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }"
+    status-format[2]* "#[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }"
+    status-interval* 15
+    status-justify* left
+    status-keys* emacs
+    status-left* "[#{session_name}] "
+    status-left-length* 10
+    status-left-style* default
+    status-position* bottom
+    status-right* "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+    status-right-length* 40
+    status-right-style* default
+    status-style* bg=themegreen,fg=themeblack
+    prompt-cursor-colour* ''
+    prompt-command-cursor-colour* ''
+    prompt-cursor-style* default
+    prompt-command-cursor-style* default
+    update-environment[0]* DISPLAY
+    update-environment[1]* KRB5CCNAME
+    update-environment[2]* MSYSTEM
+    update-environment[3]* SSH_ASKPASS
+    update-environment[4]* SSH_AUTH_SOCK
+    update-environment[5]* SSH_AGENT_PID
+    update-environment[6]* SSH_CONNECTION
+    update-environment[7]* WAYLAND_DISPLAY
+    update-environment[8]* WINDOWID
+    update-environment[9]* XAUTHORITY
+    update-environment[10]* XDG_CURRENT_DESKTOP
+    update-environment[11]* XDG_SESSION_DESKTOP
+    update-environment[12]* XDG_SESSION_TYPE
+    visual-activity* off
+    visual-bell* off
+    visual-silence* off
+    word-separators* "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+    after-bind-key*
+    after-capture-pane*
+    after-copy-mode*
+    after-display-message*
+    after-display-panes*
+    after-kill-pane*
+    after-list-buffers*
+    after-list-clients*
+    after-list-keys*
+    after-list-panes*
+    after-list-sessions*
+    after-list-windows*
+    after-load-buffer*
+    after-lock-server*
+    after-new-session*
+    after-new-window*
+    after-paste-buffer*
+    after-pipe-pane*
+    after-queue*
+    after-refresh-client*
+    after-rename-session*
+    after-rename-window*
+    after-resize-pane*
+    after-resize-window*
+    after-save-buffer*
+    after-select-layout*
+    after-select-pane*
+    after-select-window*
+    after-send-keys*
+    after-set-buffer*
+    after-set-environment*
+    after-set-hook*
+    after-set-option*
+    after-show-environment*
+    after-show-messages*
+    after-show-options*
+    after-split-window*
+    after-unbind-key*
+    alert-activity*
+    alert-bell*
+    alert-silence*
+    client-active*
+    client-attached*
+    client-detached*
+    client-focus-in*
+    client-focus-out*
+    client-resized*
+    client-session-changed*
+    client-light-theme*
+    client-dark-theme*
+    command-error*
+    session-closed*
+    session-created*
+    session-renamed*
+    session-window-changed*
+    window-linked*
+    window-unlinked*
+tmux stdout:
+    activity-action* other
+    assume-paste-time* 1
+    base-index* 0
+    bell-action* any
+    default-command* ''
+    default-shell* /bin/bash
+    default-size* 80x24
+    destroy-unattached* off
+    detach-on-destroy* on
+    display-panes-active-colour* themered
+    display-panes-colour* themeblue
+    display-panes-format* "#[align=right]#{pane_width}x#{pane_height}"
+    display-panes-time* 1000
+    display-time* 750
+    focus-follows-mouse* off
+    history-limit* 10000
+    initial-repeat-time* 0
+    key-table* root
+    lock-after-time* 0
+    lock-command* vlock
+    message-command-style* "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+    message-format* "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+    message-line* 0
+    message-style* "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"
+    mouse* on
+    prefix* C-b
+    prefix2* None
+    renumber-windows* off
+    repeat-time* 500
+    set-titles* off
+    set-titles-string* "#S:#I:#W - \"#T\" #{session_alerts}"
+    silence-action* other
+    status* on
+    status-bg* default
+    status-fg* default
+    status-format[0]* "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+    status-format[1]* "#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }"
+    status-format[2]* "#[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }"
+    status-interval* 15
+    status-justify* left
+    status-keys* emacs
+    status-left* "[#{session_name}] "
+    status-left-length* 10
+    status-left-style* default
+    status-position* bottom
+    status-right* "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+    status-right-length* 40
+    status-right-style* default
+    status-style* bg=themegreen,fg=themeblack
+    prompt-cursor-colour* ''
+    prompt-command-cursor-colour* ''
+    prompt-cursor-style* default
+    prompt-command-cursor-style* default
+    update-environment[0]* DISPLAY
+    update-environment[1]* KRB5CCNAME
+    update-environment[2]* MSYSTEM
+    update-environment[3]* SSH_ASKPASS
+    update-environment[4]* SSH_AUTH_SOCK
+    update-environment[5]* SSH_AGENT_PID
+    update-environment[6]* SSH_CONNECTION
+    update-environment[7]* WAYLAND_DISPLAY
+    update-environment[8]* WINDOWID
+    update-environment[9]* XAUTHORITY
+    update-environment[10]* XDG_CURRENT_DESKTOP
+    update-environment[11]* XDG_SESSION_DESKTOP
+    update-environment[12]* XDG_SESSION_TYPE
+    visual-activity* off
+    visual-bell* off
+    visual-silence* off
+    word-separators* "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+    after-bind-key*
+    after-capture-pane*
+    after-copy-mode*
+    after-display-message*
+    after-display-panes*
+    after-kill-pane*
+    after-list-buffers*
+    after-list-clients*
+    after-list-keys*
+    after-list-panes*
+    after-list-sessions*
+    after-list-windows*
+    after-load-buffer*
+    after-lock-server*
+    after-new-session*
+    after-new-window*
+    after-paste-buffer*
+    after-pipe-pane*
+    after-queue*
+    after-refresh-client*
+    after-rename-session*
+    after-rename-window*
+    after-resize-pane*
+    after-resize-window*
+    after-save-buffer*
+    after-select-layout*
+    after-select-pane*
+    after-select-window*
+    after-send-keys*
+    after-set-buffer*
+    after-set-environment*
+    after-set-hook*
+    after-set-option*
+    after-show-environment*
+    after-show-messages*
+    after-show-options*
+    after-split-window*
+    after-unbind-key*
+    alert-activity*
+    alert-bell*
+    alert-silence*
+    client-active*
+    client-attached*
+    client-detached*
+    client-focus-in*
+    client-focus-out*
+    client-resized*
+    client-session-changed*
+    client-light-theme*
+    client-dark-theme*
+    command-error*
+    session-closed*
+    session-created*
+    session-renamed*
+    session-window-changed*
+    window-linked*
+    window-unlinked*
+OUT: divergence
+--- zz OUT step 7
++++ tmux OUT step 7
+@@ -17,7 +17,7 @@
+ initial-repeat-time* 0
+ key-table* root
+ lock-after-time* 0
+-lock-command* "lock -np"
++lock-command* vlock
+ message-command-style* "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+ message-format* "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+ message-line* 0
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: show-options -pAH
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    cursor-colour* ''
+    cursor-style* default
+    allow-passthrough* off
+    allow-rename* off
+    allow-set-title* on
+    alternate-screen* on
+    copy-mode-position-format* "#[align=right]#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}[#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}"
+    pane-active-border-style* "fg=#{?pane_marked,thememagenta,#{?synchronize-panes,themered,#{?pane_in_mode,themeyellow,themegreen}}}"
+    pane-border-format* "#{?pane_active,#[reverse],}#{pane_index}#[default] \"#{pane_title}\"#{?#{mouse},#[align=right]#[range=control|7][#{?#{pane_floating_flag},t,f}]#[norange]#[range=control|8][#{?#{window_zoomed_flag},u,z}]#[norange]#[range=control|9][x]#[norange],}"
+    pane-border-lines* single
+    pane-border-status* off
+    pane-border-style* fg=themelightgrey
+    pane-colours*
+    pane-scrollbars-style* bg=themedarkgrey,fg=themelightgrey,width=1,pad=0
+    remain-on-exit* off
+    remain-on-exit-format* "Pane is dead (#{?#{!=:#{pane_dead_status},},status #{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},}, #{t:pane_dead_time})"
+    scroll-on-clear* on
+    switch-mode-match-style* "bg=cyan fg=black"
+    synchronize-panes* off
+    tree-mode-preview-format* "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}"
+    window-active-style* default
+    window-style* default
+    pane-died*
+    pane-exited*
+    pane-focus-in*
+    pane-focus-out*
+    pane-mode-changed*
+    pane-set-clipboard*
+    pane-title-changed*
+tmux stdout:
+    cursor-colour* ''
+    cursor-style* default
+    allow-passthrough* off
+    allow-rename* off
+    allow-set-title* on
+    alternate-screen* on
+    copy-mode-position-format* "#[align=right]#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}[#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}"
+    pane-active-border-style* "fg=#{?pane_marked,thememagenta,#{?synchronize-panes,themered,#{?pane_in_mode,themeyellow,themegreen}}}"
+    pane-border-format* "#{?pane_active,#[reverse],}#{pane_index}#[default] \"#{pane_title}\"#{?#{mouse},#[align=right]#[range=control|7][#{?#{pane_floating_flag},t,f}]#[norange]#[range=control|8][#{?#{window_zoomed_flag},u,z}]#[norange]#[range=control|9][x]#[norange],}"
+    pane-border-lines* single
+    pane-border-status* off
+    pane-border-style* fg=themelightgrey
+    pane-colours*
+    pane-scrollbars-style* bg=themedarkgrey,fg=themelightgrey,width=1,pad=0
+    remain-on-exit* off
+    remain-on-exit-format* "Pane is dead (#{?#{!=:#{pane_dead_status},},status #{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},}, #{t:pane_dead_time})"
+    scroll-on-clear* on
+    switch-mode-match-style* "bg=cyan fg=black"
+    synchronize-panes* off
+    tree-mode-preview-format* "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}"
+    window-active-style* default
+    window-style* default
+    pane-died*
+    pane-exited*
+    pane-focus-in*
+    pane-focus-out*
+    pane-mode-changed*
+    pane-set-clipboard*
+    pane-title-changed*
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: show-options -AH after-capture-pane
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    after-capture-pane
+tmux stdout:
+    after-capture-pane
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: show-window-options -H
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    command show-window-options: unknown flag -H
+tmux stderr:
+    command show-window-options: unknown flag -H
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: set-option -g @hook-row marker
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: show-options -gH
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    @hook-row marker
+    activity-action other
+    assume-paste-time 1
+    base-index 0
+    bell-action any
+    default-command ''
+    default-shell /bin/bash
+    default-size 80x24
+    destroy-unattached off
+    detach-on-destroy on
+    display-panes-active-colour themered
+    display-panes-colour themeblue
+    display-panes-format "#[align=right]#{pane_width}x#{pane_height}"
+    display-panes-time 1000
+    display-time 750
+    focus-follows-mouse off
+    history-limit 10000
+    initial-repeat-time 0
+    key-table root
+    lock-after-time 0
+    lock-command "lock -np"
+    message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+    message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+    message-line 0
+    message-style "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"
+    mouse on
+    prefix C-b
+    prefix2 None
+    renumber-windows off
+    repeat-time 500
+    set-titles off
+    set-titles-string "#S:#I:#W - \"#T\" #{session_alerts}"
+    silence-action other
+    status on
+    status-bg default
+    status-fg default
+    status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+    status-format[1] "#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }"
+    status-format[2] "#[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }"
+    status-interval 15
+    status-justify left
+    status-keys emacs
+    status-left "[#{session_name}] "
+    status-left-length 10
+    status-left-style default
+    status-position bottom
+    status-right "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+    status-right-length 40
+    status-right-style default
+    status-style bg=themegreen,fg=themeblack
+    prompt-cursor-colour ''
+    prompt-command-cursor-colour ''
+    prompt-cursor-style default
+    prompt-command-cursor-style default
+    update-environment[0] DISPLAY
+    update-environment[1] KRB5CCNAME
+    update-environment[2] MSYSTEM
+    update-environment[3] SSH_ASKPASS
+    update-environment[4] SSH_AUTH_SOCK
+    update-environment[5] SSH_AGENT_PID
+    update-environment[6] SSH_CONNECTION
+    update-environment[7] WAYLAND_DISPLAY
+    update-environment[8] WINDOWID
+    update-environment[9] XAUTHORITY
+    update-environment[10] XDG_CURRENT_DESKTOP
+    update-environment[11] XDG_SESSION_DESKTOP
+    update-environment[12] XDG_SESSION_TYPE
+    visual-activity off
+    visual-bell off
+    visual-silence off
+    word-separators "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+    after-bind-key
+    after-capture-pane
+    after-copy-mode
+    after-display-message
+    after-display-panes
+    after-kill-pane
+    after-list-buffers
+    after-list-clients
+    after-list-keys
+    after-list-panes
+    after-list-sessions
+    after-list-windows
+    after-load-buffer
+    after-lock-server
+    after-new-session
+    after-new-window
+    after-paste-buffer
+    after-pipe-pane
+    after-queue
+    after-refresh-client
+    after-rename-session
+    after-rename-window
+    after-resize-pane
+    after-resize-window
+    after-save-buffer
+    after-select-layout
+    after-select-pane
+    after-select-window
+    after-send-keys
+    after-set-buffer
+    after-set-environment
+    after-set-hook
+    after-set-option
+    after-show-environment
+    after-show-messages
+    after-show-options
+    after-split-window
+    after-unbind-key
+    alert-activity
+    alert-bell
+    alert-silence
+    client-active
+    client-attached
+    client-detached
+    client-focus-in
+    client-focus-out
+    client-resized
+    client-session-changed
+    client-light-theme
+    client-dark-theme
+    command-error
+    session-closed
+    session-created
+    session-renamed
+    session-window-changed
+    window-linked
+    window-unlinked
+tmux stdout:
+    @hook-row marker
+    activity-action other
+    assume-paste-time 1
+    base-index 0
+    bell-action any
+    default-command ''
+    default-shell /bin/bash
+    default-size 80x24
+    destroy-unattached off
+    detach-on-destroy on
+    display-panes-active-colour themered
+    display-panes-colour themeblue
+    display-panes-format "#[align=right]#{pane_width}x#{pane_height}"
+    display-panes-time 1000
+    display-time 750
+    focus-follows-mouse off
+    history-limit 10000
+    initial-repeat-time 0
+    key-table root
+    lock-after-time 0
+    lock-command vlock
+    message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+    message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+    message-line 0
+    message-style "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"
+    mouse on
+    prefix C-b
+    prefix2 None
+    renumber-windows off
+    repeat-time 500
+    set-titles off
+    set-titles-string "#S:#I:#W - \"#T\" #{session_alerts}"
+    silence-action other
+    status on
+    status-bg default
+    status-fg default
+    status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+    status-format[1] "#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }"
+    status-format[2] "#[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }"
+    status-interval 15
+    status-justify left
+    status-keys emacs
+    status-left "[#{session_name}] "
+    status-left-length 10
+    status-left-style default
+    status-position bottom
+    status-right "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+    status-right-length 40
+    status-right-style default
+    status-style bg=themegreen,fg=themeblack
+    prompt-cursor-colour ''
+    prompt-command-cursor-colour ''
+    prompt-cursor-style default
+    prompt-command-cursor-style default
+    update-environment[0] DISPLAY
+    update-environment[1] KRB5CCNAME
+    update-environment[2] MSYSTEM
+    update-environment[3] SSH_ASKPASS
+    update-environment[4] SSH_AUTH_SOCK
+    update-environment[5] SSH_AGENT_PID
+    update-environment[6] SSH_CONNECTION
+    update-environment[7] WAYLAND_DISPLAY
+    update-environment[8] WINDOWID
+    update-environment[9] XAUTHORITY
+    update-environment[10] XDG_CURRENT_DESKTOP
+    update-environment[11] XDG_SESSION_DESKTOP
+    update-environment[12] XDG_SESSION_TYPE
+    visual-activity off
+    visual-bell off
+    visual-silence off
+    word-separators "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+    after-bind-key
+    after-capture-pane
+    after-copy-mode
+    after-display-message
+    after-display-panes
+    after-kill-pane
+    after-list-buffers
+    after-list-clients
+    after-list-keys
+    after-list-panes
+    after-list-sessions
+    after-list-windows
+    after-load-buffer
+    after-lock-server
+    after-new-session
+    after-new-window
+    after-paste-buffer
+    after-pipe-pane
+    after-queue
+    after-refresh-client
+    after-rename-session
+    after-rename-window
+    after-resize-pane
+    after-resize-window
+    after-save-buffer
+    after-select-layout
+    after-select-pane
+    after-select-window
+    after-send-keys
+    after-set-buffer
+    after-set-environment
+    after-set-hook
+    after-set-option
+    after-show-environment
+    after-show-messages
+    after-show-options
+    after-split-window
+    after-unbind-key
+    alert-activity
+    alert-bell
+    alert-silence
+    client-active
+    client-attached
+    client-detached
+    client-focus-in
+    client-focus-out
+    client-resized
+    client-session-changed
+    client-light-theme
+    client-dark-theme
+    command-error
+    session-closed
+    session-created
+    session-renamed
+    session-window-changed
+    window-linked
+    window-unlinked
+OUT: divergence
+--- zz OUT step 12
++++ tmux OUT step 12
+@@ -18,7 +18,7 @@
+ initial-repeat-time 0
+ key-table root
+ lock-after-time 0
+-lock-command "lock -np"
++lock-command vlock
+ message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+ message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+ message-line 0
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: set-hook -g 'after-bind-key[0]' 'display-message global-zero'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: set-hook -g 'after-bind-key[named]' 'display-message global-named'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: show-options -g
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    @hook-row marker
+    activity-action other
+    assume-paste-time 1
+    base-index 0
+    bell-action any
+    default-command ''
+    default-shell /bin/bash
+    default-size 80x24
+    destroy-unattached off
+    detach-on-destroy on
+    display-panes-active-colour themered
+    display-panes-colour themeblue
+    display-panes-format "#[align=right]#{pane_width}x#{pane_height}"
+    display-panes-time 1000
+    display-time 750
+    focus-follows-mouse off
+    history-limit 10000
+    initial-repeat-time 0
+    key-table root
+    lock-after-time 0
+    lock-command "lock -np"
+    message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+    message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+    message-line 0
+    message-style "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"
+    mouse on
+    prefix C-b
+    prefix2 None
+    renumber-windows off
+    repeat-time 500
+    set-titles off
+    set-titles-string "#S:#I:#W - \"#T\" #{session_alerts}"
+    silence-action other
+    status on
+    status-bg default
+    status-fg default
+    status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+    status-format[1] "#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }"
+    status-format[2] "#[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }"
+    status-interval 15
+    status-justify left
+    status-keys emacs
+    status-left "[#{session_name}] "
+    status-left-length 10
+    status-left-style default
+    status-position bottom
+    status-right "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+    status-right-length 40
+    status-right-style default
+    status-style bg=themegreen,fg=themeblack
+    prompt-cursor-colour ''
+    prompt-command-cursor-colour ''
+    prompt-cursor-style default
+    prompt-command-cursor-style default
+    update-environment[0] DISPLAY
+    update-environment[1] KRB5CCNAME
+    update-environment[2] MSYSTEM
+    update-environment[3] SSH_ASKPASS
+    update-environment[4] SSH_AUTH_SOCK
+    update-environment[5] SSH_AGENT_PID
+    update-environment[6] SSH_CONNECTION
+    update-environment[7] WAYLAND_DISPLAY
+    update-environment[8] WINDOWID
+    update-environment[9] XAUTHORITY
+    update-environment[10] XDG_CURRENT_DESKTOP
+    update-environment[11] XDG_SESSION_DESKTOP
+    update-environment[12] XDG_SESSION_TYPE
+    visual-activity off
+    visual-bell off
+    visual-silence off
+    word-separators "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+tmux stdout:
+    @hook-row marker
+    activity-action other
+    assume-paste-time 1
+    base-index 0
+    bell-action any
+    default-command ''
+    default-shell /bin/bash
+    default-size 80x24
+    destroy-unattached off
+    detach-on-destroy on
+    display-panes-active-colour themered
+    display-panes-colour themeblue
+    display-panes-format "#[align=right]#{pane_width}x#{pane_height}"
+    display-panes-time 1000
+    display-time 750
+    focus-follows-mouse off
+    history-limit 10000
+    initial-repeat-time 0
+    key-table root
+    lock-after-time 0
+    lock-command vlock
+    message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+    message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+    message-line 0
+    message-style "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"
+    mouse on
+    prefix C-b
+    prefix2 None
+    renumber-windows off
+    repeat-time 500
+    set-titles off
+    set-titles-string "#S:#I:#W - \"#T\" #{session_alerts}"
+    silence-action other
+    status on
+    status-bg default
+    status-fg default
+    status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+    status-format[1] "#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }"
+    status-format[2] "#[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }"
+    status-interval 15
+    status-justify left
+    status-keys emacs
+    status-left "[#{session_name}] "
+    status-left-length 10
+    status-left-style default
+    status-position bottom
+    status-right "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+    status-right-length 40
+    status-right-style default
+    status-style bg=themegreen,fg=themeblack
+    prompt-cursor-colour ''
+    prompt-command-cursor-colour ''
+    prompt-cursor-style default
+    prompt-command-cursor-style default
+    update-environment[0] DISPLAY
+    update-environment[1] KRB5CCNAME
+    update-environment[2] MSYSTEM
+    update-environment[3] SSH_ASKPASS
+    update-environment[4] SSH_AUTH_SOCK
+    update-environment[5] SSH_AGENT_PID
+    update-environment[6] SSH_CONNECTION
+    update-environment[7] WAYLAND_DISPLAY
+    update-environment[8] WINDOWID
+    update-environment[9] XAUTHORITY
+    update-environment[10] XDG_CURRENT_DESKTOP
+    update-environment[11] XDG_SESSION_DESKTOP
+    update-environment[12] XDG_SESSION_TYPE
+    visual-activity off
+    visual-bell off
+    visual-silence off
+    word-separators "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+OUT: divergence
+--- zz OUT step 15
++++ tmux OUT step 15
+@@ -18,7 +18,7 @@
+ initial-repeat-time 0
+ key-table root
+ lock-after-time 0
+-lock-command "lock -np"
++lock-command vlock
+ message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+ message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+ message-line 0
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: show-options -g after-bind-key
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    after-bind-key[0] display-message global-zero
+    after-bind-key[named] display-message global-named
+tmux stdout:
+    after-bind-key[0] display-message global-zero
+    after-bind-key[named] display-message global-named
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: show-options -gH after-bind-key
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    after-bind-key[0] display-message global-zero
+    after-bind-key[named] display-message global-named
+tmux stdout:
+    after-bind-key[0] display-message global-zero
+    after-bind-key[named] display-message global-named
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: show-options -g after-bind-key[named]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    after-bind-key[named] display-message global-named
+tmux stdout:
+    after-bind-key[named] display-message global-named
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: show-options -gHv
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    marker
+    other
+    1
+    0
+    any
+    
+    /bin/bash
+    80x24
+    off
+    on
+    themered
+    themeblue
+    #[align=right]#{pane_width}x#{pane_height}
+    1000
+    750
+    off
+    10000
+    0
+    root
+    0
+    lock -np
+    bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}
+    #[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}
+    0
+    bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}
+    on
+    C-b
+    None
+    off
+    500
+    off
+    #S:#I:#W - "#T" #{session_alerts}
+    other
+    on
+    default
+    default
+    #[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]
+    #[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }
+    #[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }
+    15
+    left
+    emacs
+    [#{session_name}] 
+    10
+    default
+    bottom
+    #{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}"#{=21:pane_title}" %H:%M %d-%b-%y
+    40
+    default
+    bg=themegreen,fg=themeblack
+    
+    
+    default
+    default
+    DISPLAY
+    KRB5CCNAME
+    MSYSTEM
+    SSH_ASKPASS
+    SSH_AUTH_SOCK
+    SSH_AGENT_PID
+    SSH_CONNECTION
+    WAYLAND_DISPLAY
+    WINDOWID
+    XAUTHORITY
+    XDG_CURRENT_DESKTOP
+    XDG_SESSION_DESKTOP
+    XDG_SESSION_TYPE
+    off
+    off
+    off
+    !"#$%&'()*+,-./:;<=>?@[\]^`{|}~
+    display-message global-zero
+    display-message global-named
+tmux stdout:
+    marker
+    other
+    1
+    0
+    any
+    
+    /bin/bash
+    80x24
+    off
+    on
+    themered
+    themeblue
+    #[align=right]#{pane_width}x#{pane_height}
+    1000
+    750
+    off
+    10000
+    0
+    root
+    0
+    vlock
+    bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}
+    #[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}
+    0
+    bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}
+    on
+    C-b
+    None
+    off
+    500
+    off
+    #S:#I:#W - "#T" #{session_alerts}
+    other
+    on
+    default
+    default
+    #[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]
+    #[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }
+    #[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }
+    15
+    left
+    emacs
+    [#{session_name}] 
+    10
+    default
+    bottom
+    #{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}"#{=21:pane_title}" %H:%M %d-%b-%y
+    40
+    default
+    bg=themegreen,fg=themeblack
+    
+    
+    default
+    default
+    DISPLAY
+    KRB5CCNAME
+    MSYSTEM
+    SSH_ASKPASS
+    SSH_AUTH_SOCK
+    SSH_AGENT_PID
+    SSH_CONNECTION
+    WAYLAND_DISPLAY
+    WINDOWID
+    XAUTHORITY
+    XDG_CURRENT_DESKTOP
+    XDG_SESSION_DESKTOP
+    XDG_SESSION_TYPE
+    off
+    off
+    off
+    !"#$%&'()*+,-./:;<=>?@[\]^`{|}~
+    display-message global-zero
+    display-message global-named
+OUT: divergence
+--- zz OUT step 19
++++ tmux OUT step 19
+@@ -18,7 +18,7 @@
+ 0
+ root
+ 0
+-lock -np
++vlock
+ bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}
+ #[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}
+ 0
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: set-hook 'after-bind-key[local]' 'display-message local'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: show-options -A after-bind-key
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    after-bind-key[local] display-message local
+tmux stdout:
+    after-bind-key[local] display-message local
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: show-options -A after-bind-key[named]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    after-bind-key[named] 
+tmux stdout:
+    after-bind-key[named] 
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: set-hook -u after-bind-key[local]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: out: show-options -A after-bind-key
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    after-bind-key
+tmux stdout:
+    after-bind-key
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: set-hook -u after-bind-key
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: out: show-options -A after-bind-key
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    after-bind-key[0]* display-message global-zero
+    after-bind-key[named]* display-message global-named
+tmux stdout:
+    after-bind-key[0]* display-message global-zero
+    after-bind-key[named]* display-message global-named
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: set-hook -g 'pane-died[global]' 'display-message global-window'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: out: show-options -pA pane-died
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    pane-died[global]* display-message global-window
+tmux stdout:
+    pane-died[global]* display-message global-window
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: set-hook -w -t w:0 'pane-died[window]' 'display-message window'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: out: show-options -pA pane-died
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    pane-died[window]* display-message window
+tmux stdout:
+    pane-died[window]* display-message window
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 31
+COMMAND: out: show-options -pA pane-died[global]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    pane-died[global]* 
+tmux stdout:
+    pane-died[global]* 
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 32
+COMMAND: set-hook -p -t w:0.0 'pane-died[pane]' 'display-message pane'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 33
+COMMAND: out: show-options -pA pane-died
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    pane-died[pane] display-message pane
+tmux stdout:
+    pane-died[pane] display-message pane
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 34
+COMMAND: out: show-options -pAH
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    cursor-colour* ''
+    cursor-style* default
+    allow-passthrough* off
+    allow-rename* off
+    allow-set-title* on
+    alternate-screen* on
+    copy-mode-position-format* "#[align=right]#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}[#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}"
+    pane-active-border-style* "fg=#{?pane_marked,thememagenta,#{?synchronize-panes,themered,#{?pane_in_mode,themeyellow,themegreen}}}"
+    pane-border-format* "#{?pane_active,#[reverse],}#{pane_index}#[default] \"#{pane_title}\"#{?#{mouse},#[align=right]#[range=control|7][#{?#{pane_floating_flag},t,f}]#[norange]#[range=control|8][#{?#{window_zoomed_flag},u,z}]#[norange]#[range=control|9][x]#[norange],}"
+    pane-border-lines* single
+    pane-border-status* off
+    pane-border-style* fg=themelightgrey
+    pane-colours*
+    pane-scrollbars-style* bg=themedarkgrey,fg=themelightgrey,width=1,pad=0
+    remain-on-exit* off
+    remain-on-exit-format* "Pane is dead (#{?#{!=:#{pane_dead_status},},status #{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},}, #{t:pane_dead_time})"
+    scroll-on-clear* on
+    switch-mode-match-style* "bg=cyan fg=black"
+    synchronize-panes* off
+    tree-mode-preview-format* "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}"
+    window-active-style* default
+    window-style* default
+    pane-died[pane] display-message pane
+    pane-exited*
+    pane-focus-in*
+    pane-focus-out*
+    pane-mode-changed*
+    pane-set-clipboard*
+    pane-title-changed*
+tmux stdout:
+    cursor-colour* ''
+    cursor-style* default
+    allow-passthrough* off
+    allow-rename* off
+    allow-set-title* on
+    alternate-screen* on
+    copy-mode-position-format* "#[align=right]#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}[#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}"
+    pane-active-border-style* "fg=#{?pane_marked,thememagenta,#{?synchronize-panes,themered,#{?pane_in_mode,themeyellow,themegreen}}}"
+    pane-border-format* "#{?pane_active,#[reverse],}#{pane_index}#[default] \"#{pane_title}\"#{?#{mouse},#[align=right]#[range=control|7][#{?#{pane_floating_flag},t,f}]#[norange]#[range=control|8][#{?#{window_zoomed_flag},u,z}]#[norange]#[range=control|9][x]#[norange],}"
+    pane-border-lines* single
+    pane-border-status* off
+    pane-border-style* fg=themelightgrey
+    pane-colours*
+    pane-scrollbars-style* bg=themedarkgrey,fg=themelightgrey,width=1,pad=0
+    remain-on-exit* off
+    remain-on-exit-format* "Pane is dead (#{?#{!=:#{pane_dead_status},},status #{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},}, #{t:pane_dead_time})"
+    scroll-on-clear* on
+    switch-mode-match-style* "bg=cyan fg=black"
+    synchronize-panes* off
+    tree-mode-preview-format* "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}"
+    window-active-style* default
+    window-style* default
+    pane-died[pane] display-message pane
+    pane-exited*
+    pane-focus-in*
+    pane-focus-out*
+    pane-mode-changed*
+    pane-set-clipboard*
+    pane-title-changed*
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=34 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=7 warn_divergences=0

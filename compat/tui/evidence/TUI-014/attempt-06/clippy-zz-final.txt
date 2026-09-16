@@ -1,0 +1,74 @@
+    Checking getrandom v0.4.3
+    Checking hybrid-array v0.4.15
+    Checking subtle v2.6.1
+    Checking uuid v1.26.1
+    Checking tempfile v3.27.0
+    Checking ctutils v0.4.2
+    Checking zbus v5.19.0
+    Checking crypto-common v0.2.2
+    Checking block-buffer v0.12.1
+    Checking digest v0.10.7
+   Compiling rustls v0.23.44
+    Checking digest v0.11.3
+    Checking accesskit v0.24.1
+    Checking rusty-fork v0.3.1
+    Checking hmac v0.12.1
+   Compiling const-random-macro v0.1.16
+    Checking proptest v1.10.0 (https://github.com/proptest-rs/proptest?rev=3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b#3dca198a)
+   Compiling ureq v3.4.1
+    Checking atspi-common v0.13.0
+   Compiling download-cef v3.0.0
+    Checking const-random v0.1.18
+    Checking block-padding v0.4.2
+    Checking gpui v0.2.2 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+    Checking inout v0.2.2
+    Checking ahash v0.8.12
+    Checking nix v0.31.3
+    Checking atspi-proxies v0.13.0
+    Checking ashpd v0.13.13
+    Checking sha2 v0.10.9
+    Checking hkdf v0.12.4
+    Checking pbkdf2 v0.12.2
+    Checking accesskit_consumer v0.38.0
+    Checking sha2 v0.11.0
+    Checking md-5 v0.10.6
+    Checking mio v1.2.3
+    Checking merman-core v0.6.2
+    Checking zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-mux)
+   Compiling cef-dll-sys v152.2.0+152.0.6
+    Checking agent-client-protocol v2.1.0
+    Checking oo7 v0.6.0
+    Checking accesskit_atspi_common v0.19.1
+    Checking atspi v0.29.0
+    Checking cipher v0.5.2
+    Checking notify v9.0.0-rc.5
+    Checking accesskit_unix v0.22.1
+    Checking zed-xim v0.4.0-zed (https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#16f35a2c)
+    Checking zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-daemon)
+    Checking merman-render v0.6.2
+    Checking gpui_wgpu v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+    Checking rust-embed-utils v8.12.0
+    Checking notify-rust v4.18.0
+    Checking hmac v0.13.0
+    Checking aes v0.9.3
+    Checking fff-notify-debouncer-full v0.9.4
+    Checking pbkdf2 v0.13.0
+    Checking gpui_linux v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+    Checking merman v0.6.2
+    Checking rust-embed v8.12.0
+    Checking cbc v0.2.1
+    Checking sha1 v0.11.0
+    Checking fff-search v0.10.6
+    Checking gpui_platform v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+    Checking zz-ui v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-ui)
+    Checking ksni v0.3.6
+    Checking zz-config v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-config)
+    Checking zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-tui)
+    Checking notify v8.2.0
+    Checking cef v152.2.0+152.0.6
+    Checking zz-browser v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-browser)
+    Checking zz-chrome-import v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-chrome-import)
+    Checking zz v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 41s
+
+EXIT 0

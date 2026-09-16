@@ -2311,6 +2311,13 @@ impl MuxState {
         current: Option<SessionId>,
         slot: TargetSlot,
     ) -> Result<SessionId, ServerError> {
+        let target = target.map(|target| {
+            if target == "=" && slot != TargetSlot::PaneFallback {
+                ""
+            } else {
+                target
+            }
+        });
         let Some(target) = target.filter(|target| !target.is_empty()) else {
             return current
                 .filter(|session| self.sessions.contains_key(session))
@@ -2318,6 +2325,17 @@ impl MuxState {
                 .ok_or_else(|| ServerError::SessionNotFound("current session".to_owned()));
         };
         if slot == TargetSlot::Session {
+            if let Some((session, window)) = target.split_once(':')
+                && (session == "=" || window == "=")
+            {
+                let session = if session == "=" { "" } else { session };
+                let window = if window == "=" { "" } else { window };
+                return self.resolve_named_session(
+                    Some(&format!("{session}:{window}")),
+                    current,
+                    slot,
+                );
+            }
             let window_target = target.split_once(':').map_or(target, |(_, window)| window);
             let current_window = current
                 .and_then(|session| self.sessions.get(&session))
@@ -2325,12 +2343,20 @@ impl MuxState {
             if let Some((session_target, pane_target)) = target.split_once(":.")
                 && pane_target.starts_with('%')
             {
-                let session = self.resolve_named_session(Some(session_target), current, slot)?;
+                let session = if session_target.is_empty() {
+                    None
+                } else {
+                    Some(self.resolve_named_session(Some(session_target), current, slot)?)
+                };
                 let pane = self.resolve_pane(Some(pane_target), current_window, None)?;
                 let window = self
                     .window_for_pane(pane)
                     .ok_or_else(|| ServerError::PaneNotFound(pane_target.to_owned()))?;
-                return (self.windows[&window].session == session)
+                let pane_session = self.windows[&window].session;
+                let Some(session) = session else {
+                    return Ok(pane_session);
+                };
+                return (pane_session == session)
                     .then_some(session)
                     .ok_or_else(|| ServerError::PaneNotFound(pane_target.to_owned()));
             }
@@ -4978,6 +5004,9 @@ mod tests {
             "@0",
             "=cli:=win",
             "cli:win.",
+            "cli:=",
+            "=:",
+            "=cli:=",
         ] {
             assert_eq!(
                 state.resolve_session(Some(target), Some(session)),
@@ -5014,6 +5043,18 @@ mod tests {
                 "{target}"
             );
         }
+        let (other_session, _, foreign_pane) = state.create_session("foreign").unwrap();
+        for target in [format!(":.{foreign_pane}"), format!("=:.{foreign_pane}")] {
+            assert_eq!(
+                state.resolve_session(Some(&target), Some(session)),
+                Ok(other_session),
+                "{target}"
+            );
+        }
+        assert_eq!(
+            state.resolve_session(Some(&format!("cli:.{foreign_pane}")), Some(session)),
+            Err(ServerError::PaneNotFound(foreign_pane.to_string()))
+        );
         assert_eq!(pane, PaneId(0));
         assert_eq!(
             state.resolve_session(Some(&format!("cli:win.{other_pane}")), None),

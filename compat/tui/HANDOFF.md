@@ -11,7 +11,7 @@ box reads origin before it decides anything. The resume point is the branch tabl
 | --- | --- |
 | `origin/main` | `10779511` at the wrap-up (the menus-3 plus mouse-context landing); any later commit came from a lane named below |
 | Ledger | **11/12 baseline verified** (only TUI-011 open, at review); added scope: TUI-016 verified, TUI-018 at review, TUI-014 and TUI-017 active, TUI-015 unmeasured on main (at review on its branch), TUI-013 unmeasured (needs macOS) |
-| `PROTOCOL_VERSION` | **103 on main, unreleased** (v0.9.1 shipped 102); one v103 entry in `knowledge/protocol/wire-protocol.md`; `compat/wire-version.py` enforces it inside `compat/check.sh` |
+| `PROTOCOL_VERSION` | **103 SHIPPED in v0.10.0** (tagged 2026-09-16 00:28, now `origin/main` at `be5709df`), so 103 is frozen and **cycle 11's first wire append opens 104**; `compat/wire-version.py` enforces it inside `compat/check.sh` |
 | Board | `F-TUI-CYCLE-9-LANES` released at the wrap-up; MAIN and TRIAGE free; issue 7 carries every gate note of the day |
 | Workers | Claude agents (Agent tool, `model: opus`) until 14:30, then Codex CLI lanes (`codex exec`, gpt-6-astra, reasoning high) on fabrico's instruction; the same prompts, zones, proofs and JSON reports for both |
 | Main is green on this box | `cargo build -p zz`, workspace clippy `-D warnings`, `cargo fmt --check`, `compat/attached-client.sh` PASS, `compat/tui-overlays.sh --self-check`, the whole zz-daemon lib including `russh_socks`, every fixture the gates ran |
@@ -80,7 +80,9 @@ verified (its record says so in its own words). Today's position:
    `gap:<id>`); the summary line ends with `owners ... unattributed=0`; a reason opening with
    `DECIDED ` is a clause-mandated registration and is not charged. A gate verifying any of the six
    reads that tally, and a lane adding a recorded case must attribute it or it is charged to all.
-3. **Wire.** 103 is unreleased; main's v103 entry carries `CommandPromptState.pane`,
+3. **Wire.** 103 SHIPPED in v0.10.0 on 2026-09-16, so it is frozen: the first append of
+   cycle 11 bumps `PROTOCOL_VERSION` to 104, opens a v104 entry, and moves both pins in
+   `crates/zz-protocol/tests/hunt_claims.rs` (`0x67` becomes `0x68`). The shipped v103 entry carries `CommandPromptState.pane`,
    `ProtocolMessage::ClientTerminalType`, `view_action` and `press_action` on
    `InputMessage::MouseKey`, `status_range_start` on `MouseKey`, and `CommandInvocation.stdin`;
    `campaign/tui-modes-11` appends `PaneSnapshot.mode`. `crates/zz-protocol/tests/hunt_claims.rs`
@@ -140,7 +142,7 @@ verified (its record says so in its own words). Today's position:
 
 ## Resuming on another machine
 
-1. `compat/fetch-tmux.sh` and `compat/fetch-corpus.sh`; `compat/check.sh` (wire 103 unreleased).
+1. `compat/fetch-tmux.sh` and `compat/fetch-corpus.sh`; `compat/check.sh` (wire 103 shipped in v0.10.0; appends open 104).
 2. `python3 compat/tui/tracker.py check` and `ready`; `git fetch origin '+refs/heads/campaign/*:refs/remotes/origin/campaign/*'`
    and read the tips of `tui-stream-alias`, `tui-capture-11`, `tui-modes-11` and, if present,
    `tui-stream-alias-2`, `tui-modes-12`: a lane that finished after this file was written left its

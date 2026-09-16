@@ -1,0 +1,10 @@
+wire-version: 103 matches v0.10.0 and the wire is unchanged
+EXIT 0
+crates/zz-protocol/src/message.rs:21:pub const PROTOCOL_VERSION: u16 = 103;
+crates/zz-protocol/src/message.rs:5078:        assert_eq!(super::PROTOCOL_VERSION, 103);
+crates/zz-protocol/tests/hunt_claims.rs:6:    MuxOptionKey, MuxSnapshot, PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PaneSnapshot,
+crates/zz-protocol/tests/hunt_claims.rs:18:    assert_eq!(PROTOCOL_VERSION, 103);
+crates/zz-protocol/tests/hunt_claims.rs:273:        protocol_version: PROTOCOL_VERSION,
+crates/zz-protocol/tests/hunt_claims.rs:310:        protocol_version: PROTOCOL_VERSION,
+crates/zz-protocol/tests/hunt_claims.rs:325:            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x67, 0x00, 0x00, 0x67, 0x00, 0x00, 0x00, 0x00,
+Added Rust comment/doc lines: 0

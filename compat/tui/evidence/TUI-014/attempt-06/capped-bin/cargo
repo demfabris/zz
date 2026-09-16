@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+import os
+import sys
+
+arguments = sys.argv[1:]
+environment = dict(os.environ)
+environment.setdefault('CARGO_HOME', '/home/demfabris/.cargo')
+environment.setdefault('RUSTUP_HOME', '/home/demfabris/.rustup')
+if environment.get('ZZ_MODES_CARGO_IN_SCOPE', '') == '1':
+    if len(arguments) >= 2 and arguments[-2] == '--jobs':
+        jobs = arguments[-2:]
+        arguments = arguments[:-2]
+        if arguments[0] != 'fmt':
+            index = arguments.index('--') if '--' in arguments else len(arguments)
+            arguments[index:index] = jobs
+    os.execve('/home/demfabris/.cargo/bin/cargo', ['cargo', *arguments], environment)
+else:
+    environment['ZZ_MODES_CARGO_IN_SCOPE'] = '1'
+    os.execve('/tmp/zz-cargo.sh', ['/tmp/zz-cargo.sh', *arguments], environment)

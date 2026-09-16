@@ -1,0 +1,9 @@
+Base: be5709dfcd9936d44519683e5da8dc6ab7748d96
+Production proof revision: 5036e22fb73cca08a5c8a54eb06a4be5a0a5c8e1
+Source whitespace check excluding raw evidence: PASS
+Added Rust comment/doc lines: 0 (wire-and-source-final.txt)
+Attribution/generator trailers in lane commits: none
+Planned complete three-dot footprint: 393 files
+Attempt-06 files: 262; bytes before this audit write: 2845947
+All fixture runner processes completed. Final retained-output verifier PASS; prior failed run preserved. Full delta: 198 rows, 2331 steps, 187 zero-divergence, two exact known-divergence rows, nine failures, zero unrun.
+Push protection found an OAuth token in two raw corpus archives; all four occurrences redacted before amending the rejected evidence commit. No bypass.

@@ -1,0 +1,3 @@
+Full seven-package test build began with MemoryMax=5G, MemorySwapMax=3G, jobs=3.
+At 2026-09-16T10:55-03:00 fff-search compilation had spent more than eight minutes under memory pressure. The scope reported 40742 max events and zero OOM or OOM kills.
+Raised only this lane-owned scope run-p381441-i358079.scope to MemoryMax=7G with systemctl --user set-property --runtime. The shared two-slot flock and jobs=3 remain.

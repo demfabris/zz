@@ -1,0 +1,12 @@
+    Blocking waiting for file lock on build directory
+   Compiling zz v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 08s
+     Running unittests src/lib.rs (target/debug/deps/zz-1769c0bc012bf78f)
+
+running 1 test
+test control_mode::tests::exit_drain_keeps_wait_exit_acknowledgements ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 663 filtered out; finished in 0.00s
+
+
+EXIT 0

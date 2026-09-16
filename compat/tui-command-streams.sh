@@ -198,7 +198,7 @@ wait_for() {
 
 # The options the config sink writes, read back by name so a case can prove the
 # stream was applied and not merely accepted.
-PROBE_OPTIONS=(@zzcs-one @zzcs-two @zzcs-three @zzcs-parse @zzcs-cancel)
+PROBE_OPTIONS=(@zzcs-after @zzcs-replay @zzcs-one @zzcs-two @zzcs-three @zzcs-parse @zzcs-cancel)
 
 # Everything a caller stream can move, read the same way from both servers. A
 # pane's pid is never printed, only whether it has one: that is what an empty
@@ -583,6 +583,144 @@ alias_group_cases() {
   tmux_command delete-buffer -b zzcsalias >/dev/null || die 'tmux refused alias buffer cleanup'
 }
 
+review_alias_case() {
+  local name="$1" body="$2" sabotage="$3" payload="$4" file="$5" channel="$6" side
+  if [ "$name" = alias-c-locale-binary-unterminated-stdout ]; then
+    local LC_ALL=C
+    export LC_ALL
+  fi
+  for side in zz tmux; do
+    side_command "$side" set -gu @zzcs-after >/dev/null
+    side_command "$side" set -gu @zzcs-replay >/dev/null
+    local selected="$body"
+    if [ "$SELF_CHECK" -eq 1 ] && [ "$side" = zz ] && [[ "$name" != *binary-unterminated-stdout ]]; then
+      selected="$sabotage"
+    fi
+    side_command "$side" set -s 'command-alias[82]' "zzcs-review=$selected" >/dev/null ||
+      die "$side refused $name alias"
+    if [ "$file" = file-tail ]; then
+      side_command "$side" set -s 'command-alias[83]' \
+        'zzcs-tail=display-message -p ignored ; set -g @zzcs-after yes' >/dev/null ||
+        die "$side refused tail alias"
+    fi
+  done
+  stdin_from_file "$payload"
+  local -a command=(zzcs-review)
+  if [[ "$file" = file* ]]; then
+    printf 'zzcs-review\n' >"$SCRATCH_DIR/replay.conf"
+    if [ "$file" = file-tail ]; then
+      printf 'zzcs-tail\n' >>"$SCRATCH_DIR/replay.conf"
+    fi
+    command=(source-file "$SCRATCH_DIR/replay.conf")
+  fi
+  if [ "$SELF_CHECK" -eq 1 ]; then
+    self_check_run "$name" "${command[@]}"
+    self_check_expect "$name: altered alias member on zz" "$channel=1"
+  else
+    case_run "$name" same '' -- "${command[@]}"
+  fi
+  for side in zz tmux; do
+    side_command "$side" set -gu @zzcs-after >/dev/null
+    side_command "$side" set -gu @zzcs-replay >/dev/null
+    side_command "$side" delete-buffer -b zzcsreview >/dev/null 2>&1 || true
+  done
+}
+
+startup_config_stream_case() {
+  local side config="$SCRATCH_DIR/startup.conf" rc
+  local -a base
+  for side in zz tmux; do
+    printf 'source-file -\nset -g @boot-ready yes\n' >"$config"
+    if [ "$SELF_CHECK" -eq 1 ] && [ "$side" = zz ]; then
+      printf 'set -g @boot-input applied\nset -g @boot-ready yes\n' >"$config"
+    fi
+    if [ "$side" = zz ]; then
+      base=("$ZZ_BIN" --socket "${ZZ_SOCKET%.sock}-boot.sock")
+    else
+      base=("$TMUX_BIN" -L "$INNER_SOCKET_NAME-boot")
+    fi
+    set +e
+    printf 'set -g @boot-input applied\n' |
+      scrubbed HOME="$SCRATCH_DIR/boot-$side" XDG_CONFIG_HOME="$SCRATCH_DIR/boot-$side/config" \
+      "${base[@]}" -f "$config" new-session -d -s boot 'sleep 60' \
+      >"$SCRATCH_DIR/$side.out" 2>"$SCRATCH_DIR/$side.err"
+    rc=$?
+    set -e
+    printf '%s\n' "$rc" >"$SCRATCH_DIR/$side.rc"
+    scrubbed "${base[@]}" show-options -gqv @boot-input >>"$SCRATCH_DIR/$side.out"
+    scrubbed "${base[@]}" show-options -gqv @boot-ready >>"$SCRATCH_DIR/$side.out"
+    scrubbed "${base[@]}" kill-server >/dev/null 2>&1 || true
+  done
+  compare_channels daemon-start-config-refuses-stdin || true
+  if [ "$SELF_CHECK" -eq 1 ]; then
+    self_check_expect 'daemon-start-config-refuses-stdin: applied payload on zz' stdout=1
+  else
+    CHECKS=$((CHECKS + 1))
+    if [ "$LAST_EXIT_DIFFERED$LAST_STDOUT_DIFFERED$LAST_STDERR_DIFFERED$LAST_STATE_DIFFERED" = 0000 ] &&
+      [ "$(cat "$SCRATCH_DIR/tmux.out")" = yes ] && [ "$(cat "$SCRATCH_DIR/tmux.rc")" = 0 ]; then
+      printf 'ok    daemon-start-config-refuses-stdin\n'
+    else
+      FAILURES=$((FAILURES + 1))
+      printf 'DIFF  daemon-start-config-refuses-stdin\n'
+    fi
+  fi
+}
+
+review_alias_cases() {
+  printf 'set -g @zzcs-replay applied\n' >"$SCRATCH_DIR/replay-input.conf"
+  printf 'a\377\000z' >"$SCRATCH_DIR/unterminated.bin"
+  local reader name
+  for name in source buffer pane; do
+    case "$name" in
+    source) reader='source-file -' ;;
+    buffer) reader='load-buffer -b zzcsreview -' ;;
+    pane) reader="split-window -I -d -t =$SESSION:$WINDOW_NAME.0" ;;
+    esac
+    review_alias_case "alias-$name-spent-source-continues" \
+      "$reader ; source-file - ; display-message -p after ; set -g @zzcs-after yes" \
+      "$reader ; source-file -" "$SCRATCH_DIR/replay-input.conf" direct stdout
+    if [ "$SELF_CHECK" -eq 1 ]; then
+      review_alias_case "alias-$name-spent-source-continues-state" \
+        "$reader ; source-file - ; display-message -p after ; set -g @zzcs-after yes" \
+        "$reader ; source-file - ; display-message -p after" "$SCRATCH_DIR/replay-input.conf" direct state
+    fi
+    if [ "$name" = pane ]; then
+      drop_extra_panes alias-pane-restored >/dev/null
+    fi
+  done
+  review_alias_case alias-missing-source-aborts \
+    'display-message -p before ; source-file /tmp/zz018-no-such-config ; display-message -p after ; set -g @zzcs-after yes' \
+    'display-message -p before ; source-file -q /tmp/zz018-no-such-config ; display-message -p after ; set -g @zzcs-after yes' \
+    "$SCRATCH_DIR/replay-input.conf" direct state
+  review_alias_case file-replay-single-reader 'source-file -' \
+    'display-message -p dropped' "$SCRATCH_DIR/replay-input.conf" file state
+  review_alias_case file-replay-nonreader-then-reader \
+    'set -g @zzcs-after yes ; source-file -' \
+    'set -g @zzcs-after yes' "$SCRATCH_DIR/replay-input.conf" file state
+  review_alias_case file-replay-two-readers 'source-file - ; source-file -' \
+    'source-file -' "$SCRATCH_DIR/replay-input.conf" file stderr
+  review_alias_case alias-binary-unterminated-stdout \
+    'load-buffer -b zzcsreview - ; save-buffer -b zzcsreview -' \
+    'load-buffer -b zzcsreview - ; set-buffer -b zzcsreview changed ; save-buffer -b zzcsreview -' \
+    "$SCRATCH_DIR/unterminated.bin" direct stdout
+  review_alias_case alias-c-locale-binary-unterminated-stdout \
+    'load-buffer -b zzcsreview - ; save-buffer -b zzcsreview -' \
+    'load-buffer -b zzcsreview - ; save-buffer -b zzcsreview -' \
+    "$SCRATCH_DIR/unterminated.bin" direct stdout
+  review_alias_case file-replay-binary-unterminated-stdout \
+    'load-buffer -b zzcsreview - ; save-buffer -b zzcsreview -' \
+    'load-buffer -b zzcsreview - ; save-buffer -b zzcsreview -' \
+    "$SCRATCH_DIR/unterminated.bin" file stdout
+  review_alias_case file-replay-binary-then-alias-print \
+    'load-buffer -b zzcsreview - ; save-buffer -b zzcsreview -' \
+    'load-buffer -b zzcsreview - ; save-buffer -b zzcsreview - ; save-buffer -b zzcsreview -' \
+    "$SCRATCH_DIR/unterminated.bin" file-tail stderr
+  review_alias_case alias-binary-then-print \
+    'load-buffer -b zzcsreview - ; save-buffer -b zzcsreview - ; display-message -p tail' \
+    'load-buffer -b zzcsreview - ; display-message -p changed' \
+    "$SCRATCH_DIR/unterminated.bin" direct stdout
+}
+
 write_payloads() {
   printf 'a\303\251b\377c\000d\n' >"$SCRATCH_DIR/binary.bin"
   # The cap counts bytes, so these are built by size and never by line count.
@@ -613,6 +751,8 @@ run_cases() {
   pane_input_sink_cases
   buffer_stream_cases
   alias_group_cases
+  review_alias_cases
+  startup_config_stream_case
   bound_cases
 
   if [ "$FAILURES" -ne 0 ]; then
@@ -661,6 +801,9 @@ self_check_run() {
   run_both "$@"
   settle_state zz
   settle_state tmux
+  if [[ "$name" = *binary-unterminated-stdout ]]; then
+    printf '\n' >>"$SCRATCH_DIR/zz.out"
+  fi
   compare_channels "$name" || true
   CASE_STDIN_FILE=''
 }
@@ -778,6 +921,9 @@ run_self_check() {
   zz_command delete-buffer -b zzcsalias >/dev/null || die 'zz refused alias buffer cleanup'
   tmux_command delete-buffer -b zzcsalias >/dev/null || die 'tmux refused alias buffer cleanup'
   install_stream_aliases
+
+  review_alias_cases
+  startup_config_stream_case
 
   # The second equivalence: with every sabotage withdrawn the comparison is
   # silent again, so none of the four above was a difference the scene kept.

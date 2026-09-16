@@ -5962,9 +5962,15 @@ impl Shared {
             if kind == ClientKind::Command
                 || kind == ClientKind::Control && command.source.is_none()
             {
-                inner
-                    .command_streams
-                    .insert(client, CommandStreams::default());
+                inner.command_streams.insert(
+                    client,
+                    CommandStreams {
+                        stdin: (kind == ClientKind::Command)
+                            .then(|| command.stdin().cloned().map(SourceStream::Bytes))
+                            .flatten(),
+                        ..CommandStreams::default()
+                    },
+                );
             }
             client_name
         };
@@ -6040,7 +6046,9 @@ impl Shared {
             Some(streams) if !streams.is_empty() => merge_command_streams(response, &streams),
             _ => response,
         };
-        if self.sanitizes_output_for(client, kind, &command.name) {
+        if recorded_claim != Some(StdoutClaim::Raw)
+            && self.sanitizes_output_for(client, kind, &command.name)
+        {
             let output = match &mut response {
                 CommandResponse::Success { output, .. } | CommandResponse::Error { output, .. } => {
                     output
@@ -6532,6 +6540,8 @@ impl Shared {
         client_terminal: ClientTerminal,
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
+        let streamed_command = self.command_with_caller_stdin(client, context, command);
+        let command = streamed_command.as_ref().unwrap_or(command);
         if MuxEngine::is_command_alias_group(command) {
             let detached = queue_execution.is_some_and(|execution| execution.detached);
             let shutdown_blocker =
@@ -10060,7 +10070,11 @@ impl Shared {
                 } else {
                     STANDARD_INPUT_SOURCE_WARNING.to_owned()
                 };
-                source_path_error = true;
+                if request.stdin.is_some() {
+                    reported_source_failure = true;
+                } else {
+                    source_path_error = true;
+                }
                 if captured_control_source {
                     control_source_errors.push(text.clone());
                 } else {
@@ -12301,6 +12315,11 @@ impl Shared {
                 .prepare_frozen_callback_invocations(&mut parsed.commands, owner)?;
         }
         let mut result = InsertedCommandResult::default();
+        let mut stdout_claim = StdoutClaim::None;
+        let stream_client = context.replay_client().unwrap_or(client);
+        let alias_stdout = matches!(mode, InsertedCommandMode::CommandAlias { .. })
+            && kind == ClientKind::Command
+            && stream_client != ClientId(u64::MAX);
         let mut first_error = None;
         let mut failed_group = None;
         let mut stdin = match mode {
@@ -12328,7 +12347,8 @@ impl Shared {
                 failed_group = None;
             }
             if carried_a_stream
-                && command_stdin_sink(canonical_command(&command.name), &command.args).is_some()
+                && command_stdin_sink(canonical_command(&command.name), &command.args)
+                    .is_some_and(|sink| sink != CommandStdinSink::ConfigReplay)
             {
                 if let Some(stdin) = stdin.take() {
                     command.set_stdin(stdin);
@@ -12347,6 +12367,7 @@ impl Shared {
                     || self.is_capturing_control_command_events(*client)
                     || mode.queue_execution().deferred_shutdown.get() != DeferredShutdown::Force
             });
+            let stdout_sequence = self.command_stdout_sequence(stream_client);
             let (
                 execution,
                 routed_name,
@@ -12569,12 +12590,24 @@ impl Shared {
             }
             match execution {
                 Ok(execution) if !mode.queue_execution().suppress_output.get() => {
-                    append_inserted_output(&mut result.output, &execution.output);
+                    self.append_alias_output(
+                        &mut result,
+                        &execution.output,
+                        &routed_name,
+                        &mut stdout_claim,
+                        alias_stdout.then_some((stream_client, stdout_sequence)),
+                    );
                 }
                 Ok(_) => {}
                 Err(DaemonError::CommandExit { output, exit_code }) => {
                     if !mode.queue_execution().suppress_output.get() {
-                        append_inserted_output(&mut result.output, &output);
+                        self.append_alias_output(
+                            &mut result,
+                            &output,
+                            &routed_name,
+                            &mut stdout_claim,
+                            alias_stdout.then_some((stream_client, stdout_sequence)),
+                        );
                     }
                     result.exit_code = exit_code;
                     if matches!(mode, InsertedCommandMode::CommandAlias { .. }) {
@@ -12643,6 +12676,9 @@ impl Shared {
                     ));
                 }
             }
+        }
+        if alias_stdout {
+            self.record_command_stdout_claim(stream_client, stdout_claim);
         }
         if mode.queue_execution().deferred_shutdown.get() == DeferredShutdown::Force {
             result.exit_code = 0;
@@ -24753,11 +24789,92 @@ impl Shared {
         }
     }
 
+    fn append_alias_output(
+        &self,
+        result: &mut InsertedCommandResult,
+        output: &RawText,
+        name: &str,
+        claim: &mut StdoutClaim,
+        client: Option<(ClientId, usize)>,
+    ) {
+        let Some((client, sequence)) = client else {
+            append_inserted_output(&mut result.output, output);
+            return;
+        };
+        let recorded_raw = self.command_raw_stdout_since(client, sequence);
+        let next = if !output.is_empty() && *claim != StdoutClaim::Raw && recorded_raw {
+            StdoutClaim::Raw
+        } else {
+            default_stdout_claim(name, output)
+        };
+        if next == StdoutClaim::None {
+            return;
+        }
+        if next == StdoutClaim::Raw && *claim != StdoutClaim::None {
+            self.record_command_stderr(client, &spent_source_stream_error());
+            self.record_command_failure(client);
+            if let Some(streams) = self.inner.lock().command_streams.get_mut(&client) {
+                streams.stdout_claim = Some(*claim);
+                streams.stdout_write = (streams.stdout_write.0 + 1, *claim);
+            }
+            result.exit_code = 1;
+            return;
+        }
+        if *claim == StdoutClaim::Raw {
+            return;
+        }
+        append_inserted_output(&mut result.output, output);
+        *claim = next;
+        self.record_command_stdout_claim(client, next);
+    }
+
+    fn command_stdout_sequence(&self, client: ClientId) -> usize {
+        self.inner
+            .lock()
+            .command_streams
+            .get(&client)
+            .map_or(0, |streams| streams.stdout_write.0)
+    }
+
+    fn command_raw_stdout_since(&self, client: ClientId, sequence: usize) -> bool {
+        self.inner
+            .lock()
+            .command_streams
+            .get(&client)
+            .is_some_and(|streams| {
+                streams.stdout_write.0 > sequence && streams.stdout_write.1 == StdoutClaim::Raw
+            })
+    }
+
+    fn command_with_caller_stdin(
+        &self,
+        client: ClientId,
+        context: &ExecutionContext,
+        command: &CommandInvocation,
+    ) -> Option<CommandInvocation> {
+        let sink = command_stdin_sink(canonical_command(&command.name), &command.args)?;
+        if sink == CommandStdinSink::ConfigReplay {
+            return None;
+        }
+        let mut inner = self.inner.lock();
+        let streams = inner
+            .command_streams
+            .get_mut(&context.replay_client().unwrap_or(client))?;
+        let stdin = streams.stdin.as_mut()?;
+        let mut command = command.clone();
+        match std::mem::replace(stdin, SourceStream::Spent) {
+            SourceStream::Bytes(bytes) => command.set_stdin(bytes),
+            SourceStream::Spent => command.set_stdin_spent(),
+        }
+        Some(command)
+    }
+
     /// Name which of the pin's two stdout writers claimed this Command
     /// request's stream. `file_write` on `-` beats `cmdq_print`, the way the
     /// pin's first writer keeps the `dup`ed descriptor for the whole run.
     fn record_command_stdout_claim(&self, client: ClientId, claim: StdoutClaim) {
         if let Some(streams) = self.inner.lock().command_streams.get_mut(&client) {
+            streams.stdout_write = (streams.stdout_write.0 + 1, claim);
             let current = streams.stdout_claim.unwrap_or(StdoutClaim::None);
             if stdout_claim_rank(claim) > stdout_claim_rank(current) {
                 streams.stdout_claim = Some(claim);
@@ -26825,7 +26942,15 @@ impl Shared {
                 );
                 continue;
             }
-            if routed_name == "source-file" {
+            let caller_source_stream = source_file_reads_stdin(&routed.args)
+                && options.replay_client.is_some_and(|client| {
+                    self.inner
+                        .lock()
+                        .command_streams
+                        .get(&client)
+                        .is_some_and(|streams| streams.stdin.is_some())
+                });
+            if routed_name == "source-file" && !caller_source_stream {
                 let source_effects = {
                     let mut inner = self.inner.lock();
                     inner.engine.execute_prepared(context, &routed)
@@ -27149,6 +27274,9 @@ impl Shared {
                 queue_execution.callback_parse_failures.borrow().len();
             let deferred_replay_issues_start =
                 queue_execution.deferred_config_replay_issues.borrow().len();
+            let stdout_sequence = options
+                .replay_client
+                .map(|client| self.command_stdout_sequence(client));
             let result = self.execute_with_mux_source_routed_for_terminal_in_queue(
                 ClientId(u64::MAX),
                 ClientKind::Command,
@@ -27228,10 +27356,14 @@ impl Shared {
             {
                 report.note_startup_display(&command, &execution.output);
             }
-            let raw_stdout = matches!(
-                canonical_command(&routed.name),
-                "save-buffer" | "show-buffer"
-            );
+            let raw_stdout =
+                matches!(
+                    canonical_command(&routed.name),
+                    "save-buffer" | "show-buffer"
+                ) || alias_group
+                    && options.replay_client.zip(stdout_sequence).is_some_and(
+                        |(client, sequence)| self.command_raw_stdout_since(client, sequence),
+                    );
             if report.note_stdout(&captured_output, raw_stdout) == ReplayStdoutWrite::Denied
                 && let Some(replay_client) = options.replay_client
             {
@@ -28913,15 +29045,12 @@ impl ConfigLoadReport {
             .is_some_and(|transcripts| transcripts.iter().any(|frame| frame.raw_claimed))
     }
 
-    fn stdout_transcript(&self) -> Option<(&str, &str)> {
+    fn stdout_transcript(&self) -> Option<(&RawText, &RawText)> {
         self.stdout_transcript.as_ref().map(|transcripts| {
             let transcript = transcripts
                 .first()
                 .expect("stdout transcript has a root frame");
-            (
-                transcript.top_level_verbose.as_str(),
-                transcript.replay.as_str(),
-            )
+            (&transcript.top_level_verbose, &transcript.replay)
         })
     }
 
@@ -29291,6 +29420,8 @@ impl ConfigLoadReport {
 
 #[derive(Default)]
 struct CommandStreams {
+    stdin: Option<SourceStream>,
+    stdout_write: (usize, StdoutClaim),
     stdout: String,
     stderr: String,
     control_error: String,
@@ -39631,9 +39762,12 @@ pub fn load_buffer_reads_stdin(args: &[RawText]) -> bool {
 pub enum CommandStdinSink {
     /// The payload is the command's own text argument and the caller appends it
     /// after the argument boundary.
-    Argument { binary: bool },
+    Argument {
+        binary: bool,
+    },
     /// The payload is a configuration file named `-`.
     Config,
+    ConfigReplay,
     /// The payload is written into a pane that holds no process.
     PaneInput,
 }
@@ -39644,7 +39778,7 @@ impl CommandStdinSink {
         match self {
             Self::Argument { binary } => binary,
             Self::Config => false,
-            Self::PaneInput => true,
+            Self::PaneInput | Self::ConfigReplay => true,
         }
     }
 
@@ -39667,7 +39801,11 @@ pub fn command_stdin_sink(canonical_name: &str, args: &[RawText]) -> Option<Comm
         "load-buffer" => {
             load_buffer_reads_stdin(args).then_some(CommandStdinSink::Argument { binary: true })
         }
-        "source-file" => source_file_reads_stdin(args).then_some(CommandStdinSink::Config),
+        "source-file" => Some(if source_file_reads_stdin(args) {
+            CommandStdinSink::Config
+        } else {
+            CommandStdinSink::ConfigReplay
+        }),
         "display-message" | "split-window" => {
             command_has_flag(canonical_name, args, "-I").then_some(CommandStdinSink::PaneInput)
         }
@@ -43022,7 +43160,11 @@ mod tests {
                 &["-q", "one", "-"][..],
                 Some(CommandStdinSink::Config),
             ),
-            ("source-file", &["one"][..], None),
+            (
+                "source-file",
+                &["one"][..],
+                Some(CommandStdinSink::ConfigReplay),
+            ),
             (
                 "display-message",
                 &["-I"][..],

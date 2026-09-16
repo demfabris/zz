@@ -111,6 +111,260 @@ impl Default for KeyTables {
                 },
             );
         }
+        tables.bind("move", ",", Binding { commands: vec![CommandInvocation::new("if-shell", ["-F", "#{pane_floating_flag}", "{ display-menu -T \"#[align=centre]Move\" -x P -y P Centre c { move-pane -P centre } '' \"Top Left\" 1 { move-pane -P top-left } \"Top Right\" 2 { move-pane -P top-right } \"Bottom Left\" 3 { move-pane -P bottom-left } \"Bottom Right\" 4 { move-pane -P bottom-right } '' Top t { move-pane -P top-centre } Bottom b { move-pane -P bottom-centre } Left l { move-pane -P centre-left } Right r { move-pane -P centre-right } }"]).with_command_blocks([2])], repeat: false, note: None });
+        tables.bind("move", ".", Binding { commands: vec![CommandInvocation::new("if-shell", ["-F", "#{pane_floating_flag}", "{ display-menu -T \"#[align=centre]Move & Resize\" -x P -y P Fill 0 { resize-pane -x \"100%\" -y \"100%\" ; move-pane -P top-left } '' \"Top Left\" 1 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-left } \"Top Right\" 2 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-right } \"Bottom Left\" 3 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-left } \"Bottom Right\" 4 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-right } '' Top t { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P top-centre } Bottom b { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P bottom-centre } Left l { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-left } Right r { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-right } }"]).with_command_blocks([2])], repeat: false, note: None });
+        tables.bind(
+            "move",
+            "0",
+            Binding {
+                commands: vec![CommandInvocation::new(
+                    "resize-pane",
+                    [
+                        "-x",
+                        "100%",
+                        "-y",
+                        "100%",
+                        ";",
+                        "move-pane",
+                        "-P",
+                        "top-left",
+                    ],
+                )],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "move",
+            "1",
+            Binding {
+                commands: vec![CommandInvocation::new("move-pane", ["-P", "top-left"])],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "move",
+            "2",
+            Binding {
+                commands: vec![CommandInvocation::new("move-pane", ["-P", "top-right"])],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "move",
+            "3",
+            Binding {
+                commands: vec![CommandInvocation::new("move-pane", ["-P", "bottom-left"])],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "move",
+            "4",
+            Binding {
+                commands: vec![CommandInvocation::new("move-pane", ["-P", "bottom-right"])],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "move",
+            "Down",
+            Binding {
+                commands: vec![CommandInvocation::new("move-pane", ["-P", "bottom-centre"])],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "move",
+            "Left",
+            Binding {
+                commands: vec![CommandInvocation::new("move-pane", ["-P", "centre-left"])],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "move",
+            "M-1",
+            Binding {
+                commands: vec![CommandInvocation::new(
+                    "resize-pane",
+                    ["-x", "50%", "-y", "50%", ";", "move-pane", "-P", "top-left"],
+                )],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "move",
+            "M-2",
+            Binding {
+                commands: vec![CommandInvocation::new(
+                    "resize-pane",
+                    [
+                        "-x",
+                        "50%",
+                        "-y",
+                        "50%",
+                        ";",
+                        "move-pane",
+                        "-P",
+                        "top-right",
+                    ],
+                )],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "move",
+            "M-3",
+            Binding {
+                commands: vec![CommandInvocation::new(
+                    "resize-pane",
+                    [
+                        "-x",
+                        "50%",
+                        "-y",
+                        "50%",
+                        ";",
+                        "move-pane",
+                        "-P",
+                        "bottom-left",
+                    ],
+                )],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "move",
+            "M-4",
+            Binding {
+                commands: vec![CommandInvocation::new(
+                    "resize-pane",
+                    [
+                        "-x",
+                        "50%",
+                        "-y",
+                        "50%",
+                        ";",
+                        "move-pane",
+                        "-P",
+                        "bottom-right",
+                    ],
+                )],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "move",
+            "M-Down",
+            Binding {
+                commands: vec![CommandInvocation::new(
+                    "resize-pane",
+                    [
+                        "-x",
+                        "100%",
+                        "-y",
+                        "50%",
+                        ";",
+                        "move-pane",
+                        "-P",
+                        "bottom-centre",
+                    ],
+                )],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "move",
+            "M-Left",
+            Binding {
+                commands: vec![CommandInvocation::new(
+                    "resize-pane",
+                    [
+                        "-x",
+                        "50%",
+                        "-y",
+                        "100%",
+                        ";",
+                        "move-pane",
+                        "-P",
+                        "centre-left",
+                    ],
+                )],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "move",
+            "M-Right",
+            Binding {
+                commands: vec![CommandInvocation::new(
+                    "resize-pane",
+                    [
+                        "-x",
+                        "50%",
+                        "-y",
+                        "100%",
+                        ";",
+                        "move-pane",
+                        "-P",
+                        "centre-right",
+                    ],
+                )],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "move",
+            "M-Up",
+            Binding {
+                commands: vec![CommandInvocation::new(
+                    "resize-pane",
+                    [
+                        "-x",
+                        "100%",
+                        "-y",
+                        "50%",
+                        ";",
+                        "move-pane",
+                        "-P",
+                        "top-centre",
+                    ],
+                )],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "move",
+            "Right",
+            Binding {
+                commands: vec![CommandInvocation::new("move-pane", ["-P", "centre-right"])],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "move",
+            "Up",
+            Binding {
+                commands: vec![CommandInvocation::new("move-pane", ["-P", "top-centre"])],
+                repeat: false,
+                note: None,
+            },
+        );
         for (key, prompt, command) in [
             ("x", "kill-pane #P? (y/n)", "kill-pane"),
             ("&", "kill-window #W? (y/n)", "kill-window"),

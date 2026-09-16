@@ -4,7 +4,7 @@ title: zz wire protocol (v104)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-08-31T00:00:00-03:00
+timestamp: 2026-09-16T00:00:00-03:00
 ---
 
 # Overview
@@ -681,6 +681,14 @@ invocation rather than in `args` for the commands whose payload is not an argume
 (`source-file -`, `display-message -I`, `split-window -I`). `format_command` never prints it, so
 the server log still records the command the caller typed. See
 [the command stream channel](/designs/command-stream-channel.md) for the sinks and the bound.
+
+v104 is unreleased. The cycle-11 alias correction advances the version after v0.10.0
+shipped v103. This lane adds no serialized payload fields or enum variants: the
+`CommandInvocation::stdin_spent` marker uses `#[serde(skip)]` and stays inside the daemon.
+`caller_stream_spent_marker_stays_in_process` checks that absent and spent streams encode
+identically. The version advance follows the campaign correction and the release guard
+for changes to protocol source; it changes the envelope and hello version values.
+The v103 entries above describe the released layout and remain intact.
 
 # Versioning & compatibility
 

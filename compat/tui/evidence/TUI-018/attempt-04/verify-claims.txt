@@ -1,0 +1,9 @@
+verified: TUI-001, TUI-002, TUI-003, TUI-004, TUI-005, TUI-006, TUI-007, TUI-008, TUI-009, TUI-010, TUI-012, TUI-016
+re-measuring: TUI-018
+  comparing /home/demfabris/dev/zz-c11-alias/target/c11-alias-v104-proof/zz
+  running compat/tui-command-streams.sh for TUI-018 ...
+    all 57 asserted comparisons identical, 0 recorded not asserted, 4 decided (0 for a sibling lane)
+  running compat/tui-client-commands.sh for TUI-018 ...
+
+1 problem(s):
+  TUI-018: compat/tui-client-commands.sh exited 1: 3 of 84 asserted comparisons differ, 25 recorded (0 for a sibling lane, owners TUI-014=6 TUI-015=4 TUI-017=6 decided:TUI 

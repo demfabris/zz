@@ -937,11 +937,51 @@ client_tool_cases() {
   restore_case client-tools-restored
 }
 
+native_usage_run() {
+  local status=0
+  zz_command "$@" >"$SCRATCH_DIR/native.out" 2>"$SCRATCH_DIR/native.err" </dev/null || status=$?
+  printf '%s\n' "$status" >"$SCRATCH_DIR/native.rc"
+}
+
+native_usage_matches() {
+  printf '%s\n' "$1" >"$SCRATCH_DIR/native.expected"
+  [ "$(cat "$SCRATCH_DIR/native.rc")" = 2 ] &&
+    [ ! -s "$SCRATCH_DIR/native.out" ] &&
+    cmp -s "$SCRATCH_DIR/native.err" "$SCRATCH_DIR/native.expected"
+}
+
+native_usage_case() {
+  local name="$1" expected="$2"
+  shift 2
+  native_usage_run "$@"
+  CHECKS=$((CHECKS + 1))
+  if native_usage_matches "$expected"; then
+    printf 'ok    %s: native usage exits 2, exact stdout and stderr\n' "$name"
+  else
+    FAILURES=$((FAILURES + 1))
+    printf 'DIFF  %s: native usage expected exit 2, got %s\n' "$name" "$(cat "$SCRATCH_DIR/native.rc")"
+    cat "$SCRATCH_DIR/native.out" "$SCRATCH_DIR/native.err"
+  fi
+}
+
+usage_contract_cases() {
+  native_usage_case native-verb-usage 'reload-config does not take arguments' reload-config extra
+  native_usage_case native-bound-usage 'agent-send does not support --bogus' \
+    bind-key F9 agent-send --bogus
+  native_usage_case native-json-format-usage 'command list-panes: --json cannot be combined with -F' \
+    list-panes --json -F x
+  native_usage_case native-option-usage 'unsupported command: set-option -a history-trickle' \
+    set-option -a history-trickle 1
+  case_run tmux-unknown-flag same '' -- list-panes -Z
+  case_run tmux-unknown-command same '' -- zzcc-unknown-command
+}
+
 run_cases() {
   printf 'stock client-command roster at %sx%s (pin %s)\n' \
     "$COLUMNS_UNDER_TEST" "$ROWS_UNDER_TEST" "$(basename -- "$TMUX_BIN")"
   attach_both_at 80 24
   case_run baseline same '' -- display-message -p -t PANE '#{window_index}.#{pane_index}'
+  usage_contract_cases
   refresh_client_cases
   capture_pane_cases
   buffer_stream_cases
@@ -1025,6 +1065,56 @@ run_self_check() {
   self_check_run equivalence-before display-message -p -t PANE '#{window_index}.#{pane_index}'
   self_check_expect 'equivalence: the same command on both sides' \
     exit=0 stdout=0 stderr=0 screen=0 state=0
+
+  local usage_case
+  for usage_case in refresh-missing-argument client-tree-unknown-flag client-tree-usage tmux-unknown-flag tmux-unknown-command; do
+    case "$usage_case" in
+      refresh-missing-argument) run_both refresh-client -r ;;
+      client-tree-unknown-flag) run_both choose-client -Q -t PANE ;;
+      client-tree-usage) run_both choose-client -t PANE one two ;;
+      tmux-unknown-flag) run_both list-panes -Z ;;
+      tmux-unknown-command) run_both zzcc-unknown-command ;;
+    esac
+    compare_channels "$usage_case-control" || true
+    self_check_expect "$usage_case control" exit=0 stdout=0 stderr=0 screen=0 state=0
+    printf '2\n' >"$SCRATCH_DIR/zz.rc"
+    compare_channels "$usage_case-sabotage" || true
+    self_check_expect "$usage_case rejects exit 2" exit=1 stdout=0 stderr=0 screen=0 state=0
+  done
+  local native_case expected
+  for native_case in native-verb-usage native-bound-usage native-json-format-usage native-option-usage; do
+    case "$native_case" in
+      native-verb-usage)
+        native_usage_run reload-config extra
+        expected='reload-config does not take arguments'
+        ;;
+      native-option-usage)
+        native_usage_run set-option -a history-trickle 1
+        expected='unsupported command: set-option -a history-trickle'
+        ;;
+      native-bound-usage)
+        native_usage_run bind-key F9 agent-send --bogus
+        expected='agent-send does not support --bogus'
+        ;;
+      native-json-format-usage)
+        native_usage_run list-panes --json -F x
+        expected='command list-panes: --json cannot be combined with -F'
+        ;;
+    esac
+    if native_usage_matches "$expected"; then
+      printf 'ok    self-check %s control\n' "$native_case"
+    else
+      SELF_CHECK_FAILURES=$((SELF_CHECK_FAILURES + 1))
+      printf 'FAIL  self-check %s control\n' "$native_case"
+    fi
+    printf '1\n' >"$SCRATCH_DIR/native.rc"
+    if native_usage_matches "$expected"; then
+      SELF_CHECK_FAILURES=$((SELF_CHECK_FAILURES + 1))
+      printf 'FAIL  self-check %s accepted exit 1\n' "$native_case"
+    else
+      printf 'ok    self-check %s rejects exit 1\n' "$native_case"
+    fi
+  done
 
   # stdout: a buffer that exists on the zz side only, listed by name. The exit
   # status and stderr are the same on both sides and must not be reported.

@@ -45,7 +45,10 @@ current target stays valid after the mutation.
 Errors are structured `ServerError`s. Target lookup uses `SessionNotFound`, `WindowNotFound`, and
 `PaneNotFound`, displayed as tmux's `can't find TYPE: COMPONENT`; internal stable-ID failures retain
 `MissingTarget`. Other command errors use `UnsupportedCommand`, `InvalidCommand`, and the v76
-`CommandParse` tail variant. `CommandParse` identifies command-name, flag, arity, and preparation
+`CommandParse` variant, plus v104’s `NativeCommandParse`, `NativeUnsupportedCommand`, and
+`NativeInvalidCommand` for zz-native usage errors, option refusals, and callback construction
+failures that keep their command-time error phase.
+Both parse variants identify command-name, flag, arity, and preparation
 failures before effects; target lookup and semantic or runtime failures keep their existing variants.
 Most handlers validate before mutation. tmux orders some mutations before later failures;
 `select-layout`, for example, unzooms its resolved window before it parses a custom layout. The
@@ -60,7 +63,8 @@ accepted usage strings, flags/options, and completion value kinds; `canonical_co
 Use `zz --help` or the `help` verb for the command catalog. Use `zz <verb> --help`
 for a command's description, usage, options, and positional arguments; aliases
 and unique prefixes work too. These help forms need no daemon and exit 0. An
-unknown verb exits 2. Global `-h` keeps the tmux usage banner, and command `-h`
+unknown verb exits 1; an unknown verb requested through zz’s `--help` exits 2.
+Global `-h` keeps the tmux usage banner, and command `-h`
 flags keep their tmux meaning.
 
 Add `--json` to `list-sessions`, `list-windows`, `list-panes`, or `list-clients`
@@ -75,12 +79,15 @@ mapping option names to value strings in the selected scope. Combining `-F` and
 | Exit code | Meaning |
 | --- | --- |
 | 0 | Success. |
-| 1 | Command failure, missing daemon, or connection loss. |
-| 2 | Usage error: unknown verb, invalid flag, missing argument, or malformed value. |
+| 1 | Command failure, missing daemon, connection loss, or a tmux-compatible usage error (including an unknown command). |
+| 2 | Usage error in a zz-native verb or extension: invalid flag, missing argument, or malformed value. |
 | 3 | Blocked or unable to answer now, including `agent-send --on-block fail`. |
 | 124 | Wait timed out, including `agent-send --timeout`. |
 | 125 | Reserved for the `run-pane` timeout. |
 
+Tmux-compatible commands keep the pin’s exit status, including 1 for parse and usage errors.
+The error’s source determines the status: `list-panes -Z` exits 1, while zz’s
+`list-panes --json -F x` extension conflict exits 2.
 Commands that set an explicit exit code keep that code.
 
 The client handles help and exit codes in `crates/zz/src/lib.rs` (`run_command_mode`,

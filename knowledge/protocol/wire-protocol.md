@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v103)
+title: zz wire protocol (v104)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 103`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 104`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (103) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (104) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -451,6 +451,12 @@ so callers can abort parse failures before effects without changing runtime queu
 v85 appends `PostAdmissionCallback(Box<ServerError>)` at tail tag 13. It preserves the underlying
 error and display text while identifying a selected synchronous callback that may fail after Control
 has already captured a Return, so Control can preserve that Return without matching error prose.
+Protocol v104 appends `NativeCommandParse(String)` at tag 14 for zz-native verbs and extensions,
+`NativeUnsupportedCommand(String)` at tag 15 for native option refusals, and
+`NativeInvalidCommand(String)` at tag 16 for native usage errors promoted to command-time
+failures by callback construction. The latter retains the runtime error phase of `InvalidCommand`.
+Both parse variants support the same parse-error checks and diagnostic rendering. Command clients
+return 2 for the native variants, and 1 for `CommandParse` or `UnsupportedCommand`.
 
 # Attachment, presence, and per-client views
 
@@ -678,9 +684,18 @@ the server log still records the command the caller typed. See
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 103`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 104`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v104 appends `ServerError::NativeCommandParse(String)`, `NativeUnsupportedCommand(String)`,
+  and `NativeInvalidCommand(String)` after `PostAdmissionCallback`.
+  Clients use these variants to preserve exit 2 for zz-native usage errors, including extension conflicts
+  such as `list-panes --json -F x`, and native option refusals such as `set-option -a history-trickle`.
+  `CommandParse` and `UnsupportedCommand` now exit 1.
+  Both parse variants retain the same diagnostic text and parse-error classification.
+  `NativeInvalidCommand` preserves the runtime phase when bind-key or untyped confirm-before
+  constructs an invalid native callback, while retaining native usage exit 2.
+  v103 shipped in zz 0.10.0, so these builds require v104 on both sides of the connection.
 - v103 carries the pin's pane prompt and the terminal name a client learned after the hello.
   `CommandPromptState` appends `pane: Option<PaneId>` after `no_freeze`: `command-prompt -P` is
   `window_pane_set_prompt`, so the prompt hangs on the pane the command targeted rather than on the

@@ -4485,6 +4485,22 @@ impl MuxEngine {
         hooks: &mut impl StatusHooks,
         default_shell_is_valid: &mut impl FnMut(&str) -> bool,
     ) -> Result<Execution, ServerError> {
+        self.execute_without_alias_expansion_inner(context, command, hooks, default_shell_is_valid)
+            .map_err(
+                |error| match catalog_command_spec(canonical_command(&command.name)) {
+                    Some(spec) => spec.classify_usage_error(error),
+                    None => error,
+                },
+            )
+    }
+
+    fn execute_without_alias_expansion_inner(
+        &mut self,
+        context: &mut ExecutionContext,
+        command: &CommandInvocation,
+        hooks: &mut impl StatusHooks,
+        default_shell_is_valid: &mut impl FnMut(&str) -> bool,
+    ) -> Result<Execution, ServerError> {
         if let Some(commands) = parse_command_alias_group(command)? {
             validate_static_command_chain(&commands)?;
             let mut combined = Execution::default();
@@ -11775,7 +11791,7 @@ impl MuxEngine {
             .iter()
             .find(|flag| !matches!(flag.as_str(), "-F" | "-g" | "-o" | "-q"))
         {
-            return Err(ServerError::UnsupportedCommand(format!(
+            return Err(ServerError::NativeUnsupportedCommand(format!(
                 "set-option {flag} {option}"
             )));
         }
@@ -12048,7 +12064,7 @@ impl MuxEngine {
             .iter()
             .find(|flag| !matches!(flag.as_str(), "-F" | "-g" | "-o" | "-q" | "-u"))
         {
-            return Err(ServerError::UnsupportedCommand(format!(
+            return Err(ServerError::NativeUnsupportedCommand(format!(
                 "set-option {flag} history-trickle"
             )));
         }
@@ -15601,6 +15617,7 @@ fn parse_options_for_spec(
         .filter_map(|option| option.attached_value.then_some(option.name))
         .collect::<Vec<_>>();
     parse_options(args, &value_options, &attached_options)
+        .map_err(|error| spec.classify_usage_error(error))
 }
 
 fn validate_options(
@@ -15624,9 +15641,7 @@ fn validate_options_allowing_unsupported(
         .chain(options.values.iter().map(|(name, _)| name.as_str()))
     {
         let Some(option) = spec.option(name) else {
-            return Err(ServerError::CommandParse(format!(
-                "{command} does not support {name}"
-            )));
+            return Err(spec.parse_error(format!("{command} does not support {name}")));
         };
         if option.unsupported && allowed != Some(name) {
             return Err(ServerError::UnsupportedCommand(format!("{command} {name}")));
@@ -16932,6 +16947,9 @@ fn command_template_replace(template: &str, input: &str, index: u8) -> String {
 fn callback_construction_error(owner: &str, error: ServerError) -> ServerError {
     match (owner, error) {
         ("bind-key", ServerError::CommandParse(message)) => ServerError::InvalidCommand(message),
+        ("bind-key", ServerError::NativeCommandParse(message)) => {
+            ServerError::NativeInvalidCommand(message)
+        }
         (_, error) => error,
     }
 }
@@ -17630,6 +17648,36 @@ mod tests {
         hooks: &mut impl StatusHooks,
     ) -> String {
         expand_format_with_hooks(&format!("#{{{name}}}"), engine, context, hooks).to_string()
+    }
+
+    #[test]
+    fn usage_exit_status_distinguishes_native_errors_and_tmux_errors() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "usage-contract"]),
+            )
+            .unwrap();
+        for (name, args, status) in [
+            ("list-panes", vec!["-Z"], 1),
+            ("list-panes", vec!["--json", "-Z"], 1),
+            ("list-panes", vec!["--json", "-F", "x"], 2),
+            ("split-browser", vec!["-Q"], 2),
+            ("set-browser-url", vec![], 2),
+            ("reload-config", vec!["extra"], 2),
+            ("set-option", vec!["-a", "history-trickle", "1"], 2),
+            ("set-option", vec!["-a", "experimental-agent-pane", "on"], 2),
+            ("rename-window", vec![], 1),
+            ("no-such-command", vec![], 1),
+            ("clock-mode", vec![], 1),
+        ] {
+            let error = engine
+                .execute(&mut context, &command(name, &args))
+                .unwrap_err();
+            assert_eq!(error.exit_code(), status, "{name} {args:?}: {error}");
+        }
     }
 
     #[test]
@@ -24952,7 +25000,7 @@ mod tests {
         assert_eq!(execution.effects, [MuxEffect::ReloadConfig]);
         assert!(matches!(
             engine.execute(&mut context, &command("reload-config", &["unexpected"])),
-            Err(ServerError::CommandParse(_))
+            Err(ServerError::NativeCommandParse(_))
         ));
     }
 
@@ -24981,7 +25029,7 @@ mod tests {
                 &mut context,
                 &command("import-tmux-config", &["one", "two"])
             ),
-            Err(ServerError::CommandParse(_))
+            Err(ServerError::NativeCommandParse(_))
         ));
     }
 
@@ -29523,7 +29571,7 @@ mod tests {
                     &command("bind-key", &["F9", "agent-send", "--bogus"]),
                 )
                 .unwrap_err(),
-            ServerError::InvalidCommand("agent-send does not support --bogus".to_owned())
+            ServerError::NativeInvalidCommand("agent-send does not support --bogus".to_owned())
         );
     }
 

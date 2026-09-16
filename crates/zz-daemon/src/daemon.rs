@@ -6940,7 +6940,14 @@ impl Shared {
                 self.inner.lock().engine.repair_context(context);
             }
             self.enforce_destroy_unattached_if_changed(unattached_watch);
-            return result;
+            return result.map_err(|error| match error {
+                DaemonError::Server(error) => {
+                    let spec = zz_protocol::catalog_command_spec(canonical)
+                        .expect("daemon command has catalog metadata");
+                    spec.classify_usage_error(error).into()
+                }
+                error => error,
+            });
         }
         let generation = self.inner.lock().engine.state.generation();
         let display_panes_target = if canonical == "display-panes" {
@@ -16157,6 +16164,9 @@ impl Shared {
         result.map_err(|error| match error {
             ServerError::CommandParse(message) if !typed => {
                 ServerError::InvalidCommand(message).into()
+            }
+            ServerError::NativeCommandParse(message) if !typed => {
+                ServerError::NativeInvalidCommand(message).into()
             }
             error => error.into(),
         })
@@ -26627,7 +26637,10 @@ impl Shared {
                             _ => None,
                         })
                         .collect::<Vec<_>>(),
-                    Err(ServerError::UnsupportedCommand(unsupported)) => {
+                    Err(
+                        ServerError::UnsupportedCommand(unsupported)
+                        | ServerError::NativeUnsupportedCommand(unsupported),
+                    ) => {
                         log::warn!(
                             "{}: ignoring unsupported tmux command: {unsupported}",
                             path.display()
@@ -26641,7 +26654,10 @@ impl Shared {
                         );
                         continue;
                     }
-                    Err(ServerError::CommandParse(message)) => {
+                    Err(
+                        ServerError::CommandParse(message)
+                        | ServerError::NativeCommandParse(message),
+                    ) => {
                         log::warn!(
                             "{}: ignoring invalid tmux command: {message}",
                             path.display()
@@ -27041,7 +27057,10 @@ impl Shared {
             }
             match result.map_err(discard_command_output) {
                 Ok(_) => publish_guard(captured_output, false, false, captured_events),
-                Err(DaemonError::Server(ServerError::UnsupportedCommand(unsupported))) => {
+                Err(DaemonError::Server(
+                    ServerError::UnsupportedCommand(unsupported)
+                    | ServerError::NativeUnsupportedCommand(unsupported),
+                )) => {
                     log::warn!(
                         "{}: ignoring unsupported tmux command: {unsupported}",
                         path.display()
@@ -27105,7 +27124,9 @@ impl Shared {
                         failed_group = group;
                     }
                 }
-                Err(DaemonError::Server(ServerError::CommandParse(message))) => {
+                Err(DaemonError::Server(
+                    ServerError::CommandParse(message) | ServerError::NativeCommandParse(message),
+                )) => {
                     log::warn!(
                         "{}: ignoring invalid tmux command: {message}",
                         path.display()
@@ -38943,9 +38964,13 @@ fn control_command_guard_error(error: &DaemonError) -> (bool, bool, String) {
     match error {
         DaemonError::CommandFailed { error, .. } => control_command_guard_error(error),
         DaemonError::ReportedCommandExit { .. }
-        | DaemonError::Server(ServerError::UnsupportedCommand(_)) => (false, false, String::new()),
+        | DaemonError::Server(
+            ServerError::UnsupportedCommand(_) | ServerError::NativeUnsupportedCommand(_),
+        ) => (false, false, String::new()),
         DaemonError::InsertedCommandParse(message)
-        | DaemonError::Server(ServerError::CommandParse(message)) => (true, false, message.clone()),
+        | DaemonError::Server(
+            ServerError::CommandParse(message) | ServerError::NativeCommandParse(message),
+        ) => (true, false, message.clone()),
         DaemonError::Server(error) => (true, true, error.tmux_message()),
         error => (true, true, daemon_error_text(error)),
     }
@@ -38962,7 +38987,9 @@ fn post_admission_callback_parse_depth(error: &DaemonError) -> usize {
 fn command_parse_error(error: &DaemonError) -> bool {
     match error {
         DaemonError::CommandFailed { error, .. } => command_parse_error(error),
-        DaemonError::Server(ServerError::CommandParse(_)) => true,
+        DaemonError::Server(ServerError::CommandParse(_) | ServerError::NativeCommandParse(_)) => {
+            true
+        }
         _ => false,
     }
 }
@@ -63923,7 +63950,7 @@ set-option -g @alias-mixed-next yes
                 .expect_err("usage error before target resolution");
             assert!(matches!(
                 error,
-                DaemonError::Server(ServerError::CommandParse(_))
+                DaemonError::Server(ServerError::NativeCommandParse(_))
             ));
         }
         for (verb, args) in [("wait-pane", vec![]), ("run-pane", vec!["true"])] {
@@ -74414,7 +74441,7 @@ set-option -g @alias-mixed-next yes
             .expect_err("missing output path");
         assert!(matches!(
             error,
-            DaemonError::Server(ServerError::CommandParse(message))
+            DaemonError::Server(ServerError::NativeCommandParse(message))
                 if message == "capture-browser needs an output path (-o)"
         ));
 
@@ -87789,6 +87816,29 @@ bind - split-window -v -c "#{pane_current_path}"
             Execution::default()
         );
         worker.join().expect("menu command worker");
+    }
+
+    #[test]
+    fn native_callback_usage_preserves_runtime_phase() {
+        let shared = Shared::new(1);
+        for typed in [false, true] {
+            let error = shared
+                .parse_confirm_commands("agent-send --bogus", typed)
+                .unwrap_err();
+            let DaemonError::Server(server_error) = &error else {
+                panic!("unexpected callback error: {error}");
+            };
+            assert_eq!(server_error.exit_code(), 2);
+            assert_eq!(server_error.is_command_parse(), typed);
+            assert_eq!(
+                control_command_guard_error(&error),
+                (
+                    true,
+                    !typed,
+                    "agent-send does not support --bogus".to_owned()
+                )
+            );
+        }
     }
 
     #[test]

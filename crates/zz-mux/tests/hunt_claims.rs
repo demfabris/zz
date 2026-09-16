@@ -867,7 +867,9 @@ fn split_picker_rejects_positional_arguments() {
             &command("split-picker", &["printf", "not-a-shell-command"]),
         )
         .unwrap_err();
-    assert!(matches!(error, ServerError::CommandParse(message) if message.contains("positional")));
+    assert!(
+        matches!(error, ServerError::NativeCommandParse(message) if message.contains("positional"))
+    );
     assert_eq!(
         engine.state.windows.values().next().unwrap().panes.len(),
         pane_count

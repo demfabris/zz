@@ -30,6 +30,7 @@ pub struct CommandOptionSpec {
     pub optional_value: bool,
     /// Whether the option is catalogued only so its value can be rejected.
     pub unsupported: bool,
+    pub native: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,6 +46,11 @@ pub struct TmuxOptionParse<'a> {
 }
 
 impl CommandOptionSpec {
+    const fn native(mut self) -> Self {
+        self.native = true;
+        self
+    }
+
     const fn flag(name: &'static str, description: &'static str) -> Self {
         Self {
             name,
@@ -54,6 +60,7 @@ impl CommandOptionSpec {
             attached_value: false,
             optional_value: false,
             unsupported: false,
+            native: false,
         }
     }
 
@@ -66,6 +73,7 @@ impl CommandOptionSpec {
             attached_value: true,
             optional_value: true,
             unsupported: false,
+            native: false,
         }
     }
 
@@ -78,6 +86,7 @@ impl CommandOptionSpec {
             attached_value: false,
             optional_value: false,
             unsupported: false,
+            native: false,
         }
     }
 
@@ -90,6 +99,7 @@ impl CommandOptionSpec {
             attached_value: false,
             optional_value: false,
             unsupported: true,
+            native: false,
         }
     }
 
@@ -102,6 +112,7 @@ impl CommandOptionSpec {
             attached_value: false,
             optional_value: false,
             unsupported: true,
+            native: false,
         }
     }
 
@@ -114,6 +125,7 @@ impl CommandOptionSpec {
             attached_value: true,
             optional_value: true,
             unsupported: true,
+            native: false,
         }
     }
 }
@@ -169,10 +181,34 @@ impl CommandSpec {
             .unwrap_or(0)
     }
 
+    pub fn classify_usage_error(&self, error: ServerError) -> ServerError {
+        match error {
+            ServerError::CommandParse(message) if !self.uses_tmux_option_grammar() => {
+                ServerError::NativeCommandParse(message)
+            }
+            ServerError::UnsupportedCommand(message) if !self.uses_tmux_option_grammar() => {
+                ServerError::NativeUnsupportedCommand(message)
+            }
+            error => error,
+        }
+    }
+
+    pub fn parse_error(&self, message: String) -> ServerError {
+        self.classify_usage_error(ServerError::CommandParse(message))
+    }
+
+    fn option_parse_error(&self, option: &CommandOptionSpec, message: String) -> ServerError {
+        if option.native {
+            ServerError::NativeCommandParse(message)
+        } else {
+            self.parse_error(message)
+        }
+    }
+
     pub fn validate_positional_minimum(&self, actual: usize) -> Result<(), ServerError> {
         let minimum = self.positional_minimum();
         if actual < minimum {
-            return Err(ServerError::CommandParse(format!(
+            return Err(self.parse_error(format!(
                 "command {}: too few arguments (need at least {minimum})",
                 self.name
             )));
@@ -194,7 +230,7 @@ impl CommandSpec {
             return Ok(());
         };
         if actual > maximum {
-            return Err(ServerError::CommandParse(format!(
+            return Err(self.parse_error(format!(
                 "command {}: too many arguments (need at most {maximum})",
                 self.name
             )));
@@ -254,16 +290,19 @@ fn parse_tmux_options_with_command<'a>(
                 || option.optional_value && value.is_some()
             {
                 let value = value.ok_or_else(|| {
-                    ServerError::CommandParse(format!(
-                        "command {}: {} expects an argument",
-                        spec.name, option.name
-                    ))
+                    spec.option_parse_error(
+                        option,
+                        format!("command {}: {} expects an argument", spec.name, option.name),
+                    )
                 })?;
                 if command.is_some_and(|command| command.argument_is_command_block(index)) {
-                    return Err(ServerError::CommandParse(format!(
-                        "command {}: {} argument must be a string",
-                        spec.name, option.name
-                    )));
+                    return Err(spec.option_parse_error(
+                        option,
+                        format!(
+                            "command {}: {} argument must be a string",
+                            spec.name, option.name
+                        ),
+                    ));
                 }
                 options.push(TmuxOption::Value(option.name, value));
                 index += 1;
@@ -275,17 +314,21 @@ fn parse_tmux_options_with_command<'a>(
 
         for (offset, flag) in argument[1..].char_indices() {
             if flag == '?' {
-                return Err(ServerError::CommandParse(format!(
+                return Err(spec.parse_error(format!(
                     "usage: {} {}",
                     spec.name,
                     spec.pinned_tmux_usage()
                 )));
             }
             if !flag.is_ascii_alphanumeric() {
-                return Err(ServerError::CommandParse(format!(
-                    "command {}: invalid flag -{flag}",
-                    spec.name
-                )));
+                let message = format!("command {}: invalid flag -{flag}", spec.name);
+                let extension = argument
+                    .split_once('=')
+                    .and_then(|(name, _)| spec.option(name));
+                return Err(match extension {
+                    Some(option) => spec.option_parse_error(option, message),
+                    None => spec.parse_error(message),
+                });
             }
             let option = spec
                 .options
@@ -295,10 +338,7 @@ fn parse_tmux_options_with_command<'a>(
                     name.next() == Some('-') && name.next() == Some(flag) && name.next().is_none()
                 })
                 .ok_or_else(|| {
-                    ServerError::CommandParse(format!(
-                        "command {}: unknown flag -{flag}",
-                        spec.name
-                    ))
+                    spec.parse_error(format!("command {}: unknown flag -{flag}", spec.name))
                 })?;
             let value_start = offset + flag.len_utf8() + 1;
             let attached = &argument[value_start..];
@@ -310,10 +350,13 @@ fn parse_tmux_options_with_command<'a>(
                     .filter(|value| !optional_value_starts_option(value))
                 {
                     if command.is_some_and(|command| command.argument_is_command_block(index)) {
-                        return Err(ServerError::CommandParse(format!(
-                            "command {}: {} argument must be a string",
-                            spec.name, option.name
-                        )));
+                        return Err(spec.option_parse_error(
+                            option,
+                            format!(
+                                "command {}: {} argument must be a string",
+                                spec.name, option.name
+                            ),
+                        ));
                     }
                     options.push(TmuxOption::Value(option.name, value));
                     index += 1;
@@ -325,16 +368,19 @@ fn parse_tmux_options_with_command<'a>(
             if option.value.is_some() || option.attached_value {
                 let value = if attached.is_empty() {
                     let value = args.get(index).ok_or_else(|| {
-                        ServerError::CommandParse(format!(
-                            "command {}: {} expects an argument",
-                            spec.name, option.name
-                        ))
+                        spec.option_parse_error(
+                            option,
+                            format!("command {}: {} expects an argument", spec.name, option.name),
+                        )
                     })?;
                     if command.is_some_and(|command| command.argument_is_command_block(index)) {
-                        return Err(ServerError::CommandParse(format!(
-                            "command {}: {} argument must be a string",
-                            spec.name, option.name
-                        )));
+                        return Err(spec.option_parse_error(
+                            option,
+                            format!(
+                                "command {}: {} argument must be a string",
+                                spec.name, option.name
+                            ),
+                        ));
                     }
                     index += 1;
                     value.as_str()
@@ -352,7 +398,7 @@ fn parse_tmux_options_with_command<'a>(
             .iter()
             .any(|option| matches!(option, TmuxOption::Value("-F", _)))
     {
-        return Err(ServerError::CommandParse(format!(
+        return Err(ServerError::NativeCommandParse(format!(
             "command {}: --json cannot be combined with -F",
             spec.name
         )));
@@ -418,7 +464,7 @@ fn validate_command_args_parse(
             Some(CommandArgsParseRule::SetOptionValue) => position == 1,
         };
         if is_command_block && !accepts_command_block {
-            return Err(ServerError::CommandParse(format!(
+            return Err(spec.parse_error(format!(
                 "command {}: argument {} must be \"string\"",
                 spec.name,
                 position + 1
@@ -1151,6 +1197,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
                 attached_value: false,
                 optional_value: false,
                 unsupported: false,
+                native: false,
             },
         ],
         positionals: &[FreeForm],
@@ -1387,6 +1434,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
                 attached_value: false,
                 optional_value: false,
                 unsupported: false,
+                native: false,
             },
         ],
         positionals: &[],
@@ -1430,7 +1478,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         description: "List sessions",
         usage: "[--json] [-r] [-F format] [-f filter] [-O order]",
         options: &[
-            CommandOptionSpec::flag("--json", "one JSON object per line"),
+            CommandOptionSpec::flag("--json", "one JSON object per line").native(),
             CommandOptionSpec::value("-F", FreeForm, "output format"),
             CommandOptionSpec::value("-f", FreeForm, "filter"),
             CommandOptionSpec::value("-O", FreeForm, "sort order"),
@@ -1510,7 +1558,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         description: "List attached clients",
         usage: "[--json] [-r] [-F format] [-f filter] [-O order] [-t target-session]",
         options: &[
-            CommandOptionSpec::flag("--json", "one JSON object per line"),
+            CommandOptionSpec::flag("--json", "one JSON object per line").native(),
             CommandOptionSpec::value("-F", FreeForm, "output format"),
             CommandOptionSpec::value("-t", Session, "target session"),
             CommandOptionSpec::value("-f", FreeForm, "filter"),
@@ -1589,7 +1637,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         description: "List windows",
         usage: "[--json] [-ar] [-F format] [-f filter] [-O order] [-t target-session]",
         options: &[
-            CommandOptionSpec::flag("--json", "one JSON object per line"),
+            CommandOptionSpec::flag("--json", "one JSON object per line").native(),
             CommandOptionSpec::value("-t", Session, "target session"),
             CommandOptionSpec::value("-F", FreeForm, "output format"),
             CommandOptionSpec::flag("-a", "list windows from every session"),
@@ -2041,7 +2089,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         description: "List panes",
         usage: "[--json] [-asr] [-F format] [-f filter] [-O order] [-t target-window]",
         options: &[
-            CommandOptionSpec::flag("--json", "one JSON object per line"),
+            CommandOptionSpec::flag("--json", "one JSON object per line").native(),
             CommandOptionSpec::value("-t", Window, "target window"),
             CommandOptionSpec::value("-F", FreeForm, "output format"),
             CommandOptionSpec::value("-f", FreeForm, "filter"),
@@ -2546,7 +2594,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         description: "Show server, session, window, or pane options",
         usage: "[--json] [-AgHpqsvw] [-t target-pane] [option]",
         options: &[
-            CommandOptionSpec::flag("--json", "one JSON object per line"),
+            CommandOptionSpec::flag("--json", "one JSON object per line").native(),
             CommandOptionSpec::flag("-A", "include inherited values"),
             CommandOptionSpec::flag("-g", "global scope"),
             CommandOptionSpec::flag("-H", "include hooks"),
@@ -3154,6 +3202,43 @@ mod tests {
     }
 
     #[test]
+    fn usage_status_follows_the_error_surface() {
+        for (name, args, status) in [
+            ("list-panes", vec!["-Z"], 1),
+            ("list-panes", vec!["--nope"], 1),
+            ("list-panes", vec!["--json", "-Z"], 1),
+            ("list-panes", vec!["--json", "-F"], 1),
+            ("list-panes", vec!["--json", "-F", "x"], 2),
+            ("list-panes", vec!["--json=true"], 2),
+            ("display-message", vec!["--json"], 1),
+            ("choose-tree", vec!["-?"], 1),
+            ("agent-catalog", vec!["-t"], 2),
+            ("agent-catalog", vec!["-Q"], 2),
+        ] {
+            let spec = catalog_command_spec(name).unwrap();
+            let args = owned(&args);
+            let error = parse_tmux_options(spec, &args).unwrap_err();
+            assert_eq!(error.exit_code(), status, "{name} {args:?}: {error}");
+            assert!(error.is_command_parse());
+        }
+        for (name, status) in [("rename-window", 1), ("reload-config", 2)] {
+            let spec = catalog_command_spec(name).unwrap();
+            assert_eq!(
+                spec.validate_positional_maximum(2).unwrap_err().exit_code(),
+                status
+            );
+        }
+        const NATIVE_OPTIONS: &[CommandOptionSpec] =
+            &[CommandOptionSpec::value("--native", FreeForm, "native option").native()];
+        let spec = CommandSpec {
+            options: NATIVE_OPTIONS,
+            ..*command_spec("list-panes").unwrap()
+        };
+        let args = owned(&["--native"]);
+        assert_eq!(parse_tmux_options(&spec, &args).unwrap_err().exit_code(), 2);
+    }
+
+    #[test]
     fn tmux_declared_long_options_are_accepted() {
         for name in [
             "list-sessions",
@@ -3218,7 +3303,7 @@ mod tests {
             CommandOptionSpec::flag("-a", "first"),
             CommandOptionSpec::flag("-b", "second"),
             CommandOptionSpec::flag("-c", "third"),
-            CommandOptionSpec::flag("--json", "one JSON object per line"),
+            CommandOptionSpec::flag("--json", "one JSON object per line").native(),
         ];
         let spec = CommandSpec {
             options: OPTIONS,

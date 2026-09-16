@@ -216,6 +216,7 @@ struct NativeAttachArguments {
 #[derive(Debug, PartialEq, Eq)]
 enum NativeAttachArgumentError {
     Usage,
+    NativeUsage,
     Command(ServerError),
 }
 
@@ -236,11 +237,11 @@ fn run_startup(socket_path: PathBuf) -> Startup {
         }
         Err(ApplicationArgumentError::Raw(error)) => {
             eprintln!("{error}");
-            return Startup::Exit(exit_code_for(CliFailure::Usage));
+            return Startup::Exit(exit_code_for(CliFailure::TmuxUsage));
         }
         Err(ApplicationArgumentError::Usage) => {
             eprintln!("{TMUX_USAGE}");
-            return Startup::Exit(exit_code_for(CliFailure::Usage));
+            return Startup::Exit(exit_code_for(CliFailure::TmuxUsage));
         }
     };
     let ApplicationArguments {
@@ -1026,8 +1027,7 @@ fn run_command_mode(
     if prepared.is_none() && host.is_none() {
         let static_commands = if native_attach_spelling {
             if let Err(error) = parse_native_attach_arguments(command_chain[0].args.clone()) {
-                print_native_attach_argument_error(error);
-                return Some(exit_code_for(CliFailure::Usage));
+                return Some(print_native_attach_argument_error(error));
             }
             &command_chain[1..]
         } else {
@@ -1111,7 +1111,7 @@ fn run_command_mode(
         .and_then(|prepared| prepared_command_error(&prepared.commands))
     {
         eprintln!("{}", server_error_message(error));
-        return Some(exit_code_for(CliFailure::Usage));
+        return Some(exit_code_for(CliFailure::Server(error)));
     }
 
     if command == "kill-server" && host.is_none() && prepared.is_none() {
@@ -1216,8 +1216,7 @@ fn run_command_mode(
         let options = match parse_native_attach_arguments(command_chain[0].args.clone()) {
             Ok(options) => options,
             Err(error) => {
-                print_native_attach_argument_error(error);
-                return Some(exit_code_for(CliFailure::Usage));
+                return Some(print_native_attach_argument_error(error));
             }
         };
         if options.restart_daemon && host.is_some() {
@@ -1422,11 +1421,11 @@ fn command_help(command: &str) -> Result<String, ServerError> {
             zz_protocol::unimplemented_tmux_command_spec(name)
         }
         zz_protocol::CommandResolution::Ambiguous(message) => {
-            return Err(ServerError::CommandParse(message));
+            return Err(ServerError::NativeCommandParse(message));
         }
         zz_protocol::CommandResolution::Unknown => None,
     }
-    .ok_or_else(|| ServerError::CommandParse(format!("unknown command: {command}")))?;
+    .ok_or_else(|| ServerError::NativeCommandParse(format!("unknown command: {command}")))?;
     let mut help = format!(
         "{}{}\n{}\nusage: zz {} {}\n",
         spec.name,
@@ -1861,7 +1860,7 @@ fn parse_native_attach_arguments(
     while let Some(argument) = arguments.next() {
         if !explicit_boundary && argument == "--restart-daemon" {
             if restart_daemon {
-                return Err(NativeAttachArgumentError::Usage);
+                return Err(NativeAttachArgumentError::NativeUsage);
             }
             restart_daemon = true;
             continue;
@@ -1955,13 +1954,21 @@ fn parse_native_attach_arguments(
 }
 
 #[cfg(not(target_os = "ios"))]
-fn print_native_attach_argument_error(error: NativeAttachArgumentError) {
+fn print_native_attach_argument_error(error: NativeAttachArgumentError) -> ExitCode {
+    let status = match &error {
+        NativeAttachArgumentError::Usage => exit_code_for(CliFailure::TmuxUsage),
+        NativeAttachArgumentError::NativeUsage => exit_code_for(CliFailure::Usage),
+        NativeAttachArgumentError::Command(error) => exit_code_for(CliFailure::Server(error)),
+    };
     match error {
-        NativeAttachArgumentError::Usage => eprintln!("{NATIVE_ATTACH_USAGE}"),
+        NativeAttachArgumentError::Usage | NativeAttachArgumentError::NativeUsage => {
+            eprintln!("{NATIVE_ATTACH_USAGE}");
+        }
         NativeAttachArgumentError::Command(error) => {
             eprintln!("{}", command_error_message(&DaemonError::Server(error)));
         }
     }
+    status
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -2151,6 +2158,7 @@ fn print_command_error(output: &str) {
 #[derive(Clone, Copy)]
 enum CliFailure<'a> {
     Usage,
+    TmuxUsage,
     Runtime,
     Server(&'a ServerError),
     Daemon(&'a DaemonError),
@@ -2160,11 +2168,10 @@ enum CliFailure<'a> {
 fn exit_code_for(error: CliFailure<'_>) -> ExitCode {
     ExitCode::from(match error {
         CliFailure::Usage => 2,
-        CliFailure::Runtime => 1,
+        CliFailure::Runtime | CliFailure::TmuxUsage => 1,
         CliFailure::Server(error) => error.exit_code(),
         CliFailure::Daemon(error) => match error {
             DaemonError::Server(error) => error.exit_code(),
-            DaemonError::InsertedCommandParse(_) => 2,
             DaemonError::CommandExit { exit_code, .. }
             | DaemonError::ReportedCommandExit { exit_code, .. } => *exit_code,
             _ => 1,
@@ -3083,10 +3090,15 @@ mod tests {
             );
         }
         let usage = ServerError::CommandParse("command list-panes: invalid flag --".to_owned());
-        assert_eq!(exit_code_for(CliFailure::Server(&usage)), ExitCode::from(2));
+        assert_eq!(exit_code_for(CliFailure::Server(&usage)), ExitCode::from(1));
         let unsupported = ServerError::UnsupportedCommand("unknown command: bogus".to_owned());
         assert_eq!(
             exit_code_for(CliFailure::Server(&unsupported)),
+            ExitCode::from(1)
+        );
+        let native = ServerError::NativeCommandParse("native usage".to_owned());
+        assert_eq!(
+            exit_code_for(CliFailure::Server(&native)),
             ExitCode::from(2)
         );
         let runtime = ServerError::InvalidCommand("duplicate session: dup".to_owned());

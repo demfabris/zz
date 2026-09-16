@@ -38,7 +38,7 @@ fn unknown_tmux_flag_uses_tmux_usage_shape() {
         .arg("-8")
         .output()
         .expect("run zz with an unknown tmux flag");
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
     assert_eq!(
         output.stderr,
@@ -80,13 +80,17 @@ fn catalog_help_is_available_without_a_daemon() {
 }
 
 #[test]
-fn invalid_cli_arguments_exit_two_without_a_daemon() {
-    for (arguments, expected) in [
-        (&["bogus-verb"][..], "unknown command: bogus-verb"),
-        (&["bogus-verb", "--help"][..], "unknown command: bogus-verb"),
-        (&["split-window", "--nope"][..], "invalid flag"),
-        (&["-Z"][..], "unknown option -- Z"),
-        (&["list-sessions", "-F", "x", "--json"][..], "--json"),
+fn usage_errors_keep_their_surface_status_without_a_daemon() {
+    for (arguments, expected, status) in [
+        (&["bogus-verb"][..], "unknown command: bogus-verb", 1),
+        (
+            &["bogus-verb", "--help"][..],
+            "unknown command: bogus-verb",
+            2,
+        ),
+        (&["split-window", "--nope"][..], "invalid flag", 1),
+        (&["-Z"][..], "unknown option -- Z", 1),
+        (&["list-sessions", "-F", "x", "--json"][..], "--json", 2),
     ] {
         let (home, mut zz) = isolated_zz();
         let socket = home.path().join("absent.sock");
@@ -97,7 +101,7 @@ fn invalid_cli_arguments_exit_two_without_a_daemon() {
             .args(arguments)
             .output()
             .expect("run invalid CLI arguments");
-        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+        assert_eq!(output.status.code(), Some(status), "{arguments:?}");
         assert!(output.stdout.is_empty(), "{arguments:?}");
         assert!(
             String::from_utf8_lossy(&output.stderr).contains(expected),
@@ -555,6 +559,56 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn usage_errors_keep_their_surface_status_with_a_daemon() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "usage-contract"])
+                .status
+                .success()
+        );
+        for (args, status) in [
+            (&["refresh-client", "-X"][..], 1),
+            (&["choose-tree", "-Q"][..], 1),
+            (&["list-panes", "-Z"][..], 1),
+            (&["set-option"][..], 1),
+            (&["new-window", "-Q"][..], 1),
+            (&["display-message", "-Q"][..], 1),
+            (&["kill-pane", "-Q"][..], 1),
+            (&["rename-window"][..], 1),
+            (&["bogus-verb"][..], 1),
+            (&["clock-mode"][..], 1),
+            (&["list-panes", "--json", "-Z"][..], 1),
+            (&["list-panes", "--json", "-F"][..], 1),
+            (&["list-panes", "--json", "-F", "x"][..], 2),
+            (&["list-panes", "--json=true"][..], 2),
+            (&["reload-config", "extra"][..], 2),
+            (&["set-option", "-a", "history-trickle", "1"][..], 2),
+            (
+                &["set-option", "-a", "experimental-agent-pane", "on"][..],
+                2,
+            ),
+            (&["split-browser", "-Q"][..], 2),
+            (&["agent-catalog", "-Q"][..], 2),
+            (&["agent-catalog", "claude", "not-a-number"][..], 2),
+            (&["set-browser-url"][..], 2),
+        ] {
+            let output = fixture.run(args);
+            assert_eq!(
+                output.status.code(),
+                Some(status),
+                "{args:?}: {:?}",
+                output.stderr
+            );
+            assert!(output.stdout.is_empty(), "{args:?}");
+            assert!(!output.stderr.is_empty(), "{args:?}");
+        }
+    }
+
+    #[test]
     fn new_session_immediately_after_kill_server_starts_a_fresh_daemon() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
@@ -593,7 +647,7 @@ mod daemon_autostart {
             fixture.assert_not_started();
         }
         let output = fixture.run(&["source-file"]);
-        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
         assert_eq!(
             output.stderr,
@@ -2820,7 +2874,7 @@ mod daemon_autostart {
             assert_eq!(output.stderr, b"open terminal failed: not a terminal\n");
 
             let positional = fixture.run(&[command, "named", "-@"]);
-            assert_eq!(positional.status.code(), Some(2));
+            assert_eq!(positional.status.code(), Some(1));
             assert!(positional.stdout.is_empty());
             assert_eq!(
                 positional.stderr,
@@ -2910,7 +2964,7 @@ mod daemon_autostart {
                 let output = fixture.run(&invocation);
                 assert_eq!(
                     output.status.code(),
-                    Some(if arguments == ["-x"] { 1 } else { 2 }),
+                    Some(1),
                     "{invocation:?}"
                 );
                 assert!(output.stdout.is_empty(), "{invocation:?}");
@@ -3217,7 +3271,7 @@ mod daemon_autostart {
             ";",
             "broken",
         ]);
-        assert_eq!(rejected.status.code(), Some(2));
+        assert_eq!(rejected.status.code(), Some(1));
         assert!(rejected.stdout.is_empty());
         assert_eq!(rejected.stderr, b"unknown command: broken\n");
 
@@ -3276,7 +3330,7 @@ mod daemon_autostart {
             let mut arguments = vec!["set-environment", "-g", marker, "mutated", ";"];
             arguments.extend_from_slice(later);
             let rejected = fixture.run(&arguments);
-            assert_eq!(rejected.status.code(), Some(2), "{marker}");
+            assert_eq!(rejected.status.code(), Some(1), "{marker}");
             assert!(rejected.stdout.is_empty(), "{marker}");
             assert_eq!(rejected.stderr, expected, "{marker}");
 
@@ -3394,7 +3448,7 @@ mod daemon_autostart {
                     Some("extra") => "command list-sessions: too many arguments (need at most 0)",
                     _ => unreachable!("covered cold invocation"),
                 };
-                assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+                assert_eq!(output.status.code(), Some(1), "{arguments:?}");
                 assert!(output.stdout.is_empty(), "{arguments:?}");
                 assert_eq!(
                     output.stderr,
@@ -3439,7 +3493,7 @@ mod daemon_autostart {
         )
         .expect("write startup alias");
         let output = fixture.run(&["go"]);
-        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
         assert_eq!(output.stderr, b"unknown command: go\n");
         fixture.assert_not_started();
@@ -3503,7 +3557,7 @@ mod daemon_autostart {
         });
         let output = fixture.run(&["new-session", "-d", "-s", "before-reset", ";", "frobnicate"]);
         fake.join().expect("join fake listener");
-        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
         assert!(!output.stderr.is_empty());
         fixture.assert_not_started();
@@ -3525,7 +3579,7 @@ mod daemon_autostart {
             )
             .expect("write startup alias");
             let output = fixture.run(&["new-session", "-d", "-s", "before", ";", "list-sessions"]);
-            assert_eq!(output.status.code(), Some(2));
+            assert_eq!(output.status.code(), Some(1));
             assert!(output.stdout.is_empty());
             assert_eq!(output.stderr, b"unknown command: frobnicate\n");
             fixture.assert_stopped();
@@ -4188,7 +4242,7 @@ mod daemon_autostart {
                 b"can't find session: bogus\n" as &[u8],
                 1,
             ),
-            (&["wibble"], b"unknown command: wibble\n", 2),
+            (&["wibble"], b"unknown command: wibble\n", 1),
         ] {
             let output = fixture.run(arguments);
             assert_eq!(output.status.code(), Some(exit_code));

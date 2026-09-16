@@ -18,7 +18,7 @@ use crate::{Axis, ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, Sp
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 103;
+pub const PROTOCOL_VERSION: u16 = 104;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -1979,13 +1979,21 @@ pub enum ServerError {
     CommandParse(String),
     #[error("{0}")]
     PostAdmissionCallback(Box<ServerError>),
+    #[error("invalid command: {0}")]
+    NativeCommandParse(String),
+    #[error("unsupported command: {0}")]
+    NativeUnsupportedCommand(String),
+    #[error("invalid command: {0}")]
+    NativeInvalidCommand(String),
 }
 
 impl ServerError {
     #[must_use]
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::UnsupportedCommand(_) | Self::CommandParse(_) => 2,
+            Self::NativeCommandParse(_)
+            | Self::NativeUnsupportedCommand(_)
+            | Self::NativeInvalidCommand(_) => 2,
             Self::PostAdmissionCallback(error) => error.exit_code(),
             _ => 1,
         }
@@ -1994,7 +2002,7 @@ impl ServerError {
     #[must_use]
     pub const fn is_command_parse(&self) -> bool {
         match self {
-            Self::CommandParse(_) => true,
+            Self::CommandParse(_) | Self::NativeCommandParse(_) => true,
             Self::PostAdmissionCallback(error) => error.is_command_parse(),
             _ => false,
         }
@@ -2008,7 +2016,10 @@ impl ServerError {
     #[must_use]
     pub fn tmux_message(&self) -> String {
         match self {
-            Self::InvalidCommand(message) | Self::CommandParse(message) => message.clone(),
+            Self::InvalidCommand(message)
+            | Self::CommandParse(message)
+            | Self::NativeCommandParse(message)
+            | Self::NativeInvalidCommand(message) => message.clone(),
             Self::PostAdmissionCallback(error) => error.tmux_message(),
             error => error.to_string(),
         }
@@ -3954,6 +3965,54 @@ mod tests {
     }
 
     #[test]
+    fn native_usage_errors_preserve_messages_phases_and_wire_tags() {
+        use super::ServerError;
+
+        let message = "command list-panes: --json cannot be combined with -F".to_owned();
+        let error = ServerError::NativeCommandParse(message.clone());
+        let bytes = postcard::to_stdvec(&error).unwrap();
+        assert_eq!(bytes[0], 14);
+        assert_eq!(postcard::from_bytes::<ServerError>(&bytes).unwrap(), error);
+        for error in [
+            error.clone(),
+            ServerError::PostAdmissionCallback(Box::new(error)),
+        ] {
+            assert_eq!(error.exit_code(), 2);
+            assert_eq!(error.tmux_message(), message);
+            assert!(error.is_command_parse());
+        }
+        let unsupported =
+            ServerError::NativeUnsupportedCommand("set-option -a history-trickle".to_owned());
+        let bytes = postcard::to_stdvec(&unsupported).unwrap();
+        assert_eq!(bytes[0], 15);
+        assert_eq!(
+            postcard::from_bytes::<ServerError>(&bytes).unwrap(),
+            unsupported
+        );
+        assert_eq!(unsupported.exit_code(), 2);
+        assert!(!unsupported.is_command_parse());
+        assert_eq!(
+            unsupported.tmux_message(),
+            "unsupported command: set-option -a history-trickle"
+        );
+        let invalid = ServerError::NativeInvalidCommand(message.clone());
+        let bytes = postcard::to_stdvec(&invalid).unwrap();
+        assert_eq!(bytes[0], 16);
+        assert_eq!(
+            postcard::from_bytes::<ServerError>(&bytes).unwrap(),
+            invalid
+        );
+        assert_eq!(invalid.exit_code(), 2);
+        assert_eq!(invalid.tmux_message(), message);
+        assert!(!invalid.is_command_parse());
+        assert_eq!(ServerError::CommandParse(message).exit_code(), 1);
+        assert_eq!(
+            ServerError::UnsupportedCommand("clock-mode".to_owned()).exit_code(),
+            1
+        );
+    }
+
+    #[test]
     fn post_admission_callback_holds_wire_tag_thirteen() {
         let error = super::ServerError::PostAdmissionCallback(Box::new(
             super::ServerError::SessionNotFound("missing".to_owned()),
@@ -5075,7 +5134,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 103);
+        assert_eq!(super::PROTOCOL_VERSION, 104);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

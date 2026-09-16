@@ -36,7 +36,7 @@ fn every_catalog_command_rejects_a_mechanically_absent_flag() {
         } else {
             assert_eq!(
                 error,
-                ServerError::CommandParse(format!("{} does not support {flag}", spec.name))
+                ServerError::NativeCommandParse(format!("{} does not support {flag}", spec.name))
             );
         }
     }

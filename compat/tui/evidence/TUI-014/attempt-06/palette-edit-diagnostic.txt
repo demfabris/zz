@@ -1,0 +1,10 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.79s
+     Running unittests src/lib.rs (target/debug/deps/zz-1769c0bc012bf78f)
+
+running 1 test
+test command::palette::tests::tab_accepts_completion_without_leaving_the_palette ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 662 filtered out; finished in 0.04s
+
+
+EXIT 0

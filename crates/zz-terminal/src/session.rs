@@ -22264,7 +22264,7 @@ PS1='zz-path-fixture> '
         session.attach_view(TerminalViewId(145));
         wait_for_test_capture(&session, |capture| capture.contains("zz-path-fixture>"));
         let command = "printf '%s\\n' \"${PATH%%:*}\"";
-        session.send_text(&format!("{command}\n"));
+        session.send_text(format!("{command}\n").as_str());
         wait_for_test_capture(&session, |capture| {
             capture.matches("zz-path-fixture>").count() == 2
         });

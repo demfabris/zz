@@ -1,0 +1,34 @@
+tmux ['new-session', '-d', '-s', 'p', '-n', 'w', 'sleep 180'] 0 b'' b''
+CASE load-save-binary
+tmux ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 0 b'' b''
+tmux ['set', '-s', 'command-alias[78]', 'reviewtail=display-message -p tail ; set -g @tail yes'] 0 b'' b''
+tmux ['source-file', '/tmp/zzprobe-order018-wjlpx1wb/invoke.conf'] 0 b'a\xff\x00z' b''
+tmux ['save-buffer', '-b', 'review', '-'] 0 b'a\xff\x00z' b''
+CASE load-save-text
+tmux ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 0 b'' b''
+tmux ['set', '-s', 'command-alias[78]', 'reviewtail=display-message -p tail ; set -g @tail yes'] 0 b'' b''
+tmux ['source-file', '/tmp/zzprobe-order018-wjlpx1wb/invoke.conf'] 0 b'no-newline' b''
+tmux ['save-buffer', '-b', 'review', '-'] 0 b'no-newline' b''
+CASE load-save-newline
+tmux ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 0 b'' b''
+tmux ['set', '-s', 'command-alias[78]', 'reviewtail=display-message -p tail ; set -g @tail yes'] 0 b'' b''
+tmux ['source-file', '/tmp/zzprobe-order018-wjlpx1wb/invoke.conf'] 0 b'with-newline\n' b''
+tmux ['save-buffer', '-b', 'review', '-'] 0 b'with-newline\n' b''
+tmux ['kill-server'] 0 b'' b''
+zz ['new-session', '-d', '-s', 'p', '-n', 'w', 'sleep 180'] 0 b'' b''
+CASE load-save-binary
+zz ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 0 b'' b''
+zz ['set', '-s', 'command-alias[78]', 'reviewtail=display-message -p tail ; set -g @tail yes'] 0 b'' b''
+zz ['source-file', '/tmp/zzprobe-order018-kngpoylb/invoke.conf'] 1 b'a\xff\x00z' b'Bad file descriptor: -\n'
+zz ['save-buffer', '-b', 'review', '-'] 0 b'a\xff\x00z' b''
+CASE load-save-text
+zz ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 0 b'' b''
+zz ['set', '-s', 'command-alias[78]', 'reviewtail=display-message -p tail ; set -g @tail yes'] 0 b'' b''
+zz ['source-file', '/tmp/zzprobe-order018-kngpoylb/invoke.conf'] 1 b'no-newline' b'Bad file descriptor: -\n'
+zz ['save-buffer', '-b', 'review', '-'] 0 b'no-newline' b''
+CASE load-save-newline
+zz ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 0 b'' b''
+zz ['set', '-s', 'command-alias[78]', 'reviewtail=display-message -p tail ; set -g @tail yes'] 0 b'' b''
+zz ['source-file', '/tmp/zzprobe-order018-kngpoylb/invoke.conf'] 1 b'with-newline\n' b'Bad file descriptor: -\n'
+zz ['save-buffer', '-b', 'review', '-'] 0 b'with-newline\n' b''
+zz ['kill-server'] 0 b'' b''

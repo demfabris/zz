@@ -1,0 +1,31 @@
+ok    self-check equivalence: the same command on both sides
+ok    self-check stdout, an option on one side only
+ok    self-check exit and stderr, a buffer missing on both sides
+ok    self-check exit and stderr, a buffer one side does not have
+ok    self-check state, a session on one side only
+ok    self-check pane content, bytes written into one side only
+ok    self-check source-file-alias-group-two-members: second reader removed on zz
+ok    self-check source-file-alias-group-two-members-value: zz option changed
+ok    self-check load-buffer-alias-group-source-second: source reader removed on zz
+ok    self-check load-buffer-alias-group-source-second-value: one byte changed on zz
+ok    self-check load-buffer-alias-group-two-readers: second reader removed on zz
+ok    self-check load-buffer-alias-group-two-readers-value: one byte changed on zz
+ok    self-check load-buffer-alias-group-reader-last: first member output changed on zz
+ok    self-check load-buffer-alias-group-reader-last-value: one byte changed on zz
+ok    self-check alias-source-spent-source-continues: altered alias member on zz
+ok    self-check alias-source-spent-source-continues-state: altered alias member on zz
+ok    self-check alias-buffer-spent-source-continues: altered alias member on zz
+ok    self-check alias-buffer-spent-source-continues-state: altered alias member on zz
+ok    self-check alias-pane-spent-source-continues: altered alias member on zz
+ok    self-check alias-pane-spent-source-continues-state: altered alias member on zz
+ok    self-check alias-missing-source-aborts: altered alias member on zz
+ok    self-check file-replay-single-reader: altered alias member on zz
+ok    self-check file-replay-nonreader-then-reader: altered alias member on zz
+ok    self-check file-replay-two-readers: altered alias member on zz
+ok    self-check alias-binary-unterminated-stdout: altered alias member on zz
+ok    self-check alias-c-locale-binary-unterminated-stdout: altered alias member on zz
+ok    self-check file-replay-binary-unterminated-stdout: altered alias member on zz
+ok    self-check file-replay-binary-then-alias-print: altered alias member on zz
+ok    self-check alias-binary-then-print: altered alias member on zz
+ok    self-check daemon-start-config-refuses-stdin: applied payload on zz
+ok    self-check equivalence: every sabotage withdrawn

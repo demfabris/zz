@@ -1,0 +1,14 @@
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-alias/crates/zz-daemon)
+   Compiling zz-config v0.10.0 (/home/demfabris/dev/zz-c11-alias/crates/zz-config)
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-alias/crates/zz-tui)
+   Compiling zz v0.10.0 (/home/demfabris/dev/zz-c11-alias/crates/zz)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 40.46s
+     Running tests/cli_binary.rs (target/debug/deps/cli_binary-2f7f85c9fce73adb)
+
+running 3 tests
+test daemon_autostart::caller_stream_buffer_alias_groups_preserve_bytes_and_continue_after_a_spent_reader ... ok
+test daemon_autostart::caller_stream_file_replay_keeps_one_reader_across_aliases_and_nested_files ... ok
+test daemon_autostart::caller_stream_source_alias_group_applies_once_and_reports_the_spent_reader ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 130 filtered out; finished in 16.79s
+

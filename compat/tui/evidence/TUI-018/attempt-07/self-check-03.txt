@@ -1,0 +1,8 @@
+self-check: one deliberate one-sided difference per channel, plus two equivalences
+ok    self-check equivalence: the same command on both sides
+      case stdout-sabotage
+      stdout differs (tmux 0 bytes, zz 9 bytes)
+        0a1
+        > SABOTAGE
+ok    self-check stdout, an option on one side only
+ok    self-check exit and stderr, a buffer missing on both sides

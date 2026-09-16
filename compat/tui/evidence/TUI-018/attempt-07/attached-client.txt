@@ -1,0 +1,3 @@
+usage: compat/attached-client.sh [--command-output|--lifecycle] [ZZ_BIN [TMUX_BIN]]
+       ZZ_BIN=path TMUX_BIN=path compat/attached-client.sh
+exit_status=2

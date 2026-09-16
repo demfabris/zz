@@ -1,0 +1,2 @@
+aaf86edc28c00a2ee603103da0fccdb61d6502c07a29a72183c3a78f950077c0  target/debug/zz-alias-final
+4364d82bc74eb6cc5b2a7b31a2bdb8e6400609a61043f4708758e4061e581b1d  compat/tui-command-streams.sh

@@ -1,0 +1,22 @@
+{
+  "prior_attempt": "attempt-03",
+  "persistent_from_prior": [
+    "lane2-store",
+    "show-options-hooks",
+    "smoke/cli-chain-parse-abort",
+    "smoke/plugin-runtime-resurrect-restore",
+    "smoke/status-background-jobs"
+  ],
+  "not_failed_in_prior": [
+    "smoke/format-modifier-client-loop"
+  ],
+  "prior_failures_now_clean": [
+    "smoke/alias-group-forgery",
+    "smoke/args-parse-choosers",
+    "smoke/command-flag-errors",
+    "smoke/daemon-invalid-flags",
+    "smoke/positional-maximums",
+    "smoke/positional-minimums",
+    "stderr-parity"
+  ]
+}

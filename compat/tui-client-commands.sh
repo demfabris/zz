@@ -30,22 +30,8 @@
 #   [-t] [user|group]                                                                         has no socket ACL
 # lock-server               locks every client, runs          validates, empty execution,    PROVED (CLI) +
 #                             lock-command on each tty          after-lock-server fires       DECLARED (screen),
-#                                                                                             TUI-015
 # lock-session [-t]         locks that session's clients      same                           PROVED + DECLARED
 # lock-client [-t]          locks that one client             same                           PROVED + DECLARED
-# lock-server/-session/     too many arguments, unknown       same                           PROVED
-#   -client arity and -t     flag, -t without an argument
-# lock-session -t with a    validates session, window and    same at the default pane       PROVED, with configured
-#   window or pane suffix     pane components                   base index                     pane-base-index recorded
-#                                                                                              under TUI-015
-# after-lock-session        neither is a hook name: the pin   same                           PROVED
-# after-lock-client           answers `invalid option`
-# lock-after-time           arms a per-client server timer    store-only at both scopes,     DECLARED, TUI-015
-#                                                               and an invalid value is
-#                                                               refused the pin's way
-# lock-command              spawned on the client tty         store-only at both scopes;     DECLARED, the pin's
-#                                                               the pin's own default is a     default is whatever
-#                                                               build-time choice              configure found
 # refresh-client            status jobs rerun, redraw         status render published        PROVED
 # refresh-client -S         status jobs rerun, status redraw  status render published        PROVED
 # refresh-client -f -F      client flags set                  client flags set               PROVED
@@ -70,18 +56,6 @@
 #                             there is no mode
 # capture-pane -a           `no alternate screen`, and one    same                           PROVED
 #                             empty line under -q
-# capture-pane -C           backslashes doubled, and with     same for retained cell facts   PROVED; DEC charset and
-#                             -e escaped style controls                                       low indexed colour
-#                                                                                              provenance recorded
-# capture-pane -L           each line numbered from the       same                           PROVED
-#                             history size, negative in
-#                             history, and with -J the
-#                             number of every joined row
-#                             inside the joined line
-# capture-pane -F -H -P -R  line flags, the line OSC 8        loudly unsupported             DECLARED, TUI-017
-#                             URIs, the pending input                                         capture.rich-transports,
-#                             buffer and the whole internal                                   each with the workload
-#                             grid                                                            its refusal names
 # load-buffer -             caller stdin into a buffer        adopted, same                  PROVED
 # save-buffer - / -a -      buffer bytes to caller stdout     adopted, same                  PROVED
 # show-buffer [-b]          buffer bytes to stdout            same                           PROVED
@@ -788,6 +762,7 @@ CAPTURE_LINKS='DECIDED capture.rich-transports, refused with a measurement 2026-
 CAPTURE_PENDING='DECIDED capture.rich-transports, refused with a measurement 2026-09-15: -P prints the bytes the pin parser has read and not yet completed, input_pending(wp->ictx). libghostty-vt publishes no parser-pending buffer, so zz cannot answer it and an empty answer would be a fake channel that matched only because the buffer is almost always empty. The workload it would serve is debugging a half-written escape sequence. decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
 CAPTURE_GRID='DECIDED capture.rich-transports, refused with a measurement 2026-09-15: -R dumps the pin internal grid - a header G <sx>x<sy> (<hsize>/<hlimit>), then per line L <yy> (<n>) flags=<string>[<hex>] <cellused>/<cellsize>, then one C line per column carrying that cell colour, attribute and link ids. Measured at 40x8 that is 329 lines for eight rows. zz has no hsize/hlimit pair, no per-line cellused and cellsize, and no grid flag word: building them inside zz would be inventing tmux internals to make bytes match. The workload it would serve is a tmux regression test reading another tmux grid. decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
 CAPTURE_CHARSET='DECIDED capture charset provenance: decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible. At 80x24 ESC(0qqqESC(B gives literal \016qqq\017 under -C -e on the pin and UTF-8 box drawing on zz; without -e the pin emits qqq while zz still emits box drawing. Ghostty maps the source charset byte to Unicode before storing the cell and retains no charset bit. The workload is replaying original DEC line drawing bytes; ordinary Unicode text capture remains asserted'
+CAPTURE_TABS='TUI-017 ordinary residual: tmux retains a TAB cell and emits a literal tab under -C; Ghostty expands HT into cursor motion and the retained grid loses the tab origin. This is the same engine-storage root as the campaign TAB-cell residual, separate from DEC charset provenance. Trailing, internal and wide-text tabs remain open'
 CAPTURE_LOW_INDEX='TUI-017 divergence measured at 80x24: explicit 38;5;1 produces literal \033[38;5;1mRED\033[39m on the pin, while zz produces \033[31mRED\033[39m. Ghostty stores both named 31 and indexed 38;5;1 as Palette(1), so the capture cannot distinguish their original colour class. Indices 16 through 255 and RGB retain their class'
 LOG_IDENTITY='DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. Measured 2026-09-14 on both sides: the pin names ANY tty-bearing client by that tty, including the attached terminal client whose attach-session row reads /dev/pts/<n>, and zz named none of them - it spelled every row by the device name the client sent, which for an interactive client is the hostname. That half is closed: the server log now names a client by its tty whenever it has one. What stays is the clientless CLI, which names a process that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked'
 SERVER_ACCESS='zz has no multi-user socket access list: the daemon socket is the invoking user, so there is no user or group to add, and TUI-014 carries the refusal shape'
@@ -883,6 +858,10 @@ rich_capture_case() {
     self_check_expect "$name exact bytes before sabotage" exit=0 stdout=0 stderr=0
     if [ "$name" = capture-real-history ]; then
       changed="${payload//H/Z}"
+    elif [[ "$name" == capture-erased-* ]]; then
+      changed="${payload/NEXT/NEXT-X}"
+    elif [[ "$name" == capture-wide-* ]]; then
+      changed="${payload/A/Z}"
     else
       changed="X$payload"
     fi
@@ -917,7 +896,19 @@ rich_capture_cases() {
   rich_capture_case capture-underline '\033[4mUNDER\033[0m\r\nNEXT' same '' -C -e -S 0 -E 0
   rich_capture_case capture-attribute-reset '\033[1;4;31mONE\033[22mTWO\033[0m\r\nNEXT' same '' -C -e -S 0 -E 0
   rich_capture_case capture-unicode-lines '───\r\nNEXT' same '' -C -S 0 -E 0
+  rich_capture_case capture-erased-background-join '\033[41m\033[2K\033[0m\r\nNEXT' same '' -L -e -J -S 0 -E 4
+  rich_capture_case capture-erased-background-trim '\033[41m\033[2K\033[0m\r\nNEXT' same '' -e -T -S 0 -E 4
+  rich_capture_case capture-erased-display-join '\033[41m\033[2J\033[0m\r\nNEXT' same '' -L -e -J -S 0 -E 4
+  rich_capture_case capture-erased-display-trim '\033[41m\033[2J\033[0m\r\nNEXT' same '' -e -T -S 0 -E 4
+  printf -v wrap '%*s' 79 ''
+  wrap="${wrap// /A}"
+  rich_capture_case capture-wide-wrap-escape "\033[31m${wrap}界界\033[0mNEXT" same '' -C -e -S 0 -E 4
+  rich_capture_case capture-wide-wrap-padding "\033[31m${wrap}界界\033[0mNEXT" same '' -e -N -S 0 -E 4
+  rich_capture_case capture-wide-wrap-join "\033[31m${wrap}界界\033[0mNEXT" same '' -L -e -J -S 0 -E 4
   if [ "$SELF_CHECK" -eq 0 ]; then
+    rich_capture_case capture-tab-trailing 'ABC\t\r\nNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+    rich_capture_case capture-tab-internal 'ABC\tDEF\r\nNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+    rich_capture_case capture-tab-wide '界\t\r\nNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
     rich_capture_case capture-charset-text '\033(0qqq\033(B\r\nNEXT' record "$CAPTURE_CHARSET" -C -S 0 -E 0
     rich_capture_case capture-charset-escape '\033(0qqq\033(B\r\nNEXT' record "$CAPTURE_CHARSET" -C -e -S 0 -E 0
     rich_capture_case capture-low-indexed-colour '\033[38;5;1mRED\033[0m\r\nNEXT' record "$CAPTURE_LOW_INDEX" -C -e -S 0 -E 0
@@ -1003,11 +994,11 @@ message_live_job_cases() {
 }
 
 lock_target_cases() {
-  local spec name target
+  local spec name target command
   for spec in 'window|=cli:win' 'pane|=cli:win.0' 'pane-id|%0' \
     'missing-window|=cli:nosuchwin' 'missing-pane-id|%99' 'missing-pane|=cli:win.9' \
     'missing-session|=nosuch:win' 'exact-pane-name|=%0' 'exact-session|=cl:win' \
-    'session-pane-id|cli:.%1'; do
+    'session-pane-id|cli:.%1' 'empty-exact-window|cli:=' 'empty-exact-session|=:'; do
     name="${spec%%|*}"
     target="${spec#*|}"
     run_on_both set-option -gu @zzcc-locked
@@ -1016,6 +1007,13 @@ lock_target_cases() {
     case_run "lock-target-has-session-$name" same '' -- has-session -t "$target"
     case_run "lock-target-list-windows-$name" same '' -- list-windows -t "$target" -F '#{window_index}:#{window_name}'
   done
+  run_on_both new-session -d -s zzcc-foreign -n foreign "$INNER_SHELL"
+  local foreign_pane
+  foreign_pane="$(tmux_inner_command display-message -p -t '=zzcc-foreign:' '#{pane_id}')"
+  for command in lock-session has-session list-windows; do
+    case_run "lock-target-global-pane-$command" same '' -- "$command" -t ":.$foreign_pane"
+  done
+  run_on_both kill-session -t '=zzcc-foreign'
   run_on_both set-option -gw pane-base-index 1
   case_run lock-target-base-index-lock-session record "$LOCK_BASE_INDEX" -- lock-session -t '=cli:win.1'
   case_run lock-target-base-index-has-session record "$LOCK_BASE_INDEX" -- has-session -t '=cli:win.1'
@@ -1041,7 +1039,7 @@ lock_cases() {
   case_run lock-session-missing same '' -- lock-session -t zzcc-nope
   case_run lock-session-arity same '' -- lock-session zzcc-extra
   run_on_both set-option -gu @zzcc-locked
-  case_run lock-client cli "$LOCK_PROGRAM" -- lock-client -t CLIENT
+  case_run lock-client same '' -- lock-client -t CLIENT
   restore_case lock-client-restored
   case_run lock-client-no-server-hook same '' -- show-options -gqv @zzcc-locked
   case_run lock-client-current cli "$LOCK_PROGRAM" -- lock-client
@@ -1205,10 +1203,20 @@ zz_cursor_is_not() {
 
 lock_target_sabotages() {
   local command pane target expected_stdout
+  for target in 'cli:=' '=:'; do
+    for command in lock-session has-session list-windows; do
+      self_check_run "$command-$target-equivalence" "$command" -t "$target"
+      self_check_expect "$command accepts $target" exit=0 stdout=0 stderr=0
+      printf '1\n' >"$SCRATCH_DIR/zz.rc"
+      printf "can't find window: \n" >"$SCRATCH_DIR/zz.err"
+      compare_channels "$command-$target-rejection-sabotage" || true
+      self_check_expect "$command rejects $target on zz only" exit=1 stderr=1
+    done
+  done
   zz_command new-window -d -t "=$INNER_SESSION" -n zzcc-target "$INNER_SHELL" >/dev/null ||
     die 'zz refused the one-sided window target'
   pane="$(zz_command display-message -p -t "=$INNER_SESSION:zzcc-target" '#{pane_id}')"
-  for target in "=$INNER_SESSION:zzcc-target" "$pane"; do
+  for target in "=$INNER_SESSION:zzcc-target" "$pane" ":.$pane"; do
     for command in lock-session has-session list-windows; do
       self_check_run "$command-$target-sabotage" "$command" -t "$target"
       expected_stdout=0
@@ -1406,6 +1414,11 @@ run_self_check() {
   run_on_both set-hook -gu after-lock-server
   run_on_both set-option -gu @zzcc-sab-negative
   zz_command set-option -gu @zzcc-sab-lock >/dev/null || die 'zz refused set-option -gu'
+
+  zz_command set-option -g status-left LOCK-SABOTAGE >/dev/null
+  self_check_run lock-client-screen-sabotage lock-client -t CLIENT
+  self_check_expect 'lock-client one-sided status row' exit=0 stdout=0 stderr=0 screen=1
+  zz_command set-option -g status-left L >/dev/null
 
   zz_before="$(cursor_tuple zz)"
   tmux_outer_command send-keys -t "=$OUTER_SESSION:zz" zzq ||

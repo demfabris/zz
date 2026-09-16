@@ -1,0 +1,11 @@
+{
+  "command": [
+    "env",
+    "ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-customize/target/debug/zz-customize-final",
+    "compat/run.sh",
+    "smoke/command-flag-errors.txt",
+    "smoke/config-discovery.txt"
+  ],
+  "exit": 1,
+  "seconds": 479.7
+}

@@ -1,0 +1,21 @@
+{
+  "base": "2e2dc5842e71a25d5872d3757c0e19f48758ad6a",
+  "os": "Linux-7.2.3-1-cachyos-deckify-x86_64-with-glibc2.44",
+  "term": "xterm-ghostty",
+  "shell": "/bin/bash",
+  "tmux_pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
+  "cargo_wrapper": "/tmp/zz-cargo.sh",
+  "screen": "80x24 initial; fixture explicit resizes",
+  "home": "fixtures isolate HOME and XDG_CONFIG_HOME",
+  "logical_cpus": 16,
+  "memory_kib": {
+    "MemTotal": 16153072,
+    "SwapTotal": 16152572
+  },
+  "daemon_test_home": "/tmp/zz-emptyhome",
+  "daemon_test_xdg_config_home": "/tmp/zz-emptyhome/config",
+  "cargo_adapter": "compat/tui/evidence/TUI-014/attempt-07-customize/capped-bin/cargo",
+  "initial_binary_protocol_version": 104,
+  "final_binary_protocol_version": 104,
+  "final_verifier_shell": "/bin/sh"
+}

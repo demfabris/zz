@@ -1,0 +1,14 @@
+[
+  {
+    "binary": "target/debug/zz",
+    "exit": 1,
+    "stdout": "",
+    "stderr": "usage: customize-mode [-kNZ] [-F format] [-f filter] [-t target-pane]\n"
+  },
+  {
+    "binary": "target/debug/zz-customize-final",
+    "exit": 1,
+    "stdout": "",
+    "stderr": "usage: customize-mode [-kNZ] [-F format] [-f filter] [-t target-pane]\n"
+  }
+]

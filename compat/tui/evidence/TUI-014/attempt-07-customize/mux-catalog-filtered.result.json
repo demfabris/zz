@@ -1,0 +1,13 @@
+{
+  "command": [
+    "/tmp/zz-cargo.sh",
+    "test",
+    "-p",
+    "zz-mux",
+    "--test",
+    "hunt_claims",
+    "catalog_covers_the_options_the_handlers_read"
+  ],
+  "exit": 0,
+  "seconds": 38.8
+}

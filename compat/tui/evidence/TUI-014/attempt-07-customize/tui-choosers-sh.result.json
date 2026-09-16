@@ -1,0 +1,9 @@
+{
+  "command": [
+    "compat/tui-choosers.sh",
+    "/home/demfabris/dev/zz-c11-customize/target/debug/zz",
+    "/home/demfabris/dev/zz-c11-customize/compat/.cache/tmux-src/tmux"
+  ],
+  "exit": 0,
+  "seconds": 739.8
+}

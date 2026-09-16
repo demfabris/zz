@@ -1,0 +1,32 @@
+{
+  "base": "b2c00bd26091523a167343b1d39f36c036662d07",
+  "added_code_comments": 0,
+  "comment_locations": [],
+  "python_syntax_checked": [
+    "compat/tui/evidence/TUI-014/attempt-07-customize/control-pin-probe.py",
+    "compat/tui/evidence/TUI-014/attempt-07-customize/run-regressions.py",
+    "compat/tui/evidence/TUI-014/attempt-07-customize/run-command.py",
+    "compat/tui/evidence/TUI-014/attempt-07-customize/final-checks.py",
+    "compat/tui/evidence/TUI-014/attempt-07-customize/capture-corpus.py",
+    "compat/tui/evidence/TUI-014/attempt-07-customize/new-command-flags.py",
+    "compat/tui/evidence/TUI-014/attempt-07-customize/seal-corpus.py",
+    "compat/tui/evidence/TUI-014/attempt-07-customize/finalize-proof.py",
+    "compat/tui-client-job.py"
+  ],
+  "credential_pattern_scanned_files": 692,
+  "credential_pattern_locations": [],
+  "archives": [
+    {
+      "path": "compat/tui/evidence/TUI-014/attempt-07-customize/client-run-1-captures.tar.gz",
+      "members": 330,
+      "sha256": "6ddb609ee897d5e97b8ca5a8e41d31cd3e7d2c5ef454293bd0e82f6702b3bd47"
+    },
+    {
+      "path": "compat/tui/evidence/TUI-014/attempt-07-customize/corpus-logs.tar.gz",
+      "members": 204,
+      "sha256": "320a79bed9967fbd5fa9639b14a237dae66d095756c924a2bff45cb34a33f7e8"
+    }
+  ],
+  "source_whitespace_check_exit": 0,
+  "raw_evidence_whitespace": "Preserved verbatim; full staged diff --check reports trailing spaces and blank final lines in captured diagnostic output."
+}

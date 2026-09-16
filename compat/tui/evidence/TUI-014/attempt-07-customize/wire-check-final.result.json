@@ -1,0 +1,12 @@
+{
+  "command": [
+    "python3",
+    "compat/wire-version.py"
+  ],
+  "launcher": [
+    "python3",
+    "compat/wire-version.py"
+  ],
+  "exit": 0,
+  "seconds": 0.0
+}

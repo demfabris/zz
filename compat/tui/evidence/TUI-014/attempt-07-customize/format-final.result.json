@@ -1,0 +1,18 @@
+{
+  "command": [
+    "/tmp/zz-cargo.sh",
+    "fmt",
+    "--all"
+  ],
+  "launcher": [
+    "bash",
+    "-c",
+    "RANDOM=\"$1\"; shift; source /tmp/zz-cargo.sh \"$@\"",
+    "zz-cargo-slot",
+    "2",
+    "fmt",
+    "--all"
+  ],
+  "exit": 0,
+  "seconds": 9.4
+}

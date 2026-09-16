@@ -1,0 +1,10 @@
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-mux)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 20.08s
+     Running tests/hunt_claims.rs (target/debug/deps/hunt_claims-9522f8865b2da2b6)
+
+running 1 test
+test catalog_covers_the_options_the_handlers_read ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 59 filtered out; finished in 0.00s
+

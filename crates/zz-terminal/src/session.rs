@@ -8645,11 +8645,15 @@ fn capture_styled_terminal(
     for row in start..=end {
         let y = u32::try_from(row).unwrap_or(u32::MAX);
         let mut used = 0;
+        let mut text_end = 0;
         for x in 0..columns {
             let cell = terminal
                 .grid_ref(Point::Screen(PointCoordinate { x, y }))
                 .and_then(|grid| grid.cell())
                 .map_err(capture_failure)?;
+            if cell.has_text().map_err(capture_failure)? {
+                text_end = x + 1;
+            }
             if cell.has_text().map_err(capture_failure)?
                 || cell.has_styling().map_err(capture_failure)?
                 || matches!(
@@ -8661,7 +8665,7 @@ fn capture_styled_terminal(
             }
         }
         let width = if options.join_wrapped || options.trim_positions {
-            used
+            text_end
         } else {
             u16::try_from(allocated_row_width(usize::from(used), usize::from(columns)))
                 .unwrap_or(columns)
@@ -8672,13 +8676,17 @@ fn capture_styled_terminal(
                 .grid_ref(Point::Screen(PointCoordinate { x, y }))
                 .map_err(capture_failure)?;
             let cell = grid.cell().map_err(capture_failure)?;
-            if matches!(
-                cell.wide().map_err(capture_failure)?,
-                CellWide::SpacerTail | CellWide::SpacerHead
-            ) {
+            let wide = cell.wide().map_err(capture_failure)?;
+            if wide == CellWide::SpacerTail
+                || (wide == CellWide::SpacerHead && options.join_wrapped)
+            {
                 continue;
             }
-            let mut style = grid.style().map_err(capture_failure)?;
+            let mut style = if wide == CellWide::SpacerHead {
+                libghostty_vt::style::Style::default()
+            } else {
+                grid.style().map_err(capture_failure)?
+            };
             match cell.content_tag().map_err(capture_failure)? {
                 CellContentTag::BgColorPalette => {
                     style.bg_color =
@@ -18413,6 +18421,80 @@ mod tests {
                 "A".repeat(10)
             )
         );
+    }
+
+    #[test]
+    fn styled_capture_trims_erased_backgrounds_to_text_extent() {
+        for erase in ["\x1b[2K", "\x1b[2J"] {
+            let mut terminal = Terminal::new(TerminalOptions {
+                cols: 80,
+                rows: 24,
+                max_scrollback: 64,
+            })
+            .expect("terminal");
+            terminal.vt_write(format!("\x1b[41m{erase}\x1b[0m\r\nNEXT").as_bytes());
+            for join_wrapped in [false, true] {
+                let output = capture_terminal(
+                    &terminal,
+                    None,
+                    CaptureOptions {
+                        end: CaptureBoundary::Relative(4),
+                        escape_sequences: true,
+                        trim_positions: !join_wrapped,
+                        join_wrapped,
+                        number_lines: join_wrapped,
+                        ..CaptureOptions::default()
+                    },
+                )
+                .expect("capture");
+                assert_eq!(
+                    output,
+                    if join_wrapped {
+                        "0 \n1 NEXT\n2 \n3 \n4 "
+                    } else {
+                        "\nNEXT\n\n\n"
+                    },
+                    "{erase:?} join={join_wrapped}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn styled_capture_preserves_default_padding_before_wide_wraps() {
+        for cols in [80, 100] {
+            let mut terminal = Terminal::new(TerminalOptions {
+                cols,
+                rows: 24,
+                max_scrollback: 64,
+            })
+            .expect("terminal");
+            let text = "A".repeat(usize::from(cols - 1));
+            terminal.vt_write(format!("\x1b[31m{text}界界\x1b[0mNEXT").as_bytes());
+            for preserve_trailing in [false, true] {
+                let output = capture_terminal(
+                    &terminal,
+                    None,
+                    CaptureOptions {
+                        end: CaptureBoundary::Relative(1),
+                        escape_sequences: true,
+                        preserve_trailing,
+                        ..CaptureOptions::default()
+                    },
+                )
+                .expect("capture");
+                let padding = if preserve_trailing { " " } else { "" };
+                let tail = if preserve_trailing {
+                    " ".repeat(usize::from(cols / 4 - 8))
+                } else {
+                    String::new()
+                };
+                assert_eq!(
+                    output,
+                    format!("\x1b[31m{text}\x1b[39m{padding}\n\x1b[31m界界\x1b[39mNEXT{tail}")
+                );
+            }
+        }
     }
 
     #[test]

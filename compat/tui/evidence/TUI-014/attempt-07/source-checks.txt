@@ -1,0 +1,6 @@
+origin/main: be5709dfcd9936d44519683e5da8dc6ab7748d96
+Frozen v103 history matches origin/main exactly.
+PaneSnapshot.mode follows border_status_text with serde(default) and is the last field.
+Protocol constant and decimal pins: 104. Both hello byte pins: 0x68.
+Added Rust comment/doc lines against origin/main including corrections: 0.
+All assertions passed.

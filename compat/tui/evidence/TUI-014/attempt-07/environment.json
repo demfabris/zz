@@ -1,0 +1,9 @@
+{
+  "base": "be5709dfcd9936d44519683e5da8dc6ab7748d96",
+  "prior_tip": "2e2dc5842e71a25d5872d3757c0e19f48758ad6a",
+  "platform": "Linux-7.2.3-1-cachyos-deckify-x86_64-with-glibc2.44",
+  "tmux_version": "tmux next-3.8",
+  "shell": "/bin/sh",
+  "cargo_wrapper": "/tmp/zz-cargo.sh",
+  "scope_adapter": "attempt-06/capped-bin/cargo"
+}

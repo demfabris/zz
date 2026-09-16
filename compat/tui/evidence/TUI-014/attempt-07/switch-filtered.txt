@@ -1,0 +1,11 @@
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-mux)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 18.98s
+     Running unittests src/lib.rs (target/debug/deps/zz_daemon-7a6e412177cab2ac)
+
+running 1 test
+test daemon::tests::switch_mode_window_order_skips_orphan_sessions ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 937 filtered out; finished in 0.02s
+

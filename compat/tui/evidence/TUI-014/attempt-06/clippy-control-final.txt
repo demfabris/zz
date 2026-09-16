@@ -1,0 +1,10 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling cef-dll-sys v152.2.0+152.0.6
+    Checking cef v152.2.0+152.0.6
+    Checking zz-browser v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-browser)
+    Checking zz-chrome-import v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-chrome-import)
+    Checking zz v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 18.95s
+
+EXIT 0

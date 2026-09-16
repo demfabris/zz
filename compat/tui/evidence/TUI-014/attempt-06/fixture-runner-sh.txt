@@ -1,0 +1,14 @@
+START choosers-sh 2026-09-16T11:19:56-0300
+END choosers-sh 0
+START choosers-self-check-sh 2026-09-16T11:24:49-0300
+END choosers-self-check-sh 0
+START copy-mode-sh 2026-09-16T11:33:24-0300
+END copy-mode-sh 0
+START copy-mode-self-check-sh 2026-09-16T11:36:56-0300
+END copy-mode-self-check-sh 0
+START screen-diff-sh 2026-09-16T11:41:26-0300
+END screen-diff-sh 0
+START attached-client-sh 2026-09-16T11:45:04-0300
+END attached-client-sh 0
+START verify-claims-sh 2026-09-16T11:53:07-0300
+END verify-claims-sh 0

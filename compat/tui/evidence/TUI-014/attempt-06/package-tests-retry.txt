@@ -1,0 +1,89 @@
+   Compiling rand_core v0.10.1
+   Compiling getrandom v0.4.3
+   Compiling subtle v2.6.1
+   Compiling ctutils v0.4.2
+   Compiling nix v0.31.3
+   Compiling hybrid-array v0.4.15
+   Compiling uuid v1.26.1
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling block-padding v0.4.2
+   Compiling inout v0.2.2
+   Compiling tempfile v3.27.0
+   Compiling digest v0.11.3
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-mux)
+   Compiling cipher v0.5.2
+   Compiling hmac v0.13.0
+   Compiling sha2 v0.11.0
+   Compiling agent-client-protocol v2.1.0
+   Compiling aes v0.9.3
+   Compiling pbkdf2 v0.13.0
+   Compiling cbc v0.2.1
+   Compiling mio v1.2.3
+   Compiling base64ct v1.8.3
+   Compiling pem-rfc7468 v1.0.0
+   Compiling sha1 v0.11.0
+   Compiling universal-hash v0.6.1
+   Compiling fnv v1.0.7
+   Compiling zbus v5.19.0
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-daemon)
+   Compiling polyval v0.7.3
+   Compiling der v0.8.2
+   Compiling crypto-bigint v0.7.5
+   Compiling ghash v0.6.0
+   Compiling rustls v0.23.44
+   Compiling ctr v0.10.1
+   Compiling aead v0.6.1
+   Compiling aes-gcm v0.11.1
+   Compiling digest v0.10.7
+   Compiling ureq v3.4.1
+   Compiling spki v0.8.0
+   Compiling salsa20 v0.11.0
+   Compiling accesskit v0.24.1
+   Compiling collections v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling scrypt v0.12.0
+   Compiling zz-config v0.10.0 (/home/demfabris/dev/zz-c11-modes/crates/zz-config)
+   Compiling pkcs5 v0.8.1
+   Compiling zlog v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling convert_case v0.11.0
+   Compiling wait-timeout v0.2.1
+   Compiling quick-error v1.2.3
+   Compiling bit-vec v0.8.0
+   Compiling logos-codegen v0.14.4
+   Compiling ztracing v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling bit-set v0.8.0
+   Compiling rusty-fork v0.3.1
+   Compiling proptest-macro v0.5.0 (https://github.com/proptest-rs/proptest?rev=3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b#3dca198a)
+   Compiling gpui v0.2.2 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling download-cef v3.0.0
+   Compiling pkcs8 v0.11.0
+   Compiling atspi-common v0.13.0
+   Compiling perf v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling hmac v0.12.1
+   Compiling rand_xorshift v0.4.0
+   Compiling const-random-macro v0.1.16
+   Compiling ff v0.14.0
+   Compiling unarray v0.1.4
+   Compiling proptest v1.10.0 (https://github.com/proptest-rs/proptest?rev=3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b#3dca198a)
+   Compiling cef-dll-sys v152.2.0+152.0.6
+   Compiling http_client v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling const-random v0.1.18
+   Compiling logos-derive v0.14.4
+   Compiling util_macros v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling sum_tree v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling logos v0.14.4
+   Compiling ahash v0.8.12
+   Compiling sha2 v0.10.9
+   Compiling group v0.14.0
+   Compiling hkdf v0.12.4
+   Compiling pbkdf2 v0.12.2
+   Compiling atspi-proxies v0.13.0
+   Compiling ashpd v0.13.13
+   Compiling accesskit_consumer v0.38.0
+   Compiling md-5 v0.10.6
+   Compiling signature v3.0.0
+   Compiling base16ct v1.0.0
+   Compiling sec1 v0.8.1
+   Compiling merman-core v0.6.2
+
+EXIT 143

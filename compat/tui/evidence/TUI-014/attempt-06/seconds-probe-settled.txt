@@ -1,0 +1,13 @@
+SECONDS_SAMPLE_START 24-with-seconds 2026-09-16T10:28:01,410722429-03:00
+clock capture clock-24-with-seconds: both faces redrew; screen and cursor pair stayed inside epoch second 1789565285
+ok    clock-24-with-seconds
+SECONDS_SAMPLE_END 24-with-seconds 2026-09-16T10:28:05,253389772-03:00
+ok    clock-24-with-seconds-closed
+SECONDS_SAMPLE_START 12-with-seconds 2026-09-16T10:28:10,567071334-03:00
+clock capture clock-12-with-seconds: both faces redrew; screen and cursor pair stayed inside epoch second 1789565294
+ok    clock-12-with-seconds
+SECONDS_SAMPLE_END 12-with-seconds 2026-09-16T10:28:14,240452881-03:00
+ok    clock-12-with-seconds-closed
+seconds probe: 4 assertions including both seconds faces, 0 failures
+
+EXIT 0

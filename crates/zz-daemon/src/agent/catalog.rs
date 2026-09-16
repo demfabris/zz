@@ -4,6 +4,7 @@ use std::{
     time::Duration,
 };
 
+use parking_lot::Mutex;
 use serde_json::Value;
 use zz_protocol::{AgentAutoApprove, AgentProvider};
 
@@ -23,6 +24,7 @@ pub(crate) async fn load(
         Box::pin(run_agent_runtime(
             config,
             provider,
+            channels.auto_approve,
             channels.permission_ids,
             None,
             channels.commands,
@@ -46,6 +48,7 @@ async fn load_with_runner(cwd: PathBuf, runner: PaneRunner) -> Result<Value, Str
     let closer = events.clone();
     let runtime = async move {
         let result = runner(RuntimeChannels {
+            auto_approve: Arc::new(Mutex::new(AgentAutoApprove::Off)),
             permission_ids: Arc::new(AtomicU64::new(1)),
             journal: None,
             commands: command_rx,
@@ -158,7 +161,7 @@ mod tests {
         let runner: PaneRunner = Box::new(move |channels| {
             Box::pin(super::super::runtime::run_agent_connection(
                 AgentProvider::ClaudeCode,
-                AgentAutoApprove::Off,
+                channels.auto_approve,
                 agent,
                 channels.permission_ids,
                 None,

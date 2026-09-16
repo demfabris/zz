@@ -3,9 +3,13 @@ use std::{
     io::{self, Write},
     path::{Path, PathBuf},
     process::ExitCode,
-    sync::{Arc, mpsc},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use zz_daemon::InteractiveClient;
@@ -109,6 +113,33 @@ fn drive<W: Write>(
     output: &mut EventWriter<W>,
     startup_gaps: &mut u64,
 ) -> Result<(), StreamError> {
+    let (receiver, pending) = subscribe(client, output.target.as_deref())?;
+    if output.next_seq == 0 {
+        output.line("ready", &BTreeMap::new())?;
+        for _ in 0..std::mem::take(startup_gaps) {
+            output.line("gap", &BTreeMap::new())?;
+        }
+    }
+    for payload in pending {
+        output.hook(payload)?;
+    }
+    loop {
+        if let ProtocolMessage::Event(event) = receive(&receiver)? {
+            output.hook(event.payload)?;
+        }
+    }
+}
+
+fn subscribe(
+    client: &Arc<InteractiveClient>,
+    target: Option<&str>,
+) -> Result<
+    (
+        mpsc::Receiver<Result<ProtocolMessage, String>>,
+        Vec<EventPayload>,
+    ),
+    StreamError,
+> {
     let (sender, receiver) = mpsc::sync_channel(32);
     let reader = Arc::clone(client);
     thread::Builder::new()
@@ -132,8 +163,8 @@ fn drive<W: Write>(
             }
         })?;
     let mut arguments = Vec::<RawText>::new();
-    if let Some(target) = &output.target {
-        arguments.extend(["-t".into(), target.clone().into()]);
+    if let Some(target) = target {
+        arguments.extend(["-t".into(), target.into()]);
     }
     let mut pending = Vec::new();
     for command in [
@@ -172,29 +203,21 @@ fn drive<W: Write>(
             }
         }
     }
-    if output.next_seq == 0 {
-        output.line("ready", &BTreeMap::new())?;
-        for _ in 0..std::mem::take(startup_gaps) {
-            output.line("gap", &BTreeMap::new())?;
-        }
-    }
-    for payload in pending {
-        output.hook(payload)?;
-    }
-    loop {
-        if let ProtocolMessage::Event(event) = receive(&receiver)? {
-            output.hook(event.payload)?;
-        }
-    }
+    Ok((receiver, pending))
 }
 
 fn receive(
     receiver: &mpsc::Receiver<Result<ProtocolMessage, String>>,
 ) -> Result<ProtocolMessage, StreamError> {
-    let message = receiver
-        .recv()
-        .map_err(|_| StreamError::Disconnected("disconnected".to_owned()))?
-        .map_err(StreamError::Disconnected)?;
+    check_message(
+        receiver
+            .recv()
+            .map_err(|_| StreamError::Disconnected("disconnected".to_owned()))?,
+    )
+}
+
+fn check_message(message: Result<ProtocolMessage, String>) -> Result<ProtocolMessage, StreamError> {
+    let message = message.map_err(StreamError::Disconnected)?;
     if let ProtocolMessage::Event(event) = &message {
         match &event.payload {
             EventPayload::ControlExit { reason } if reason == "too far behind" => {
@@ -264,6 +287,246 @@ impl<W: Write> EventWriter<W> {
     }
 }
 
+pub(crate) fn progress_target(arguments: &[RawText]) -> Result<Option<String>, &'static str> {
+    let mut progress = false;
+    let mut wait = false;
+    let mut target = None;
+    let mut explicit = false;
+    let mut index = 0;
+    while let Some(argument) = arguments.get(index) {
+        if argument == "--" {
+            break;
+        }
+        match argument.as_str() {
+            "--progress" => progress = true,
+            "--wait" => wait = true,
+            _ => {
+                for name in ["-t", "--target", "--timeout", "--context", "--on-block"] {
+                    let value = if argument == name {
+                        index += 1;
+                        arguments.get(index).map(RawText::as_str)
+                    } else if name == "-t" {
+                        argument
+                            .strip_prefix(name)
+                            .filter(|value| !value.is_empty())
+                    } else {
+                        argument
+                            .strip_prefix(name)
+                            .and_then(|value| value.strip_prefix('='))
+                    };
+                    if let Some(value) = value {
+                        if matches!(name, "-t" | "--target") {
+                            target = Some(value.to_owned());
+                            explicit = true;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    if !progress {
+        return Ok(None);
+    }
+    if !wait
+        || !explicit
+        || !target.as_deref().is_some_and(|target| {
+            target
+                .strip_prefix('%')
+                .is_some_and(|id| !id.is_empty() && id.bytes().all(|ch| ch.is_ascii_digit()))
+        })
+    {
+        return Err("agent-send: --progress requires --wait and an explicit -t %N");
+    }
+    Ok(target)
+}
+
+pub(crate) struct Progress {
+    stop: Arc<AtomicBool>,
+    client: Arc<InteractiveClient>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+impl Progress {
+    pub(crate) fn start(socket_path: &Path, pane: String) -> Result<Self, String> {
+        let client = Arc::new(
+            InteractiveClient::connect_control(socket_path)
+                .map_err(|error| format_local_command_error(socket_path, error))?,
+        );
+        let mut progress = Self {
+            stop: Arc::new(AtomicBool::new(false)),
+            client,
+            worker: None,
+        };
+        let (receiver, pending) =
+            subscribe(&progress.client, Some(&pane)).map_err(|error| match error {
+                StreamError::Gap => "event stream overflowed during attach".to_owned(),
+                StreamError::Disconnected(reason) => reason,
+            })?;
+        let stop = Arc::clone(&progress.stop);
+        progress.worker = Some(
+            thread::Builder::new()
+                .name("zz-agent-progress".to_owned())
+                .spawn(move || {
+                    let mut output = ProgressWriter::new(io::stderr(), pane);
+                    let started = Instant::now();
+                    for payload in pending {
+                        if output.hook(payload, started.elapsed()).is_err() {
+                            return;
+                        }
+                    }
+                    loop {
+                        if !stop.load(Ordering::Acquire)
+                            && output.heartbeat(started.elapsed()).is_err()
+                        {
+                            break;
+                        }
+                        let message = if stop.load(Ordering::Acquire) {
+                            match receiver.try_recv() {
+                                Ok(message) => message,
+                                Err(_) => break,
+                            }
+                        } else {
+                            match receiver.recv_timeout(Duration::from_millis(100)) {
+                                Ok(message) => message,
+                                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                            }
+                        };
+                        match check_message(message) {
+                            Ok(ProtocolMessage::Event(event)) => {
+                                if output.hook(event.payload, started.elapsed()).is_err() {
+                                    break;
+                                }
+                            }
+                            Ok(_) => {}
+                            Err(error) => {
+                                if !stop.load(Ordering::Acquire) {
+                                    let reason = match error {
+                                        StreamError::Gap => "event stream overflowed".to_owned(),
+                                        StreamError::Disconnected(reason) => reason,
+                                    };
+                                    eprintln!("agent-send: --progress: {reason}");
+                                }
+                                break;
+                            }
+                        }
+                    }
+                })
+                .map_err(|error| error.to_string())?,
+        );
+        Ok(progress)
+    }
+}
+
+impl Drop for Progress {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        #[cfg(unix)]
+        let _ = self.client.shutdown();
+        #[cfg(not(unix))]
+        let _ = self.client.detach();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+struct ProgressWriter<W> {
+    output: W,
+    pane: String,
+    last_line: Duration,
+    tool_calls: usize,
+    last_title: String,
+}
+
+impl<W: Write> ProgressWriter<W> {
+    fn new(output: W, pane: String) -> Self {
+        Self {
+            output,
+            pane,
+            last_line: Duration::ZERO,
+            tool_calls: 0,
+            last_title: String::new(),
+        }
+    }
+
+    fn line(&mut self, elapsed: Duration, text: &str) -> io::Result<()> {
+        let seconds = elapsed.as_secs();
+        writeln!(
+            self.output,
+            "[zz {} +{:02}:{:02}] {text}",
+            self.pane,
+            seconds / 60,
+            seconds % 60
+        )?;
+        self.output.flush()?;
+        self.last_line = elapsed;
+        Ok(())
+    }
+
+    fn hook(&mut self, payload: EventPayload, elapsed: Duration) -> io::Result<()> {
+        let EventPayload::HookEvent { name, variables } = payload else {
+            return Ok(());
+        };
+        if variables.get("hook_pane") != Some(&self.pane) {
+            return Ok(());
+        }
+        let value = |key: &str| variables.get(key).map(String::as_str).unwrap_or_default();
+        match name.as_str() {
+            "agent-tool-call" => {
+                let title = value("tool_title")
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .chars()
+                    .take(120)
+                    .collect::<String>();
+                self.last_title.clone_from(&title);
+                let status = value("tool_status");
+                let label = if matches!(status, "completed" | "failed") {
+                    status
+                } else {
+                    self.tool_calls += 1;
+                    match value("tool_kind") {
+                        "" => "call",
+                        kind => kind,
+                    }
+                };
+                self.line(
+                    elapsed,
+                    &format!("tool_call {label} {}", serde_json::to_string(&title)?),
+                )
+            }
+            "agent-state-changed" => {
+                let mut state = value("agent_state").to_owned();
+                let permission = value("agent_pending_permission");
+                if !permission.is_empty() {
+                    state.push_str(" permission=");
+                    state.push_str(permission);
+                }
+                self.line(elapsed, &state)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn heartbeat(&mut self, elapsed: Duration) -> io::Result<()> {
+        if elapsed.saturating_sub(self.last_line) >= Duration::from_mins(1) {
+            self.line(
+                elapsed,
+                &format!(
+                    "working tool_calls={} last={}",
+                    self.tool_calls,
+                    serde_json::to_string(&self.last_title)?
+                ),
+            )?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,6 +552,147 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
+    }
+
+    #[test]
+    fn progress_formats_tools_states_permissions_and_heartbeat() {
+        let mut writer = ProgressWriter::new(Vec::new(), "%7".to_owned());
+        let tool = |status: &str| EventPayload::HookEvent {
+            name: "agent-tool-call".to_owned(),
+            variables: BTreeMap::from([
+                ("hook_pane".to_owned(), "%7".to_owned()),
+                ("tool_call_id".to_owned(), "one".to_owned()),
+                ("tool_kind".to_owned(), "execute".to_owned()),
+                (
+                    "tool_title".to_owned(),
+                    "cargo test -p zz-daemon agent".to_owned(),
+                ),
+                ("tool_status".to_owned(), status.to_owned()),
+            ]),
+        };
+        writer
+            .hook(tool("pending"), Duration::from_secs(12))
+            .unwrap();
+        writer
+            .hook(tool("completed"), Duration::from_secs(41))
+            .unwrap();
+        let before_heartbeat = writer.output.len();
+        writer.heartbeat(Duration::from_secs(100)).unwrap();
+        assert_eq!(writer.output.len(), before_heartbeat);
+        writer.heartbeat(Duration::from_secs(101)).unwrap();
+        writer
+            .hook(tool("failed"), Duration::from_secs(102))
+            .unwrap();
+        for (state, permission, seconds) in [("working", "42", 103), ("idle", "", 873)] {
+            writer
+                .hook(
+                    EventPayload::HookEvent {
+                        name: "agent-state-changed".to_owned(),
+                        variables: BTreeMap::from([
+                            ("hook_pane".to_owned(), "%7".to_owned()),
+                            ("agent_state".to_owned(), state.to_owned()),
+                            ("agent_pending_permission".to_owned(), permission.to_owned()),
+                        ]),
+                    },
+                    Duration::from_secs(seconds),
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            String::from_utf8(writer.output).unwrap(),
+            concat!(
+                "[zz %7 +00:12] tool_call execute \"cargo test -p zz-daemon agent\"\n",
+                "[zz %7 +00:41] tool_call completed \"cargo test -p zz-daemon agent\"\n",
+                "[zz %7 +01:41] working tool_calls=1 last=\"cargo test -p zz-daemon agent\"\n",
+                "[zz %7 +01:42] tool_call failed \"cargo test -p zz-daemon agent\"\n",
+                "[zz %7 +01:43] working permission=42\n",
+                "[zz %7 +14:33] idle\n",
+            )
+        );
+    }
+
+    #[test]
+    fn progress_caps_and_quotes_titles_and_filters_events() {
+        let mut writer = ProgressWriter::new(Vec::new(), "%7".to_owned());
+        writer.hook(hook(), Duration::from_secs(1)).unwrap();
+        writer
+            .hook(EventPayload::ServerStopping, Duration::from_secs(1))
+            .unwrap();
+        writer
+            .hook(
+                EventPayload::HookEvent {
+                    name: "pane-title-changed".to_owned(),
+                    variables: BTreeMap::from([("hook_pane".to_owned(), "%7".to_owned())]),
+                },
+                Duration::from_secs(1),
+            )
+            .unwrap();
+        assert!(writer.output.is_empty());
+        writer.heartbeat(Duration::from_mins(1)).unwrap();
+        assert_eq!(
+            String::from_utf8(writer.output.clone()).unwrap(),
+            "[zz %7 +01:00] working tool_calls=0 last=\"\"\n"
+        );
+        writer
+            .hook(
+                EventPayload::HookEvent {
+                    name: "agent-tool-call".to_owned(),
+                    variables: BTreeMap::from([
+                        ("hook_pane".to_owned(), "%7".to_owned()),
+                        ("tool_kind".to_owned(), "execute".to_owned()),
+                        ("tool_status".to_owned(), "in_progress".to_owned()),
+                        (
+                            "tool_title".to_owned(),
+                            format!("\n\"quoted\" \\ {}", "界".repeat(130)),
+                        ),
+                    ]),
+                },
+                Duration::from_secs(61),
+            )
+            .unwrap();
+        let output = String::from_utf8(writer.output).unwrap();
+        let title: String = serde_json::from_str(
+            output
+                .lines()
+                .last()
+                .unwrap()
+                .split_once("execute ")
+                .unwrap()
+                .1,
+        )
+        .unwrap();
+        assert_eq!(title.chars().count(), 120);
+        assert!(title.starts_with("\"quoted\" \\ "));
+        assert_eq!(writer.last_line, Duration::from_secs(61));
+    }
+
+    #[test]
+    fn progress_argument_gate_handles_values_and_payloads() {
+        for args in [
+            vec!["--wait", "--progress", "-t", "%7", "hi"],
+            vec!["hi", "-t%7", "--wait", "--progress"],
+        ] {
+            assert_eq!(
+                progress_target(&args.into_iter().map(RawText::from).collect::<Vec<_>>()),
+                Ok(Some("%7".to_owned()))
+            );
+        }
+        for args in [
+            vec!["--", "--progress"],
+            vec!["--context", "--progress", "hi"],
+            vec!["--context=--progress", "hi"],
+        ] {
+            assert_eq!(
+                progress_target(&args.into_iter().map(RawText::from).collect::<Vec<_>>()),
+                Ok(None)
+            );
+        }
+        for target in ["%", "%x", "%1:2", "work", "@1"] {
+            assert!(
+                progress_target(&["--wait", "--progress", "-t", target].map(RawText::from))
+                    .is_err()
+            );
+        }
     }
 
     #[test]

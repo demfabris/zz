@@ -26,8 +26,8 @@ use agent_client_protocol::schema::v1::SessionUpdate;
 use parking_lot::{Condvar, Mutex};
 use serde_json::Value;
 use zz_protocol::{
-    AgentPaneWire, AgentPermissionWire, AgentProvider, ClientId, ClientInstanceId,
-    MAX_AGENT_PROMPT_BYTES, MAX_AGENT_QUEUED_PROMPTS, MAX_AGENT_RESULT_BYTES,
+    AgentAutoApprove, AgentPaneWire, AgentPermissionWire, AgentProvider, ClientId,
+    ClientInstanceId, MAX_AGENT_PROMPT_BYTES, MAX_AGENT_QUEUED_PROMPTS, MAX_AGENT_RESULT_BYTES,
     MAX_AGENT_UPDATES_BYTES, PaneId,
 };
 
@@ -58,6 +58,14 @@ const MAX_TITLE_CHARS: usize = 48;
 /// the one title the daemon may overwrite.
 const DEFAULT_AGENT_PANE_TITLE: &str = "agent";
 
+#[derive(Clone, Default)]
+pub(crate) struct AgentToolCall {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) kind: String,
+    pub(crate) status: String,
+}
+
 pub(crate) enum AgentRequestReply {
     Sessions { client: ClientId, result: String },
 }
@@ -83,6 +91,7 @@ pub(crate) trait AgentPublisher: Send + Sync + 'static {
         also: Option<ClientId>,
     );
     fn publish_agent_state(&self, pane: PaneId, state: AgentPaneWire);
+    fn publish_agent_tool_call(&self, pane: PaneId, call: AgentToolCall);
     fn send_agent_reply(&self, pane: PaneId, reply: AgentRequestReply);
     /// The adapter named the session this pane is now speaking to. The daemon
     /// owns that metadata, so it lands in the mux state, not just the stream.
@@ -245,6 +254,10 @@ impl AgentRuntime {
         self.host.config()
     }
 
+    pub(crate) fn auto_approve(&self, pane: PaneId) -> Option<AgentAutoApprove> {
+        self.host.auto_approve(pane)
+    }
+
     /// What a client needs to render the pane without the stream.
     pub(crate) fn wire_state(&self, pane: PaneId) -> Option<AgentPaneWire> {
         self.fanout.published_state(pane).or_else(|| {
@@ -315,6 +328,7 @@ struct PaneLane {
     reclaimed_bytes: usize,
     next_reclaim_id: u64,
     pending_prompts: VecDeque<String>,
+    tool_calls: BTreeMap<String, AgentToolCall>,
     /// Bumped whenever a blob the pane state carries is replaced, so the
     /// per-item comparison never copies a quarter-megabyte of JSON.
     blobs: u64,
@@ -390,6 +404,55 @@ impl PaneLane {
         bytes
     }
 
+    fn tool_call(&mut self, payload: &AgentStreamPayload) -> Option<AgentToolCall> {
+        let AgentStreamPayload::Update { update } = payload else {
+            if matches!(
+                payload,
+                AgentStreamPayload::TurnStarted { .. }
+                    | AgentStreamPayload::SessionReset { .. }
+                    | AgentStreamPayload::SessionSwitched { .. }
+            ) {
+                self.tool_calls.clear();
+            }
+            return None;
+        };
+        let update_kind = update.get("sessionUpdate")?.as_str()?;
+        if !matches!(update_kind, "tool_call" | "tool_call_update") {
+            return None;
+        }
+        let id = update.get("toolCallId")?.as_str()?;
+        if update_kind == "tool_call" {
+            self.tool_calls.remove(id);
+        }
+        let call = self
+            .tool_calls
+            .entry(id.to_owned())
+            .or_insert_with(|| AgentToolCall {
+                id: id.to_owned(),
+                ..AgentToolCall::default()
+            });
+        let previous_status = call.status.clone();
+        if let Some(title) = update.get("title").and_then(Value::as_str) {
+            call.title = title
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(200)
+                .collect();
+        }
+        if let Some(kind) = update.get("kind").and_then(Value::as_str) {
+            kind.clone_into(&mut call.kind);
+        }
+        if let Some(status) = update.get("status").and_then(Value::as_str) {
+            status.clone_into(&mut call.status);
+        }
+        (update_kind == "tool_call"
+            || (call.status != previous_status
+                && matches!(call.status.as_str(), "completed" | "failed")))
+        .then(|| call.clone())
+    }
+
     fn new(generation: u64, provider: AgentProvider, session_id: Option<String>) -> Self {
         Self {
             generation,
@@ -415,6 +478,7 @@ impl PaneLane {
             reclaimed_bytes: 0,
             next_reclaim_id: 1,
             pending_prompts: VecDeque::new(),
+            tool_calls: BTreeMap::new(),
             blobs: 0,
             fingerprint: None,
             state: None,
@@ -607,11 +671,17 @@ impl AgentFanout {
                 publisher.send_agent_reply(pane, AgentRequestReply::Sessions { client, result });
                 return true;
             }
-            HostCommand::NewSession { .. } | HostCommand::SwitchSession { .. } => {
-                AgentStreamPayload::SessionSwitchFailed {
-                    message: "agent command queue is busy".to_owned(),
+            HostCommand::NewSession { reply, .. } => {
+                let message = "agent command queue is busy".to_owned();
+                if let Some(reply) = reply {
+                    let _ = reply.try_send(Err(message.clone()));
                 }
+                AgentStreamPayload::SessionSwitchFailed { message }
             }
+            HostCommand::SwitchSession { .. } => AgentStreamPayload::SessionSwitchFailed {
+                message: "agent command queue is busy".to_owned(),
+            },
+            HostCommand::SetAutoApprove(_) => return false,
             HostCommand::Prompt(mut queued) => {
                 queued.settle(Err(AgentTurnFailure::Reclaimed));
                 return self.reclaim_prompt(pane, queued.prompt);
@@ -651,6 +721,7 @@ impl AgentFanout {
         let mut adoption = None;
         let mut reply = None;
         let mut projection = Vec::new();
+        let mut tool_call = None;
         let mut lanes = self.lanes.lock();
         let Some(lane) = lanes.get_mut(&pane) else {
             return;
@@ -669,6 +740,7 @@ impl AgentFanout {
         }
         if let Some(item) = item {
             projection = lane.project(&item.payload);
+            tool_call = lane.tool_call(&item.payload);
             match &item.payload {
                 AgentStreamPayload::Ready { .. } => {
                     lane.ready = Some(item.payload.clone());
@@ -802,6 +874,9 @@ impl AgentFanout {
         self.wake.notify_all();
         if !projection.is_empty() {
             publisher.feed_agent_pane_text(pane, projection);
+        }
+        if let Some(call) = tool_call {
+            publisher.publish_agent_tool_call(pane, call);
         }
         if let Some(reply) = reply {
             publisher.send_agent_reply(pane, reply);
@@ -1441,6 +1516,8 @@ mod tests {
             self.states.lock().push((pane, state));
         }
 
+        fn publish_agent_tool_call(&self, _pane: PaneId, _call: AgentToolCall) {}
+
         fn send_agent_reply(&self, pane: PaneId, reply: AgentRequestReply) {
             let AgentRequestReply::Sessions { client, result } = reply;
             let request_id = 0;
@@ -2039,6 +2116,7 @@ mod tests {
             provider: AgentProvider::Codex,
             cwd: PathBuf::from("/"),
             resume_session: None,
+            auto_approve: None,
             workspace: crate::agent::environment::AgentWorkspaceEnvironment::default(),
         };
         assert!(runtime.open(pane, spec.clone()));
@@ -2108,6 +2186,7 @@ mod tests {
             provider: AgentProvider::Codex,
             cwd: PathBuf::from("/"),
             resume_session: None,
+            auto_approve: None,
             workspace: crate::agent::environment::AgentWorkspaceEnvironment::default(),
         };
 

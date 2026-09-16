@@ -269,6 +269,7 @@ impl AgentSpawnConfig {
 pub(crate) async fn run_agent_runtime(
     config: AgentSpawnConfig,
     provider: AgentProvider,
+    auto_approve: Arc<Mutex<AgentAutoApprove>>,
     permission_ids: Arc<AtomicU64>,
     journal: Option<Arc<AgentJournal>>,
     command_rx: Receiver<RuntimeCommand>,
@@ -290,7 +291,7 @@ pub(crate) async fn run_agent_runtime(
 
     run_agent_connection(
         provider,
-        config.auto_approve,
+        auto_approve,
         agent,
         permission_ids,
         journal,
@@ -598,7 +599,7 @@ async fn complete_staged_session(
 
 pub(crate) async fn run_agent_connection(
     provider: AgentProvider,
-    auto_approve: AgentAutoApprove,
+    auto_approve: Arc<Mutex<AgentAutoApprove>>,
     agent: impl ConnectTo<AcpClientRole>,
     permission_ids: Arc<AtomicU64>,
     journal: Option<Arc<AgentJournal>>,
@@ -666,7 +667,8 @@ pub(crate) async fn run_agent_connection(
                         RequestPermissionOutcome::Cancelled,
                     ));
                 }
-                if tier_approves(auto_approve, request.tool_call.fields.kind)
+                let tier = *auto_approve.lock();
+                if tier_approves(tier, request.tool_call.fields.kind)
                     && !is_user_question(&request.options)
                     && let Some(option_id) = preferred_allow_option(&request.options)
                 {
@@ -1720,7 +1722,7 @@ fn tier_approves(tier: AgentAutoApprove, kind: Option<ToolKind>) -> bool {
 /// option carries a kind outside the allow/reject set — that is how agents
 /// relay user-facing choices. Repeated kinds are not a question signal:
 /// codex-acp sends two `allow_always` options on every exec approval.
-fn is_user_question(options: &[PermissionOption]) -> bool {
+pub(crate) fn is_user_question(options: &[PermissionOption]) -> bool {
     options.iter().any(|option| {
         !matches!(
             option.kind,

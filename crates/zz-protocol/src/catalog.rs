@@ -638,6 +638,7 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
 pub static DAEMON_COMMAND_NAMES: &[&str] = &[
     "events",
     "agent-catalog",
+    "new-agent-session",
     "capture-pane",
     "capturep",
     "run-shell",
@@ -880,6 +881,7 @@ pub static NATIVE_COMMAND_NAMES: &[&str] = &[
     "focus-sidebar",
     "import-tmux-config",
     "inspect",
+    "new-agent-session",
     "new-browser",
     "reload-config",
     "restart-agent-pane",
@@ -905,6 +907,27 @@ pub static NATIVE_COMMAND_NAMES: &[&str] = &[
 
 pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
+        name: "new-agent-session",
+        aliases: &[],
+        description: "Start a fresh agent session, wait until ready, and print nothing on success",
+        usage: "[-t target-pane] [-c start-directory] [--timeout SECS]",
+        options: &[
+            CommandOptionSpec::value("-t", Pane, "target agent pane"),
+            CommandOptionSpec::value(
+                "-c",
+                FreeForm,
+                "working directory; defaults to the pane's current directory",
+            ),
+            CommandOptionSpec::value(
+                "--timeout",
+                FreeForm,
+                "seconds to wait; default 60, timeout exits 124",
+            ),
+        ],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
         name: "wait-for-exit",
         aliases: &[],
         description: "Wait for a terminal pane's command to exit and mirror its status",
@@ -923,11 +946,12 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         name: "inspect",
         aliases: &[],
-        description: "Describe a pane: kind, process, agent and browser facts, applicable verbs",
-        usage: "[-t target-pane] [--json]",
+        description: "Describe panes: kind, process, agent and browser facts, applicable verbs",
+        usage: "[-a] [-t target-pane] [--json]",
         options: &[
+            CommandOptionSpec::flag("-a", "describe every pane in every session"),
             CommandOptionSpec::value("-t", Pane, "target pane"),
-            CommandOptionSpec::flag("--json", "one JSON object"),
+            CommandOptionSpec::flag("--json", "one JSON object per pane"),
         ],
         positionals: &[],
         variadic: None,
@@ -992,7 +1016,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         name: "agent-catalog",
         aliases: &[],
-        description: "Load a provider catalog without switching the agent pane",
+        description: "Load a provider catalog for GUI pickers; the answer arrives on the client event stream, not stdout",
         usage: "[-t target-pane] provider request-id",
         options: &[CommandOptionSpec::value("-t", Pane, "target agent pane")],
         positionals: &[FreeForm, FreeForm],
@@ -1030,7 +1054,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         name: "agent-send",
         aliases: &[],
         description: "Send text to an agent pane",
-        usage: "[-t target-pane] [--target target-pane] [--submit] [--wait] [--timeout seconds] [--on-block wait|fail] [--context context] [text ...]",
+        usage: "[-t target-pane] [--target target-pane] [--submit] [--wait] [--progress] [--timeout seconds] [--on-block wait|fail|allow|deny] [--json] [--final] [--context context] [text ...]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("--target", Pane, "target pane"),
@@ -1039,11 +1063,23 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
                 "submit the text instead of filling the composer",
             ),
             CommandOptionSpec::flag("--wait", "submit, then print the turn's reply"),
+            CommandOptionSpec::flag(
+                "--json",
+                "with --wait, print one JSON object with turn facts and reply text",
+            ),
+            CommandOptionSpec::flag(
+                "--final",
+                "with --wait, print only text after the last tool call or update",
+            ),
+            CommandOptionSpec::flag(
+                "--progress",
+                "print local progress to stderr; requires --wait and -t %N",
+            ),
             CommandOptionSpec::value("--timeout", FreeForm, "seconds to wait for the reply"),
             CommandOptionSpec::value(
                 "--on-block",
                 FreeForm,
-                "wait for permission or fail with exit code 3",
+                "wait for permission; fail prints permission JSON and exits 3; allow approves tools; deny rejects requests",
             ),
             CommandOptionSpec::value("--context", FreeForm, "file and optional line range"),
         ],
@@ -1053,7 +1089,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         name: "show-agent-permission",
         aliases: &[],
-        description: "Print an agent pane's oldest pending permission as JSON",
+        description: "Print the oldest pending permission as nested request_id, tool_call, and options JSON",
         usage: "[-t target-pane]",
         options: &[CommandOptionSpec::value("-t", Pane, "target agent pane")],
         positionals: &[],
@@ -1062,7 +1098,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         name: "agent-respond",
         aliases: &[],
-        description: "Answer an agent pane's pending permission",
+        description: "Answer a pending permission and print the selected option ID",
         usage: "[-t target-pane] [--allow] [--deny] [--option option-id] [request-id]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target agent pane"),
@@ -1129,13 +1165,13 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         name: "tools",
         aliases: &[],
-        description: "Show commands for controlling a zz workspace",
-        usage: "[--skill]",
+        description: "Show workspace commands, optionally limited to agent, terminal, browser, or advanced",
+        usage: "[--skill] [section]",
         options: &[CommandOptionSpec::flag(
             "--skill",
-            "include skill frontmatter",
+            "show the agent guide with skill frontmatter; cannot combine with section",
         )],
-        positionals: &[],
+        positionals: &[FreeForm],
         variadic: None,
     },
     CommandSpec {
@@ -2014,7 +2050,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         name: "restart-agent-pane",
         aliases: &[],
-        description: "Restart an agent pane's ACP adapter",
+        description: "Restart an agent pane's ACP adapter and resume its session",
         usage: "[-t target-pane]",
         options: &[CommandOptionSpec::value("-t", Pane, "target agent pane")],
         positionals: &[],

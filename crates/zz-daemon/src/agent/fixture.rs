@@ -55,9 +55,10 @@ pub(crate) fn fixture_runner(
     load: bool,
 ) -> PaneRunner {
     Box::new(move |channels: RuntimeChannels| {
+        *channels.auto_approve.lock() = auto_approve;
         Box::pin(run_agent_connection(
             provider,
-            auto_approve,
+            channels.auto_approve,
             fixture_agent(behavior, load),
             channels.permission_ids,
             channels.journal,
@@ -70,6 +71,7 @@ pub(crate) fn fixture_runner(
 
 pub(crate) fn fixture_agent(behavior: Behavior, load: bool) -> impl ConnectTo<AcpClientRole> {
     let prompts = Arc::new(AtomicUsize::new(0));
+    let sessions = AtomicUsize::new(0);
     Agent
         .builder()
         .on_receive_notification(
@@ -95,8 +97,14 @@ pub(crate) fn fixture_agent(behavior: Behavior, load: bool) -> impl ConnectTo<Ac
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async |_: NewSessionRequest, responder, _| {
-                responder.respond(NewSessionResponse::new("fixture-session"))
+            async move |_: NewSessionRequest, responder, _| {
+                let session = sessions.fetch_add(1, Ordering::Relaxed);
+                let id = if session == 0 {
+                    "fixture-session".to_owned()
+                } else {
+                    format!("fixture-session-{session}")
+                };
+                responder.respond(NewSessionResponse::new(id))
             },
             agent_client_protocol::on_receive_request!(),
         )

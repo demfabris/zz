@@ -703,6 +703,20 @@ fn run_command_mode(
             }
         });
     }
+    let progress_target = if command == "agent-send" {
+        match events::progress_target(&invocation.args) {
+            Ok(target) => target,
+            Err(message) => {
+                eprintln!("{message}");
+                return Some(exit_code_for(CliFailure::Usage));
+            }
+        }
+    } else {
+        None
+    };
+    if progress_target.is_some() && host.is_some() {
+        eprintln!("agent-send: --progress is local only");
+    }
     if command == "events" {
         if host.is_some() || command_chain.len() != 1 {
             eprintln!("events: use a single local command: zz events [-t target]");
@@ -1133,6 +1147,20 @@ fn run_command_mode(
             return Some(exit_code_for(CliFailure::Runtime));
         }
     };
+    let _progress = if host.is_none()
+        && command_chain.len() == 1
+        && let Some(pane) = progress_target
+    {
+        match events::Progress::start(socket_path, pane) {
+            Ok(progress) => Some(progress),
+            Err(error) => {
+                eprintln!("agent-send: --progress: {error}");
+                return Some(exit_code_for(CliFailure::Runtime));
+            }
+        }
+    } else {
+        None
+    };
     let mut output_writer = CommandOutputWriter::default();
     if let Some(prepared_commands) = prepared_commands {
         let recover_kill = prepared_commands
@@ -1287,14 +1315,36 @@ fn command_help(command: &str) -> Result<String, ServerError> {
     }
     if !spec.positionals.is_empty() || spec.variadic.is_some() {
         help.push_str("\npositionals\n");
-        for kind in spec.positionals {
-            let _ = writeln!(help, "  <{}>", help_value(*kind));
+        let names = usage_positional_names(spec.usage);
+        for (index, kind) in spec.positionals.iter().enumerate() {
+            match names.as_ref().and_then(|names| names.get(index)) {
+                Some(name) => {
+                    let _ = writeln!(help, "  <{name}>");
+                }
+                None => {
+                    let _ = writeln!(help, "  <{}>", help_value(*kind));
+                }
+            }
         }
         if let Some(kind) = spec.variadic {
             let _ = writeln!(help, "  <{}>...", help_value(kind));
         }
     }
     Ok(help)
+}
+
+fn usage_positional_names(usage: &str) -> Option<Vec<&str>> {
+    let mut depth = 0usize;
+    let mut names = Vec::new();
+    for token in usage.split_whitespace() {
+        let opens = token.matches('[').count();
+        let closes = token.matches(']').count();
+        if depth == 0 && opens == 0 && !token.starts_with('-') && !token.ends_with("...") {
+            names.push(token);
+        }
+        depth = (depth + opens).saturating_sub(closes);
+    }
+    (!names.is_empty()).then_some(names)
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -2815,6 +2865,34 @@ mod tests {
 
         let path = PathBuf::from(OsString::from_vec(b"/tmp/client-\xff".to_vec()));
         assert!(validated_bootstrap_client_working_directory(path).is_none());
+    }
+
+    #[test]
+    fn agent_send_progress_usage_errors_exit_two_before_connecting() {
+        for args in [
+            vec!["agent-send", "--progress", "-t", "%1", "hi"],
+            vec!["agent-send", "--progress", "--wait", "hi"],
+        ] {
+            let args = args.into_iter().map(RawText::from).collect::<Vec<_>>();
+            assert_eq!(
+                run_command_mode(
+                    &args,
+                    std::path::Path::new("/tmp/zz-progress-missing.sock"),
+                    super::SocketSelectionSource::Default,
+                    None,
+                    &[],
+                    true,
+                    None,
+                    false,
+                    &super::StartupOptions {
+                        origin: super::CommandLineOrigin::Launcher,
+                        browser_provider: None
+                    },
+                    false,
+                ),
+                Some(std::process::ExitCode::from(2))
+            );
+        }
     }
 
     #[test]

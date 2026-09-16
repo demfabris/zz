@@ -16,6 +16,7 @@ mod parser;
 mod sort;
 mod status;
 mod terminfo;
+mod tmux_option_metadata;
 mod tmux_options;
 
 pub use command::TMUX_OPTION_CONSUMERS as BEHAVES;

@@ -1,0 +1,27 @@
+$ date -Is
+2026-09-16T10:20:39-03:00
+$ uname -a
+Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+$ git rev-parse HEAD
+8b95fa478d5dc527634cd2d3fc9a0fd5aeb05584
+$ git rev-parse origin/main
+be5709dfcd9936d44519683e5da8dc6ab7748d96
+$ git status --short
+ M compat/tui-client-commands.sh
+?? compat/tui/evidence/TUI-014/attempt-06/
+$ bash --version
+GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)
+Copyright (C) 2025 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+
+This is free software; you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+$ python3 --version
+Python 3.14.6
+$ compat/.cache/tmux-src/tmux -V
+tmux next-3.8
+85044752b1e7f2ffeb68a2974b9cb23f7f326d4ecad59b8c5c6bcefd2b5be259  /home/demfabris/dev/zz-c11-modes/target/debug/zz
+df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  /home/demfabris/dev/zz-c11-modes/compat/.cache/tmux-src/tmux
+outer terminal: pinned tmux; fixture geometry 80x24; shell /bin/sh; isolated HOME and XDG_CONFIG_HOME per side
+Cargo: /tmp/zz-cargo.sh; build MemoryMax=7G, swap=3G, jobs=4; subsequent default cap=5G, swap=3G, jobs=3
+TERM=xterm-ghostty

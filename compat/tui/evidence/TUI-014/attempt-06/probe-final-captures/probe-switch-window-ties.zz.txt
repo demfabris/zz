@@ -1,0 +1,37 @@
+[38;2;13;13;13m[48;2;184;134;11mcli:two[39m
+[49malpha:win
+cli:win
+zulu:win
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[38;2;13;13;13m[48;2;184;134;11m(search) [39m[49m
+[38;2;13;13;13m[48;2;154;205;50mL[4m0:win*[0m[38;2;13;13;13m[48;2;154;205;50m 1:two
+cursor 9,22 flag=1 pane=80x24 shape=default
+S alpha 1 0
+S cli 2 1
+S zulu 1 0
+W alpha:0 win * 1
+W cli:0 win * 1
+W cli:1 two  1
+W zulu:0 win * 1
+P alpha:0.0 mode=0/ 80x24 alienware
+P cli:0.0 mode=1/switch-mode 80x23 ptitle
+P cli:1.0 mode=0/ 80x24 ptitle
+P zulu:0.0 mode=0/ 80x24 alienware
+C cli 80x24 0

@@ -216,8 +216,10 @@
         "native-command:capture-browser",
         "native-command:copy-mode-search-prompt",
         "native-command:debug-marker",
+        "native-command:events",
         "native-command:focus-sidebar",
         "native-command:import-tmux-config",
+        "native-command:inspect",
         "native-command:new-browser",
         "native-command:reload-config",
         "native-command:restart-agent-pane",
@@ -237,6 +239,7 @@
         "native-command:split-browser",
         "native-command:split-picker",
         "native-command:tools",
+        "native-command:wait-for-exit",
         "native-command:wait-pane"
       ],
       "evidence": [

@@ -76,7 +76,8 @@ Commands that set an explicit exit code keep that code.
 
 Draft into another Agent pane's composer for its user to review. An omitted or
 non-agent target routes to that window's most recently focused Agent pane,
-except for Claude Code terminal peers and Codex terminal panes described below.
+except for terminal peers, queued terminal sends, and terminal panes with
+`@agent_state` using `--wait`, described below.
 Read stdin when TEXT is omitted: `git diff | zz agent-send`.
 `--context` adds a file/line header and fences the payload; text is capped at 1 MiB.
 
@@ -101,7 +102,14 @@ name from the pane title and queues the text through Codex's own `codex queue`.
 Codex runs it at its next idle, with polling taking up to ten seconds. Plain sends
 and `--submit` both queue the message and print the pane ID for command clients.
 A fresh session has no name until its first prompt; `/rename` inside Codex resolves
-a name collision. `--wait` is not available for Codex terminal panes.
+a name collision.
+
+For a terminal pane without a peer reply channel, `--wait` requires a non-empty
+`@agent_state` and uses the existing terminal delivery path. It waits for a
+non-idle state followed by `idle`, and prints nothing on success. A pane that
+starts idle must leave idle within 15 seconds; otherwise it exits 124. The overall
+`--timeout` also exits 124. `failed` exits 1; `blocked` waits unless `--on-block fail`
+requests exit 3. A missing `@agent_state` exits 1 before sending.
 
 ### `zz show-agent-permission [-t %N]`
 
@@ -129,6 +137,40 @@ Output is capped at 200 lines or 256 KiB with a truncation note.
 Print that last command and output under a `%N $ command` header, with the same
 OSC 133 requirement and caps. For an Agent pane, read its last prompt and reply.
 When known, an `exit: <n>` line follows the header.
+
+### `zz wait-for-exit [-t %N] [--timeout SECS]`
+
+Wait for a terminal pane's command to exit and mirror its status. Prints nothing
+on success. A retained dead pane returns its exit status immediately; killing or
+respawning a pane releases the wait with status 0. The timeout defaults to 0,
+which waits forever; a timeout exits 124. Use a command or Control client.
+
+### `zz inspect -t %N [--json]`
+
+Describe a pane's kind, process, geometry, exit status, progress, agent facts, and
+browser URL. Read one `key: value` line per field, or use `--json` for one object
+with string facts and string arrays for `verbs` and `events`. Lists in text output
+use spaces; unavailable facts have empty values. `verbs` lists what applies to
+this pane's kind; terminal panes with a nonempty `agent_state` also include
+`agent-send`. `events` names what `zz events` can report for the pane.
+The keys, in text output order, are `session_id`, `session_name`, `window_id`, `window_index`, `window_name`, `window_width`, `window_height`, `window_size`, `pane_id`, `pane_index`, `pane_active`, `pane_kind`, `pane_pid`, `pane_current_command`, `pane_current_path`, `pane_title`, `pane_width`, `pane_height`, `pane_dead`, `pane_dead_status`, `pane_dead_signal`, `pane_last_command_status`, `pane_pb_state`, `pane_pb_progress`, `agent_state`, `agent_pending_permission`, `browser_url`, `verbs`, `events`.
+
+### `zz events [-t %N]`
+
+Stream hook events as JSON lines, flushed per line:
+`{"seq":1,"event":"agent-state-changed","time":1750000000000,"hook_pane":"%3","agent_state":"working",...}`.
+Each line includes the hook's string variables. `time` is Unix milliseconds.
+Wait for the first line, `{"seq":0,"event":"ready","time":...}`, before starting work.
+On subscriber overflow, `gap` consumes the next sequence number; the client
+reconnects and continues counting without another `ready` line.
+Use `-t %N` for a pane, `-t @N` for a window, `-t '$N'` for a session ID,
+or `-t name` for a session name. Filters match exact hook fields;
+`ready` and `gap` always print. Omit `-t` to stream without filtering.
+`agent-state-changed` carries `agent_state` for every pane kind and
+`agent_pending_permission` with the permission ID or an empty string.
+Other `@option-changed` firings are not streamed; use a hook for those.
+Invalid arguments exit 2. Connection and daemon errors, or any disconnect
+other than overflow, exit 1, including server shutdown.
 
 ### `zz wait-pane [-t %N] [--idle MS | --until TEXT | --regex RE] [--timeout SECS] [--tail N]`
 
@@ -228,16 +270,26 @@ at pane, window, session, or global scope to disable these updates.
 
 ```sh
 zz list-panes -F '#{pane_id} #{agent_state} #{agent_pending_permission}'
-until [ "$(zz display-message -p -t %5 '#{agent_state}')" = idle ]; do zz wait-for agent_state@%5; done
+zz agent-send -t %5 --wait "..."
 ```
 
-The `agent_state@%N` channel is sticky: a signal before the wait still wakes it.
-Recheck the state after waking. A completed turn or permission request also rings
+A completed turn or permission request also rings
 the pane bell; use `zz set-hook -g alert-bell 'display-message "agent needs attention"'`.
 
-For foreign agents, read `@agent_state` with `zz show-options -p -t %5 -v @agent_state`
-and wait on `zz wait-for '@agent_state@%5'`. Use the lifecycle hooks below to write it.
+For foreign agents, read `@agent_state` with `zz show-options -p -t %5 -v @agent_state`.
+Use `zz agent-send -t %5 --wait "..."` to send and wait for a turn, and use the
+lifecycle hooks below to write the state. For transitions you did not cause,
+`zz wait-for agent_state@%N` observes native Agent state and
+`zz wait-for '@agent_state@%5'` observes a terminal's option writes; read the state
+after waking.
 `zz set-hook -g @option-changed` observes user-option writes.
+
+The sticky channel is level-triggered like tmux's `wait-for`: a signal that happened
+before the wait wakes it at once. A read-then-wait loop started right after a send
+can see the pre-send idle and return early. Use `zz agent-send -t %N --wait "..."`
+to wait for a turn on any pane kind. Use the channel loop to observe transitions
+you did not cause.
+`zz events -t %N` streams `agent-state-changed` lines for any pane kind.
 
 ```sh
 zz run-shell -b -d 300 'zz send-text -t %5 continue'
@@ -258,8 +310,8 @@ refresh-client -B 'agent:%5:#{agent_state}'
 Agent panes register as Claude Code peers under their `@name` user option
 (default `zz-%N`). `ListAgents` in any Claude Code session lists them, and
 `SendMessage` queues a prompt into the pane while its adapter runs. Claude
-Code refuses idle subscriptions to these peers; wait with
-`zz wait-for agent_state@%N` instead.
+Code refuses idle subscriptions to these peers. Use
+`zz agent-send -t %N --wait "..."` to send and wait for a turn.
 
 A terminal pane becomes a peer when you set its pane `@name` option:
 `zz set-option -p -t %3 @name codex-1`. A Codex pane with a session name receives
@@ -277,7 +329,7 @@ Notification, or equivalent) to write a pane option:
 ```sh
 zz set-option -p -t "$TMUX_PANE" @agent_state idle
 zz set-option -p -t "$TMUX_PANE" @agent_state needs-approval
-until [ "$(zz show-options -p -t %5 -v @agent_state)" = idle ]; do zz wait-for '@agent_state@%5'; done
+zz agent-send -t %5 --wait "..."
 zz set-hook -g @option-changed 'run-shell "notify-send zz \"#{hook_target} #{hook_option}\""'
 ```
 

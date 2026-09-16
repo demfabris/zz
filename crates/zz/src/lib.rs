@@ -9,6 +9,8 @@ mod config;
 mod control_mode;
 mod diagnostics;
 mod editor;
+#[cfg(not(target_os = "ios"))]
+mod events;
 #[cfg(any(feature = "agent-pane", feature = "editor-pane"))]
 mod file_picker;
 /// A CLI verb, so it belongs to the platforms that have a command line.
@@ -871,6 +873,23 @@ fn run_command_mode(
                 exit_code_for(CliFailure::Server(&error))
             }
         });
+    }
+    if command == "events" {
+        if host.is_some() || command_chain.len() != 1 {
+            eprintln!("events: use a single local command: zz events [-t target]");
+            return Some(exit_code_for(CliFailure::Usage));
+        }
+        if implicit_tmux_conflict {
+            eprintln!("{FOREIGN_TMUX_ERROR}");
+            return Some(exit_code_for(CliFailure::Runtime));
+        }
+        return Some(events::run(
+            socket_path,
+            socket_source,
+            mux_config_files,
+            no_start_server,
+            &invocation.args,
+        ));
     }
     if command == "app" {
         if host.is_some() || !invocation.args.is_empty() || command_chain.len() != 1 {

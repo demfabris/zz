@@ -590,6 +590,7 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
 ];
 
 pub static DAEMON_COMMAND_NAMES: &[&str] = &[
+    "events",
     "agent-catalog",
     "capture-pane",
     "capturep",
@@ -602,7 +603,9 @@ pub static DAEMON_COMMAND_NAMES: &[&str] = &[
     "show-agent-permission",
     "send-last-output",
     "show-last-output",
+    "inspect",
     "send-text",
+    "wait-for-exit",
     "wait-pane",
     "run-pane",
     "capture-browser",
@@ -827,8 +830,10 @@ pub static NATIVE_COMMAND_NAMES: &[&str] = &[
     "capture-browser",
     "copy-mode-search-prompt",
     "debug-marker",
+    "events",
     "focus-sidebar",
     "import-tmux-config",
+    "inspect",
     "new-browser",
     "reload-config",
     "restart-agent-pane",
@@ -848,10 +853,52 @@ pub static NATIVE_COMMAND_NAMES: &[&str] = &[
     "split-browser",
     "split-picker",
     "tools",
+    "wait-for-exit",
     "wait-pane",
 ];
 
 pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
+    CommandSpec {
+        name: "wait-for-exit",
+        aliases: &[],
+        description: "Wait for a terminal pane's command to exit and mirror its status",
+        usage: "[-t target-pane] [--timeout SECS]",
+        options: &[
+            CommandOptionSpec::value("-t", Pane, "target terminal pane"),
+            CommandOptionSpec::value(
+                "--timeout",
+                FreeForm,
+                "seconds to wait; default 0 waits forever, timeout exits 124",
+            ),
+        ],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "inspect",
+        aliases: &[],
+        description: "Describe a pane: kind, process, agent and browser facts, applicable verbs",
+        usage: "[-t target-pane] [--json]",
+        options: &[
+            CommandOptionSpec::value("-t", Pane, "target pane"),
+            CommandOptionSpec::flag("--json", "one JSON object"),
+        ],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "events",
+        aliases: &[],
+        description: "Stream hook events as JSON lines until disconnected",
+        usage: "[-t target]",
+        options: &[CommandOptionSpec::value(
+            "-t",
+            FreeForm,
+            "target pane, window, session, or session name",
+        )],
+        positionals: &[],
+        variadic: None,
+    },
     CommandSpec {
         name: "wait-pane",
         aliases: &[],

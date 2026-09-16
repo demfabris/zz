@@ -167,6 +167,7 @@ const MAX_STARTUP_CONFIG_PREVIEW_BYTES: usize = 64 * 1024;
 const STARTUP_CONFIG_PREVIEW_TRUNCATED: &str =
     "... startup diagnostics truncated; restart in Control mode for full output";
 const AGENT_SEND_WAIT_TIMEOUT: Duration = Duration::from_mins(10);
+const AGENT_STATE_START_GRACE: Duration = Duration::from_secs(15);
 const SEND_TEXT_TIMEOUT_MS: u64 = 2000;
 const SEND_TEXT_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const SEND_TEXT_TAIL_CHARS: usize = 40;
@@ -3082,8 +3083,115 @@ fn close_outbound_too_far_behind(state: &mut OutboundState) {
     }
 }
 
+const INSPECT_FIELDS: &[&str] = &[
+    "session_id",
+    "session_name",
+    "window_id",
+    "window_index",
+    "window_name",
+    "window_width",
+    "window_height",
+    "window_size",
+    "pane_id",
+    "pane_index",
+    "pane_active",
+    "pane_kind",
+    "pane_pid",
+    "pane_current_command",
+    "pane_current_path",
+    "pane_title",
+    "pane_width",
+    "pane_height",
+    "pane_dead",
+    "pane_dead_status",
+    "pane_dead_signal",
+    "pane_last_command_status",
+    "pane_pb_state",
+    "pane_pb_progress",
+    "agent_state",
+    "agent_pending_permission",
+    "browser_url",
+    "verbs",
+    "events",
+];
+
+const INSPECT_VERBS: &[(&str, &[&str])] = &[
+    (
+        "terminal",
+        &[
+            "send-keys",
+            "send-text",
+            "paste-buffer",
+            "capture-pane",
+            "show-last-output",
+            "send-last-output",
+            "wait-pane",
+            "run-pane",
+            "pipe-pane",
+            "respawn-pane",
+            "resize-pane",
+            "kill-pane",
+            "select-pane-kind",
+        ],
+    ),
+    (
+        "browser",
+        &[
+            "set-browser-url",
+            "set-browser-tabs",
+            "set-browser-profile",
+            "capture-browser",
+            "resize-pane",
+            "kill-pane",
+            "select-pane-kind",
+        ],
+    ),
+    (
+        "agent",
+        &[
+            "agent-send",
+            "agent-respond",
+            "show-agent-permission",
+            "show-last-output",
+            "send-last-output",
+            "restart-agent-pane",
+            "set-agent-provider",
+            "set-agent-session",
+            "resize-pane",
+            "kill-pane",
+            "select-pane-kind",
+        ],
+    ),
+    (
+        "editor",
+        &[
+            "set-editor-path",
+            "resize-pane",
+            "kill-pane",
+            "select-pane-kind",
+        ],
+    ),
+    ("picker", &["resize-pane", "kill-pane", "select-pane-kind"]),
+];
+
+const INSPECT_EVENTS: &[&str] = &[
+    "pane-died",
+    "pane-exited",
+    "pane-focus-in",
+    "pane-focus-out",
+    "pane-mode-changed",
+    "pane-set-clipboard",
+    "pane-title-changed",
+    "alert-activity",
+    "alert-bell",
+    "alert-silence",
+    "@option-changed",
+    "agent-state-changed",
+];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DaemonCommandDispatch {
+    Events,
     AgentCatalog,
     CapturePane,
     RunShell,
@@ -3093,7 +3201,9 @@ enum DaemonCommandDispatch {
     AgentRespond,
     SendLastOutput,
     ShowLastOutput,
+    Inspect,
     SendText,
+    WaitForExit,
     WaitPane,
     RunPane,
     CaptureBrowser,
@@ -3114,6 +3224,7 @@ enum DaemonCommandDispatch {
 }
 
 const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
+    ("events", DaemonCommandDispatch::Events),
     ("agent-catalog", DaemonCommandDispatch::AgentCatalog),
     ("capture-pane", DaemonCommandDispatch::CapturePane),
     ("capturep", DaemonCommandDispatch::CapturePane),
@@ -3129,7 +3240,9 @@ const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
     ("agent-respond", DaemonCommandDispatch::AgentRespond),
     ("send-last-output", DaemonCommandDispatch::SendLastOutput),
     ("show-last-output", DaemonCommandDispatch::ShowLastOutput),
+    ("inspect", DaemonCommandDispatch::Inspect),
     ("send-text", DaemonCommandDispatch::SendText),
+    ("wait-for-exit", DaemonCommandDispatch::WaitForExit),
     ("wait-pane", DaemonCommandDispatch::WaitPane),
     ("run-pane", DaemonCommandDispatch::RunPane),
     ("capture-browser", DaemonCommandDispatch::CaptureBrowser),
@@ -3218,7 +3331,7 @@ struct Shared {
     agent_stopped: AtomicBool,
     #[cfg(all(feature = "agent", unix))]
     agent_peers: Mutex<BTreeMap<PaneId, crate::agent::claude_peers::PeerInbox>>,
-    #[cfg(all(feature = "agent", unix))]
+    #[cfg(feature = "agent")]
     agent_peer_owner: Mutex<Weak<Self>>,
     #[cfg(all(feature = "agent", unix))]
     peer_wait_inbox: Mutex<Option<crate::agent::claude_peers::PeerInbox>>,
@@ -4303,7 +4416,7 @@ impl Shared {
             agent_stopped: AtomicBool::new(false),
             #[cfg(all(feature = "agent", unix))]
             agent_peers: Mutex::new(BTreeMap::new()),
-            #[cfg(all(feature = "agent", unix))]
+            #[cfg(feature = "agent")]
             agent_peer_owner: Mutex::new(Weak::new()),
             #[cfg(all(feature = "agent", unix))]
             peer_wait_inbox: Mutex::new(None),
@@ -6715,6 +6828,11 @@ impl Shared {
                 match daemon_command_dispatch(canonical)
                     .expect("daemon command catalog and dispatch must agree")
                 {
+                    DaemonCommandDispatch::Events => Err(ServerError::InvalidCommand(
+                        "events streams to the zz command-line client; run it as `zz events`"
+                            .into(),
+                    )
+                    .into()),
                     DaemonCommandDispatch::AgentCatalog => {
                         self.agent_catalog(client, context, &command.args)
                     }
@@ -6742,7 +6860,11 @@ impl Shared {
                     DaemonCommandDispatch::ShowLastOutput => {
                         self.show_last_output(context, &command.args)
                     }
+                    DaemonCommandDispatch::Inspect => self.inspect(client, context, &command.args),
                     DaemonCommandDispatch::SendText => self.send_text(context, &command.args),
+                    DaemonCommandDispatch::WaitForExit => {
+                        self.wait_for_exit(client, kind, context, &command.args)
+                    }
                     DaemonCommandDispatch::WaitPane => {
                         self.wait_pane(client, kind, context, &command.args)
                     }
@@ -9734,6 +9856,43 @@ impl Shared {
         }
         self.restyle_client_overlays();
         for channel in option_signals {
+            if let Some(pane) = channel
+                .strip_prefix("@agent_state@")
+                .filter(|target| target.starts_with('%'))
+                .and_then(|target| target.parse::<PaneId>().ok())
+            {
+                let event = {
+                    let inner = self.inner.lock();
+                    let snapshot = MuxHookSnapshot::capture(&inner.engine);
+                    snapshot.panes.get(&pane).map(|pane_state| {
+                        let value = inner
+                            .engine
+                            .format_facts()
+                            .user_option(
+                                &pane.to_string(),
+                                &pane_state.window.to_string(),
+                                &pane_state.session.to_string(),
+                                "@agent_state",
+                            )
+                            .unwrap_or_default()
+                            .to_owned();
+                        let mut event = PendingHookEvent::pane(
+                            "agent-state-changed",
+                            pane,
+                            pane_state,
+                            &snapshot,
+                        );
+                        event.variables.insert("agent_state".to_owned(), value);
+                        event
+                            .variables
+                            .insert("agent_pending_permission".to_owned(), String::new());
+                        event
+                    })
+                };
+                if let Some(event) = event {
+                    self.run_event_hooks(vec![event]);
+                }
+            }
             #[cfg(all(feature = "agent", unix))]
             if let Some(pane) = channel
                 .strip_prefix("@name@")
@@ -13081,12 +13240,9 @@ impl Shared {
                         effects: Vec::new(),
                     });
                 }
-                if let Some((pid, title, cwd)) = codex {
-                    if parsed.wait {
-                        return Err(ServerError::InvalidCommand(
-                            "agent-send --wait needs a reply channel; Codex terminal panes have none, use an Agent pane".to_owned(),
-                        ).into());
-                    }
+                if !parsed.wait
+                    && let Some((pid, title, cwd)) = codex
+                {
                     let delivered = crate::agent::codex_queue::deliver(pid, &title, &cwd, &payload)
                         .map_err(|error| {
                             ServerError::InvalidCommand(error.for_pane(pane, &title, &cwd))
@@ -13101,6 +13257,30 @@ impl Shared {
                         effects: Vec::new(),
                     });
                 }
+            }
+        }
+        if parsed.wait {
+            let terminal = {
+                let inner = self.inner.lock();
+                let pane = inner.engine.resolve_pane(
+                    parsed.target.as_deref(),
+                    context.window,
+                    context.pane,
+                )?;
+                matches!(
+                    inner.engine.state.pane(pane).map(|pane| &pane.kind),
+                    Some(PaneKind::Terminal)
+                )
+                .then_some(pane)
+            };
+            if let Some(pane) = terminal {
+                if !matches!(kind, ClientKind::Command | ClientKind::Control) {
+                    return Err(ServerError::InvalidCommand(
+                        "agent-send --wait needs a command client".to_owned(),
+                    )
+                    .into());
+                }
+                return self.send_terminal_message_and_wait(client, pane, &payload, &parsed);
             }
         }
         let pane = self.resolve_agent_pane(context, parsed.target.as_deref())?;
@@ -13129,6 +13309,93 @@ impl Shared {
             execution.output = pane.to_string().into();
         }
         Ok(execution)
+    }
+
+    fn pane_agent_state(&self, pane: PaneId) -> String {
+        let inner = self.inner.lock();
+        let Some(window) = inner.engine.state.window_for_pane(pane) else {
+            return String::new();
+        };
+        let session = inner.engine.state.windows[&window].session.to_string();
+        inner
+            .engine
+            .format_facts()
+            .user_option(
+                &pane.to_string(),
+                &window.to_string(),
+                &session,
+                "@agent_state",
+            )
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    fn send_terminal_message_and_wait(
+        &self,
+        client: ClientId,
+        pane: PaneId,
+        payload: &str,
+        parsed: &ParsedAgentSend,
+    ) -> Result<Execution, DaemonError> {
+        let initial = self.pane_agent_state(pane);
+        if initial.is_empty() {
+            return Err(ServerError::InvalidCommand(format!(
+                "{pane}: agent-send --wait needs an agent state; the pane reports none (@agent_state is unset)"
+            ))
+            .into());
+        }
+        #[cfg(all(feature = "agent", unix))]
+        self.deliver_to_terminal_pane(pane, payload)?;
+        #[cfg(not(all(feature = "agent", unix)))]
+        self.paste_and_submit(pane, payload, SEND_TEXT_TIMEOUT_MS, true)?;
+        self.report_command_queue_park();
+        let started = Instant::now();
+        let mut seen_working = initial != "idle";
+        loop {
+            match self.pane_agent_state(pane).as_str() {
+                "idle" if seen_working => return Ok(Execution::default()),
+                "blocked" if parsed.fail_on_block => {
+                    return Err(DaemonError::CommandExit {
+                        output: format!("{pane}: blocked (agent_state=blocked)").into(),
+                        exit_code: 3,
+                    });
+                }
+                "failed" => {
+                    return Err(DaemonError::CommandExit {
+                        output: format!("{pane}: agent_state=failed").into(),
+                        exit_code: 1,
+                    });
+                }
+                "" | "idle" => {}
+                _ => seen_working = true,
+            }
+            if self.command_queue_cancelled(client) {
+                return Ok(Execution::default());
+            }
+            if let Some(timeout) = parsed.wait_timeout()
+                && started.elapsed() >= timeout
+            {
+                return Err(DaemonError::CommandExit {
+                    output: format!(
+                        "{pane}: no idle state within {} seconds; the turn may still be running",
+                        timeout.as_secs(),
+                    )
+                    .into(),
+                    exit_code: 124,
+                });
+            }
+            if !seen_working && started.elapsed() >= AGENT_STATE_START_GRACE {
+                return Err(DaemonError::CommandExit {
+                    output: format!(
+                        "{pane}: agent_state stayed idle for {} seconds after the send",
+                        AGENT_STATE_START_GRACE.as_secs(),
+                    )
+                    .into(),
+                    exit_code: 124,
+                });
+            }
+            thread::sleep(SEND_TEXT_POLL_INTERVAL);
+        }
     }
 
     #[cfg(all(feature = "agent", unix))]
@@ -13209,11 +13476,14 @@ impl Shared {
                 if let Some(timeout) = timeout
                     && started.elapsed() >= timeout
                 {
-                    return Err(ServerError::InvalidCommand(format!(
-                        "{pane}: no reply within {} seconds; the turn is still running",
-                        timeout.as_secs(),
-                    ))
-                    .into());
+                    return Err(DaemonError::CommandExit {
+                        output: format!(
+                            "{pane}: no reply within {} seconds; the turn is still running",
+                            timeout.as_secs(),
+                        )
+                        .into(),
+                        exit_code: 124,
+                    });
                 }
             }
         })();
@@ -13349,6 +13619,107 @@ impl Shared {
                 result: encoded,
             },
         );
+    }
+
+    fn inspect(
+        &self,
+        client: ClientId,
+        context: &ExecutionContext,
+        args: &[RawText],
+    ) -> Result<Execution, DaemonError> {
+        let spec = zz_protocol::catalog_command_spec("inspect").expect("inspect spec");
+        let options = zz_protocol::parse_tmux_options(spec, args)?;
+        spec.validate_positional_maximum(options.positionals.len())?;
+        let mut target = None;
+        let mut json = false;
+        for option in options.options {
+            match option {
+                zz_protocol::TmuxOption::Value("-t", value) => target = Some(value),
+                zz_protocol::TmuxOption::Flag("--json") => json = true,
+                _ => {}
+            }
+        }
+        let inner = self.inner.lock();
+        let pane = inner
+            .engine
+            .resolve_pane(target, context.window, context.pane)?;
+        let window = inner
+            .engine
+            .state
+            .window_for_pane(pane)
+            .expect("pane window");
+        let session = inner.engine.state.windows[&window].session;
+        let facts = format_hook_facts_for_client(&inner, client, context);
+        let mut hooks = DaemonFormatHooks::command_with_optional_variables(&facts, None);
+        let status = inner.engine.format_status_context_with_format_client(
+            Some(session),
+            Some(window),
+            Some(pane),
+            context.session,
+            context.format_client(),
+        );
+        let session_values = status.scoped_format_values("session", &mut hooks);
+        let window_values = status.scoped_format_values("window", &mut hooks);
+        let pane_values = status.scoped_format_values("pane", &mut hooks);
+        let mut values = serde_json::Map::new();
+        for &key in INSPECT_FIELDS {
+            let value = match key {
+                "verbs" | "events" => continue,
+                "window_size" => inner.engine.window_size(window).as_str(),
+                _ => {
+                    let scope = if key.starts_with("session_") {
+                        &session_values
+                    } else if key.starts_with("window_") {
+                        &window_values
+                    } else {
+                        &pane_values
+                    };
+                    scope[key].as_str().unwrap_or_default()
+                }
+            };
+            values.insert(key.to_owned(), serde_json::Value::String(value.to_owned()));
+        }
+        let kind = values["pane_kind"].as_str().unwrap_or_default();
+        let mut verbs = INSPECT_VERBS
+            .iter()
+            .find_map(|(name, verbs)| (*name == kind).then_some(*verbs))
+            .unwrap_or_default()
+            .to_vec();
+        if kind == "terminal"
+            && !values["agent_state"]
+                .as_str()
+                .unwrap_or_default()
+                .is_empty()
+        {
+            verbs.push("agent-send");
+        }
+        values.insert("verbs".to_owned(), serde_json::json!(verbs));
+        values.insert("events".to_owned(), serde_json::json!(INSPECT_EVENTS));
+        let output = if json {
+            serde_json::Value::Object(values).to_string()
+        } else {
+            INSPECT_FIELDS
+                .iter()
+                .map(|key| {
+                    let value = &values[*key];
+                    let text = if let Some(items) = value.as_array() {
+                        items
+                            .iter()
+                            .map(|item| item.as_str().unwrap_or_default())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    } else {
+                        value.as_str().unwrap_or_default().to_owned()
+                    };
+                    format!("{key}: {text}")
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        Ok(Execution {
+            output: output.into(),
+            effects: Vec::new(),
+        })
     }
 
     fn show_agent_permission(
@@ -13562,6 +13933,56 @@ impl Shared {
             .cloned()
             .ok_or(ServerError::PaneExited(pane))?;
         Ok((pane, terminal))
+    }
+
+    fn wait_for_exit(
+        &self,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        args: &[RawText],
+    ) -> Result<Execution, DaemonError> {
+        let parsed = parse_wait_for_exit_args(args)?;
+        let (pane, terminal) =
+            self.terminal_wait_target("wait-for-exit", kind, context, parsed.target.as_deref())?;
+        let started = Instant::now();
+        self.report_command_queue_park();
+        loop {
+            if terminal.completion().is_some() {
+                let exit_code = pane_wait_exit_code(&terminal, &terminal.latest_viewport().status);
+                return if exit_code == 0 {
+                    Ok(Execution::default())
+                } else {
+                    Err(DaemonError::CommandExit {
+                        output: RawText::default(),
+                        exit_code,
+                    })
+                };
+            }
+            if !self
+                .inner
+                .lock()
+                .terminals
+                .get(&pane)
+                .is_some_and(|current| Arc::ptr_eq(current, &terminal))
+            {
+                return Ok(Execution::default());
+            }
+            if self.command_queue_cancelled(client) {
+                return Ok(Execution::default());
+            }
+            if !parsed.timeout.is_zero() && started.elapsed() >= parsed.timeout {
+                return Err(DaemonError::CommandExit {
+                    output: format!(
+                        "wait-for-exit: {pane} still running after {} seconds",
+                        parsed.timeout.as_secs(),
+                    )
+                    .into(),
+                    exit_code: 124,
+                });
+            }
+            thread::sleep(SEND_TEXT_POLL_INTERVAL);
+        }
     }
 
     fn wait_pane(
@@ -26786,10 +27207,7 @@ impl Shared {
         if let Some(runtime) = slot.as_ref() {
             return Some(Arc::clone(runtime));
         }
-        #[cfg(unix)]
-        {
-            *self.agent_peer_owner.lock() = Arc::downgrade(self);
-        }
+        *self.agent_peer_owner.lock() = Arc::downgrade(self);
         let publisher: Arc<dyn AgentPublisher> = Arc::<Self>::clone(self);
         let runtime = Arc::new(AgentRuntime::new(&publisher, config, journal));
         runtime.prewarm();
@@ -27646,6 +28064,31 @@ impl AgentPublisher for Shared {
         }
         if changed {
             self.signal_wait_channel(&format!("agent_state@{pane}"));
+            let event = {
+                let inner = self.inner.lock();
+                let snapshot = MuxHookSnapshot::capture(&inner.engine);
+                snapshot.panes.get(&pane).map(|pane_state| {
+                    let mut event =
+                        PendingHookEvent::pane("agent-state-changed", pane, pane_state, &snapshot);
+                    event.variables.insert(
+                        "agent_state".to_owned(),
+                        crate::status::agent_state_name(&state.phase).to_owned(),
+                    );
+                    event.variables.insert(
+                        "agent_pending_permission".to_owned(),
+                        state
+                            .pending_permission
+                            .as_ref()
+                            .map(|permission| permission.request_id.to_string())
+                            .unwrap_or_default(),
+                    );
+                    event
+                })
+            };
+            let owner = self.agent_peer_owner.lock().upgrade();
+            if let (Some(owner), Some(event)) = (owner, event) {
+                owner.run_event_hooks(vec![event]);
+            }
         }
         self.publish_for_pane(pane, &EventPayload::AgentState { pane, state });
     }
@@ -40072,6 +40515,39 @@ enum PaneWaitCondition {
 }
 
 #[derive(Debug)]
+struct ParsedWaitForExit {
+    target: Option<String>,
+    timeout: Duration,
+}
+
+fn parse_wait_for_exit_args(args: &[RawText]) -> Result<ParsedWaitForExit, ServerError> {
+    let mut parsed = ParsedWaitForExit {
+        target: None,
+        timeout: Duration::ZERO,
+    };
+    let mut index = 0;
+    while let Some(argument) = args.get(index) {
+        if argument == "--" && index + 1 == args.len() {
+            break;
+        }
+        if let Some(value) = option_value("wait-for-exit", args, index, &["-t"])? {
+            parsed.target = Some(value.value);
+            index += value.consumed;
+            continue;
+        }
+        if let Some(value) = option_value("wait-for-exit", args, index, &["--timeout"])? {
+            parsed.timeout = parse_pane_timeout("wait-for-exit", &value.value)?;
+            index += value.consumed;
+            continue;
+        }
+        return Err(ServerError::CommandParse(format!(
+            "unexpected wait-for-exit argument: {argument}"
+        )));
+    }
+    Ok(parsed)
+}
+
+#[derive(Debug)]
 struct ParsedWaitPane {
     target: Option<String>,
     condition: PaneWaitCondition,
@@ -40662,7 +41138,8 @@ Commands that set an explicit exit code keep that code.
 
 Draft into another Agent pane's composer for its user to review. An omitted or
 non-agent target routes to that window's most recently focused Agent pane,
-except for Claude Code terminal peers and Codex terminal panes described below.
+except for terminal peers, queued terminal sends, and terminal panes with
+`@agent_state` using `--wait`, described below.
 Read stdin when TEXT is omitted: `git diff | zz agent-send`.
 `--context` adds a file/line header and fences the payload; text is capped at 1 MiB.
 
@@ -40687,7 +41164,14 @@ name from the pane title and queues the text through Codex's own `codex queue`.
 Codex runs it at its next idle, with polling taking up to ten seconds. Plain sends
 and `--submit` both queue the message and print the pane ID for command clients.
 A fresh session has no name until its first prompt; `/rename` inside Codex resolves
-a name collision. `--wait` is not available for Codex terminal panes.
+a name collision.
+
+For a terminal pane without a peer reply channel, `--wait` requires a non-empty
+`@agent_state` and uses the existing terminal delivery path. It waits for a
+non-idle state followed by `idle`, and prints nothing on success. A pane that
+starts idle must leave idle within 15 seconds; otherwise it exits 124. The overall
+`--timeout` also exits 124. `failed` exits 1; `blocked` waits unless `--on-block fail`
+requests exit 3. A missing `@agent_state` exits 1 before sending.
 
 ### `zz show-agent-permission [-t %N]`
 
@@ -40715,6 +41199,40 @@ Output is capped at 200 lines or 256 KiB with a truncation note.
 Print that last command and output under a `%N $ command` header, with the same
 OSC 133 requirement and caps. For an Agent pane, read its last prompt and reply.
 When known, an `exit: <n>` line follows the header.
+
+### `zz wait-for-exit [-t %N] [--timeout SECS]`
+
+Wait for a terminal pane's command to exit and mirror its status. Prints nothing
+on success. A retained dead pane returns its exit status immediately; killing or
+respawning a pane releases the wait with status 0. The timeout defaults to 0,
+which waits forever; a timeout exits 124. Use a command or Control client.
+
+### `zz inspect -t %N [--json]`
+
+Describe a pane's kind, process, geometry, exit status, progress, agent facts, and
+browser URL. Read one `key: value` line per field, or use `--json` for one object
+with string facts and string arrays for `verbs` and `events`. Lists in text output
+use spaces; unavailable facts have empty values. `verbs` lists what applies to
+this pane's kind; terminal panes with a nonempty `agent_state` also include
+`agent-send`. `events` names what `zz events` can report for the pane.
+The keys, in text output order, are `session_id`, `session_name`, `window_id`, `window_index`, `window_name`, `window_width`, `window_height`, `window_size`, `pane_id`, `pane_index`, `pane_active`, `pane_kind`, `pane_pid`, `pane_current_command`, `pane_current_path`, `pane_title`, `pane_width`, `pane_height`, `pane_dead`, `pane_dead_status`, `pane_dead_signal`, `pane_last_command_status`, `pane_pb_state`, `pane_pb_progress`, `agent_state`, `agent_pending_permission`, `browser_url`, `verbs`, `events`.
+
+### `zz events [-t %N]`
+
+Stream hook events as JSON lines, flushed per line:
+`{"seq":1,"event":"agent-state-changed","time":1750000000000,"hook_pane":"%3","agent_state":"working",...}`.
+Each line includes the hook's string variables. `time` is Unix milliseconds.
+Wait for the first line, `{"seq":0,"event":"ready","time":...}`, before starting work.
+On subscriber overflow, `gap` consumes the next sequence number; the client
+reconnects and continues counting without another `ready` line.
+Use `-t %N` for a pane, `-t @N` for a window, `-t '$N'` for a session ID,
+or `-t name` for a session name. Filters match exact hook fields;
+`ready` and `gap` always print. Omit `-t` to stream without filtering.
+`agent-state-changed` carries `agent_state` for every pane kind and
+`agent_pending_permission` with the permission ID or an empty string.
+Other `@option-changed` firings are not streamed; use a hook for those.
+Invalid arguments exit 2. Connection and daemon errors, or any disconnect
+other than overflow, exit 1, including server shutdown.
 
 ### `zz wait-pane [-t %N] [--idle MS | --until TEXT | --regex RE] [--timeout SECS] [--tail N]`
 
@@ -40814,16 +41332,26 @@ at pane, window, session, or global scope to disable these updates.
 
 ```sh
 zz list-panes -F '#{pane_id} #{agent_state} #{agent_pending_permission}'
-until [ "$(zz display-message -p -t %5 '#{agent_state}')" = idle ]; do zz wait-for agent_state@%5; done
+zz agent-send -t %5 --wait "..."
 ```
 
-The `agent_state@%N` channel is sticky: a signal before the wait still wakes it.
-Recheck the state after waking. A completed turn or permission request also rings
+A completed turn or permission request also rings
 the pane bell; use `zz set-hook -g alert-bell 'display-message "agent needs attention"'`.
 
-For foreign agents, read `@agent_state` with `zz show-options -p -t %5 -v @agent_state`
-and wait on `zz wait-for '@agent_state@%5'`. Use the lifecycle hooks below to write it.
+For foreign agents, read `@agent_state` with `zz show-options -p -t %5 -v @agent_state`.
+Use `zz agent-send -t %5 --wait "..."` to send and wait for a turn, and use the
+lifecycle hooks below to write the state. For transitions you did not cause,
+`zz wait-for agent_state@%N` observes native Agent state and
+`zz wait-for '@agent_state@%5'` observes a terminal's option writes; read the state
+after waking.
 `zz set-hook -g @option-changed` observes user-option writes.
+
+The sticky channel is level-triggered like tmux's `wait-for`: a signal that happened
+before the wait wakes it at once. A read-then-wait loop started right after a send
+can see the pre-send idle and return early. Use `zz agent-send -t %N --wait "..."`
+to wait for a turn on any pane kind. Use the channel loop to observe transitions
+you did not cause.
+`zz events -t %N` streams `agent-state-changed` lines for any pane kind.
 
 ```sh
 zz run-shell -b -d 300 'zz send-text -t %5 continue'
@@ -40844,8 +41372,8 @@ refresh-client -B 'agent:%5:#{agent_state}'
 Agent panes register as Claude Code peers under their `@name` user option
 (default `zz-%N`). `ListAgents` in any Claude Code session lists them, and
 `SendMessage` queues a prompt into the pane while its adapter runs. Claude
-Code refuses idle subscriptions to these peers; wait with
-`zz wait-for agent_state@%N` instead.
+Code refuses idle subscriptions to these peers. Use
+`zz agent-send -t %N --wait "..."` to send and wait for a turn.
 
 A terminal pane becomes a peer when you set its pane `@name` option:
 `zz set-option -p -t %3 @name codex-1`. A Codex pane with a session name receives
@@ -40863,7 +41391,7 @@ Notification, or equivalent) to write a pane option:
 ```sh
 zz set-option -p -t "$TMUX_PANE" @agent_state idle
 zz set-option -p -t "$TMUX_PANE" @agent_state needs-approval
-until [ "$(zz show-options -p -t %5 -v @agent_state)" = idle ]; do zz wait-for '@agent_state@%5'; done
+zz agent-send -t %5 --wait "..."
 zz set-hook -g @option-changed 'run-shell "notify-send zz \"#{hook_target} #{hook_option}\""'
 ```
 
@@ -63068,6 +63596,248 @@ set-option -g @alias-mixed-next yes
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn wait_for_exit_mirrors_the_child_status() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-window-option", ["-g", "remain-on-exit", "on"]),
+            )
+            .expect("retain the exited pane");
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "waitexitstatus", "sh -c 'sleep 0.3; exit 7'"],
+                ),
+            )
+            .expect("create the exiting pane");
+        for call in 0..2 {
+            let started = Instant::now();
+            let error = shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("wait-for-exit", ["-t", "%0"]),
+                )
+                .expect_err("mirror the child status");
+            assert!(matches!(
+                error,
+                DaemonError::CommandExit { output, exit_code: 7 } if output.is_empty()
+            ));
+            if call == 1 {
+                assert!(started.elapsed() < Duration::from_millis(100));
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_for_exit_times_out_with_124() {
+        let (shared, client, target) =
+            send_text_fixture("waitexittimeout", "printf 'zz-ready\\r\\n'; exec sleep 30");
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("wait-for-exit", ["-t", &target, "--timeout", "1"]),
+            )
+            .expect_err("child outlives the timeout");
+        assert!(matches!(
+            error,
+            DaemonError::CommandExit { output, exit_code: 124 }
+                if output == format!("wait-for-exit: {target} still running after 1 seconds")
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_for_exit_returns_zero_when_the_pane_is_killed() {
+        let (shared, client, target) =
+            send_text_fixture("waitexitkill", "printf 'zz-ready\\r\\n'; exec sleep 30");
+        let mailbox = OutboundMailbox::new();
+        shared
+            .client_writers
+            .lock()
+            .insert(client, Arc::clone(&mailbox));
+        let waiting = Arc::clone(&shared);
+        let wait_target = target.clone();
+        let waiter = thread::spawn(move || {
+            let _scope = CommandQueueParkScope::new(client, 1);
+            waiting.execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("wait-for-exit", ["-t", &wait_target, "--timeout", "10"]),
+            )
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if take_reliable_messages(&mailbox).iter().any(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::CommandQueueParked { request_id: 1 }
+                )
+            }) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "wait did not park");
+            thread::sleep(SEND_TEXT_POLL_INTERVAL);
+        }
+        shared
+            .execute(
+                ClientId(8),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("kill-pane", ["-t", &target]),
+            )
+            .expect("kill the waited pane");
+        let execution = waiter
+            .join()
+            .expect("wait thread")
+            .expect("kill releases wait");
+        assert!(execution.output.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_send_wait_follows_the_agent_state_edge_on_terminal_panes() {
+        let (shared, client, target) =
+            send_text_fixture("agentstateedge", "printf 'zz-ready\\r\\n'; exec /bin/cat");
+        let pane = target.parse::<PaneId>().expect("pane id");
+        shared.write_pane_agent_state(pane, "idle");
+        let waiting = Arc::clone(&shared);
+        let wait_target = target.clone();
+        let waiter = thread::spawn(move || {
+            waiting.execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "agent-send",
+                    ["-t", &wait_target, "--wait", "--timeout", "10", "hello"],
+                ),
+            )
+        });
+        wait_for_capture(&shared, client, &target, |screen| screen.contains("hello"));
+        thread::sleep(Duration::from_millis(100));
+        assert!(
+            !waiter.is_finished(),
+            "pre-send idle must not finish the wait"
+        );
+        shared.write_pane_agent_state(pane, "working");
+        thread::sleep(Duration::from_millis(100));
+        assert!(!waiter.is_finished(), "working must not finish the wait");
+        shared.write_pane_agent_state(pane, "idle");
+        let execution = waiter
+            .join()
+            .expect("wait thread")
+            .expect("idle after working");
+        assert!(execution.output.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_send_wait_reports_blocked_with_on_block_fail() {
+        let (shared, client, target) = send_text_fixture(
+            "agentstateblocked",
+            "printf 'zz-ready\\r\\n'; exec /bin/cat",
+        );
+        let pane = target.parse::<PaneId>().expect("pane id");
+        shared.write_pane_agent_state(pane, "idle");
+        let waiting = Arc::clone(&shared);
+        let wait_target = target.clone();
+        let waiter = thread::spawn(move || {
+            waiting.execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "agent-send",
+                    [
+                        "-t",
+                        &wait_target,
+                        "--wait",
+                        "--timeout",
+                        "10",
+                        "--on-block",
+                        "fail",
+                        "hello",
+                    ],
+                ),
+            )
+        });
+        wait_for_capture(&shared, client, &target, |screen| screen.contains("hello"));
+        thread::sleep(Duration::from_millis(100));
+        shared.write_pane_agent_state(pane, "working");
+        thread::sleep(Duration::from_millis(100));
+        shared.write_pane_agent_state(pane, "blocked");
+        let error = waiter
+            .join()
+            .expect("wait thread")
+            .expect_err("blocked state");
+        assert!(matches!(
+            error,
+            DaemonError::CommandExit { output, exit_code: 3 }
+                if output == format!("{target}: blocked (agent_state=blocked)")
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_send_wait_refuses_panes_without_agent_state() {
+        let (shared, client, target) =
+            send_text_fixture("agentstatenone", "printf 'zz-ready\\r\\n'; exec /bin/cat");
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("agent-send", ["-t", &target, "--wait", "hello"]),
+            )
+            .expect_err("state is required before sending");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == format!("{target}: agent-send --wait needs an agent state; the pane reports none (@agent_state is unset)")
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_send_wait_times_out_when_the_state_never_leaves_idle() {
+        let (shared, client, target) =
+            send_text_fixture("agentstateidle", "printf 'zz-ready\\r\\n'; exec /bin/cat");
+        shared.write_pane_agent_state(target.parse().expect("pane id"), "idle");
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "agent-send",
+                    ["-t", &target, "--wait", "--timeout", "1", "hello"],
+                ),
+            )
+            .expect_err("idle without work times out");
+        assert!(matches!(
+            error,
+            DaemonError::CommandExit { output, exit_code: 124 }
+                if output == format!("{target}: no idle state within 1 seconds; the turn may still be running")
+        ));
+    }
+
     #[test]
     fn wait_and_run_pane_reject_invalid_arguments() {
         for args in [
@@ -67213,6 +67983,138 @@ set-option -g @alias-mixed-next yes
     }
 
     #[test]
+    fn inspect_reports_kind_facts_and_verbs() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let run = |args: &[&str]| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                )
+                .expect("inspect fixture command")
+                .output
+        };
+        run(&["new-session", "-d", "-s", "inspect"]);
+        let inspect = || {
+            serde_json::from_str::<serde_json::Value>(&run(&["inspect", "--json", "-t", "%0"]))
+                .expect("inspect JSON object")
+        };
+        let row = inspect();
+        assert_eq!(row["session_id"], "$0");
+        assert_eq!(row["session_name"], "inspect");
+        assert_eq!(row["window_id"], "@0");
+        assert_eq!(row["pane_kind"], "terminal");
+        assert_eq!(row["pane_id"], "%0");
+        assert_eq!(row["window_size"], "latest");
+        assert_eq!(row["agent_state"], "");
+        let verbs = row["verbs"].as_array().expect("verbs array");
+        assert!(verbs.contains(&"wait-pane".into()));
+        assert!(!verbs.contains(&"agent-send".into()));
+        assert!(
+            row["events"]
+                .as_array()
+                .unwrap()
+                .contains(&"pane-exited".into())
+        );
+        run(&["set-option", "-p", "-t", "%0", "@agent_state", "idle"]);
+        let row = inspect();
+        assert_eq!(row["agent_state"], "idle");
+        assert!(
+            row["verbs"]
+                .as_array()
+                .unwrap()
+                .contains(&"agent-send".into())
+        );
+    }
+
+    #[test]
+    fn inspect_verb_table_names_real_commands() {
+        for (_, verbs) in INSPECT_VERBS {
+            for verb in *verbs {
+                assert!(
+                    zz_mux::command_spec(verb).is_some()
+                        || zz_protocol::catalog_command_spec(verb).is_some(),
+                    "inspect lists an unknown command: {verb}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn inspect_text_lists_fields_in_order() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "inspect-text"]),
+            )
+            .expect("inspect text session");
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("inspect", ["-t", "%0"]),
+            )
+            .expect("inspect text")
+            .output;
+        assert!(output.lines().any(|line| line == "pane_kind: terminal"));
+        assert!(output.lines().any(|line| line == "agent_state: "));
+        assert!(
+            output
+                .lines()
+                .any(|line| line.starts_with("verbs: send-keys send-text "))
+        );
+        let keys = output
+            .lines()
+            .map(|line| line.split_once(": ").expect("field line").0)
+            .collect::<Vec<_>>();
+        assert_eq!(keys.first(), Some(&"session_id"));
+        assert_eq!(keys.last(), Some(&"events"));
+        assert_eq!(
+            keys,
+            [
+                "session_id",
+                "session_name",
+                "window_id",
+                "window_index",
+                "window_name",
+                "window_width",
+                "window_height",
+                "window_size",
+                "pane_id",
+                "pane_index",
+                "pane_active",
+                "pane_kind",
+                "pane_pid",
+                "pane_current_command",
+                "pane_current_path",
+                "pane_title",
+                "pane_width",
+                "pane_height",
+                "pane_dead",
+                "pane_dead_status",
+                "pane_dead_signal",
+                "pane_last_command_status",
+                "pane_pb_state",
+                "pane_pb_progress",
+                "agent_state",
+                "agent_pending_permission",
+                "browser_url",
+                "verbs",
+                "events",
+            ]
+        );
+    }
+
+    #[test]
     fn formats_expand_pane_kind_and_user_options() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
@@ -67441,6 +68343,8 @@ set-option -g @alias-mixed-next yes
     #[test]
     fn tools_catalog_matches_dispatchable_verbs() {
         const TOOL_VERBS: &[&str] = &[
+            "inspect",
+            "events",
             "capture-pane",
             "agent-send",
             "show-agent-permission",
@@ -67448,6 +68352,7 @@ set-option -g @alias-mixed-next yes
             "send-last-output",
             "show-last-output",
             "send-text",
+            "wait-for-exit",
             "wait-pane",
             "run-pane",
             "capture-browser",
@@ -67577,6 +68482,7 @@ set-option -g @alias-mixed-next yes
             assert!(daemon_command_dispatch(name).is_none());
         }
         for (prefix, dispatch) in [
+            ("wait-for-exit", DaemonCommandDispatch::WaitForExit),
             ("wait-pane", DaemonCommandDispatch::WaitPane),
             ("run-pane", DaemonCommandDispatch::RunPane),
             ("wait", DaemonCommandDispatch::WaitFor),
@@ -67954,6 +68860,128 @@ set-option -g @alias-mixed-next yes
             DaemonError::Server(ServerError::InvalidCommand(message))
                 if message == "channel sticky not locked"
         ));
+    }
+
+    #[test]
+    fn agent_state_changes_publish_the_hook_event_for_terminal_panes() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .inner
+            .lock()
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "terminal-events"]),
+            )
+            .expect("session");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(control, context.session.expect("session"))
+            .expect("attach");
+        take_reliable_messages(&mailbox);
+        for value in ["working", "working", "idle"] {
+            shared
+                .execute(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-option",
+                        ["-p", "-t", "%0", "@agent_state", value],
+                    ),
+                )
+                .expect("set state");
+            let events = take_reliable_messages(&mailbox)
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::HookEvent { name, variables },
+                        ..
+                    }) if name == "agent-state-changed" => Some(variables),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0]["hook_pane"], "%0");
+            assert_eq!(events[0]["agent_state"], value);
+            assert_eq!(events[0]["agent_pending_permission"], "");
+        }
+    }
+
+    #[cfg(feature = "agent")]
+    #[test]
+    fn agent_state_changes_publish_the_hook_event_for_agent_panes() {
+        let shared = Arc::new(Shared::new(1));
+        *shared.agent_peer_owner.lock() = Arc::downgrade(&shared);
+        let mut context = ExecutionContext::default();
+        {
+            let mut inner = shared.inner.lock();
+            for command in [
+                CommandInvocation::new("new-session", ["-s", "agent-events"]),
+                CommandInvocation::new("set-option", ["-g", "experimental-agent-pane", "on"]),
+                CommandInvocation::new("split-picker", [] as [&str; 0]),
+                CommandInvocation::new("select-pane-kind", ["agent"]),
+            ] {
+                inner
+                    .engine
+                    .execute(&mut context, &command)
+                    .expect("mux setup");
+            }
+        }
+        let pane = context.pane.expect("agent");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(control, context.session.expect("session"))
+            .expect("attach");
+        take_reliable_messages(&mailbox);
+        for (phase, permission, expected) in [
+            (zz_protocol::AgentConnectionPhase::Running, None, "working"),
+            (zz_protocol::AgentConnectionPhase::Ready, None, "idle"),
+            (zz_protocol::AgentConnectionPhase::Ready, Some(7), "idle"),
+            (zz_protocol::AgentConnectionPhase::Ready, None, "idle"),
+        ] {
+            let state = AgentPaneWire {
+                phase,
+                pending_permission: permission.map(|request_id| zz_protocol::AgentPermissionWire {
+                    request_id,
+                    payload: "{}".to_owned(),
+                }),
+                ..AgentPaneWire::default()
+            };
+            shared.publish_agent_state(pane, state.clone());
+            let events = take_reliable_messages(&mailbox)
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::HookEvent { name, variables },
+                        ..
+                    }) if name == "agent-state-changed" => Some(variables),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0]["hook_pane"], pane.to_string());
+            assert_eq!(events[0]["agent_state"], expected);
+            assert_eq!(
+                events[0]["agent_pending_permission"],
+                permission.map(|id| id.to_string()).unwrap_or_default()
+            );
+            shared.publish_agent_state(pane, state);
+            assert!(
+                !take_reliable_messages(&mailbox)
+                    .iter()
+                    .any(|message| matches!(message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::HookEvent { name, .. }, ..
+                        }) if name == "agent-state-changed"
+                    ))
+            );
+        }
     }
 
     #[cfg(feature = "agent")]

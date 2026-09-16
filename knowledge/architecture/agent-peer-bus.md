@@ -158,7 +158,12 @@ noninteractive caller. Errors exit 1 and do not route the message to an Agent pa
 - Several matching threads: `N Codex sessions named X in DIR; run /rename in the pane`.
 - Missing executable: `codex executable not found on the login-shell PATH`.
 - Queue failure: Codex's trimmed stderr, with the target pane ID.
-- `--wait`: `agent-send --wait needs a reply channel; Codex terminal panes have none, use an Agent pane`.
+
+For a terminal pane without a peer reply channel, `--wait` requires a non-empty
+`@agent_state`. It uses terminal delivery and waits for a non-idle state followed
+by `idle`, with no reply text. A state that stays idle for 15 seconds after sending
+exits 124; the overall timeout also exits 124. `failed` exits 1; `blocked` waits
+unless `--on-block fail` requests exit 3. An unset state exits 1 before sending.
 
 A named terminal peer running Codex receives its full attributed message through the same queue.
 If the session has no title name yet, the daemon logs the reason at info level and uses the
@@ -188,7 +193,7 @@ Delivery updates match `action: peer_message_status`, regardless of `type`. The 
 `held` and `delivered` keep waiting. `expired`, `dropped`, or `status_detail: refused` fail with exit 1
 and report the status and supplied `reason` or `drop_reason`. A dead target pid also fails with
 exit 1. The timeout defaults to 600 seconds, and `0` waits forever. Timeout errors name the pane
-and use the ACP wait's wording; a timeout does not cancel the remote turn.
+and exit 124; a timeout does not cancel the remote turn.
 
 ```json
 {"type":"control","action":"peer_message_status","orig_msg_id":"sent-message-id","status":"dropped","reason":"peer policy","from":"uds:/tmp/cc-socks/4712.sock"}
@@ -205,10 +210,15 @@ the record names the adapter or shell, never receives a subscription, and the se
 subscription could not be sent". The transient daemon peer is the exception, since its record
 names the daemon's own pid, which is why delivery status reports reach pending waits.
 
-zz therefore advertises no `peerFeatures` on pane peers and offers no idle notices. A Claude Code
-session that wants to wait for a zz pane runs `zz wait-for agent_state@%N` through the shim in its
-pane. Offering notices would need a helper process per pane that owns both the record pid and the
-socket.
+zz therefore advertises no `peerFeatures` on pane peers and offers no idle notices.
+Offering notices would need a helper process per pane that owns both the record pid
+and the socket.
+
+The sticky channel is level-triggered like tmux's `wait-for`: a signal that happened
+before the wait wakes it at once. A read-then-wait loop started right after a send
+can see the pre-send idle and return early. Use `zz agent-send -t %N --wait "..."`
+to wait for a turn on any pane kind. Use the channel loop to observe transitions
+you did not cause.
 
 The subscription line, for reference, is:
 

@@ -398,6 +398,72 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn events_stream_ready_then_window_hook() {
+        use std::io::BufRead as _;
+
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            eprintln!("SKIPPED: Unix socket binding is unavailable");
+            return;
+        }
+        let created = fixture.run(&["new-session", "-d", "-s", "events"]);
+        assert_eq!(created.status.code(), Some(0));
+        let mut child = fixture
+            .command()
+            .arg("events")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start event stream");
+        let stdout = child.stdout.take().expect("event stdout");
+        let (sender, receiver) = mpsc::sync_channel(32);
+        let reader = thread::spawn(move || {
+            for line in io::BufReader::new(stdout).lines() {
+                if sender.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        let result = (|| -> Result<(), String> {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let next = || -> Result<serde_json::Value, String> {
+                let remaining = deadline
+                    .checked_duration_since(Instant::now())
+                    .ok_or("event deadline elapsed")?;
+                let line = receiver
+                    .recv_timeout(remaining)
+                    .map_err(|error| error.to_string())?
+                    .map_err(|error| error.to_string())?;
+                serde_json::from_str(&line).map_err(|error| error.to_string())
+            };
+            let ready = next()?;
+            if ready["event"] != "ready" || ready["seq"] != 0 {
+                return Err(format!("expected ready first: {ready}"));
+            }
+            let created = fixture.run(&["new-window"]);
+            if !created.status.success() {
+                return Err(format!("new-window failed: {:?}", created.stderr));
+            }
+            for _ in 0..20 {
+                let event = next()?;
+                if matches!(
+                    event["event"].as_str(),
+                    Some("window-linked" | "session-window-changed")
+                ) {
+                    return Ok(());
+                }
+            }
+            Err("no window hook in 20 lines".to_owned())
+        })();
+        let _ = child.kill();
+        let _ = child.wait();
+        drop(receiver);
+        reader.join().expect("event reader");
+        result.expect("ready then window hook within 10 seconds");
+    }
+
+    #[test]
     fn pane_json_contains_format_ids_and_native_kind() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
@@ -421,6 +487,56 @@ mod daemon_autostart {
                 .values()
                 .all(serde_json::Value::is_string)
         );
+    }
+
+    #[test]
+    fn inspect_json_contains_pane_facts_verbs_and_events() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            eprintln!("SKIPPED: Unix socket binding is unavailable");
+            return;
+        }
+        let created = fixture.run(&["new-session", "-d", "-s", "inspect"]);
+        assert_eq!(created.status.code(), Some(0));
+        let output = fixture.run(&["inspect", "--json", "-t", "%0"]);
+        assert_eq!(output.status.code(), Some(0));
+        assert!(output.stderr.is_empty());
+        let text = String::from_utf8(output.stdout).expect("UTF-8 JSON output");
+        let rows = text.lines().collect::<Vec<_>>();
+        assert_eq!(rows.len(), 1);
+        let row: serde_json::Value = serde_json::from_str(rows[0]).expect("inspect JSON object");
+        assert_eq!(row["session_id"], "$0");
+        assert_eq!(row["session_name"], "inspect");
+        assert_eq!(row["window_id"], "@0");
+        assert_eq!(row["window_size"], "latest");
+        assert_eq!(row["pane_id"], "%0");
+        assert_eq!(row["pane_kind"], "terminal");
+        assert!(
+            row["verbs"]
+                .as_array()
+                .unwrap()
+                .contains(&"wait-pane".into())
+        );
+        assert!(
+            row["events"]
+                .as_array()
+                .unwrap()
+                .contains(&"pane-exited".into())
+        );
+        assert_eq!(row.as_object().unwrap().len(), 29);
+        for (key, value) in row.as_object().unwrap() {
+            if matches!(key.as_str(), "verbs" | "events") {
+                assert!(
+                    value
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .all(serde_json::Value::is_string)
+                );
+            } else {
+                assert!(value.is_string(), "{key}");
+            }
+        }
     }
 
     #[test]

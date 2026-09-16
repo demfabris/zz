@@ -294,11 +294,24 @@ These variables work in pane listings, display messages, status
 formats, hooks, and control-mode `refresh-client -B` subscriptions. For native Agent panes, the
 daemon signals the sticky `agent_state@%N` wait channel when the phase or pending permission
 changes; repeated publication of the same state does not signal it.
+Use `zz events -t %N` for a push stream of `agent-state-changed` events.
 
 ```sh
 zz list-panes -F '#{pane_id} #{agent_state}'
-until [ "$(zz display-message -p -t %N '#{agent_state}')" = idle ]; do zz wait-for agent_state@%N; done
+zz agent-send -t %N --wait "..."
 ```
+
+The sticky channel is level-triggered like tmux's `wait-for`: a signal that happened
+before the wait wakes it at once. A read-then-wait loop started right after a send
+can see the pre-send idle and return early. Use `zz agent-send -t %N --wait "..."`
+to wait for a turn on any pane kind. Use the channel loop to observe transitions
+you did not cause.
+
+For terminal panes without a peer reply channel, `--wait` requires a non-empty
+`@agent_state`. It waits for a non-idle state followed by `idle` and returns no
+reply text. Starting idle without observing work for 15 seconds exits 124, as does
+the overall timeout. `failed` exits 1; `blocked` keeps waiting unless `--on-block fail`
+requests exit 3. An unset state exits 1 before sending.
 
 `show-agent-permission [-t %N]` prints the oldest pending `AgentPermissionWire` as JSON:
 `request_id` identifies the request, and `payload` contains a JSON string with `toolCall` and

@@ -5,7 +5,7 @@ description: "MuxEngine, the tmux-style command executor: canonical names + alia
 resource: crates/zz-mux/src/command.rs
 tags: [tmux, commands, mux-engine, targets, effects]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-09-15
+last_updated: 2026-09-16
 ---
 
 # Cycle-16 checkpoint
@@ -555,16 +555,20 @@ shared `catalog.rs` specs, so `list-commands`, stored-command validation and ren
 [command-palette](/concepts/command-palette.md) completion discover them like the other native
 verbs. Exact native names resolve before abbreviation lookup. A native abbreviation resolves only
 when no tmux canonical name starts with it, which keeps `capture-b` native while `capture` resolves
-to tmux's `capture-pane`. Execution remains daemon-owned.
+to tmux's `capture-pane`. Execution remains daemon-owned except for `events`, which the CLI
+handles through a control subscription.
 
 | Command | Purpose |
 | --- | --- |
 | `tools` | Print the workspace catalog; `--skill` includes the skill YAML frontmatter. Run `just tools-skill` to regenerate `.agents/skills/zz-workspace/SKILL.md` from that output. |
-| `agent-send` | `[-t %N] [--submit \| --wait [--timeout SECS] [--on-block wait\|fail]] [--context PATH[:START[-END]]] [TEXT]` . append text to a GUI-owned Agent composer, submit it as a prompt (daemon-side, no GUI needed; prints the pane it chose), or with `--wait` submit and block until that turn ends, printing the reply. A non-agent or omitted target routes to that window's most recently focused Agent pane. Reads stdin when TEXT is omitted; capped at 1 MiB. See [Agent pane](/concepts/agent-pane.md). |
+| `agent-send` | `[-t %N] [--submit \| --wait [--timeout SECS] [--on-block wait\|fail]] [--context PATH[:START[-END]]] [TEXT]` . append text to a GUI-owned Agent composer, submit it as a prompt (daemon-side, no GUI needed; prints the pane it chose), or with `--wait` submit and block until that turn ends, printing the reply. Terminal peers use their reply channel; other terminal panes with `--wait` require `@agent_state` and wait for a non-idle state followed by `idle`, without reply text. Other non-agent or omitted targets route to that window's most recently focused Agent pane. Reads stdin when TEXT is omitted; capped at 1 MiB. See [Agent pane](/concepts/agent-pane.md). |
 | `show-agent-permission` | `[-t %N]` . print the oldest pending permission as JSON; exit 1 when none is pending. |
 | `agent-respond` | `[-t %N] (--allow \| --deny \| --option ID) [REQUEST_ID]` . answer the oldest or named request and print the option ID. `--allow` prefers allow-once. Interactive clients cannot invoke it. |
 | `send-last-output` | `-t %N` . route a terminal pane's last completed command and output (OSC 133 marks) into the window's most recently focused Agent pane. Bound to `<prefix> e`. |
 | `show-last-output` | `-t %N` . the read twin: print that same fenced `%N $ command` block to the caller instead of routing it, so a script or an agent reads a terminal's last result without a capture-and-regex dance. Same OSC 133 requirement and 200-line / 256 KiB cap. When known, an `exit: <n>` line follows the header. Accepts an Agent pane too: its transcript projection frames every turn with OSC 133 marks, so the block is the last prompt and reply. |
+| `wait-for-exit` | `[-t target-pane] [--timeout SECS]` . wait for a terminal pane's command to exit and mirror its status. Prints nothing on success. A retained dead pane returns its exit status immediately; a killed or respawned pane releases the wait with status 0. Timeout defaults to 0 (forever); timeout exits 124. Command and Control clients only. |
+| `inspect` | `[-t %N] [--json]` . describe any pane: session and window identity, geometry and sizing rule, pane kind and process, exit status, progress, agent state and pending permission, and browser URL. Text prints ordered `key: value` lines; JSON uses strings for facts and arrays for `verbs` and `events`. `verbs` lists the commands for that pane kind; terminal panes with a nonempty agent state also include `agent-send`. `events` lists the event names for the pane. |
+| `events` | `[-t target]` . stream hook events as JSON lines from the CLI, with `seq`, `event`, Unix milliseconds in `time`, and string hook variables. Wait for `ready` before starting work; `gap` marks overflow and reconnection. Filter by pane `%N`, window `@N`, session `$N`, or session name. `agent-state-changed` carries `agent_state`; other `@option-changed` firings require a hook. Invalid arguments exit 2; connection, daemon, and disconnect errors exit 1. |
 | `wait-pane` | `[-t %N] [--idle MS \| --until TEXT \| --regex RE] [--timeout SECS] [--tail N]` . wait for one condition in a terminal pane. Default: 500 ms without output after observation starts, with no output on success. Text and regex searches join wrapped visible lines and print the matching line; `--tail` restricts the search to the last N logical lines. Timeout defaults to 60 seconds and exits 124; invalid regex syntax exits 2. Command and Control clients only. |
 | `run-pane` | `[-t %N] [--timeout SECS] [--] COMMAND...` . join words with single spaces and paste one command line into a POSIX terminal shell, verify its echo, then submit. Random markers identify the output and child exit code without shell integration. Capture includes scrollback, capped to the last 10,000 logical lines. Timeout defaults to 120 seconds, prints partial output, and exits 125 while the command continues. Command and Control clients only. |
 | `send-text` | `-t %N [--no-enter] [--timeout MS] TEXT` . deliver TEXT to a TUI in a terminal pane the way `send-keys -l … Enter` cannot: paste it (bracketed iff the app enabled DECSET 2004 — the actor decides), poll `capture` until the text's tail, or a `[Pasted text` collapse marker, is on screen, then press Enter. No echo within `--timeout` (default 2000 ms) is a non-zero exit with nothing submitted. Honors `pane_input_off` and `synchronize-panes` like `paste-buffer`. |
@@ -587,17 +591,28 @@ the GUI has the CEF frame. The GUI answers from its mux observation rather than 
 a minimized window still replies. `--submit` and `--wait` never touch the GUI: the daemon's own
 agent runtime takes the prompt, and `--wait` parks the command thread on the turn's reply instead
 (600 s default, no lock held). `MuxState::recent_agent_pane` picks the recipient
-for `send-last-output` and for any `agent-send` whose target is not itself an Agent pane, with the
+for `send-last-output` and for `agent-send` outside its terminal delivery paths, with the
 same active → focus-history → layout-order rule as `cwd_donor`.
 
 One superset event rides an existing verb: every user-option write or unset (`set-option -p/-w/-s/-g
 @name …`) signals the `wait-for` channel `<name>@<target>` — `@agent_state@%5`, `@fleet@$1`,
 `@x@global-session`, `@x@server` — with `wait-for -S` semantics, so a signal nobody is waiting on
 parks as sticky. A foreign agent CLI's lifecycle hook can stamp
-`zz set-option -p -t $TMUX_PANE @agent_state idle` and an orchestrator blocks on
-`zz wait-for '@agent_state@%5'` then reads `show-options -p -t %5 -v @agent_state`; the sticky flag
-makes that read-then-wait loop race-free. tmux never signals on option writes, but no tmux config
-waits on such a channel, so the differential harness cannot observe the divergence. The push form
+`zz set-option -p -t $TMUX_PANE @agent_state idle`; use its lifecycle hooks to write
+`working` when work starts and `idle` when it ends.
+
+The sticky channel is level-triggered like tmux's `wait-for`: a signal that happened
+before the wait wakes it at once. A read-then-wait loop started right after a send
+can see the pre-send idle and return early. Use `zz agent-send -t %N --wait "..."`
+to wait for a turn on any pane kind. Use the channel loop to observe transitions
+you did not cause.
+
+Terminal state waits exit 124 on timeout or if the state stays idle for 15 seconds
+after sending. `failed` exits 1; `blocked` waits unless `--on-block fail` requests
+exit 3. An unset `@agent_state` exits 1 before sending.
+
+tmux never signals on option writes, but no tmux config waits on such a channel,
+so the differential harness cannot observe the divergence. The push form
 is the `@option-changed` user hook: `set-hook -g @option-changed 'run-shell "…#{hook_option} #{hook_target}…"'`
 runs on every user-option write with those two variables in scope; commands already running from a
 hook do not fire it again, so a hook that writes an option cannot recurse.

@@ -1,0 +1,66 @@
+{
+  "selected_rows": 222,
+  "completed_rows": 222,
+  "completed_steps": 2639,
+  "complete": false,
+  "unrun_rows": [],
+  "unexpected_rows": [],
+  "shards": [
+    {
+      "label": "corpus-complete-0",
+      "selected_rows": 105,
+      "exit_status": 1
+    },
+    {
+      "label": "corpus-complete-1",
+      "selected_rows": 104,
+      "exit_status": null
+    },
+    {
+      "label": "corpus-complete-extra",
+      "selected_rows": 13,
+      "exit_status": 0
+    }
+  ],
+  "first_pass_failures": [
+    "lane2-store",
+    "smoke/alias-group-forgery",
+    "smoke/args-parse-choosers",
+    "smoke/daemon-invalid-flags",
+    "smoke/plugin-runtime-resurrect-restore",
+    "smoke/positional-maximums",
+    "stderr-parity",
+    "show-options-hooks",
+    "smoke/cli-chain-parse-abort",
+    "smoke/command-flag-errors",
+    "smoke/positional-minimums",
+    "smoke/status-background-jobs"
+  ],
+  "failed_after_retry": [
+    "lane2-store",
+    "smoke/alias-group-forgery",
+    "smoke/args-parse-choosers",
+    "smoke/daemon-invalid-flags",
+    "smoke/plugin-runtime-resurrect-restore",
+    "smoke/positional-maximums",
+    "stderr-parity",
+    "show-options-hooks",
+    "smoke/cli-chain-parse-abort",
+    "smoke/command-flag-errors",
+    "smoke/positional-minimums"
+  ],
+  "known_divergences": [
+    {
+      "row": "known/known-pane-scrollbar-columns",
+      "tuple": "0 2 0 1 0"
+    },
+    {
+      "row": "known/known-main-preset-two-panes",
+      "tuple": "0 1 0 0 0"
+    },
+    {
+      "row": "known/known-spread-mixed",
+      "tuple": "0 1 0 0 0"
+    }
+  ]
+}

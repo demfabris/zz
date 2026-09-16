@@ -1,0 +1,2 @@
+   Compiling zz v0.10.0 (/home/demfabris/dev/zz-c11-alias/crates/zz)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 25.02s

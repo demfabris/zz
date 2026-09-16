@@ -1,0 +1,38 @@
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+ok   test_bare_number_lease_reads_as_hours
+ok   test_integrated_main_from_non_holder_is_ignored
+ok   test_records_only_merge_lands_on_the_ledger
+ok   test_release_after_candidate_frees_zones_and_goes_stale
+ok   test_repair_after_lease_expiry_frees_the_front
+ok   test_repair_dissolves_candidate_and_keeps_active_claim
+ok   test_withdraw_by_triage_holder_lands
+ok   test_withdraw_on_claimed_or_candidate_front_is_void
+ok   test_withdraw_requires_triage_hold
+........
+----------------------------------------------------------------------
+Ran 8 tests in 0.026s
+
+OK
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 0.067s
+
+OK
+verified: TUI-001, TUI-002, TUI-003, TUI-004, TUI-005, TUI-006, TUI-007, TUI-008, TUI-009, TUI-010, TUI-012, TUI-016
+
+every verified obligation holds up
+wire-version: crates/zz-protocol/src/message.rs changed since v0.10.0, which shipped PROTOCOL_VERSION 103,
+  but the tree still says 103. A released version cannot take appends: two builds
+  would both claim 103 and disagree about the bytes.
+  Set PROTOCOL_VERSION to 104, move this cycle's appends into a v104
+  entry in knowledge/protocol/wire-protocol.md's version history, and update the two
+  assertions that pin the number (crates/zz-protocol/src/message.rs and
+  crates/zz-protocol/tests/hunt_claims.rs).
+  32 changed line(s), first few:
+    +    #[serde(skip)]
+    +    stdin_spent: bool,
+    +            stdin_spent: false,
+    +        self.stdin_spent = false;
+    +    }
+    +    pub fn set_stdin_spent(&mut self) {

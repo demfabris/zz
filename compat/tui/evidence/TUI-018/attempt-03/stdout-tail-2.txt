@@ -1,0 +1,28 @@
+tmux ['new-session', '-d', '-s', 'p', '-n', 'w', 'sleep 180'] 0 b'' b''
+CASE load-save-binary
+tmux ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review - ; display-message -p tail'] 0 b'' b''
+tmux ['revieworder'] 0 b'a\xff\x00z' b''
+tmux ['save-buffer', '-b', 'review', '-'] 0 b'a\xff\x00z' b''
+CASE load-save-text
+tmux ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review - ; display-message -p tail'] 0 b'' b''
+tmux ['revieworder'] 0 b'no-newline' b''
+tmux ['save-buffer', '-b', 'review', '-'] 0 b'no-newline' b''
+CASE load-save-newline
+tmux ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review - ; display-message -p tail'] 0 b'' b''
+tmux ['revieworder'] 0 b'with-newline\n' b''
+tmux ['save-buffer', '-b', 'review', '-'] 0 b'with-newline\n' b''
+tmux ['kill-server'] 0 b'' b''
+zz ['new-session', '-d', '-s', 'p', '-n', 'w', 'sleep 180'] 0 b'' b''
+CASE load-save-binary
+zz ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review - ; display-message -p tail'] 0 b'' b''
+zz ['revieworder'] 0 b'a\xff\x00ztail\n' b''
+zz ['save-buffer', '-b', 'review', '-'] 0 b'a\xff\x00z' b''
+CASE load-save-text
+zz ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review - ; display-message -p tail'] 0 b'' b''
+zz ['revieworder'] 0 b'no-newlinetail\n' b''
+zz ['save-buffer', '-b', 'review', '-'] 0 b'no-newline' b''
+CASE load-save-newline
+zz ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review - ; display-message -p tail'] 0 b'' b''
+zz ['revieworder'] 0 b'with-newline\ntail\n' b''
+zz ['save-buffer', '-b', 'review', '-'] 0 b'with-newline\n' b''
+zz ['kill-server'] 0 b'' b''

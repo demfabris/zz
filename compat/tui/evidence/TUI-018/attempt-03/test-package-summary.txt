@@ -1,0 +1,113 @@
+Running unittests src/lib.rs (target/debug/deps/zz-d88754f6f8453ec8)
+test result: FAILED. 660 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.73s
+
+Running unittests src/main.rs (target/debug/deps/zz-b6d17c89165f8b5c)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Running unittests src/bin/zz_browser_fixture.rs (target/debug/deps/zz_browser_fixture-166e9befc5ecd12b)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Running unittests src/bin/zz_cli.rs (target/debug/deps/zz_cli-1d5593cf5aa198cb)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Running unittests src/bin/zz_external_texture_fixture.rs (target/debug/deps/zz_external_texture_fixture-63703537436e6249)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Running unittests src/bin/zz_helper.rs (target/debug/deps/zz_helper-5ea18195179438e8)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Running tests/buffer_client_file_load.rs (target/debug/deps/buffer_client_file_load-ee51e170891a1269)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.27s
+
+Running tests/buffer_client_file_save.rs (target/debug/deps/buffer_client_file_save-82d5fa413913b1a1)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.18s
+
+Running tests/cli_binary.rs (target/debug/deps/cli_binary-c82f91ddff7ed115)
+test result: ok. 133 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 106.86s
+
+Running unittests src/lib.rs (target/debug/deps/zz_daemon-f05be0e64d0dfba0)
+test result: ok. 937 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 144.86s
+
+Running tests/agent_soak.rs (target/debug/deps/agent_soak-5d5f2c04bf5d0849)
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 4.19s
+
+Running tests/display_menu_cell_layout.rs (target/debug/deps/display_menu_cell_layout-b46a12dda1fc432e)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.50s
+
+Running tests/display_menu_resize_lifecycle.rs (target/debug/deps/display_menu_resize_lifecycle-9b0698d992919af8)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.41s
+
+Running tests/display_menu_shortcut_grammar.rs (target/debug/deps/display_menu_shortcut_grammar-9fa32bc037bafca5)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.24s
+
+Running tests/display_popup_resize_lifecycle.rs (target/debug/deps/display_popup_resize_lifecycle-71915795a07d06a1)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.66s
+
+Running tests/format_client_loop_context.rs (target/debug/deps/format_client_loop_context-b2196a20e54e9e41)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.63s
+
+Running tests/format_environment_loop_context.rs (target/debug/deps/format_environment_loop_context-88cc0a76490008fb)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.53s
+
+Running tests/format_modifier_client_loop.rs (target/debug/deps/format_modifier_client_loop-8c77679343a958e0)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.44s
+
+Running tests/format_modifier_environment_loop.rs (target/debug/deps/format_modifier_environment_loop-5218fabea0ff0f94)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.61s
+
+Running unittests src/lib.rs (target/debug/deps/zz_mux-7e23d6b48afa646b)
+test result: ok. 533 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.17s
+
+Running tests/attached_pane_width.rs (target/debug/deps/attached_pane_width-cfcd25251b46be25)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+Running tests/catalog_floor.rs (target/debug/deps/catalog_floor-277c65ffca8e4b52)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+Running tests/chaos.rs (target/debug/deps/chaos-771a70a2f045f8ed)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.26s
+
+Running tests/config_fixture.rs (target/debug/deps/config_fixture-29831bd2119de854)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+Running tests/config_non_utf8_bytes.rs (target/debug/deps/config_non_utf8_bytes-2e62f5be59c52e0e)
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Running tests/config_non_utf8_engine.rs (target/debug/deps/config_non_utf8_engine-ac2df94797b9f8c0)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+Running tests/format_modifier_client_loop.rs (target/debug/deps/format_modifier_client_loop-f39b1a3c61b19990)
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Running tests/format_modifier_environment_loop.rs (target/debug/deps/format_modifier_environment_loop-eec114922c178b6b)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Running tests/format_modifier_option_loop.rs (target/debug/deps/format_modifier_option_loop-2dc41423f6bea05c)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+Running tests/format_option_loop_context.rs (target/debug/deps/format_option_loop_context-52672afb8febbc22)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+Running tests/hunt_claims.rs (target/debug/deps/hunt_claims-d12b497891ca7e2e)
+test result: ok. 60 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+Running unittests src/lib.rs (target/debug/deps/zz_protocol-60e6189ebbda9536)
+test result: ok. 228 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+
+Running tests/display_menu_cell_layout.rs (target/debug/deps/display_menu_cell_layout-7fcd1df6e101aa82)
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Running tests/hunt_claims.rs (target/debug/deps/hunt_claims-a35bfb4faa039676)
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Doc-tests zz
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Doc-tests zz_daemon
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Doc-tests zz_mux
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Doc-tests zz_protocol
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

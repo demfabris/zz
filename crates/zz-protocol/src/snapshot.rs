@@ -444,7 +444,7 @@ impl PaneBorderIndicators {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PaneSnapshot {
     pub id: PaneId,
     pub title: String,
@@ -466,7 +466,7 @@ pub struct PaneSnapshot {
     pub mode: Option<PaneMode>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum PaneMode {
     Clock {
         time: String,
@@ -480,6 +480,11 @@ pub enum PaneMode {
         prompt: String,
         prompt_style: String,
     },
+    Customize {
+        state: crate::ChooseTreeState,
+        presentation: Box<crate::ChooserPresentation>,
+        offset: u32,
+    },
 }
 
 impl PaneMode {
@@ -487,6 +492,7 @@ impl PaneMode {
     pub const fn name(&self) -> &'static str {
         match self {
             Self::Clock { .. } => "clock-mode",
+            Self::Customize { .. } => "options-mode",
             Self::Switch { .. } => "switch-mode",
         }
     }

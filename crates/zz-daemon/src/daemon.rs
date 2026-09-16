@@ -26960,20 +26960,16 @@ impl Shared {
                 {
                     continue;
                 }
-                match value {
-                    Some(value) => {
-                        if inner.claude_peer_states.get(&pane).map(String::as_str) == Some(value) {
-                            continue;
-                        }
-                        inner.claude_peer_states.insert(pane, value.to_owned());
-                        value
+                if let Some(value) = value {
+                    if inner.claude_peer_states.get(&pane).map(String::as_str) == Some(value) {
+                        continue;
                     }
-                    None => {
-                        if inner.claude_peer_states.remove(&pane).is_none() {
-                            continue;
-                        }
-                        "idle"
-                    }
+                    inner.claude_peer_states.insert(pane, value.to_owned());
+                    value
+                } else if inner.claude_peer_states.remove(&pane).is_none() {
+                    continue;
+                } else {
+                    "idle"
                 }
             };
             self.write_pane_agent_state(pane, value);
@@ -72577,7 +72573,7 @@ set-option -g @alias-mixed-next yes
                 ClientId(1),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-s", "claude-status"]),
+                &CommandInvocation::new("new-session", ["-d", "-s", "claude-status"]),
             )
             .expect("terminal session");
         let pane = context.pane.expect("terminal pane");

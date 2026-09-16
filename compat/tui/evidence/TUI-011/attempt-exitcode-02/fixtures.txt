@@ -1,0 +1,121 @@
+superset-alone
+command=["env", "ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-exitcode/target/debug/zz-exitcode-followup", "ZZ_SUPERSET_DIAGNOSTICS_DIR=/home/demfabris/dev/zz-c11-exitcode/compat/tui/evidence/TUI-011/attempt-exitcode-02/superset-diagnostics", "ZZ_SUPERSET_CAPTURE_DIR=/home/demfabris/dev/zz-c11-exitcode/compat/tui/evidence/TUI-011/attempt-exitcode-02/superset-captures", "compat/tui-superset.sh", "/home/demfabris/dev/zz-c11-exitcode/target/debug/zz-exitcode-followup"]
+started=2026-09-16T19:46:14.995918+00:00
+superset commands beside tmux behaviour (pin tmux)
+ok    names name-agent-catalog
+ok    names name-agent-respond
+ok    names name-agent-send
+ok    names name-capture-browser
+ok    names name-copy-mode-search-prompt
+ok    names name-debug-marker
+ok    names name-events
+ok    names name-focus-sidebar
+ok    names name-import-tmux-config
+ok    names name-inspect
+ok    names name-new-browser
+ok    names name-reload-config
+ok    names name-restart-agent-pane
+ok    names name-run-pane
+ok    names name-select-pane-kind
+ok    names name-send-last-output
+ok    names name-send-text
+ok    names name-set-agent-provider
+ok    names name-set-agent-session
+ok    names name-set-browser-profile
+ok    names name-set-browser-tabs
+ok    names name-set-browser-url
+ok    names name-set-editor-path
+ok    names name-show-agent-permission
+ok    names name-show-last-output
+ok    names name-split-agent
+ok    names name-split-browser
+ok    names name-split-picker
+ok    names name-tools
+ok    names name-wait-for-exit
+ok    names name-wait-pane
+      31 declared native names, every one reachable by that name
+ok    sidebar direct
+ok    sidebar binding
+ok    sidebar window-columns
+ok    sidebar focused-key-is-the-sidebars
+ok    sidebar window-columns-restored
+ok    sidebar unfocused-hands-the-key-to-the-pane
+ok    sidebar still-drawn-while-unfocused
+diagnostics retained in /home/demfabris/dev/zz-c11-exitcode/compat/tui/evidence/TUI-011/attempt-exitcode-02/superset-diagnostics:
+outer-tmux.screen.txt
+outer-tmuxb.screen.txt
+outer-zz.screen.txt
+outer-zzb.screen.txt
+ring-zz.daemon.log.txt
+ring-zz.tui.log.txt
+tmux.list-panes.txt
+what-fired.txt
+zz-client.stderr.txt
+zz-daemon.stderr.txt
+zz-daemon.stdout.txt
+zz.active-pane.txt
+zz.list-clients.txt
+zz.list-panes.txt
+error: the sidebar withdrawn did not happen within 12 seconds
+exit_status=2
+
+main-superset-alone
+command=["env", "ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-exitcode/target/exitcode-baseline-target/debug/zz", "ZZ_SUPERSET_DIAGNOSTICS_DIR=/home/demfabris/dev/zz-c11-exitcode/compat/tui/evidence/TUI-011/attempt-exitcode-02/main-superset-diagnostics", "ZZ_SUPERSET_CAPTURE_DIR=/home/demfabris/dev/zz-c11-exitcode/compat/tui/evidence/TUI-011/attempt-exitcode-02/main-superset-captures", "compat/tui-superset.sh", "/home/demfabris/dev/zz-c11-exitcode/target/exitcode-baseline-target/debug/zz"]
+started=2026-09-16T19:52:40.144390+00:00
+superset commands beside tmux behaviour (pin tmux)
+ok    names name-agent-catalog
+ok    names name-agent-respond
+ok    names name-agent-send
+ok    names name-capture-browser
+ok    names name-copy-mode-search-prompt
+ok    names name-debug-marker
+ok    names name-events
+ok    names name-focus-sidebar
+ok    names name-import-tmux-config
+ok    names name-inspect
+ok    names name-new-browser
+ok    names name-reload-config
+ok    names name-restart-agent-pane
+ok    names name-run-pane
+ok    names name-select-pane-kind
+ok    names name-send-last-output
+ok    names name-send-text
+ok    names name-set-agent-provider
+ok    names name-set-agent-session
+ok    names name-set-browser-profile
+ok    names name-set-browser-tabs
+ok    names name-set-browser-url
+ok    names name-set-editor-path
+ok    names name-show-agent-permission
+ok    names name-show-last-output
+ok    names name-split-agent
+ok    names name-split-browser
+ok    names name-split-picker
+ok    names name-tools
+ok    names name-wait-for-exit
+ok    names name-wait-pane
+      31 declared native names, every one reachable by that name
+ok    sidebar direct
+ok    sidebar binding
+ok    sidebar window-columns
+ok    sidebar focused-key-is-the-sidebars
+ok    sidebar window-columns-restored
+ok    sidebar unfocused-hands-the-key-to-the-pane
+ok    sidebar still-drawn-while-unfocused
+diagnostics retained in /home/demfabris/dev/zz-c11-exitcode/compat/tui/evidence/TUI-011/attempt-exitcode-02/main-superset-diagnostics:
+outer-tmux.screen.txt
+outer-tmuxb.screen.txt
+outer-zz.screen.txt
+outer-zzb.screen.txt
+ring-zz.daemon.log.txt
+ring-zz.tui.log.txt
+tmux.list-panes.txt
+what-fired.txt
+zz-client.stderr.txt
+zz-daemon.stderr.txt
+zz-daemon.stdout.txt
+zz.active-pane.txt
+zz.list-clients.txt
+zz.list-panes.txt
+error: the sidebar withdrawn did not happen within 12 seconds
+exit_status=2

@@ -1,0 +1,73 @@
+2026-09-16T19:43:55.427917+00:00
+["git", "rev-parse", "HEAD", "origin/main", "origin/campaign/tui-exitcode"]
+963dca55a2f4363996d2479cb005e5d572d08c7f
+e40a13e1c981aa9b707a5a6a54f5e0267c751de9
+177922fd02e34edc3201f738ee5aeb3aeb4960bf
+["git", "status", "--short"]
+ M .agents/skills/zz-workspace/SKILL.md
+ M crates/zz-daemon/src/daemon.rs
+?? compat/tui/evidence/TUI-011/attempt-exitcode-02/
+["uname", "-a"]
+Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+["/bin/sh", "-c", "command -v just; command -v rustc"]
+/usr/bin/just
+/home/demfabris/.cargo/bin/rustc
+["cat", "/tmp/zz-cargo.sh"]
+#!/usr/bin/env bash
+# Two-slot, memory-capped cargo for the alienware box (15 GB RAM + zram).
+# Every cargo command in cycle 11 goes through this. Never run bare cargo.
+set -uo pipefail
+CAP="${ZZ_CARGO_CAP:-4G}"
+SWAP="${ZZ_CARGO_SWAP:-2G}"
+JOBS="${ZZ_CARGO_JOBS:-2}"
+S=$((RANDOM % 2))
+exec systemd-run --user --scope -q \
+  -p MemoryMax="$CAP" -p MemorySwapMax="$SWAP" \
+  flock -w 3600 /tmp/zz-cargo-slot-$S.lock \
+  cargo "$@" --jobs "$JOBS"
+["cat", "/tmp/zz-exitcode-cargo/inside/cargo"]
+#!/usr/bin/env python3
+import os, sys
+if marker := os.environ.get("ZZ_EXITCODE_CARGO_STARTED"):
+    with open(marker, "w") as output:
+        output.write(str(os.getpid()))
+args = sys.argv[1:]
+assert len(args) >= 3 and args[-2] == "--jobs", args
+jobs = args[-2:]
+args = args[:-2]
+if args[0] != "fmt":
+    index = args.index("--") if "--" in args else len(args)
+    args[index:index] = jobs
+os.execv("/home/demfabris/.cargo/bin/cargo", ["cargo", *args])
+["cat", "/tmp/zz-exitcode-cargo/entry/cargo"]
+#!/usr/bin/env python3
+import os,pathlib,subprocess,sys,tempfile,time
+with tempfile.TemporaryDirectory(prefix='zz-exit-cargo-') as directory:
+    marker=pathlib.Path(directory)/'started'
+    env={**os.environ,'PATH':'/tmp/zz-exitcode-cargo/inside:'+os.environ['PATH'],'ZZ_EXITCODE_CARGO_STARTED':str(marker)}
+    attempt=0
+    while True:
+        attempt+=1
+        child=subprocess.Popen(['/tmp/zz-cargo.sh',*sys.argv[1:]],env=env)
+        deadline=time.monotonic()+15
+        while child.poll() is None and not marker.exists() and time.monotonic()<deadline:
+            time.sleep(.05)
+        if marker.exists() or child.poll() is not None:
+            sys.exit(child.wait())
+        try:
+            unit=pathlib.Path(f'/proc/{child.pid}/cgroup').read_text().strip().split('/')[-1]
+            children=pathlib.Path(f'/proc/{child.pid}/task/{child.pid}/children').read_text().strip()
+            if unit.startswith('run-') and unit.endswith('.scope') and not marker.exists() and not children:
+                print(f'exitcode queue adapter: retry {attempt}; no cargo start marker after 15 seconds; terminating owned queued scope {unit}',file=sys.stderr,flush=True)
+                subprocess.run(['systemctl','--user','kill',unit],check=True)
+                status=child.wait()
+                if marker.exists():
+                    sys.exit(status)
+            else:
+                sys.exit(child.wait())
+        except FileNotFoundError:
+            sys.exit(child.wait())
+41474e9d35d6d9be36312687e7c99f5946d9ec5f5fed4ea0cb4b6186e314c158  target/debug/zz-exitcode-followup
+df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  compat/.cache/tmux-src/tmux
+59d13fc20f1a7211b562fa046ee3db36e0a65150d8c391c514a16e8bc8818190  .agents/skills/zz-workspace/SKILL.md
+bb8cc64d3680fbdd7a501aead044199910b7147aa92a66ab8438b1d6fcff83a8  target/exitcode-baseline-target/debug/zz (plain origin/main e40a13e1)

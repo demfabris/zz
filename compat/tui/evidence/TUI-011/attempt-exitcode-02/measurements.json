@@ -1,0 +1,319 @@
+{
+  "code_commit": "755ebd6d1a253206bf622ae843181b7cb3c1ee74",
+  "base": "e40a13e1c981aa9b707a5a6a54f5e0267c751de9",
+  "runs": [
+    {
+      "name": "regenerate",
+      "command": [
+        "env",
+        "PATH=/tmp/zz-exitcode-cargo/entry:/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/home/demfabris/.local/bin:/home/demfabris/bin:/home/demfabris/.codex/tmp/arg0/codex-arg0wXriNh:/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/home/demfabris/.local/share/pnpm:/home/demfabris/.cargo/bin:/home/demfabris/.local/bin:/home/demfabris/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/home/demfabris/.local/share/flatpak/exports/bin:/usr/bin/site_perl:/usr/bin/vendor_perl:/usr/bin/core_perl:/usr/lib/rustup/bin:/home/demfabris/.claude/plugins/cache/claude-plugins-official/skill-creator/f0dce59fec06/bin:/home/demfabris/.claude/plugins/cache/claude-plugins-official/frontend-design/f0dce59fec06/bin:/home/demfabris/.claude/plugins/cache/codex-cc/codex/3.0.0/bin",
+        "CARGO_HOME=/home/demfabris/.cargo",
+        "RUSTUP_HOME=/home/demfabris/.rustup",
+        "HOME=/tmp/zz-emptyhome",
+        "XDG_CONFIG_HOME=/tmp/zz-emptyhome/config",
+        "just",
+        "tools-skill"
+      ],
+      "started": "2026-09-16T19:43:36.297596+00:00",
+      "ended": "2026-09-16T19:45:44.641073+00:00",
+      "exit_status": 0
+    },
+    {
+      "name": "superset-alone",
+      "command": [
+        "env",
+        "ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-exitcode/target/debug/zz-exitcode-followup",
+        "ZZ_SUPERSET_DIAGNOSTICS_DIR=/home/demfabris/dev/zz-c11-exitcode/compat/tui/evidence/TUI-011/attempt-exitcode-02/superset-diagnostics",
+        "ZZ_SUPERSET_CAPTURE_DIR=/home/demfabris/dev/zz-c11-exitcode/compat/tui/evidence/TUI-011/attempt-exitcode-02/superset-captures",
+        "compat/tui-superset.sh",
+        "/home/demfabris/dev/zz-c11-exitcode/target/debug/zz-exitcode-followup"
+      ],
+      "started": "2026-09-16T19:46:14.995918+00:00",
+      "ended": "2026-09-16T19:47:13.949672+00:00",
+      "exit_status": 2
+    },
+    {
+      "name": "skill-sync",
+      "command": [
+        "env",
+        "PATH=/tmp/zz-exitcode-cargo/inside:/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/home/demfabris/.local/bin:/home/demfabris/bin:/home/demfabris/.codex/tmp/arg0/codex-arg0wXriNh:/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/home/demfabris/.local/share/pnpm:/home/demfabris/.cargo/bin:/home/demfabris/.local/bin:/home/demfabris/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/home/demfabris/.local/share/flatpak/exports/bin:/usr/bin/site_perl:/usr/bin/vendor_perl:/usr/bin/core_perl:/usr/lib/rustup/bin:/home/demfabris/.claude/plugins/cache/claude-plugins-official/skill-creator/f0dce59fec06/bin:/home/demfabris/.claude/plugins/cache/claude-plugins-official/frontend-design/f0dce59fec06/bin:/home/demfabris/.claude/plugins/cache/codex-cc/codex/3.0.0/bin",
+        "CARGO_HOME=/home/demfabris/.cargo",
+        "RUSTUP_HOME=/home/demfabris/.rustup",
+        "HOME=/tmp/zz-emptyhome",
+        "XDG_CONFIG_HOME=/tmp/zz-emptyhome/config",
+        "/tmp/zz-cargo.sh",
+        "test",
+        "-p",
+        "zz-daemon",
+        "--lib",
+        "tools_skill_matches_workspace_skill"
+      ],
+      "started": "2026-09-16T19:47:28.843873+00:00",
+      "ended": "2026-09-16T19:47:54.877784+00:00",
+      "exit_status": -15
+    },
+    {
+      "name": "skill-sync-retry",
+      "command": [
+        "env",
+        "CARGO_HOME=/home/demfabris/.cargo",
+        "RUSTUP_HOME=/home/demfabris/.rustup",
+        "HOME=/tmp/zz-emptyhome",
+        "XDG_CONFIG_HOME=/tmp/zz-emptyhome/config",
+        "/tmp/zz-exitcode-cargo/entry/cargo",
+        "test",
+        "-p",
+        "zz-daemon",
+        "--lib",
+        "tools_skill_matches_workspace_skill"
+      ],
+      "started": "2026-09-16T19:47:54.959727+00:00",
+      "ended": "2026-09-16T19:48:38.903483+00:00",
+      "exit_status": 0
+    },
+    {
+      "name": "main-build",
+      "command": [
+        "env",
+        "CARGO_TARGET_DIR=/home/demfabris/dev/zz-c11-exitcode/target/exitcode-baseline-target",
+        "CARGO_HOME=/home/demfabris/.cargo",
+        "RUSTUP_HOME=/home/demfabris/.rustup",
+        "HOME=/tmp/zz-emptyhome",
+        "XDG_CONFIG_HOME=/tmp/zz-emptyhome/config",
+        "/tmp/zz-exitcode-cargo/entry/cargo",
+        "build",
+        "--manifest-path",
+        "target/exitcode-main-source/Cargo.toml",
+        "-p",
+        "zz",
+        "--bin",
+        "zz"
+      ],
+      "started": "2026-09-16T19:48:54.440755+00:00",
+      "ended": "2026-09-16T19:52:13.399718+00:00",
+      "exit_status": 0
+    },
+    {
+      "name": "main-superset-alone",
+      "command": [
+        "env",
+        "ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-exitcode/target/exitcode-baseline-target/debug/zz",
+        "ZZ_SUPERSET_DIAGNOSTICS_DIR=/home/demfabris/dev/zz-c11-exitcode/compat/tui/evidence/TUI-011/attempt-exitcode-02/main-superset-diagnostics",
+        "ZZ_SUPERSET_CAPTURE_DIR=/home/demfabris/dev/zz-c11-exitcode/compat/tui/evidence/TUI-011/attempt-exitcode-02/main-superset-captures",
+        "compat/tui-superset.sh",
+        "/home/demfabris/dev/zz-c11-exitcode/target/exitcode-baseline-target/debug/zz"
+      ],
+      "started": "2026-09-16T19:52:40.144390+00:00",
+      "ended": "2026-09-16T19:53:35.748329+00:00",
+      "exit_status": 2
+    },
+    {
+      "name": "daemon-full",
+      "command": [
+        "env",
+        "CARGO_HOME=/home/demfabris/.cargo",
+        "RUSTUP_HOME=/home/demfabris/.rustup",
+        "HOME=/tmp/zz-emptyhome",
+        "XDG_CONFIG_HOME=/tmp/zz-emptyhome/config",
+        "/tmp/zz-exitcode-cargo/entry/cargo",
+        "test",
+        "-p",
+        "zz-daemon",
+        "--no-fail-fast",
+        "--",
+        "--test-threads=1"
+      ],
+      "started": "2026-09-16T19:53:48.737331+00:00",
+      "ended": "2026-09-16T20:02:59.862813+00:00",
+      "exit_status": 0
+    },
+    {
+      "name": "fmt",
+      "command": [
+        "/tmp/zz-exitcode-cargo/entry/cargo",
+        "fmt",
+        "--all"
+      ],
+      "started": "2026-09-16T20:03:11.423560+00:00",
+      "ended": "2026-09-16T20:03:47.159341+00:00",
+      "exit_status": 0
+    },
+    {
+      "name": "compat-check",
+      "command": [
+        "env",
+        "PATH=/tmp/zz-exitcode-cargo/entry:/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/home/demfabris/.local/bin:/home/demfabris/bin:/home/demfabris/.codex/tmp/arg0/codex-arg0wXriNh:/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/home/demfabris/.local/share/pnpm:/home/demfabris/.cargo/bin:/home/demfabris/.local/bin:/home/demfabris/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/home/demfabris/.local/share/flatpak/exports/bin:/usr/bin/site_perl:/usr/bin/vendor_perl:/usr/bin/core_perl:/usr/lib/rustup/bin:/home/demfabris/.claude/plugins/cache/claude-plugins-official/skill-creator/f0dce59fec06/bin:/home/demfabris/.claude/plugins/cache/claude-plugins-official/frontend-design/f0dce59fec06/bin:/home/demfabris/.claude/plugins/cache/codex-cc/codex/3.0.0/bin",
+        "CARGO_HOME=/home/demfabris/.cargo",
+        "RUSTUP_HOME=/home/demfabris/.rustup",
+        "HOME=/tmp/zz-emptyhome",
+        "XDG_CONFIG_HOME=/tmp/zz-emptyhome/config",
+        "ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-c11-exitcode/target/debug/zz-exitcode-followup",
+        "compat/check.sh"
+      ],
+      "started": "2026-09-16T20:04:12.677600+00:00",
+      "ended": "2026-09-16T20:06:28.301328+00:00",
+      "exit_status": 0
+    },
+    {
+      "name": "wire-version",
+      "command": [
+        "python3",
+        "compat/wire-version.py"
+      ],
+      "started": "2026-09-16T20:04:13.834108+00:00",
+      "ended": "2026-09-16T20:04:13.868964+00:00",
+      "exit_status": 0
+    },
+    {
+      "name": "tui-tracker",
+      "command": [
+        "python3",
+        "compat/tui/tracker.py",
+        "check"
+      ],
+      "started": "2026-09-16T20:04:13.901685+00:00",
+      "ended": "2026-09-16T20:04:13.994180+00:00",
+      "exit_status": 0
+    },
+    {
+      "name": "clippy",
+      "command": [
+        "env",
+        "CARGO_HOME=/home/demfabris/.cargo",
+        "RUSTUP_HOME=/home/demfabris/.rustup",
+        "HOME=/tmp/zz-emptyhome",
+        "XDG_CONFIG_HOME=/tmp/zz-emptyhome/config",
+        "/tmp/zz-exitcode-cargo/entry/cargo",
+        "clippy",
+        "-p",
+        "zz",
+        "-p",
+        "zz-protocol",
+        "-p",
+        "zz-mux",
+        "-p",
+        "zz-daemon",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "started": "2026-09-16T20:06:34.568226+00:00",
+      "ended": "2026-09-16T20:07:12.158116+00:00",
+      "exit_status": 0
+    }
+  ],
+  "daemon_results": [
+    {
+      "target": "Running unittests src/lib.rs (target/debug/deps/zz_daemon-7a6e412177cab2ac)",
+      "status": "ok",
+      "passed": 951,
+      "failed": 0,
+      "ignored": 0,
+      "elapsed": "478.07s"
+    },
+    {
+      "target": "Running tests/agent_soak.rs (target/debug/deps/agent_soak-9c60ef249afbed08)",
+      "status": "ok",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 1,
+      "elapsed": "5.14s"
+    },
+    {
+      "target": "Running tests/display_menu_cell_layout.rs (target/debug/deps/display_menu_cell_layout-6cc30fe1acce4b1e)",
+      "status": "ok",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "elapsed": "3.00s"
+    },
+    {
+      "target": "Running tests/display_menu_resize_lifecycle.rs (target/debug/deps/display_menu_resize_lifecycle-bc4e59c0f13e15bf)",
+      "status": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "elapsed": "1.42s"
+    },
+    {
+      "target": "Running tests/display_menu_shortcut_grammar.rs (target/debug/deps/display_menu_shortcut_grammar-98f8118896878c58)",
+      "status": "ok",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "elapsed": "2.24s"
+    },
+    {
+      "target": "Running tests/display_popup_resize_lifecycle.rs (target/debug/deps/display_popup_resize_lifecycle-6c97b3d54f8ae732)",
+      "status": "ok",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "elapsed": "2.62s"
+    },
+    {
+      "target": "Running tests/format_client_loop_context.rs (target/debug/deps/format_client_loop_context-5e2aab9874aeb5f0)",
+      "status": "ok",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0,
+      "elapsed": "4.89s"
+    },
+    {
+      "target": "Running tests/format_environment_loop_context.rs (target/debug/deps/format_environment_loop_context-11ae7d8439dcb962)",
+      "status": "ok",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0,
+      "elapsed": "3.24s"
+    },
+    {
+      "target": "Running tests/format_modifier_client_loop.rs (target/debug/deps/format_modifier_client_loop-ad20dff4c39383b2)",
+      "status": "ok",
+      "passed": 6,
+      "failed": 0,
+      "ignored": 0,
+      "elapsed": "8.54s"
+    },
+    {
+      "target": "Running tests/format_modifier_environment_loop.rs (target/debug/deps/format_modifier_environment_loop-772f9135237ca4e2)",
+      "status": "ok",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "elapsed": "6.24s"
+    },
+    {
+      "target": "Doc-tests zz_daemon",
+      "status": "ok",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "elapsed": "0.00s"
+    }
+  ],
+  "superset_comparison": {
+    "outer-zz.screen.txt": {
+      "byte_identical": true
+    },
+    "outer-tmux.screen.txt": {
+      "byte_identical": true
+    },
+    "zz.active-pane.txt": {
+      "byte_identical": true
+    },
+    "zz.list-panes.txt": {
+      "byte_identical": true
+    },
+    "zz-client.stderr.txt": {
+      "byte_identical": true
+    },
+    "zz-daemon.stderr.txt": {
+      "byte_identical": false
+    },
+    "candidate_fired": "wait that ran out: the sidebar withdrawn\nat: 2026-09-16T16:47:12-03:00\ncase group: sidebar\nzz: /home/demfabris/dev/zz-c11-exitcode/target/debug/zz-exitcode-followup\ntmux: /home/demfabris/dev/zz-c11-exitcode/compat/.cache/tmux-src/tmux\nzz socket: /tmp/zzsu-kaYbAf.sock\nouter socket: zzsuo-kaYbAf\nlast command status: 1\nlast command output: focus-sidebar requires an interactive client\n",
+    "main_fired": "wait that ran out: the sidebar withdrawn\nat: 2026-09-16T16:53:34-03:00\ncase group: sidebar\nzz: /home/demfabris/dev/zz-c11-exitcode/target/exitcode-baseline-target/debug/zz\ntmux: /home/demfabris/dev/zz-c11-exitcode/compat/.cache/tmux-src/tmux\nzz socket: /tmp/zzsu-nSdZuo.sock\nouter socket: zzsuo-nSdZuo\nlast command status: 1\nlast command output: focus-sidebar requires an interactive client\n"
+  }
+}

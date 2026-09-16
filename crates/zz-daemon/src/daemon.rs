@@ -41137,7 +41137,8 @@ when unknown; terminal and Agent panes report it from OSC 133 marks.
 The `--help` flag alone, or the `help` verb, prints the command catalog. Use
 `zz <verb> --help` for a command's description, usage, options, and positional
 arguments; aliases and unique prefixes work too. These help forms need no daemon and exit 0. An
-unknown verb exits 2. Global `-h` keeps the tmux usage banner, and command `-h`
+unknown verb exits 1; an unknown verb requested through zz’s `--help` exits 2.
+Global `-h` keeps the tmux usage banner, and command `-h`
 flags keep their tmux meaning.
 
 Add `--json` to `list-sessions`, `list-windows`, `list-panes`, or `list-clients`
@@ -41152,12 +41153,15 @@ mapping option names to value strings in the selected scope. Combining `-F` and
 | Exit code | Meaning |
 | --- | --- |
 | 0 | Success. |
-| 1 | Command failure, missing daemon, or connection loss. |
-| 2 | Usage error: unknown verb, invalid flag, missing argument, or malformed value. |
+| 1 | Command failure, missing daemon, connection loss, or a tmux-compatible usage error (including an unknown command). |
+| 2 | Usage error in a zz-native verb or extension: invalid flag, missing argument, or malformed value. |
 | 3 | Blocked or unable to answer now, including `agent-send --on-block fail`. |
 | 124 | Wait timed out, including `agent-send --timeout`. |
 | 125 | Reserved for the `run-pane` timeout. |
 
+Tmux-compatible commands keep the pin’s exit status, including 1 for parse and usage errors.
+The error’s source determines the status: `list-panes -Z` exits 1, while zz’s
+`list-panes --json -F x` extension conflict exits 2.
 Commands that set an explicit exit code keep that code.
 
 ## Verbs

@@ -1,0 +1,69 @@
+2012779 tty=/dev/pts/12 flags=attached,focused,UTF-8
+2012782 tty=/dev/pts/21 flags=attached,focused,UTF-8
+note  suspend-client: the tmux screen never settled within 6 seconds
+      case suspend-client
+      screen differs
+        0a1,3
+        > $ printf 'SCENE-%s\n' %0
+        > SCENE-%0
+        > $
+        1a5,24
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        cursor tmux: 0,0 flag=1 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        1c1
+        < S cli 2 0
+        ---
+        > S cli 2 1
+        5a6
+        > C cli 80x24 0
+DIFF  suspend-client
+zz state after command: S<sl+
+tmux state after command: S<s+
+ok    resume
+zz state after direct SIGTSTP: S<sl+
+$ printf 'SCENE-%s\n' %0
+SCENE-%0
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+L0:win* 1:two
+probe checks=2 failures=1

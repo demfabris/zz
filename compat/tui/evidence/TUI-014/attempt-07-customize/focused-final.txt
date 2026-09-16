@@ -1,0 +1,19 @@
+ok    customize-mode-open
+ok    customize-Right
+ok    customize-Down
+ok    customize-Down
+ok    customize-Enter
+ok    customize-C-u
+ok    customize-7
+ok    customize-Enter
+ok    customize-value
+ok    customize-close
+note  suspend-client: the zz screen never settled within 6 seconds
+note  suspend-client: the tmux screen never settled within 6 seconds
+ok    suspend-client
+zz process 2891799
+T<l+
+tmux process 2891810
+T<+
+ok    suspend-resumed
+probe checks=12 failures=0

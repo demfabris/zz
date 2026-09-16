@@ -1,0 +1,14 @@
+  wrote index.md
+  wrote architecture/index.md
+  wrote browser/index.md
+  wrote concepts/index.md
+  wrote configuration/index.md
+  wrote crates/index.md
+  wrote designs/index.md
+  wrote playbooks/index.md
+  wrote protocol/index.md
+  wrote references/index.md
+  wrote research/index.md
+  wrote terminal/index.md
+  wrote tmux/index.md
+regenerated 13 index.md file(s)

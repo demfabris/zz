@@ -1,0 +1,6 @@
+    Checking zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-protocol)
+    Checking zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-mux)
+    Checking zz-client v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-client)
+    Checking zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-daemon)
+    Checking zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-tui)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 36.92s

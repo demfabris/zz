@@ -1,0 +1,16 @@
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-protocol)
+   Compiling zz-client v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-client)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-mux)
+   Compiling zz-browser v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-browser)
+   Compiling zz-chrome-import v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-chrome-import)
+   Compiling zz-ui v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-ui)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-daemon)
+   Compiling zz-config v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-config)
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-tui)
+   Compiling zz v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz)
+warning: due to multiple output types requested, the explicitly specified output file name will be adapted for each output type
+
+warning: ignoring --out-dir flag due to -o flag
+
+warning: `zz` (bin "zz") generated 2 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 30s

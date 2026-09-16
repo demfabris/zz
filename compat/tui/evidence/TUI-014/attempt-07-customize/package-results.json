@@ -1,0 +1,110 @@
+[
+  {
+    "target": "unittests src/lib.rs (target/debug/deps/zz_daemon-119aa22e630793ff)",
+    "result": "FAILED. 936 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 144.47s"
+  },
+  {
+    "target": "tests/agent_soak.rs (target/debug/deps/agent_soak-08f0cf541354e015)",
+    "result": "ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 10.80s"
+  },
+  {
+    "target": "tests/display_menu_cell_layout.rs (target/debug/deps/display_menu_cell_layout-233e40b9313e9654)",
+    "result": "ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.91s"
+  },
+  {
+    "target": "tests/display_menu_resize_lifecycle.rs (target/debug/deps/display_menu_resize_lifecycle-301ccc7c10dfb0e0)",
+    "result": "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.80s"
+  },
+  {
+    "target": "tests/display_menu_shortcut_grammar.rs (target/debug/deps/display_menu_shortcut_grammar-aa134dd4f635de55)",
+    "result": "ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.49s"
+  },
+  {
+    "target": "tests/display_popup_resize_lifecycle.rs (target/debug/deps/display_popup_resize_lifecycle-1bc03189ac804f22)",
+    "result": "ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.29s"
+  },
+  {
+    "target": "tests/format_client_loop_context.rs (target/debug/deps/format_client_loop_context-0bd1484185ece130)",
+    "result": "ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.91s"
+  },
+  {
+    "target": "tests/format_environment_loop_context.rs (target/debug/deps/format_environment_loop_context-8f406eba0da796e7)",
+    "result": "ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.29s"
+  },
+  {
+    "target": "tests/format_modifier_client_loop.rs (target/debug/deps/format_modifier_client_loop-718a012f0a9c28b0)",
+    "result": "ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.59s"
+  },
+  {
+    "target": "tests/format_modifier_environment_loop.rs (target/debug/deps/format_modifier_environment_loop-b70381c8ab026dee)",
+    "result": "ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.58s"
+  },
+  {
+    "target": "unittests src/lib.rs (target/debug/deps/zz_mux-b97afb34b0ebf390)",
+    "result": "ok. 536 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.20s"
+  },
+  {
+    "target": "tests/attached_pane_width.rs (target/debug/deps/attached_pane_width-484df48fe9c5b280)",
+    "result": "ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s"
+  },
+  {
+    "target": "tests/catalog_floor.rs (target/debug/deps/catalog_floor-90c74a6020421788)",
+    "result": "ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s"
+  },
+  {
+    "target": "tests/chaos.rs (target/debug/deps/chaos-ecf3d9577fe6bdbd)",
+    "result": "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.24s"
+  },
+  {
+    "target": "tests/config_fixture.rs (target/debug/deps/config_fixture-1a4113c52aff0de8)",
+    "result": "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s"
+  },
+  {
+    "target": "tests/config_non_utf8_bytes.rs (target/debug/deps/config_non_utf8_bytes-c81940558a132e44)",
+    "result": "ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+  },
+  {
+    "target": "tests/config_non_utf8_engine.rs (target/debug/deps/config_non_utf8_engine-64ae96be6442bcbd)",
+    "result": "ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s"
+  },
+  {
+    "target": "tests/format_modifier_client_loop.rs (target/debug/deps/format_modifier_client_loop-0c772bdf277e16a3)",
+    "result": "ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+  },
+  {
+    "target": "tests/format_modifier_environment_loop.rs (target/debug/deps/format_modifier_environment_loop-0d154fffa102b34e)",
+    "result": "ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+  },
+  {
+    "target": "tests/format_modifier_option_loop.rs (target/debug/deps/format_modifier_option_loop-70ab43ba7af2575e)",
+    "result": "ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s"
+  },
+  {
+    "target": "tests/format_option_loop_context.rs (target/debug/deps/format_option_loop_context-252e7e55a9ad586f)",
+    "result": "ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s"
+  },
+  {
+    "target": "tests/hunt_claims.rs (target/debug/deps/hunt_claims-ec5d893be6a546af)",
+    "result": "FAILED. 59 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s"
+  },
+  {
+    "target": "unittests src/lib.rs (target/debug/deps/zz_protocol-cfef56c060055769)",
+    "result": "FAILED. 223 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.85s"
+  },
+  {
+    "target": "tests/display_menu_cell_layout.rs (target/debug/deps/display_menu_cell_layout-7198e9a087b7489f)",
+    "result": "ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+  },
+  {
+    "target": "tests/hunt_claims.rs (target/debug/deps/hunt_claims-8d832376fb53301e)",
+    "result": "ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+  },
+  {
+    "target": "unittests src/lib.rs (target/debug/deps/zz_tui-63ce01406aa136e1)",
+    "result": "ok. 212 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s"
+  },
+  {
+    "target": "unittests src/main.rs (target/debug/deps/zz_tui-b05ae852c34b79ec)",
+    "result": "ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+  }
+]

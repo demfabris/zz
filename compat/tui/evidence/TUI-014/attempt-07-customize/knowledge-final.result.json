@@ -1,0 +1,10 @@
+{
+  "command": [
+    "python3",
+    ".agents/skills/okf/scripts/okf.py",
+    "validate",
+    "knowledge"
+  ],
+  "exit": 0,
+  "seconds": 0.4
+}

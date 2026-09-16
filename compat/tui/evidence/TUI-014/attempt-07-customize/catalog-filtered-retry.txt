@@ -1,0 +1,41 @@
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-customize/crates/zz-protocol)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 18.50s
+     Running unittests src/lib.rs (target/debug/deps/zz_protocol-9e3605435a33ab23)
+
+running 33 tests
+test catalog::tests::attach_session_working_directory_is_supported_and_advertised ... ok
+test catalog::tests::catalog_covers_every_executable_command_arm ... ok
+test catalog::tests::attaching_commands_accept_client_flags ... ok
+test catalog::tests::command_prompt_args_parse_accepts_only_the_template_as_a_block ... ok
+test catalog::tests::confirm_before_args_parse_accepts_only_the_command_as_a_block ... ok
+test catalog::tests::chooser_args_parse_accepts_a_command_or_string_template ... ok
+test catalog::tests::default_args_parse_requires_string_positionals_and_option_values ... ok
+test catalog::tests::bind_key_args_parse_accepts_every_positional_as_command_or_string ... ok
+test catalog::tests::display_menu_args_parse_tracks_names_keys_actions_and_separators ... ok
+test catalog::tests::tmux_declared_long_options_are_accepted ... ok
+test catalog::tests::tmux_json_rejects_custom_formats ... ok
+test catalog::tests::tmux_option_diagnostics_use_the_canonical_command ... ok
+test catalog::tests::tmux_optional_values_follow_the_pinned_lookahead ... ok
+test catalog::tests::tmux_required_values_accept_attached_and_flag_looking_arguments ... ok
+test catalog::tests::tmux_short_flag_clusters_are_unchanged ... ok
+test catalog::tests::display_panes_args_parse_accepts_a_command_or_string_template ... ok
+test catalog::tests::command_resolution_follows_the_pin_contract ... ok
+test catalog::tests::catalog_names_aliases_and_options_are_unique ... ok
+test catalog::tests::tmux_option_scanning_stops_at_the_first_positional_or_boundary ... ok
+test catalog::tests::every_usage_string_matches_its_accepted_options ... ok
+test catalog::tests::tmux_undeclared_long_options_remain_invalid ... ok
+test catalog::tests::if_shell_args_parse_distinguishes_conditions_branches_and_option_values ... ok
+test catalog::tests::external_command_name_lists_are_unique_and_disjoint ... ok
+test catalog::tests::tmux_option_catalog_matches_the_pinned_oracle ... ok
+test catalog::tests::run_shell_args_parse_switches_every_positional_with_leading_command_mode ... ok
+test catalog::tests::unimplemented_table_matches_the_flat_list ... ok
+test catalog::tests::set_hook_args_parse_switches_positionals_for_format_monitors ... ok
+test catalog::tests::set_option_args_parse_accepts_only_the_value_as_a_command_block ... ok
+test catalog::tests::split_window_spawn_style_and_title_options_are_supported_values ... ok
+test catalog::tests::send_keys_outer_options_match_the_tmux_pin ... ok
+test catalog::tests::native_names_do_not_change_the_affected_tmux_prefixes ... ok
+test catalog::tests::unknown_commands_remain_available_for_structured_errors ... ok
+test catalog::tests::unimplemented_tmux_syntax_matches_the_pinned_oracle ... ok
+
+test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 194 filtered out; finished in 0.01s
+

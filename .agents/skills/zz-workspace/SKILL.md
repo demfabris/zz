@@ -97,6 +97,30 @@ Output is capped at 200 lines or 256 KiB with a truncation note.
 Print that last command and output under a `%N $ command` header, with the same
 OSC 133 requirement and caps. For an Agent pane, read its last prompt and reply.
 
+### `zz wait-pane [-t %N] [--idle MS | --until TEXT | --regex RE] [--timeout SECS] [--tail N]`
+
+Wait for a terminal pane to stop producing output or show a matching logical line.
+Choose one condition; the default is `--idle 500`, measured from this call.
+Text and regex matches join wrapped screen lines and print the matching line.
+`--tail N` searches only the last N logical lines. Idle success prints nothing.
+The timeout defaults to 60 seconds; timeout exits 124 and names the condition.
+Invalid regex syntax exits 2. Use a command or Control client.
+
+### `zz run-pane [-t %N] [--timeout SECS] [--] COMMAND...`
+
+Run a command in a terminal pane's POSIX shell without shell integration.
+Join COMMAND words with single spaces, preserving supplied quoting; pass one
+command line. Paste it, verify the echo, then press Enter. Print the output between
+unique markers and return the child's exit code. Capture includes scrollback,
+capped to the last 10,000 logical lines. The timeout defaults to 120 seconds;
+timeout prints the output collected so far and exits 125. It leaves the command
+running. Use a command or Control client.
+
+```sh
+zz run-pane -t %3 -- "sh -c 'echo hi; exit 7'"
+zz wait-pane -t %3 --until 'ready' --timeout 30
+```
+
 ### `zz send-text -t %N [--no-enter] [--timeout MS] [TEXT]`
 
 Paste into a terminal TUI, wait for the text to appear, then press Enter. Read

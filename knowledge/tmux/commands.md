@@ -514,10 +514,10 @@ stored binding display renders all children. Both preserve the prepared group fo
 
 # Daemon-side workspace verbs
 
-Nine zz-native verbs are handled by [the daemon](/crates/zz-daemon.md) before the engine sees them,
+These zz-native verbs are handled by [the daemon](/crates/zz-daemon.md) before the engine sees them,
 for the same reason `capture-pane` is: each acts on something `MuxState` does not own. They now have
 shared `catalog.rs` specs, so `list-commands`, stored-command validation and rendering, and
-[command-palette](/concepts/command-palette.md) completion discover them like the other 16 native
+[command-palette](/concepts/command-palette.md) completion discover them like the other native
 verbs. Exact native names resolve before abbreviation lookup. A native abbreviation resolves only
 when no tmux canonical name starts with it, which keeps `capture-b` native while `capture` resolves
 to tmux's `capture-pane`. Execution remains daemon-owned.
@@ -530,6 +530,8 @@ to tmux's `capture-pane`. Execution remains daemon-owned.
 | `agent-respond` | `[-t %N] (--allow \| --deny \| --option ID) [REQUEST_ID]` . answer the oldest or named request and print the option ID. `--allow` prefers allow-once. Interactive clients cannot invoke it. |
 | `send-last-output` | `-t %N` . route a terminal pane's last completed command and output (OSC 133 marks) into the window's most recently focused Agent pane. Bound to `<prefix> e`. |
 | `show-last-output` | `-t %N` . the read twin: print that same fenced `%N $ command` block to the caller instead of routing it, so a script or an agent reads a terminal's last result without a capture-and-regex dance. Same OSC 133 requirement and 200-line / 256 KiB cap. Accepts an Agent pane too: its transcript projection frames every turn with OSC 133 marks, so the block is the last prompt and reply. |
+| `wait-pane` | `[-t %N] [--idle MS \| --until TEXT \| --regex RE] [--timeout SECS] [--tail N]` . wait for one condition in a terminal pane. Default: 500 ms without output after observation starts, with no output on success. Text and regex searches join wrapped visible lines and print the matching line; `--tail` restricts the search to the last N logical lines. Timeout defaults to 60 seconds and exits 124; invalid regex syntax exits 2. Command and Control clients only. |
+| `run-pane` | `[-t %N] [--timeout SECS] [--] COMMAND...` . join words with single spaces and paste one command line into a POSIX terminal shell, verify its echo, then submit. Random markers identify the output and child exit code without shell integration. Capture includes scrollback, capped to the last 10,000 logical lines. Timeout defaults to 120 seconds, prints partial output, and exits 125 while the command continues. Command and Control clients only. |
 | `send-text` | `-t %N [--no-enter] [--timeout MS] TEXT` . deliver TEXT to a TUI in a terminal pane the way `send-keys -l … Enter` cannot: paste it (bracketed iff the app enabled DECSET 2004 — the actor decides), poll `capture` until the text's tail, or a `[Pasted text` collapse marker, is on screen, then press Enter. No echo within `--timeout` (default 2000 ms) is a non-zero exit with nothing submitted. Honors `pane_input_off` and `synchronize-panes` like `paste-buffer`. |
 | `capture-browser` | `-t %N -o /abs/path.png` . write a browser pane's latest rendered frame to a PNG. The path must be absolute because the GUI process writes it. |
 | `debug-marker` | `[NOTE]` . stamp a `user_marker` line into the daemon's log so the moment an incident was noticed is findable later. The GUI's `DebugMark` key (`cmd-shift-m`/`ctrl-shift-m`) forwards here after stamping the app's own log. |

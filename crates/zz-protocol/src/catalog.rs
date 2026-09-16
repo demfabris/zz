@@ -560,6 +560,8 @@ pub static DAEMON_COMMAND_NAMES: &[&str] = &[
     "send-last-output",
     "show-last-output",
     "send-text",
+    "wait-pane",
+    "run-pane",
     "capture-browser",
     "debug-marker",
     "tools",
@@ -787,6 +789,7 @@ pub static NATIVE_COMMAND_NAMES: &[&str] = &[
     "new-browser",
     "reload-config",
     "restart-agent-pane",
+    "run-pane",
     "select-pane-kind",
     "send-last-output",
     "send-text",
@@ -802,9 +805,54 @@ pub static NATIVE_COMMAND_NAMES: &[&str] = &[
     "split-browser",
     "split-picker",
     "tools",
+    "wait-pane",
 ];
 
 pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
+    CommandSpec {
+        name: "wait-pane",
+        aliases: &[],
+        description: "Wait for terminal output or an idle interval",
+        usage: "[-t target-pane] [--idle MS] [--until TEXT] [--regex RE] [--timeout SECS] [--tail N]",
+        options: &[
+            CommandOptionSpec::value("-t", Pane, "target terminal pane"),
+            CommandOptionSpec::value(
+                "--idle",
+                FreeForm,
+                "milliseconds without output; default 500",
+            ),
+            CommandOptionSpec::value("--until", FreeForm, "text to find in a logical line"),
+            CommandOptionSpec::value(
+                "--regex",
+                FreeForm,
+                "regular expression to match a logical line",
+            ),
+            CommandOptionSpec::value(
+                "--timeout",
+                FreeForm,
+                "seconds to wait; default 60, timeout exits 124",
+            ),
+            CommandOptionSpec::value("--tail", FreeForm, "search only the last N logical lines"),
+        ],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "run-pane",
+        aliases: &[],
+        description: "Run a command in a POSIX terminal shell and return its output and exit code",
+        usage: "[-t target-pane] [--timeout SECS] [--] COMMAND...",
+        options: &[
+            CommandOptionSpec::value("-t", Pane, "target terminal pane"),
+            CommandOptionSpec::value(
+                "--timeout",
+                FreeForm,
+                "seconds to wait; default 120, timeout exits 125",
+            ),
+        ],
+        positionals: &[],
+        variadic: Some(FreeForm),
+    },
     CommandSpec {
         name: "agent-catalog",
         aliases: &[],

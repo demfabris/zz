@@ -3084,6 +3084,8 @@ enum DaemonCommandDispatch {
     SendLastOutput,
     ShowLastOutput,
     SendText,
+    WaitPane,
+    RunPane,
     CaptureBrowser,
     DebugMarker,
     Tools,
@@ -3118,6 +3120,8 @@ const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
     ("send-last-output", DaemonCommandDispatch::SendLastOutput),
     ("show-last-output", DaemonCommandDispatch::ShowLastOutput),
     ("send-text", DaemonCommandDispatch::SendText),
+    ("wait-pane", DaemonCommandDispatch::WaitPane),
+    ("run-pane", DaemonCommandDispatch::RunPane),
     ("capture-browser", DaemonCommandDispatch::CaptureBrowser),
     ("debug-marker", DaemonCommandDispatch::DebugMarker),
     ("tools", DaemonCommandDispatch::Tools),
@@ -6727,6 +6731,12 @@ impl Shared {
                         self.show_last_output(context, &command.args)
                     }
                     DaemonCommandDispatch::SendText => self.send_text(context, &command.args),
+                    DaemonCommandDispatch::WaitPane => {
+                        self.wait_pane(client, kind, context, &command.args)
+                    }
+                    DaemonCommandDispatch::RunPane => {
+                        self.run_pane(client, kind, context, &command.args)
+                    }
                     DaemonCommandDispatch::CaptureBrowser => {
                         self.capture_browser(context, &command.args)
                     }
@@ -8263,6 +8273,7 @@ impl Shared {
                             }
                             Self::wake_pane_exit_wait(&inner, *pane, 0);
                             inner.terminals.remove(pane);
+                            inner.last_output.remove(pane);
                             inner.terminal_spawns.remove(pane);
                             inner.terminal_geometries.remove(pane);
                             inner.paste_uploads.retain(|_, upload| upload.pane != *pane);
@@ -13502,6 +13513,201 @@ impl Shared {
             }
         }
         self.paste_and_submit(pane, text, 2000, true)
+    }
+
+    fn terminal_wait_target(
+        &self,
+        verb: &str,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        target: Option<&str>,
+    ) -> Result<(PaneId, Arc<TerminalSession>), DaemonError> {
+        if !matches!(kind, ClientKind::Command | ClientKind::Control) {
+            return Err(ServerError::InvalidCommand(format!(
+                "{verb} requires a command or control client"
+            ))
+            .into());
+        }
+        let inner = self.inner.lock();
+        let pane = inner
+            .engine
+            .resolve_pane(target, context.window, context.pane)?;
+        if !matches!(
+            inner.engine.state.pane(pane).map(|pane| &pane.kind),
+            Some(PaneKind::Terminal)
+        ) {
+            return Err(
+                ServerError::InvalidTarget(format!("{pane} is not a terminal pane")).into(),
+            );
+        }
+        let terminal = inner
+            .terminals
+            .get(&pane)
+            .cloned()
+            .ok_or(ServerError::PaneExited(pane))?;
+        Ok((pane, terminal))
+    }
+
+    fn wait_pane(
+        &self,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        args: &[RawText],
+    ) -> Result<Execution, DaemonError> {
+        let parsed = parse_wait_pane_args(args)?;
+        let (pane, terminal) =
+            self.terminal_wait_target("wait-pane", kind, context, parsed.target.as_deref())?;
+        let started = Instant::now();
+        let options = CaptureOptions {
+            join_wrapped: true,
+            preserve_trailing: true,
+            ..CaptureOptions::default()
+        };
+        let mut first = true;
+        self.report_command_queue_park();
+        loop {
+            if self.command_queue_cancelled(client) {
+                return Ok(Execution::default());
+            }
+            let last_output = {
+                let inner = self.inner.lock();
+                if !inner
+                    .terminals
+                    .get(&pane)
+                    .is_some_and(|current| Arc::ptr_eq(current, &terminal))
+                {
+                    return Err(ServerError::PaneExited(pane).into());
+                }
+                inner
+                    .last_output
+                    .get(&pane)
+                    .copied()
+                    .unwrap_or(started)
+                    .max(started)
+            };
+            match &parsed.condition {
+                PaneWaitCondition::Idle(dwell) => {
+                    if !first && last_output.elapsed() >= *dwell {
+                        return Ok(Execution::default());
+                    }
+                }
+                condition => {
+                    let screen = capture_screen(&terminal, pane, &options)?;
+                    if let Some(line) = screen
+                        .lines()
+                        .rev()
+                        .take(parsed.tail.unwrap_or(usize::MAX))
+                        .find(|line| match condition {
+                            PaneWaitCondition::Until(text) => line.contains(text),
+                            PaneWaitCondition::Regex(regex) => regex.is_match(line),
+                            PaneWaitCondition::Idle(_) => false,
+                        })
+                    {
+                        return Ok(Execution {
+                            output: format!("{line}\n").into(),
+                            effects: Vec::new(),
+                        });
+                    }
+                }
+            }
+            if started.elapsed() >= parsed.timeout {
+                let condition = match &parsed.condition {
+                    PaneWaitCondition::Idle(dwell) => format!("--idle {}", dwell.as_millis()),
+                    PaneWaitCondition::Until(text) => format!("--until {text:?}"),
+                    PaneWaitCondition::Regex(regex) => format!("--regex {:?}", regex.as_str()),
+                };
+                return Err(DaemonError::CommandExit {
+                    output: format!("wait-pane: timed out waiting for {condition} on {pane}\n")
+                        .into(),
+                    exit_code: 124,
+                });
+            }
+            first = false;
+            thread::sleep(SEND_TEXT_POLL_INTERVAL);
+        }
+    }
+
+    fn run_pane(
+        &self,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        args: &[RawText],
+    ) -> Result<Execution, DaemonError> {
+        let parsed = parse_run_pane_args(args)?;
+        let (pane, terminal) =
+            self.terminal_wait_target("run-pane", kind, context, parsed.target.as_deref())?;
+        let mut nonce = [0_u8; 8];
+        getrandom::fill(&mut nonce).map_err(std::io::Error::other)?;
+        let nonce = u64::from_ne_bytes(nonce);
+        let marker = format!("ZZRUN-{nonce:016x}");
+        let line = format!(
+            "printf '\\n%s\\n' '{marker}-BEGIN'; {}; printf '\\n{marker}-RC=%d=END\\n' $?",
+            parsed.command,
+        );
+        let started = Instant::now();
+        self.report_command_queue_park();
+        if self.command_queue_cancelled(client) {
+            return Ok(Execution::default());
+        }
+        if parsed.timeout.is_zero() {
+            return Err(DaemonError::CommandExit {
+                output: RawText::default(),
+                exit_code: 125,
+            });
+        }
+        let timeout_ms = u64::try_from(parsed.timeout.as_millis())
+            .unwrap_or(u64::MAX)
+            .min(SEND_TEXT_TIMEOUT_MS);
+        if let Err(error) = self.paste_and_submit(pane, &line, timeout_ms, true) {
+            if started.elapsed() >= parsed.timeout {
+                return Err(DaemonError::CommandExit {
+                    output: RawText::default(),
+                    exit_code: 125,
+                });
+            }
+            return Err(error);
+        }
+        let options = CaptureOptions {
+            start: CaptureBoundary::HistoryStart,
+            join_wrapped: true,
+            preserve_trailing: true,
+            ..CaptureOptions::default()
+        };
+        let mut output = String::new();
+        let mut collecting = false;
+        loop {
+            if self.command_queue_cancelled(client) {
+                return Ok(Execution::default());
+            }
+            let screen = capture_screen(&terminal, pane, &options)?;
+            let (captured, exit_code) = run_pane_result(&screen, &marker, collecting);
+            if let Some(captured) = captured {
+                collecting = true;
+                output = captured.to_owned();
+            }
+            if let Some(exit_code) = exit_code {
+                return if exit_code == 0 {
+                    Ok(Execution {
+                        output: output.into(),
+                        effects: Vec::new(),
+                    })
+                } else {
+                    Err(DaemonError::CommandExit {
+                        output: output.into(),
+                        exit_code,
+                    })
+                };
+            }
+            if started.elapsed() >= parsed.timeout {
+                return Err(DaemonError::CommandExit {
+                    output: output.into(),
+                    exit_code: 125,
+                });
+            }
+            thread::sleep(SEND_TEXT_POLL_INTERVAL);
+        }
     }
 
     fn paste_and_submit(
@@ -22844,6 +23050,7 @@ impl Shared {
             let mut alert_window = None;
             let mut silence_schedule = None;
             if output_activity {
+                inner.last_output.insert(pane, Instant::now());
                 inner.engine.set_format_now(unix_timestamp());
                 for session in inner.copy_sessions.values_mut() {
                     if session.pane == pane && !session.exiting {
@@ -28428,6 +28635,7 @@ struct ServerState {
     deferred_event_hooks: Vec<PendingHookEvent>,
     deferred_control_refresh: bool,
     terminals: BTreeMap<PaneId, Arc<TerminalSession>>,
+    last_output: BTreeMap<PaneId, Instant>,
     terminal_spawns: BTreeMap<PaneId, TerminalSpawn>,
     next_command_output_id: u64,
     command_outputs: BTreeMap<ClientId, CommandOutputSession>,
@@ -39630,6 +39838,194 @@ pub fn send_text_reads_stdin(args: &[RawText]) -> bool {
     parse_send_text_args(args).is_ok_and(|parsed| parsed.text.is_empty())
 }
 
+#[derive(Debug)]
+enum PaneWaitCondition {
+    Idle(Duration),
+    Until(String),
+    Regex(regex::Regex),
+}
+
+#[derive(Debug)]
+struct ParsedWaitPane {
+    target: Option<String>,
+    condition: PaneWaitCondition,
+    timeout: Duration,
+    tail: Option<usize>,
+}
+
+fn parse_wait_pane_args(args: &[RawText]) -> Result<ParsedWaitPane, ServerError> {
+    let mut parsed = ParsedWaitPane {
+        target: None,
+        condition: PaneWaitCondition::Idle(Duration::from_millis(500)),
+        timeout: Duration::from_secs(60),
+        tail: None,
+    };
+    let mut condition_set = false;
+    let mut index = 0;
+    while let Some(argument) = args.get(index) {
+        if argument == "--" && index + 1 == args.len() {
+            break;
+        }
+        if let Some(value) = option_value("wait-pane", args, index, &["-t"])? {
+            parsed.target = Some(value.value);
+            index += value.consumed;
+            continue;
+        }
+        if let Some(value) = option_value("wait-pane", args, index, &["--timeout"])? {
+            parsed.timeout = parse_pane_timeout("wait-pane", &value.value)?;
+            index += value.consumed;
+            continue;
+        }
+        if let Some(value) = option_value("wait-pane", args, index, &["--tail"])? {
+            parsed.tail = Some(value.value.parse().map_err(|_| {
+                ServerError::CommandParse(
+                    "wait-pane --tail needs a nonnegative whole number of lines".to_owned(),
+                )
+            })?);
+            index += value.consumed;
+            continue;
+        }
+        let mut condition = None;
+        for name in ["--idle", "--until", "--regex"] {
+            let Some(value) = option_value("wait-pane", args, index, &[name])? else {
+                continue;
+            };
+            if condition_set {
+                return Err(ServerError::CommandParse(
+                    "wait-pane accepts exactly one of --idle, --until, or --regex".to_owned(),
+                ));
+            }
+            condition = Some(match name {
+                "--idle" => PaneWaitCondition::Idle(Duration::from_millis(
+                    value.value.parse().map_err(|_| {
+                        ServerError::CommandParse(
+                            "wait-pane --idle needs a nonnegative whole number of milliseconds"
+                                .to_owned(),
+                        )
+                    })?,
+                )),
+                "--regex" => {
+                    PaneWaitCondition::Regex(regex::Regex::new(&value.value).map_err(|error| {
+                        ServerError::CommandParse(format!("wait-pane --regex: {error}"))
+                    })?)
+                }
+                _ => PaneWaitCondition::Until(value.value),
+            });
+            index += value.consumed;
+            break;
+        }
+        if let Some(condition) = condition {
+            parsed.condition = condition;
+            condition_set = true;
+            continue;
+        }
+        return Err(ServerError::CommandParse(format!(
+            "unexpected wait-pane argument: {argument}"
+        )));
+    }
+    Ok(parsed)
+}
+
+#[derive(Debug)]
+struct ParsedRunPane {
+    target: Option<String>,
+    timeout: Duration,
+    command: String,
+}
+
+fn parse_run_pane_args(args: &[RawText]) -> Result<ParsedRunPane, ServerError> {
+    let mut parsed = ParsedRunPane {
+        target: None,
+        timeout: Duration::from_secs(120),
+        command: String::new(),
+    };
+    let mut index = 0;
+    while let Some(argument) = args.get(index) {
+        if argument == "--" {
+            index += 1;
+            break;
+        }
+        if let Some(value) = option_value("run-pane", args, index, &["-t"])? {
+            parsed.target = Some(value.value);
+            index += value.consumed;
+            continue;
+        }
+        if let Some(value) = option_value("run-pane", args, index, &["--timeout"])? {
+            parsed.timeout = parse_pane_timeout("run-pane", &value.value)?;
+            index += value.consumed;
+            continue;
+        }
+        if argument.starts_with('-') {
+            return Err(ServerError::CommandParse(format!(
+                "unexpected run-pane option: {argument}"
+            )));
+        }
+        break;
+    }
+    parsed.command = args[index..]
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(" ");
+    if parsed.command.trim().is_empty() {
+        return Err(ServerError::CommandParse(
+            "usage: run-pane [-t target-pane] [--timeout SECS] [--] COMMAND...".to_owned(),
+        ));
+    }
+    if parsed
+        .command
+        .chars()
+        .any(|character| character.is_control() && character != '\t')
+    {
+        return Err(ServerError::CommandParse(
+            "run-pane requires a single command line without control characters".to_owned(),
+        ));
+    }
+    Ok(parsed)
+}
+
+fn parse_pane_timeout(verb: &str, value: &str) -> Result<Duration, ServerError> {
+    value.parse().map(Duration::from_secs).map_err(|_| {
+        ServerError::CommandParse(format!(
+            "{verb} --timeout needs a nonnegative whole number of seconds"
+        ))
+    })
+}
+
+fn run_pane_result<'a>(
+    screen: &'a str,
+    marker: &str,
+    collecting: bool,
+) -> (Option<&'a str>, Option<u8>) {
+    let begin = format!("{marker}-BEGIN");
+    let prefix = format!("{marker}-RC=");
+    let lines = screen
+        .split_inclusive('\n')
+        .rev()
+        .take(10_000)
+        .collect::<Vec<_>>();
+    let mut offset = screen.len() - lines.iter().map(|line| line.len()).sum::<usize>();
+    let capture_start = offset;
+    let mut start = collecting.then_some(offset);
+    for line in lines.into_iter().rev() {
+        let text = line.strip_suffix('\n').unwrap_or(line);
+        if text == begin {
+            start = Some(offset + line.len());
+        } else if let Some(code) = text
+            .strip_prefix(&prefix)
+            .and_then(|code| code.strip_suffix("=END"))
+            && !code.is_empty()
+            && code.bytes().all(|byte| byte.is_ascii_digit())
+            && let Ok(code) = code.parse::<u8>()
+        {
+            let segment = &screen[start.unwrap_or(capture_start)..offset];
+            return (Some(segment.strip_suffix('\n').unwrap_or(segment)), Some(code));
+        }
+        offset += line.len();
+    }
+    (start.map(|start| &screen[start..]), None)
+}
+
 fn parse_send_text_args(args: &[RawText]) -> Result<ParsedSendText, ServerError> {
     let mut parsed = ParsedSendText {
         target: None,
@@ -40053,6 +40449,30 @@ Output is capped at 200 lines or 256 KiB with a truncation note.
 
 Print that last command and output under a `%N $ command` header, with the same
 OSC 133 requirement and caps. For an Agent pane, read its last prompt and reply.
+
+### `zz wait-pane [-t %N] [--idle MS | --until TEXT | --regex RE] [--timeout SECS] [--tail N]`
+
+Wait for a terminal pane to stop producing output or show a matching logical line.
+Choose one condition; the default is `--idle 500`, measured from this call.
+Text and regex matches join wrapped screen lines and print the matching line.
+`--tail N` searches only the last N logical lines. Idle success prints nothing.
+The timeout defaults to 60 seconds; timeout exits 124 and names the condition.
+Invalid regex syntax exits 2. Use a command or Control client.
+
+### `zz run-pane [-t %N] [--timeout SECS] [--] COMMAND...`
+
+Run a command in a terminal pane's POSIX shell without shell integration.
+Join COMMAND words with single spaces, preserving supplied quoting; pass one
+command line. Paste it, verify the echo, then press Enter. Print the output between
+unique markers and return the child's exit code. Capture includes scrollback,
+capped to the last 10,000 logical lines. The timeout defaults to 120 seconds;
+timeout prints the output collected so far and exits 125. It leaves the command
+running. Use a command or Control client.
+
+```sh
+zz run-pane -t %3 -- "sh -c 'echo hi; exit 7'"
+zz wait-pane -t %3 --until 'ready' --timeout 30
+```
 
 ### `zz send-text -t %N [--no-enter] [--timeout MS] [TEXT]`
 
@@ -62158,6 +62578,313 @@ set-option -g @alias-mixed-next yes
 
     #[cfg(unix)]
     #[test]
+    fn run_pane_returns_the_child_exit_code_and_output() {
+        let (shared, client, target) =
+            send_text_fixture("runchild", "printf 'zz-ready\\r\\n'; PS1='' exec /bin/sh");
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "run-pane",
+                    ["-t", &target, "--", "sh", "-c", "'echo hi; exit 7'"],
+                ),
+            )
+            .expect_err("child exits seven");
+        assert!(
+            matches!(&error, DaemonError::CommandExit { output, exit_code: 7 } if output == "hi\n"),
+            "{error:?}"
+        );
+        let execution = shared
+            .execute(
+                client,
+                ClientKind::Control,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("run-pane", ["-t", &target, "--", "printf 'ok'"]),
+            )
+            .expect("zero child status");
+        assert_eq!(execution.output, "ok");
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("run-pane", ["-t", &target, "--", "sh -c 'exit 124'"]),
+            )
+            .expect_err("child status 124 is preserved");
+        assert!(matches!(
+            error,
+            DaemonError::CommandExit { exit_code: 124, .. }
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_pane_times_out_with_125() {
+        let (shared, client, target) =
+            send_text_fixture("runtimeout", "printf 'zz-ready\\r\\n'; PS1='' exec /bin/sh");
+        let started = Instant::now();
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "run-pane",
+                    [
+                        "-t",
+                        &target,
+                        "--timeout",
+                        "1",
+                        "--",
+                        "printf 'partial\\n'; sleep 10",
+                    ],
+                ),
+            )
+            .expect_err("child did not finish before timeout");
+        assert!(started.elapsed() >= Duration::from_secs(1));
+        assert!(
+            matches!(&error, DaemonError::CommandExit { output, exit_code: 125 } if output.starts_with("partial") && !output.contains("ZZRUN-")),
+            "{error:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_pane_until_matches_an_unwrapped_line() {
+        let (shared, client, target) =
+            send_text_fixture("waitwrapped", "printf 'zz-ready\\r\\n'; exec /bin/cat");
+        let line = format!("{}needle{}", "a".repeat(77), "z".repeat(80));
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("send-text", ["-t", &target, &line]),
+            )
+            .expect("write a wrapped line");
+        let screen = wait_for_capture(&shared, client, &target, |screen| screen.contains("zzz"));
+        assert!(!screen.contains(&line), "fixture must wrap the line");
+        let execution = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("wait-pane", ["-t", &target, "--until", &line]),
+            )
+            .expect("logical line matches across wraps");
+        assert_eq!(execution.output, format!("{line}\n"));
+        let execution = shared
+            .execute(
+                client,
+                ClientKind::Control,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "wait-pane",
+                    ["-t", &target, "--regex", "^a{77}needlez{80}$"],
+                ),
+            )
+            .expect("regex matches the same logical line");
+        assert_eq!(execution.output, format!("{line}\n"));
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("send-text", ["-t", &target, "--no-enter", "tailmarker"]),
+            )
+            .expect("send-text");
+        wait_for_capture(&shared, client, &target, |screen| {
+            screen.trim_end().ends_with("tailmarker")
+        });
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "wait-pane",
+                    [
+                        "-t",
+                        &target,
+                        "--until",
+                        &line,
+                        "--tail",
+                        "1",
+                        "--timeout",
+                        "0",
+                    ],
+                ),
+            )
+            .expect_err("last visible line is the parked text, not the needle");
+        assert!(matches!(
+            error,
+            DaemonError::CommandExit { exit_code: 124, .. }
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_pane_idle_returns_after_the_dwell() {
+        let (shared, client, target) =
+            send_text_fixture("waitidle", "printf 'zz-ready\\r\\n'; exec /bin/cat");
+        let writer = Arc::clone(&shared);
+        let destination = target.clone();
+        let started = Instant::now();
+        let writing = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            writer
+                .execute(
+                    ClientId(8),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("send-text", ["-t", &destination, "activity"]),
+                )
+                .expect("output during the idle dwell");
+        });
+        let execution = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("wait-pane", ["-t", &target]),
+            )
+            .expect("default idle dwell");
+        writing.join().expect("writer");
+        assert!(execution.output.is_empty());
+        assert!(started.elapsed() >= Duration::from_millis(500));
+        let pane = shared
+            .inner
+            .lock()
+            .engine
+            .resolve_pane(Some(&target), None, None)
+            .expect("pane");
+        let last_output = shared.inner.lock().last_output[&pane];
+        assert!(last_output > started);
+        assert!(last_output.elapsed() >= Duration::from_millis(500));
+        let started = Instant::now();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("wait-pane", ["-t", &target, "--idle", "100"]),
+            )
+            .expect("an already idle pane still needs a fresh dwell");
+        assert!(started.elapsed() >= Duration::from_millis(100));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_pane_times_out_with_124() {
+        let (shared, client, target) =
+            send_text_fixture("waittimeout", "printf 'zz-ready\\r\\n'; exec /bin/cat");
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "wait-pane",
+                    ["-t", &target, "--idle", "2000", "--timeout", "1"],
+                ),
+            )
+            .expect_err("idle dwell exceeds timeout");
+        assert!(
+            matches!(error, DaemonError::CommandExit { output, exit_code: 124 } if output.contains("--idle 2000") && output.lines().count() == 1)
+        );
+    }
+
+    #[test]
+    fn wait_and_run_pane_reject_invalid_arguments() {
+        for args in [
+            vec!["--idle", "1", "--until", "ready"],
+            vec!["--until", "ready", "--regex", "ready"],
+            vec!["--regex", "ready", "--idle", "1"],
+            vec!["--regex", "["],
+            vec!["--timeout", "-1"],
+            vec!["--tail", "-1"],
+        ] {
+            assert!(matches!(
+                parse_wait_pane_args(&args.into_iter().map(RawText::from).collect::<Vec<_>>()),
+                Err(ServerError::CommandParse(_))
+            ));
+        }
+        for args in [
+            vec![],
+            vec!["--"],
+            vec!["--timeout", "1"],
+            vec!["--", "echo one\necho two"],
+        ] {
+            assert!(matches!(
+                parse_run_pane_args(&args.into_iter().map(RawText::from).collect::<Vec<_>>()),
+                Err(ServerError::CommandParse(_))
+            ));
+        }
+        let parsed = parse_run_pane_args(
+            &["-t%3", "--timeout=4", "sh", "-c", "'echo hi; exit 7'"].map(RawText::from),
+        )
+        .expect("command words");
+        assert_eq!(parsed.target.as_deref(), Some("%3"));
+        assert_eq!(parsed.timeout, Duration::from_secs(4));
+        assert_eq!(parsed.command, "sh -c 'echo hi; exit 7'");
+        let shared = Arc::new(Shared::new(1));
+        for (verb, args) in [("wait-pane", vec!["--regex", "["]), ("run-pane", vec![])] {
+            let error = shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(verb, args),
+                )
+                .expect_err("usage error before target resolution");
+            assert!(matches!(
+                error,
+                DaemonError::Server(ServerError::CommandParse(_))
+            ));
+        }
+        for (verb, args) in [("wait-pane", vec![]), ("run-pane", vec!["true"])] {
+            let error = shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Interactive,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(verb, args),
+                )
+                .expect_err("interactive clients cannot block");
+            assert!(
+                matches!(error, DaemonError::Server(ServerError::InvalidCommand(message)) if message.contains("command or control client"))
+            );
+        }
+    }
+
+    #[test]
+    fn run_pane_markers_ignore_echo_and_preserve_output() {
+        let marker = "ZZRUN-0123456789abcdef";
+        let echo = format!(
+            "printf '\\n%s\\n' '{marker}-BEGIN'; echo hi; printf '\\n{marker}-RC=%d=END\\n' $?\n"
+        );
+        assert_eq!(run_pane_result(&echo, marker, false), (None, None));
+        let screen = format!(
+            "{echo}{marker}-BEGIN\nstale\n{marker}-BEGIN\nhi  \n\n{marker}-RC=7=END\nprompt"
+        );
+        assert_eq!(
+            run_pane_result(&screen, marker, false),
+            (Some("hi  \n"), Some(7))
+        );
+        for code in ["%d", "-1", "+1", "256", ""] {
+            let screen = format!("{marker}-BEGIN\n{marker}-RC={code}=END\n");
+            assert_eq!(run_pane_result(&screen, marker, false).1, None);
+        }
+        let screen = format!("{marker}-BEGIN\n{}", "line\n".repeat(10_001));
+        let (output, code) = run_pane_result(&screen, marker, true);
+        assert_eq!(code, None);
+        assert_eq!(output.expect("retained tail").lines().count(), 10_000);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn send_text_verifies_the_echo_then_submits() {
         let (shared, client, target) =
             send_text_fixture("sendtext", "printf 'zz-ready\\r\\n'; exec /bin/cat");
@@ -62226,6 +62953,23 @@ set-option -g @alias-mixed-next yes
             )
             .expect("picker");
         let picker = context.pane.expect("picker").to_string();
+        for (verb, args) in [
+            ("wait-pane", vec!["-t", picker.as_str()]),
+            ("run-pane", vec!["-t", picker.as_str(), "true"]),
+        ] {
+            let error = shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context.clone(),
+                    &CommandInvocation::new(verb, args),
+                )
+                .expect_err("wait and run require a terminal pane");
+            assert!(matches!(
+                error,
+                DaemonError::Server(ServerError::InvalidTarget(_))
+            ));
+        }
         let error = shared
             .execute(
                 client,
@@ -66432,6 +67176,8 @@ set-option -g @alias-mixed-next yes
             "send-last-output",
             "show-last-output",
             "send-text",
+            "wait-pane",
+            "run-pane",
             "capture-browser",
             "debug-marker",
             "tools",
@@ -66559,6 +67305,10 @@ set-option -g @alias-mixed-next yes
             assert!(daemon_command_dispatch(name).is_none());
         }
         for (prefix, dispatch) in [
+            ("wait-pane", DaemonCommandDispatch::WaitPane),
+            ("run-pane", DaemonCommandDispatch::RunPane),
+            ("wait", DaemonCommandDispatch::WaitFor),
+            ("run", DaemonCommandDispatch::RunShell),
             ("capture-pan", DaemonCommandDispatch::CapturePane),
             ("run-sh", DaemonCommandDispatch::RunShell),
             ("if-sh", DaemonCommandDispatch::IfShell),

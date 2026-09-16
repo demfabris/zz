@@ -16237,6 +16237,9 @@ fn expand_short_formats(
 }
 
 fn key_token(value: &str) -> KeyToken {
+    if let Some(name) = canonical_named_key(value) {
+        return KeyToken::Named(name.to_owned());
+    }
     const NAMED: &[&str] = &[
         "Enter", "Escape", "Space", "Tab", "BSpace", "Up", "Down", "Left", "Right", "Home", "End",
         "PPage", "NPage", "DC", "IC",
@@ -25414,6 +25417,37 @@ mod tests {
             ),
             Err(ServerError::NativeCommandParse(_))
         ));
+    }
+
+    #[test]
+    fn send_keys_preserves_extended_named_tokens_and_explicit_literals() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &[]))
+            .unwrap();
+        for name in ["BTab", "btab", "KPEnter", "kpenter", "KP0", "PageUp"] {
+            let execution = engine
+                .execute(&mut context, &command("send-keys", &[name]))
+                .unwrap();
+            assert!(
+                matches!(
+                    execution.effects.as_slice(),
+                    [MuxEffect::SendKeys { keys, .. }]
+                        if keys == &[KeyToken::Named(canonical_named_key(name).unwrap().to_owned())]
+                ),
+                "{name}: {:?}",
+                execution.effects
+            );
+            let literal = engine
+                .execute(&mut context, &command("send-keys", &["-l", name]))
+                .unwrap();
+            assert!(matches!(
+                literal.effects.as_slice(),
+                [MuxEffect::SendKeys { keys, .. }]
+                    if keys == &[KeyToken::Literal(name.to_owned())]
+            ));
+        }
     }
 
     #[test]

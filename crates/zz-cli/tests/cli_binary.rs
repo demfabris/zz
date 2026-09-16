@@ -492,6 +492,48 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn pane_mode_syntax_errors_keep_the_pinned_exit_status_with_a_daemon() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "mode-errors"])
+                .status
+                .success()
+        );
+        for (arguments, expected) in [
+            (
+                &["choose-client", "-Q"][..],
+                "command choose-client: unknown flag -Q\n",
+            ),
+            (
+                &["choose-client", "one", "two"][..],
+                "command choose-client: too many arguments (need at most 1)\n",
+            ),
+            (
+                &["clock-mode", "-Q"][..],
+                "command clock-mode: unknown flag -Q\n",
+            ),
+            (
+                &["switch-mode", "one", "two"][..],
+                "command switch-mode: too many arguments (need at most 1)\n",
+            ),
+            (
+                &["refresh-client", "-r"][..],
+                "command refresh-client: -r expects an argument\n",
+            ),
+        ] {
+            let output = fixture.run(arguments);
+            assert_eq!(output.status.code(), Some(1), "{arguments:?}");
+            assert!(output.stdout.is_empty(), "{arguments:?}");
+            assert_eq!(output.stderr, expected.as_bytes(), "{arguments:?}");
+        }
+    }
+
+
+    #[test]
     fn inspect_json_contains_pane_facts_verbs_and_events() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {

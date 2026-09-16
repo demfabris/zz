@@ -579,7 +579,10 @@ use CommandValueKind::{
 };
 
 static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
-    ("customize-mode", "[-kNZ] [-F format] [-f filter] [-t target-pane]"),
+    (
+        "customize-mode",
+        "[-kNZ] [-F format] [-f filter] [-t target-pane]",
+    ),
     (
         "break-pane",
         "[-abdPW] [-F format] [-n window-name] [-s src-pane] [-t dst-window] [-x width] [-y height] [-X x-position] [-Y y-position]",

@@ -13,7 +13,7 @@ export const meta = {
 // checks it against every lesson an earlier cycle paid for.
 
 const SLOTS = 3;        // at most three agents; the two cargo slots still cap compiles at two
-const ORDER = ['capture-11', 'alias-2', 'modes-12', 'customize', 'capture-residuals'];
+const ORDER = ['capture-11', 'alias-2', 'modes-12', 'customize', 'capture-residuals', 'zz-knobs'];
 
 const COMMON = `
 ZONES. A lane's zones are drawn around its OBLIGATION, across whatever crates it needs, not
@@ -78,10 +78,12 @@ const LANES = [
   {
     key: 'customize', obligation: 'TUI-014', from: 'campaign/tui-modes-12',
     push: 'campaign/tui-customize',
-    batch: 'Build customize-mode and suspend-client, TUI-014 clause 2\'s last two entries. ' +
-      'fabrico ruled on 2026-09-16 that both are built rather than decided out, and that ' +
-      'customize-mode carries zz\'s own TUI options and knobs beside the tmux-compatible ones. ' +
-      'Flip customize-mode-open and suspend-client from recorded to asserted.',
+    batch: 'Build customize-mode against the pin and land suspend-client, TUI-014 clause 2\'s ' +
+      'last two entries. fabrico ruled on 2026-09-16 that both are built rather than decided out. ' +
+      'The lane resolves the surface question - PaneMode is per-pane but has no navigation at all ' +
+      '(selected and offset are rebuilt as 0), while the choose-tree engine has the tree but is ' +
+      'per-client - and records the choice in knowledge/designs. Flip customize-mode-open and ' +
+      'suspend-client from recorded to asserted, which takes TUI-014 to zero records.',
   },
   {
     key: 'capture-residuals', obligation: 'TUI-015', from: 'campaign/tui-capture-11',
@@ -90,6 +92,15 @@ const LANES = [
       'grammar for lock-session, has-session and list-windows, which lives in CommandEngine ' +
       'outside the resolver excursion; and the indexed-colour-1 class, an engine question about ' +
       'whether zz-terminal can keep the colour class the pin keeps.',
+  },
+  {
+    key: 'zz-knobs', obligation: 'superset', from: 'campaign/tui-customize',
+    push: 'campaign/tui-zz-knobs',
+    batch: 'The second half of fabrico\'s 2026-09-16 ruling: zz\'s own TUI options and knobs live ' +
+      'in the customize-mode tree beside the tmux-compatible ones. Split from the customize lane ' +
+      'because it closes no acceptance clause and must not gate the campaign, and because ' +
+      'zz-config is not a dependency of zz-tui, zz-daemon or zz-mux and its settings table has no ' +
+      'wire path today. The pin-compared rows must stay byte-identical while the zz section exists.',
   },
 ];
 

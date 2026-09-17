@@ -25,11 +25,10 @@
 #                                                               clock-mode-colour and the
 #                                                               four clock-mode-style faces
 # switch-mode [-kswZ]       window_switch_mode on the target  the same pane mode, its rows   PROVED (the mode it
-#   [-F -t] [command]         pane: one row per session or       expanded from the same         opens and its Escape
-#                             window over a (search) prompt      default format, over the       teardown) + DECLARED
-#                                                                same prompt                    (the mode's own
-#                                                                                               movement, Enter target
-#                                                                                               and incremental filter)
+#   [-F -t] [command]         pane: one row per session or       expanded from the same         opens, its movement
+#                             window over a (search) prompt      default format, over the       keys, the incremental
+#                                                                same prompt                    fuzzy filter and the
+#                                                                                               Enter target)
 # server-access [-adglrw]   socket access control list, and    every lookup, ordering and     PROVED (-l and every
 #   [-t] [user|group]         the lookups, orderings and         refusal; the socket admits     refusal) + DECLARED
 #                             refusals around it                 its owner alone, so adding     (admitting a second
@@ -348,14 +347,15 @@ pane_in_mode() {
 write_attach() {
   local side="$1"
   local destination="$2"
+  local session="${3:-$INNER_SESSION}"
   printf '#!/usr/bin/env bash\n' >"$destination"
   printf 'exec python3 %q ' "$COMPAT_DIR/tui-client-job.py" >>"$destination"
   if [ "$side" = zz ]; then
     printf 'env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL -u XDG_STATE_HOME HOME=%q XDG_CONFIG_HOME=%q ZZ_LOG_DIR=%q TMUX_TMPDIR=/tmp %q --socket %q attach-session -t %q\n' \
-      "$ZZ_HOME" "$ZZ_HOME/config" "$ZZ_LOG_DIR" "$ZZ_BIN" "$ZZ_SOCKET" "=$INNER_SESSION" >>"$destination"
+      "$ZZ_HOME" "$ZZ_HOME/config" "$ZZ_LOG_DIR" "$ZZ_BIN" "$ZZ_SOCKET" "=$session" >>"$destination"
   else
     printf 'env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL -u XDG_STATE_HOME HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q -L %q attach-session -t %q\n' \
-      "$TMUX_HOME" "$TMUX_HOME/config" "$TMUX_BIN" "$INNER_SOCKET_NAME" "=$INNER_SESSION" >>"$destination"
+      "$TMUX_HOME" "$TMUX_HOME/config" "$TMUX_BIN" "$INNER_SOCKET_NAME" "=$session" >>"$destination"
   fi
   chmod +x "$destination"
 }
@@ -533,11 +533,47 @@ run_both() {
   done
 }
 
+clock_glyph_digit() {
+  case "$1" in
+  XXXXXXOOOXXOOOXXOOOXXXXXX) printf 0 ;;
+  OOOOXOOOOXOOOOXOOOOXOOOOX) printf 1 ;;
+  XXXXXOOOOXXXXXXXOOOOXXXXX) printf 2 ;;
+  XXXXXOOOOXXXXXXOOOOXXXXXX) printf 3 ;;
+  XOOOXXOOOXXXXXXOOOOXOOOOX) printf 4 ;;
+  XXXXXXOOOOXXXXXOOOOXXXXXX) printf 5 ;;
+  XXXXXXOOOOXXXXXXOOOXXXXXX) printf 6 ;;
+  XXXXXOOOOXOOOOXOOOOXOOOOX) printf 7 ;;
+  XXXXXXOOOXXXXXXXOOOXXXXXX) printf 8 ;;
+  XXXXXXOOOXXXXXXOOOOXXXXXX) printf 9 ;;
+  *) printf '?' ;;
+  esac
+}
+
+clock_face_seconds() {
+  local screen="$1" column row code='' line
+  for column in 58 49; do
+    code=''
+    for ((row = 9; row <= 13; row++)); do
+      line="$(printf '%s\n' "$screen" | sed -e 's/\x1b\[[0-9;]*m//g' | sed -n "${row}p")"
+      line="${line}                                                                                "
+      line="${line:$column:5}"
+      line="${line//#/X}"
+      code="$code${line// /O}"
+    done
+    case "$(clock_glyph_digit "$code")" in
+    '?') ;;
+    *)
+      clock_glyph_digit "$code"
+      return 0
+      ;;
+    esac
+  done
+  printf '?'
+}
+
 capture_seconds_pair() {
-  local before_zz before_tmux start now attempt poll
+  local start now attempt poll wanted
   for ((attempt = 0; attempt < 8; attempt++)); do
-    before_zz="$(styled_screen_of zz)"
-    before_tmux="$(styled_screen_of tmux)"
     start="$(date +%s)"
     for ((poll = 0; poll < 150; poll++)); do
       now="$(date +%s)"
@@ -545,21 +581,22 @@ capture_seconds_pair() {
       sleep 0.01
     done
     [ "$now" != "$start" ] || continue
-    sleep 0.2
+    wanted="$((now % 10))"
     for ((poll = 0; poll < 100; poll++)); do
       zz_screen="$(styled_screen_of zz)"
       tmux_screen="$(styled_screen_of tmux)"
       zz_cursor="$(cursor_tuple zz)"
       tmux_cursor="$(cursor_tuple tmux)"
       [ "$(date +%s)" = "$now" ] || break
-      if [ "$zz_screen" != "$before_zz" ] && [ "$tmux_screen" != "$before_tmux" ]; then
-        printf 'clock capture %s: both faces redrew; screen and cursor pair stayed inside epoch second %s\n' "$CASE_LABEL" "$now"
+      if [ "$(clock_face_seconds "$zz_screen")" = "$wanted" ] &&
+        [ "$(clock_face_seconds "$tmux_screen")" = "$wanted" ]; then
+        printf 'clock capture %s: both faces show second %s of epoch second %s\n' "$CASE_LABEL" "$wanted" "$now"
         return 0
       fi
       sleep 0.01
     done
   done
-  die "could not capture both seconds faces after redraw within one second"
+  die "could not capture both seconds faces showing the same second"
 }
 
 compare_channels() {
@@ -960,12 +997,14 @@ customize_fix_self_checks() {
 switch_tail_style_cases() {
   attach_both_at 80 24
   local style
+  CASE_GRID_CELLS=1
   for style in dim fg=red bg=red underscore; do
     case_run "switch-tail-short-$style" same '' -- switch-mode -w -F "#[$style]#{window_name}#[default]" -t PANE
     restore_case "switch-tail-short-$style-closed"
   done
   case_run switch-tail-boundary-colour same '' -- switch-mode -w -F '#[bg=red]12345678901234567#{window_name}#[default]' -t PANE
   restore_case switch-tail-boundary-colour-closed
+  CASE_GRID_CELLS=0
 }
 
 switch_tail_self_checks() {
@@ -977,15 +1016,9 @@ switch_tail_self_checks() {
       run_on_both new-session -d -s alpha -n "$WINDOW_NAME" -x 80 -y 24 "$INNER_SHELL"
       run_on_both new-session -d -s zulu -n "$WINDOW_NAME" -x 80 -y 24 "$INNER_SHELL"
     fi
-    self_check_run "switch-tail-$duplicate-control" switch-mode -w -t PANE
-    self_check_expect "switch window tail $duplicate control" exit=0 stdout=0 stderr=0 screen=0 state=0
-    zz_command copy-mode -q -t "$(active_pane zz)" >/dev/null
-    zz_command switch-mode -w -F '#{window_name} #[dim]#{session_name}:#{window_index}#{window_flags}#[default] #[dim]#{pane_current_command}#[default] #[dim]#{?#{!=:#{pane_title},#{host_short}},#{pane_title},}#[default]#{?#{==:#{window_name},two},, }' -t "$(active_pane zz)" >/dev/null
-    self_check_run "switch-tail-$duplicate-sabotage" display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
-    self_check_expect "default cell after final dim run $duplicate changes the capture style tail" exit=0 stdout=0 stderr=0 screen=1 state=0
     CASE_GRID_CELLS=1
-    self_check_run "switch-tail-$duplicate-cells-control" display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
-    self_check_expect 'allocated default cells preserve the same glyphs and styles' exit=0 stdout=0 stderr=0 screen=0 state=0
+    self_check_run "switch-tail-$duplicate-control" switch-mode -w -t PANE
+    self_check_expect "switch window rows $duplicate control" exit=0 stdout=0 stderr=0 screen=0 state=0
     zz_command copy-mode -q -t "$(active_pane zz)" >/dev/null
     zz_command switch-mode -w -F '#{window_name} #[dim]#{session_name}:#{window_index}#{window_flags}#[default] #[dim]#{pane_current_command}#[default] #[dim]#{?#{!=:#{pane_title},#{host_short}},#{pane_title},}#[default]#{?#{==:#{window_name},two},,#[bg=red] }' -t "$(active_pane zz)" >/dev/null
     self_check_run "switch-tail-$duplicate-cells-sabotage" display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
@@ -1074,6 +1107,357 @@ switch_lifetime_self_checks() {
   lifetime_window_close switch-mode-zoom-sabotage-restored
 }
 
+client_count_is() {
+  [ "$(side_command "$1" list-clients -F x 2>/dev/null | wc -l)" = "$2" ]
+}
+
+attach_second_clients() {
+  run_on_both new-session -d -s other -n "$WINDOW_NAME" -x 80 -y 24 "$INNER_SHELL"
+  write_attach zz "$SCRATCH_DIR/attach-zz-other.sh" other
+  write_attach tmux "$SCRATCH_DIR/attach-tmux-other.sh" other
+  tmux_outer_command new-window -d -n zz2 "$SCRATCH_DIR/attach-zz-other.sh"
+  tmux_outer_command new-window -d -n tmux2 "$SCRATCH_DIR/attach-tmux-other.sh"
+  wait_for 'the second zz client attached' client_count_is zz 2
+  wait_for 'the second tmux client attached' client_count_is tmux 2
+}
+
+detach_second_clients() {
+  tmux_outer_command kill-window -t "=$OUTER_SESSION:zz2" >/dev/null 2>&1 || true
+  tmux_outer_command kill-window -t "=$OUTER_SESSION:tmux2" >/dev/null 2>&1 || true
+  side_command zz kill-session -t '=other' >/dev/null 2>&1 || true
+  side_command tmux kill-session -t '=other' >/dev/null 2>&1 || true
+  wait_for 'the second zz client gone' client_count_is zz 1
+  wait_for 'the second tmux client gone' client_count_is tmux 1
+}
+
+switch_key_scene() {
+  attach_both_at 80 24
+  run_on_both new-session -d -s alpha -n "$WINDOW_NAME" -x 80 -y 24 "$INNER_SHELL"
+  run_on_both new-session -d -s zulu -n "$WINDOW_NAME" -x 80 -y 24 "$INNER_SHELL"
+}
+
+switch_key_cases() {
+  local spec name keys
+  switch_key_scene
+  CASE_GRID_CELLS=1
+  CASE_NEEDLE_MODE=1
+  case_run switch-keys-open same '' -- switch-mode -t PANE 'set-option -g @switch-target "%%"'
+  for spec in 'down|Down' 'down-again|Down' 'down-wrap|Down' 'up-wrap|Up' 'ctrl-p|C-p' \
+    'ctrl-n|C-n' 'ctrl-k|C-k' 'ctrl-j|C-j' 'npage|NPage' 'ppage|PPage' 'home|Home' 'end|End' \
+    'filter-z|z' 'filter-zu|u' 'filter-left|Left' 'filter-ctrl-a|C-a' 'filter-ctrl-e|C-e' \
+    'bspace|BSpace' 'bspace-empty|BSpace' 'fuzzy|c l' 'fuzzy-down|Down' 'clear|C-u' \
+    'smart-case|L' 'no-match|C-u q q q' 'no-match-enter|Enter' 'no-match-down|Down' \
+    'clear-again|C-u' 'word-delete|a l p C-w' 'transpose|z l C-a C-f C-t'; do
+    name="${spec%%|*}"
+    keys="${spec#*|}"
+    case_run "switch-keys-$name" same '' -- send-keys -t PANE $keys
+  done
+  case_run switch-keys-still-open same '' -- display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+  case_run switch-keys-filtered-enter same '' -- send-keys -t PANE C-u z u BSpace Enter
+  CASE_GRID_CELLS=0
+  case_run switch-keys-filtered-target same '' -- show-options -gv @switch-target
+  CASE_GRID_CELLS=1
+  run_both switch-mode -t PANE 'set-option -g @switch-target "%%"'
+  case_run switch-keys-moved-enter same '' -- send-keys -t PANE Down Enter
+  CASE_GRID_CELLS=0
+  case_run switch-keys-moved-target same '' -- show-options -gv @switch-target
+  CASE_GRID_CELLS=1
+  run_both switch-mode -w -t PANE 'set-option -g @switch-target "%%"'
+  case_run switch-keys-windows-filter same '' -- send-keys -t PANE t w o
+  case_run switch-keys-windows-enter same '' -- send-keys -t PANE Enter
+  CASE_GRID_CELLS=0
+  case_run switch-keys-windows-target same '' -- show-options -gv @switch-target
+  CASE_GRID_CELLS=1
+  set_window_on_both switch-mode-match-style 'bg=red,bold'
+  run_both switch-mode -t PANE
+  case_run switch-keys-match-style same '' -- send-keys -t PANE a
+  run_on_both set-option -gwu switch-mode-match-style
+  case_run switch-keys-default-enter same '' -- send-keys -t PANE C-u z u Enter
+  CASE_GRID_CELLS=0
+  case_run switch-keys-default-client same '' -- list-clients -F '#{client_session}'
+  run_both switch-client -c CLIENT -t "=$INNER_SESSION"
+  run_on_both set-option -gu @switch-target
+  run_on_both kill-session -t '=alpha'
+  run_on_both kill-session -t '=zulu'
+  CASE_GRID_CELLS=1
+  restore_case switch-keys-restored
+  CASE_GRID_CELLS=0
+}
+
+switch_key_self_checks() {
+  local CASE_EXPECT_EQUAL=1
+  switch_key_scene
+  CASE_GRID_CELLS=1
+  run_both switch-mode -t PANE 'set-option -g @switch-target "%%"'
+  run_both send-keys -t PANE Down
+  self_check_run switch-keys-control display-message -p -t PANE '#{pane_in_mode}'
+  self_check_expect 'both switch modes moved to the same row' exit=0 stdout=0 stderr=0 screen=0 state=0
+  zz_command send-keys -t "$(active_pane zz)" Down >/dev/null
+  self_check_run switch-keys-move-sabotage display-message -p -t PANE '#{pane_in_mode}'
+  self_check_expect 'a one-sided Down selects a different row' exit=0 stdout=0 stderr=0 screen=1 state=0
+  tmux_inner_command send-keys -t "$(active_pane tmux)" Down >/dev/null
+  run_both send-keys -t PANE z
+  self_check_run switch-keys-filter-control display-message -p -t PANE '#{pane_in_mode}'
+  self_check_expect 'both filters draw the same match' exit=0 stdout=0 stderr=0 screen=0 state=0
+  zz_command send-keys -t "$(active_pane zz)" BSpace >/dev/null
+  self_check_run switch-keys-filter-sabotage display-message -p -t PANE '#{pane_in_mode}'
+  self_check_expect 'a one-sided filter edit changes rows and prompt' exit=0 stdout=0 stderr=0 screen=1 state=0
+  zz_command send-keys -t "$(active_pane zz)" z >/dev/null
+  zz_command set-option -gw switch-mode-match-style bg=red >/dev/null
+  run_both send-keys -t PANE C-e
+  self_check_run switch-keys-style-sabotage display-message -p -t PANE '#{pane_in_mode}'
+  self_check_expect 'a one-sided match style changes the matched cell' exit=0 stdout=0 stderr=0 screen=1 state=0
+  zz_command set-option -gwu switch-mode-match-style >/dev/null
+  run_both send-keys -t PANE C-e
+  run_both send-keys -t PANE C-u q q q Enter
+  self_check_run switch-keys-no-match-control display-message -p -t PANE '#{pane_in_mode}'
+  self_check_expect 'Enter with no match keeps both modes open' exit=0 stdout=0 stderr=0 screen=0 state=0
+  zz_command send-keys -t "$(active_pane zz)" C-u Enter >/dev/null
+  self_check_run switch-keys-no-match-sabotage display-message -p -t PANE '#{pane_in_mode}'
+  self_check_expect 'a one-sided accepted row closes that mode' exit=0 stdout=1 stderr=0 screen=1 state=1
+  tmux_inner_command copy-mode -q -t "$(active_pane tmux)" >/dev/null
+  run_on_both set-option -g @switch-target none
+  run_both switch-mode -t PANE 'set-option -g @switch-target "%%"'
+  zz_command send-keys -t "$(active_pane zz)" Down >/dev/null
+  run_both send-keys -t PANE Enter
+  CASE_GRID_CELLS=0
+  self_check_run switch-keys-target-sabotage show-options -gv @switch-target
+  self_check_expect 'a one-sided selection runs the template on another row' exit=0 stdout=1 stderr=0 screen=0 state=0
+  run_on_both set-option -gu @switch-target
+  run_on_both kill-session -t '=alpha'
+  run_on_both kill-session -t '=zulu'
+}
+
+customize_long_prompt_cases() {
+  customize_scene
+  attach_second_clients
+  CASE_NEEDLE_MODE=1
+  case_run customize-long-open same '' -- customize-mode -t PANE
+  case_run customize-long-search same '' -- send-keys -t PANE / status-format Enter
+  case_run customize-long-root-prompt same '' -- send-keys -t PANE Enter
+  case_run customize-long-root-left same '' -- send-keys -t PANE Left Left
+  case_run customize-long-root-home same '' -- send-keys -t PANE Home
+  case_run customize-long-root-escape same '' -- send-keys -t PANE Escape
+  case_run customize-long-expanded same '' -- send-keys -t PANE Right
+  case_run customize-long-child same '' -- send-keys -t PANE Right
+  case_run customize-long-child-prompt same '' -- send-keys -t PANE Enter
+  case_run customize-long-child-end same '' -- send-keys -t PANE C-a C-e
+  case_run customize-long-child-escape same '' -- send-keys -t PANE Escape
+  case_run customize-long-clients same '' -- list-clients -F '#{client_session} #{client_width}x#{client_height}'
+  restore_case customize-long-closed
+  detach_second_clients
+  CASE_GRID_CELLS=0
+}
+
+customize_long_prompt_self_checks() {
+  local CASE_EXPECT_EQUAL=1
+  customize_scene
+  attach_second_clients
+  run_both customize-mode -t PANE
+  run_both send-keys -t PANE / status-format Enter Enter
+  self_check_run customize-long-control display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+  self_check_expect 'both long root prompts scroll to the cursor' exit=0 stdout=0 stderr=0 screen=0 state=0
+  zz_command send-keys -t "$(active_pane zz)" Home >/dev/null
+  self_check_run customize-long-scroll-sabotage display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+  self_check_expect 'a prompt drawn from its start changes the row and cursor' exit=0 stdout=0 stderr=0 screen=1 state=0
+  tmux_inner_command send-keys -t "$(active_pane tmux)" Home >/dev/null
+  tmux_outer_command kill-window -t "=$OUTER_SESSION:zz2" >/dev/null
+  wait_for 'the one-sided second client gone' client_count_is zz 1
+  self_check_run customize-long-client-sabotage display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+  self_check_expect 'a disconnected second client changes the attachment state' exit=0 stdout=0 stderr=0 state=1
+  run_both copy-mode -q -t PANE
+  detach_second_clients
+  CASE_GRID_CELLS=0
+}
+
+customize_screen_case() {
+  case_run "customize-screen-$1" same '' -- send-keys -t PANE "${@:2}"
+}
+
+customize_scene() {
+  attach_both_at 80 24
+  run_on_both set-option -g history-limit 2000
+  run_on_both set-option -t "$INNER_SESSION" default-size 80x24
+  CASE_GRID_CELLS=1
+}
+
+customize_screen_open() {
+  if pane_in_mode tmux 1 || pane_in_mode zz 1; then
+    run_both copy-mode -q -t PANE
+  fi
+  CASE_NEEDLE_MODE=1
+  case_run "customize-$1-open" same '' -- customize-mode "${@:2}" -t PANE
+}
+
+customize_screen_cases() {
+  customize_scene
+  run_on_both bind-key -T zzcc-keys -N 'Review note' a display-message review
+  run_on_both bind-key -r -T zzcc-keys b display-message repeat
+  customize_screen_open tree
+  customize_screen_case right-expand Right
+  customize_screen_case right-descend Right
+  customize_screen_case left-child Left
+  customize_screen_case down Down
+  customize_screen_case left-root Left
+  customize_screen_case expand-all M-+
+  customize_screen_case collapse-keep Down Down Down Down M--
+  customize_screen_case preview-off v
+  customize_screen_case preview-big v
+  customize_screen_case preview-normal v
+  customize_screen_case help C-h
+  customize_screen_case help-closed x
+  customize_screen_case shortcut 1
+  customize_screen_case end End
+  customize_screen_case home g
+  customize_screen_case page-down Right NPage
+  customize_screen_case page-up PPage
+  customize_screen_case wrap-up Up
+  customize_screen_case wrap-down Down
+  customize_screen_open search
+  customize_screen_case search-prompt / p a n e - b o r d
+  customize_screen_case search-accept e r Enter
+  customize_screen_case search-next n
+  customize_screen_case search-next-again n
+  customize_screen_case search-previous N
+  customize_screen_case search-wrap N N N N N
+  customize_screen_case search-cancel / x Escape n
+  customize_screen_open tags
+  customize_screen_case tag Right Down t
+  customize_screen_case tagged-down Down t
+  customize_screen_case tag-root Up Up t
+  customize_screen_case reset-tagged-prompt D
+  customize_screen_case reset-tagged-cancel Escape
+  customize_screen_case unset-tagged-prompt U
+  customize_screen_case unset-tagged-refuse n
+  customize_screen_case untag T
+  customize_screen_case tag-all C-t
+  customize_screen_case untag-all T
+  customize_screen_case tag-collapse Down t Up Left
+  customize_screen_case tag-expand Right
+  customize_screen_open prompts
+  customize_screen_case reset-prompt Right Down d
+  customize_screen_case reset-cancel Escape
+  customize_screen_case unset-prompt u
+  customize_screen_case unset-refuse n
+  customize_screen_case section-unset Up u
+  customize_screen_case hide-global Down Down Right H
+  customize_screen_case show-global H
+  customize_screen_case filter-prompt f
+  customize_screen_case filter-accept '#{m:*mode*,#{option_name}}' Enter
+  customize_screen_case filter-edit f BSpace
+  customize_screen_case filter-escape Escape
+  customize_screen_case filter-again f '#{m:*bell*,#{option_name}}' Enter
+  customize_screen_case filter-clear c
+  customize_screen_open markup
+  customize_screen_case markup / pane-border-format Enter
+  customize_screen_case markup-prompt Enter
+  customize_screen_case markup-left Left Left Left
+  customize_screen_case markup-escape Escape
+  customize_screen_open edits
+  customize_screen_case flag / mouse Enter Enter
+  customize_screen_case choice / status-justify Enter s
+  customize_screen_case window-set / automatic-rename Enter w
+  customize_screen_case global-set S
+  customize_screen_case window-reset w
+  customize_screen_case global-reset S
+  customize_screen_case number-prompt / display-time Enter Enter
+  customize_screen_case number-accept C-u 9 0 0 Enter
+  customize_screen_case string-prompt / word-separators Enter Enter
+  customize_screen_case string-escape Escape
+  customize_screen_case style-preview / mode-style Enter
+  customize_screen_case colour-preview / status-bg Enter
+  customize_screen_case theme-preview / dark-theme-light-grey Enter
+  customize_screen_case colour-flag-preview / clock-mode-colour Enter
+  customize_screen_open keys
+  customize_screen_case keys / 'Key Table - zzcc-keys' Enter Right
+  customize_screen_case key-row Down
+  customize_screen_case key-fields Right Right
+  customize_screen_case key-command-prompt Enter
+  customize_screen_case key-command-escape Escape
+  customize_screen_case key-note Down
+  customize_screen_case key-note-prompt Enter
+  customize_screen_case key-note-escape Escape
+  customize_screen_case key-repeat Down Enter
+  customize_screen_case key-second-row Down Down
+  restore_case customize-screen-closed
+  run_on_both set-option -u -t "$INNER_SESSION" focus-follows-mouse
+  run_on_both set-option -u -t "$INNER_SESSION" status-justify
+  run_on_both set-option -u -t "$INNER_SESSION" display-time
+  run_on_both set-option -g automatic-rename off
+  run_both set-option -wu -t PANE automatic-rename
+  run_both rename-window -t PANE "$WINDOW_NAME"
+  run_on_both unbind-key -T zzcc-keys a
+  run_on_both unbind-key -T zzcc-keys b
+
+  customize_screen_open array
+  customize_screen_case array-search / command-alias Enter
+  customize_screen_case array-expanded Right
+  customize_screen_case array-child Right
+  customize_screen_case array-child-prompt Enter
+  customize_screen_case array-child-escape Escape
+  customize_screen_case array-key-prompt a
+  customize_screen_case array-key-accept C-u 9 Enter
+  case_run customize-array-key-values same '' -- show-options -s command-alias
+  customize_screen_case array-unset-prompt u
+  customize_screen_case array-unset-accept y
+  case_run customize-array-unset-values same '' -- show-options -s command-alias
+  customize_screen_case array-root-prompt Enter
+  customize_screen_case array-root-escape Escape
+  customize_screen_case array-left-child Right Left
+  restore_case customize-array-closed
+  run_on_both set-option -su command-alias
+  run_both set-option -p -t PANE pane-colours[3] red
+  customize_screen_open pane-array -N
+  customize_screen_case pane-array-child / pane-colours Enter Right Right
+  customize_screen_case pane-array-prompt Enter
+  customize_screen_case pane-array-escape Escape
+  restore_case customize-pane-array-closed
+  run_both set-option -pu -t PANE pane-colours
+  CASE_GRID_CELLS=0
+}
+
+customize_screen_self_checks() {
+  local CASE_EXPECT_EQUAL=1
+  customize_scene
+  run_both customize-mode -t PANE
+  run_both send-keys -t PANE / command-alias Enter Right Right
+  self_check_run customize-array-screen-control display-message -p -t PANE '#{pane_in_mode}'
+  self_check_expect 'both trees show the first array child' exit=0 stdout=0 stderr=0 screen=0 state=0
+  zz_command set-option -su 'command-alias[0]' >/dev/null
+  zz_command send-keys -t "$(active_pane zz)" Down Up >/dev/null
+  tmux_inner_command send-keys -t "$(active_pane tmux)" Down Up >/dev/null
+  self_check_run customize-array-screen-sabotage display-message -p -t PANE '#{pane_in_mode}'
+  self_check_expect 'a one-sided missing array index changes the child rows' exit=0 stdout=0 stderr=0 screen=1 state=0
+  run_both copy-mode -q -t PANE
+  zz_command set-option -su command-alias >/dev/null
+  run_both customize-mode -t PANE
+  run_both send-keys -t PANE Right
+  zz_command send-keys -t "$(active_pane zz)" Right >/dev/null
+  self_check_run customize-right-sabotage display-message -p -t PANE '#{pane_in_mode}'
+  self_check_expect 'a one-sided Right on an expanded row moves to its child' exit=0 stdout=0 stderr=0 screen=1 state=0
+  run_both copy-mode -q -t PANE
+  run_both customize-mode -t PANE
+  run_both send-keys -t PANE v
+  zz_command send-keys -t "$(active_pane zz)" v >/dev/null
+  self_check_run customize-preview-sabotage display-message -p -t PANE '#{pane_in_mode}'
+  self_check_expect 'a one-sided preview cycle changes the box' exit=0 stdout=0 stderr=0 screen=1 state=0
+  run_both copy-mode -q -t PANE
+  run_both customize-mode -t PANE
+  run_both send-keys -t PANE / pane-border-format Enter
+  zz_command set-option -g pane-border-format '#[fg=red]#{pane_index}' >/dev/null
+  self_check_run customize-markup-sabotage display-message -p -t PANE '#{pane_in_mode}'
+  self_check_expect 'a one-sided markup value changes the literal row text' exit=0 stdout=0 stderr=0 screen=1 state=0
+  zz_command set-option -gu pane-border-format >/dev/null
+  run_both copy-mode -q -t PANE
+  run_both customize-mode -t PANE
+  run_both send-keys -t PANE / mouse Enter u
+  zz_command send-keys -t "$(active_pane zz)" Escape d >/dev/null
+  self_check_run customize-prompt-sabotage display-message -p -t PANE '#{pane_in_mode}'
+  self_check_expect 'a one-sided reset prompt replaces the unset prompt' exit=0 stdout=0 stderr=0 screen=1 state=0
+  run_both copy-mode -q -t PANE
+  CASE_GRID_CELLS=0
+}
+
 # --- the roster's cases -----------------------------------------------------
 INTERACTIVE_REFRESH='clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported'
 LOCK_PROGRAM='DECIDED options.lock-program: decided 2026-09-14 by fabrico under the superset principle; the desktop session owns locking. The pin runs lock-command on the client tty; zz accepts the CLI and stores lock-command and lock-after-time without arming a terminal locker'
@@ -1088,7 +1472,7 @@ CAPTURE_TABS='TUI-017 ordinary residual: tmux retains a TAB cell and emits a lit
 CAPTURE_LOW_INDEX='TUI-017 divergence measured at 80x24: explicit 38;5;1 produces literal \033[38;5;1mRED\033[39m on the pin, while zz produces \033[31mRED\033[39m. Ghostty stores both named 31 and indexed 38;5;1 as Palette(1), so the capture cannot distinguish their original colour class. Indices 16 through 255 and RGB retain their class'
 LOG_IDENTITY='DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. Measured 2026-09-14 on both sides: the pin names ANY tty-bearing client by that tty, including the attached terminal client whose attach-session row reads /dev/pts/<n>, and zz named none of them - it spelled every row by the device name the client sent, which for an interactive client is the hostname. That half is closed: the server log now names a client by its tty whenever it has one. What stays is the clientless CLI, which names a process that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked'
 SERVER_ACCESS='protocol.socket-acl, accepted as a permanent exclusion: the daemon socket is the invoking user at mode 0600, so zz keeps no peer identity and every other form of the command - the list, the lookups, the owner test, the flag conflicts, the deny of an entry that is not there and the no-action form - answers exactly as the pin does, measured 2026-09-15. Only admitting a second identity diverges - semantic:multi-user-socket-acl, the permanent exclusion this gap exists for: the pin stores the entry and exits 0, zz refuses it'
-CLIENT_TREE_CLIENTLESS='clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer, while the pin exits 0 with no output and, alone among the three, opens no mode either: cmd_choose_tree_exec returns CMD_RETURN_NORMAL before window_pane_set_mode when server_client_how_many() == 0 (cmd-choose-tree.c), so the exit status and the error text are what diverge here, measured 2026-09-14. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open'
+CLIENT_TREE_CLIENTLESS='clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer. Measured 2026-09-17 with the fixture client attached, as it is in every run: the pin exits 0 with no output and opens client-mode on the target pane, drawing the client tree and the preview box over it, because server_client_how_many() counts that attached client (cmd-choose-tree.c); zz exits 1 with choose-client requires an interactive client on stderr and leaves the pane in no mode. The exit status, stderr, the screen and the pane mode diverge. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open'
 
 refresh_client_cases() {
   case_run refresh-bare same '' -- refresh-client
@@ -1469,6 +1853,7 @@ client_tool_cases() {
   case_run customize-mode-open same '' -- customize-mode -t PANE
   restore_case customize-mode-closed
   customize_fix_cases
+  CASE_GRID_CELLS=1
   CASE_NEEDLE_MODE=1
   case_run switch-mode same '' -- switch-mode -t PANE
   restore_case switch-mode-closed
@@ -1485,7 +1870,6 @@ client_tool_cases() {
   switch_lifetime_cases
   CASE_GRID_CELLS=1
   case_run switch-mode-history-cells same '' -- switch-mode -w -t PANE
-  CASE_GRID_CELLS=0
   restore_case switch-mode-history-closed
   attach_both_at 80 24
   CASE_NEEDLE_MODE=1
@@ -1502,6 +1886,10 @@ client_tool_cases() {
   run_on_both kill-session -t '=zulu'
   restore_case switch-mode-window-order-restored
   switch_tail_style_cases
+  switch_key_cases
+  customize_long_prompt_cases
+  customize_screen_cases
+  attach_both_at 80 24
   case_run server-access-bare same '' -- server-access
   case_run server-access-formatted same '' -- server-access '#{?#{==:1,1},nobody,root}'
   case_run server-access-user same '' -- server-access -w zzcc-nobody
@@ -2021,10 +2409,16 @@ run_self_check() {
 
   switch_lifetime_self_checks
   customize_fix_self_checks
+  switch_key_self_checks
+  customize_long_prompt_self_checks
+  customize_screen_self_checks
+  attach_both_at 80 24
   switch_tail_self_checks
+  CASE_GRID_CELLS=1
   self_check_run switch-tail-short-control switch-mode -w -F '#[bg=red]#{window_name}#[default]' -t PANE
-  self_check_expect 'short styled rows clear their allocated tail' exit=0 stdout=0 stderr=0 screen=0 state=0
+  self_check_expect 'short styled rows decode to the same cells' exit=0 stdout=0 stderr=0 screen=0 state=0
   run_both copy-mode -q -t PANE
+  CASE_GRID_CELLS=0
 
   self_check_run equivalence-after display-message -p -t PANE '#{window_index}.#{pane_index}'
   self_check_expect 'equivalence: every sabotage withdrawn' \

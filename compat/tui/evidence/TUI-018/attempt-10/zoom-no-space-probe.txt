@@ -1,0 +1,8 @@
+tmux before 1:2
+no space for a new pane
+exit=1
+tmux after 0:2
+zz before 1:2
+no space for a new pane
+exit=1
+zz after 1:2

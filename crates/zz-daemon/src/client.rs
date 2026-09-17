@@ -376,24 +376,30 @@ impl CommandClient {
                     streamed_stderr.push_str(&line);
                 }
                 ProtocolMessage::ClientFileRequest(request) => {
-                    let response =
-                        if let ClientFileOperation::ReadStdin { binary } = request.operation {
-                            let result = if self.stdin_enabled && !self.stdin_spent {
-                                self.stdin_spent = true;
-                                read_command_stdin(binary)
-                            } else {
-                                Err(crate::strerror_text(&io::Error::from_raw_os_error(9)))
-                            };
-                            ClientFileResponse {
-                                request_id: request.request_id,
-                                data: result.as_ref().cloned().unwrap_or_default(),
-                                error: result.err(),
-                            }
-                        } else {
-                            answer_client_file(&request)
-                        };
+                    let readable = self.stdin_enabled && !self.stdin_spent;
+                    let result = match request.operation {
+                        ClientFileOperation::ReadStdin { binary } if readable => {
+                            self.stdin_spent = true;
+                            read_command_stdin(binary)
+                        }
+                        ClientFileOperation::ReadStdinChunk if readable => {
+                            let chunk = read_command_stdin_chunk();
+                            self.stdin_spent = !matches!(&chunk, Ok(chunk) if !chunk.is_empty());
+                            chunk
+                        }
+                        _ => {
+                            self.writer.send(&ProtocolMessage::ClientFileResponse(
+                                answer_client_file(&request),
+                            ))?;
+                            continue;
+                        }
+                    };
                     self.writer
-                        .send(&ProtocolMessage::ClientFileResponse(response))?;
+                        .send(&ProtocolMessage::ClientFileResponse(ClientFileResponse {
+                            request_id: request.request_id,
+                            data: result.as_ref().cloned().unwrap_or_default(),
+                            error: result.err(),
+                        }))?;
                 }
                 _ => {}
             }
@@ -1698,7 +1704,9 @@ pub fn short_device_name() -> Option<String> {
         .map(str::to_owned)
 }
 
-fn read_command_stdin(binary: bool) -> Result<Vec<u8>, String> {
+const STDIN_CHUNK_BYTES: usize = 16 * 1024;
+
+fn caller_stdin() -> Result<std::fs::File, String> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     if STDIN_WAS_CLOSED.load(Ordering::Relaxed) {
         eprintln!(
@@ -1707,7 +1715,42 @@ fn read_command_stdin(binary: bool) -> Result<Vec<u8>, String> {
         );
         std::process::exit(1);
     }
-    read_command_stdin_from(io::stdin().lock(), binary)
+    let stdin = io::stdin();
+    #[cfg(unix)]
+    let duplicate = std::os::fd::AsFd::as_fd(&stdin).try_clone_to_owned();
+    #[cfg(windows)]
+    let duplicate = std::os::windows::io::AsHandle::as_handle(&stdin).try_clone_to_owned();
+    duplicate
+        .map(std::fs::File::from)
+        .map_err(|error| crate::strerror_text(&error))
+}
+
+fn stdin_read_error() -> String {
+    crate::strerror_text(&io::Error::from_raw_os_error(CLIENT_FILE_READ_ERRNO))
+}
+
+fn read_command_stdin(binary: bool) -> Result<Vec<u8>, String> {
+    read_command_stdin_from(caller_stdin()?, binary)
+}
+
+fn read_command_stdin_chunk() -> Result<Vec<u8>, String> {
+    read_command_stdin_chunk_from(caller_stdin()?)
+}
+
+fn read_command_stdin_chunk_from(mut reader: impl Read) -> Result<Vec<u8>, String> {
+    #[cfg(all(unix, feature = "daemon"))]
+    let _signal = StdinReadSignal::install().map_err(|error| error.to_string())?;
+    let mut chunk = vec![0; STDIN_CHUNK_BYTES];
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(read) => {
+                chunk.truncate(read);
+                return Ok(chunk);
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(_) => return Err(stdin_read_error()),
+        }
+    }
 }
 
 fn read_command_stdin_from(reader: impl Read, binary: bool) -> Result<Vec<u8>, String> {
@@ -1718,7 +1761,7 @@ fn read_command_stdin_from(reader: impl Read, binary: bool) -> Result<Vec<u8>, S
     reader
         .take(limit as u64 + 1)
         .read_to_end(&mut payload)
-        .map_err(|error| format!("could not read standard input: {error}"))?;
+        .map_err(|_| stdin_read_error())?;
     if payload.len() > limit {
         return Err(format!("standard input exceeds {limit} bytes"));
     }
@@ -1768,7 +1811,7 @@ impl Drop for StdinReadSignal {
 fn answer_client_file(request: &ClientFileRequest) -> ClientFileResponse {
     let path = PathBuf::from(&request.path);
     let (data, error) = match &request.operation {
-        ClientFileOperation::ReadStdin { .. } => (
+        ClientFileOperation::ReadStdin { .. } | ClientFileOperation::ReadStdinChunk => (
             Vec::new(),
             Some(crate::strerror_text(&io::Error::from_raw_os_error(9))),
         ),
@@ -1872,6 +1915,45 @@ mod tests {
         assert_eq!(disposition(), pending);
         drop(command);
         assert_eq!(disposition(), previous);
+    }
+
+    #[test]
+    fn stdin_chunk_returns_available_bytes_and_maps_read_errors_to_eio() {
+        struct OneRead(Option<&'static [u8]>);
+        impl std::io::Read for OneRead {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                let bytes = self
+                    .0
+                    .take()
+                    .expect("a chunk read never waits for more input");
+                buffer[..bytes.len()].copy_from_slice(bytes);
+                Ok(bytes.len())
+            }
+        }
+        struct FailedRead;
+        impl std::io::Read for FailedRead {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("is a directory"))
+            }
+        }
+        assert_eq!(
+            super::read_command_stdin_chunk_from(OneRead(Some(b"\x1b[31"))),
+            Ok(b"\x1b[31".to_vec())
+        );
+        assert_eq!(
+            super::read_command_stdin_chunk_from(OneRead(Some(b""))),
+            Ok(Vec::new())
+        );
+        assert_eq!(
+            super::read_command_stdin_chunk_from(FailedRead),
+            Err("Input/output error".to_owned())
+        );
+        assert_eq!(
+            super::read_command_stdin_from(FailedRead, true),
+            Err("Input/output error".to_owned())
+        );
+        let chunk = super::read_command_stdin_chunk_from(std::io::repeat(b'x')).expect("chunk");
+        assert_eq!(chunk.len(), super::STDIN_CHUNK_BYTES);
     }
 
     #[test]

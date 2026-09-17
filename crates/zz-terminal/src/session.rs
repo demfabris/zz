@@ -4827,6 +4827,7 @@ fn run_output_view(
                     if let Some(status) = last_command_status {
                         publisher.set_last_command_status(status.code());
                     }
+                    publisher.set_facts(engine_filter.facts(&terminal)?);
                     publisher.mark_output_activity();
                     publish_active_views(
                         &mut terminal,

@@ -6854,12 +6854,8 @@ impl Shared {
                 .get(&source_client)
                 .copied()
                 .unwrap_or(kind);
-            self.route_source_error(
-                source_client,
-                source_kind,
-                context.pane,
-                &spent_source_stream_error(),
-            );
+            let error = self.take_caller_stdin_error(source_client);
+            self.route_source_error(source_client, source_kind, context.pane, &error);
             return Err(if canonical == "load-buffer" {
                 DaemonError::ReportedCommandExit {
                     output: RawText::default(),
@@ -10116,7 +10112,7 @@ impl Shared {
                 }
                 let read_failure = request.stdin.is_some() || control_target.is_some();
                 let text = if read_failure {
-                    spent_source_stream_error()
+                    self.take_caller_stdin_error(source_client)
                 } else {
                     STANDARD_INPUT_SOURCE_WARNING.to_owned()
                 };
@@ -24841,14 +24837,58 @@ impl Shared {
     /// `window_pane_input_callback`: the caller's stream reaches a PTY-free
     /// pane's parser as if a child had printed it. The mux has already refused
     /// a pane that holds a process.
-    fn feed_pane_stream_input(&self, pane: PaneId, bytes: &[u8]) {
-        let terminal = {
+    fn feed_pane_stream_input(&self, pane: PaneId, bytes: &[u8]) -> bool {
+        let (terminal, geometry) = {
             let inner = self.inner.lock();
-            inner.terminals.get(&pane).cloned()
+            (
+                inner.terminals.get(&pane).cloned(),
+                inner.engine.pane_geometry(pane),
+            )
         };
-        if let Some(terminal) = terminal {
-            terminal.feed(Arc::from(bytes));
+        let Some(terminal) = terminal else {
+            return false;
+        };
+        if let Some((columns, rows)) = geometry {
+            let viewport = terminal.latest_viewport();
+            if (viewport.columns, viewport.rows) != (columns, rows) {
+                terminal.resize(columns, rows, 0, 0);
+            }
         }
+        terminal.feed(Arc::from(bytes))
+    }
+
+    fn stream_caller_stdin_to_pane(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &ExecutionContext,
+        command: &CommandInvocation,
+    ) {
+        let target = self
+            .inner
+            .lock()
+            .engine
+            .display_message_format_target(context, &command.args);
+        let Some(pane) = target.ok().and_then(|(target, _)| target?.pane) else {
+            return;
+        };
+        while let Some(Ok(chunk)) = self.client_file_operation(
+            Some(client),
+            Path::new("-"),
+            ClientFileOperation::ReadStdinChunk,
+        ) {
+            if chunk.is_empty() || !self.feed_pane_stream_input(pane, &chunk) {
+                break;
+            }
+        }
+    }
+
+    fn take_caller_stdin_error(&self, client: ClientId) -> String {
+        self.inner
+            .lock()
+            .command_streams
+            .get_mut(&client)
+            .and_then(|streams| streams.stdin_error.take())
+            .unwrap_or_else(spent_source_stream_error)
     }
 
     /// Append one line to the running Command request's stderr.
@@ -24963,7 +25003,10 @@ impl Shared {
             }
             (stdin, available)
         };
-        let stdin = if stdin.is_none() && available {
+        let stdin = if stdin.is_none() && available && sink == CommandStdinSink::PaneInput {
+            self.stream_caller_stdin_to_pane(client, context, command);
+            Some(SourceStream::Spent)
+        } else if stdin.is_none() && available {
             let bytes = self
                 .client_file_operation(
                     Some(client),
@@ -24978,8 +25021,11 @@ impl Shared {
                 Err(error)
                     if (sink == CommandStdinSink::Config
                         || canonical_command(&command.name) == "load-buffer")
-                        && error.tmux_message() == spent_source_stream_error() =>
+                        && caller_stdin_read_failure(&error.tmux_message()) =>
                 {
+                    if let Some(streams) = self.inner.lock().command_streams.get_mut(&client) {
+                        streams.stdin_error = Some(error.tmux_message());
+                    }
                     SourceStream::Spent
                 }
                 Err(error) => return Err(error.into()),
@@ -29567,6 +29613,7 @@ impl ConfigLoadReport {
 struct CommandStreams {
     stdin_available: bool,
     stdin: Option<SourceStream>,
+    stdin_error: Option<String>,
     stdout_write: (usize, StdoutClaim),
     stdout: String,
     stderr: String,
@@ -43163,6 +43210,11 @@ const STANDARD_INPUT_SOURCE_WARNING: &str = "source-file from standard input is 
 fn spent_source_stream_error() -> String {
     source_glob_error_warning(Path::new("-"), "Bad file descriptor")
 }
+
+fn caller_stdin_read_failure(message: &str) -> bool {
+    message == spent_source_stream_error()
+        || message == source_glob_error_warning(Path::new("-"), "Input/output error")
+}
 const NESTED_SOURCE_LIMIT_ERROR: &str = "too many nested files";
 
 fn source_glob_error_warning(path: &Path, error: &str) -> String {
@@ -43354,6 +43406,78 @@ mod tests {
         ));
         assert_eq!(read_global_option(&shared, "@payload"), "yes");
         assert_eq!(read_global_option(&shared, "@after"), "yes");
+    }
+
+    #[test]
+    fn unreadable_caller_stdin_reports_eio_once_and_continues() {
+        for (reader, spent_reader) in [
+            ("source-file -", "source-file -"),
+            ("load-buffer -b eio -", "load-buffer -b eio2 -"),
+        ] {
+            let shared = Arc::new(Shared::new(1));
+            let mailbox = OutboundMailbox::new();
+            let (client, _) =
+                shared.register_subscribed(ClientKind::Command, None, None, Arc::clone(&mailbox));
+            let _writer = ClientWriterRegistrationGuard::new(&shared, client, Arc::clone(&mailbox));
+            let alias = format!("unreadable={reader} ; {spent_reader} ; set -g @after yes");
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("set-option", ["-s", "command-alias[80]", &alias]),
+                )
+                .expect("alias");
+            take_reliable_messages(&mailbox);
+            let mut command = CommandInvocation::new("unreadable", [] as [&str; 0]);
+            command.set_stdin_available(true);
+            let worker = Arc::clone(&shared);
+            let pending = thread::spawn(move || {
+                worker.execute_command_request(
+                    client,
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    1,
+                    &command,
+                )
+            });
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let request = loop {
+                if let Some(request) =
+                    take_reliable_messages(&mailbox)
+                        .into_iter()
+                        .find_map(|message| match message {
+                            ProtocolMessage::ClientFileRequest(request) => Some(request),
+                            _ => None,
+                        })
+                {
+                    break request;
+                }
+                assert!(Instant::now() < deadline, "reader never requested stdin");
+                thread::sleep(Duration::from_millis(5));
+            };
+            shared.complete_client_file(
+                client,
+                ClientFileResponse {
+                    request_id: request.request_id,
+                    data: Vec::new(),
+                    error: Some("Input/output error".to_owned()),
+                },
+            );
+            let response = pending.join().expect("command worker");
+            let CommandResponse::Success {
+                exit_code, stderr, ..
+            } = &response
+            else {
+                panic!("{reader}: {response:?}");
+            };
+            assert_eq!(*exit_code, 1, "{reader}");
+            assert_eq!(
+                stderr, "Input/output error: -\nBad file descriptor: -\n",
+                "{reader}"
+            );
+            assert_eq!(read_global_option(&shared, "@after"), "yes", "{reader}");
+        }
     }
 
     #[test]

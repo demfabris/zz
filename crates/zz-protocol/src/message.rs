@@ -3898,6 +3898,7 @@ pub enum ClientFileOperation {
     ReadStdin {
         binary: bool,
     },
+    ReadStdinChunk,
 }
 
 /// One file operation the daemon asks its invoking client to perform. `path` is
@@ -4871,6 +4872,13 @@ mod tests {
         assert_eq!(
             postcard::from_bytes::<super::ClientFileOperation>(&bytes).expect("decode request"),
             request
+        );
+        let chunk = super::ClientFileOperation::ReadStdinChunk;
+        let bytes = postcard::to_stdvec(&chunk).expect("encode stdin chunk request");
+        assert_eq!(bytes, [3]);
+        assert_eq!(
+            postcard::from_bytes::<super::ClientFileOperation>(&bytes).expect("decode chunk"),
+            chunk
         );
     }
 

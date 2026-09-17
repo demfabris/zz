@@ -4211,6 +4211,7 @@ struct FuzzyCharacter {
     value: char,
     column: usize,
     width: usize,
+    align: zz_protocol::TmuxAlign,
 }
 
 #[derive(Clone, Copy)]
@@ -4230,6 +4231,20 @@ fn fuzzy_positions(pattern: &str, text: &str) -> Option<String> {
     {
         return Some(String::new());
     }
+    let (_, selected) = fuzzy_best(pattern, &characters)?;
+    Some(
+        characters
+            .iter()
+            .zip(selected)
+            .filter(|(_, selected)| *selected)
+            .flat_map(|(character, _)| character.column..character.column + character.width)
+            .map(|column| column.to_string())
+            .collect::<Vec<_>>()
+            .join(","),
+    )
+}
+
+fn fuzzy_best(pattern: &str, characters: &[FuzzyCharacter]) -> Option<(i32, Vec<bool>)> {
     let fold = !pattern.bytes().any(|byte| byte.is_ascii_uppercase());
     let mut best: Option<(i32, Vec<bool>)> = None;
     for group in pattern.split('|') {
@@ -4244,9 +4259,9 @@ fn fuzzy_positions(pattern: &str, text: &str) -> Option<String> {
             };
             any = true;
             let found = if term.exact {
-                fuzzy_exact(&term, &characters, fold)
+                fuzzy_exact(&term, characters, fold)
             } else {
-                fuzzy_subsequence(term.text, &characters, fold)
+                fuzzy_subsequence(term.text, characters, fold)
             };
             if term.inverse {
                 if found.is_some() {
@@ -4274,17 +4289,68 @@ fn fuzzy_positions(pattern: &str, text: &str) -> Option<String> {
             best = Some((score, selected));
         }
     }
-    let (_, selected) = best?;
-    Some(
+    best
+}
+
+pub fn fuzzy_match_columns(pattern: &str, text: &str, width: usize) -> Option<(u32, Vec<usize>)> {
+    use zz_protocol::TmuxAlign;
+    if width == 0 {
+        return None;
+    }
+    if pattern
+        .chars()
+        .all(|character| matches!(character, ' ' | '|'))
+    {
+        return Some((0, Vec::new()));
+    }
+    let characters = fuzzy_markup_characters(text);
+    let (score, selected) = fuzzy_best(pattern, &characters)?;
+    let total = |align: TmuxAlign| {
         characters
             .iter()
-            .zip(selected)
-            .filter(|(_, selected)| *selected)
-            .flat_map(|(character, _)| character.column..character.column + character.width)
-            .map(|column| column.to_string())
-            .collect::<Vec<_>>()
-            .join(","),
-    )
+            .filter(|character| character.align == align)
+            .map(|character| character.width)
+            .sum::<usize>()
+    };
+    let (left, centre, right, absolute) = (
+        total(TmuxAlign::Left),
+        total(TmuxAlign::Centre),
+        total(TmuxAlign::Right),
+        total(TmuxAlign::AbsoluteCentre),
+    );
+    let (mut wl, mut wc, mut wr) = (left, centre, right);
+    while wl + wc + wr > width {
+        if wc > 0 {
+            wc -= 1;
+        } else if wr > 0 {
+            wr -= 1;
+        } else {
+            wl -= 1;
+        }
+    }
+    let wa = absolute.min(width);
+    let area = |align: TmuxAlign| match align {
+        TmuxAlign::Right => (width - wr, right - wr, wr),
+        TmuxAlign::Centre => (
+            (wl + (width - wr - wl) / 2).saturating_sub(wc / 2),
+            (centre / 2).saturating_sub(wc / 2),
+            wc,
+        ),
+        TmuxAlign::AbsoluteCentre => ((width - wa) / 2, 0, wa),
+        TmuxAlign::Left | TmuxAlign::Default => (0, 0, wl),
+    };
+    let mut columns = Vec::new();
+    for (character, _) in characters.iter().zip(selected).filter(|(_, hit)| *hit) {
+        let (start, source, visible) = area(character.align);
+        if character.column < source || character.column >= source + visible {
+            continue;
+        }
+        let column = start + character.column - source;
+        columns.extend((column..column + character.width).filter(|column| *column < width));
+    }
+    columns.sort_unstable();
+    columns.dedup();
+    Some((u32::try_from(score.max(0)).unwrap_or(0), columns))
 }
 
 fn fuzzy_characters(text: &str) -> Vec<FuzzyCharacter> {
@@ -4299,11 +4365,82 @@ fn fuzzy_characters(text: &str) -> Vec<FuzzyCharacter> {
                 value,
                 column,
                 width,
+                align: zz_protocol::TmuxAlign::Left,
             };
             column = column.saturating_add(width);
             Some(character)
         })
         .collect()
+}
+
+fn fuzzy_markup_characters(text: &str) -> Vec<FuzzyCharacter> {
+    use zz_protocol::TmuxAlign;
+    let mut characters = Vec::new();
+    let mut offsets = [0usize; 5];
+    let mut align = TmuxAlign::Left;
+    let slot = |align: TmuxAlign| match align {
+        TmuxAlign::Default | TmuxAlign::Left => 0,
+        TmuxAlign::Centre => 1,
+        TmuxAlign::Right => 2,
+        TmuxAlign::AbsoluteCentre => 3,
+    };
+    let mut push = |value: char, align: TmuxAlign, characters: &mut Vec<FuzzyCharacter>| {
+        let width = value.width().unwrap_or_default();
+        let offset = &mut offsets[slot(align)];
+        characters.push(FuzzyCharacter {
+            value,
+            column: *offset,
+            width,
+            align,
+        });
+        *offset += width;
+    };
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'#' {
+            let hashes = bytes[index..]
+                .iter()
+                .take_while(|byte| **byte == b'#')
+                .count();
+            if bytes.get(index + hashes) != Some(&b'[') {
+                for _ in 0..hashes.div_ceil(2) {
+                    push('#', align, &mut characters);
+                }
+                index += hashes;
+                continue;
+            }
+            for _ in 0..hashes / 2 {
+                push('#', align, &mut characters);
+            }
+            if hashes % 2 == 0 {
+                push('[', align, &mut characters);
+                index += hashes + 1;
+                continue;
+            }
+            let start = index + hashes + 1;
+            let Some(end) = text[start..].find(']') else {
+                break;
+            };
+            if let Some(style) = zz_protocol::parse_style(&text[start..start + end])
+                && let Some(next) = style.align
+            {
+                align = if next == TmuxAlign::Default {
+                    TmuxAlign::Left
+                } else {
+                    next
+                };
+            }
+            index = start + end + 1;
+            continue;
+        }
+        let value = text[index..].chars().next().expect("character boundary");
+        index += value.len_utf8();
+        if !value.is_ascii_control() {
+            push(value, align, &mut characters);
+        }
+    }
+    characters
 }
 
 fn fuzzy_term(raw: &str) -> Option<FuzzyTerm<'_>> {

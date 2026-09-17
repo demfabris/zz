@@ -24,12 +24,13 @@ pub use command::{
     AgentOptions, CommandAliasBodyError, CommandAliasResolution, CommandPromptStep,
     CommandPromptTemplate, CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachRequest, DetachScope,
     Execution, ExecutionContext, FormatFacts, FormatMonitor, FormatMonitorScope,
-    FormatMonitorTarget, MAX_WORD_SEPARATORS_BYTES, MenuOptions, MouseEventTarget, MuxEffect,
-    MuxEngine, PaneBorderStyleValues, PaneModeRequest, PaneRuntimeFacts, PopupOptions,
-    RetainedJobEnvironment, SourceStream, StatusRowVariables, TMUX_OPTION_CONSUMERS,
-    TerminalWorkerOptions, WindowStyleValues, copy_mode_action_is_read_only_safe, format_command,
-    hook_format_variables, if_shell_truthy, parse_tmux_key, resolve_invoking_mouse_targets,
-    send_keys_is_read_only_safe, send_keys_target_client, validate_static_command_chain,
+    FormatMonitorTarget, MAX_WORD_SEPARATORS_BYTES, MenuOptions, ModeKey, ModePrompt,
+    MouseEventTarget, MuxEffect, MuxEngine, PaneBorderStyleValues, PaneModeRequest,
+    PaneRuntimeFacts, PopupOptions, PromptOutcome, RetainedJobEnvironment, SourceStream,
+    StatusRowVariables, SwitchAction, SwitchMode, TMUX_OPTION_CONSUMERS, TerminalWorkerOptions,
+    WindowStyleValues, copy_mode_action_is_read_only_safe, format_command, hook_format_variables,
+    if_shell_truthy, parse_tmux_key, resolve_invoking_mouse_targets, send_keys_is_read_only_safe,
+    send_keys_target_client, validate_static_command_chain,
 };
 #[doc(hidden)]
 pub use command::{
@@ -43,8 +44,8 @@ pub use copy_actions::{
 };
 pub use formats::{
     FormatClient, FormatClientRow, FormatEnvironRow, TmuxColour, delegated_format_variable_names,
-    display_width, format_true, indexed_colour_rgb, parse_tmux_colour, sanitize_client_output,
-    utf8_sanitize,
+    display_width, format_true, fuzzy_match_columns, indexed_colour_rgb, parse_tmux_colour,
+    sanitize_client_output, utf8_sanitize,
 };
 pub use honest_knobs::{BellAction, PresetOptions, VisualBell, WindowSize};
 pub use layout::{CellLayout, SplitSize};

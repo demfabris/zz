@@ -2,14 +2,14 @@
 type: Design Plan
 title: Command stream channel
 description: "One bounded channel for the caller's standard input and output on a command client: a single reader with a single cap, one byte-preserving carrier on the invocation, and three named sinks, so `source-file -`, `display-message -I`, `split-window -I`, `load-buffer -` and `save-buffer -` share a transport instead of owning five."
-status: "Built for TUI-018; deferred reader acquisition and control read-error continuation added 2026-09-16 on protocol 104; awaiting independent campaign review"
+status: "Built for TUI-018; caller matrix corrections on protocol 104; closed-fd cells remain recorded; awaiting independent campaign review"
 resource: crates/zz-protocol/src/message.rs
 tags:
 - tmux
 - compatibility
 - protocol
 - cli
-timestamp: 2026-09-16T18:00:00-03:00
+timestamp: 2026-09-17T00:00:00-03:00
 ---
 
 # Why
@@ -86,9 +86,22 @@ daemon memory without limit. Decided 2026-09-14 by the orchestrator under fabric
 contract of 2026-09-09; reversible.
 
 **Cancellation** follows EOF or client disconnect. EOF completes the pending payload; the
-reader then runs on those bytes. SIGTERM during the read exits the command client with status 0,
-matching the pin. Disconnect releases the daemon's file waiter and prevents the payload and
-following group members from running. State from members that finished before the read remains.
+reader then runs on those bytes. SIGTERM before, during or after the read exits the waiting command
+client with status 0. Each command wait and each nested read saves and restores the previous
+SIGTERM disposition with `sigaction`, including read errors and cap refusals. Disconnect releases
+the daemon's file waiter and prevents pending payloads and following group members from running.
+State from completed members remains. Source diagnostics reach CLI stderr as they occur through
+`ClientMessage` error events; the client removes delivered text from the final accumulated response.
+
+Destination validation precedes stdin acquisition. A missing `display-message -I` target returns
+without consuming the stream, a running pane rejects it, and `split-window -I` resolves its target
+and validates spawn options before requesting bytes. Control source read failures use the same
+unframed `ControlSourceFile::ReadError` event for direct commands, aliases and file replay, preserving
+both continuation and the attached control client's exit status.
+
+The matrix records a remaining closed-descriptor difference under TUI-018. Rust replaces a closed
+fd 0 with `/dev/null` before application entry; the pin instead reports a libevent EBADF error when
+its source reader runs. This is distinct from EOF on an open descriptor and remains unasserted.
 
 **Process lifetime** is the daemon's, never the caller's. The `PaneInput` sink writes into a pane
 that has no child process at all: pinned tmux's `-I` forms require `PANE_EMPTY` and answer

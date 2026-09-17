@@ -115,6 +115,7 @@ pub struct CommandOutcome {
 pub struct CommandClient {
     stdin_enabled: bool,
     stdin_spent: bool,
+    stderr_handler: Option<fn(&str)>,
     reader: ProtocolReceiver<LocalStream>,
     writer: ProtocolSender<LocalStream>,
     hello: ServerHello,
@@ -211,6 +212,7 @@ impl CommandClient {
         Self {
             stdin_enabled: false,
             stdin_spent: false,
+            stderr_handler: None,
             reader,
             writer,
             hello,
@@ -229,6 +231,10 @@ impl CommandClient {
     #[must_use]
     pub fn server_hello(&self) -> &ServerHello {
         &self.hello
+    }
+
+    pub fn set_stderr_handler(&mut self, handler: fn(&str)) {
+        self.stderr_handler = Some(handler);
     }
 
     pub fn enable_stdin(&mut self) {
@@ -277,8 +283,14 @@ impl CommandClient {
         command: CommandInvocation,
         prepared: bool,
     ) -> Result<CommandOutcome, DaemonError> {
+        #[cfg(all(unix, feature = "daemon"))]
+        let _signal = self
+            .stdin_enabled
+            .then(StdinReadSignal::install)
+            .transpose()?;
         let mut command = command;
         command.set_stdin_available(self.stdin_enabled);
+        let mut streamed_stderr = String::new();
         let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
         self.writer
             .send(&ProtocolMessage::CommandRequest(CommandRequest {
@@ -297,7 +309,10 @@ impl CommandClient {
                 }) if response_id == request_id => {
                     return Ok(CommandOutcome {
                         stdout: output,
-                        stderr,
+                        stderr: stderr
+                            .strip_prefix(&streamed_stderr)
+                            .unwrap_or(&stderr)
+                            .to_owned(),
                         exit_code,
                         stdout_claim,
                     });
@@ -316,6 +331,19 @@ impl CommandClient {
                             error: Box::new(error),
                         })
                     };
+                }
+                ProtocolMessage::Event(zz_protocol::Event {
+                    payload:
+                        zz_protocol::EventPayload::ClientMessage {
+                            kind: zz_protocol::ClientMessageKind::Error,
+                            text,
+                            ..
+                        },
+                    ..
+                }) if self.stderr_handler.is_some() => {
+                    self.stderr_handler.expect("stderr handler checked")(&text);
+                    streamed_stderr.push_str(&text);
+                    streamed_stderr.push('\n');
                 }
                 ProtocolMessage::ClientFileRequest(request) => {
                     let response =
@@ -1641,12 +1669,15 @@ pub fn short_device_name() -> Option<String> {
 }
 
 fn read_command_stdin(binary: bool) -> Result<Vec<u8>, String> {
+    read_command_stdin_from(io::stdin().lock(), binary)
+}
+
+fn read_command_stdin_from(reader: impl Read, binary: bool) -> Result<Vec<u8>, String> {
     #[cfg(all(unix, feature = "daemon"))]
     let _signal = StdinReadSignal::install().map_err(|error| error.to_string())?;
     let limit = zz_protocol::MAX_AGENT_SEND_BYTES;
     let mut payload = Vec::new();
-    io::stdin()
-        .lock()
+    reader
         .take(limit as u64 + 1)
         .read_to_end(&mut payload)
         .map_err(|error| format!("could not read standard input: {error}"))?;
@@ -1660,36 +1691,39 @@ fn read_command_stdin(binary: bool) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(all(unix, feature = "daemon"))]
-struct StdinReadSignal(async_channel::Sender<()>);
+struct StdinReadSignal(libc::sigaction);
 
 #[cfg(all(unix, feature = "daemon"))]
+#[allow(
+    unsafe_code,
+    reason = "sigaction saves and restores the exact previous disposition"
+)]
 impl StdinReadSignal {
     fn install() -> io::Result<Self> {
-        use futures_lite::StreamExt as _;
-        let mut signals = async_signal::Signals::new([async_signal::Signal::Term])?;
-        let (stop, stopped) = async_channel::bounded(1);
-        std::thread::Builder::new()
-            .name("zz-stdin-signal".to_owned())
-            .spawn(move || {
-                futures_lite::future::block_on(futures_lite::future::or(
-                    async {
-                        if signals.next().await.is_some() {
-                            std::process::exit(0);
-                        }
-                    },
-                    async {
-                        let _ = stopped.recv().await;
-                    },
-                ));
-            })?;
-        Ok(Self(stop))
+        unsafe extern "C" fn terminate(_: libc::c_int) {
+            unsafe { libc::_exit(0) };
+        }
+        unsafe {
+            let mut previous = std::mem::zeroed();
+            let mut action: libc::sigaction = std::mem::zeroed();
+            action.sa_sigaction = terminate as *const () as usize;
+            libc::sigemptyset(&raw mut action.sa_mask);
+            if libc::sigaction(libc::SIGTERM, &raw const action, &raw mut previous) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Self(previous))
+        }
     }
 }
 
 #[cfg(all(unix, feature = "daemon"))]
+#[allow(
+    unsafe_code,
+    reason = "restore the saved signal disposition when the scope ends"
+)]
 impl Drop for StdinReadSignal {
     fn drop(&mut self) {
-        let _ = self.0.try_send(());
+        unsafe { libc::sigaction(libc::SIGTERM, &raw const self.0, std::ptr::null_mut()) };
     }
 }
 
@@ -1760,6 +1794,47 @@ mod tests {
         client_working_directory, startup_config_owner_capability, terminal_facts_capabilities,
         terminal_facts_capabilities_with,
     };
+
+    #[cfg(all(unix, feature = "daemon"))]
+    #[test]
+    #[allow(
+        unsafe_code,
+        reason = "query signal dispositions without changing them"
+    )]
+    fn stdin_read_restores_signal_disposition_on_success_and_errors() {
+        fn disposition() -> libc::sighandler_t {
+            unsafe {
+                let mut action: libc::sigaction = std::mem::zeroed();
+                assert_eq!(
+                    libc::sigaction(libc::SIGTERM, std::ptr::null(), &raw mut action),
+                    0
+                );
+                action.sa_sigaction
+            }
+        }
+        struct FailedRead;
+        impl std::io::Read for FailedRead {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("read failed"))
+            }
+        }
+        let previous = disposition();
+        let command = super::StdinReadSignal::install().expect("command signal");
+        let pending = disposition();
+        assert_eq!(
+            super::read_command_stdin_from(&b"ok"[..], false),
+            Ok(b"ok".to_vec())
+        );
+        assert_eq!(disposition(), pending);
+        assert!(super::read_command_stdin_from(FailedRead, false).is_err());
+        assert_eq!(disposition(), pending);
+        assert!(super::read_command_stdin_from(&b"\xff"[..], false).is_err());
+        assert_eq!(disposition(), pending);
+        assert!(super::read_command_stdin_from(std::io::repeat(b'x'), true).is_err());
+        assert_eq!(disposition(), pending);
+        drop(command);
+        assert_eq!(disposition(), previous);
+    }
 
     #[test]
     fn attach_session_command_preserves_the_exact_requested_flag_mutation() {

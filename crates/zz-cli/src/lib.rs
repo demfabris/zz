@@ -226,7 +226,7 @@ pub fn run_startup(socket_path: &Path, options: StartupOptions) -> Startup {
             &mux_config_files,
             no_start_server,
             control_mode,
-            remaining,
+            &remaining,
         ));
     }
     if let Some(exit) = run_command_mode(
@@ -1135,6 +1135,7 @@ fn run_command_mode(
         None
     };
     client.enable_stdin();
+    client.set_stderr_handler(print_command_error);
     let mut output_writer = CommandOutputWriter::default();
     if let Some(prepared_commands) = prepared_commands {
         let recover_kill = prepared_commands

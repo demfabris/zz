@@ -120,6 +120,8 @@ fn build_vendored(link_mode: LinkMode) {
         Err(_) => fetch_ghostty(&out_dir),
     };
 
+    apply_provenance_patch(&ghostty_dir);
+
     // Build libghostty-vt via zig.
     let install_prefix = out_dir.join("ghostty-install");
     let zig_cache_dir = out_dir.join("zig-cache");
@@ -170,6 +172,13 @@ fn build_vendored(link_mode: LinkMode) {
     }
 
     run(build, "zig build");
+    for name in ["libghostty-vt.pc", "libghostty-vt-static.pc"] {
+        let path = install_prefix.join("share/pkgconfig").join(name);
+        if let Ok(contents) = std::fs::read_to_string(&path) {
+            std::fs::write(path, format!("zz_capture_provenance=1\n{contents}"))
+                .expect("mark terminal provenance package");
+        }
+    }
 
     let lib_dir = install_prefix.join("lib");
     let include_dir = install_prefix.join("include");
@@ -235,6 +244,9 @@ fn warn_unused_xcframework(lib_dir: &Path) {
 
 #[cfg(feature = "pkg-config")]
 fn try_pkg_config(link_mode: LinkMode) -> bool {
+    if !matches!(pkg_config::get_variable(link_mode.pkg_config_name(), "zz_capture_provenance").as_deref(), Ok("1")) {
+        return false;
+    }
     let mut config = pkg_config::Config::new();
     let lib = match link_mode {
         LinkMode::Dynamic => config.probe(link_mode.pkg_config_name()),
@@ -372,6 +384,34 @@ fn fetch_ghostty(out_dir: &Path) -> PathBuf {
     std::fs::write(&stamp, GHOSTTY_COMMIT).unwrap_or_else(|e| panic!("failed to write stamp: {e}"));
 
     src_dir
+}
+
+fn apply_provenance_patch(source: &Path) {
+    let patch = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("provenance.patch");
+    println!("cargo:rerun-if-changed={}", patch.display());
+    let stamp = source.join(".zz-provenance.patch");
+    let contents = std::fs::read(&patch).expect("read terminal provenance patch");
+    if let Ok(previous) = std::fs::read(&stamp)
+        && previous != contents
+    {
+        let mut undo = Command::new("git");
+        undo.args(["apply", "--reverse"]).arg(&stamp).current_dir(source);
+        run(undo, "remove previous terminal provenance patch");
+    }
+    let reverse = Command::new("git")
+        .args(["apply", "--reverse", "--check"])
+        .arg(&patch)
+        .current_dir(source)
+        .output()
+        .expect("check terminal provenance patch");
+    if reverse.status.success() {
+        std::fs::write(&stamp, &contents).expect("stamp terminal provenance patch");
+        return;
+    }
+    let mut apply = Command::new("git");
+    apply.arg("apply").arg(&patch).current_dir(source);
+    run(apply, "apply terminal provenance patch");
+    std::fs::write(&stamp, contents).expect("stamp terminal provenance patch");
 }
 
 fn run(mut command: Command, context: &str) {

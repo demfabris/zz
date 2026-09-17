@@ -4,7 +4,7 @@ title: tmux compatibility gap report
 description: "Live TODO and status report for tmux compatibility gaps, decisions, evidence, and acceptance gates."
 resource: compat/tmux-gaps.json
 tags: [tmux, compatibility, gaps, tracker]
-timestamp: 2026-09-15T00:00:00-03:00
+timestamp: 2026-09-16T00:00:00-03:00
 ---
 
 # Overview
@@ -17,17 +17,17 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **41**. Classified items: **379**.
+Tracked gap groups: **41**. Classified items: **380**.
 
 - Status: open: 1, accepted: 40.
 - Decision: adopt: 1, native: 31, never: 9.
 - Priority: now: 1, none: 40.
 - Closed history entries: 207.
-- Surface: command: 8, flag: 25, extension-flag: 5, native-command: 31, option: 34, format: 43, key: 47, binding: 37, native-key: 91, semantic: 49, presentation: 8, protocol: 1.
+- Surface: command: 8, flag: 25, extension-flag: 5, native-command: 32, option: 34, format: 43, key: 47, binding: 37, native-key: 91, semantic: 49, presentation: 8, protocol: 1.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 84 of those commands. The registry classifies 25 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 5 zz-only flags on tmux command names, 31 native command names, 34 options absent from `BEHAVES`, 43 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 0 currently documented hook-producer gaps, 47 omitted default keys, 37 divergent shared default bindings, 91 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 84 of those commands. The registry classifies 25 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 5 zz-only flags on tmux command names, 32 native command names, 34 options absent from `BEHAVES`, 43 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 0 currently documented hook-producer gaps, 47 omitted default keys, 37 divergent shared default bindings, 91 zz-only default keys.
 
 ## Enforcement boundary
 
@@ -227,14 +227,14 @@ These commands draw terminal client chrome that zz replaces with native surfaces
 
 ### `commands.native-superset`: Keep the zz-native command namespace explicit
 
-The GUI superset needs its own names so tmux spellings can keep frozen tmux meaning. Pin citation added 2026-09-06. The pin's whole command namespace is one array, cmd_table in cmd.c, which holds 92 entries at d77c9dc6 and is what compat/tmux-oracle.json's commands list is derived from; a name that is not in it is not a tmux command, and tmux has no vendor-prefix convention that would let a superset hide inside it. Measured: every one of zz's 23 native command names is absent from that array and from every entry's alias list, which crates/zz-mux/src/compat_manifest_tests.rs re-checks against the oracle on every registry edit. The product stance is that the superset is additive and audited: a zz-native name may never equal a tmux exact spelling or alias, so a config written for tmux keeps tmux meaning and a zz name can never be shadowed into one. Re-measured 2026-09-13 (TUI-012 attempt-01): the array holds 25 names, not the 23 this reason counted when it was written, and every one of them is reachable from a raw TUI by its declared name with no compatibility profile and no activation flag - compat/tui-superset.sh's names group walks NATIVE_COMMAND_NAMES itself and requires each name not to answer `unknown command`. That landing closes no item here: the pin has no counterpart for any of these names, so there is no pin behaviour for the raw TUI to start honouring, and the group stays accepted for the GUI and for the TUI alike. Re-measured 2026-09-15: wait-pane and run-pane joined the array (27 names), both absent from the pin's cmd_table and alias lists.
+The GUI superset needs its own names so tmux spellings can keep frozen tmux meaning. Pin citation added 2026-09-06. The pin's whole command namespace is one array, cmd_table in cmd.c, which holds 92 entries at d77c9dc6 and is what compat/tmux-oracle.json's commands list is derived from; a name that is not in it is not a tmux command, and tmux has no vendor-prefix convention that would let a superset hide inside it. Measured: every one of zz's 23 native command names is absent from that array and from every entry's alias list, which crates/zz-mux/src/compat_manifest_tests.rs re-checks against the oracle on every registry edit. The product stance is that the superset is additive and audited: a zz-native name may never equal a tmux exact spelling or alias, so a config written for tmux keeps tmux meaning and a zz name can never be shadowed into one. Re-measured 2026-09-13 (TUI-012 attempt-01): the array holds 25 names, not the 23 this reason counted when it was written, and every one of them is reachable from a raw TUI by its declared name with no compatibility profile and no activation flag - compat/tui-superset.sh's names group walks NATIVE_COMMAND_NAMES itself and requires each name not to answer `unknown command`. That landing closes no item here: the pin has no counterpart for any of these names, so there is no pin behaviour for the raw TUI to start honouring, and the group stays accepted for the GUI and for the TUI alike. Re-measured 2026-09-15: wait-pane and run-pane joined the array (27 names), both absent from the pin's cmd_table and alias lists. Registered 2026-09-16: new-agent-session joined the native catalog in 94f7bcf4 and is absent from the pin's command names and aliases; it follows this group's existing additive namespace rule.
 
 - Decision: `native`
 - Status: `accepted`
 - Priority and ease: `none` / `none`
 - Owner: `protocol`
 - User impact: daily, gui, scripts
-- Items: `native-command:agent-catalog`, `native-command:agent-respond`, `native-command:agent-send`, `native-command:capture-browser`, `native-command:copy-mode-search-prompt`, `native-command:debug-marker`, `native-command:events`, `native-command:focus-sidebar`, `native-command:import-tmux-config`, `native-command:inspect`, `native-command:new-browser`, `native-command:reload-config`, `native-command:restart-agent-pane`, `native-command:run-pane`, `native-command:select-pane-kind`, `native-command:send-last-output`, `native-command:send-text`, `native-command:set-agent-provider`, `native-command:set-agent-session`, `native-command:set-browser-profile`, `native-command:set-browser-tabs`, `native-command:set-browser-url`, `native-command:set-editor-path`, `native-command:show-agent-permission`, `native-command:show-last-output`, `native-command:split-agent`, `native-command:split-browser`, `native-command:split-picker`, `native-command:tools`, `native-command:wait-for-exit`, `native-command:wait-pane`
+- Items: `native-command:agent-catalog`, `native-command:agent-respond`, `native-command:agent-send`, `native-command:capture-browser`, `native-command:copy-mode-search-prompt`, `native-command:debug-marker`, `native-command:events`, `native-command:focus-sidebar`, `native-command:import-tmux-config`, `native-command:inspect`, `native-command:new-agent-session`, `native-command:new-browser`, `native-command:reload-config`, `native-command:restart-agent-pane`, `native-command:run-pane`, `native-command:select-pane-kind`, `native-command:send-last-output`, `native-command:send-text`, `native-command:set-agent-provider`, `native-command:set-agent-session`, `native-command:set-browser-profile`, `native-command:set-browser-tabs`, `native-command:set-browser-url`, `native-command:set-editor-path`, `native-command:show-agent-permission`, `native-command:show-last-output`, `native-command:split-agent`, `native-command:split-browser`, `native-command:split-picker`, `native-command:tools`, `native-command:wait-for-exit`, `native-command:wait-pane`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-protocol/src/catalog.rs`

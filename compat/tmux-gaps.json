@@ -1,7 +1,7 @@
 {
   "schema": 3,
   "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
-  "updated_on": "2026-09-15",
+  "updated_on": "2026-09-16",
   "gaps": [
     {
       "id": "aliases.remote-client-preflight",
@@ -220,6 +220,7 @@
         "native-command:focus-sidebar",
         "native-command:import-tmux-config",
         "native-command:inspect",
+        "native-command:new-agent-session",
         "native-command:new-browser",
         "native-command:reload-config",
         "native-command:restart-agent-pane",
@@ -250,7 +251,7 @@
         "Every zz-native exact command name and alias remains explicitly classified and does not equal a tmux exact spelling."
       ],
       "depends_on": [],
-      "reason": "The GUI superset needs its own names so tmux spellings can keep frozen tmux meaning. Pin citation added 2026-09-06. The pin's whole command namespace is one array, cmd_table in cmd.c, which holds 92 entries at d77c9dc6 and is what compat/tmux-oracle.json's commands list is derived from; a name that is not in it is not a tmux command, and tmux has no vendor-prefix convention that would let a superset hide inside it. Measured: every one of zz's 23 native command names is absent from that array and from every entry's alias list, which crates/zz-mux/src/compat_manifest_tests.rs re-checks against the oracle on every registry edit. The product stance is that the superset is additive and audited: a zz-native name may never equal a tmux exact spelling or alias, so a config written for tmux keeps tmux meaning and a zz name can never be shadowed into one. Re-measured 2026-09-13 (TUI-012 attempt-01): the array holds 25 names, not the 23 this reason counted when it was written, and every one of them is reachable from a raw TUI by its declared name with no compatibility profile and no activation flag - compat/tui-superset.sh's names group walks NATIVE_COMMAND_NAMES itself and requires each name not to answer `unknown command`. That landing closes no item here: the pin has no counterpart for any of these names, so there is no pin behaviour for the raw TUI to start honouring, and the group stays accepted for the GUI and for the TUI alike. Re-measured 2026-09-15: wait-pane and run-pane joined the array (27 names), both absent from the pin's cmd_table and alias lists."
+      "reason": "The GUI superset needs its own names so tmux spellings can keep frozen tmux meaning. Pin citation added 2026-09-06. The pin's whole command namespace is one array, cmd_table in cmd.c, which holds 92 entries at d77c9dc6 and is what compat/tmux-oracle.json's commands list is derived from; a name that is not in it is not a tmux command, and tmux has no vendor-prefix convention that would let a superset hide inside it. Measured: every one of zz's 23 native command names is absent from that array and from every entry's alias list, which crates/zz-mux/src/compat_manifest_tests.rs re-checks against the oracle on every registry edit. The product stance is that the superset is additive and audited: a zz-native name may never equal a tmux exact spelling or alias, so a config written for tmux keeps tmux meaning and a zz name can never be shadowed into one. Re-measured 2026-09-13 (TUI-012 attempt-01): the array holds 25 names, not the 23 this reason counted when it was written, and every one of them is reachable from a raw TUI by its declared name with no compatibility profile and no activation flag - compat/tui-superset.sh's names group walks NATIVE_COMMAND_NAMES itself and requires each name not to answer `unknown command`. That landing closes no item here: the pin has no counterpart for any of these names, so there is no pin behaviour for the raw TUI to start honouring, and the group stays accepted for the GUI and for the TUI alike. Re-measured 2026-09-15: wait-pane and run-pane joined the array (27 names), both absent from the pin's cmd_table and alias lists. Registered 2026-09-16: new-agent-session joined the native catalog in 94f7bcf4 and is absent from the pin's command names and aliases; it follows this group's existing additive namespace rule."
     },
     {
       "id": "config.background-if-shell-race",

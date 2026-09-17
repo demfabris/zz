@@ -43575,12 +43575,12 @@ mod tests {
         assert!(rows.contains(&"list-commands (lscm) [-F format] [command]"));
         assert!(rows.contains(&"start-server (start) "));
         assert!(rows.contains(
-            &"agent-send [-t target-pane] [--target target-pane] [--submit] [--wait] [--timeout seconds] [--on-block wait|fail] [--context context] [text ...]"
+            &"agent-send [-t target-pane] [--target target-pane] [--submit] [--wait] [--progress] [--timeout seconds] [--on-block wait|fail|allow|deny] [--json] [--final] [--context context] [text ...]"
         ));
         assert!(rows.contains(&"send-last-output [-t target-pane]"));
         assert!(rows.contains(&"capture-browser [-t target-pane] [-o output-path]"));
         assert!(rows.contains(&"debug-marker [note ...]"));
-        assert!(rows.contains(&"tools [--skill]"));
+        assert!(rows.contains(&"tools [--skill] [section]"));
         assert!(rows.contains(
             &"capture-pane (capturep) [-aeJMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
         ));

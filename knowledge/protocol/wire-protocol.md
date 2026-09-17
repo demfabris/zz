@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v104)
+title: zz wire protocol (v105)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 104`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 105`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (104) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (105) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -685,20 +685,12 @@ the server log still records the command the caller typed. See
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 104`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 105`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
-- v104 appends `ServerError::NativeCommandParse(String)`, `NativeUnsupportedCommand(String)`,
-  and `NativeInvalidCommand(String)` after `PostAdmissionCallback`.
-  Clients use these variants to preserve exit 2 for zz-native usage errors, including extension conflicts
-  such as `list-panes --json -F x`, and native option refusals such as `set-option -a history-trickle`.
-  `CommandParse` and `UnsupportedCommand` now exit 1.
-  Both parse variants retain the same diagnostic text and parse-error classification.
-  `NativeInvalidCommand` preserves the runtime phase when bind-key or untyped confirm-before
-  constructs an invalid native callback, while retaining native usage exit 2.
-  v103 shipped in zz 0.10.0, so these builds require v104 on both sides of the connection.
-  This unreleased version also appends `mode: Option<PaneMode>` after `PaneSnapshot.border_status_text` with
-  `#[serde(default)]`; no existing field moves. The field carries the server-owned pane mode
+- v105 carries the server-owned pane modes. v104 shipped in zz 0.11.0, so these builds require
+  v105 on both sides of the connection. It appends `mode: Option<PaneMode>` after
+  `PaneSnapshot.border_status_text` with `#[serde(default)]`; no existing field moves. The field carries the server-owned pane mode
   `wp->modes` holds. `None` is a pane in no such mode; `PaneMode::Clock {
   time, colour }` is `window_clock_mode`, carrying the `tim` string `window_clock_draw_screen`
   formatted from `clock-mode-style` and the `clock-mode-colour` option value the client resolves the
@@ -727,9 +719,20 @@ the server log still records the command the caller typed. See
   `status-position top`; `ChooseTreeState.prompt` stays empty, so an option value longer than
   `MAX_CHOOSE_ITEM_TEXT_BYTES` never crosses a bounded field. A client that meets a control frame it
   cannot decode now logs it and reads the next frame instead of dropping the connection.
-  `InputMessage::ClientSuspendState { suspended }` is a tail variant in v104. The raw TUI
+  `InputMessage::ClientSuspendState { suspended }` is a tail variant in v105. The raw TUI
   reports terminal suspension and resumption so client lists and attachment counts exclude
-  a stopped client while its connection and pane views survive.
+  a stopped client while its connection and pane views survive. `parse_styled_segments` also
+  draws the text after `#[ignore]` literally, the way `format_draw` does, which changes what a
+  client renders from markup it already received but not the bytes of any message.
+- v104 appends `ServerError::NativeCommandParse(String)`, `NativeUnsupportedCommand(String)`,
+  and `NativeInvalidCommand(String)` after `PostAdmissionCallback`.
+  Clients use these variants to preserve exit 2 for zz-native usage errors, including extension conflicts
+  such as `list-panes --json -F x`, and native option refusals such as `set-option -a history-trickle`.
+  `CommandParse` and `UnsupportedCommand` now exit 1.
+  Both parse variants retain the same diagnostic text and parse-error classification.
+  `NativeInvalidCommand` preserves the runtime phase when bind-key or untyped confirm-before
+  constructs an invalid native callback, while retaining native usage exit 2.
+  v103 shipped in zz 0.10.0, so these builds require v104 on both sides of the connection.
 - v103 carries the pin's pane prompt and the terminal name a client learned after the hello.
   `CommandPromptState` appends `pane: Option<PaneId>` after `no_freeze`: `command-prompt -P` is
   `window_pane_set_prompt`, so the prompt hangs on the pane the command targeted rather than on the

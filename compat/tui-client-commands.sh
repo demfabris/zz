@@ -855,8 +855,12 @@ rich_capture_case() {
     self_check_expect "$name exact bytes before sabotage" exit=0 stdout=0 stderr=0
     if [ "$name" = capture-low-indexed-colour ]; then
       changed="${payload/38;5;1/31}"
+    elif [ "$name" = capture-edited-tab-overwrite-background ]; then
+      changed="${payload/41m/42m}"
     elif [[ "$name" == capture-edited-tab-ich-* ]]; then
       changed="${payload/@/m}"
+    elif [ "$name" = capture-edited-tab-dch-middle ]; then
+      changed="${payload/\\t/     }"
     elif [[ "$name" == capture-edited-tab-dch-* ]]; then
       changed="${payload/\\033\[P/\\033[m}"
       changed="${changed/2P/2m}"
@@ -898,6 +902,7 @@ rich_capture_case() {
 }
 
 edited_tab_capture_cases() {
+  rich_capture_case capture-edited-tab-overwrite-background '\033[44mABC\tDEF\033[0m\r\033[6G\033[41mX\033[0m\033[5;1HNEXT' same '' -C -e -S 0 -E 4
   rich_capture_case capture-edited-tab-ich-middle 'ABC\tDEF\r\033[5G\033[@X\033[5;1HNEXT' same '' -C -S 0 -E 4
   rich_capture_case capture-edited-tab-ich-before 'ABC\tDEF\r\033[2G\033[2@\033[5;1HNEXT' same '' -C -S 0 -E 4
   rich_capture_case capture-edited-tab-ich-head 'ABC\tDEF\r\033[4G\033[@\033[5;1HNEXT' same '' -C -S 0 -E 4

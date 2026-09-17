@@ -391,11 +391,46 @@ fn local_scroll_needs_prefetch(
     target_offset < front.saturating_add(scrollbar.len.saturating_mul(2))
 }
 
-fn terminal_text_input(pane: PaneId, text: &str) -> InputMessage {
-    InputMessage::Text {
+fn terminal_text_input(pane: PaneId, key: Option<&KeyDownEvent>, text: &str) -> InputMessage {
+    let Some(event) = key else {
+        return InputMessage::Text {
+            pane,
+            text: text.to_owned(),
+        };
+    };
+    let keystroke = Keystroke {
+        key_char: Some(text.to_owned()),
+        ..event.keystroke.clone()
+    };
+    InputMessage::Key {
         pane,
-        text: text.to_owned(),
+        input: key_input(
+            &keystroke,
+            key_code(&keystroke.key),
+            if event.is_held {
+                KeyAction::Repeat
+            } else {
+                KeyAction::Press
+            },
+        ),
+        text_follows: false,
     }
+}
+
+fn popup_input(input: InputMessage) -> InputMessage {
+    let action = match input {
+        InputMessage::Key {
+            input,
+            text_follows,
+            ..
+        } => PopupAction::Key {
+            input,
+            text_follows,
+        },
+        InputMessage::Text { text, .. } => PopupAction::Text(text),
+        other => return other,
+    };
+    InputMessage::Popup { action }
 }
 
 #[allow(
@@ -431,6 +466,7 @@ pub(crate) struct TerminalView {
     search_prompt_behavior: SearchPromptBehavior,
     swallowed_overlay_key: Option<KeyCode>,
     forwarded_keys: HashSet<String>,
+    text_input_key: Option<KeyDownEvent>,
     terminal_resize_suppressed: Rc<Cell<bool>>,
     last_grid_size: Option<GridSize>,
     hit_grid: Option<HitGrid>,
@@ -1095,6 +1131,7 @@ impl TerminalView {
             search_prompt_behavior: SearchPromptBehavior::default(),
             swallowed_overlay_key: None,
             forwarded_keys: HashSet::new(),
+            text_input_key: None,
             terminal_resize_suppressed,
             last_grid_size: None,
             hit_grid: None,
@@ -2145,15 +2182,16 @@ impl TerminalView {
         self.reset_cursor_blink(cx);
         let code = key_code(&event.keystroke.key);
         let modifiers = modifiers(event.keystroke.modifiers);
+        let text_key = matches!(code, KeyCode::Character(_))
+            && !modifiers.control()
+            && !modifiers.alt()
+            && !modifiers.platform();
+        self.text_input_key = (text_key && self.retained.read().viewport.kitty_keyboard)
+            .then(|| event.clone());
         if self.popup {
-            let printable = matches!(code, KeyCode::Character(_));
-            let text_follows = !self.retained.read().viewport.kitty_keyboard
-                && printable
-                && !modifiers.control()
-                && !modifiers.alt()
-                && !modifiers.platform();
-            if !text_follows {
+            if !text_key {
                 self.forwarded_keys.insert(event.keystroke.key.clone());
+                cx.stop_propagation();
             }
             self.mux.read(cx).send_input(InputMessage::Popup {
                 action: PopupAction::Key {
@@ -2166,10 +2204,9 @@ impl TerminalView {
                             KeyAction::Press
                         },
                     ),
-                    text_follows,
+                    text_follows: text_key,
                 },
             });
-            cx.stop_propagation();
             return;
         }
         let chrome = crate::keymap::resolve(cx, TERMINAL_TABLE, &event.keystroke);
@@ -2242,14 +2279,7 @@ impl TerminalView {
                 self.snapshot_clipboard_image(item, cx);
             }
         }
-        let printable = matches!(code, KeyCode::Character(_));
-        let raw_key = self.retained.read().viewport.kitty_keyboard
-            || !printable
-            || modifiers.control()
-            || modifiers.alt()
-            || modifiers.platform();
-
-        if raw_key {
+        if !text_key {
             self.cancel_local_scroll(cx);
             self.forwarded_keys.insert(event.keystroke.key.clone());
             self.mux.read(cx).send_input(InputMessage::Key {
@@ -2629,6 +2659,7 @@ impl EntityInputHandler for TerminalView {
     ) {
         self.reset_cursor_blink(cx);
         self.marked_text = None;
+        let key = self.text_input_key.take();
         if !text.is_empty() {
             if let Some(query) = self.search_query.as_mut() {
                 query.text.push_str(text);
@@ -2637,12 +2668,14 @@ impl EntityInputHandler for TerminalView {
                 self.send_view_action(cx, TerminalViewAction::SearchUpdate(query));
             } else {
                 self.cancel_local_scroll(cx);
+                if let Some(event) = &key {
+                    self.forwarded_keys.insert(event.keystroke.key.clone());
+                }
+                let input = terminal_text_input(self.pane, key.as_ref(), text);
                 self.mux.read(cx).send_input(if self.popup {
-                    InputMessage::Popup {
-                        action: PopupAction::Text(text.to_owned()),
-                    }
+                    popup_input(input)
                 } else {
-                    terminal_text_input(self.pane, text)
+                    input
                 });
             }
         }
@@ -2659,6 +2692,7 @@ impl EntityInputHandler for TerminalView {
         cx: &mut Context<Self>,
     ) {
         self.reset_cursor_blink(cx);
+        self.text_input_key = None;
         self.marked_text = (!new_text.is_empty()).then(|| new_text.to_owned());
         window.invalidate_character_coordinates();
         cx.notify();
@@ -2863,10 +2897,44 @@ mod tests {
     #[test]
     fn gpui_terminal_commits_text_as_one_standalone_message() {
         assert_eq!(
-            terminal_text_input(PaneId(7), "typed"),
+            terminal_text_input(PaneId(7), None, "typed"),
             InputMessage::Text {
                 pane: PaneId(7),
                 text: "typed".to_owned(),
+            }
+        );
+        assert_eq!(
+            popup_input(terminal_text_input(PaneId(7), None, "é")),
+            InputMessage::Popup {
+                action: PopupAction::Text("é".to_owned()),
+            }
+        );
+    }
+
+    #[test]
+    fn kitty_text_key_carries_the_platform_committed_text() {
+        let event = KeyDownEvent {
+            keystroke: Keystroke {
+                key: "e".to_owned(),
+                key_char: Some("e".to_owned()),
+                modifiers: gpui::Modifiers::default(),
+            },
+            is_held: false,
+            prefer_character_input: false,
+        };
+
+        assert_eq!(
+            terminal_text_input(PaneId(7), Some(&event), "é"),
+            InputMessage::Key {
+                pane: PaneId(7),
+                input: KeyInput {
+                    action: KeyAction::Press,
+                    key: KeyCode::Character('e'),
+                    modifiers: Modifiers::default(),
+                    text: Some(Box::from("é")),
+                    unshifted_codepoint: Some('e'),
+                },
+                text_follows: false,
             }
         );
     }

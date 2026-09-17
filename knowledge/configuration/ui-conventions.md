@@ -4,7 +4,7 @@ title: UI design conventions
 description: The component, palette, and styling rules that keep zz application chrome consistent and theme-aware.
 resource: crates/zz/src/command/palette.rs
 tags: [ui, gpui, zz-ui, theme, chrome, clippy]
-timestamp: 2026-09-16T00:17:40Z
+timestamp: 2026-09-17T00:00:00Z
 ---
 
 # Overview
@@ -99,8 +99,9 @@ The browser client in `clients/web` (`just web`) uses the shared GPUI components
    Settings > Panes > Selected pane glow scales its strength from 0–200%; 0 turns it off.
    `pane-glow-strength` stores the factor from 0–2, defaulting to 1.
    `PaneChrome::active` shares this top-left emphasis across desktop, browser, and preview callers.
-   The glow fades in over 300ms when a pane becomes selected; reduced motion or disabled
-   animations show the final strength immediately. The local Metal,
+   The glow fades in over 300ms when a pane becomes selected, paced at 30fps through
+   `Animation::with_max_fps` because every animation frame redraws the whole window; reduced
+   motion or disabled animations show the final strength immediately. The local Metal,
    WGPU, and DirectX renderers dither the fade to reduce banding. Pane content roots paint their own backgrounds using the configured pane opacity.
 
 Settings > Panes scrolls its three-pane preview with the controls, like the Terminal preview. The shared
@@ -114,9 +115,9 @@ immediately, including valid numeric input while typing; the file watcher still 
 
 Settings > Status bar scrolls its live preview with the controls. The session switcher uses
 a Layers/name/chevron button. Session and agent buttons share the active window pill’s background,
-theme border, shadow, and 30px height, with widths sized to their contents. Window pills always align left, and the right edge shows an
+theme border, shadow, and 26px height, with widths sized to their contents. The 35px titlebar leaves 4.5px above and below each pill. Window pills always align left, and the right edge shows an
 agent status dot and summary with a pane-selection menu. Time/date and alignment controls are absent. Window pills share the
-production pane deck: 26px rounded cards overlap by 9px inside a vertically centered 30px pill, with a theme outline and directional
+production pane deck: 20px rounded cards with 14px icons overlap by 7px inside a vertically centered 26px pill, with a theme outline and directional
 shadow. Cards stack left to right above their right-hand neighbors; hovering lifts a card above
 inactive cards, with a fixed hit area to avoid hover flicker. The focused pane always paints last,
 even above a hovered card or overflow, and sits 1px higher at
@@ -262,7 +263,8 @@ client keeps the default derivation strengths.
 Icon-only chrome controls use `Button::compact_icon`: a 24px hover surface around a Small 14px
 glyph with a 0.5px downward optical adjustment. The titlebar, sidebar row actions, browser pane,
 and Agent pane share this constructor, which fixes padding and icon scale in one place. Browser
-controls override the hover surface to 28px while retaining the shared icon scale.
+controls override the hover surface to 28px while retaining the shared icon scale. Workspace settings
+and sidebar buttons use 26px surfaces to match the titlebar pills, with the same 14px glyphs.
 
 A radius is a *request*, not the final corner. GPUI caps one at half the shorter side . the point a
 rounded rectangle stops existing . so one global setting applied to components of different sizes

@@ -224,7 +224,7 @@ both Control and Command editing shortcuts so browser clients work on either des
 
 The shared workspace components also include window tabs and overflow menus in
 `src/navigation/status.rs`, including session switching and agent activity menus with the window pill surface and height, and overlapping pane icon decks, hover details, and direct pane selection in
-`src/navigation/status/pane_deck.rs`, sidebar markers, actions, and keyboard navigation in
+`src/navigation/status/pane_deck.rs`. The titlebar uses 26px pills and 20px pane cards with 7px overlap and 14px icons to leave vertical space around both surfaces. Workspace settings and sidebar buttons match the 26px pill height. Sidebar markers, actions, and keyboard navigation live in
 `src/navigation/sidebar.rs`, and command palette/menu/confirmation presentation in
 `src/command/`. `src/agent/slash.rs` renders provider command suggestions; the matching and
 replacement rules live in `zz-client`. Desktop and browser both use these components.

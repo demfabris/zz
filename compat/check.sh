@@ -12,6 +12,7 @@ python3 -B "$COMPAT_DIR/tui/tracker_test.py"
 python3 -B "$COMPAT_DIR/tui/verify_claims_test.py"
 python3 "$COMPAT_DIR/tui/verify-claims.py"
 python3 "$COMPAT_DIR/wire-version.py"
+python3 "$COMPAT_DIR/evidence-secrets.py"
 python3 "$COMPAT_DIR/tui/tracker.py" check
 
 # Drift report, never a gate: names the pin registers that no proof fires.

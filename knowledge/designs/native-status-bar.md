@@ -11,7 +11,7 @@ tags:
 - client
 - snapshot
 - configuration
-timestamp: 2026-09-14T00:00:00-03:00
+timestamp: 2026-09-17T00:00:00-03:00
 ---
 
 # Decision
@@ -53,11 +53,11 @@ The sidebar and status bar are mutually exclusive desktop views: an expanded sid
 status bar; retracting it shows the status bar in the title bar. There is no bottom placement.
 
 Session and agent buttons share the active window pill’s background, theme border, shadow, and
-30px height, with widths sized to their contents.
+26px height, with widths sized to their contents.
 
-Window pills are 30px high and vertically centered inside the titlebar, leaving space at both edges. They
+Window pills are 26px high and vertically centered inside the 35px titlebar, leaving 4.5px at both edges. They
 start at 240px wide regardless of the title and shrink together only when the window strip runs
-out of room; titles truncate within the remaining space. Their pane cards are 26px rounded squares with 9px overlap, a fine
+out of room; titles truncate within the remaining space. Their pane cards are 20px rounded squares with 14px icons, 7px overlap, a fine
 outline, and a directional theme shadow. Up to three pane cards are visible, followed by `+N`
 when more panes exist. Cards stack from left to right, each above its right-hand neighbor; the
 hovered card lifts above inactive cards within a fixed hit area. The focused pane always paints
@@ -79,7 +79,7 @@ without a periodic timer. Session and agent menu actions are disabled while disc
 # Settings
 
 The settings are app-side presentation preferences in `zz/config`. The **Status bar** page under the
-Appearance navigation group exposes them. A pinned preview above the scrolling controls uses the
+Appearance navigation group exposes them. A preview that scrolls with the controls uses the
 same status components and sample pane decks, updating as these preferences change.
 
 | Key | Default | Effect |

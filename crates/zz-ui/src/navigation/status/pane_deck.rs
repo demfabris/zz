@@ -10,8 +10,8 @@ use crate::{ActiveTheme as _, Colorize as _, Icon, IconName, tooltip::Tooltip};
 
 use super::StatusAction;
 
-const CARD_SIZE: f32 = 26.0;
-const CARD_OVERLAP: f32 = 9.0;
+const CARD_SIZE: f32 = 20.0;
+const CARD_OVERLAP: f32 = 7.0;
 const MAX_PANE_CARDS: usize = 3;
 
 #[derive(Clone)]
@@ -203,7 +203,7 @@ impl RenderOnce for PaneDeck {
                                             )
                                         } else {
                                             Icon::new(pane.icon.clone())
-                                                .size(px(15.0))
+                                                .size(px(14.0))
                                                 .into_any_element()
                                         }
                                     } else {

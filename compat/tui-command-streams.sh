@@ -13,8 +13,8 @@
 # ---------------------------------------------------------------------------
 # form                        sink        what it does with the caller's bytes
 # source-file -               Config      parsed and applied as a file named -
-# display-message -I          PaneInput   written into a pane with no process
-# split-window -I             PaneInput   builds that pane, then writes into it
+# display-message -I          PaneInput   streamed into a pane with no process
+# split-window -I             PaneInput   builds that pane, then streams into it
 # load-buffer -               Argument    the bytes become a paste buffer
 # save-buffer - / -a -        (stdout)    the buffer's bytes, exactly, to stdout
 # ---------------------------------------------------------------------------
@@ -27,13 +27,16 @@
 # `record` asserts nothing and has to say why; a recorded case holds the
 # obligation's clause open.
 #
-# THE ONE DECIDED DIFFERENCE is the bound. Pinned tmux streams a caller payload
-# in acknowledged 16 KiB chunks with no total limit; zz reads at most
-# MAX_AGENT_SEND_BYTES (1 MiB) and refuses the whole invocation at the reader,
-# before the daemon sees a byte. Bulk file transfer through a command client is
-# a workload zz does not serve, because an unbounded stream lets one caller grow
-# daemon memory without limit. Every case at and below the cap is asserted, so
-# what is decided is the bound and nothing else.
+# THE ONE DECIDED DIFFERENCE is the bound on a sink that holds its payload.
+# Pinned tmux accumulates a source-file - or load-buffer - payload in 16 KiB
+# chunks with no total limit; zz reads at most MAX_AGENT_SEND_BYTES (1 MiB) and
+# refuses the whole invocation at the reader, before the daemon sees a byte.
+# Bulk file transfer through a command client is a workload zz does not serve,
+# because an unbounded accumulation lets one caller grow daemon memory without
+# limit. Every case at and below the cap is asserted, so what is decided is the
+# bound and nothing else. A PaneInput sink holds nothing: it streams chunks into
+# the pane with backpressure and no total cap, like the pin, and
+# stream-display-fast asserts a payload over the cap.
 #
 # CONTROLLED DYNAMIC VALUES, set identically on both sides:
 #   the inner shell   ENV= PS1='$ ' exec /bin/sh: no rc file, and a prompt with
@@ -468,7 +471,7 @@ drop_extra_panes() {
 }
 
 # --- the roster's cases -----------------------------------------------------
-BOUND_DECISION="pinned tmux streams a caller payload in acknowledged 16 KiB chunks with no total limit and zz refuses one larger than MAX_AGENT_SEND_BYTES ($STREAM_CAP_BYTES) at the reader, before the daemon sees a byte: bulk file transfer through a command client is a workload zz does not serve, because an unbounded stream lets one caller grow daemon memory without limit; $DECISION"
+BOUND_DECISION="pinned tmux accumulates a source-file or load-buffer payload in 16 KiB chunks with no total limit and zz refuses one larger than MAX_AGENT_SEND_BYTES ($STREAM_CAP_BYTES) at the reader, before the daemon sees a byte: bulk file transfer through a command client is a workload zz does not serve, because an unbounded stream lets one caller grow daemon memory without limit; $DECISION"
 
 config_sink_cases() {
   stdin_from 'set -g @zzcs-one alpha'
@@ -885,6 +888,179 @@ review_execution_cases() {
   review_control_case control-source-read-error-continues-state state
 }
 
+# A PaneInput sink parses each chunk into the pane as it arrives. Every sample
+# is taken while the caller still holds its stdin open, after a SIGTERM, or
+# after EOF, and each one reads the first pane row with its attributes plus the
+# cursor, so a sink that buffers until EOF shows a blank row at 0:0. The fast
+# shape reads the whole screen and leaves #{history_size} out: past history-limit
+# the retained row count is semantic:history-limit-product-default, not this
+# channel.
+pane_stream_sample() {
+  local side="$1" pane="$2" label="$3" rows="${4:-0}" facts=' cursor=#{cursor_x}:#{cursor_y} history=#{history_size}'
+  if [ "$rows" != 0 ]; then facts=' cursor=#{cursor_x}:#{cursor_y}'; fi
+  printf '%s=' "$label"
+  side_command "$side" capture-pane -e -p -t "$pane" -S 0 -E "$rows" 2>&1 | cat -v | tr -d '\000' |
+    awk '{ rows[NR] = $0 } END { last = 0; for (i = 1; i <= NR; i++) if (rows[i] != "") last = i; for (i = 1; i <= last; i++) printf "%s|", rows[i] }'
+  side_command "$side" display-message -p -t "$pane" "$facts"
+}
+
+pane_stream_wait() {
+  local side="$1" pane="$2" text="$3" attempt
+  for ((attempt = 0; attempt < 60; attempt++)); do
+    side_command "$side" capture-pane -p -t "$pane" -S 0 -E 23 2>/dev/null | grep -Fq -- "$text" && return 0
+    sleep 0.05
+  done
+  return 1
+}
+
+# NAME DESTINATION SHAPE
+#   partial  12 styled bytes, sampled while stdin stays open, then EOF
+#   eof      a first write sampled open, a second write completed by EOF
+#   term     12 styled bytes, then SIGTERM with stdin still open
+#   slow     six writes 150 ms apart, sampled after the third and at EOF
+#   fast     a numbered payload over the 1 MiB cap written as fast as the pipe takes it
+#   utf8     a multibyte character and an escape sequence cut between writes
+pane_stream_case() {
+  local name="$1" destination="$2" shape="$3" side pid rc pane attempt sabotage oracle=1 piece
+  local -a base command
+  CASE_LABEL="stream-$name"
+  CASE_STATE_FILE=1
+  for side in zz tmux; do
+    if [ "$side" = zz ]; then
+      base=(env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_HOME/config" ZZ_LOG_DIR="$ZZ_LOG_DIR" "$ZZ_BIN" --socket "$ZZ_SOCKET")
+    else
+      base=(env -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME="$TMUX_HOME" XDG_CONFIG_HOME="$TMUX_HOME/config" "$TMUX_BIN" -L "$INNER_SOCKET_NAME")
+    fi
+    sabotage=0
+    if [ "$SELF_CHECK" = 1 ] && [ "$side" = zz ]; then sabotage=1; fi
+    if [ "$destination" = display ]; then
+      pane="$(side_command "$side" split-window -d -t "=$SESSION:$WINDOW_NAME.0" -P -F '#{pane_id}' '')"
+      command=(display-message -I -t "$pane")
+    else
+      pane=''
+      command=(split-window -I -d -t "=$SESSION:$WINDOW_NAME.0")
+    fi
+    rm -f "$SCRATCH_DIR/stream-fifo"
+    mkfifo "$SCRATCH_DIR/stream-fifo"
+    exec 9<>"$SCRATCH_DIR/stream-fifo"
+    (exec "${base[@]}" "${command[@]}" <"$SCRATCH_DIR/stream-fifo" 9>&-) >"$SCRATCH_DIR/$side.out" 2>"$SCRATCH_DIR/$side.err" &
+    pid=$!
+    if [ -z "$pane" ]; then
+      for ((attempt = 0; attempt < 100; attempt++)); do
+        pane="$(side_command "$side" list-panes -t "=$SESSION:$WINDOW_NAME" -F '#{pane_index} #{pane_id}' 2>/dev/null | awk '$1 == 1 { print $2 }')"
+        [ -n "$pane" ] && break
+        sleep 0.03
+      done
+      [ -n "$pane" ] || oracle=0
+    fi
+    : >"$SCRATCH_DIR/$side.matrix-state"
+    case "$shape" in
+    partial|term)
+      if [ "$sabotage" = 0 ]; then printf '\033[31mRED\033[0m' >&9; fi
+      pane_stream_wait "$side" "$pane" RED || [ "$sabotage" = 1 ] || oracle=0
+      pane_stream_sample "$side" "$pane" open >>"$SCRATCH_DIR/$side.matrix-state"
+      if [ "$shape" = term ]; then
+        kill -TERM "$pid" 2>/dev/null || oracle=0
+      else
+        if [ "$sabotage" = 1 ]; then printf '\033[31mRED\033[0m' >&9; fi
+        exec 9>&-
+      fi
+      ;;
+    eof)
+      printf 'FIRST-' >&9
+      pane_stream_wait "$side" "$pane" FIRST- || oracle=0
+      pane_stream_sample "$side" "$pane" open >>"$SCRATCH_DIR/$side.matrix-state"
+      if [ "$sabotage" = 0 ]; then printf '\033[1mSECOND\033[0m\r\nTHIRD' >&9; fi
+      exec 9>&-
+      ;;
+    slow)
+      for piece in 1 2 3 4 5 6; do
+        if [ "$sabotage" = 0 ] || [ "$piece" != 5 ]; then printf 'slow%s-' "$piece" >&9; fi
+        sleep 0.15
+        if [ "$piece" = 3 ]; then
+          pane_stream_wait "$side" "$pane" slow3- || oracle=0
+          pane_stream_sample "$side" "$pane" third >>"$SCRATCH_DIR/$side.matrix-state"
+        fi
+      done
+      exec 9>&-
+      ;;
+    fast)
+      if [ "$sabotage" = 1 ]; then
+        head -c "$(($(wc -c <"$SCRATCH_DIR/stream-fast.bin") - 16384))" "$SCRATCH_DIR/stream-fast.bin" >&9
+      else
+        cat "$SCRATCH_DIR/stream-fast.bin" >&9
+      fi
+      exec 9>&-
+      ;;
+    utf8)
+      printf 'A\303' >&9
+      sleep 0.3
+      if [ "$sabotage" = 1 ]; then printf 'B\033[3' >&9; else printf '\251B\033[3' >&9; fi
+      sleep 0.3
+      printf '1mRED\033[0mC' >&9
+      pane_stream_wait "$side" "$pane" RED || oracle=0
+      pane_stream_sample "$side" "$pane" open >>"$SCRATCH_DIR/$side.matrix-state"
+      exec 9>&-
+      ;;
+    esac
+    for ((attempt = 0; attempt < 1200; attempt++)); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.05
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "$pid" 2>/dev/null
+      oracle=0
+    fi
+    set +e
+    wait "$pid"
+    rc=$?
+    set -e
+    exec 9>&-
+    rm -f "$SCRATCH_DIR/stream-fifo"
+    printf '%s\n' "$rc" >"$SCRATCH_DIR/$side.rc"
+    settle_state "$side"
+    if [ "$shape" = fast ]; then
+      pane_stream_sample "$side" "$pane" final 23 >>"$SCRATCH_DIR/$side.matrix-state"
+    else
+      pane_stream_sample "$side" "$pane" final >>"$SCRATCH_DIR/$side.matrix-state"
+    fi
+    printf 'panes=%s\n' "$(side_command "$side" list-panes -t "=$SESSION:$WINDOW_NAME" -F x | wc -l)" >>"$SCRATCH_DIR/$side.matrix-state"
+    side_command "$side" kill-pane -t "$pane" >/dev/null 2>&1 || true
+  done
+  compare_channels "$CASE_LABEL" || true
+  case "$shape" in
+  partial|term) grep -Fq 'open=^[[31mRED' "$SCRATCH_DIR/tmux.matrix-state" || oracle=0 ;;
+  fast) grep -Fq '180000| cursor=' "$SCRATCH_DIR/tmux.matrix-state" || oracle=0 ;;
+  esac
+  if [ "$SELF_CHECK" = 1 ]; then
+    if [ "$oracle" != 1 ]; then
+      SELF_CHECK_FAILURES=$((SELF_CHECK_FAILURES + 1))
+      printf 'FAIL  self-check %s did not reach its required execution point\n' "$CASE_LABEL"
+    fi
+    self_check_expect "$CASE_LABEL: $shape delivery sabotage" state=1
+  else
+    CHECKS=$((CHECKS + 1))
+    if [ "$LAST_EXIT_DIFFERED$LAST_STDOUT_DIFFERED$LAST_STDERR_DIFFERED$LAST_STATE_DIFFERED" = 0000 ] && [ "$oracle" = 1 ]; then
+      printf 'ok    %s\n' "$CASE_LABEL"
+    else
+      FAILURES=$((FAILURES + 1))
+      printf 'DIFF  %s\n' "$CASE_LABEL"
+    fi
+  fi
+  CASE_STATE_FILE=0
+}
+
+review_stream_delivery_cases() {
+  local row
+  for row in 'display-partial display partial' 'display-eof display eof' 'display-term display term' \
+    'display-slow display slow' 'display-fast display fast' 'display-utf8 display utf8' \
+    'split-partial split partial' 'split-term split term' 'split-utf8 split utf8'; do
+    set -- $row
+    if [[ -n "${ZZ_STREAM_MATRIX_FILTER:-}" && ! "stream-$1" =~ $ZZ_STREAM_MATRIX_FILTER ]]; then continue; fi
+    pane_stream_case "$1" "$2" "$3"
+  done
+}
+
 stream_matrix() {
   cat <<'MATRIX'
 direct-buffer-spent direct cli spent buffer none state same
@@ -978,6 +1154,42 @@ file-term-after file cli used source after exit same
 direct-term-after-error direct cli spent source after exit same
 alias-term-after-error alias cli spent source after exit same
 file-term-after-error file cli spent source after exit same
+direct-display-spent direct cli spent display-empty none state same
+alias-display-spent alias cli spent display-empty none state same
+file-display-spent file cli spent display-empty none state same
+direct-split-spent direct cli spent split-normal none state same
+alias-split-spent alias cli spent split-normal none state same
+file-split-spent file cli spent split-normal none state same
+direct-source-writeonly direct cli writeonly source none stderr same
+alias-source-writeonly alias cli writeonly source none stderr same
+file-source-writeonly file cli writeonly source none stderr same
+direct-buffer-writeonly direct cli writeonly buffer none stderr same
+alias-buffer-writeonly alias cli writeonly buffer none stderr same
+file-buffer-writeonly file cli writeonly buffer none stderr same
+direct-display-writeonly direct cli writeonly display-empty none state same
+alias-display-writeonly alias cli writeonly display-empty none state same
+file-display-writeonly file cli writeonly display-empty none state same
+direct-split-writeonly direct cli writeonly split-normal none state same
+alias-split-writeonly alias cli writeonly split-normal none state same
+file-split-writeonly file cli writeonly split-normal none state same
+direct-source-directory direct cli directory source none stderr same
+alias-source-directory alias cli directory source none stderr same
+file-source-directory file cli directory source none stderr same
+direct-buffer-directory direct cli directory buffer none stderr same
+alias-buffer-directory alias cli directory buffer none stderr same
+file-buffer-directory file cli directory buffer none stderr same
+direct-display-directory direct cli directory display-empty none state same
+alias-display-directory alias cli directory display-empty none state same
+file-display-directory file cli directory display-empty none state same
+direct-split-directory direct cli directory split-normal none state same
+alias-split-directory alias cli directory split-normal none state same
+file-split-directory file cli directory split-normal none state same
+alias-attached-term-before alias attached used source before stdout same
+alias-attached-term-after alias attached used source after stdout same
+alias-control-term-before alias control used source before stdout same
+alias-control-term-after alias control used source after stdout same
+file-control-term-before file control used source before stdout same
+file-control-term-after file control used source after stdout same
 MATRIX
 }
 
@@ -1062,7 +1274,7 @@ matrix_attached() {
 
 matrix_case() {
   local name="$1" invocation="$2" caller="$3" input="$4" destination="$5" signal="$6" sabotage="$7" mode="$8"
-  local side option body rc pid guard attempt ready pane target config before after oracle=1
+  local side option body rc pid guard attempt ready pane target config before after oracle=1 drop_before
   local -a MATRIX_BASE reader command
   CASE_LABEL="matrix-$name"
   CASE_STATE_FILE=1
@@ -1125,10 +1337,14 @@ matrix_case() {
     esac
     before=yes
     after=MATRIX-AFTER
+    drop_before=0
     if [ "$SELF_CHECK" = 1 ] && [ "${MATRIX_MUTATION:-0}" = 1 ] && [ "$side" = zz ]; then
       case "$sabotage" in
       state) if [ "$signal" != pending ]; then before=SABOTAGE; fi ;;
-      stdout) after=MATRIX-SABOTAGE ;;
+      stdout)
+        after=MATRIX-SABOTAGE
+        if [ "$signal" = before ] || [ "$signal" = after ]; then drop_before=1; fi
+        ;;
       stderr) reader=(source-file /tmp/zzcs-sabotage-missing) ;;
       exit)
         if [ "$signal" = none ]; then
@@ -1140,6 +1356,7 @@ matrix_case() {
       esac
     fi
     command=(set -g @zzcs-matrix-before "$before" ';')
+    if [ "$drop_before" = 1 ]; then command=(); fi
     if [ "$signal" = before ]; then command+=(run-shell "printf ready > $ready; sleep 1" ';'); fi
     command+=("${reader[@]}" ';')
     if [ "$input" = spent ]; then command+=("${reader[@]}" ';'); fi
@@ -1182,6 +1399,13 @@ matrix_case() {
         ;;
       closed*)
         (exec "${MATRIX_BASE[@]}" "${command[@]}" 0<&-) >"$SCRATCH_DIR/$side.out" 2>"$SCRATCH_DIR/$side.err" &
+        ;;
+      writeonly)
+        : >"$SCRATCH_DIR/matrix-writeonly"
+        (exec "${MATRIX_BASE[@]}" "${command[@]}" 0>"$SCRATCH_DIR/matrix-writeonly") >"$SCRATCH_DIR/$side.out" 2>"$SCRATCH_DIR/$side.err" &
+        ;;
+      directory)
+        (exec "${MATRIX_BASE[@]}" "${command[@]}" 0<"$SCRATCH_DIR") >"$SCRATCH_DIR/$side.out" 2>"$SCRATCH_DIR/$side.err" &
         ;;
       oversized-unused)
         (exec "${MATRIX_BASE[@]}" "${command[@]}" <"$SCRATCH_DIR/over-cap.bin") >"$SCRATCH_DIR/$side.out" 2>"$SCRATCH_DIR/$side.err" &
@@ -1302,6 +1526,7 @@ run_stream_matrix() {
 
 write_payloads() {
   printf 'a\303\251b\377c\000d\n' >"$SCRATCH_DIR/binary.bin"
+  awk 'BEGIN { for (i = 1; i <= 180000; i++) printf "%06d ", i }' >"$SCRATCH_DIR/stream-fast.bin"
   # The cap counts bytes, so these are built by size and never by line count.
   head -c "$STREAM_CAP_BYTES" /dev/zero | tr '\0' 'x' >"$SCRATCH_DIR/at-cap.bin"
   head -c "$((STREAM_CAP_BYTES + 1))" /dev/zero | tr '\0' 'x' >"$SCRATCH_DIR/over-cap.bin"
@@ -1333,6 +1558,7 @@ run_cases() {
   review_alias_cases
   startup_config_stream_case
   review_execution_cases
+  review_stream_delivery_cases
   run_stream_matrix
   bound_cases
 
@@ -1506,6 +1732,7 @@ run_self_check() {
   review_alias_cases
   startup_config_stream_case
   review_execution_cases
+  review_stream_delivery_cases
   run_stream_matrix
 
   # The second equivalence: with every sabotage withdrawn the comparison is
@@ -1532,6 +1759,7 @@ fi
 if [ "$MATRIX_CHECK" = 1 ]; then
   build_scene
   write_payloads
+  review_stream_delivery_cases
   run_stream_matrix
   printf 'matrix: %s asserted, %s failures, %s recorded:TUI-018, %s decided:TUI-018, %s self-check failures\n' "$CHECKS" "$FAILURES" "$RECORDS" "$DECIDED" "$SELF_CHECK_FAILURES"
   [ "$FAILURES" = 0 ] && [ "$SELF_CHECK_FAILURES" = 0 ]
@@ -1541,6 +1769,7 @@ if [ "$EXECUTION_CHECK" -eq 1 ]; then
   build_scene
   write_payloads
   review_execution_cases
+  review_stream_delivery_cases
   printf 'execution-check: %s asserted, %s failures, %s self-check failures\n' "$CHECKS" "$FAILURES" "$SELF_CHECK_FAILURES"
   [ "$FAILURES" -eq 0 ] && [ "$SELF_CHECK_FAILURES" -eq 0 ]
 elif [ "$SELF_CHECK" -eq 1 ]; then

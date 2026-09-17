@@ -8441,15 +8441,14 @@ fn capture_history(
                 (ColourClass::Resolved, ColourClass::Resolved)
             } else {
                 (
-                    classes.ground(raw_style.fg_color, 0, raw_style.fg_indexed),
+                    classes.ground(raw_style.fg_color, 0),
                     match raw_cell.content_tag().map_err(capture_failure)? {
-                        CellContentTag::BgColorPalette => classes.entry_class(
-                            raw_cell.bg_color_palette().map_err(capture_failure)?.0,
-                            raw_cell.bg_indexed().map_err(capture_failure)?,
-                        ),
+                        CellContentTag::BgColorPalette => {
+                            classes.entry(raw_cell.bg_color_palette().map_err(capture_failure)?.0)
+                        }
                         CellContentTag::BgColorRgb => ColourClass::Rgb,
                         CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {
-                            classes.ground(raw_style.bg_color, 1, raw_style.bg_indexed)
+                            classes.ground(raw_style.bg_color, 1)
                         }
                     },
                 )
@@ -8499,14 +8498,11 @@ fn capture_history(
                 underline_style(raw_style.underline),
             )
             .with_classes(classes.0, classes.1);
-            output.push(
-                PackedCell::new(
-                    dictionary.encode_glyph(&grapheme_text),
-                    dictionary.intern_style(style),
-                    width,
-                )
-                .with_tab(raw_cell.tab().map_err(capture_failure)?),
-            );
+            output.push(PackedCell::new(
+                dictionary.encode_glyph(&grapheme_text),
+                dictionary.intern_style(style),
+                width,
+            ));
         }
         rows.push(output);
     }
@@ -9129,21 +9125,11 @@ fn capture_viewport_row(
     output: &mut String,
 ) {
     let start = output.len();
-    let cells = viewport.row(row).unwrap_or_default();
-    let tags: Vec<_> = cells.iter().map(|cell| cell.tab()).collect();
-    let mut column = 0;
-    while column < cells.len() {
-        let width = capture_tab_width(&tags, column);
-        if width > 0 {
-            output.push('\t');
-            column += width;
-        } else {
-            push_viewport_cell(viewport, cells[column], output);
-            column += 1;
-        }
+    for cell in viewport.row(row).unwrap_or_default() {
+        push_viewport_cell(viewport, *cell, output);
     }
     if !preserve_trailing {
-        let trimmed = output[start..].trim_end_matches(' ').len();
+        let trimmed = output[start..].trim_end().len();
         output.truncate(start.saturating_add(trimmed));
     }
 }
@@ -14061,15 +14047,14 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
                         (ColourClass::Resolved, ColourClass::Resolved)
                     } else {
                         (
-                            classes.ground(raw_style.fg_color, 0, raw_style.fg_indexed),
+                            classes.ground(raw_style.fg_color, 0),
                             match raw_cell.content_tag()? {
-                                CellContentTag::BgColorPalette => classes.entry_class(
-                                    raw_cell.bg_color_palette()?.0,
-                                    raw_cell.bg_indexed()?,
-                                ),
+                                CellContentTag::BgColorPalette => {
+                                    classes.entry(raw_cell.bg_color_palette()?.0)
+                                }
                                 CellContentTag::BgColorRgb => ColourClass::Rgb,
                                 CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {
-                                    classes.ground(raw_style.bg_color, 1, raw_style.bg_indexed)
+                                    classes.ground(raw_style.bg_color, 1)
                                 }
                             },
                         )
@@ -14104,8 +14089,7 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
                     .with_classes(classes.0, classes.1);
                     let style_id = dictionary.intern_style(style);
                     let glyph = dictionary.encode_glyph(&grapheme_scratch);
-                    output_row[column] =
-                        PackedCell::new(glyph, style_id, width).with_tab(raw_cell.tab()?);
+                    output_row[column] = PackedCell::new(glyph, style_id, width);
                     column += 1;
                 }
                 row.set_dirty(false)?;
@@ -14504,18 +14488,11 @@ impl<'a> Classifier<'a> {
         }
     }
 
-    fn ground(&self, value: StyleColor, ground: usize, indexed: bool) -> ColourClass {
+    fn ground(&self, value: StyleColor, ground: usize) -> ColourClass {
         match value {
             StyleColor::None => self.grounds[ground],
-            StyleColor::Palette(index) => self.entry_class(index.0, indexed),
+            StyleColor::Palette(index) => self.entry(index.0),
             StyleColor::Rgb(_) => ColourClass::Rgb,
-        }
-    }
-
-    fn entry_class(&self, index: u8, indexed: bool) -> ColourClass {
-        match self.entry(index) {
-            ColourClass::Palette(value) if value < 16 && indexed => ColourClass::IndexedLow(value),
-            class => class,
         }
     }
 

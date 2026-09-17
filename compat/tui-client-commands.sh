@@ -928,6 +928,16 @@ customize_fix_self_checks() {
   run_both copy-mode -q -t PANE
 }
 
+switch_tail_style_cases() {
+  local style
+  for style in dim fg=red bg=red underscore; do
+    case_run "switch-tail-short-$style" same '' -- switch-mode -w -F "#[$style]#{window_name}#[default]" -t PANE
+    restore_case "switch-tail-short-$style-closed"
+  done
+  case_run switch-tail-boundary-colour same '' -- switch-mode -w -F '#[bg=red]12345678901234567#{window_name}#[default]' -t PANE
+  restore_case switch-tail-boundary-colour-closed
+}
+
 switch_tail_self_checks() {
   local duplicate
   for duplicate in no yes; do
@@ -1446,6 +1456,7 @@ client_tool_cases() {
   run_on_both kill-session -t '=alpha'
   run_on_both kill-session -t '=zulu'
   restore_case switch-mode-window-order-restored
+  switch_tail_style_cases
   case_run server-access-bare same '' -- server-access
   case_run server-access-formatted same '' -- server-access '#{?#{==:1,1},nobody,root}'
   case_run server-access-user same '' -- server-access -w zzcc-nobody
@@ -1966,6 +1977,9 @@ run_self_check() {
   switch_lifetime_self_checks
   customize_fix_self_checks
   switch_tail_self_checks
+  self_check_run switch-tail-short-control switch-mode -w -F '#[bg=red]#{window_name}#[default]' -t PANE
+  self_check_expect 'short styled rows clear their allocated tail' exit=0 stdout=0 stderr=0 screen=0 state=0
+  run_both copy-mode -q -t PANE
 
   self_check_run equivalence-after display-message -p -t PANE '#{window_index}.#{pane_index}'
   self_check_expect 'equivalence: every sabotage withdrawn' \

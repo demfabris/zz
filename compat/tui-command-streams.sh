@@ -904,9 +904,9 @@ startup-unused startup cli open-unused source none state same
 direct-spent direct cli spent source none state same
 alias-spent alias cli spent source none state same
 file-spent file cli spent source none state same
-direct-closed direct cli closed source none stderr same
-alias-closed alias cli closed source none stderr same
-file-closed file cli closed source none stderr same
+direct-closed direct cli closed source none stderr record
+alias-closed alias cli closed source none stderr record
+file-closed file cli closed source none stderr record
 direct-eof direct cli eof source none state same
 direct-large-unused direct cli oversized-unused source none exit same
 alias-large-unused alias cli oversized-unused source none exit same
@@ -935,9 +935,9 @@ file-term-during file cli open source during exit same
 direct-term-after direct cli used source after exit same
 alias-term-after alias cli used source after exit same
 file-term-after file cli used source after exit same
-direct-term-after-error direct cli closed source after exit same
-alias-term-after-error alias cli closed source after exit same
-file-term-after-error file cli closed source after exit same
+direct-term-after-error direct cli spent source after exit same
+alias-term-after-error alias cli spent source after exit same
+file-term-after-error file cli spent source after exit same
 MATRIX
 }
 
@@ -972,23 +972,27 @@ matrix_attached() {
     if rg -q '%session-changed' "$SCRATCH_DIR/$side.control" 2>/dev/null; then break; fi
     sleep 0.03
   done
+  [ "$attempt" != 100 ] || oracle=0
   scrubbed "$TMUX_BIN" -L "$outer" send-keys -t "$pane" -l 'display-message -p MATRIX-BEGIN'
   scrubbed "$TMUX_BIN" -L "$outer" send-keys -t "$pane" Enter
   for ((attempt=0; attempt<100; attempt++)); do
-    if rg -q '^MATRIX-BEGIN$' "$SCRATCH_DIR/$side.control"; then break; fi
+    if rg -q $'^MATRIX-BEGIN\r?$' "$SCRATCH_DIR/$side.control"; then break; fi
     sleep 0.03
   done
+  [ "$attempt" != 100 ] || oracle=0
   scrubbed "$TMUX_BIN" -L "$outer" send-keys -t "$pane" -l "$body"
   scrubbed "$TMUX_BIN" -L "$outer" send-keys -t "$pane" Enter
   for ((attempt=0; attempt<100; attempt++)); do
     if [ "$(side_command "$side" show-options -gqv @zzcs-matrix-tail)" = yes ]; then break; fi
     sleep 0.03
   done
+  [ "$attempt" != 100 ] || oracle=0
   scrubbed "$TMUX_BIN" -L "$outer" send-keys -t "$pane" Enter
   for ((attempt=0; attempt<100; attempt++)); do
     [ -f "$SCRATCH_DIR/$side.done" ] && break
     sleep 0.03
   done
+  [ "$attempt" != 100 ] || oracle=0
   if [ ! -f "$SCRATCH_DIR/$side.done" ]; then printf '124\n' >"$SCRATCH_DIR/$side.rc"; fi
   sleep 0.05
   scrubbed "$TMUX_BIN" -L "$outer" kill-server >/dev/null 2>&1 || true
@@ -996,13 +1000,13 @@ matrix_attached() {
     mkdir -p "${ZZ_STREAM_PROBES}.raw"
     cp "$SCRATCH_DIR/$side.control" "${ZZ_STREAM_PROBES}.raw/$CASE_LABEL-$side.control"
   fi
-  sed -n '/^MATRIX-BEGIN$/,$p' "$SCRATCH_DIR/$side.control" |
+  sed $'s/\r$//' "$SCRATCH_DIR/$side.control" | sed -n '/^MATRIX-BEGIN$/,$p' |
     sed -E 's/^(%begin|%end|%error) [0-9]+ [0-9]+ /\1 TIME ID /' >"$SCRATCH_DIR/$side.out"
 }
 
 matrix_case() {
   local name="$1" invocation="$2" caller="$3" input="$4" destination="$5" signal="$6" sabotage="$7" mode="$8"
-  local side option body rc pid guard attempt ready pane target config oracle=1
+  local side option body rc pid guard attempt ready pane target config before after oracle=1
   local -a MATRIX_BASE reader command
   CASE_LABEL="matrix-$name"
   CASE_STATE_FILE=1
@@ -1031,14 +1035,33 @@ matrix_case() {
     case "$input" in
     *unused) reader=(set -g @zzcs-matrix-input unused) ;;
     eof) : >"$SCRATCH_DIR/matrix-input" ;;
-    oversized-used) cp "$SCRATCH_DIR/over-cap.conf" "$SCRATCH_DIR/matrix-input" ;;
+    oversized-used)
+      head -c "$STREAM_CAP_BYTES" /dev/zero | tr '\0' '#' >>"$SCRATCH_DIR/matrix-input"
+      printf '\n' >>"$SCRATCH_DIR/matrix-input"
+      ;;
     esac
-    command=(set -g @zzcs-matrix-before yes ';')
+    before=yes
+    after=MATRIX-AFTER
+    if [ "$SELF_CHECK" = 1 ] && [ "${MATRIX_MUTATION:-0}" = 1 ] && [ "$side" = zz ]; then
+      case "$sabotage" in
+      state) before=SABOTAGE ;;
+      stdout) after=MATRIX-SABOTAGE ;;
+      stderr) reader=(source-file /tmp/zzcs-sabotage-missing) ;;
+      exit)
+        if [ "$signal" = none ]; then
+          if [ "$caller" = attached ]; then reader=(set -g @zzcs-matrix-input unused)
+          else reader=(source-file -)
+          fi
+        fi
+        ;;
+      esac
+    fi
+    command=(set -g @zzcs-matrix-before "$before" ';')
     if [ "$signal" = before ]; then command+=(run-shell "printf ready > $ready; sleep 1" ';'); fi
     command+=("${reader[@]}" ';')
     if [ "$input" = spent ]; then command+=(source-file - ';'); fi
     if [ "$signal" = after ]; then command+=(run-shell "printf ready > $ready; sleep 1" ';'); fi
-    if [ "$invocation" != startup ]; then command+=(display-message -p MATRIX-AFTER ';'); fi
+    if [ "$invocation" != startup ]; then command+=(display-message -p "$after" ';'); fi
     command+=(set -g @zzcs-matrix-tail yes)
     body="$(matrix_body "${command[@]}")"
     config="$SCRATCH_DIR/matrix.conf"
@@ -1099,7 +1122,11 @@ matrix_case() {
         done
         if [ "$attempt" = 100 ]; then oracle=0; fi
         sleep 0.05
-        kill -TERM "$pid" 2>/dev/null || oracle=0
+        if [ "$SELF_CHECK" = 1 ] && [ "${MATRIX_MUTATION:-0}" = 1 ] && [ "$side" = zz ]; then
+          kill -KILL "$pid" 2>/dev/null || oracle=0
+        else
+          kill -TERM "$pid" 2>/dev/null || oracle=0
+        fi
       fi
       set +e
       wait "$pid"
@@ -1130,19 +1157,23 @@ matrix_case() {
       DECIDED=$((DECIDED+1))
       printf 'note  %s decided:TUI-018: %s\n' "$CASE_LABEL" "$BOUND_DECISION"
     fi
+  elif [ "$mode" = record ]; then
+    RECORDS=$((RECORDS+1))
+    printf 'note  %s owner:TUI-018: closed fd 0 is sanitized to /dev/null by Rust before application entry; the pin instead fails in libevent after the preceding command (exit 1, evsig_cb Bad file descriptor), so the tail state differs\n' "$CASE_LABEL"
   elif [ "$SELF_CHECK" = 1 ]; then
-    if [ "$LAST_EXIT_DIFFERED$LAST_STDOUT_DIFFERED$LAST_STDERR_DIFFERED$LAST_STATE_DIFFERED" != 0000 ] || [ "$oracle" != 1 ]; then
-      SELF_CHECK_FAILURES=$((SELF_CHECK_FAILURES+1))
-      printf 'FAIL  self-check %s baseline differs before sabotage\n' "$CASE_LABEL"
+    if [ "${MATRIX_MUTATION:-0}" = 0 ]; then
+      if [ "$LAST_EXIT_DIFFERED$LAST_STDOUT_DIFFERED$LAST_STDERR_DIFFERED$LAST_STATE_DIFFERED" != 0000 ] || [ "$oracle" != 1 ]; then
+        SELF_CHECK_FAILURES=$((SELF_CHECK_FAILURES+1))
+        printf 'FAIL  self-check %s baseline differs before sabotage\n' "$CASE_LABEL"
+      fi
+      MATRIX_MUTATION=1 matrix_case "$@"
+      return
     fi
-    case "$sabotage" in
-    exit) printf '%s\n' "$((1-$(cat "$SCRATCH_DIR/zz.rc")))" >"$SCRATCH_DIR/zz.rc" ;;
-    stdout) printf 'SABOTAGE\n' >>"$SCRATCH_DIR/zz.out" ;;
-    stderr) printf 'SABOTAGE\n' >>"$SCRATCH_DIR/zz.err" ;;
-    state) printf 'tail=SABOTAGE\n' >>"$SCRATCH_DIR/zz.matrix-state" ;;
-    esac
-    compare_channels "$CASE_LABEL" || true
-    self_check_expect "$CASE_LABEL: $sabotage sabotage" "$sabotage=1"
+    if [ "$oracle" != 1 ]; then
+      SELF_CHECK_FAILURES=$((SELF_CHECK_FAILURES+1))
+      printf 'FAIL  self-check %s did not reach its required execution point\n' "$CASE_LABEL"
+    fi
+    self_check_expect "$CASE_LABEL: $sabotage execution sabotage" "$sabotage=1"
   else
     CHECKS=$((CHECKS+1))
     if [ "$LAST_EXIT_DIFFERED$LAST_STDOUT_DIFFERED$LAST_STDERR_DIFFERED$LAST_STATE_DIFFERED" = 0000 ] && [ "$oracle" = 1 ]; then
@@ -1399,7 +1430,7 @@ if [ "$MATRIX_CHECK" = 1 ]; then
   build_scene
   write_payloads
   run_stream_matrix
-  printf 'matrix: %s asserted, %s failures, %s decided:TUI-018, %s self-check failures\n' "$CHECKS" "$FAILURES" "$DECIDED" "$SELF_CHECK_FAILURES"
+  printf 'matrix: %s asserted, %s failures, %s recorded:TUI-018, %s decided:TUI-018, %s self-check failures\n' "$CHECKS" "$FAILURES" "$RECORDS" "$DECIDED" "$SELF_CHECK_FAILURES"
   [ "$FAILURES" = 0 ] && [ "$SELF_CHECK_FAILURES" = 0 ]
   exit $?
 fi

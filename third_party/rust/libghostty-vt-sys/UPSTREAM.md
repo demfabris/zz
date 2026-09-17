@@ -8,8 +8,8 @@ This directory is a source snapshot of `libghostty-vt-sys` from
 - Upstream Ghostty pin: `a887df42c56f6de86c0fe6da9c4eeca37931e083`
 - Local Ghostty pin: `20c3eae04dee606349eb21e2dd0293b203d47179`
 - License: MIT OR Apache-2.0; the upstream MIT license is retained here.
-- Local override: the workspace patches the git-sourced `libghostty-vt-sys` package to this
-  directory while leaving the safe `libghostty-vt` crate on its upstream v0.2.1 release commit.
+- Local override: the workspace patches both git-sourced wrapper packages to adjacent
+  snapshots from the same upstream v0.2.1 release commit.
 
 ## Local delta
 

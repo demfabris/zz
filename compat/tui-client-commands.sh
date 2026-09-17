@@ -651,10 +651,10 @@ case_owner() {
   lock-* )
     printf 'TUI-015'
     ;;
-  clock-mode-open | customize-mode-open | switch-mode | suspend-client | server-access-bare | server-access-user)
+  clock-mode-open | customize-mode-open | switch-mode | switch-mode-kill | switch-mode-kill-exit | switch-mode-zoom | suspend-client | server-access-bare | server-access-user)
     printf 'TUI-014'
     ;;
-  switch-mode-windows | switch-mode-duplicate-windows | switch-mode-kill | switch-mode-kill-exit | switch-mode-zoom | copy-over-clock* | clock-over-copy*)
+  switch-mode-windows | switch-mode-duplicate-windows | copy-over-clock* | clock-over-copy*)
     printf 'gap:clients.interactive-refresh'
     ;;
   server-access-add)
@@ -845,6 +845,102 @@ restore_extra_panes() {
 
 window_pane_count() {
   [ "$(side_command "$1" list-panes -t "=$INNER_SESSION:$WINDOW_NAME" -F x | wc -l)" = "$2" ]
+}
+
+lifetime_window() {
+  run_on_both new-window -t "=$INNER_SESSION:2" -n lifetime "$INNER_SHELL"
+  run_both select-pane -t PANE -T "$PANE_TITLE"
+}
+
+lifetime_split() {
+  run_both split-window -d -h -t PANE "$INNER_SHELL"
+  local side pane
+  for side in zz tmux; do
+    for pane in $(side_command "$side" list-panes -t "=$INNER_SESSION:2" -F '#{pane_id}'); do
+      side_command "$side" select-pane -t "$pane" -T "$PANE_TITLE"
+    done
+  done
+}
+
+lifetime_window_close() {
+  run_on_both kill-window -t "=$INNER_SESSION:2"
+  run_on_both select-window -t "=$INNER_SESSION:0"
+  restore_case "$1"
+}
+
+switch_lifetime_cases() {
+  run_on_both new-session -d -s zzcc-k -n lifetime-k -x 80 -y 24 "$INNER_SHELL"
+  case_run switch-mode-kill same '' -- switch-mode -k -t '=zzcc-k:'
+  case_run switch-mode-kill-exit same '' -- copy-mode -q -t '=zzcc-k:'
+  restore_case switch-mode-kill-restored
+  case_run switch-mode-zoom same '' -- switch-mode -Z -t PANE
+  case_run switch-mode-zoom-single same '' -- display-message -p -t PANE '#{window_zoomed_flag}'
+  restore_case switch-mode-zoom-restored
+
+  lifetime_window
+  lifetime_split
+  run_on_both set-option -g @lifetime-kill-hook untouched
+  run_on_both set-hook -g after-kill-pane 'set-option -g @lifetime-kill-hook fired'
+  case_run switch-mode-kill-visible same '' -- switch-mode -k -t PANE
+  CASE_CLOCK_FACE=1
+  case_run switch-mode-kill-covered same '' -- clock-mode -t PANE
+  case_run switch-mode-kill-uncovered same '' -- send-keys -t PANE Escape
+  case_run switch-mode-kill-survives-cover same '' -- list-panes -t "=$INNER_SESSION:2" -F '#{pane_index} #{pane_in_mode}/#{pane_mode}'
+  case_run switch-mode-kill-visible-exit same '' -- send-keys -t PANE Escape
+  case_run switch-mode-kill-visible-panes same '' -- list-panes -t "=$INNER_SESSION:2" -F '#{pane_index}'
+  case_run switch-mode-kill-no-command-hook same '' -- show-options -gv @lifetime-kill-hook
+  run_on_both set-hook -gu after-kill-pane
+  run_on_both set-option -gu @lifetime-kill-hook
+  lifetime_split
+  run_both switch-mode -k -t PANE
+  run_both clock-mode -t PANE
+  case_run switch-mode-kill-drain-stack same '' -- copy-mode -q -t PANE
+  case_run switch-mode-kill-drain-panes same '' -- list-panes -t "=$INNER_SESSION:2" -F '#{pane_index}'
+  lifetime_window_close switch-mode-kill-visible-restored
+
+  lifetime_window
+  case_run switch-mode-zoom-before-split same '' -- switch-mode -Z -t PANE
+  lifetime_split
+  case_run switch-mode-zoom-during-mode same '' -- resize-pane -Z -t PANE
+  case_run switch-mode-zoom-during-mode-flag same '' -- display-message -p -t PANE '#{window_zoomed_flag}'
+  case_run switch-mode-zoom-exit same '' -- send-keys -t PANE Escape
+  case_run switch-mode-zoom-restored-flag same '' -- display-message -p -t PANE '#{window_zoomed_flag}'
+  run_both resize-pane -Z -t PANE
+  case_run switch-mode-already-zoomed same '' -- switch-mode -Z -t PANE
+  case_run switch-mode-already-zoomed-exit same '' -- send-keys -t PANE Escape
+  case_run switch-mode-already-zoomed-flag same '' -- display-message -p -t PANE '#{window_zoomed_flag}'
+  run_both resize-pane -Z -t PANE
+  lifetime_window_close switch-mode-zoom-lifetime-restored
+}
+
+switch_lifetime_self_checks() {
+  lifetime_window
+  lifetime_split
+  self_check_run switch-mode-kill-control switch-mode -k -t PANE
+  self_check_expect 'switch -k accepts the flag and opens the same mode' exit=0 stdout=0 stderr=0 screen=0 state=0
+  run_both copy-mode -q -t PANE
+  lifetime_split
+  tmux_inner_command switch-mode -k -t "$(active_pane tmux)"
+  zz_command switch-mode -t "$(active_pane zz)"
+  run_both send-keys -t PANE Escape
+  self_check_run switch-mode-kill-sabotage list-panes -t "=$INNER_SESSION:2" -F '#{pane_index}'
+  self_check_expect 'omitting -k preserves the source pane on one side' exit=0 stdout=1 stderr=0 state=1
+  lifetime_window_close switch-mode-kill-sabotage-restored
+
+  lifetime_window
+  self_check_run switch-mode-zoom-control switch-mode -Z -t PANE
+  self_check_expect 'switch -Z accepts the flag and opens the same mode' exit=0 stdout=0 stderr=0 screen=0 state=0
+  run_both copy-mode -q -t PANE
+  tmux_inner_command switch-mode -Z -t "$(active_pane tmux)"
+  zz_command switch-mode -t "$(active_pane zz)"
+  lifetime_split
+  run_both resize-pane -Z -t PANE
+  self_check_run switch-mode-zoom-equivalence display-message -p -t PANE '#{window_zoomed_flag}'
+  self_check_expect 'both modes show the zoom before exit' exit=0 stdout=0 stderr=0 screen=0 state=0
+  run_both send-keys -t PANE Escape
+  self_check_run switch-mode-zoom-sabotage display-message -p -t PANE '#{window_zoomed_flag}'
+  self_check_expect 'omitting -Z keeps a zoom the mode should restore' exit=0 stdout=1 stderr=0 state=1
+  lifetime_window_close switch-mode-zoom-sabotage-restored
 }
 
 # --- the roster's cases -----------------------------------------------------
@@ -1255,13 +1351,7 @@ client_tool_cases() {
   done
   case_run switch-mode-template-result same '' -- show-options -gv @review-command
   run_on_both set-option -gu @review-command
-  run_on_both new-session -d -s zzcc-k -x 80 -y 24 "$INNER_SHELL"
-  case_run switch-mode-kill record 'TUI-014: -k kills the source pane when the pin mode exits; zz rejects this unbuilt lifecycle variant' -- switch-mode -k -t '=zzcc-k:'
-  case_run switch-mode-kill-exit record 'TUI-014: copy-mode -q closes the pin switch and kills zzcc-k; zz rejected -k and retains that session' -- copy-mode -q -t '=zzcc-k:'
-  zz_command kill-session -t '=zzcc-k' >/dev/null
-  restore_case switch-mode-kill-restored
-  case_run switch-mode-zoom record 'TUI-014: -Z opens a zoom-restoring switch mode on the pin; zz rejects this unbuilt lifecycle variant' -- switch-mode -Z -t PANE
-  restore_case switch-mode-zoom-restored
+  switch_lifetime_cases
   CASE_NEEDLE_MODE=1
   case_run switch-mode-windows record "$SWITCH_MODE_WINDOW_ROWS" -- switch-mode -w -t PANE
   restore_case switch-mode-windows-closed
@@ -1791,6 +1881,7 @@ run_self_check() {
   wait_for 'the suspended raw client resumes' client_attached zz
   SUSPENDED_ZZ_PID=""
 
+  switch_lifetime_self_checks
 
   self_check_run equivalence-after display-message -p -t PANE '#{window_index}.#{pane_index}'
   self_check_expect 'equivalence: every sabotage withdrawn' \

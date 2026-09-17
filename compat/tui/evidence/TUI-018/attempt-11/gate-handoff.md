@@ -2,7 +2,9 @@
 
 Branch `campaign/tui-stream-alias-6`. Production commits 8be81508 (control run-shell guard) and
 613ef711 (streamed pane input, unreadable stdin, spent pane readers, pane geometry and facts);
-fixture 13c78b22; documents e3e6b003. Read notes.md first.
+fixture 13c78b22; documents e3e6b003; evidence 9ac5831e; then the origin/main merge 47f6ab30, the
+attempt-09 redaction 9a1211e1 and the protocol 105 move 4bb7a2ca. Read notes.md first, including its
+tip section: the counted proof is at e3e6b003 and the fixtures were re-run at the tip.
 
 Re-measure, in this order:
 

@@ -1,0 +1,78 @@
+   Compiling syn v2.0.119
+   Compiling stable_deref_trait v1.2.1
+   Compiling smallvec v1.16.1
+   Compiling zerovec-derive v0.11.6
+   Compiling synstructure v0.13.2
+   Compiling num-traits v0.2.19
+   Compiling displaydoc v0.2.7
+   Compiling log v0.4.34
+   Compiling proc-macro2-diagnostics v0.10.1
+   Compiling moxcms v0.8.1
+   Compiling zerofrom-derive v0.1.7
+   Compiling zerofrom v0.1.8
+   Compiling yoke-derive v0.8.2
+   Compiling thiserror-impl v1.0.69
+   Compiling yoke v0.8.3
+   Compiling thiserror v1.0.69
+   Compiling phf_macros v0.13.1
+   Compiling zerovec v0.11.8
+   Compiling tinystr v0.8.4
+   Compiling icu_locale_core v2.3.0
+   Compiling potential_utf v0.1.6
+   Compiling zerotrie v0.2.5
+   Compiling icu_provider v2.3.1
+   Compiling icu_collections v2.3.0
+   Compiling filedescriptor v0.8.3
+   Compiling int-enum v1.2.0
+   Compiling phf v0.13.1
+   Compiling parking_lot_core v0.9.12
+   Compiling strum_macros v0.28.0
+   Compiling libghostty-vt v0.2.1 (https://github.com/uzaaft/libghostty-rs?rev=46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0#46a9d2ac)
+   Compiling image v0.25.10
+   Compiling portable-pty v0.9.0
+   Compiling derive_more-impl v2.1.1
+   Compiling parking_lot v0.12.5
+   Compiling csscolorparser v0.8.4
+   Compiling tracing-attributes v0.1.31
+   Compiling zz-terminal v0.11.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-terminal)
+   Compiling tracing v0.1.44
+   Compiling icu_properties v2.3.0
+   Compiling derive_more v2.1.1
+   Compiling icu_normalizer v2.3.0
+   Compiling strum v0.28.0
+   Compiling pin-project-internal v1.1.13
+   Compiling zz-protocol v0.11.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-protocol)
+   Compiling agent-client-protocol-schema v1.7.0
+   Compiling pin-project v1.1.13
+   Compiling idna_adapter v1.2.2
+   Compiling rustls-pki-types v1.15.1
+   Compiling futures-concurrency v7.7.1
+   Compiling chrono v0.4.45
+   Compiling nix v0.31.3
+   Compiling idna v1.1.0
+   Compiling form_urlencoded v1.2.2
+   Compiling uuid v1.26.1
+   Compiling zz-mux v0.11.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-mux)
+   Compiling agent-client-protocol v2.1.0
+   Compiling rustls v0.23.44
+   Compiling http v1.5.0
+   Compiling url v2.5.8
+   Compiling rustls-webpki v0.103.15
+   Compiling tempfile v3.27.0
+   Compiling libmimalloc-sys v0.1.49
+   Compiling subtle v2.6.1
+   Compiling zz-daemon v0.11.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-daemon)
+   Compiling ureq-proto v0.6.2
+   Compiling zz-client v0.11.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-client)
+   Compiling webpki-roots v1.0.9
+   Compiling anstream v1.0.0
+   Compiling ureq v3.4.1
+   Compiling env_filter v2.0.0
+   Compiling semver v1.0.28
+   Compiling zz-config v0.11.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-config)
+   Compiling env_logger v0.11.11
+   Compiling mimalloc v0.1.52
+   Compiling zz-tui v0.11.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-tui)
+   Compiling zz-cli v0.11.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 44s
+DONE 0

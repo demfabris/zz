@@ -1,8 +1,7 @@
 # TUI-018 sixth pass
 
 Base: campaign/tui-stream-alias-5 at 3c4a5255, which merges cleanly into origin/main 38c50df4. The
-four findings of the sixth review are built, none is recorded. Protocol stays 104; the one wire
-change is a tail append inside the unreleased v104 entry. No environment dump was taken.
+four findings of the sixth review are built, none is recorded. The one wire change is a tail append; see the tip section for the 105 bump. No environment dump was taken.
 
 ## What changed
 
@@ -93,6 +92,27 @@ All counted runs use `target/alias6-bins/zz_cli-final` (sha256 in binary-hashes.
 Residual found while measuring, not in this batch: `zz -C cmd ; run-shell 'sleep 1' ; tail`
 with stdin at EOF exits after the run-shell guard, where the pin runs the queue to the end
 (probes/f4d-*.txt, identical on the 3c4a5255 binary).
+
+## The tip after zz 0.11.0
+
+origin/main moved while this pass ran: 066b862a released zz 0.11.0, and that release shipped
+`PROTOCOL_VERSION` 104, the number this branch had been appending to. `python3 compat/wire-version.py`
+now says a release shipped 104, so the branch merges origin/main (no file is touched on both sides)
+and moves this cycle's three appends (`CommandInvocation.stdin_available`,
+`ClientFileOperation::ReadStdin` and `ReadStdinChunk`) into a v105 entry, with both pins and the
+`0x69` hello bytes updated. The proof above is at e3e6b003; at the merged tip 4bb7a2ca, with
+`target/alias6-bins/zz_cli-tip` (tip-binary-hash.txt), the fixtures were re-run:
+`compat/tui-command-streams.sh` 201 asserted, 0 recorded, 5 decided (tip-streams.txt);
+`compat/tui-client-commands.sh` 198 asserted with `unattributed=0` (tip-client-commands.txt);
+`compat/attached-client.sh` PASS (tip-attached-client.txt); zz-protocol tests 231 plus 23
+(tip-test-zz-protocol.txt); `compat/check.sh` including `evidence-secrets` and
+`wire-version: 105 is unreleased` (tip-compat-check.txt). The delta corpus, the self-check and the
+other packages' tests were not re-run at the tip: between e3e6b003 and the tip the only source change
+is the protocol number and main's five commits, none of which touches a file this branch touches.
+
+`cargo fmt --all -- --check` fails at the tip on `crates/zz/src/terminal/view.rs`
+(tip-fmt-check.txt), which is byte-identical to origin/main and is not this branch's file; the
+pre-merge check on this branch's own files passed (fmt-check.txt).
 
 ## Failed and superseded runs
 

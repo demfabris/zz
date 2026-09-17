@@ -1,0 +1,28 @@
+verified: TUI-001, TUI-002, TUI-003, TUI-004, TUI-005, TUI-006, TUI-007, TUI-008, TUI-009, TUI-010, TUI-012, TUI-016
+re-measuring: TUI-014
+  comparing /home/demfabris/dev/zz-c11-modes-final/target/debug/zz-customize-rebased
+  running compat/tui-client-commands.sh for TUI-014 ...
+Traceback (most recent call last):
+  File "/home/demfabris/dev/zz-c11-modes-final/compat/tui/verify-claims.py", line 248, in <module>
+    sys.exit(main(sys.argv))
+             ~~~~^^^^^^^^^^
+  File "/home/demfabris/dev/zz-c11-modes-final/compat/tui/verify-claims.py", line 236, in main
+    run_fixtures(targets, items, problems, args.zz, args.output_dir)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/demfabris/dev/zz-c11-modes-final/compat/tui/verify-claims.py", line 185, in run_fixtures
+    r = subprocess.run(["bash", str(path)], capture_output=True, text=True,
+                       cwd=str(ROOT), env=env, timeout=1800)
+  File "/usr/lib/python3.14/subprocess.py", line 557, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1221, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 2154, in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1268, in _check_timeout
+    raise TimeoutExpired(
+    ...<2 lines>...
+            stderr=b''.join(stderr_seq) if stderr_seq else None)
+subprocess.TimeoutExpired: Command '['bash', '/home/demfabris/dev/zz-c11-modes-final/compat/tui-client-commands.sh']' timed out after 1800 seconds

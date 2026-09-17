@@ -1,0 +1,154 @@
+{
+  "lane": "modes-final",
+  "branch": "campaign/tui-customize-3",
+  "base": "38c50df4c4d51401752c49b72bb689b09e33427d",
+  "runtime_revision": "0b72e3b242381028396272e3bea2915d39b1768c",
+  "fixture_revision": "76662d8d",
+  "verifier_revision": "7adc5e26",
+  "fixtures": [
+    {
+      "attempt": "client-3",
+      "command": "compat/tui-client-commands.sh",
+      "exit": 0,
+      "result_line": "all 332 asserted comparisons identical, 30 recorded not asserted (0 for a sibling lane, owners TUI-015=3 TUI-017=4 decided:TUI-014=3 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 gap:protocol.socket-acl=1 unattributed=0)",
+      "log": "client-3.txt"
+    },
+    {
+      "attempt": "client-7",
+      "command": "compat/tui-client-commands.sh",
+      "exit": 0,
+      "result_line": "all 332 asserted comparisons identical, 30 recorded not asserted (0 for a sibling lane, owners TUI-015=3 TUI-017=4 decided:TUI-014=3 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 gap:protocol.socket-acl=1 unattributed=0)",
+      "log": "client-7.txt"
+    },
+    {
+      "attempt": "client-8",
+      "command": "compat/tui-client-commands.sh",
+      "exit": 0,
+      "result_line": "all 332 asserted comparisons identical, 30 recorded not asserted (0 for a sibling lane, owners TUI-015=3 TUI-017=4 decided:TUI-014=3 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 gap:protocol.socket-acl=1 unattributed=0)",
+      "log": "client-8.txt"
+    },
+    {
+      "attempt": "client-self",
+      "command": "compat/tui-client-commands.sh --self-check",
+      "exit": 0,
+      "result_line": "self-check complete: every sabotage was caught in its own channel and both equivalences passed",
+      "log": "client-self.txt"
+    },
+    {
+      "attempt": "tui-choosers",
+      "command": "compat/tui-choosers.sh",
+      "exit": 0,
+      "result_line": "all 78 asserted comparisons identical, 0 recorded not asserted (0 for a sibling lane)",
+      "log": "tui-choosers.txt"
+    },
+    {
+      "attempt": "tui-choosers-self",
+      "command": "compat/tui-choosers.sh --self-check",
+      "exit": 0,
+      "result_line": "self-check complete: every sabotage was caught and all equivalences passed",
+      "log": "tui-choosers-self.txt"
+    },
+    {
+      "attempt": "tui-copy-mode",
+      "command": "compat/tui-copy-mode.sh",
+      "exit": 0,
+      "result_line": "all 147 cases agree on every channel they assert, 0 recorded a difference elsewhere",
+      "log": "tui-copy-mode.txt"
+    },
+    {
+      "attempt": "tui-copy-mode-self",
+      "command": "compat/tui-copy-mode.sh --self-check",
+      "exit": 0,
+      "result_line": "self-check complete: every sabotage was caught in its own channel and every equivalence passed",
+      "log": "tui-copy-mode-self.txt"
+    },
+    {
+      "attempt": "tui-screen-diff",
+      "command": "compat/tui-screen-diff.sh",
+      "exit": 0,
+      "result_line": "all 147 asserted checkpoints identical, 6 recorded not asserted",
+      "log": "tui-screen-diff.txt"
+    },
+    {
+      "attempt": "tui-screen-diff-self",
+      "command": "compat/tui-screen-diff.sh --self-check",
+      "exit": 0,
+      "result_line": "self-check complete: every sabotage was caught in its own channel and every equivalence passed",
+      "log": "tui-screen-diff-self.txt"
+    },
+    {
+      "attempt": "tui-overlays",
+      "command": "compat/tui-overlays.sh",
+      "exit": 0,
+      "result_line": "all 48 asserted comparisons identical, 0 recorded not asserted",
+      "log": "tui-overlays.txt"
+    },
+    {
+      "attempt": "tui-overlays-self",
+      "command": "compat/tui-overlays.sh --self-check",
+      "exit": 0,
+      "result_line": "self-check complete: every sabotage was caught and the equivalence passed",
+      "log": "tui-overlays-self.txt"
+    },
+    {
+      "attempt": "attached-identity",
+      "command": "compat/attached-client.sh",
+      "exit": 0,
+      "result_line": "attached-client compatibility: PASS",
+      "log": "attached-identity.txt"
+    },
+    {
+      "attempt": "verify-claims-bounded",
+      "command": "python3 compat/tui/verify-claims.py --run TUI-014 --timeout 7200 --zz target/debug/zz-customize-rebased",
+      "exit": 0,
+      "result_line": "every verified obligation holds up",
+      "log": "verify-claims-bounded.txt"
+    }
+  ],
+  "corpus": "corpus-results.json",
+  "tests": {
+    "full_command": "/tmp/zz-cargo.sh test -p zz-protocol -p zz-mux -p zz-daemon -p zz-tui -p zz-client -p zz-client-ffi -p zz-cli -p zz --all-features --no-fail-fast",
+    "full_exit": 101,
+    "failures": [
+      "CLI refresh_client_c_sizes_a_control_target_for_menu_gating: passes alone",
+      "Simulator seeded_convergence_seed_5eed: fails three candidate runs then passes unchanged; main passes three times, pre-fix passes once; cause unresolved",
+      "Daemon agent_stream_soak_slow_client: candidate and main fail 1501 versus 1500 updates"
+    ],
+    "clippy_exit": 0,
+    "fmt_exit": 0,
+    "compat_check_exit": 0,
+    "verifier_timeout_retention_test_exit": 0
+  },
+  "wire": {
+    "version": 104,
+    "new_appends_in_fix_pass": 0,
+    "guard_exit": 0
+  },
+  "ordinary_TUI014_records": 0,
+  "decided_TUI014_records": [
+    "clock-over-copy",
+    "clock-over-copy-key",
+    "copy-over-clock"
+  ],
+  "flipped": [
+    "switch-mode-windows",
+    "switch-mode-duplicate-windows"
+  ],
+  "limits": [
+    "client-6 has two ticking-clock capture differences; retained, not waived",
+    "Full suite has the integration failures detailed above",
+    "History capture allocation metadata differs while decoded cells match; exact fresh-scene capture assertions and both sabotage types remain"
+  ],
+  "targeted_mode_cases_gap_owned": 0,
+  "status": "complete; ledger remains review",
+  "checks": {
+    "fmt-delivery": 0,
+    "wire-delivery": 0,
+    "compat-check-verifier": 0,
+    "tracker-delivery": 0,
+    "tmux-tracker-delivery": 0,
+    "claims-structure": 0,
+    "binary-source-match": 0,
+    "security-scan": 0
+  }
+}

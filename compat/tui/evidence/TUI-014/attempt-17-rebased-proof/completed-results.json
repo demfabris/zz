@@ -1,0 +1,488 @@
+[
+  {
+    "attempt": "agent-soak-main",
+    "exit": 101,
+    "result_lines": [
+      "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 5.35s"
+    ],
+    "log": "agent-soak-main.txt"
+  },
+  {
+    "attempt": "agent-soak-solo",
+    "exit": 101,
+    "result_lines": [
+      "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 7.01s"
+    ],
+    "log": "agent-soak-solo.txt"
+  },
+  {
+    "attempt": "attached-final",
+    "exit": 1,
+    "result_lines": [],
+    "log": "attached-final.txt"
+  },
+  {
+    "attempt": "attached-identity",
+    "exit": 0,
+    "result_lines": [
+      "attached-client compatibility: PASS"
+    ],
+    "log": "attached-identity.txt"
+  },
+  {
+    "attempt": "attached-main",
+    "exit": 1,
+    "result_lines": [],
+    "log": "attached-main.txt"
+  },
+  {
+    "attempt": "attached-retry",
+    "exit": 1,
+    "result_lines": [],
+    "log": "attached-retry.txt"
+  },
+  {
+    "attempt": "attached",
+    "exit": 2,
+    "result_lines": [],
+    "log": "attached.txt"
+  },
+  {
+    "attempt": "binary-source-match",
+    "exit": 0,
+    "result_lines": [],
+    "log": "binary-source-match.txt"
+  },
+  {
+    "attempt": "build",
+    "exit": 0,
+    "result_lines": [],
+    "log": "build.txt"
+  },
+  {
+    "attempt": "claims-structure",
+    "exit": 0,
+    "result_lines": [
+      "every verified obligation holds up"
+    ],
+    "log": "claims-structure.txt"
+  },
+  {
+    "attempt": "cli-menu-solo",
+    "exit": 0,
+    "result_lines": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 133 filtered out; finished in 2.29s"
+    ],
+    "log": "cli-menu-solo.txt"
+  },
+  {
+    "attempt": "client-1",
+    "exit": 1,
+    "result_lines": [],
+    "log": "client-1.txt"
+  },
+  {
+    "attempt": "client-2",
+    "exit": 143,
+    "result_lines": [],
+    "log": "client-2.txt"
+  },
+  {
+    "attempt": "client-3",
+    "exit": 0,
+    "result_lines": [
+      "all 332 asserted comparisons identical, 30 recorded not asserted (0 for a sibling lane, owners TUI-015=3 TUI-017=4 decided:TUI-014=3 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 gap:protocol.socket-acl=1 unattributed=0)"
+    ],
+    "log": "client-3.txt"
+  },
+  {
+    "attempt": "client-4",
+    "exit": 143,
+    "result_lines": [],
+    "log": "client-4.txt"
+  },
+  {
+    "attempt": "client-5",
+    "exit": 143,
+    "result_lines": [],
+    "log": "client-5.txt"
+  },
+  {
+    "attempt": "client-6",
+    "exit": 1,
+    "result_lines": [],
+    "log": "client-6.txt"
+  },
+  {
+    "attempt": "client-7",
+    "exit": 0,
+    "result_lines": [
+      "all 332 asserted comparisons identical, 30 recorded not asserted (0 for a sibling lane, owners TUI-015=3 TUI-017=4 decided:TUI-014=3 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 gap:protocol.socket-acl=1 unattributed=0)"
+    ],
+    "log": "client-7.txt"
+  },
+  {
+    "attempt": "client-8",
+    "exit": 0,
+    "result_lines": [
+      "all 332 asserted comparisons identical, 30 recorded not asserted (0 for a sibling lane, owners TUI-015=3 TUI-017=4 decided:TUI-014=3 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 gap:protocol.socket-acl=1 unattributed=0)"
+    ],
+    "log": "client-8.txt"
+  },
+  {
+    "attempt": "client-self",
+    "exit": 0,
+    "result_lines": [
+      "self-check complete: every sabotage was caught in its own channel and both equivalences passed"
+    ],
+    "log": "client-self.txt"
+  },
+  {
+    "attempt": "clippy",
+    "exit": 0,
+    "result_lines": [],
+    "log": "clippy.txt"
+  },
+  {
+    "attempt": "compat-check-final",
+    "exit": 0,
+    "result_lines": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 984 filtered out; finished in 0.01s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 984 filtered out; finished in 0.02s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 984 filtered out; finished in 0.00s"
+    ],
+    "log": "compat-check-final.txt"
+  },
+  {
+    "attempt": "compat-check-verifier",
+    "exit": 0,
+    "result_lines": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 984 filtered out; finished in 0.05s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 984 filtered out; finished in 0.03s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 984 filtered out; finished in 0.01s"
+    ],
+    "log": "compat-check-verifier.txt"
+  },
+  {
+    "attempt": "compat-check",
+    "exit": 0,
+    "result_lines": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 984 filtered out; finished in 0.01s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 984 filtered out; finished in 0.02s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 984 filtered out; finished in 0.00s"
+    ],
+    "log": "compat-check.txt"
+  },
+  {
+    "attempt": "delta-1",
+    "exit": 1,
+    "result_lines": [],
+    "log": "delta-1.txt"
+  },
+  {
+    "attempt": "delta-2",
+    "exit": 0,
+    "result_lines": [],
+    "log": "delta-2.txt"
+  },
+  {
+    "attempt": "delta-3",
+    "exit": 0,
+    "result_lines": [],
+    "log": "delta-3.txt"
+  },
+  {
+    "attempt": "delta-4",
+    "exit": 1,
+    "result_lines": [],
+    "log": "delta-4.txt"
+  },
+  {
+    "attempt": "delta-candidate-isolated",
+    "exit": 1,
+    "result_lines": [],
+    "log": "delta-candidate-isolated.txt"
+  },
+  {
+    "attempt": "delta-extra",
+    "exit": 0,
+    "result_lines": [],
+    "log": "delta-extra.txt"
+  },
+  {
+    "attempt": "delta-main-chooser-kill",
+    "exit": 0,
+    "result_lines": [],
+    "log": "delta-main-chooser-kill.txt"
+  },
+  {
+    "attempt": "delta-main-environment-loop",
+    "exit": 0,
+    "result_lines": [],
+    "log": "delta-main-environment-loop.txt"
+  },
+  {
+    "attempt": "delta-main-menu-mouse",
+    "exit": 0,
+    "result_lines": [],
+    "log": "delta-main-menu-mouse.txt"
+  },
+  {
+    "attempt": "delta-main-menu-shortcut",
+    "exit": 0,
+    "result_lines": [],
+    "log": "delta-main-menu-shortcut.txt"
+  },
+  {
+    "attempt": "environment-loop-identity",
+    "exit": 0,
+    "result_lines": [],
+    "log": "environment-loop-identity.txt"
+  },
+  {
+    "attempt": "environment-loop-matched",
+    "exit": 1,
+    "result_lines": [],
+    "log": "environment-loop-matched.txt"
+  },
+  {
+    "attempt": "fmt-delivery",
+    "exit": 0,
+    "result_lines": [],
+    "log": "fmt-delivery.txt"
+  },
+  {
+    "attempt": "fmt-final",
+    "exit": 0,
+    "result_lines": [],
+    "log": "fmt-final.txt"
+  },
+  {
+    "attempt": "fmt",
+    "exit": 0,
+    "result_lines": [],
+    "log": "fmt.txt"
+  },
+  {
+    "attempt": "security-scan",
+    "exit": 0,
+    "result_lines": [],
+    "log": "security-scan.txt"
+  },
+  {
+    "attempt": "simulator-before",
+    "exit": 0,
+    "result_lines": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 7.00s"
+    ],
+    "log": "simulator-before.txt"
+  },
+  {
+    "attempt": "simulator-candidate-rebuilt",
+    "exit": 101,
+    "result_lines": [
+      "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 7.32s"
+    ],
+    "log": "simulator-candidate-rebuilt.txt"
+  },
+  {
+    "attempt": "simulator-candidate-repeat",
+    "exit": 0,
+    "result_lines": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 7.06s"
+    ],
+    "log": "simulator-candidate-repeat.txt"
+  },
+  {
+    "attempt": "simulator-main-2",
+    "exit": 0,
+    "result_lines": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 7.20s"
+    ],
+    "log": "simulator-main-2.txt"
+  },
+  {
+    "attempt": "simulator-main-3",
+    "exit": 0,
+    "result_lines": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 6.50s"
+    ],
+    "log": "simulator-main-3.txt"
+  },
+  {
+    "attempt": "simulator-main",
+    "exit": 0,
+    "result_lines": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 6.79s"
+    ],
+    "log": "simulator-main.txt"
+  },
+  {
+    "attempt": "simulator-solo",
+    "exit": 101,
+    "result_lines": [
+      "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 3.77s"
+    ],
+    "log": "simulator-solo.txt"
+  },
+  {
+    "attempt": "source-replay-identity",
+    "exit": 1,
+    "result_lines": [],
+    "log": "source-replay-identity.txt"
+  },
+  {
+    "attempt": "tail-bounded-redraw",
+    "exit": 0,
+    "result_lines": [],
+    "log": "tail-bounded-redraw.txt"
+  },
+  {
+    "attempt": "tail-history",
+    "exit": 1,
+    "result_lines": [],
+    "log": "tail-history.txt"
+  },
+  {
+    "attempt": "tail-isolated-controls",
+    "exit": 0,
+    "result_lines": [],
+    "log": "tail-isolated-controls.txt"
+  },
+  {
+    "attempt": "tail-rejected-controls",
+    "exit": 1,
+    "result_lines": [],
+    "log": "tail-rejected-controls.txt"
+  },
+  {
+    "attempt": "tests",
+    "exit": 101,
+    "result_lines": [
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    ],
+    "log": "tests.txt"
+  },
+  {
+    "attempt": "tmux-tracker-delivery",
+    "exit": 0,
+    "result_lines": [],
+    "log": "tmux-tracker-delivery.txt"
+  },
+  {
+    "attempt": "tracker-delivery",
+    "exit": 0,
+    "result_lines": [],
+    "log": "tracker-delivery.txt"
+  },
+  {
+    "attempt": "tui-choosers-self",
+    "exit": 0,
+    "result_lines": [
+      "self-check complete: every sabotage was caught and all equivalences passed"
+    ],
+    "log": "tui-choosers-self.txt"
+  },
+  {
+    "attempt": "tui-choosers",
+    "exit": 0,
+    "result_lines": [
+      "all 78 asserted comparisons identical, 0 recorded not asserted (0 for a sibling lane)"
+    ],
+    "log": "tui-choosers.txt"
+  },
+  {
+    "attempt": "tui-copy-mode-self",
+    "exit": 0,
+    "result_lines": [
+      "self-check complete: every sabotage was caught in its own channel and every equivalence passed"
+    ],
+    "log": "tui-copy-mode-self.txt"
+  },
+  {
+    "attempt": "tui-copy-mode",
+    "exit": 0,
+    "result_lines": [
+      "all 147 cases agree on every channel they assert, 0 recorded a difference elsewhere"
+    ],
+    "log": "tui-copy-mode.txt"
+  },
+  {
+    "attempt": "tui-overlays-self",
+    "exit": 0,
+    "result_lines": [
+      "self-check complete: every sabotage was caught and the equivalence passed"
+    ],
+    "log": "tui-overlays-self.txt"
+  },
+  {
+    "attempt": "tui-overlays",
+    "exit": 0,
+    "result_lines": [
+      "all 48 asserted comparisons identical, 0 recorded not asserted"
+    ],
+    "log": "tui-overlays.txt"
+  },
+  {
+    "attempt": "tui-screen-diff-self",
+    "exit": 0,
+    "result_lines": [
+      "self-check complete: every sabotage was caught in its own channel and every equivalence passed"
+    ],
+    "log": "tui-screen-diff-self.txt"
+  },
+  {
+    "attempt": "tui-screen-diff",
+    "exit": 0,
+    "result_lines": [
+      "all 147 asserted checkpoints identical, 6 recorded not asserted"
+    ],
+    "log": "tui-screen-diff.txt"
+  },
+  {
+    "attempt": "verifier-timeout-test",
+    "exit": 0,
+    "result_lines": [],
+    "log": "verifier-timeout-test.txt"
+  },
+  {
+    "attempt": "verify-claims-bounded",
+    "exit": 0,
+    "result_lines": [
+      "every verified obligation holds up"
+    ],
+    "log": "verify-claims-bounded.txt"
+  },
+  {
+    "attempt": "verify-claims-final",
+    "exit": 1,
+    "result_lines": [],
+    "log": "verify-claims-final.txt"
+  },
+  {
+    "attempt": "verify-claims-latest",
+    "exit": 1,
+    "result_lines": [],
+    "log": "verify-claims-latest.txt"
+  },
+  {
+    "attempt": "verify-claims",
+    "exit": 1,
+    "result_lines": [],
+    "log": "verify-claims.txt"
+  },
+  {
+    "attempt": "wire-delivery",
+    "exit": 0,
+    "result_lines": [],
+    "log": "wire-delivery.txt"
+  },
+  {
+    "attempt": "wire",
+    "exit": 0,
+    "result_lines": [],
+    "log": "wire.txt"
+  }
+]

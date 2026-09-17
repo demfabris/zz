@@ -1,0 +1,224 @@
+--- a/include/ghostty/vt/screen.h
++++ b/include/ghostty/vt/screen.h
+@@ -204,6 +204,8 @@
+    * Output type: GhosttyColorRgb *
+    */
+   GHOSTTY_CELL_DATA_COLOR_RGB = 11,
++  GHOSTTY_CELL_DATA_TAB = 12,
++  GHOSTTY_CELL_DATA_BG_INDEXED = 13,
+   GHOSTTY_CELL_DATA_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
+ } GhosttyCellData;
+ 
+--- a/include/ghostty/vt/style.h
++++ b/include/ghostty/vt/style.h
+@@ -105,6 +105,8 @@
+   bool strikethrough;
+   bool overline;
+   int underline; /**< One of GHOSTTY_SGR_UNDERLINE_* values */
++  bool fg_indexed;
++  bool bg_indexed;
+ } GhosttyStyle;
+ 
+ /**
+--- a/src/terminal/Screen.zig
++++ b/src/terminal/Screen.zig
+@@ -2327,6 +2327,7 @@
+         },
+ 
+         .direct_color_fg => |rgb| {
++            self.cursor.style.flags.fg_indexed = false;
+             self.cursor.style.fg_color = .{
+                 .rgb = .{
+                     .r = rgb.r,
+@@ -2337,6 +2338,7 @@
+         },
+ 
+         .direct_color_bg => |rgb| {
++            self.cursor.style.flags.bg_indexed = false;
+             self.cursor.style.bg_color = .{
+                 .rgb = .{
+                     .r = rgb.r,
+@@ -2347,30 +2349,42 @@
+         },
+ 
+         .@"8_fg" => |n| {
++            self.cursor.style.flags.fg_indexed = false;
+             self.cursor.style.fg_color = .{ .palette = @intFromEnum(n) };
+         },
+ 
+         .@"8_bg" => |n| {
++            self.cursor.style.flags.bg_indexed = false;
+             self.cursor.style.bg_color = .{ .palette = @intFromEnum(n) };
+         },
+ 
+-        .reset_fg => self.cursor.style.fg_color = .none,
+-
+-        .reset_bg => self.cursor.style.bg_color = .none,
++        .reset_fg => {
++            self.cursor.style.fg_color = .none;
++            self.cursor.style.flags.fg_indexed = false;
++        },
++
++        .reset_bg => {
++            self.cursor.style.bg_color = .none;
++            self.cursor.style.flags.bg_indexed = false;
++        },
+ 
+         .@"8_bright_fg" => |n| {
++            self.cursor.style.flags.fg_indexed = false;
+             self.cursor.style.fg_color = .{ .palette = @intFromEnum(n) };
+         },
+ 
+         .@"8_bright_bg" => |n| {
++            self.cursor.style.flags.bg_indexed = false;
+             self.cursor.style.bg_color = .{ .palette = @intFromEnum(n) };
+         },
+ 
+         .@"256_fg" => |idx| {
++            self.cursor.style.flags.fg_indexed = true;
+             self.cursor.style.fg_color = .{ .palette = idx };
+         },
+ 
+         .@"256_bg" => |idx| {
++            self.cursor.style.flags.bg_indexed = true;
+             self.cursor.style.bg_color = .{ .palette = idx };
+         },
+ 
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -2109,14 +2109,31 @@
+ /// Horizontal tab moves the cursor to the next tabstop, clearing
+ /// the screen to the left the tabstop.
+ pub fn horizontalTab(self: *Terminal) void {
+-    while (self.screens.active.cursor.x < self.scrolling_region.right) {
+-        // Move the cursor right
+-        self.screens.active.cursorRight(1);
+-
+-        // If the last cursor position was a tabstop we return. We do
+-        // "last cursor position" because we want a space to be written
+-        // at the tabstop unless we're at the end (the while condition).
+-        if (self.tabstops.get(self.screens.active.cursor.x)) return;
++    const screen = self.screens.active;
++    const start = screen.cursor.x;
++    const y = screen.cursor.y;
++    while (screen.cursor.x < self.scrolling_region.right) {
++        screen.cursorRight(1);
++        if (self.tabstops.get(screen.cursor.x)) break;
++    }
++    const width = screen.cursor.x - start;
++    if (width == 0 or width > 32) return;
++    const first = screen.pages.getCell(.{ .active = .{ .x = start, .y = y } }).?;
++    const first_cell = first.cell.*;
++    var x = start;
++    while (x < start + width) : (x += 1) {
++        const cell = screen.pages.getCell(.{ .active = .{ .x = x, .y = y } }).?.cell.*;
++        if (cell.wide != .narrow or cell.hyperlink or cell.tab != 0) return;
++        if (cell.codepoint() != 0 and cell.codepoint() != ' ') return;
++        if (cell.style_id != first_cell.style_id or cell.content_tag != first_cell.content_tag or cell.bg_indexed != first_cell.bg_indexed) return;
++        if (cell.content_tag == .bg_color_palette and cell.content.color_palette.data != first_cell.content.color_palette.data) return;
++        if (cell.content_tag == .bg_color_rgb and cell.content.color_rgb != first_cell.content.color_rgb) return;
++    }
++    x = start;
++    while (x < start + width) : (x += 1) {
++        const rac = screen.pages.getCell(.{ .active = .{ .x = x, .y = y } }).?;
++        rac.cell.tab = if (x == start) @intCast(width) else 128 + @as(u8, @intCast(x - start));
++        rac.row.dirty = true;
+     }
+ }
+ 
+--- a/src/terminal/c/cell.zig
++++ b/src/terminal/c/cell.zig
+@@ -82,6 +82,8 @@
+     /// Only valid when content_tag is bg_color_rgb.
+     /// Output type: GhosttyColorRgb *
+     color_rgb = 11,
++    tab = 12,
++    bg_indexed = 13,
+ 
+     /// Output type expected for querying the data of the given kind.
+     pub fn OutType(comptime self: CellData) type {
+@@ -93,7 +95,8 @@
+             .has_text, .has_styling, .has_hyperlink, .protected => bool,
+             .style_id => u16,
+             .semantic_content => SemanticContent,
+-            .color_palette => u8,
++            .color_palette, .tab => u8,
++            .bg_indexed => bool,
+             .color_rgb => color.RGB.C,
+         };
+     }
+@@ -159,6 +162,8 @@
+         .protected => out.* = cell.protected,
+         .semantic_content => out.* = @enumFromInt(@intFromEnum(cell.semantic_content)),
+         .color_palette => out.* = cell.content.color_palette.data,
++        .tab => out.* = cell.tab,
++        .bg_indexed => out.* = cell.bg_indexed,
+         .color_rgb => {
+             const rgb = cell.content.color_rgb;
+             out.* = .{ .r = rgb.r, .g = rgb.g, .b = rgb.b };
+--- a/src/terminal/c/style.zig
++++ b/src/terminal/c/style.zig
+@@ -58,9 +58,13 @@
+     strikethrough: bool,
+     overline: bool,
+     underline: c_int,
++    fg_indexed: bool,
++    bg_indexed: bool,
+ 
+     pub fn fromStyle(s: style.Style) Style {
+         return .{
++            .fg_indexed = s.flags.fg_indexed,
++            .bg_indexed = s.flags.bg_indexed,
+             .fg_color = .fromColor(s.fg_color),
+             .bg_color = .fromColor(s.bg_color),
+             .underline_color = .fromColor(s.underline_color),
+--- a/src/terminal/page.zig
++++ b/src/terminal/page.zig
+@@ -2084,7 +2084,9 @@
+     /// boundary points for content.
+     semantic_content: SemanticContent = .output,
+ 
+-    _padding: u16 = 0,
++    tab: u8 = 0,
++    bg_indexed: bool = false,
++    _padding: u7 = 0,
+ 
+     pub const ContentTag = enum(u2) {
+         /// A single codepoint, could be zero to be empty cell.
+@@ -2171,6 +2173,7 @@
+     ///   - Cell is styled but only with a background color and no text
+     ///   - Cell has a unicode placeholder for Kitty graphics protocol
+     pub inline fn hasText(self: Cell) bool {
++        if (self.tab != 0) return true;
+         return switch (self.content_tag) {
+             .codepoint,
+             .codepoint_grapheme,
+@@ -2183,6 +2186,7 @@
+     }
+ 
+     pub inline fn codepoint(self: Cell) u21 {
++        if (self.tab != 0) return ' ';
+         return switch (self.content_tag) {
+             .codepoint,
+             .codepoint_grapheme,
+--- a/src/terminal/style.zig
++++ b/src/terminal/style.zig
+@@ -36,7 +36,9 @@
+         strikethrough: bool = false,
+         overline: bool = false,
+         underline: sgr.Attribute.Underline = .none,
+-        _padding: u5 = 0,
++        fg_indexed: bool = false,
++        bg_indexed: bool = false,
++        _padding: u3 = 0,
+     };
+ 
+     /// The color for an SGR attribute. A color can come from multiple
+@@ -211,6 +213,7 @@
+         return switch (self.bg_color) {
+             .none => null,
+             .palette => |idx| .{
++                .bg_indexed = self.flags.bg_indexed,
+                 .content_tag = .bg_color_palette,
+                 .content = .{ .color_palette = .{ .data = idx } },
+             },

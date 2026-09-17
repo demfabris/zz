@@ -19,6 +19,7 @@ members = [
 exclude = [
     "clients/web",
     "third_party/rust/libghostty-vt-sys",
+    "third_party/rust/libghostty-vt",
 ]
 resolver = "3"
 
@@ -94,6 +95,7 @@ x11rb = "0.13.2"
 zeroize = "=1.9.0"
 
 [patch."https://github.com/uzaaft/libghostty-rs"]
+libghostty-vt = { path = "third_party/rust/libghostty-vt" }
 libghostty-vt-sys = { path = "third_party/rust/libghostty-vt-sys" }
 
 [patch."https://github.com/zed-industries/zed"]

@@ -32,3 +32,18 @@ and updates the safe Kitty API.
 
 When replacing this snapshot, remove its git-source patch from the workspace, refresh `Cargo.lock`,
 and run the focused terminal tests plus the real macOS bundle build.
+
+## Capture provenance
+
+`provenance.patch` retains explicit indexed foreground/background flags in the
+style's spare bits, including erased backgrounds, and tab spans in spare cell
+bits. The cell and style allocations keep their existing size. The C style
+uses its trailing padding for two booleans; cell queries append tags 12 and 13.
+The adjacent safe wrapper exposes these fields. Both wrappers must accompany
+this patch; a stock prebuilt libghostty-vt does not implement the new queries.
+
+The build applies the patch to its fetched or explicitly supplied Ghostty source
+and records the applied patch. On a later patch change it reverses only that
+recorded patch before applying the new one; a conflicting source edit fails.
+The pkg-config path accepts only packages declaring `zz_capture_provenance=1`;
+it falls back to the patched source build for an unmarked library.

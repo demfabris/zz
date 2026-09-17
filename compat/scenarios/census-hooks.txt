@@ -118,7 +118,7 @@ set-hook -gu after-set-option
 out: show-environment -g CENSUS_AFTER_SET_OPTION
 set-environment -g CENSUS_AFTER_SHOW_ENVIRONMENT no
 set-hook -g after-show-environment "set-environment -g CENSUS_AFTER_SHOW_ENVIRONMENT yes"
-show-environment -g
+show-environment -g CENSUS_AFTER_SHOW_ENVIRONMENT
 set-hook -gu after-show-environment
 out: show-environment -g CENSUS_AFTER_SHOW_ENVIRONMENT
 set-environment -g CENSUS_AFTER_SHOW_MESSAGES no

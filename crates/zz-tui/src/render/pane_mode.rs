@@ -251,7 +251,8 @@ fn switch_surface(
             grid.fill(0, index, rect.width, &Paint::Style(cleared_to(&selection)));
             grid.markup(0, index, rect.width, row, &selection, false);
         } else {
-            grid.markup(0, index, rect.width, row, &base, false);
+            let used = grid.markup(0, index, rect.width, row, &base, false);
+            grid.extend_last_cell(used, index);
         }
     }
     let prompt_row = rect.height - 1;

@@ -1,0 +1,107 @@
+# Scenario: smoke/tpm-init
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/smoke/tpm-init.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: conf: fixtures/tpm-init.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    %begin 1789619784 1 0
+    %end 1789619784 1 0
+    %begin 1789619784 2 0
+    %end 1789619784 2 0
+    %exit
+tmux stdout:
+    %begin 1789619784 316 0
+    %end 1789619784 316 0
+    %begin 1789619784 317 0
+    %end 1789619784 317 0
+    %begin 1789619784 318 0
+    %end 1789619784 318 0
+    %exit
+COMMAND EXIT-CLASS: clean
+WARN zz: clean
+WARN tmux: clean
+WARN terminator: clean (%end / %end)
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: keys: prefix I
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|I|0|run-shell /home/demfabris/dev/zz-c11-capture-residuals/compat/results/.smoke-tpm-init.BvyMTd/home/.tmux/plugins/tpm/bindings/install_plugins
+tmux stdout:
+    prefix|I|0|run-shell /home/demfabris/dev/zz-c11-capture-residuals/compat/results/.smoke-tpm-init.BvyMTd/home/.tmux/plugins/tpm/bindings/install_plugins
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: keys: prefix U
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|U|0|run-shell /home/demfabris/dev/zz-c11-capture-residuals/compat/results/.smoke-tpm-init.BvyMTd/home/.tmux/plugins/tpm/bindings/update_plugins
+tmux stdout:
+    prefix|U|0|run-shell /home/demfabris/dev/zz-c11-capture-residuals/compat/results/.smoke-tpm-init.BvyMTd/home/.tmux/plugins/tpm/bindings/update_plugins
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: keys: prefix M-u
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|M-u|0|run-shell /home/demfabris/dev/zz-c11-capture-residuals/compat/results/.smoke-tpm-init.BvyMTd/home/.tmux/plugins/tpm/bindings/clean_plugins
+tmux stdout:
+    prefix|M-u|0|run-shell /home/demfabris/dev/zz-c11-capture-residuals/compat/results/.smoke-tpm-init.BvyMTd/home/.tmux/plugins/tpm/bindings/clean_plugins
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: show-environment -g TMUX_PLUGIN_MANAGER_PATH
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    TMUX_PLUGIN_MANAGER_PATH=/home/demfabris/dev/zz-c11-capture-residuals/compat/results/.smoke-tpm-init.BvyMTd/home/.tmux/plugins/
+tmux stdout:
+    TMUX_PLUGIN_MANAGER_PATH=/home/demfabris/dev/zz-c11-capture-residuals/compat/results/.smoke-tpm-init.BvyMTd/home/.tmux/plugins/
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=5 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

@@ -1,0 +1,9 @@
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-terminal)
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-mux)
+   Compiling zz-client v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-client)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-daemon)
+   Compiling zz-config v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-config)
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-tui)
+   Compiling zz-cli v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 13.64s

@@ -1,0 +1,13 @@
+   Compiling libghostty-vt-sys v0.2.1 (/tmp/zzcr-no-resolver.m9hB2T/third_party/rust/libghostty-vt-sys)
+   Compiling libghostty-vt v0.2.1 (/tmp/zzcr-no-resolver.m9hB2T/third_party/rust/libghostty-vt)
+   Compiling zz-terminal v0.10.0 (/tmp/zzcr-no-resolver.m9hB2T/crates/zz-terminal)
+   Compiling zz-protocol v0.10.0 (/tmp/zzcr-no-resolver.m9hB2T/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/tmp/zzcr-no-resolver.m9hB2T/crates/zz-mux)
+   Compiling zz-client v0.10.0 (/tmp/zzcr-no-resolver.m9hB2T/crates/zz-client)
+   Compiling zz-daemon v0.10.0 (/tmp/zzcr-no-resolver.m9hB2T/crates/zz-daemon)
+   Compiling zz-config v0.10.0 (/tmp/zzcr-no-resolver.m9hB2T/crates/zz-config)
+   Compiling zz-tui v0.10.0 (/tmp/zzcr-no-resolver.m9hB2T/crates/zz-tui)
+   Compiling zz-cli v0.10.0 (/tmp/zzcr-no-resolver.m9hB2T/crates/zz-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 39.95s
+
+EXIT=0

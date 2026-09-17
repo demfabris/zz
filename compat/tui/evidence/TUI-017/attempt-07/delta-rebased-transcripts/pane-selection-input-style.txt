@@ -1,0 +1,581 @@
+# Scenario: pane-selection-input-style
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/pane-selection-input-style.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: split-window -d -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: select-pane -d -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: display-message -p -t w:0.1 #{pane_input_off}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: display-message -p -t w:0 #{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: select-pane -e -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: display-message -p -t w:0.1 #{pane_input_off}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: select-pane -d -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: select-pane -d -e -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: display-message -p -t w:0.1 #{pane_input_off}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: select-pane -D -d -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: display-message -p -t w:0.1 #{pane_input_off}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: display-message -p -t w:0 #{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: select-pane -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: select-pane -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: select-pane -l -e
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: display-message -p -t w:0.1 #{pane_input_off}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: select-pane -l -d
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: display-message -p -t w:0.1 #{pane_input_off}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: display-message -p -t w:0 #{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: select-pane -e -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: select-pane -g -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    default
+tmux stdout:
+    default
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: select-pane -P bg=red -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: out: show-options -pv -t w:0.1 window-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bg=red
+tmux stdout:
+    bg=red
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: out: show-options -pv -t w:0.1 window-active-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bg=red
+tmux stdout:
+    bg=red
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: out: display-message -p -t w:0 #{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: select-pane -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: out: select-pane -g -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bg=red
+tmux stdout:
+    bg=red
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: out: display-message -p -t w:0 #{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: out: select-pane -P bg=blue -g -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bg=blue
+tmux stdout:
+    bg=blue
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: out: show-options -pv -t w:0.1 window-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bg=blue
+tmux stdout:
+    bg=blue
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 31
+COMMAND: out: display-message -p -t w:0 #{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 32
+COMMAND: out: select-pane -P bogus=zzz -g -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bogus=zzz
+tmux stdout:
+    bogus=zzz
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 33
+COMMAND: out: show-options -pv -t w:0.1 window-active-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bogus=zzz
+tmux stdout:
+    bogus=zzz
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 34
+COMMAND: set-window-option -t w:0 window-style fg=colour10
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 35
+COMMAND: out: select-pane -g -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    fg=colour10
+tmux stdout:
+    fg=colour10
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 36
+COMMAND: out: select-pane -g -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bogus=zzz
+tmux stdout:
+    bogus=zzz
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 37
+COMMAND: select-pane -m -P bg=yellow -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 38
+COMMAND: out: display-message -p -t w:0.0 #{pane_marked}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 39
+COMMAND: out: select-pane -g -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    fg=colour10
+tmux stdout:
+    fg=colour10
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 40
+COMMAND: select-pane -M -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=40 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

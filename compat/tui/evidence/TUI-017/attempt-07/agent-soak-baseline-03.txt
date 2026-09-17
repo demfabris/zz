@@ -1,0 +1,5 @@
+
+EXIT=143
+STOP_REASON=Cancelled the third childless wait and requeued after the five-package run released its slot. No baseline test had started.
+
+EXIT=143

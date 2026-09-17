@@ -1,0 +1,1 @@
+Stopped own wait-exit CLI child PID 2464862 after more than three minutes in the full package run; the test has an unbounded wait_with_output after its 500 ms hold check. The resulting failure is a terminated test, not a completed timing assertion.

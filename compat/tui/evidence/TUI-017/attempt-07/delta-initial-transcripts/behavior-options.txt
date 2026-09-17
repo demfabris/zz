@@ -1,0 +1,189 @@
+# Scenario: behavior-options
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/behavior-options.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: source-file compat/scenarios/behavior-options.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-options -gv mouse
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    on
+tmux stdout:
+    on
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-options -sv escape-time
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    25
+tmux stdout:
+    25
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: show-options -wv -t w:0 automatic-rename
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    off
+tmux stdout:
+    off
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: show-window-options -gv automatic-rename-format
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    #{pane_current_command}
+tmux stdout:
+    #{pane_current_command}
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: show-window-options -gv remain-on-exit
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    on
+tmux stdout:
+    on
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: show-options -sv default-terminal
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    zz-term
+tmux stdout:
+    zz-term
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: show-options -gv display-time
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1200
+tmux stdout:
+    1200
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: show-options -gv repeat-time
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    650
+tmux stdout:
+    650
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: display-message -p -t w:0.1 #{pane_dead}:#{pane_dead_status}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1:7
+tmux stdout:
+    1:7
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: respawn-pane -t w:0.1 'sleep 60'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: display-message -p -t w:0.1 #{pane_dead}:#{pane_dead_status}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:
+tmux stdout:
+    0:
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=12 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

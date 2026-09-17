@@ -1,0 +1,13 @@
+    Checking libghostty-vt-sys v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt-sys)
+    Checking libghostty-vt v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt)
+    Checking zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-terminal)
+    Checking zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-protocol)
+    Checking zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-mux)
+    Checking zz-client v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-client)
+    Checking zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-daemon)
+    Checking zz-config v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-config)
+    Checking zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-tui)
+    Checking zz-cli v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 45.01s
+
+EXIT=0

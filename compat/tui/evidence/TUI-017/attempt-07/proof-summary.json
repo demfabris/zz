@@ -1,0 +1,189 @@
+{
+  "lane": "capture-residuals",
+  "branch": "campaign/tui-capture-residuals",
+  "base": "f9c52359e3da88cbde735076b38e22cdf3e003c6",
+  "capture_12_remote": "c550a39632ca97dc0e7c6793791b44263d3d81eb",
+  "proof_revision": "bb693da5c5654dbf97129857b36e6e63e0b18cbc",
+  "runtime_revision": "ddbd4bed52f597afed92afba4d05de9e8c854ae7",
+  "cases_flipped": [
+    {
+      "name": "capture-tab-trailing",
+      "owner": "TUI-017",
+      "before": "recorded",
+      "after": "asserted",
+      "fixed_self_check_exit": 0,
+      "reverted_self_check_exit": 1,
+      "previous_reason": "TUI-017 ordinary residual: tmux retains a TAB cell and emits a literal tab under -C; Ghostty expands HT into cursor motion and the retained grid loses the tab origin. This is the same engine-storage root as the campaign TAB-cell residual, separate from DEC charset provenance. Trailing, internal and wide-text tabs remain open"
+    },
+    {
+      "name": "capture-tab-internal",
+      "owner": "TUI-017",
+      "before": "recorded",
+      "after": "asserted",
+      "fixed_self_check_exit": 0,
+      "reverted_self_check_exit": 1,
+      "previous_reason": "TUI-017 ordinary residual: tmux retains a TAB cell and emits a literal tab under -C; Ghostty expands HT into cursor motion and the retained grid loses the tab origin. This is the same engine-storage root as the campaign TAB-cell residual, separate from DEC charset provenance. Trailing, internal and wide-text tabs remain open"
+    },
+    {
+      "name": "capture-tab-wide",
+      "owner": "TUI-017",
+      "before": "recorded",
+      "after": "asserted",
+      "fixed_self_check_exit": 0,
+      "reverted_self_check_exit": 1,
+      "previous_reason": "TUI-017 ordinary residual: tmux retains a TAB cell and emits a literal tab under -C; Ghostty expands HT into cursor motion and the retained grid loses the tab origin. This is the same engine-storage root as the campaign TAB-cell residual, separate from DEC charset provenance. Trailing, internal and wide-text tabs remain open"
+    },
+    {
+      "name": "capture-low-indexed-colour",
+      "owner": "TUI-017",
+      "before": "recorded",
+      "after": "asserted",
+      "fixed_self_check_exit": 0,
+      "reverted_self_check_exit": 1,
+      "previous_reason": "TUI-017 divergence measured at 80x24: explicit 38;5;1 produces literal \\033[38;5;1mRED\\033[39m on the pin, while zz produces \\033[31mRED\\033[39m. Ghostty stores both named 31 and indexed 38;5;1 as Palette(1), so the capture cannot distinguish their original colour class. Indices 16 through 255 and RGB retain their class"
+    },
+    {
+      "name": "lock-target-base-index-lock-session",
+      "owner": "TUI-015",
+      "before": "recorded",
+      "after": "asserted",
+      "fixed_self_check_exit": 0,
+      "reverted_self_check_exit": 1,
+      "previous_reason": "TUI-015 divergence with pane-base-index=1: the pin resolves =cli:win.1 and zz reports cannot find pane 1. resolve_named_session in MuxState has no access to CommandEngine pane-base-index options; plumbing configured indices crosses the authorized single-function grammar excursion. lock-session, has-session and list-windows each retain this owned measurement, without a decision waiver"
+    },
+    {
+      "name": "lock-target-base-index-has-session",
+      "owner": "TUI-015",
+      "before": "recorded",
+      "after": "asserted",
+      "fixed_self_check_exit": 0,
+      "reverted_self_check_exit": 1,
+      "previous_reason": "TUI-015 divergence with pane-base-index=1: the pin resolves =cli:win.1 and zz reports cannot find pane 1. resolve_named_session in MuxState has no access to CommandEngine pane-base-index options; plumbing configured indices crosses the authorized single-function grammar excursion. lock-session, has-session and list-windows each retain this owned measurement, without a decision waiver"
+    },
+    {
+      "name": "lock-target-base-index-list-windows",
+      "owner": "TUI-015",
+      "before": "recorded",
+      "after": "asserted",
+      "fixed_self_check_exit": 0,
+      "reverted_self_check_exit": 1,
+      "previous_reason": "TUI-015 divergence with pane-base-index=1: the pin resolves =cli:win.1 and zz reports cannot find pane 1. resolve_named_session in MuxState has no access to CommandEngine pane-base-index options; plumbing configured indices crosses the authorized single-function grammar excursion. lock-session, has-session and list-windows each retain this owned measurement, without a decision waiver"
+    }
+  ],
+  "ordinary_records_before": {
+    "TUI-015": 3,
+    "TUI-017": 4
+  },
+  "ordinary_records_after": {
+    "TUI-015": 0,
+    "TUI-017": 0
+  },
+  "status": {
+    "TUI-015": "review",
+    "TUI-017": "review"
+  },
+  "shared_fixture": {
+    "assertions": 199,
+    "records": 25,
+    "owners": {
+      "gap:clients.interactive-refresh": 8,
+      "decided:TUI-017": 6,
+      "decided:TUI-016": 1,
+      "TUI-014": 6,
+      "decided:TUI-015": 4
+    },
+    "unattributed": 0,
+    "rebased_runs": [
+      "fixture-rebased.txt",
+      "../../TUI-015/attempt-04/verify-claims-rebased.txt",
+      "verify-claims-rebased.txt"
+    ],
+    "exits": [
+      0,
+      0,
+      0
+    ],
+    "self_check_exit": 0
+  },
+  "fixtures": {
+    "screen": {
+      "asserted": 147,
+      "recorded_decisions": 6,
+      "exit": 0
+    },
+    "copy": {
+      "asserted": 147,
+      "exit": 0,
+      "self_check_exit": 0
+    },
+    "attached": {
+      "latest_full_exit": 0,
+      "artifact": "attached-rebased-controlled.txt",
+      "earlier_full_failures_retained": true,
+      "causal_fix_claimed": false
+    },
+    "scope_probe": {
+      "steps": 21,
+      "exit": 0
+    },
+    "capture_probe": {
+      "matches": 108,
+      "differences": 8,
+      "asserting": false
+    }
+  },
+  "delta": {
+    "selected": 205,
+    "completed": 205,
+    "matched": 197,
+    "failed": 8,
+    "unrun": [],
+    "batch_exits": [
+      1,
+      0,
+      1
+    ],
+    "details": "delta-summary.json",
+    "owners_and_reasons": "delta-residuals.json"
+  },
+  "libraries": {
+    "zz-cli": 106,
+    "zz-daemon": 979,
+    "zz-mux": 536,
+    "zz-terminal": 286,
+    "zz-tui": 208,
+    "ignored": {
+      "zz-terminal": 1
+    }
+  },
+  "full_package_exit": 101,
+  "integration_limits": "validation-residuals.json",
+  "checks": {
+    "fmt": 0,
+    "clippy_five_crates_all_targets_all_features_deny_warnings": 0,
+    "compat_check": 0,
+    "tui_tracker": 0,
+    "tmux_tracker": 0,
+    "wire_guard": 0,
+    "okf": 0,
+    "restore_production_build": 0
+  },
+  "wire": {
+    "version": 104,
+    "payload_changes": false,
+    "released_version": 103
+  },
+  "footprint": "footprint.json",
+  "honest_limits": [
+    "Gate review pending; no obligation marked verified.",
+    "Eight broader erased-background probe comparisons remain owned by TUI-017; styled frozen-mode capture is unproven.",
+    "The earlier attached reattach failures are unexplained despite the later unchanged-binary pass.",
+    "Full integration tests and the delta corpus are not all green; failed runs and baseline comparisons are retained.",
+    "Linux debug headless proof only; no macOS, Windows, iOS or release-bundle run.",
+    "No large-history capture throughput benchmark or exhaustive shrinking/reflow proof.",
+    "Census-hook transcripts redact inherited credential values after comparison; private originals and redaction metadata are retained."
+  ],
+  "restored_binary_matches_proof_binary": true,
+  "binary_sha256": "af2d42b54318a3be8043a51ed21344bb6e405b8b63fc9bba92a00a7ab6eb9468",
+  "evidence_redactions": "evidence-redactions.json"
+}

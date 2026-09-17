@@ -1,0 +1,70 @@
+# Scenario: smoke/client-non-utf8-cwd
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/smoke/client-non-utf8-cwd.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: run-shell 'sh ~/client-non-utf8-cwd.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g NON_UTF8_CWD
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    NON_UTF8_CWD=clean:12
+tmux stdout:
+    NON_UTF8_CWD=clean:12
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g NON_UTF8_CWD_DIRECT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    NON_UTF8_CWD_DIRECT=hit
+tmux stdout:
+    NON_UTF8_CWD_DIRECT=hit
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: show-environment -g NON_UTF8_CWD_NESTED
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    NON_UTF8_CWD_NESTED=hit
+tmux stdout:
+    NON_UTF8_CWD_NESTED=hit
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=4 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

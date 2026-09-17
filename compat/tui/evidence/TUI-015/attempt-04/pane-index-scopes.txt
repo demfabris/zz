@@ -1,0 +1,21 @@
+rename-window -t w:0 win
+set-option -g pane-base-index 1
+has-session -t '=w:win.1'
+has-session -t '=w:win.0'
+list-windows -t '=w:win.1' -F '#{window_index}:#{window_name}'
+set-option -t w pane-base-index 2
+has-session -t '=w:win.2'
+has-session -t '=w:win.1'
+set-option -w -t w:win pane-base-index 3
+has-session -t '=w:win.3'
+has-session -t %0
+has-session -t '=w:win.%0'
+set-option -g base-index 5
+has-session -t '=w:0.3'
+has-session -t '=w:5.3'
+set-option -uw -t w:win pane-base-index
+has-session -t '=w:win.1'
+has-session -t '=w:win.3'
+set-option -s pane-base-index 4
+has-session -t '=w:win.4'
+has-session -t '=w:win.1'

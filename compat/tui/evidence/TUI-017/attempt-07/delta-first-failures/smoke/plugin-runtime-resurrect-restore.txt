@@ -1,0 +1,69 @@
+# Scenario: smoke/plugin-runtime-resurrect-restore
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/smoke/plugin-runtime-resurrect-restore.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: run-shell 'python3 ~/resurrect-restore.py'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    RESTORE_SAVE_SCRIPT=<PLUGIN>/scripts/save.sh
+    RESTORE_SCRIPT=<PLUGIN>/scripts/restore.sh
+    RESTORE_BEFORE=0|ALPHA|<DIR>/alpha
+    1|BETA|<DIR>/beta
+    RESTORE_SAVED_RECORDS=0:0:ALPHA,0:1:BETA
+    RESTORE_SESSION_GONE=True
+    RESTORE_WINDOW=0|restored|2
+    RESTORE_AFTER=0|ALPHA|<DIR>/alpha
+    1|BETA|<DIR>/beta
+tmux stdout:
+    RESTORE_SAVE_SCRIPT=<PLUGIN>/scripts/save.sh
+    RESTORE_SCRIPT=<PLUGIN>/scripts/restore.sh
+    RESTORE_BEFORE=0|ALPHA|<DIR>/alpha
+    1|BETA|<DIR>/beta
+    RESTORE_SAVED_RECORDS=0:0:ALPHA,0:1:BETA
+    RESTORE_SESSION_GONE=True
+    RESTORE_WINDOW=0|restored|2
+    AssertionError(('0|ALPHA|<DIR>/alpha\n1|BETA|<DIR>/beta', '0|demfabris@alienware:~/resurrect-restore-tmux/alpha|<DIR>/alpha\n1|demfabris@alienware:~/resurrect-restore-tmux/beta|<DIR>/beta'))
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: divergence
+--- zz SMOKE STDOUT step 1
++++ tmux SMOKE STDOUT step 1
+@@ -5,5 +5,4 @@
+ RESTORE_SAVED_RECORDS=0:0:ALPHA,0:1:BETA
+ RESTORE_SESSION_GONE=True
+ RESTORE_WINDOW=0|restored|2
+-RESTORE_AFTER=0|ALPHA|<DIR>/alpha
+-1|BETA|<DIR>/beta
++AssertionError(('0|ALPHA|<DIR>/alpha\n1|BETA|<DIR>/beta', '0|demfabris@alienware:~/resurrect-restore-tmux/alpha|<DIR>/alpha\n1|demfabris@alienware:~/resurrect-restore-tmux/beta|<DIR>/beta'))
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g ZZ_RESURRECT_RESTORE
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    ZZ_RESURRECT_RESTORE=clean:two-panes-restored
+tmux stdout:
+    ZZ_RESURRECT_RESTORE=failed:tmux-side-only
+OUT: divergence
+--- zz OUT step 2
++++ tmux OUT step 2
+@@ -1 +1 @@
+-ZZ_RESURRECT_RESTORE=clean:two-panes-restored
++ZZ_RESURRECT_RESTORE=failed:tmux-side-only
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=1

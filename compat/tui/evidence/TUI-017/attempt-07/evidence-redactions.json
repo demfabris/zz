@@ -1,0 +1,20 @@
+{
+  "reason": "GitHub push protection rejected an inherited OAuth token in the census-hook environment dump. Credential values were redacted after comparison; expectations and recorded comparison results were not changed.",
+  "private_original_directory": "/tmp/zzcr-private-evidence.sxqfbybk",
+  "artifacts": [
+    {
+      "artifact": "delta-initial-transcripts/census-hooks.txt",
+      "redacted_assignments": {
+        "CLAUDE_CODE_MESSAGING_TOKEN": 1,
+        "GITHUB_PERSONAL_ACCESS_TOKEN": 2
+      }
+    },
+    {
+      "artifact": "delta-rebased-transcripts/census-hooks.txt",
+      "redacted_assignments": {
+        "CLAUDE_CODE_MESSAGING_TOKEN": 1,
+        "GITHUB_PERSONAL_ACCESS_TOKEN": 2
+      }
+    }
+  ]
+}

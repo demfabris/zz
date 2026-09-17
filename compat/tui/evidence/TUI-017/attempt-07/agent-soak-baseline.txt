@@ -1,0 +1,5 @@
+
+EXIT=143
+STOP_REASON=Cancelled this lane own childless Cargo-slot wait after fifteen minutes; no test process had started. Requeued through the same capped wrapper.
+
+EXIT=143

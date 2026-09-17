@@ -1,0 +1,12 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.68s
+     Running tests/cli_binary.rs (target/debug/deps/cli_binary-15c07f6383f0fd89)
+
+running 3 tests
+test daemon_autostart::control_mode::refresh_client_b_reports_initial_change_and_exact_removal ... ok
+test daemon_autostart::control_mode::refresh_client_c_sizes_a_control_target_for_menu_gating ... ok
+test daemon_autostart::control_mode::refresh_client_pane_states_gate_the_live_control_stream ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 130 filtered out; finished in 13.20s
+
+
+EXIT=0

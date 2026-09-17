@@ -1,0 +1,138 @@
+# Scenario: smoke/config-non-utf8-file-bytes
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/smoke/config-non-utf8-file-bytes.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: run-shell 'sh ~/config-non-utf8-file-bytes.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g CONFIG_BYTE_DIRECT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    CONFIG_BYTE_DIRECT=rc=0 out= err=
+tmux stdout:
+    CONFIG_BYTE_DIRECT=rc=0 out= err=
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g CONFIG_BYTE_EMPTY
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    CONFIG_BYTE_EMPTY=rc=0 out= err=
+tmux stdout:
+    CONFIG_BYTE_EMPTY=rc=0 out= err=
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: show-environment -g CONFIG_BYTE_CONTINUED_SOURCE
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    CONFIG_BYTE_CONTINUED_SOURCE=rc=0 out=continued.conf:1: set-environment -g CONFIG_BYTE_CONTINUED continued~ err=
+tmux stdout:
+    CONFIG_BYTE_CONTINUED_SOURCE=rc=0 out=continued.conf:1: set-environment -g CONFIG_BYTE_CONTINUED continued~ err=
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: show-environment -g CONFIG_BYTE_CONTINUED_MARKER
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    CONFIG_BYTE_CONTINUED_MARKER=rc=0 value=CONFIG_BYTE_CONTINUED=continued
+tmux stdout:
+    CONFIG_BYTE_CONTINUED_MARKER=rc=0 value=CONFIG_BYTE_CONTINUED=continued
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: show-environment -g CONFIG_BYTE_IF_SHELL
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    CONFIG_BYTE_IF_SHELL=rc=0 out=root.conf:1: display-message -p ROOT_BEFORE~root.conf:2: if-shell -F 1 "source-file isolated.conf"~root.conf:3: display-message -p ROOT_AFTER~ROOT_BEFORE~ROOT_AFTER~ err=
+tmux stdout:
+    CONFIG_BYTE_IF_SHELL=rc=0 out=root.conf:1: display-message -p ROOT_BEFORE~root.conf:2: if-shell -F 1 "source-file isolated.conf"~root.conf:3: display-message -p ROOT_AFTER~ROOT_BEFORE~ROOT_AFTER~ err=
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: show-environment -g CONFIG_BYTE_MATRIX
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    CONFIG_BYTE_MATRIX=|isolated-ff:rc=0:out=:err=|embedded-ff:rc=1:out=case.conf:1: command display-message: too many arguments (need at most 1)~:err=|trailing-ff:rc=0:out=case.conf:1: display-message -p before~before~:err=|boundary-ff:rc=0:out=case.conf:1: display-message -p before ; display-message -p after~before~after~:err=|second-boundary-ff:rc=0:out=case.conf:1: display-message -p first~first~:err=|comment-ff:rc=0:out=case.conf:1: display-message -p escaped~escaped~:err=|even-backslash-ff:rc=0:out=case.conf:1: display-message -p before\\after~before\after~:err=|unicode-eof:rc=1:out=case.conf:1: syntax error~:err=|second-eof-incomplete:rc=1:out=case.conf:1: syntax error~:err=|block-hard-eof:rc=1:out=case.conf:2: syntax error~:err=|block-quote-ff:rc=1:out=case.conf:2: syntax error~:err=
+tmux stdout:
+    CONFIG_BYTE_MATRIX=|isolated-ff:rc=0:out=:err=|embedded-ff:rc=1:out=case.conf:1: command display-message: too many arguments (need at most 1)~:err=|trailing-ff:rc=0:out=case.conf:1: display-message -p before~before~:err=|boundary-ff:rc=0:out=case.conf:1: display-message -p before ; display-message -p after~before~after~:err=|second-boundary-ff:rc=0:out=case.conf:1: display-message -p first~first~:err=|comment-ff:rc=0:out=case.conf:1: display-message -p escaped~escaped~:err=|even-backslash-ff:rc=0:out=case.conf:1: display-message -p before\\after~before\after~:err=|unicode-eof:rc=1:out=case.conf:1: syntax error~:err=|second-eof-incomplete:rc=1:out=case.conf:1: syntax error~:err=|block-hard-eof:rc=1:out=case.conf:2: syntax error~:err=|block-quote-ff:rc=1:out=case.conf:2: syntax error~:err=
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: show-environment -g CONFIG_BYTE_STARTUP_RESULT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    CONFIG_BYTE_STARTUP_RESULT=rc=0 out= err= marker=1::unknown variable: CONFIG_BYTE_STARTUP~
+tmux stdout:
+    CONFIG_BYTE_STARTUP_RESULT=rc=0 out= err= marker=1::unknown variable: CONFIG_BYTE_STARTUP~
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=8 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

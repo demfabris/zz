@@ -1,0 +1,241 @@
+# Scenario: format-modifier-option-loop
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/format-modifier-option-loop.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: new-session -d -s oloop
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: display-message -p -t oloop [#{O:#{loop_index}:#{option_name};}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    []
+tmux stdout:
+    []
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: set-option -t oloop status-left L
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: set-option -t oloop @user U
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: set-option -t oloop status-format[0] A
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: set-option -t oloop status-format[1] B
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: set-hook -t oloop after-new-window "display-message x"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: display-message -p -t oloop [#{O:#{loop_index}|#{option_name}|#{option_value}|#{option_is_array}|#{option_array_key}|#{option_array_index}|#{option_array_first}|#{option_array_last}|#{option_array_count}|#{option_is_hook}|#{option_is_user}|#{loop_last_flag};}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [0|@user|U|0|||0|0|0|0|1|0;1|after-new-window|display-message x|1|0|0|1|1|1|1|0|0;2|status-format|A|1|0|0|1|0|2|0|0|0;3|status-format|B|1|1|1|0|1|2|0|0|0;4|status-left|L|0|||0|0|0|0|0|1;]
+tmux stdout:
+    [0|@user|U|0|||0|0|0|0|1|0;1|after-new-window|display-message x|1|0|0|1|1|1|1|0|0;2|status-format|A|1|0|0|1|0|2|0|0|0;3|status-format|B|1|1|1|0|1|2|0|0|0;4|status-left|L|0|||0|0|0|0|0|1;]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: display-message -p -t oloop [#{Os:#{option_name};}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [@user;after-new-window;status-format;status-format;status-left;]
+tmux stdout:
+    [@user;after-new-window;status-format;status-format;status-left;]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: set-option -t oloop update-environment ""
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: display-message -p -t oloop [#{O:#{option_name}=(#{option_value})#{option_array_count}#{option_array_first}#{option_array_last};}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [@user=(U)000;after-new-window=(display-message x)111;status-format=(A)210;status-format=(B)201;status-left=(L)000;update-environment=()011;]
+tmux stdout:
+    [@user=(U)000;after-new-window=(display-message x)111;status-format=(A)210;status-format=(B)201;status-left=(L)000;update-environment=()011;]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: set-option -w -t oloop:0 @wuser W
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: set-option -p -t oloop:0.0 @puser P
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: out: display-message -p -t oloop:0.0 [#{Ow:#{option_name}=#{option_value};}|#{Op:#{option_name}=#{option_value};}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [@wuser=W;|@puser=P;]
+tmux stdout:
+    [@wuser=W;|@puser=P;]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: display-message -p -t oloop:0.0 [#{Osw:#{option_name};}|#{Osp:#{option_name};}|#{Owp:#{option_name};}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [@wuser;|@user;after-new-window;status-format;status-format;status-left;update-environment;|@wuser;]
+tmux stdout:
+    [@wuser;|@user;after-new-window;status-format;status-format;status-left;update-environment;|@wuser;]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: display-message -p -t oloop [#{Oz:#{option_name};}|#{Ogp:#{option_name};}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [|]
+tmux stdout:
+    [|]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: display-message -p -t oloop [#{n:#{Ov:#{l:x}}}|#{n:#{Og:#{l:x}}}|#{n:#{Ogs:#{l:x}}}|#{n:#{Ogw:#{l:x}}}|#{n:#{Ovgw:#{l:x}}}|#{n:#{Ogsw:#{l:x}}}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [53|127|127|89|53|89]
+tmux stdout:
+    [53|127|127|89|53|89]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=17 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

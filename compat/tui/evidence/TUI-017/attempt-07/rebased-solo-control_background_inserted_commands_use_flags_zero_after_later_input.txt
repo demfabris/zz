@@ -1,0 +1,3 @@
+
+EXIT=143
+STOP_REASON=Cancelled this lane childless filtered-test queue and replaced it with a serial run of the complete control-mode family, which includes all four full-suite failures.

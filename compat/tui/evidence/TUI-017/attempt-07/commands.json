@@ -1,0 +1,312 @@
+[
+  {
+    "command": "/tmp/zz-cargo.sh build -p zz-cli --bin zz_cli",
+    "artifact": "rebased-build.txt",
+    "source": "rebased-code-revision.txt",
+    "exit": 0
+  },
+  {
+    "command": "compat/tui-client-commands.sh target/capture-residuals-rebased/zz compat/.cache/tmux-src/tmux",
+    "artifact": "fixture-rebased.txt",
+    "exit": 0
+  },
+  {
+    "command": "python3 compat/tui/verify-claims.py --run TUI-015 --zz target/capture-residuals-rebased/zz",
+    "artifact": "../../TUI-015/attempt-04/verify-claims-rebased.txt",
+    "exit": 0
+  },
+  {
+    "command": "python3 compat/tui/verify-claims.py --run TUI-017 --zz target/capture-residuals-rebased/zz",
+    "artifact": "verify-claims-rebased.txt",
+    "exit": 0
+  },
+  {
+    "command": "compat/tui-client-commands.sh --self-check target/capture-residuals-rebased/zz compat/.cache/tmux-src/tmux",
+    "artifact": "self-check-rebased.txt",
+    "exit": 0
+  },
+  {
+    "command": "compat/tui-copy-mode.sh target/capture-residuals-rebased/zz compat/.cache/tmux-src/tmux",
+    "artifact": "copy-mode-ready.txt",
+    "exit": 0
+  },
+  {
+    "command": "compat/tui-screen-diff.sh target/capture-residuals-rebased/zz compat/.cache/tmux-src/tmux",
+    "artifact": "screen-diff-rebased.txt",
+    "exit": 0
+  },
+  {
+    "command": "compat/attached-client.sh target/capture-residuals-rebased/zz compat/.cache/tmux-src/tmux",
+    "artifact": "attached-rebased.txt",
+    "exit": 1
+  },
+  {
+    "command": "ZZ_COMPAT_ZZ=$PWD/target/capture-residuals-proof/zz python3 compat/tui/evidence/TUI-017/attempt-06/capture-probe.py",
+    "artifact": "capture-probe.txt",
+    "asserting": false,
+    "exit": 0
+  },
+  {
+    "command": "compat/diff-scenario.sh --strict-geometry compat/tui/evidence/TUI-015/attempt-04/pane-index-scopes.txt target/capture-residuals-final/zz compat/.cache/tmux-src/tmux",
+    "artifact": "../../TUI-015/attempt-04/pane-index-scopes-run.txt",
+    "note": "Collected under attempt-02 with a new filename and moved to attempt-04 without changing the probe.",
+    "exit": 0
+  },
+  {
+    "command": "HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup RUST_TEST_THREADS=2 /tmp/zz-cargo.sh test -p zz-terminal -p zz-mux -p zz-daemon -p zz-tui -p zz-cli --no-fail-fast",
+    "artifact": "packages-rebased.txt",
+    "exit": 101
+  },
+  {
+    "command": "/tmp/zz-cargo.sh clippy -p zz-terminal -p zz-mux -p zz-daemon -p zz-tui -p zz-cli --all-targets --all-features -- -D warnings",
+    "artifact": "clippy-rebased.txt",
+    "exit": 0
+  },
+  {
+    "command": "cargo() { /tmp/zz-cargo.sh \"$@\"; }; export -f cargo; HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup compat/check.sh",
+    "artifact": "compat-check-rebased.txt",
+    "exit": 0
+  },
+  {
+    "command": "/tmp/zz-cargo.sh fmt --all",
+    "artifact": "fmt-rebased.txt",
+    "exit": 0
+  },
+  {
+    "command": "python3 compat/wire-version.py",
+    "artifact": "wire-version.txt",
+    "exit": 0
+  },
+  {
+    "command": "python3 .agents/skills/okf/scripts/okf.py validate knowledge",
+    "artifact": "okf.txt",
+    "exit": 0
+  },
+  {
+    "command": "ZZ_COMPAT_ZZ=$PWD/target/capture-residuals-rebased/zz compat/run.sh --strict-geometry --delta origin/main...HEAD --commands capture-pane,lock-session,has-session,list-windows,new-session,rename-session,kill-session,attach-session,detach-client,last-window,next-window,previous-window,move-window,command-prompt,display-message,set-environment,show-environment,list-clients,switch-client --list",
+    "artifact": "delta-rebased-selection.txt"
+  },
+  {
+    "command": "mapfile -t TASK_ROWS < compat/tui/evidence/TUI-017/attempt-07/delta-batch-1.txt; ZZ_COMPAT_ZZ=$PWD/target/capture-residuals-rebased/zz compat/run.sh --strict-geometry --delta origin/main...HEAD --commands capture-pane,lock-session,has-session,list-windows,new-session,rename-session,kill-session,attach-session,detach-client,last-window,next-window,previous-window,move-window,command-prompt,display-message,set-environment,show-environment,list-clients,switch-client \"${TASK_ROWS[@]}\"",
+    "artifact": "delta-batch-1-run.txt",
+    "exit": 1
+  },
+  {
+    "command": "mapfile -t TASK_ROWS < compat/tui/evidence/TUI-017/attempt-07/delta-batch-2.txt; ZZ_COMPAT_ZZ=$PWD/target/capture-residuals-rebased/zz compat/run.sh --strict-geometry --delta origin/main...HEAD --commands capture-pane,lock-session,has-session,list-windows,new-session,rename-session,kill-session,attach-session,detach-client,last-window,next-window,previous-window,move-window,command-prompt,display-message,set-environment,show-environment,list-clients,switch-client \"${TASK_ROWS[@]}\"",
+    "artifact": "delta-batch-2-run.txt",
+    "exit": 0
+  },
+  {
+    "command": "mapfile -t TASK_ROWS < compat/tui/evidence/TUI-017/attempt-07/delta-batch-3.txt; ZZ_COMPAT_ZZ=$PWD/target/capture-residuals-rebased/zz compat/run.sh --strict-geometry --delta origin/main...HEAD --commands capture-pane,lock-session,has-session,list-windows,new-session,rename-session,kill-session,attach-session,detach-client,last-window,next-window,previous-window,move-window,command-prompt,display-message,set-environment,show-environment,list-clients,switch-client \"${TASK_ROWS[@]}\"",
+    "artifact": "delta-batch-3-run.txt",
+    "exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh capture-low-indexed-colour target/capture-residuals-final/zz",
+    "artifact": "positive-capture-low-indexed-colour.txt",
+    "expected_exit": 0,
+    "exit": 0
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh capture-low-indexed-colour target/capture-residuals-reverted/zz",
+    "artifact": "reverted-capture-low-indexed-colour.txt",
+    "expected_exit": 1,
+    "exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh capture-tab-trailing target/capture-residuals-final/zz",
+    "artifact": "positive-capture-tab-trailing.txt",
+    "expected_exit": 0,
+    "exit": 0
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh capture-tab-trailing target/capture-residuals-reverted/zz",
+    "artifact": "reverted-capture-tab-trailing.txt",
+    "expected_exit": 1,
+    "exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh capture-tab-internal target/capture-residuals-final/zz",
+    "artifact": "positive-capture-tab-internal.txt",
+    "expected_exit": 0,
+    "exit": 0
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh capture-tab-internal target/capture-residuals-reverted/zz",
+    "artifact": "reverted-capture-tab-internal.txt",
+    "expected_exit": 1,
+    "exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh capture-tab-wide target/capture-residuals-final/zz",
+    "artifact": "positive-capture-tab-wide.txt",
+    "expected_exit": 0,
+    "exit": 0
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh capture-tab-wide target/capture-residuals-reverted/zz",
+    "artifact": "reverted-capture-tab-wide.txt",
+    "expected_exit": 1,
+    "exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh lock-session target/capture-residuals-final/zz",
+    "artifact": "positive-lock-session.txt",
+    "expected_exit": 0,
+    "exit": 0
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh lock-session target/capture-residuals-reverted/zz",
+    "artifact": "reverted-lock-session.txt",
+    "expected_exit": 1,
+    "exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh has-session target/capture-residuals-final/zz",
+    "artifact": "positive-has-session.txt",
+    "expected_exit": 0,
+    "exit": 0
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh has-session target/capture-residuals-reverted/zz",
+    "artifact": "reverted-has-session.txt",
+    "expected_exit": 1,
+    "exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh list-windows target/capture-residuals-final/zz",
+    "artifact": "positive-list-windows.txt",
+    "expected_exit": 0,
+    "exit": 0
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh list-windows target/capture-residuals-reverted/zz",
+    "artifact": "reverted-list-windows.txt",
+    "expected_exit": 1,
+    "exit": 1
+  },
+  {
+    "command": "compat/tui-copy-mode.sh --self-check target/capture-residuals-rebased/zz compat/.cache/tmux-src/tmux",
+    "artifact": "copy-self-check-rebased.txt",
+    "exit": 0
+  },
+  {
+    "command": "compat/attached-client.sh --lifecycle target/capture-residuals-rebased/zz compat/.cache/tmux-src/tmux",
+    "artifact": "attached-lifecycle-rebased.txt",
+    "exit": 0
+  },
+  {
+    "command": "compat/attached-client.sh target/capture-residuals-baseline/zz compat/.cache/tmux-src/tmux",
+    "artifact": "attached-baseline.txt",
+    "exit": 0
+  },
+  {
+    "command": "HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup RUST_TEST_THREADS=1 /tmp/zz-cargo.sh test -p zz-cli --test cli_binary control_mode",
+    "artifact": "cli-control-serial.txt",
+    "exit": 101
+  },
+  {
+    "command": "HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup CARGO_TARGET_DIR=$PWD/target/capture-residuals-baseline-build RUST_TEST_THREADS=1 /tmp/zz-cargo.sh test --manifest-path /tmp/zzcr-attached-base.mRivMl/Cargo.toml -p zz-cli --test cli_binary control_mode",
+    "artifact": "baseline-cli-control-serial.txt",
+    "exit": 101
+  },
+  {
+    "command": "HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup RUST_TEST_THREADS=1 /tmp/zz-cargo.sh test -p zz-cli --test cli_binary refresh_client_",
+    "artifact": "cli-refresh-filtered.txt",
+    "exit": 0
+  },
+  {
+    "command": "compat/attached-client.sh target/capture-residuals-rebased/zz compat/.cache/tmux-src/tmux",
+    "artifact": "attached-rebased-retry.txt",
+    "scope": "full fixture",
+    "exit": 1
+  },
+  {
+    "command": "compat/attached-client.sh target/capture-residuals-baseline/zz compat/.cache/tmux-src/tmux",
+    "artifact": "attached-baseline-retry.txt",
+    "scope": "full fixture",
+    "exit": 0
+  },
+  {
+    "command": "compat/attached-client.sh target/capture-residuals-reverted/zz compat/.cache/tmux-src/tmux",
+    "artifact": "attached-reverted.txt",
+    "scope": "full fixture",
+    "exit": 0
+  },
+  {
+    "command": "sed '/^probe_side zz$/,/^probe_requested_client_flags zz$/{ /^probe_requested_client_flags zz$/!d; }' compat/attached-client.sh | bash -s -- target/capture-residuals-rebased/zz compat/.cache/tmux-src/tmux",
+    "artifact": "attached-tail-probe.txt",
+    "scope": "bounded late-probe subset, not the full fixture",
+    "exit": 0
+  },
+  {
+    "command": "compat/attached-client.sh target/capture-residuals-rebased/zz compat/.cache/tmux-src/tmux",
+    "artifact": "attached-rebased-controlled.txt",
+    "exit": 0
+  },
+  {
+    "command": "/tmp/zz-cargo.sh build -p zz-cli --bin zz_cli",
+    "artifact": "restore-production-build.txt",
+    "exit": 0
+  },
+  {
+    "command": "CARGO_TARGET_DIR=$PWD/target /tmp/zz-cargo.sh build --manifest-path /tmp/zzcr-no-tab-scan.yCKvnI/Cargo.toml -p zz-cli --bin zz_cli",
+    "artifact": "no-tab-scan-build.txt",
+    "exit": 0
+  },
+  {
+    "command": "compat/attached-client.sh target/capture-residuals-no-tab-scan/zz compat/.cache/tmux-src/tmux",
+    "artifact": "attached-no-tab-scan.txt",
+    "exit": 0
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh capture-tab-trailing target/capture-residuals-no-tab-scan/zz",
+    "artifact": "no-tab-scan-capture-tab-trailing.txt",
+    "exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh has-session target/capture-residuals-no-tab-scan/zz",
+    "artifact": "no-tab-scan-has-session.txt",
+    "exit": 0
+  },
+  {
+    "command": "CARGO_TARGET_DIR=$PWD/target /tmp/zz-cargo.sh build --manifest-path /tmp/zzcr-no-resolver.m9hB2T/Cargo.toml -p zz-cli --bin zz_cli",
+    "artifact": "no-resolver-build.txt",
+    "exit": 0
+  },
+  {
+    "command": "compat/attached-client.sh target/capture-residuals-no-resolver/zz compat/.cache/tmux-src/tmux",
+    "artifact": "attached-no-resolver.txt",
+    "exit": 0
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh capture-tab-trailing target/capture-residuals-no-resolver/zz",
+    "artifact": "no-resolver-capture-tab-trailing.txt",
+    "exit": 0
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-07/residual-self-check.sh has-session target/capture-residuals-no-resolver/zz",
+    "artifact": "no-resolver-has-session.txt",
+    "exit": 1
+  },
+  {
+    "command": "python3 compat/tui/tracker.py check",
+    "artifact": "tracker-final.txt",
+    "exit": 0
+  },
+  {
+    "command": "python3 compat/tmux-tracker.py check",
+    "artifact": "tmux-tracker-final.txt",
+    "exit": 0
+  },
+  {
+    "command": "python3 compat/wire-version.py",
+    "artifact": "wire-version-final.txt",
+    "exit": 0
+  },
+  {
+    "command": "python3 .agents/skills/okf/scripts/okf.py validate knowledge",
+    "artifact": "okf-final.txt",
+    "exit": 0
+  }
+]

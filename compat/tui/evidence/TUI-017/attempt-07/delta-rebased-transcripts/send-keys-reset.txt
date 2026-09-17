@@ -1,0 +1,239 @@
+# Scenario: send-keys-reset
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/send-keys-reset.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: new-window -d -t w -n reset -- cat
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: send-keys -t w:reset.0 alpha Enter
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: send-keys -t w:reset.0 beta Enter
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: send-keys -t w:reset.0 gamma Enter
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: run-shell "sleep 0.3"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: capture-pane -p -S 0 -E 5 -t w:reset.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alpha
+    alpha
+    beta
+    beta
+    gamma
+    gamma
+tmux stdout:
+    alpha
+    alpha
+    beta
+    beta
+    gamma
+    gamma
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: send-keys -R -t w:reset.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: run-shell "sleep 0.3"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: capture-pane -p -S -6 -E -1 -t w:reset.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alpha
+    alpha
+    beta
+    beta
+    gamma
+    gamma
+tmux stdout:
+    alpha
+    alpha
+    beta
+    beta
+    gamma
+    gamma
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: send-keys -l -t w:reset.0 marker
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: run-shell "sleep 0.3"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: capture-pane -p -S 0 -E 0 -t w:reset.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    marker
+tmux stdout:
+    marker
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: send-keys -R -t w:reset.0 delta Enter
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: run-shell "sleep 0.3"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: capture-pane -p -S 0 -E 1 -t w:reset.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    delta
+    markerdelta
+tmux stdout:
+    delta
+    markerdelta
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: capture-pane -p -S -1 -E -1 -t w:reset.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    marker
+tmux stdout:
+    marker
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=16 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

@@ -1,0 +1,3 @@
+attached-client compatibility: PASS
+
+EXIT=0

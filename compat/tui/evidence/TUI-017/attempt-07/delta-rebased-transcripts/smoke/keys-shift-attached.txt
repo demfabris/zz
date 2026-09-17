@@ -1,0 +1,101 @@
+# Scenario: smoke/keys-shift-attached
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/smoke/keys-shift-attached.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: out: set-environment -gu KEYS_CONTRACT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: run-shell 'KEYS_CONTRACT_MODE=shift sh ~/keys-contract.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    S-Left window=0
+    S-Right window=1
+    S-Up fired
+    S-Down fired
+    S-Left fired
+    S-Right fired
+    BTab fired
+    S-Home fired
+    S-End fired
+    S-PPage fired
+    S-NPage fired
+    S-Insert fired
+    S-Delete fired
+    S-F1 fired
+    S-F2 fired
+    S-F3 fired
+    S-F4 fired
+    S-F5 fired
+    S-F6 fired
+    S-F7 fired
+    S-F8 fired
+    S-F9 fired
+    S-F10 fired
+    S-F11 fired
+    S-F12 fired
+tmux stdout:
+    S-Left window=0
+    S-Right window=1
+    S-Up fired
+    S-Down fired
+    S-Left fired
+    S-Right fired
+    BTab fired
+    S-Home fired
+    S-End fired
+    S-PPage fired
+    S-NPage fired
+    S-Insert fired
+    S-Delete fired
+    S-F1 fired
+    S-F2 fired
+    S-F3 fired
+    S-F4 fired
+    S-F5 fired
+    S-F6 fired
+    S-F7 fired
+    S-F8 fired
+    S-F9 fired
+    S-F10 fired
+    S-F11 fired
+    S-F12 fired
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g KEYS_CONTRACT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    KEYS_CONTRACT=clean:shift
+tmux stdout:
+    KEYS_CONTRACT=clean:shift
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

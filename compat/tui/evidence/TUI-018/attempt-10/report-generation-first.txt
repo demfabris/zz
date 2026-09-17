@@ -1,0 +1,1 @@
+write-report first attempt: exit 1 because delivery-tracker.txt had not yet been generated. Generate the referenced validation artifacts, then retry.

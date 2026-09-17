@@ -1,0 +1,53 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m checking pinned plugin corpus
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-c11-alias-fix/target/debug/zz-alias5-corrected
+[1;36m==>[0m running smoke/control-alias-prepare
+smoke/control-alias-prepare: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/copy-mode-refresh
+smoke/copy-mode-refresh: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/display-menu-style-refresh
+smoke/display-menu-style-refresh: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/fixture-conf
+smoke/fixture-conf: 5 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/format-window-bigger
+smoke/format-window-bigger: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/kill-filters
+smoke/kill-filters: 17 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/pane-tmux-path
+smoke/pane-tmux-path: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/resurrect-init
+smoke/resurrect-init: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/split-window-wait
+smoke/split-window-wait: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running source-hook-cwd-sourced
+source-hook-cwd-sourced: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| smoke/control-alias-prepare | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-refresh | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-style-refresh | 3 | yes | 0 | yes | yes | yes |
+| smoke/fixture-conf | 5 | yes | 0 | yes | yes | yes |
+| smoke/format-window-bigger | 3 | yes | 0 | yes | yes | yes |
+| smoke/kill-filters | 17 | yes | 0 | yes | yes | yes |
+| smoke/pane-tmux-path | 3 | yes | 0 | yes | yes | yes |
+| smoke/resurrect-init | 3 | yes | 0 | yes | yes | yes |
+| smoke/split-window-wait | 2 | yes | 0 | yes | yes | yes |
+| source-hook-cwd-sourced | 3 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+[1;36m==>[0m partial run complete; full summary left unchanged
+
+exit_status=0

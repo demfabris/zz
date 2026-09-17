@@ -1,0 +1,116 @@
+{
+  "lane": "alias-fix",
+  "obligation": "TUI-018",
+  "status": "review",
+  "base": "38c50df4c4d51401752c49b72bb689b09e33427d",
+  "production_revision": "5e601c026b3385d3c45e6d9995353d4adfb43bb4",
+  "binary_sha256": "f2fc9d2cf19697cbd3b040cf7243865fbcb492065957c691e82400db032f2d7a",
+  "matrix": {
+    "cells": 91,
+    "asserted": 90,
+    "recorded": 0,
+    "decided": 1,
+    "new_assertions": 37,
+    "recorded_to_asserted": [
+      "matrix-direct-closed",
+      "matrix-alias-closed",
+      "matrix-file-closed"
+    ]
+  },
+  "streams": {
+    "runs": 3,
+    "asserted_per_run": 156,
+    "recorded_per_run": 0,
+    "decided_per_run": 5,
+    "exit_statuses": [
+      0,
+      0,
+      0
+    ]
+  },
+  "self_check": {
+    "sabotages_caught": 128,
+    "equivalences_passed": 2,
+    "exit_status": 0,
+    "earlier_failed_run_retained": true
+  },
+  "shared_clients": {
+    "asserted": 198,
+    "recorded": 32,
+    "owned_records": 0,
+    "unattributed": 0,
+    "exit_status": 0,
+    "details": "compat/tui/evidence/TUI-018/attempt-10/shared-records.json"
+  },
+  "attached_client": {
+    "result": "PASS",
+    "exit_status": 0
+  },
+  "corpus": {
+    "rows": 241,
+    "steps": 2954,
+    "counts": {
+      "zero-divergence": 230,
+      "registered-gap": 4,
+      "inherited": 7,
+      "unclassified": 0
+    },
+    "caused_failures": 0,
+    "all_inherited_compared_with_fresh_main": true,
+    "proof": "compat/tui/evidence/TUI-018/attempt-10/corpus-proof.json",
+    "segment_exit_statuses": [
+      143,
+      1,
+      1,
+      1,
+      1,
+      0,
+      0
+    ],
+    "controlled_rebalance": "compat/tui/evidence/TUI-018/attempt-10/corpus-rebalance.json"
+  },
+  "tests": {
+    "full_package_exit_status": 101,
+    "details": "compat/tui/evidence/TUI-018/attempt-10/tests-proof.json",
+    "clippy_exit_status": 0,
+    "fmt_exit_status": 0,
+    "compat_check_exit_status": 0,
+    "okf_exit_status": 0,
+    "wire_exit_status": 0
+  },
+  "wire": {
+    "version": 104,
+    "fifth_pass_changes": false
+  },
+  "honest_limits": [
+    "Broad package tests and delta corpus are not entirely green; exact failures, retries and main comparisons are retained.",
+    "The first corrected self-check failed its pending-split completion checkpoint under load; the complete retry passes.",
+    "The original first corpus shard was stopped after its current scenario completed; only unstarted rows were redistributed. Its exit 143 is not a passing shard status.",
+    "Linux pre-main behavior is measured in CLI and desktop binaries. macOS implementation is behind cfg but was not cross-built or run.",
+    "No independent approval or verified claim is made."
+  ],
+  "footprint": {
+    "base": "38c50df4c4d51401752c49b72bb689b09e33427d",
+    "complete_three_dot_file_list": "compat/tui/evidence/TUI-018/attempt-10/footprint.txt",
+    "files": 1387,
+    "sha256": "2b85f18fb9b182380737b2882028cdadfecbe9346d2913d94066a959b9c2931b",
+    "non_evidence_files": [
+      "compat/tmux-gaps.json",
+      "compat/tui-command-streams.sh",
+      "compat/tui/campaign.json",
+      "crates/zz-cli/src/control_mode.rs",
+      "crates/zz-cli/src/lib.rs",
+      "crates/zz-cli/tests/cli_binary.rs",
+      "crates/zz-daemon/src/client.rs",
+      "crates/zz-daemon/src/daemon.rs",
+      "crates/zz-daemon/src/lib.rs",
+      "crates/zz-mux/src/command.rs",
+      "crates/zz-protocol/src/message.rs",
+      "knowledge/designs/command-stream-channel.md",
+      "knowledge/protocol/wire-protocol.md",
+      "knowledge/tmux/gaps.md",
+      "knowledge/tmux/tmux-compat.md",
+      "knowledge/tmux/tui-parity.md"
+    ]
+  }
+}

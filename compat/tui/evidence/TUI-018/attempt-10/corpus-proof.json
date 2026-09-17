@@ -1,0 +1,2265 @@
+{
+  "production_revision": "5e601c02",
+  "binary_sha256": "f2fc9d2cf19697cbd3b040cf7243865fbcb492065957c691e82400db032f2d7a",
+  "selection": "compat/tui/evidence/TUI-018/attempt-10/delta-final-selection.txt",
+  "selected_rows": 241,
+  "completed_unique_rows": 241,
+  "steps": 2954,
+  "counts": {
+    "zero-divergence": 230,
+    "registered-gap": 4,
+    "inherited": 7,
+    "unclassified": 0
+  },
+  "shards": [
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/corrected-corpus-1.txt",
+      "exit_status": 143
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/corrected-corpus-2.txt",
+      "exit_status": 1
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/corrected-corpus-3.txt",
+      "exit_status": 1
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/corrected-corpus-4.txt",
+      "exit_status": 1
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/corrected-corpus-5.txt",
+      "exit_status": 1
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/corrected-corpus-6.txt",
+      "exit_status": 0
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/corrected-corpus-7.txt",
+      "exit_status": 0
+    }
+  ],
+  "rebalance": "compat/tui/evidence/TUI-018/attempt-10/corpus-rebalance.json",
+  "comparisons": [
+    {
+      "row": "lane2-store.txt",
+      "candidate": "compat/tui/evidence/TUI-018/attempt-10/candidate-comparisons/lane2-store.txt",
+      "main": "compat/tui/evidence/TUI-018/attempt-10/main-comparisons/lane2-store.txt",
+      "identical_except_source_header": true
+    },
+    {
+      "row": "show-options-hooks.txt",
+      "candidate": "compat/tui/evidence/TUI-018/attempt-10/candidate-comparisons/show-options-hooks.txt",
+      "main": "compat/tui/evidence/TUI-018/attempt-10/main-comparisons/show-options-hooks.txt",
+      "identical_except_source_header": true
+    },
+    {
+      "row": "smoke/cli-chain-parse-abort.txt",
+      "candidate": "compat/tui/evidence/TUI-018/attempt-10/candidate-comparisons/smoke/cli-chain-parse-abort.txt",
+      "main": "compat/tui/evidence/TUI-018/attempt-10/main-comparisons/smoke/cli-chain-parse-abort.txt",
+      "identical_except_source_header": true
+    },
+    {
+      "row": "smoke/default-client-command.txt",
+      "candidate": "compat/tui/evidence/TUI-018/attempt-10/candidate-comparisons/smoke/default-client-command.txt",
+      "main": "compat/tui/evidence/TUI-018/attempt-10/main-comparisons/smoke/default-client-command.txt",
+      "identical_except_source_header": true
+    },
+    {
+      "row": "smoke/plugin-runtime-resurrect-restore.txt",
+      "candidate": "compat/tui/evidence/TUI-018/attempt-10/candidate-comparisons/smoke/plugin-runtime-resurrect-restore.txt",
+      "main": "compat/tui/evidence/TUI-018/attempt-10/main-comparisons/smoke/plugin-runtime-resurrect-restore.txt",
+      "identical_except_source_header": true
+    },
+    {
+      "row": "smoke/source-replay-diagnostics.txt",
+      "candidate": "compat/tui/evidence/TUI-018/attempt-10/candidate-comparisons/smoke/source-replay-diagnostics.txt",
+      "main": "compat/tui/evidence/TUI-018/attempt-10/main-comparisons/smoke/source-replay-diagnostics.txt",
+      "identical_except_source_header": false,
+      "same_timeout_except_additional_empty_guard": true,
+      "retained_diff": "compat/tui/evidence/TUI-018/attempt-10/source-replay-main-comparison.diff"
+    },
+    {
+      "row": "smoke/status-background-jobs.txt",
+      "candidate": "compat/tui/evidence/TUI-018/attempt-10/candidate-comparisons/smoke/status-background-jobs.txt",
+      "main": "compat/tui/evidence/TUI-018/attempt-10/main-comparisons/smoke/status-background-jobs.txt",
+      "identical_except_source_header": false,
+      "initial_candidate_identical_to_main": true,
+      "retained_diff": "compat/tui/evidence/TUI-018/attempt-10/status-background-main-comparison.diff"
+    }
+  ],
+  "rows": [
+    {
+      "row": "alerts.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=62 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "a5a901cebc7cc00e1b9b9c8b57923870c7c8de0b1b90d30aee91320a8fea8907",
+      "scenario_sha256": "97165ad83c74c2c20d77ad6f7ffce500c067a289a07f3438915ee0e5f6c78565",
+      "classification": "zero-divergence",
+      "steps": 62
+    },
+    {
+      "row": "aliases-multi-body.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=8 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "ef725ba8b2fead4ddf2eba38a02021c78e8effa607d5784e2c72efe8c58cd452",
+      "scenario_sha256": "008972fa149ad5eb848056d718469fdbb25cbfffb4b6004f5721beb6542a48d1",
+      "classification": "zero-divergence",
+      "steps": 8
+    },
+    {
+      "row": "bare-targets.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=8 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "c1dae9ba6a1837a6ff7971d1909d0469977d8b4379084c3b1ae1a55475f055c0",
+      "scenario_sha256": "85257e8bf118e7e850274e7c75446afeac39e05b635618fa4b538070c1432196",
+      "classification": "zero-divergence",
+      "steps": 8
+    },
+    {
+      "row": "base-index.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=11 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "d11aa0c95afde158831acadca9956600a84558e805283cd3332d27e092a77b99",
+      "scenario_sha256": "9dd2b96bb4ee9cdbcd253593114c0520da3e1f484a4a3060aa2ecae0bad0e33d",
+      "classification": "zero-divergence",
+      "steps": 11
+    },
+    {
+      "row": "behavior-options.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=12 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "ae6fb13ff61bdc088d09c74f61b3c2a7c941f6c3487c12c57283253468177d1a",
+      "scenario_sha256": "d6a207be557575849276deaa73b1167bfb95814512510150b547a210159dc88d",
+      "classification": "zero-divergence",
+      "steps": 12
+    },
+    {
+      "row": "break-pane.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=30 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "c6f43819a17ba19177a514b6f59470ded5f80bcb1052aa3dfb12421f525ab9fa",
+      "scenario_sha256": "870018ccbace7d82389f848aecce9ce23ef67edb6f1c9d23143535e4346a9412",
+      "classification": "zero-divergence",
+      "steps": 30
+    },
+    {
+      "row": "buffer-client-file-load.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "816167dd3f9bd023c441b1c0e2de89557991db32fd2dbff97a5415b1275ef00e",
+      "scenario_sha256": "beeb111dd5e8f454ace84f5b6b03592b520430f1967b0d9880d40b577d48b729",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "buffer-client-file-save.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "97890d214d5b467600607762fd2d0fd9fe6f62147effe96c7c8a1bca30041778",
+      "scenario_sha256": "ceb2adebab17418db961fd8936715486465cd2c2ab10027c1b8129e48d85a78b",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "buffer-missing-target-error.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "fcde2548020e458587a2f7d9c88c57dc0f74a2f1893464bb75e94be97446e765",
+      "scenario_sha256": "d2bad946f3d700fe861f52c0177f8e735098092b19c01c8427adc659aa1c6714",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "buffer-path-format.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=36 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "5ceed8240cd6fd3e586eb0479ef120466e1f1b2fbc59d0de9e67e7f6c40b8d2b",
+      "scenario_sha256": "dab89b34fc8a487f9cb905d2dca3f37bb783a54c2f115dd61b002e051d09a990",
+      "classification": "zero-divergence",
+      "steps": 36
+    },
+    {
+      "row": "capture-pane.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=34 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "6982ee435ffb55f496a8d98b6a303737ba37a44b5667a0621b782558aa236049",
+      "scenario_sha256": "f98b97ce9f7b4c428766c187ae24dd0ebdfb6f33e3af859f1afeaff95f7da3b4",
+      "classification": "zero-divergence",
+      "steps": 34
+    },
+    {
+      "row": "census-formats.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=40 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "262de0549fb152ea554469d38352c79b0dd99b36b11958a92a69ccc46be564d4",
+      "scenario_sha256": "4e114ca5bfebcdab911e2058b84432b2df6027f71412fba4891178f16d9cc5b5",
+      "classification": "zero-divergence",
+      "steps": 40
+    },
+    {
+      "row": "census-hooks.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=152 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "62610d17a967a5805e9589e9a103a21f2e9473a46f475ee43e207cfdc32ea2a1",
+      "scenario_sha256": "9c79c3d32b39041efac15270e9420898345816e2896b42e92fbf962c4709f7f3",
+      "classification": "zero-divergence",
+      "steps": 152
+    },
+    {
+      "row": "census-options.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=55 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "74dba4f5f802740bb1cbcfccdcf7c4d2e8c04467e14dff3bfe4851a6b92522ac",
+      "scenario_sha256": "9214ec8237451cff157c93d9507615f6c89610e2d2ade400d2bcb6486f3a5e68",
+      "classification": "zero-divergence",
+      "steps": 55
+    },
+    {
+      "row": "collapse.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=4 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "b45b338da42ad9e16611684ce50e973419ea725b46bfa5203150154d09e22708",
+      "scenario_sha256": "3ffad9df1857d7d78f0d11ccce5bfd4a490c778fb4e68bdb627b81aba0baec6a",
+      "classification": "zero-divergence",
+      "steps": 4
+    },
+    {
+      "row": "command-alias.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=16 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "206655cb41c6b517e4a0eaa2cc5a2f2be214de309d34718fc4158353d4b4d591",
+      "scenario_sha256": "14ea272925e08e6abf1a4a16cabe91c99188e0b0647114730c0e38520308a535",
+      "classification": "zero-divergence",
+      "steps": 16
+    },
+    {
+      "row": "command-item-format.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=125 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "fc96b3bcdd543ff48f74c0c4da07d3055b75551dbeff86d709633c6031c30adb",
+      "scenario_sha256": "cece65bbc41e9f8f99e5b2dfe46ed8640f11163ad2eb3536d9d27446e2497e27",
+      "classification": "zero-divergence",
+      "steps": 125
+    },
+    {
+      "row": "copy-mode-cursor-view.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=13 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "7b32c6e71c70f7b7743f1a5a92efa9249d7f48afec1dde05dda5eef78313cd9b",
+      "scenario_sha256": "49ec19457e1fef0a72d31eb5a17ef860f95d4c5be7baf5f94e066d4fd93fe4cb",
+      "classification": "zero-divergence",
+      "steps": 13
+    },
+    {
+      "row": "copy-mode-goto-line.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=18 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "fe39488aa1fc4b0600b226eba045aee0edca140a6e36a539c4ba31bcf8635af8",
+      "scenario_sha256": "d0dedc5b402be80a720e84c10efccf7b8759809713213158afde971e6698e6a2",
+      "classification": "zero-divergence",
+      "steps": 18
+    },
+    {
+      "row": "copy-mode-previous-bracket.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=23 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "daff296b91c6d2794fbd6c87edb1430887b18cbb5540715edbf118c7765155eb",
+      "scenario_sha256": "48f87708a2314ef310ef01afcfb5ca247c079166830419904e662739d0a9b343",
+      "classification": "zero-divergence",
+      "steps": 23
+    },
+    {
+      "row": "copy-mode-recentre.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=8 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "16db47d47a10da038bfdd80978ffec97c76cc1e4b21949d0b2ab255b59df04e0",
+      "scenario_sha256": "a833176bd0843342d8a7f549a6f2fb7dd2dfb5bbc3bbb736aadd3cd166175c75",
+      "classification": "zero-divergence",
+      "steps": 8
+    },
+    {
+      "row": "copy-mode-scroll-exit.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=11 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "2b63e4a449960a9106811678111a5aa1e2bf72f42d345a854fef124e67d02c02",
+      "scenario_sha256": "42557755d48b24afea2981171132dd58d301f83f0ab8c872b42fb5c06e85ea2d",
+      "classification": "zero-divergence",
+      "steps": 11
+    },
+    {
+      "row": "copy-mode-selection-lifecycle.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=19 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "9774401df097dc9184f092227ed9b2051d775b6e6f92460a1b6585bd89041331",
+      "scenario_sha256": "8d9a7f72b6e4e4e410e94228fbcb6dbe760e921d1456d39a1ed24fb0cc47df6b",
+      "classification": "zero-divergence",
+      "steps": 19
+    },
+    {
+      "row": "copy-mode-stock-action-keys.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=17 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "ebb52b3caffedc7712f98ef088053a2566ad0d83928d090f37a66ec5aa1aebe1",
+      "scenario_sha256": "54c8598725f1d99448271ac95bddbdf118a7f1a752c087157612491076f764c8",
+      "classification": "zero-divergence",
+      "steps": 17
+    },
+    {
+      "row": "daemon-command-item-format.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=24 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "87195db49b816ddf0fdf16777d196d41736e9796a487c25cf86e9ddd7da9ecf1",
+      "scenario_sha256": "77debbcdfe7aabeadc6c4763bbc70ba3a30196418b190b9c6ee48553398a5e36",
+      "classification": "zero-divergence",
+      "steps": 24
+    },
+    {
+      "row": "display-message.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=27 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "4f0363fe3cf2b3f90e2613a70cec8ce5783d3078bf636ba535003d0c9632e8a2",
+      "scenario_sha256": "521ff83d28e9b120983a38ad1b5b8f170fff71a0e18730c7f334214af2a2e7dc",
+      "classification": "zero-divergence",
+      "steps": 27
+    },
+    {
+      "row": "display-panes-format.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=10 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "360ea3924d2eb602c8a4b86446baeb9d725b189f43b6b2d010480cf7ccaa92e4",
+      "scenario_sha256": "0f07508d3dc6a9b9e96bb74c0d604eaaaa9ab4f5312bf4a9915f1be732147016",
+      "classification": "zero-divergence",
+      "steps": 10
+    },
+    {
+      "row": "exec-family.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=30 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "c31815c1eae7c449842970d09e1ffdf78e51ef95508803c19b762e46b1be2cea",
+      "scenario_sha256": "c3ed2dbad8c978d6660360d893123e41f6902b2e1e5f8ef9f26829720253b080",
+      "classification": "zero-divergence",
+      "steps": 30
+    },
+    {
+      "row": "format-environment-fallback.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=27 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "f70b7ee4a3ae622b4549d932f448dd092173f0d94bfa7333c564db63ade4f5d8",
+      "scenario_sha256": "21192790099cb8117e9fca95dc0e1ffca50e71e869537eccd865ae76d0dd5462",
+      "classification": "zero-divergence",
+      "steps": 27
+    },
+    {
+      "row": "format-expansion-output-clamp.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=7 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "790fbe82b2fe925b6666e03051e34791041460e6764b85d7688f7d8870461850",
+      "scenario_sha256": "27617ffcf7f499e0c9b78b6f46622b16dc02a4f592e1c6dd41d8cc3ef7ecfa88",
+      "classification": "zero-divergence",
+      "steps": 7
+    },
+    {
+      "row": "format-flags.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=8 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "b47bf34f50b62e6df75097e0bb344bc10c975bbfa8221dfee951e4d46789e3e0",
+      "scenario_sha256": "49ee76454e5041efde1efc2cd020239abf0a76bddd26c9cfade6976699aa2326",
+      "classification": "zero-divergence",
+      "steps": 8
+    },
+    {
+      "row": "format-modifier-option-loop.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=17 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "eed07d053549f391e917d494853b96a212cfeda47893db1206f24fde0a577573",
+      "scenario_sha256": "9cdcae4fe875b4ed4dc67e3d8bcded19004902861f8e60584d57f4fd9ec736ce",
+      "classification": "zero-divergence",
+      "steps": 17
+    },
+    {
+      "row": "format-modifier-width.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=9 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "e8d1fe92dcd2c6b9e7e5feccdc5b98bd1899a9c16fa10bd3f93854299b4b0ad0",
+      "scenario_sha256": "e1490ccae1db7472d1db90932784a887b62ef736798132645e99d6cc8244c144",
+      "classification": "zero-divergence",
+      "steps": 9
+    },
+    {
+      "row": "format-option-loop-context.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=14 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "dad8ffe9a5d171d09208c5a27ad5edf5c305e6f25af224abd8a06dcb01b5fe29",
+      "scenario_sha256": "e99571a338f662422b083cbfd28b0a3a00c1b2f3a7973c0668635517ea1b4bd8",
+      "classification": "zero-divergence",
+      "steps": 14
+    },
+    {
+      "row": "format-window-cell-metrics.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=8 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "5564c0784313bc8ef3ea5d144ee54e9013ce22996ccb6d4b63f5ff0135de457e",
+      "scenario_sha256": "b302a533f38ee653052d0f15b1cfe1b175a21fa74d08b0d9783ecffe9556c872",
+      "classification": "zero-divergence",
+      "steps": 8
+    },
+    {
+      "row": "format-window-neighbour-user-options.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=26 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "76b7a6a6e57806ba1189f01cdee1a24ad127f9469be3961b961eedca3204af33",
+      "scenario_sha256": "208a33107070bc5cb120d1954dc980004011bcc35594c206e2c2393b46ec9c9b",
+      "classification": "zero-divergence",
+      "steps": 26
+    },
+    {
+      "row": "formats-values.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=45 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "7684bfca3e027c2547bcd62274bde6dcc96f7a5212b3130ef4a11f399c36f6bb",
+      "scenario_sha256": "8dbe93480ffb7f1a725aa2255e9dfdc4f694768502414149db1b01b6a20e9cde",
+      "classification": "zero-divergence",
+      "steps": 45
+    },
+    {
+      "row": "formats.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=16 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "f118f67b568ee2b746e85648c94c0baaf9896a3c1ceec5cbbc506e76ac6b1efb",
+      "scenario_sha256": "2faf704834f074bad46bf270bde874c877b70ae4878273defc8272fdb456a226",
+      "classification": "zero-divergence",
+      "steps": 16
+    },
+    {
+      "row": "honest-knobs-c1-errors.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=17 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "e5318b77f937d62a0afb726f1c56cd1c057a9b99fa3d6e1459651297fe87ba81",
+      "scenario_sha256": "bb4e03c6df6ad981e5393fdde5fb5c3129241b709fa7f7a778fea9de61255ca9",
+      "classification": "zero-divergence",
+      "steps": 17
+    },
+    {
+      "row": "honest-knobs-c1-layout.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=9 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "05e6f79895953232a72bc6cd395b1aaa4ea8878d3f12e438d65912247df5f686",
+      "scenario_sha256": "fa946320d2cd027f2a87d5cbe7a6d1d842c1c0f3edeccf5ae3176e7c6521fa28",
+      "classification": "zero-divergence",
+      "steps": 9
+    },
+    {
+      "row": "honest-knobs-c1-readback.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=21 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "3030ef4ac9e3c836f8399d2b20666789f91673d926dbe64fdaa6fbff271da454",
+      "scenario_sha256": "8c4d71ba0b8311e95b31ae86bd183347f83eed6c736f354ed8cd8c71544e9c37",
+      "classification": "zero-divergence",
+      "steps": 21
+    },
+    {
+      "row": "hooks-pane-clipboard.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "1b4eb9194caf180cc811321786f8dcedad1e9a8c7d524f51159ab794321a1549",
+      "scenario_sha256": "d4fd389b2c0d659de22d4a7ee7d1730b0b12f09ecc67c94fbd04d55fb32cc08a",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "if-shell-background-order.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "983590769d3c01ca8df2b3c3e18bde62fc5f61d2285483a3632b9926289b6b00",
+      "scenario_sha256": "b3e4a22711d1e1b3d63767f357e299412e7397c20031da5dfa4e1f4a6bb5accc",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "jobs-environment.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "c3b69106fe8e109cc416a4e4fe7120aef64dba82b3f108b4dd482316f3a126cf",
+      "scenario_sha256": "d105fa71b3e968ed0b9b19f5332b7687698bff4a57660a9cb5883ef072f00385",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "jobs-run-shell-order.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "88c89767605b367b36d98cea4f334e714df3d44054b74c1fc95a1b9ea19e29a3",
+      "scenario_sha256": "d2d69d4b903d1742b20584bb5d135d5bb05deb620b2108b755ff433c2ad90b41",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "join-pane-size.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=11 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "5766bb24b76a7e4644855cc5cf39f8bec4ec76ae2f120a5e5da95d65631f1d75",
+      "scenario_sha256": "11e6571b9a3b785fd31c1409594052d3b8b94b7ee268ec15ae699a27da811f6a",
+      "classification": "zero-divergence",
+      "steps": 11
+    },
+    {
+      "row": "known/known-main-preset-two-panes.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=1 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "6598374b6080b167636d9c053d49d7164bc73c3df43e1df18b4ca18a947d0d22",
+      "scenario_sha256": "d539331251977ac6ecd6e1dc5de6b708cc9e739d7c3585f16905965769ea1697",
+      "classification": "registered-gap",
+      "steps": 2
+    },
+    {
+      "row": "known/known-pane-scrollbar-columns.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=4 topo_divergences=0 geo_divergences=2 fmt_divergences=0 out_divergences=1 warn_divergences=0",
+      "sha256": "02cfc3fcaed57c2b4a7b1c2bb989fe69b4543dfd6a09b1c5cbf80c66c28b3e45",
+      "scenario_sha256": "a8e51865f40a00f0ad4c7a4f33fb8a80c8f09ddb48969ecf57d2888c628aca01",
+      "classification": "registered-gap",
+      "steps": 4
+    },
+    {
+      "row": "known/known-spread-mixed.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=6 topo_divergences=0 geo_divergences=1 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "2350ac08f7b7f85b6b4393fdde5692b0ca1205f3c7e860996dc848f5cac71a0a",
+      "scenario_sha256": "b286c865ab6dd0ab75bb2cbec6b18dfecec1f24553b782a48d57cd7701d03e1a",
+      "classification": "registered-gap",
+      "steps": 6
+    },
+    {
+      "row": "known/known-terminal-runtime.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=28 topo_divergences=0 geo_divergences=0 fmt_divergences=6 out_divergences=0 warn_divergences=0",
+      "sha256": "6d4fe189d44c4a0a33827b3c15968b136af4413153b0d9581a623d8581fff400",
+      "scenario_sha256": "49ae369872b04009c7e288d84fa3bb98e0758e9d5f85411ca28e184378a4c440",
+      "classification": "registered-gap",
+      "steps": 28
+    },
+    {
+      "row": "lane2-store.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=193 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=2 warn_divergences=0",
+      "sha256": "b4c8852af9e2ac2e8cfb2ee55c911c74aeac9e8468a55fe968419004936c4a02",
+      "scenario_sha256": "74d8c15b40a468885b46acc06c0e71fe333534fda4bf7a78d9c1a438d25ad82a",
+      "classification": "inherited",
+      "steps": 193
+    },
+    {
+      "row": "last-pane-input-off.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=15 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "2b5245ed336b8a1a4819997ffe46b9c73cea54c2b852c988da526e4b80ce6d13",
+      "scenario_sha256": "86b7fc66afeaa29853702920051370b5e89f1ec639d3d163ecd21164698ac6c2",
+      "classification": "zero-divergence",
+      "steps": 15
+    },
+    {
+      "row": "layout-strings.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=6 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "18c59b47d9e7c0368f1acce1bc9f8d9aec6761e3fdc738cbdfd1a25b880af91a",
+      "scenario_sha256": "4257373dc015cf2e14c6b051c7f0df1bbab7dd94c05e2a56623c0e8775528bdd",
+      "classification": "zero-divergence",
+      "steps": 6
+    },
+    {
+      "row": "list-keys-padding.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=46 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "32e069d167f7cf92d5991a69804385606e23578bbe05df30922f69f917f04444",
+      "scenario_sha256": "d81912349781cda06b6d4d47f7ffa9e96dc4d30cd628c77c9c92dd5cfe1b596b",
+      "classification": "zero-divergence",
+      "steps": 46
+    },
+    {
+      "row": "list-sort-filter.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=12 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "7502a57dc46117f771a4bf574345b70b9fcee9a6d1ccc7d6b636646c43ab37db",
+      "scenario_sha256": "4c45e3ac011a6b86dd0d2cda340c765ba76664482c7c4810ab7752311290f5db",
+      "classification": "zero-divergence",
+      "steps": 12
+    },
+    {
+      "row": "manual-window-size-transition.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=24 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "f95033db7f74311bb3e80ea6030667ec6585798e81466d9fd728826fe8427797",
+      "scenario_sha256": "cc5efa3156628e60beb4f0d764caff3f50026ba1aa97f5562b99ca116e5a69f1",
+      "classification": "zero-divergence",
+      "steps": 24
+    },
+    {
+      "row": "micro-flags.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=17 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "477c41d87cc008a8ee565421784cbb13f6b80704a0de0437d1c64f4767138800",
+      "scenario_sha256": "c8d306ade125ad931ca63ffcdaf9415a8a81671b0602af5066de372c4cd13435",
+      "classification": "zero-divergence",
+      "steps": 17
+    },
+    {
+      "row": "mru-activity.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=11 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "d856d28c304654f308086c03c16b2892902d712fe66fdaf19db63ed07531c527",
+      "scenario_sha256": "f8f6a01f6fceaed86e9d63616a71e31142733e0a8557ac68175c4858f4ef5725",
+      "classification": "zero-divergence",
+      "steps": 11
+    },
+    {
+      "row": "native-prefix-isolation.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=29 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "1955fe6c5bec68a1761b26dd435af6f52841d91a369e61e9b4afa7ceab2ec873",
+      "scenario_sha256": "4bc75d95bab0765bfcac1d9d5048a7a0f647e3d7e02c1f3c0094381da7907bb9",
+      "classification": "zero-divergence",
+      "steps": 29
+    },
+    {
+      "row": "nested-splits.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=4 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "c5370b04206b5a12d5cda0aed38886ebc89160fcd900f79cbdf6688580caad58",
+      "scenario_sha256": "8ceb5d1c196faa3afa9833052dbc2365fbfb3bf1fab9c6fc417f2a6a8f857d08",
+      "classification": "zero-divergence",
+      "steps": 4
+    },
+    {
+      "row": "new-session-cwd.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=10 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "d7eb2e635241d96c0b09fa6ef9f6b0353ad19e491c56b60b50c8abf9084e367c",
+      "scenario_sha256": "f16f0ec924124647da74f636c1e0a6a37a893eac11c201b4c0a9e7dddd2d8f67",
+      "classification": "zero-divergence",
+      "steps": 10
+    },
+    {
+      "row": "new-session-environment.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=18 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "830a6b2d3833479b6c424472cb25f3d990b5432ae4e8f90f9baf2e1b7b34c7d3",
+      "scenario_sha256": "08dd7d8085e797b19bf56cb41e75f91e45601f8233e43244ff09a80d598bd074",
+      "classification": "zero-divergence",
+      "steps": 18
+    },
+    {
+      "row": "option-name-formats.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=60 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "bc889c7334e9a752e4683806564f15706d989d2cfc0d282b3f9f427335c7a16f",
+      "scenario_sha256": "4a9e6e21566821908a81f4b4b53c5ebc62dc5d5132add0c92c3c4b589290a3ee",
+      "classification": "zero-divergence",
+      "steps": 60
+    },
+    {
+      "row": "options-readback.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=15 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "e0178efbb6e04631a99c5c5be210d0cbf24e93edc61ad5d27d4a83c1ea40124f",
+      "scenario_sha256": "1fe8c2227bb4191b094c4728e68d30b5fe41b8a658d94f4c8cfb4de5744fb94d",
+      "classification": "zero-divergence",
+      "steps": 15
+    },
+    {
+      "row": "pane-border-span-owner.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=10 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "a7bfb3a1087339e25a8183e7cc8b1bbb88789c14f4538b63e04855225eb9f8ca",
+      "scenario_sha256": "d8ab254455a40b3d0e05baee2679bea2c535314716aec98638b9b02aef3004b5",
+      "classification": "zero-divergence",
+      "steps": 10
+    },
+    {
+      "row": "pane-dead-time.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=6 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "a5946052627f99062d19b928dd0f03b3098ff4b9b6439e36792721897c166735",
+      "scenario_sha256": "beca5a2cf1b5af40e5eaefd2643e6c82adee4c20f57eb38f5efce36f2515a0d0",
+      "classification": "zero-divergence",
+      "steps": 6
+    },
+    {
+      "row": "pane-exact-target-prefix.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=31 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "0a94d4c834310951f11deb0607087768a8a455c381ad3f9643791a5f9c371a50",
+      "scenario_sha256": "798ccff7a5b2793bdec6fbb1cb60e91dd8c4d9e9276c38293ffe22260cbeb1f1",
+      "classification": "zero-divergence",
+      "steps": 31
+    },
+    {
+      "row": "pane-selection-input-style.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=40 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "f044861d92f02342881749e2aa1822810fb724533fe95c3219bf4d836bcb5727",
+      "scenario_sha256": "7557edaf0f5d47343ab2fe44a786f21f7104b8861923eb5e0be0ab94515100a7",
+      "classification": "zero-divergence",
+      "steps": 40
+    },
+    {
+      "row": "pane-selection-marked.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=73 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "7b3a8d1c822d5f76730750a00dcdd6b571f7cfcb6b914a33b080fdefb5ffb646",
+      "scenario_sha256": "ed2a435e91fb8025ee89d94c299c35daad7cd7d18f65d636efbdcaee90c9d2de",
+      "classification": "zero-divergence",
+      "steps": 73
+    },
+    {
+      "row": "pane-spawn-options.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=25 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "d48a0c7d21b074df4138d3fb3d7cbd3fea2c1984df8a082c214e622d1435f806",
+      "scenario_sha256": "ca7ad8d9c55d426422ef735ed799b6b08f78b6c97f26f65bb54ea089edf7fed2",
+      "classification": "zero-divergence",
+      "steps": 25
+    },
+    {
+      "row": "pane-spawn-retain.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=27 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "12164826bb7a0ffb3c3eb369b64b6a99fd09473569f8460c72ccddbfed56cc21",
+      "scenario_sha256": "c7b10c6948d69df20daf1fa0edde0c904bb68971e48ccbe0e5dca4ae5433a8a7",
+      "classification": "zero-divergence",
+      "steps": 27
+    },
+    {
+      "row": "pane-spawn-style-title-v2.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=18 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "1eb5b381a927125b84a5325a5175b77b9f7f4a386fe6d5d506ca45e4268dd0d5",
+      "scenario_sha256": "815b243d273c7a5cb564e1a27573414845004da682fb438c75ecba01778e9a9e",
+      "classification": "zero-divergence",
+      "steps": 18
+    },
+    {
+      "row": "pane-target-grammar.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=70 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "54c877c69b951b55eedfe065888ff21502c755a310e64a285df3a7e9f396a82b",
+      "scenario_sha256": "22aa8d5e674adaa0a117fa53ad24dc41cd7eb5d73fe12def6dfe898d2dcfe14a",
+      "classification": "zero-divergence",
+      "steps": 70
+    },
+    {
+      "row": "panes.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=9 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "38411dea820eff3e17b4cc94fb425ba928fda3710e76b0d028dc1afbef5908a4",
+      "scenario_sha256": "f8ee4e299545317380849fe91e58a50bb52c08c186e49c5e4c2fc50b958ded37",
+      "classification": "zero-divergence",
+      "steps": 9
+    },
+    {
+      "row": "prefix2.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=15 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "2a0e2be17fe79e6290d05de258bf2417475df9c5c76525ca53a0688a3f851c09",
+      "scenario_sha256": "570ca0be24afd9300d7b64131169beeaad4b3ad7c179bf8cf0373280eb6a786d",
+      "classification": "zero-divergence",
+      "steps": 15
+    },
+    {
+      "row": "presets-mirrored.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=6 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "38289254937c325823858ab222d0d4d7d508e65fa8d83ed631fe25152a9407db",
+      "scenario_sha256": "8846bd79e68411fadc48c86907cc801ed2313e638b55ea5c94f2587a3311271a",
+      "classification": "zero-divergence",
+      "steps": 6
+    },
+    {
+      "row": "presets.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=7 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "21e01ac09ccf3a29681a09bc76c62b9df4244f89a42a4bde5e59aa324b695809",
+      "scenario_sha256": "bacd859c74a705f2e0b4d975bac8213b1fd785ef7cbae7946edc665028f3a291",
+      "classification": "zero-divergence",
+      "steps": 7
+    },
+    {
+      "row": "renderer-styles.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=12 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "bc4193d2dca1d30c5d3d3d8251a7d47c6aaf1f42ef51d84f7b723b48fc42b5af",
+      "scenario_sha256": "cf55854dde5c9d545ead666b31eb78ae8e29ebf45d6a468626fe6e5d281e8b51",
+      "classification": "zero-divergence",
+      "steps": 12
+    },
+    {
+      "row": "resize-directions.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=16 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "b6bcb38154691928af4f6264f1242a6d0ddc74d9c63d5df921ea2c54f79f7fe1",
+      "scenario_sha256": "9f763833f3fa4013e797fcba8bd29a5a8e277af70264277360cf934a83ac53d7",
+      "classification": "zero-divergence",
+      "steps": 16
+    },
+    {
+      "row": "resize-window.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=16 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "2b9edca12c37f6102c2a1649dcd22ab6e7116a40eef1fbbfafd64b22aaaa0b2b",
+      "scenario_sha256": "8d8aee70d27de81c3a8799ba1b3d3dfa01e18724ee102949193cee7cd9ba1ea8",
+      "classification": "zero-divergence",
+      "steps": 16
+    },
+    {
+      "row": "resize.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=6 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "fcffc8f7f6a6d376a05dbac1539a77d00be3c57ecbb24d65697775a5b1727241",
+      "scenario_sha256": "4c1a9ca1974f8eb89c60d318fcc4379843ef498646319dea7e6a8d090aead406",
+      "classification": "zero-divergence",
+      "steps": 6
+    },
+    {
+      "row": "send-keys-repeat.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=16 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "d520473b75a25a787440d4420801c5c9320f4c07513def9e8030566ff911a402",
+      "scenario_sha256": "65e467949298a6596f144c506a6727fa2dd4bfd90a94d49106338fd9ad24c59f",
+      "classification": "zero-divergence",
+      "steps": 16
+    },
+    {
+      "row": "send-keys-reset.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=16 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "e5033c6271d47a81e45e4350eef6dde0a3b431bdacdd18edaad1920558924847",
+      "scenario_sha256": "8e8931af106cc5551998924aee0920cb3b8867c3d5ad2387ac099c73b7779a95",
+      "classification": "zero-divergence",
+      "steps": 16
+    },
+    {
+      "row": "show-options-hooks.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=34 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=7 warn_divergences=0",
+      "sha256": "5405f53e635cd92ad229a1d96aa7ed3b137d0bac0e4a9442af2fcebc6cceae2e",
+      "scenario_sha256": "df6817b2d8bf02fced8592e96be9054ab490978e996b513958161f1ee76424f9",
+      "classification": "inherited",
+      "steps": 34
+    },
+    {
+      "row": "smoke/alias-group-forgery.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=7 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "63c388d5cf6b83c110a66367a435234ffeea31a81ce3f3251544c4e5a552c253",
+      "scenario_sha256": "891bd13b8a7069a3a0bddc47210730fc7f1d758711f9da208891eed0de49d933",
+      "classification": "zero-divergence",
+      "steps": 7
+    },
+    {
+      "row": "smoke/args-parse-bind-key.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "00899e6f7410def7af994acab1e0401af92c605edb647f60c5cccc6137c95ff7",
+      "scenario_sha256": "3873610728100166058f31a35885f0a0062e64771fa71025a6b9a1e397d54061",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/args-parse-choosers.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "cdf48af64df7c03420579754ed6e4d3201d0f80c80b384aea25b3e5ac2d64602",
+      "scenario_sha256": "bb6755683df3f81db634bbeb4db2339a7285d36bf26187b50aff60e9265f7a16",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/args-parse-command-prompt.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "b5a381c1035ced1a5b90722692dbf77d102e52e59e62064a74881d25f634a1d4",
+      "scenario_sha256": "3d3c09b21bbf13e892408b8035e73c025a4ca496cbc25bc42b1ef84d4df795d4",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/args-parse-confirm-before.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "3fef4d1957374dc630f5043001b0c1aad6b5142ea23ffffa11a71cb557af271e",
+      "scenario_sha256": "34f55e3b4b755849b145ad995c6bd5ff98b2b3473f79407edad6d8482e5bada3",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/args-parse-display-menu.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "f09a8e41ffe837fbff18dee756fae4046ada5a1ee815b75949983d9d765b6005",
+      "scenario_sha256": "50349c325f4b484145e1f2142aa37623ab8da491af12ab4997c76bb7239bd285",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/args-parse-display-panes.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "7146258bd774399585fc497cee298646f576c20c478bcfc61dccfc7a215f6a64",
+      "scenario_sha256": "bf0b1366e3212f32a1403862c5deecdc5bf4d8198e9eac9e6de712a68941115b",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/args-parse-if-shell.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "f5e81b4fee653f072b9a1ba8ac77f0ed3eed5544542fa49c24064ad3bb78aa33",
+      "scenario_sha256": "b8d7a944cf61ad769ec7ac997c08dea2ed8d0d9e4774df115a143d1d8b0df033",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/args-parse-run-shell.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "6b25ea6e256d5d9f261ae5f071480f4c72e803b1b5f471594c9456b7da7b26fc",
+      "scenario_sha256": "d3c3b5f26393305066dc5eea74639a8cb48d7d94a5cd0760e987474457314772",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/args-parse-set-hook.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "830defb40e61e5484f8126d882a37727101c52981b7ce3352f8e968c71f4597f",
+      "scenario_sha256": "99a3b135550ed7529f215b8f85e15495e40ab0961bec09074cc4554221fda9ef",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/args-parse-set-option.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "eb87925fdb0d22de60da5b030d4c1dcee1ac2eab5b321665b59db4d511603a18",
+      "scenario_sha256": "e1e5d4796c73f762bcdefbb14567439cf82b6e01d8898e4a189605e19283c816",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/buffer-clipboard-write.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "704b4cbc9940b5879865073ba5226006715d6457542488e3cea7be16550c86b7",
+      "scenario_sha256": "073d0a41b0618f688a06a9702bda15f9f79cd255407c3953cdfcc0e0ac1e34e7",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/buffer-standard-streams.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "cff8d8aa106c54a812fd90a1c7ac6a607204fcadd51bbec9ea616e492a60bfc5",
+      "scenario_sha256": "71ac2446ff14a50267db5a6cafa6d2ce5e5428fa90eb19c41c57b6ba8edc903d",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/cheap-flags.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=22 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "d222b03cfaad266aeff3f0e3db6117902d45a7b36012431a6cb394f56bc3da69",
+      "scenario_sha256": "e888e704d764557a7389c395b8663ea1d86f3810a4b112128fba2d24818eb78e",
+      "classification": "zero-divergence",
+      "steps": 22
+    },
+    {
+      "row": "smoke/chooser-buffer-confirm-flag.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "6d003f5688894331fd379d1367abecfbe7c5a1cdac798d277a14d6066de73e04",
+      "scenario_sha256": "f7c74afba1b55885ff85596bb283565f718a1c203de51d203df5e260fc063df7",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/chooser-buffer-vocabulary.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "938bf8d06601d3c2ab3915f8152af1b6d40cc42070493f1ceb30159365552258",
+      "scenario_sha256": "1228a2f3a49161d0d09243371c13d534fbb61d7d5980f66c9a90e18de353ac43",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/chooser-kill-keys.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "6b3de01f41b868246ba852f147cacb0db3bb9b1de60bd6a735a105c80971f020",
+      "scenario_sha256": "e41957d55779c889288951cd08a1d14d896d4b7c6da0a8ada5f3839607ba7a66",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/chooser-kill-on-exit.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "5eca51eec2b96fdf00f70afc14084fde5bf6e2a203e0ea89124e05d9a2e21d6f",
+      "scenario_sha256": "23fb9974e4bd77dff33a710a38a10200523593782f28823eea747be066ef6c7e",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/chooser-row-flags.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "e7ec798ef0abca6793cd2e92f3872c7ddcaa19be88fa9c26e6f8825bec61ae4f",
+      "scenario_sha256": "6fe5e5cb4430c3717bf249a60ebdf99e24fd62195a70ee930c80d97ccf9ae06e",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/chooser-tree-vocabulary.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "002d555c61077f386b3b7851591abbabfd852843dcc1bef3a80940db86760aeb",
+      "scenario_sha256": "0403ee46e405a4bff33bc0cc3ad94a3f24e4c04cbac398c87e01cd8f1643bed0",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/clear-history-hyperlinks.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "b5841238363cca14419d8d2280f89986ea856cee48a9b4725a52192a1ab323ed",
+      "scenario_sha256": "2743c6195e81f86af46df303296bd3641403f6810345c5a416cdd38084f08096",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/cli-chain-parse-abort.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=0",
+      "sha256": "eef5d0e5cc3cd25f0e5af087f77302a77741dcd401eb2e952d586c8b4a33fb88",
+      "scenario_sha256": "b2dbee7f0e6665e16386f5b561281df40012ebf12cd15d6fbd02902f86b294f5",
+      "classification": "inherited",
+      "steps": 3
+    },
+    {
+      "row": "smoke/cli-output-bytes.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "fcb4355593f729451fd0b80327e6267d2e7e9d753bdac7e361d9e411d6bed15d",
+      "scenario_sha256": "afa801d5175b868f17f354f3a7f42523ec68a2bd3def7f7374761f8fe8e6b2ab",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/client-exit-actions.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "db24695f027bc8191fbbb9f816d9173264c9db2ce972e5c32ead035e5e95371b",
+      "scenario_sha256": "3a70337dbf55052daf3936f5757c3a4fc2bc8c5328db76cab5cc4f88e6f68ddc",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/client-non-utf8-cwd.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=4 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "a157e13a1c7f8f55d2f303e23c563a43e47cb95816ba77dfdd7cb4e57528c3e9",
+      "scenario_sha256": "f4fe6ac359c7e81cb98829d115508c5a30cbde4a036d2529792409cd38cb3d8a",
+      "classification": "zero-divergence",
+      "steps": 4
+    },
+    {
+      "row": "smoke/client-resized-context.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "0e899beca20e07a0f7d25378ca154f07d7b3d2f97e40fa46b1cf17a764399b68",
+      "scenario_sha256": "d1dd06dd504be86e7e51adf208b9d9b8a9c6ec601392b984a8912f2297ec9b82",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/client-utf8-sanitizer.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "3cc031b0eb9283b5b4eb122cd4968b96ca85f529bd7f21e83817f9e489d69343",
+      "scenario_sha256": "b419cf45880f2c67846699a18a5cb9b4b7f7a0bbc3528233c57dff305fe5733b",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/command-flag-errors.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "6a806b8bbd7b077f56f500a418f0931cfce050fe06b9a46c2c0f0ab54843db30",
+      "scenario_sha256": "e7bf038532c9fdd64a90f94ac41d6035f53f9f31092736e77f8d8a8205af04a7",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/command-prompt-chain.txt",
+      "shard": 1,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "28193e247a9244a886a6597eaaa27f0afa65dd63c8e7980885977373c9699045",
+      "scenario_sha256": "3087214be7a39df91d69ecfa49b3b151422660f332f39bc12dbf6fd743160185",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/command-prompt-editing.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "bbda4b0935ddc6a1ffa48dfae0bfb19f59e4bd0d13e1110ad743b1b00aba5c15",
+      "scenario_sha256": "f07906d30deb6c9d9ea630759147e64cd21842ee10317a18a265a566f2f7822e",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/command-prompt-target.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "7ab2098082a31a66f17b16a8cc1ce4b0dd025faa7ffea8332e58292280ed70a1",
+      "scenario_sha256": "dc93d5901bb1c19992c9b1baac2ec3f709ff86abd30ce46f2883efdf7a073f8c",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/config-alias-parse-unit.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "1d6f8277995698942ea5f8f360ace079efb9727fbd91e78eb555170997f28d7f",
+      "scenario_sha256": "955c6f9a7b7d4227b7e61a1d75a2dc899ab35a25852cab4b9cba56606d15a57f",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/config-chain-parse-abort.txt",
+      "shard": 5,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "029308162b5fa2cb69ee91b6ea8049fb71eb34e38bcdba19aaeb79c44028d89e",
+      "scenario_sha256": "cc4a2ddb132876041f97152e295b5b34117d7261d86bac5e31c7b6485a350067",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/config-discovery-explicit.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=13 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "0bfd086b3077c9e2b7268a91f8e112593c64fba45716b289e8962e9a8b6dce1a",
+      "scenario_sha256": "d3dfa1df360b2af63e070f6a561a4cf4980701f1f19367778080f5a4d752b7fb",
+      "classification": "zero-divergence",
+      "steps": 13
+    },
+    {
+      "row": "smoke/config-discovery-launcher.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=12 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "127e66879e5e846a181ea848d5cf0a2f99fe0bf115ecb871ac22e95731816659",
+      "scenario_sha256": "40b21edb1025dd8289e2cf779f61d0d6a774c7c73888ae634652e9bee6931e64",
+      "classification": "zero-divergence",
+      "steps": 12
+    },
+    {
+      "row": "smoke/config-discovery.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=12 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "0d011a84cd99daf8268f63d8f09db38d54d70cc54e7f23fdc8942d2b2c3ea44c",
+      "scenario_sha256": "4d260d165c3e934cd94cf513cdf5456e3bfd2f1ed89a9d9f1a368729c499e6e7",
+      "classification": "zero-divergence",
+      "steps": 12
+    },
+    {
+      "row": "smoke/config-grammar.txt",
+      "shard": 6,
+      "summary": "SUMMARY steps=17 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "dd125f0dc20b352be5f754f13f07d3e1f64d67fcf0dde12e81d48d5a4df44d79",
+      "scenario_sha256": "1832aaa869c300267272e8e3738b0ad2c2e348c064cc33a83fdd6e37e6c7c1d6",
+      "classification": "zero-divergence",
+      "steps": 17
+    },
+    {
+      "row": "smoke/config-non-utf8-byte-matrix.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "d1298cfcc48ff5e29dc8ad7e012de8ccb0b4f96fbb623406e24e61249294efb8",
+      "scenario_sha256": "7a2ab5821d31138052aa336e6fc9aa3989070803897f4557982efe02cda07fe5",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/config-non-utf8-file-bytes.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=8 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "5999149b15f3c2ca70d0ae6026395e2d4c338ee0537198998bf308b898e6de76",
+      "scenario_sha256": "47e8a7b549020f9e80606e5deed264896fb38e6bf24040794472ed083b22566e",
+      "classification": "zero-divergence",
+      "steps": 8
+    },
+    {
+      "row": "smoke/continuum-init.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "0ea3a4db085e927d2754ab0f2bce0866729848391aa6212bf6f7fe4da8ee31ca",
+      "scenario_sha256": "e5f19c5dcb6d566853615a677d2d8c4197d6b8bd9e9f1b755963641dc505fdb1",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/control-alias-prepare.txt",
+      "shard": 7,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "f4f4e245dec3244dca78b509948cbf34e4e016850401d83bbb9f803b1d4255d6",
+      "scenario_sha256": "0d738090834d0cd30cb2446384841de1c6f37aab1dbb45587d26a1a6981d2728",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/control-eof-drain.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "46ad5e423316cae92d179d4ef51b2ea4b1dcb63cb080a1e9934cd1fdd2770405",
+      "scenario_sha256": "ecfdf05ba388a325b896e9ec0288f72c372284e27d51e7feefe1eb7603cf6320",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/control-hard-loss.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "6528626221070ee811cb5a62f7e01b32160b0cc167d28c49e428fdd0392a8ef4",
+      "scenario_sha256": "d885529cbf609c12503408bc48e4b10f6714b1be88c3a09d1d70991c539969fc",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/control-notify.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "f3c11737daafd1415b47eac944764663b55e753f0d9b8eb0e55e0c6823d4bc66",
+      "scenario_sha256": "7d2526cdf195a2b9d0d5b9c2cca86784b6a5547448cbb4f24108d4ca9a94321d",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/control-tilde-environment.txt",
+      "shard": 5,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "fb901dd7f7ab0b4725bb1acf381ac75817dc51a5d17650eaf695f3840c762221",
+      "scenario_sha256": "9e9c63b556b4a50c1e7aefa700c7651914207d18361342b2e7b435b38a9bb864",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/copy-mode-command-errors.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "ce8ce681774b77f357b1a9b653c5873066a2f4216f126da34817ce258383b809",
+      "scenario_sha256": "c01eaf2f05bce6d6e6687f34b9f63a3e389dcbc494e24fdac0460295e1bb3f5e",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/copy-mode-copy-line.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "1d7af7d931d9194b24a942679348e460539045c440e6aab93810c7a8e539722d",
+      "scenario_sha256": "aec735de41b7f4da3da1fe35dcfa51bc7f61b74f2abc1e4b7683d8e382af2059",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/copy-mode-formats.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "404b49fe85352c8e288ee67ee9bf9580ab3f84cef5011701e7427c40a05e05b3",
+      "scenario_sha256": "158a925a022742dc76adf70ef015b3e16b24d2f8dbac6e173a1b1b35d51ee10b",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/copy-mode-kill-on-exit.txt",
+      "shard": 6,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "e72389e24f62cde0943aee930ac797b88de01f47cdf93e23344fe3491b6da001",
+      "scenario_sha256": "9d16ea467b3f3d741f7bdd937f0a80d05cddc4e96c67a42d116fc17b90bd282a",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/copy-mode-mode-keys-tail.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "fba660d8673de281d285daee86fed4ad28b88cb96e2381808ab8c6315f7b0d95",
+      "scenario_sha256": "81baea03e1c5f65fd5bea36345f0687a97c9b648dad4fd314f1159371bfcc453",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/copy-mode-mode-keys.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "3bda39117b7c917777558cd1ad1c5b427877e69e7921bf0cacba5bb92d6e523b",
+      "scenario_sha256": "71b282c2ddff8d9ffcaa921896202ab481bd5a2e0915c6b5ab58d86e19c6581e",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/copy-mode-prompt-bindings.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "fcc0560c9eb9a6ae2cd1fdff9999554be9ae65f02207738690cafb790536f513",
+      "scenario_sha256": "f6d98126e32776d1b6b6091752779a153e27160201e0fbec0877acbfd9d86f18",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/copy-mode-refresh.txt",
+      "shard": 7,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "627117987c4650ebe2f3ed6e2278697f81ff98f4cfc5d6a33bdfb927fa8d81e5",
+      "scenario_sha256": "a508629b6ca370daec48b1be6216c36f03071cd75827c424db7f43d9dfdeb337",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/copy-mode-search.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "c589c17a4fc0449615c0adc5262471a636078ecec90198e6d2fb3656ef976b49",
+      "scenario_sha256": "383d210b5ae4901c3fef573d123e3d1380eecab02b46a8c4622f63d307bf5948",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/copy-mode-source-pane.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "2c70cbff3edaef30d137c9ed6ceb7864c948110769e17a3e7a339abdfbedf43a",
+      "scenario_sha256": "55abf10f320441c6ee9bf2d195dd729b4e0c4382ae1202129b333fbec18340c5",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/copy-selection-clipboard-bytes.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "d7eee8ee84436f339bedbd151efd64eb15f46c2f210aabb54825a21a05bb79fb",
+      "scenario_sha256": "4045d72556f7e191aa8bab32aaf8a57c3f1d727162e386bef9d66bc20eef86a6",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/daemon-invalid-flags.txt",
+      "shard": 5,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "19137ca9a2982cd2caeafa780666cb90fcdcca116c1c5ad9cf64ad8304622e7a",
+      "scenario_sha256": "dfe2bc17a976968baac6548c4c4419140587d735cee043a1c83cc3772d6cddca",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/default-client-command.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=2",
+      "sha256": "49fde97c8381a44dd7ba85b2ff1b281691286fbc3a70caabdd59d8d45954b5d3",
+      "scenario_sha256": "4b0ff5e9e75d509c95bc5726791da6dcc3c43bf8deb2f6eabb3fa874a62617ad",
+      "classification": "inherited",
+      "steps": 3
+    },
+    {
+      "row": "smoke/display-menu-action-queue.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "7262a0506d16ec0a1859d1c3737d42ee570b6cef233d8194719c101eed9a95b1",
+      "scenario_sha256": "1205936ecf4edb61856bdd9854abdc7339c033dc9884b10e67fa70164dc6bf12",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/display-menu-cell-layout.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "46cdb0669c28bb3a92dcb9e4f627858bedca72242f61928edc712e016dac4939",
+      "scenario_sha256": "7406e3fc43d901151f8603f02115278d5c9195b2ddb31ae4477def85b9f9a996",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/display-menu-mouse.txt",
+      "shard": 6,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "1855052dd5d8538cfc055eb6ca8d485c209bbb7d347d3310ffc84e23a79db075",
+      "scenario_sha256": "6e8339323980a59b3702d7327371cf606792b190672632f28b9a2fa588c9f91c",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/display-menu-paste.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "bb733171a56ac3577af5f0a74761fb2c9780e789543a592fa7bd28147233966b",
+      "scenario_sha256": "ebe6af321eab3b4b36b46128ab4d8fffb3fe52d05e008afec142e8abeb9576b2",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/display-menu-resize-lifecycle.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "e3be5c464399d63a0542228d51753218a169b2d0882008a562875dab7aa02fa2",
+      "scenario_sha256": "b8a2eea44b4ff0b55b34862e48927aebb52f2e5bd772756ece73e6549670317e",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/display-menu-shortcut-grammar.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "bfa80fac34ec8f9a8d5bf0f0abbe0d204d4afd12f93049b080b681f20703f54b",
+      "scenario_sha256": "e482401e27af149c81ca310cde184e9341de1fa0131f93d6661133cfb6db7c6b",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/display-menu-style-refresh.txt",
+      "shard": 7,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "ff9dc90c8a4766656c2a653b7a6837d0392668c59c788e5dc3487590bd5bcc5d",
+      "scenario_sha256": "1b7a297590b1f825ccb7af4d3d4aac89b0462b5f0b51340e973c32ced7840cd5",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/display-message-client-aliases.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "95c39e0a8bb3af663e5c2d6428d65d15b9dd498e8dfdc45f5eae098cb01540fe",
+      "scenario_sha256": "a84828e1be92435c3cb0d36bbd3e36772a6f703f748c56dd367c400762b32904",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/display-panes-template.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "640a798604a918516f0857682b1b371a6fc63ec5ef39d4b099dce4705741ce74",
+      "scenario_sha256": "81302c11107e0add415079ce88658863f1065833e49c32cdb61bd603816dcce9",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/display-popup-drag.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "8fab92d8d50f5715789f8d610e011c5902affc41c655a865693203b29f20d102",
+      "scenario_sha256": "0559173b9bf682e8a5dfcd70957002fbf3ce9675943e3a18f85cfae02afd6dca",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/display-popup-kitty-noresize.txt",
+      "shard": 5,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "ed4f8a18b8a12bd65aa1f459ff1b9c15c937537934607d76aca559cbbe8e8a36",
+      "scenario_sha256": "0420540928cfce4797ec9b3d38eeb115db2db1fe6b35af67444220d561eba3e1",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/display-popup-kitty.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "96c44c19cbd4dd7525c372d972fc4f3032c6ec4c3f26d999f404f8411e232b81",
+      "scenario_sha256": "8897beb65ee8806fb5cb24fa8da92d34f4e93d58433341c628a9005beeb168e3",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/display-popup-menu-policy.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "09548ff6fe966696505b4f07ae00f046dd3a659d391539c34b98aeea00379b08",
+      "scenario_sha256": "e5c9183daec118bd470149f26b55095d36930a55e40c618ae96b23372b3d5fe5",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/display-popup-menu.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "e52f0ba6a3515a48d462d9a4e08c982dd0926400272b55d86e737aa533dbdf3b",
+      "scenario_sha256": "d782a5d6a7bf67065cae2d25e280dd1cffae0db7aeee84540c9ff687d1994d51",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/display-popup-resize-lifecycle.txt",
+      "shard": 6,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "e66885e9d3384315f28be8a4ad3f8b69719a2d10952609648c151f276de0d905",
+      "scenario_sha256": "116ad63de9ddcb0cf3d1a016d38e0a873d6a151076c7693e33dd5ab8f65d6910",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/display-popup-style-refresh.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "0af2c52d63de2298935db041054149b1769365b23e92d5ea44193d5c43a54893",
+      "scenario_sha256": "66d3bf9e5ae1103b8f7162aac7715227fc195d7a1fd279d8b4949b554276611f",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/display-popup-to-pane.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "0a8cbba70cae69ef0e4d5fecb084a1f3a657f3968bad7c237c1324550dfeb653",
+      "scenario_sha256": "8d8eddb5e86baf1057c6b3ea4fa00be564e26e2a0a178872ea43a18378d67ccb",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/environment-bytes.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "47b8484c5b1e280ff1f8d8649af351add1f105c7a8fbc667acdc116fde62cb6b",
+      "scenario_sha256": "a9a045805afe64bd5d1b29df1addf49488ec004e0e47b7e78f0fbe60dc75b7b3",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/fixture-conf.txt",
+      "shard": 7,
+      "summary": "SUMMARY steps=5 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "3d9bc26a9861891ef1ba09c4077a405d7dc8261e0d88d4638be00adb62725c91",
+      "scenario_sha256": "d199cc8b304cc4cd2af2dba0d479c250c458d841c26b44dcc0554791c80e39a9",
+      "classification": "zero-divergence",
+      "steps": 5
+    },
+    {
+      "row": "smoke/focus-follows-mouse.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "42ed56d27fe915f17cdec459e9ee63695a26f28ea5399e1a11d05b9a46e39e55",
+      "scenario_sha256": "1162ff01743721f9a799ac54576faa4d2ac7b9199371eee547a41bd7d720c39a",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/format-client-loop-context.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "e0041c77aa72925024a5e1e71fc7be79d384bcb675d4eae945d6de506ca3015b",
+      "scenario_sha256": "d6357210a8078f435c8b983c11f5d682ddab41c9303d5b0f16026b26fff418d2",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/format-environment-loop-context.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "63bc28ae9fdef4c37752ec96ed29eea0d3f3c575cad40ea4e05733af90429cf5",
+      "scenario_sha256": "6b728cd5e4b908a4536735140ea6537764c94cb0c0870011d8d6e89e994e5759",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/format-listing.txt",
+      "shard": 5,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "90893602e3899eb1d7760cc3d5f3ac6eea32e9e8c2934153b4634dd6d984ef3c",
+      "scenario_sha256": "06734f33e704801caf9ad830b3cca3b728e56c6570ed7206d8ef88570cd00db1",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/format-modifier-client-loop.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "8989b96ebca7b969cc7087c905e8d3424329e497dd22d3213cf20643990853e0",
+      "scenario_sha256": "c78433ec8cb014b3d224815df6815e4bb4c8673d09fd386b9cbc35495c279fea",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/format-modifier-environment-loop.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "a1c170cf0e8859d1ad62d343c85816a14571b9a8bb856200acf6738d8196ab12",
+      "scenario_sha256": "3096e3de1c4a3251d0e09f6d489d362be901d495bf5a1347060621f27477de5a",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/format-modifier-interrogate.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "cf2fc88bd894f5a3e6bb2a5ef81d1a461f8ae3620b699091f3ae09ce3a670576",
+      "scenario_sha256": "4197be0c7839ce504b5cbb656d75811257d2f8245a1420c2e5253f9a1dc4f1ef",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/format-monitor-hooks.txt",
+      "shard": 6,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "f69fe81cc901992d22469ee493c2b77bef3c44ee80df203ee6d6df5311d06cea",
+      "scenario_sha256": "bfed3034dcf3ad6aca878b11d87c56bf304eb8b8b4f239d9e4c4d6009db3f4ba",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/format-pane-process.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "53cb45c95a78011d5335a814b1c0f0ff6437c2c94ef2530b2c26f0a020840b8a",
+      "scenario_sha256": "635771446229a8cf76cf7b50ab591e3dde92ab619db89865a17f91aa62012896",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/format-pane-progress.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "cb7abaf7defcf54a5f4fa6744bffa9d0018f4dc79bcc9b490f777f6c3c604698",
+      "scenario_sha256": "7ddfe0e8c3416a9ece45e64843083ed8160f145d8839b60e5405472f0e399a88",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/format-trace.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=29 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "8a9a81208459b11b240b9646b32a0a0e3f8d322ed478871f9458c2938ccc5e3f",
+      "scenario_sha256": "209dfa7224aed98b40150bffa9b56218e1d324a2cce58d4cfb964ef55734f5d5",
+      "classification": "zero-divergence",
+      "steps": 29
+    },
+    {
+      "row": "smoke/format-window-bigger.txt",
+      "shard": 7,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "cf1ec315efaf8ed3c23cc504df91ae050bf11e5ad0c41f05cfa5e0993a71322f",
+      "scenario_sha256": "c4f49863a52d7229f175158b4f493d8754be7e68d45458ee108fe83488806404",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/fpp-init.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "a9955354cfdc2c174905a2ba0221cefbe19dff38813fa45de2c333be0c851f54",
+      "scenario_sha256": "57a22b6c18be5e1b248fe9311ac007ee37747a2fe1262925ace7b3647adf73a0",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/hooks-pane-focus-clients.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "acc5f4e7146b4f1a634e9f24f9ade06aca109682eedef4c1108d602d492cad66",
+      "scenario_sha256": "c5c129082ddedcc33f1714b372d2d607e8a13add58114d9d1bbb31c1e683ce0c",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/hooks-pane-focus.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "4bf690236c9b472e4d7d68865ba88b08be3f5f9027d0feea19cad649e8b34969",
+      "scenario_sha256": "b07e28c6c6bbf6106a02d3c05fab8889c9d8c83031297e62221d56366ad1a2f1",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/jobs-command-environment.txt",
+      "shard": 5,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "d093cb977d0c5c354b847882dd1eaaecbac885657a8ff0baa9c5b3f29760dd19",
+      "scenario_sha256": "9aa159b040ca4b7b5f7420d4a5f242e4e986281377e778cd69d804a67cdb8173",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/jobs-display-popup-environment.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "15549fdfab66f04121274c3b6e2bdee5eb9b9c834bfee520aeb3de83d0734e3d",
+      "scenario_sha256": "238dbeca508d9a1d3349c6271fc64d883355a477b8b73f289284505318624fba",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/jobs-shell-job-cwd.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "08a18e969fd4dacdd4e721cdc4e67574507a65e4a4c2a54406af3aa32f5dbdc5",
+      "scenario_sha256": "759bd931192609b281d01ac941e8eaa869396b223c49638e218beb9d82c0c742",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/keys-prefix-attached.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "f7419a2a96b99b9437806833c2bb8fb59f0be61352178a0041ad17d0259ce3a0",
+      "scenario_sha256": "59baa812a4bf67e8ae24605f1ade89fcdd59f71a6d728468334d8b1e95e7432a",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/keys-prefix-remainder.txt",
+      "shard": 6,
+      "summary": "SUMMARY steps=6 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "859c19f043a885307415e61431b71dde64966d069f6fa82f11776d7d8edb9db7",
+      "scenario_sha256": "8750e4ba5fefca1d604096058d8ffdff06af4fce0b3825daeece5408fcb2ce54",
+      "classification": "zero-divergence",
+      "steps": 6
+    },
+    {
+      "row": "smoke/keys-prefix-stock.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=40 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "78be2b6990252e074e9989144553e6d18fddc10f04884496f57d327998a6f39a",
+      "scenario_sha256": "95d7ea6b62aeb12f45659384517e9c0aee8fa20154f552d0fbf1aa9a9bdf5c4f",
+      "classification": "zero-divergence",
+      "steps": 40
+    },
+    {
+      "row": "smoke/keys-shift-attached.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "1912f52450a247882522b2a4df66cb91d52a141454a59a617913a245c1e76af9",
+      "scenario_sha256": "2085c6e915e8e48539ff93222aafa74a0181bccc7c443e380f5311d94dd17c42",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/keys-table-lifecycle.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "43f35521a0da025fc9cda93867d9ba3a01b45f2f42278bb4fd05c4e661921956",
+      "scenario_sha256": "2c6aa798188fb201b9bf414bbf199a0621b06d4f18d01ba27b8e6f1ff44069a8",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/kill-filters.txt",
+      "shard": 7,
+      "summary": "SUMMARY steps=17 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "f1b3059d3ae56b44bad578dc8fd061f75ab3b1db18774366b75d500cafa4f2d5",
+      "scenario_sha256": "e76b98f220ed829e7e996ddc23170cbbf65a74d8bd67ef5c82e4cc26521fe168",
+      "classification": "zero-divergence",
+      "steps": 17
+    },
+    {
+      "row": "smoke/launcher-installed-layout.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=7 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "afd89620e31eb076df0e4aa8f6cafd54ca1437dc112e7ed75d0f50e25c2e6384",
+      "scenario_sha256": "28c01717b5e0e48f3cc3e7f20732320c167f83606c62a626e9921481ba6d08d8",
+      "classification": "zero-divergence",
+      "steps": 7
+    },
+    {
+      "row": "smoke/oh-my-tmux.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=15 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "bd9c5197f0fad024351c22147c326b6e702abf68ca821abd4c23acf06168fcfe",
+      "scenario_sha256": "88aac299557132e2f906c20764dc2ef5dc67d0bcc00c23879f9de6b1db831105",
+      "classification": "zero-divergence",
+      "steps": 15
+    },
+    {
+      "row": "smoke/own-conf.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=6 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "34ad8c394622e367d44b9e597249d11b7b3baf63324731fa80d2f6aaf2a7eab2",
+      "scenario_sha256": "b490082c5c3a71b48f27be08efd60c9d5e6e2eebd626c7049ceccab711bd567c",
+      "classification": "zero-divergence",
+      "steps": 6
+    },
+    {
+      "row": "smoke/pane-border-indicators.txt",
+      "shard": 5,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "75655bcc8cf7e5f973951a81b301ef7c0e271c4ef0ebc00989db1813e2f853e1",
+      "scenario_sha256": "5589f805ecef6062bf321334268b9d97cf48cdc65254f474dae91889468e6427",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/pane-border-lines.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "85fadbea8e41aa336dba55787872ab36bbefa96609a05a26d03c13a6eba61610",
+      "scenario_sha256": "8c76f23f586977d19242581b08b7c8a6eca9caab4598eb1c7b2522f648320ee2",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/pane-border-status.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=34 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "3e797897bfddb8b9a103a54493a84af1678b9a6214815fcfc606ed26e10d0d77",
+      "scenario_sha256": "469440f74b04f7caa9ecff5d3c1b0826caee8574efd1c8db376c0604864cd9a9",
+      "classification": "zero-divergence",
+      "steps": 34
+    },
+    {
+      "row": "smoke/pane-border-zorder.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "81a53e65dd7c0ef56cd4ef166396e10cb362f9bfee8aea0dbe94abe53b6c53ab",
+      "scenario_sha256": "6396c6208c2b2a33d651e5275f68e06695b11ee1ad916ccfe8ce4b165835e11d",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/pane-colours-palette.txt",
+      "shard": 6,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "7a0fb8da5ef0035af375b181fb575e39110df2c56bf6cdbb78348d22716b79ec",
+      "scenario_sha256": "3588f6e0b056babf62965b1d0673dbc395af09f49f031a709697a2f3c0071ae2",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/pane-engine-knobs-input.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "b37010ffb12d3801dfa679acedcea45f6f83c059e1e783a82822df47779021f4",
+      "scenario_sha256": "01c21426083cfd420c913b82a88e6fe8f4f02fbf806e9a653123eb499de50a63",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/pane-engine-knobs.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "d295fe8afbccd6dfa1321f1a340e739594f8db0b47ca59c2e41dbac4add4058e",
+      "scenario_sha256": "3a7a4b3b69072ac9f642959bbf5611c23985d046580fb30695bb2d82aa02a84b",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/pane-runtime-facts.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "eed5de307c409a498f9e2e21dc58b31991d9b56dbf209f1f393f56f9231cc761",
+      "scenario_sha256": "e5a4dff9cafc21222059f3178e0b0dba5f27980b06d86542fd4a2c60b72f9880",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/pane-tmux-path.txt",
+      "shard": 7,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "136b32dadcc9e6f53d0dfa9e2d985784e4e36299a471c022168be9e967bc44b5",
+      "scenario_sha256": "8cfb8f550720be2bb101b80c95a4d646c1c2355660cb88396b333b34579bc176",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/plugin-runtime-continuum.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "5b04edd19f822190acfaf033be54d4ae0a521fbe9853cd203bec54bce91660b0",
+      "scenario_sha256": "c19baad32e7080b2be0da409141aea99b051b706d5788f94ccff6a024759dd5a",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/plugin-runtime-fpp.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "033510d37e9ff87e5fae9481d7247666e56f712c3b569cfde3962f9be0f0fbeb",
+      "scenario_sha256": "511d1c16eb93131c9fad451435f6042868eee4291eb6027043bff7147972a077",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/plugin-runtime-oh-my-tmux.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=4 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "02af1492c91387977227e76aab23c23515e8ff35a5842a194375cfe869e25207",
+      "scenario_sha256": "5f21f1e4707fa4623e70e5aabdd4b765ca77a3d5c89e07204d33ef84ad15ec66",
+      "classification": "zero-divergence",
+      "steps": 4
+    },
+    {
+      "row": "smoke/plugin-runtime-resurrect-restore.txt",
+      "shard": 5,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=1",
+      "sha256": "31660e7d8ae8214c432318cf390aa3433e3d8ebc669397086bec97ebf6acd614",
+      "scenario_sha256": "4b886a038dd3ae9ac71305e310fe5b3c768cfd2a05405c0012b87881c12d445f",
+      "classification": "inherited",
+      "steps": 2
+    },
+    {
+      "row": "smoke/plugin-runtime-tpm-install.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "550330737798613f1dc4b253e0f839f81a357f948783f928a5daa092c6130825",
+      "scenario_sha256": "82edd54a382ff27ea17a560eb3adaa4d8e13ec9e4991e68fa12b07afffabdec8",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/plugin-runtime-vim-tmux-navigator.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "ad5da904a40a12f9830ad8699e382beef17acd69ec02e97374ffbe41a2b019c9",
+      "scenario_sha256": "5cb5d287107b608954702d33ebfe401b84cd949ea8ba71259d167b04e3cab390",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/plugin-runtime-yank.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "231cb6ebfe2dd61d781ce7dd32e21064eb42c1a3629bd4facb682127a0d9ed73",
+      "scenario_sha256": "27f665904874349475acf5aced24c1e7a573f0bf7f595e45d54e2229fd7c54c9",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/positional-maximums.txt",
+      "shard": 6,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "b0226b08048dc5ae3d6539e0780749705e5aac671bfc977a220625687b79935a",
+      "scenario_sha256": "e4f73c39ef3b9df5063bc3b41dab6f73091008f96f08f4a7f5a849cf1cc6ac17",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/positional-minimums.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "ca755f470920d1acdca499c4ce31612a28fc2725a09982ea9772b529dee724ae",
+      "scenario_sha256": "3e404d6fad6ec054855bb465d57c162c0af1a82134d5996ebbd8ead20f76b83b",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/refresh-status.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "5d0b1dbac6fdb0fa0429206189dfaae5b4c87b497aea5a81551c586bb5b469cc",
+      "scenario_sha256": "156fbc7c7ea89e2692464e64d3ff6134db6fff9709c2d0558734e8ff4367107c",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/remain-on-exit-format.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "dee23b6987f255204231f522e02c77690236461109fe3cbee7f82679beeb5781",
+      "scenario_sha256": "22bd3b8323e6dddc7b1a8ed6ee1a3ccbdbe8fb4fef93749829a4244399a1803f",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/resurrect-init.txt",
+      "shard": 7,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "135356699969c308ff5e88492d32d7bf66442bd8a169f57d0e1fc7e7f0b0da1b",
+      "scenario_sha256": "abfe932ce0609c24ebf1d0169d43f42caecba7ca4627a730c00950b187c76101",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/resurrect-save.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "75949f5818af8466f9c57d34eb9a40a6b1c019424c96c14aa6c8d55e3ab95e83",
+      "scenario_sha256": "5646662bc499a84f82ef64e701df8b385a53e87085a9ba0ac886a24a732a3a15",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/send-keys-client-selection.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "b454d38091a6c7b9b284e0064929cdaf89a322b3fdd630c1b9918a070a928c5e",
+      "scenario_sha256": "517056b32b52a8c3ec6f766fa93afc2d4286a1485a199ee55854f06c68eafce0",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/send-keys-control.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "dae4b931e1578538865b69967dc30beaab5222bdb2a5f12bc4bba07f03212e1a",
+      "scenario_sha256": "d3ffa37c149b22485cb0e61c42f598ac2148e51e0d235cd36bbb32ca14669f97",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/send-keys-inject.txt",
+      "shard": 5,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "ce09628a43651e7cec261f71ce05fa6c98edb3498892c3fbdd4a1454af2f5e1b",
+      "scenario_sha256": "0d55bb203f759944993ee800f928fd1863a2c21d626b7205c81810c5233c19a4",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/sensible.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=6 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "e2b59e8675de83bd6467640cd76330c92a5f4d7e0c732097937e1ff2ee0ec477",
+      "scenario_sha256": "0e9c198ee4a2def29aca64ff64238239a9b8d811fd7b952ded52fe8879b07145",
+      "classification": "zero-divergence",
+      "steps": 6
+    },
+    {
+      "row": "smoke/source-file-byte-name.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "b4db0a8531c80f4fd1b9fee941cd2def072b91d9ddf5946cf8926fb3b7051742",
+      "scenario_sha256": "0b9b4c5f39b2def533ed08ec9b17fc9bff7ee138669fd8b62387ac43c5c93a0c",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/source-file-control.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=12 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "580701b805ad51e74679357654fa31148e2a00f363adcd193c9a53637f49b181",
+      "scenario_sha256": "867147034e2d7fee842fe5aea22f243e04de93013667c4cffae9971fc7f94442",
+      "classification": "zero-divergence",
+      "steps": 12
+    },
+    {
+      "row": "smoke/source-file-depth.txt",
+      "shard": 6,
+      "summary": "SUMMARY steps=4 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "e575a2ad7b49c62d8e4b10de9b26acfae817e2dbb7ad81db5f077b4bde4f5f62",
+      "scenario_sha256": "9ca46c9f2a628b2b5b10865cbd716f407dffbb5fcf9100b6d60b42ec213f3e97",
+      "classification": "zero-divergence",
+      "steps": 4
+    },
+    {
+      "row": "smoke/source-file-diagnostics.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=12 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "b994ef31e933af2ea0926c33d6fc3003122216addff539c65bfdbb96cd94ce54",
+      "scenario_sha256": "4e6514c21e980ae16bafd962bea7cc9994567ef3663f823601d811c31b86012e",
+      "classification": "zero-divergence",
+      "steps": 12
+    },
+    {
+      "row": "smoke/source-file-tilde.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "c5b1db22d5524397c1a7ab14d04c1bf9d2976cef4f453b97de7aaa7bbe6913ee",
+      "scenario_sha256": "59778b48eec021663eaee1c7b8f096a36ba58241e99b2c4acd7f4762e487c4e5",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "smoke/source-replay-diagnostics.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=60 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=0",
+      "sha256": "d8692b1147967fae7a92e3fa5979dbe49e4a9322257789d3a4b8fa7b3e16feed",
+      "scenario_sha256": "fbf0a6f37e0eb7be782cc9f6ea27cda49e5defe57aa83203d1d513a391028608",
+      "classification": "inherited",
+      "steps": 60
+    },
+    {
+      "row": "smoke/split-window-wait.txt",
+      "shard": 7,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "edb69a8a4e7a10b525663ddf56ccff7ec052220bcc819f36da55612bdbd9e18d",
+      "scenario_sha256": "ae49a53dd6a4f828d2cda5519f9fb5a88cd446983aeadcb0267ae7d2d6ae886c",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/status-background-jobs.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=1",
+      "sha256": "3c6cd8335b212488823d6918756b92d7eeeb16fbbd1bb1e3e8cf4f6407254f49",
+      "scenario_sha256": "bf0793c245e2d85efb872e6636940aa41ff1e15204792ba051bec8aeb727cc81",
+      "classification": "inherited",
+      "steps": 2
+    },
+    {
+      "row": "smoke/status-keys-editor-default.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "18a95a85dcd28a5e94941ae8797166fa16b5876d92af5eda5bc625e755da09ef",
+      "scenario_sha256": "450726c4277c304cc8a280b1450555ddee9f9610fe6bf285d2c08690f901a9fe",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/terminal-facts.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "510d45090d1d1ffbae3639deda3ca0d31f340bed1bfb73e5346a94523d8d10e0",
+      "scenario_sha256": "8ab73fe69ce43fdd4cd079fc4ac956e5436d7b3ac544e23a027802fc669b9ec7",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/tpm-init.txt",
+      "shard": 5,
+      "summary": "SUMMARY steps=5 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "ba8595e4c537e4911fa79e83ca035c6d720ad55435cdd373aba534ba7d14d8e2",
+      "scenario_sha256": "c1b141f23294a1691163a5651e20a803543d4833c51e02ca3befeabf35fbd2c2",
+      "classification": "zero-divergence",
+      "steps": 5
+    },
+    {
+      "row": "smoke/tui-client-input-backpressure.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "005f78a8bd9d4b09c180eab9728727fbdf607878fadbddda19654926778e8fab",
+      "scenario_sha256": "b4c3096a88ead60a0e955b0c10661b304ae1fd40089b3cd4dca8d5e4cd93429c",
+      "classification": "zero-divergence",
+      "steps": 2
+    },
+    {
+      "row": "smoke/vim-tmux-navigator.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=8 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "472e524c3651296982d8f2dece5b9aef01cca74557e80c7543c250ebaf36cecd",
+      "scenario_sha256": "120b6b1f33d530ede44f0fe794e511195706b16f5c4772688037701f769858ac",
+      "classification": "zero-divergence",
+      "steps": 8
+    },
+    {
+      "row": "smoke/yank.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "3e7bc7779ae31db54dfdbe7dbd0480a8a39e9d785044ef223f7b57c7e77f10af",
+      "scenario_sha256": "be3be2ddb98f58ff7eca16cdf58d198172147480fae42a4f996570342745a3fa",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "source-file-current-file.txt",
+      "shard": 6,
+      "summary": "SUMMARY steps=24 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "02c01d4dd57e872f55d4efe410ceee925d8d1f9b6e1e5cd6fef106426bcf67ea",
+      "scenario_sha256": "0fd59322d456ed31d48d01c5ce8e7030458316de009cdc749626b2f68cc0a29f",
+      "classification": "zero-divergence",
+      "steps": 24
+    },
+    {
+      "row": "source-file-format.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=40 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "f41c36c1774d44d3f7b43607a30e378d01ebf57d2aad4dc8849281e8a2dbfb30",
+      "scenario_sha256": "359248551cd6cc35882e4153dda71f6c4b16a5366fd65d1ec43acbbc83ff5679",
+      "classification": "zero-divergence",
+      "steps": 40
+    },
+    {
+      "row": "source-file-output.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=12 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "77cc58507b24f84a59f5c15cbde502d3c04fff814d3523d2562c0ca933bc0461",
+      "scenario_sha256": "aed6f18da49108ceb284b62fbcaa6c1dab34bae810242bacc450ef68a1e5a81c",
+      "classification": "zero-divergence",
+      "steps": 12
+    },
+    {
+      "row": "source-hook-cwd-event.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "0bbf5284ef11488e54e1c7f2789a15e09d4fa31aa1cfe5534e1fc76e39100e6f",
+      "scenario_sha256": "61780f15ecefd05fd0a2e180701c00e33546f54c6595bd5fbb630add48c8fb23",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "source-hook-cwd-sourced.txt",
+      "shard": 7,
+      "summary": "SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "d68a58c6b1578ec2f5d3d07b0101311fdd82e08fbab9776d381639109cf4cb53",
+      "scenario_sha256": "3b6cdca2e4c99c091b3632e4da91a587bdcca59722499839a84c1b6717d11f06",
+      "classification": "zero-divergence",
+      "steps": 3
+    },
+    {
+      "row": "split-window-zoom-hidden-width.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=21 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "16e81e3b987c27926ef32d3eceab1f04ca2c13c95fc9c4210106ef57fa0ba71a",
+      "scenario_sha256": "4d7d318a3a020e99c31399fbe8d504bf68bbde6f89ee61256f7ff2fa86895e97",
+      "classification": "zero-divergence",
+      "steps": 21
+    },
+    {
+      "row": "split-window-zoom.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=11 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "22b99892e8c814430af957c153251338a8ca2c7b9a474306065c74012a4b05a6",
+      "scenario_sha256": "4a4d8d87c70682e100b8d4c1b6c7c2dc8ce827b2fba9e4e6053e09412b666358",
+      "classification": "zero-divergence",
+      "steps": 11
+    },
+    {
+      "row": "splits-sized.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=5 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "11ac53c650f55f698c76b8d7462bdf6cb0679d3639487e7946a51b47585f897f",
+      "scenario_sha256": "5cf2abfa17bfdc9a3eadc09276767e56db03182845b747411c7e4f048be5e014",
+      "classification": "zero-divergence",
+      "steps": 5
+    },
+    {
+      "row": "status-options.txt",
+      "shard": 5,
+      "summary": "SUMMARY steps=79 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "4782e61b694844d1638d9fd5d68fffc8ab1dbb5b12686a1e59af9524f64a7575",
+      "scenario_sha256": "6024fd5f8c064da45ac0287ba774b35e66e8c29942a79a8e88fd94bd40bfad55",
+      "classification": "zero-divergence",
+      "steps": 79
+    },
+    {
+      "row": "stderr-parity.txt",
+      "shard": 2,
+      "summary": "SUMMARY steps=14 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "ad010b0bfaf90fcf923f27ae9b0dac41d57c77468cd64296c294d7c97d4deae3",
+      "scenario_sha256": "032ba99f1b20a715b358328f5a01621ba7ea6b455fca8f60401b60a2ada29a12",
+      "classification": "zero-divergence",
+      "steps": 14
+    },
+    {
+      "row": "strict-key-validation.txt",
+      "shard": 3,
+      "summary": "SUMMARY steps=40 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "c30e24fc942400b7c8a7bc2e19f4e169b6558adde066166285deed02d633fb51",
+      "scenario_sha256": "a6b1e03f99b4dc45a72a9146aee51b3e1bc13f901b1a80930f13eca2d9c68ed1",
+      "classification": "zero-divergence",
+      "steps": 40
+    },
+    {
+      "row": "update-environment.txt",
+      "shard": 4,
+      "summary": "SUMMARY steps=6 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "3174db8ed310e45f3f6a2ed8e44decbc173e28068bac5eb978a51d5945a37822",
+      "scenario_sha256": "1f331bb20dd797c8f0d9da341dfa874418aba7fabd1b86ac4c6344c00d6f6c6f",
+      "classification": "zero-divergence",
+      "steps": 6
+    },
+    {
+      "row": "zoom.txt",
+      "shard": 6,
+      "summary": "SUMMARY steps=5 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0",
+      "sha256": "7976cf994415d0d255e3d521c465a6f8c756bd0887dc661d8840aa322cfda98c",
+      "scenario_sha256": "eb960a8e875248ee0a9bf45b32057433cef187b2c6f9c0bb7b6d67e2d4a78cad",
+      "classification": "zero-divergence",
+      "steps": 5
+    }
+  ],
+  "transcript_policy": "All row summaries and hashes retained; full transcripts copied only for targeted failure comparisons, with no environment dumps."
+}

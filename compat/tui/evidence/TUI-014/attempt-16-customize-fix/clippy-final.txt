@@ -1,0 +1,2 @@
+    Checking zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-mux)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 9.60s

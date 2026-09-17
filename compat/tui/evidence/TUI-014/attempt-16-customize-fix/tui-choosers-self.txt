@@ -1,0 +1,2 @@
+self-check: one deliberate difference per channel, plus equivalences and info-mask checks
+Terminated                 env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL -u XDG_STATE_HOME -u ZZ_LOG_DIR TMUX_TMPDIR=/tmp "$@"

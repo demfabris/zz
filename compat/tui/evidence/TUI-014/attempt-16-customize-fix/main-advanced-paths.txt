@@ -1,0 +1,9 @@
+compat/diff-scenario.sh
+compat/run.sh
+compat/tui-client-commands.sh
+compat/tui/campaign.json
+crates/zz-daemon/src/daemon.rs
+crates/zz-mux/src/command.rs
+crates/zz-mux/src/model.rs
+crates/zz-protocol/src/catalog.rs
+crates/zz-terminal/src/session.rs

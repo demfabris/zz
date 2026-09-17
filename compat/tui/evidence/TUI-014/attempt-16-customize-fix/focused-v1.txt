@@ -1,0 +1,144 @@
+ok    customize-array-command-alias
+ok    customize-array-child-command-alias
+ok    customize-array-terminal-overrides
+ok    customize-array-child-terminal-overrides
+ok    customize-array-terminal-features
+ok    customize-array-child-terminal-features
+ok    customize-array-codepoint-widths
+ok    customize-array-child-codepoint-widths
+ok    customize-array-user-keys
+ok    customize-array-child-user-keys
+ok    customize-array-update-environment
+ok    customize-array-child-update-environment
+ok    customize-array-status-format
+ok    customize-array-child-status-format
+ok    customize-array-pane-colours
+ok    customize-array-child-pane-colours
+      case customize-array-after-bind-key
+      stdout differs
+        0a1
+        > after-bind-key[0] display-message review
+DIFF  customize-array-after-bind-key
+      case customize-array-child-after-bind-key
+      stdout differs
+        0a1
+        > after-bind-key[0] display-message review
+DIFF  customize-array-child-after-bind-key
+ok    customize-unbound-C-c
+ok    customize-retained-C-c
+ok    customize-unbound-C-c-closed
+ok    customize-unbound-C-d
+ok    customize-retained-C-d
+ok    customize-unbound-C-d-closed
+ok    customize-unbound-C-j
+ok    customize-retained-C-j
+ok    customize-unbound-C-j-closed
+ok    customize-unbound-Space
+ok    customize-retained-Space
+ok    customize-unbound-Space-closed
+ok    customize-unbound-M-<
+ok    customize-retained-M-<
+ok    customize-unbound-M-<-closed
+ok    customize-unbound-M->
+ok    customize-retained-M->
+ok    customize-unbound-M->-closed
+ok    customize-unbound-x
+ok    customize-retained-x
+ok    customize-unbound-x-closed
+ok    customize-exit-q
+ok    customize-exit-Escape
+ok    customize-exit-C-g
+ok    self-check array root insertion preserves every existing alias
+      case customize-array-sabotage
+      stdout differs
+        1,8c1
+        < command-alias[0] split-pane=split-window
+        < command-alias[1] splitp=split-window
+        < command-alias[2] "server-info=show-messages -JT"
+        < command-alias[3] "info=show-messages -JT"
+        < command-alias[4] "choose-window=choose-tree -w"
+        < command-alias[5] "choose-session=choose-tree -s"
+        < command-alias[6] "review=display-message review"
+        < command-alias[100] "review=display-message review"
+        ---
+        > command-alias[0] "review=display-message review"
+ok    self-check unindexed array replacement erases the seeded aliases
+ok    self-check C-c leaves customize mode open
+      case customize-interrupt-sabotage
+      stdout differs
+        1c1
+        < 1/options-mode
+        ---
+        > 0/
+      screen differs
+        1,8c1,20
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %0
+        > SCENE-%0
+        > $
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        12,23d23
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        4c4
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        ---
+        > P cli:0.0 mode=0/ 80x23 ptitle
+ok    self-check closing customize mode on C-c changes mode and screen
+ok    self-check switch window tail no control
+      case switch-tail-no-sabotage
+      screen differs
+        2c2
+        < ^[[49mwin ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle
+        ---
+        > ^[[49mwin ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle^[[0m
+        23c23
+        < ^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+ok    self-check default cell after final dim run no changes decoded styles
+ok    self-check switch window tail yes control
+      case switch-tail-yes-sabotage
+      screen differs
+        3,4c3,4
+        < win ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle
+        < ^[[0mwin ^[[2mzulu:0*^[[0m ^[[2msh^[[0m
+        ---
+        > win ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle^[[0m
+        > win ^[[2mzulu:0*^[[0m ^[[2msh^[[0m
+ok    self-check default cell after final dim run yes changes decoded styles
+focused checks=42 failures=2 self-check-failures=0

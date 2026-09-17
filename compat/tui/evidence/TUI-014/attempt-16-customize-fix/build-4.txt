@@ -1,0 +1,54 @@
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-tui)
+error[E0432]: unresolved import `zz_protocol::PaneMode`
+ --> crates/zz-tui/src/render/pane_mode.rs:2:5
+  |
+2 |     PaneMode, ThemeColours, TmuxAttributeState, TmuxColour, TmuxStyle, parse_tmux_colour,
+  |     ^^^^^^^^ no `PaneMode` in the root
+
+error[E0599]: no variant named `ClientSuspendState` found for enum `InputMessage`
+   --> crates/zz-tui/src/app.rs:973:47
+    |
+973 |                     .send_input(InputMessage::ClientSuspendState { suspended: true })
+    |                                               ^^^^^^^^^^^^^^^^^^ variant not found in `InputMessage`
+
+error[E0599]: no variant named `ClientSuspendState` found for enum `InputMessage`
+   --> crates/zz-tui/src/app.rs:986:47
+    |
+986 |                     .send_input(InputMessage::ClientSuspendState { suspended: false })
+    |                                               ^^^^^^^^^^^^^^^^^^ variant not found in `InputMessage`
+
+error[E0609]: no field `mode` on type `&PaneSnapshot`
+   --> crates/zz-tui/src/render.rs:679:50
+    |
+679 |                         .insert(entry.pane, pane.mode.is_some())
+    |                                                  ^^^^ unknown field
+    |
+    = note: available fields are: `id`, `title`, `kind`, `synchronized_input`, `bell` ... and 5 others
+
+error[E0609]: no field `mode` on type `&PaneSnapshot`
+   --> crates/zz-tui/src/render.rs:680:38
+    |
+680 |                         != Some(pane.mode.is_some());
+    |                                      ^^^^ unknown field
+    |
+    = note: available fields are: `id`, `title`, `kind`, `synchronized_input`, `bell` ... and 5 others
+
+error[E0609]: no field `mode` on type `&PaneSnapshot`
+   --> crates/zz-tui/src/render.rs:681:51
+    |
+681 |                     if let Some(pane_mode) = pane.mode.as_ref() {
+    |                                                   ^^^^ unknown field
+    |
+    = note: available fields are: `id`, `title`, `kind`, `synchronized_input`, `bell` ... and 5 others
+
+error[E0609]: no field `mode` on type `&PaneSnapshot`
+    --> crates/zz-tui/src/render.rs:2025:35
+     |
+2025 |             .and_then(|pane| pane.mode.as_ref())
+     |                                   ^^^^ unknown field
+     |
+     = note: available fields are: `id`, `title`, `kind`, `synchronized_input`, `bell` ... and 5 others
+
+Some errors have detailed explanations: E0432, E0599, E0609.
+For more information about an error, try `rustc --explain E0432`.
+error: could not compile `zz-tui` (lib) due to 7 previous errors

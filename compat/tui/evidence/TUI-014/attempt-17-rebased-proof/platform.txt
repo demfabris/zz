@@ -1,0 +1,5 @@
+Linux 7.2.3-1-cachyos-deckify x86_64 GNU/Linux
+16
+rustc 1.97.0 (2d8144b78 2026-07-07)
+tmux next-3.8
+df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  compat/.cache/tmux-src/tmux

@@ -1,0 +1,39 @@
+ok    switch-mode-kill
+ok    switch-mode-kill-exit
+ok    switch-mode-kill-restored
+ok    switch-mode-zoom
+ok    switch-mode-zoom-single
+ok    switch-mode-zoom-restored
+ok    switch-mode-kill-visible
+ok    switch-mode-kill-covered
+ok    switch-mode-kill-uncovered
+ok    switch-mode-kill-survives-cover
+ok    switch-mode-kill-visible-exit
+ok    switch-mode-kill-visible-panes
+ok    switch-mode-kill-no-command-hook
+ok    switch-mode-kill-drain-stack
+ok    switch-mode-kill-drain-panes
+ok    switch-mode-kill-visible-restored
+ok    switch-mode-zoom-before-split
+ok    switch-mode-zoom-during-mode
+ok    switch-mode-zoom-during-mode-flag
+ok    switch-mode-zoom-exit
+ok    switch-mode-zoom-restored-flag
+ok    switch-mode-already-zoomed
+ok    switch-mode-already-zoomed-exit
+ok    switch-mode-already-zoomed-flag
+ok    switch-mode-zoom-lifetime-restored
+      case tail-after-lifetimes
+      screen differs
+        2c2
+        < ^[[49mwin ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle^[[0m
+        ---
+        > ^[[49mwin ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle
+        23c23
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+        ---
+        > ^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+DIFF  tail-after-lifetimes
+ok    tail-history-closed
+ok    tail-fresh
+checks=28 failures=1

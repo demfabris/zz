@@ -202,9 +202,10 @@ nothing and keeps its own presentation.
 
 `switch-mode` left this table on 2026-09-15. It opens the same server-owned pane mode
 `clock-mode` opens, listing sessions or, under `-w`, windows through the pin's own
-`WINDOW_SWITCH_DEFAULT_FORMAT` over a `(search)` prompt. Its movement keys and its
-incremental filter stay open as `semantic:switch-mode-vocabulary` under
-`clients.interactive-refresh`.
+`WINDOW_SWITCH_DEFAULT_FORMAT` over a `(search)` prompt. Since 2026-09-17 it also keeps the
+pin's movement keys, its incremental fuzzy filter with `switch-mode-match-style` highlights and
+Enter on the selected match. Mouse input inside switch-mode and customize-mode stays open as
+`semantic:pane-mode-mouse` under `clients.interactive-refresh`.
 
 # Flag-level gaps on implemented commands: 2026-08-22 snapshot
 

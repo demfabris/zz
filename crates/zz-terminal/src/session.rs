@@ -8441,14 +8441,15 @@ fn capture_history(
                 (ColourClass::Resolved, ColourClass::Resolved)
             } else {
                 (
-                    classes.ground(raw_style.fg_color, 0),
+                    classes.ground(raw_style.fg_color, 0, raw_style.fg_indexed),
                     match raw_cell.content_tag().map_err(capture_failure)? {
-                        CellContentTag::BgColorPalette => {
-                            classes.entry(raw_cell.bg_color_palette().map_err(capture_failure)?.0)
-                        }
+                        CellContentTag::BgColorPalette => classes.entry_class(
+                            raw_cell.bg_color_palette().map_err(capture_failure)?.0,
+                            raw_cell.bg_indexed().map_err(capture_failure)?,
+                        ),
                         CellContentTag::BgColorRgb => ColourClass::Rgb,
                         CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {
-                            classes.ground(raw_style.bg_color, 1)
+                            classes.ground(raw_style.bg_color, 1, raw_style.bg_indexed)
                         }
                     },
                 )
@@ -8498,11 +8499,14 @@ fn capture_history(
                 underline_style(raw_style.underline),
             )
             .with_classes(classes.0, classes.1);
-            output.push(PackedCell::new(
-                dictionary.encode_glyph(&grapheme_text),
-                dictionary.intern_style(style),
-                width,
-            ));
+            output.push(
+                PackedCell::new(
+                    dictionary.encode_glyph(&grapheme_text),
+                    dictionary.intern_style(style),
+                    width,
+                )
+                .with_tab(raw_cell.tab().map_err(capture_failure)?),
+            );
         }
         rows.push(output);
     }
@@ -8553,7 +8557,7 @@ fn capture_terminal(
     let requested_rows = usize::try_from(end.saturating_sub(start).saturating_add(1)).unwrap_or(1);
 
     let columns = terminal.cols().map_err(capture_failure)?;
-    if options.escape_sequences {
+    if options.escape_sequences || capture_has_tabs(terminal, start, end, columns)? {
         return capture_styled_terminal(terminal, options, start, end, visible_start, columns);
     }
     let head = terminal
@@ -8631,6 +8635,41 @@ fn capture_terminal(
     ))
 }
 
+fn capture_has_tabs(
+    terminal: &Terminal<'_, '_>,
+    start: u64,
+    end: u64,
+    columns: u16,
+) -> Result<bool, TerminalCaptureError> {
+    for row in start..=end {
+        for x in 0..columns {
+            let cell = terminal
+                .grid_ref(Point::Screen(PointCoordinate {
+                    x,
+                    y: u32::try_from(row).unwrap_or(u32::MAX),
+                }))
+                .and_then(|grid| grid.cell())
+                .map_err(capture_failure)?;
+            if cell.tab().map_err(capture_failure)? != 0 {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn capture_tab_width(tags: &[u8], x: usize) -> usize {
+    let width = usize::from(tags[x]);
+    if !(1..=32).contains(&width) || x + width > tags.len() {
+        return 0;
+    }
+    if (1..width).all(|offset| tags[x + offset] == 128 + u8::try_from(offset).unwrap_or(0)) {
+        width
+    } else {
+        0
+    }
+}
+
 fn capture_styled_terminal(
     terminal: &Terminal<'_, '_>,
     options: CaptureOptions,
@@ -8670,8 +8709,21 @@ fn capture_styled_terminal(
             u16::try_from(allocated_row_width(usize::from(used), usize::from(columns)))
                 .unwrap_or(columns)
         };
+        let tags = (0..columns)
+            .map(|x| {
+                terminal
+                    .grid_ref(Point::Screen(PointCoordinate { x, y }))
+                    .and_then(|grid| grid.cell())
+                    .and_then(libghostty_vt::screen::Cell::tab)
+                    .map_err(capture_failure)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut skip_until = 0;
         let mut line = String::new();
         for x in 0..width {
+            if x < skip_until {
+                continue;
+            }
             let grid = terminal
                 .grid_ref(Point::Screen(PointCoordinate { x, y }))
                 .map_err(capture_failure)?;
@@ -8691,14 +8743,23 @@ fn capture_styled_terminal(
                 CellContentTag::BgColorPalette => {
                     style.bg_color =
                         StyleColor::Palette(cell.bg_color_palette().map_err(capture_failure)?);
+                    style.bg_indexed = cell.bg_indexed().map_err(capture_failure)?;
                 }
                 CellContentTag::BgColorRgb => {
                     style.bg_color = StyleColor::Rgb(cell.bg_color_rgb().map_err(capture_failure)?);
                 }
                 CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {}
             }
-            push_capture_sgr(&mut line, previous, style);
+            if options.escape_sequences {
+                push_capture_sgr(&mut line, previous, style);
+            }
             previous = style;
+            let tab_width = capture_tab_width(&tags, usize::from(x));
+            if tab_width > 0 {
+                line.push('\t');
+                skip_until = x + u16::try_from(tab_width).unwrap_or(0);
+                continue;
+            }
             let count = match grid.graphemes(&mut graphemes) {
                 Ok(count) => count,
                 Err(libghostty_vt::Error::OutOfSpace { required }) => {
@@ -8793,18 +8854,37 @@ fn push_capture_sgr(
         output.push_str(&attributes.join(";"));
         output.push('m');
     }
-    for (old, new, base) in [
-        (previous.fg_color, style.fg_color, 30),
-        (previous.bg_color, style.bg_color, 40),
-        (previous.underline_color, style.underline_color, 50),
+    for (old, new, old_indexed, indexed, base) in [
+        (
+            previous.fg_color,
+            style.fg_color,
+            previous.fg_indexed,
+            style.fg_indexed,
+            30,
+        ),
+        (
+            previous.bg_color,
+            style.bg_color,
+            previous.bg_indexed,
+            style.bg_indexed,
+            40,
+        ),
+        (
+            previous.underline_color,
+            style.underline_color,
+            true,
+            true,
+            50,
+        ),
     ] {
-        if (reset && new != StyleColor::None) || (!reset && old != new) {
-            push_capture_colour(output, new, base);
+        if (reset && new != StyleColor::None) || (!reset && (old != new || old_indexed != indexed))
+        {
+            push_capture_colour(output, new, base, indexed);
         }
     }
 }
 
-fn push_capture_colour(output: &mut String, colour: StyleColor, base: u16) {
+fn push_capture_colour(output: &mut String, colour: StyleColor, base: u16, indexed: bool) {
     use std::fmt::Write as _;
 
     match colour {
@@ -8812,10 +8892,10 @@ fn push_capture_colour(output: &mut String, colour: StyleColor, base: u16) {
         StyleColor::None => {
             let _ = write!(output, "\x1b[{}m", base + 9);
         }
-        StyleColor::Palette(index) if base != 50 && index.0 < 8 => {
+        StyleColor::Palette(index) if !indexed && base != 50 && index.0 < 8 => {
             let _ = write!(output, "\x1b[{}m", base + u16::from(index.0));
         }
-        StyleColor::Palette(index) if base != 50 && index.0 < 16 => {
+        StyleColor::Palette(index) if !indexed && base != 50 && index.0 < 16 => {
             let _ = write!(output, "\x1b[{}m", base + 60 + u16::from(index.0) - 8);
         }
         StyleColor::Palette(index) => {
@@ -9049,11 +9129,21 @@ fn capture_viewport_row(
     output: &mut String,
 ) {
     let start = output.len();
-    for cell in viewport.row(row).unwrap_or_default() {
-        push_viewport_cell(viewport, *cell, output);
+    let cells = viewport.row(row).unwrap_or_default();
+    let tags: Vec<_> = cells.iter().map(|cell| cell.tab()).collect();
+    let mut column = 0;
+    while column < cells.len() {
+        let width = capture_tab_width(&tags, column);
+        if width > 0 {
+            output.push('\t');
+            column += width;
+        } else {
+            push_viewport_cell(viewport, cells[column], output);
+            column += 1;
+        }
     }
     if !preserve_trailing {
-        let trimmed = output[start..].trim_end().len();
+        let trimmed = output[start..].trim_end_matches(' ').len();
         output.truncate(start.saturating_add(trimmed));
     }
 }
@@ -13971,14 +14061,15 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
                         (ColourClass::Resolved, ColourClass::Resolved)
                     } else {
                         (
-                            classes.ground(raw_style.fg_color, 0),
+                            classes.ground(raw_style.fg_color, 0, raw_style.fg_indexed),
                             match raw_cell.content_tag()? {
-                                CellContentTag::BgColorPalette => {
-                                    classes.entry(raw_cell.bg_color_palette()?.0)
-                                }
+                                CellContentTag::BgColorPalette => classes.entry_class(
+                                    raw_cell.bg_color_palette()?.0,
+                                    raw_cell.bg_indexed()?,
+                                ),
                                 CellContentTag::BgColorRgb => ColourClass::Rgb,
                                 CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {
-                                    classes.ground(raw_style.bg_color, 1)
+                                    classes.ground(raw_style.bg_color, 1, raw_style.bg_indexed)
                                 }
                             },
                         )
@@ -14013,7 +14104,8 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
                     .with_classes(classes.0, classes.1);
                     let style_id = dictionary.intern_style(style);
                     let glyph = dictionary.encode_glyph(&grapheme_scratch);
-                    output_row[column] = PackedCell::new(glyph, style_id, width);
+                    output_row[column] =
+                        PackedCell::new(glyph, style_id, width).with_tab(raw_cell.tab()?);
                     column += 1;
                 }
                 row.set_dirty(false)?;
@@ -14412,11 +14504,18 @@ impl<'a> Classifier<'a> {
         }
     }
 
-    fn ground(&self, value: StyleColor, ground: usize) -> ColourClass {
+    fn ground(&self, value: StyleColor, ground: usize, indexed: bool) -> ColourClass {
         match value {
             StyleColor::None => self.grounds[ground],
-            StyleColor::Palette(index) => self.entry(index.0),
+            StyleColor::Palette(index) => self.entry_class(index.0, indexed),
             StyleColor::Rgb(_) => ColourClass::Rgb,
+        }
+    }
+
+    fn entry_class(&self, index: u8, indexed: bool) -> ColourClass {
+        match self.entry(index) {
+            ColourClass::Palette(value) if value < 16 && indexed => ColourClass::IndexedLow(value),
+            class => class,
         }
     }
 
@@ -18347,9 +18446,58 @@ mod tests {
     }
 
     #[test]
+    fn capture_preserves_tab_spans_and_discards_partial_overwrites() {
+        for (input, expected) in [
+            ("ABC\t\r\nNEXT", "ABC\t\nNEXT\n\n\n"),
+            ("ABC\tDEF\r\nNEXT", "ABC\tDEF\nNEXT\n\n\n"),
+            ("界\t\r\nNEXT", "界\t\nNEXT\n\n\n"),
+            ("ABCDEFGH\rABC\t\r\nNEXT", "ABCDEFGH\nNEXT\n\n\n"),
+            ("ABC\t\r\x1b[6GX\r\nNEXT", "ABC  X\nNEXT\n\n\n"),
+            ("ABC\t\r\x1b[4G\x1b[K\r\nNEXT", "ABC\nNEXT\n\n\n"),
+        ] {
+            for chunk_size in [1, input.len()] {
+                let mut terminal = Terminal::new(TerminalOptions {
+                    cols: 80,
+                    rows: 24,
+                    max_scrollback: 64,
+                })
+                .unwrap();
+                for chunk in input.as_bytes().chunks(chunk_size) {
+                    terminal.vt_write(chunk);
+                }
+                let options = CaptureOptions {
+                    end: CaptureBoundary::Relative(4),
+                    ..CaptureOptions::default()
+                };
+                assert_eq!(
+                    capture_terminal(&terminal, None, options).unwrap(),
+                    expected,
+                    "{input:?}"
+                );
+                terminal.resize(100, 24, 0, 0).unwrap();
+                assert_eq!(
+                    capture_terminal(&terminal, None, options).unwrap(),
+                    expected,
+                    "resized {input:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn styled_capture_matches_pinned_colour_and_attribute_transitions() {
         for (input, expected) in [
             ("\x1b[31mRED\x1b[0m", "\x1b[31mRED\x1b[39m"),
+            ("\x1b[38;5;1mRED\x1b[0m", "\x1b[38;5;1mRED\x1b[39m"),
+            (
+                "\x1b[31mA\x1b[38;5;1mB\x1b[31mC\x1b[0m",
+                "\x1b[31mA\x1b[38;5;1mB\x1b[31mC\x1b[39m",
+            ),
+            (
+                "\x1b[48;5;1mA\x1b[41mB\x1b[0m",
+                "\x1b[48;5;1mA\x1b[41mB\x1b[49m",
+            ),
+            ("\x1b[48;5;1m\x1b[2K\x1b[0m", "\x1b[48;5;1m"),
             ("\x1b[38;5;196mRED\x1b[0m", "\x1b[38;5;196mRED\x1b[39m"),
             ("\x1b[38;2;1;2;3mRGB\x1b[0m", "\x1b[38;2;1;2;3mRGB\x1b[39m"),
             ("\x1b[1mBOLD\x1b[0m", "\x1b[1mBOLD\x1b[0m"),

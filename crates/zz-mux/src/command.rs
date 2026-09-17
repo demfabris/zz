@@ -17849,7 +17849,7 @@ mod tests {
             ("set-option", vec!["-a", "experimental-agent-pane", "on"], 2),
             ("rename-window", vec![], 1),
             ("no-such-command", vec![], 1),
-            ("clock-mode", vec![], 1),
+            ("clock-mode", vec!["-Q"], 1),
         ] {
             let error = engine
                 .execute(&mut context, &command(name, &args))

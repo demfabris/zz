@@ -1,0 +1,88 @@
+chooser and command-output differential at 80x24 (pin tmux)
+ok    baseline
+ok    session-tree-open
+ok    session-tree-next
+ok    session-tree-expanded
+ok    session-tree-closed
+ok    window-tree-open
+ok    window-tree-tagged
+ok    window-tree-untagged
+ok    window-tree-sorted
+ok    window-tree-sort-wrapped
+ok    window-tree-unfit-help-then-search
+ok    window-tree-searched
+ok    window-tree-preview-off
+ok    window-tree-preview-big
+ok    window-tree-preview-normal
+ok    window-tree-closed
+ok    filter-prompt
+ok    filter-typed
+ok    filter-applied
+ok    filter-cleared
+ok    filter-closed
+ok    tree-scrolled-bottom
+ok    tree-scrolled-top
+ok    tree-scroll-closed
+ok    buffer-tree-open
+ok    buffer-tree-next
+ok    buffer-tree-tagged
+ok    buffer-tree-closed
+ok    buffer-filter-prompt
+ok    buffer-filter-typed
+ok    buffer-filter-applied
+ok    buffer-filter-cleared
+ok    buffer-filter-closed
+ok    find-window-prompt
+ok    find-window-typed
+ok    find-window-tree
+ok    find-window-closed
+ok    output-shown
+ok    output-search-prompt
+ok    output-search-typed
+ok    output-searched
+ok    output-selected
+ok    output-closed
+note  output-copied: the copied selection is the same text on both sides
+ok    client-tree-open
+ok    client-sort-size
+ok    client-sort-creation
+ok    client-sort-activity
+ok    client-sort-name
+ok    client-sort-reversed
+ok    client-sort-forward
+ok    client-tagged
+ok    client-untagged
+ok    client-tag-all
+ok    client-tag-all-cleared
+ok    client-info-view
+ok    client-info-view-off
+ok    client-filter-prompt
+ok    client-filter-cancelled
+ok    client-tree-closed
+ok    client-run-open
+ok    client-run-chosen
+ok    client-run-dismissed
+ok    zoom-tree-open
+ok    zoom-tree-closed
+ok    zoom-manual
+ok    zoom-prezoomed-open
+ok    zoom-prezoomed-closed
+note  zoom: L0:win* 1:two on the zz screen: the zz screen changed and then held still for 2 seconds without it
+      case zoom-manual-released
+      1 of 24 rows differ, first differing row 23
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        23 zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*Z^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+      cursor tmux: 2,22 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,22 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+DIFF  zoom-manual-released
+ok    tall-window-tree-open
+ok    tall-window-tree-help
+ok    tall-window-tree-help-closed
+ok    tall-buffer-tree-open
+ok    tall-buffer-tree-help
+ok    tall-buffer-tree-help-closed
+ok    tall-client-tree-open
+ok    tall-client-tree-help
+ok    tall-client-tree-help-closed
+ok    tall-closed
+1 of 78 asserted comparisons differ, 0 recorded (0 for a sibling lane)

@@ -1,0 +1,10 @@
+%0 1 switch-mode 0
+%0 1 switch-mode 1
+%2 0  1
+%0 0  0
+%2 0  0
+%0 2 clock-mode 1
+%2 0  1
+%0 1 switch-mode 1
+%2 0  1
+%2 0  0

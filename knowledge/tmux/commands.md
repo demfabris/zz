@@ -90,7 +90,7 @@ The error’s source determines the status: `list-panes -Z` exits 1, while zz’
 `list-panes --json -F x` extension conflict exits 2.
 Commands that set an explicit exit code keep that code.
 
-The client handles help and exit codes in `crates/zz/src/lib.rs` (`run_command_mode`,
+The client handles help and exit codes in `crates/zz-cli/src/lib.rs` (`run_command_mode`,
 `exit_code_for`). The catalog in `crates/zz-protocol/src/catalog.rs` supplies help
 and declared long options; `ServerError::exit_code` in `crates/zz-protocol/src/message.rs`
 classifies server errors. Format enumeration lives in `crates/zz-mux/src/formats.rs`

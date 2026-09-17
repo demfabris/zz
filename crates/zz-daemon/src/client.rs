@@ -341,9 +341,9 @@ impl CommandClient {
                         },
                     ..
                 }) if self.stderr_handler.is_some() => {
-                    self.stderr_handler.expect("stderr handler checked")(&text);
-                    streamed_stderr.push_str(&text);
-                    streamed_stderr.push('\n');
+                    let line = format!("{text}\n");
+                    self.stderr_handler.expect("stderr handler checked")(&line);
+                    streamed_stderr.push_str(&line);
                 }
                 ProtocolMessage::ClientFileRequest(request) => {
                     let response =

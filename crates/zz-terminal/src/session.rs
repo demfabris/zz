@@ -110,6 +110,7 @@ const PTY_BRIDGE_SPIN_MAX: u32 = 512;
 #[cfg(target_os = "linux")]
 const PTY_GATHER_BRIDGE_SPIN_MAX: u32 = 16;
 const CONTENT_PUBLISH_STALENESS: Duration = Duration::from_millis(16);
+const SYNCHRONIZED_OUTPUT_TIMEOUT: Duration = Duration::from_secs(1);
 #[cfg(unix)]
 const PTY_WRITE_RETRY: Duration = Duration::from_millis(16);
 #[cfg(unix)]
@@ -1292,6 +1293,7 @@ struct PublishedViewports {
     last_command_status: Option<i32>,
     facts: TerminalFacts,
     search_string: String,
+    synchronized_output_deadline: Option<Instant>,
 }
 
 impl PublishedViewports {
@@ -1305,6 +1307,7 @@ impl PublishedViewports {
             last_command_status: None,
             facts: TerminalFacts::default(),
             search_string: String::new(),
+            synchronized_output_deadline: None,
         }
     }
 }
@@ -3941,6 +3944,33 @@ struct Publisher {
 }
 
 impl Publisher {
+    fn synchronized_output_deadline(&self) -> Option<Instant> {
+        self.latest.read().synchronized_output_deadline
+    }
+
+    fn defer_synchronized_output(
+        &self,
+        terminal: &mut Terminal<'_, '_>,
+        status: &SessionStatus,
+    ) -> Result<bool, WorkerError> {
+        let mut latest = self.latest.write();
+        if !terminal.mode(Mode::SYNC_OUTPUT)? {
+            latest.synchronized_output_deadline = None;
+            return Ok(false);
+        }
+        let now = Instant::now();
+        let deadline = latest
+            .synchronized_output_deadline
+            .get_or_insert(now + SYNCHRONIZED_OUTPUT_TIMEOUT);
+        if matches!(status, SessionStatus::Running) && now < *deadline {
+            return Ok(true);
+        }
+        latest.synchronized_output_deadline = None;
+        drop(latest);
+        terminal.set_mode(Mode::SYNC_OUTPUT, false)?;
+        Ok(false)
+    }
+
     fn set_foreground_source(&self, source: Option<Box<ForegroundSource>>) {
         *self.state.foreground.write() = source;
     }
@@ -4443,7 +4473,28 @@ fn run_output_view(
     let (mut search_worker, search_results) = SearchWorker::spawn(ActorWake::none())?;
 
     loop {
+        let synchronized_output_timeout = publisher
+            .synchronized_output_deadline()
+            .map_or_else(crossbeam_channel::never, |deadline| {
+                crossbeam_channel::after(deadline.saturating_duration_since(Instant::now()))
+            });
         crossbeam_channel::select_biased! {
+            recv(synchronized_output_timeout) -> _ => {
+                publish_active_views(
+                    &mut terminal,
+                    publisher,
+                    &mut render_state,
+                    &mut row_iterator,
+                    &mut cell_iterator,
+                    &mut generations,
+                    SnapshotChange::Content,
+                    &mut dictionary,
+                    &mut active_views,
+                    &word_separators,
+                    SessionStatus::Running,
+                )?;
+            }
+
             recv(command_rx) -> message => match message {
                 Ok(Command::AttachView(view_id)) => {
                     if frozen {
@@ -5331,8 +5382,18 @@ fn run_terminal(
         if let Some(status) = engine_last_command_status.take() {
             publisher.set_last_command_status(status.code());
         }
+        let synchronized_output_deadline = publisher.synchronized_output_deadline();
+        let synchronized_output_due =
+            synchronized_output_deadline.is_some_and(|deadline| now >= deadline);
+        if synchronized_output_due || (reader_eof && synchronized_output_deadline.is_some()) {
+            output_pending = true;
+        }
+        if reader_eof {
+            terminal.set_mode(Mode::SYNC_OUTPUT, false)?;
+        }
         if output_pending
             && (reader_eof
+                || synchronized_output_due
                 || pending_window_due
                 || last_content_publish.elapsed() >= CONTENT_PUBLISH_STALENESS)
         {
@@ -5392,6 +5453,9 @@ fn run_terminal(
         }
 
         let mut deadline = Instant::now() + IDLE_SLEEP;
+        if let Some(due) = publisher.synchronized_output_deadline() {
+            deadline = deadline.min(due);
+        }
         if output_pending {
             deadline = deadline.min(last_content_publish + CONTENT_PUBLISH_STALENESS);
         }
@@ -12959,6 +13023,9 @@ fn publish_active_views<'alloc: 'callbacks, 'callbacks>(
     word_separators: &WordSeparators,
     status: SessionStatus,
 ) -> Result<(), WorkerError> {
+    if publisher.defer_synchronized_output(terminal, &status)? {
+        return Ok(());
+    }
     if active.is_empty() {
         publisher.publish(snapshot(
             terminal,
@@ -20493,6 +20560,134 @@ mod tests {
             Some(1)
         );
         worker.join().expect("tap worker");
+    }
+
+    fn synchronized_output_session() -> (TerminalSession, Arc<TerminalViewport>) {
+        let session = TerminalSession::spawn_empty_with_appearance(
+            64,
+            Arc::new(TerminalAppearance::default()),
+        );
+        assert!(session.feed(Arc::from(b"BEFORE".as_slice())));
+        let before = wait_for_test_viewport(&session, |viewport| {
+            viewport
+                .cells
+                .first()
+                .is_some_and(|cell| cell.glyph() == u32::from(b'B'))
+        });
+        assert!(session.feed(Arc::from(b"\x1b[?2026h\rAFTER!".as_slice())));
+        wait_for_test_capture(&session, |capture| capture.contains("AFTER!"));
+        assert!(Arc::ptr_eq(&before, &session.latest_viewport()));
+        (session, before)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_synchronized_output_holds_the_frame_and_flushes_on_release() {
+        let session = TerminalSession::spawn(
+            64,
+            Arc::new(TerminalAppearance::default()),
+            TerminalSpawn {
+                command: Some(vec![
+                    "stty -echo; printf BEFORE; read marker; printf '\\033[?2026h\\rAFTER!'; read marker; printf '\\033[?2026l'; read marker".to_owned(),
+                ]),
+                ..TerminalSpawn::default()
+            },
+        );
+        let before = wait_for_test_viewport(&session, |viewport| {
+            viewport
+                .cells
+                .first()
+                .is_some_and(|cell| cell.glyph() == u32::from(b'B'))
+        });
+        session.send_text("begin\n");
+        wait_for_test_capture(&session, |capture| capture.contains("AFTER!"));
+        thread::sleep(Duration::from_millis(50));
+        assert!(Arc::ptr_eq(&before, &session.latest_viewport()));
+        session.send_text("finish\n");
+        wait_for_test_viewport(&session, |viewport| {
+            viewport
+                .cells
+                .first()
+                .is_some_and(|cell| cell.glyph() == u32::from(b'A'))
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_synchronized_output_times_out_without_more_output() {
+        let session = TerminalSession::spawn(
+            64,
+            Arc::new(TerminalAppearance::default()),
+            TerminalSpawn {
+                command: Some(vec![
+                    "stty -echo; printf BEFORE; read marker; printf '\\033[?2026h\\rAFTER!'; read marker".to_owned(),
+                ]),
+                ..TerminalSpawn::default()
+            },
+        );
+        let before = wait_for_test_viewport(&session, |viewport| {
+            viewport
+                .cells
+                .first()
+                .is_some_and(|cell| cell.glyph() == u32::from(b'B'))
+        });
+        session.send_text("begin\n");
+        wait_for_test_capture(&session, |capture| capture.contains("AFTER!"));
+        thread::sleep(Duration::from_millis(50));
+        assert!(Arc::ptr_eq(&before, &session.latest_viewport()));
+        wait_for_test_viewport(&session, |viewport| {
+            matches!(viewport.status, SessionStatus::Running)
+                && viewport
+                    .cells
+                    .first()
+                    .is_some_and(|cell| cell.glyph() == u32::from(b'A'))
+        });
+    }
+
+    #[test]
+    fn synchronized_output_holds_the_frame_until_release() {
+        let (session, before) = synchronized_output_session();
+        session.attach_view(TerminalViewId(991));
+        wait_for_test_capture(&session, |capture| capture.contains("AFTER!"));
+        assert!(Arc::ptr_eq(&before, &session.latest_viewport()));
+        assert!(session.feed(Arc::from(b"\x1b[?2026l".as_slice())));
+        wait_for_test_viewport(&session, |viewport| {
+            viewport
+                .cells
+                .first()
+                .is_some_and(|cell| cell.glyph() == u32::from(b'A'))
+        });
+    }
+
+    #[test]
+    fn synchronized_output_times_out_without_more_output() {
+        let (session, _) = synchronized_output_session();
+        wait_for_test_viewport(&session, |viewport| {
+            viewport
+                .cells
+                .first()
+                .is_some_and(|cell| cell.glyph() == u32::from(b'A'))
+        });
+        assert!(session.feed(Arc::from(b"\rLATER!".as_slice())));
+        wait_for_test_viewport(&session, |viewport| {
+            viewport
+                .cells
+                .first()
+                .is_some_and(|cell| cell.glyph() == u32::from(b'L'))
+        });
+    }
+
+    #[test]
+    fn synchronized_output_is_released_by_resize() {
+        let (session, _) = synchronized_output_session();
+        session.resize(100, 30, 8, 18);
+        wait_for_test_viewport(&session, |viewport| {
+            viewport.columns == 100
+                && viewport
+                    .cells
+                    .first()
+                    .is_some_and(|cell| cell.glyph() == u32::from(b'A'))
+        });
     }
 
     #[test]

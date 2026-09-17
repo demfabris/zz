@@ -4,7 +4,7 @@ title: zz-terminal crate
 description: The per-pane terminal engine that owns a PTY child and every libghostty-vt object on a worker thread and publishes immutable renderer-neutral frames.
 resource: crates/zz-terminal/src/terminal_core.rs
 tags: [terminal, libghostty, pty, actor, worker-thread, frames]
-timestamp: 2026-08-06T00:00:00Z
+timestamp: 2026-09-16T22:03:45Z
 ---
 
 # Overview
@@ -29,11 +29,11 @@ command sender + frame subscriber, while all mutable state lives behind one work
 | --- | --- |
 | `TerminalSession` | Public handle. Sends `Command`s, exposes `latest_viewport()` and an event stream. Holds no terminal state. |
 | worker thread `zz-terminal` | Owns the `Terminal`, `RenderState`, encoders, PTY writer, per-client views, and the `ViewportDictionary`. Runs `run_terminal`. |
-| reader thread `zz-pty-reader` | Blocking `read_pty` loop feeding a recycled buffer pool back to the worker. |
+| PTY reader | Platform-specific output delivery into the worker; macOS drains the nonblocking PTY directly in the worker loop. |
 | waiter thread `zz-child-wait` | Owns the `portable_pty` child, parks in `wait()`, and hands the exit status to the worker as a wake event. The worker keeps a `clone_killer()` handle for shutdown. |
 | worker thread `zz-output-view` | PTY-free variant (`run_output_view`) that renders frozen native command output through the same view lifecycle. |
 | `SearchWorker` thread | Scans an immutable `HistorySearchSnapshot` off-thread so search never borrows or blocks libghostty. |
-| `Publisher` | Writes each new frame into `Arc<RwLock<Arc<TerminalViewport>>>` and coalesces a `ViewportReady` notification. |
+| `Publisher` | Replaces frames in `Arc<RwLock<PublishedViewports>>`, retains the fallback and per-view frames, and coalesces a `ViewportReady` notification. |
 
 `CommandSender` routes work through two bounded lanes. A capacity-one control lane carries resize,
 capture, copy-mode, and pure view operations. An ordered PTY-input lane carries text, keys,
@@ -68,10 +68,15 @@ there is best-effort. It reports success as 0 and failure using a nonzero `$LAST
 back to 1. Without the read-line hook, it emits A/B but cannot delimit command output. OSC 2 titles,
 OSC 7 working directories, and cursor resets continue alongside the prompt marks.
 
-The worker retains one `active_view` (`Option<(TerminalViewId, Box<TerminalViewState>)>`) plus a map of
-`inactive_views`. Only the active view drives the published frame; `attach_view` makes a client the
-interactive owner of the snapshot stream, `detach_view` returns it to the live bottom viewport, and
-`release_view` drops its retained state.
+The worker retains maps of active and inactive views. Each attached view has its own scroll,
+selection, and copy-mode state; `publish_active_views` snapshots active views independently.
+`detach_view` retains the view's state as inactive, and `release_view` drops its retained state.
+
+Synchronized output (`DECSET 2026`) holds the last published frames while parsing and input
+continue. `Publisher::defer_synchronized_output` guards the shared snapshot path. Both live-PTY
+and PTY-free workers wake on a one-second deadline to release an unfinished redraw. The closing
+sequence, resize, EOF, or process exit also allows pending content to publish. See
+[BH-004](/research/2026-09-16-interactive-bughunt.md) for the reproduction and regression checks.
 
 # Schema
 

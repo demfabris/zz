@@ -1,0 +1,169 @@
+      case customize-array-control
+      stdout differs
+        1,8c1
+        < command-alias[0] split-pane=split-window
+        < command-alias[1] splitp=split-window
+        < command-alias[2] "server-info=show-messages -JT"
+        < command-alias[3] "info=show-messages -JT"
+        < command-alias[4] "choose-window=choose-tree -w"
+        < command-alias[5] "choose-session=choose-tree -s"
+        < command-alias[6] "review=display-message review"
+        < command-alias[100] "review=display-message review"
+        ---
+        > command-alias[0] "review=display-message review"
+FAIL  self-check array root insertion preserves every existing alias: stdout reported 1, expected 0
+      case customize-array-sabotage
+      stdout differs
+        1,8c1
+        < command-alias[0] split-pane=split-window
+        < command-alias[1] splitp=split-window
+        < command-alias[2] "server-info=show-messages -JT"
+        < command-alias[3] "info=show-messages -JT"
+        < command-alias[4] "choose-window=choose-tree -w"
+        < command-alias[5] "choose-session=choose-tree -s"
+        < command-alias[6] "review=display-message review"
+        < command-alias[100] "review=display-message review"
+        ---
+        > command-alias[0] "review=display-message review"
+ok    self-check unindexed array replacement erases the seeded aliases
+      case customize-interrupt-control
+      stdout differs
+        1c1
+        < 1/options-mode
+        ---
+        > 0/
+      screen differs
+        1,8c1,20
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %0
+        > SCENE-%0
+        > $
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        12,23d23
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        4c4
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        ---
+        > P cli:0.0 mode=0/ 80x23 ptitle
+FAIL  self-check C-c leaves customize mode open: stdout reported 1, expected 0
+      case customize-interrupt-sabotage
+      stdout differs
+        1c1
+        < 1/options-mode
+        ---
+        > 0/
+      screen differs
+        1,8c1,20
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %0
+        > SCENE-%0
+        > $
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        12,23d23
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        4c4
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        ---
+        > P cli:0.0 mode=0/ 80x23 ptitle
+ok    self-check closing customize mode on C-c changes mode and screen
+ok    self-check switch window tail no control
+      case switch-tail-no-sabotage
+      screen differs
+        1c1
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mtwo ^[[2mcli:1^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2msh^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2mptitle^[[0m^[[48;2;184;134;11m
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11mtwo ^[[2mcli:1^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2msh^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2mptitle^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[39m
+ok    self-check default cell after final dim run no changes decoded styles
+      case switch-tail-yes-control
+      screen differs
+        3,4c3,4
+        < win ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle
+        < ^[[0mwin ^[[2mzulu:0*^[[0m ^[[2msh^[[0m
+        ---
+        > win ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle^[[0m
+        > win ^[[2mzulu:0*^[[0m ^[[2msh^[[0m
+FAIL  self-check switch window tail yes control: screen reported 1, expected 0
+      case switch-tail-yes-sabotage
+      screen differs
+        1c1
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mtwo ^[[2mcli:1^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2msh^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2mptitle^[[0m^[[48;2;184;134;11m
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11mtwo ^[[2mcli:1^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2msh^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2mptitle^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[39m
+        3,4c3,4
+        < win ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle
+        < ^[[0mwin ^[[2mzulu:0*^[[0m ^[[2msh^[[0m
+        ---
+        > win ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle^[[0m
+        > win ^[[2mzulu:0*^[[0m ^[[2msh^[[0m
+ok    self-check default cell after final dim run yes changes decoded styles
+self-check-failures=3

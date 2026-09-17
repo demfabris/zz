@@ -1,0 +1,33 @@
+ok    switch-tail-short-dim
+ok    switch-tail-short-dim-closed
+ok    switch-tail-short-fg=red
+ok    switch-tail-short-fg=red-closed
+ok    switch-tail-short-bg=red
+ok    switch-tail-short-bg=red-closed
+ok    switch-tail-short-underscore
+ok    switch-tail-short-underscore-closed
+ok    switch-tail-boundary-colour
+ok    switch-tail-boundary-colour-closed
+ok    self-check switch window tail no control
+      case switch-tail-no-sabotage
+      screen differs
+        2c2
+        < ^[[49mwin ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle
+        ---
+        > ^[[49mwin ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle^[[0m
+        23c23
+        < ^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+ok    self-check default cell after final dim run no changes decoded styles
+ok    self-check switch window tail yes control
+      case switch-tail-yes-sabotage
+      screen differs
+        3,4c3,4
+        < win ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle
+        < ^[[0mwin ^[[2mzulu:0*^[[0m ^[[2msh^[[0m
+        ---
+        > win ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle^[[0m
+        > win ^[[2mzulu:0*^[[0m ^[[2msh^[[0m
+ok    self-check default cell after final dim run yes changes decoded styles
+checks=10 failures=0 self-check-failures=0

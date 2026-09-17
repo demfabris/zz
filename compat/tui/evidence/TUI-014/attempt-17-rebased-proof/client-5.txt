@@ -1,0 +1,22 @@
+stock client-command roster at 80x24 (pin tmux)
+ok    baseline
+ok    native-verb-usage: native usage exits 2, exact stdout and stderr
+ok    native-bound-usage: native usage exits 2, exact stdout and stderr
+ok    native-json-format-usage: native usage exits 2, exact stdout and stderr
+ok    native-option-usage: native usage exits 2, exact stdout and stderr
+ok    tmux-unknown-flag
+ok    tmux-unknown-command
+ok    refresh-bare
+      case refresh-status
+      screen differs
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+DIFF  refresh-status
+ok    refresh-target
+ok    refresh-missing-target
+ok    refresh-flag-set
+ok    refresh-flag-clear
+ok    refresh-flag-restore
+ok    refresh-control-pane

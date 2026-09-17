@@ -1,0 +1,252 @@
+stock client-command roster at 80x24 (pin tmux)
+ok    baseline
+ok    native-verb-usage: native usage exits 2, exact stdout and stderr
+ok    native-bound-usage: native usage exits 2, exact stdout and stderr
+ok    native-json-format-usage: native usage exits 2, exact stdout and stderr
+ok    native-option-usage: native usage exits 2, exact stdout and stderr
+ok    tmux-unknown-flag
+ok    tmux-unknown-command
+ok    refresh-bare
+ok    refresh-status
+ok    refresh-target
+ok    refresh-missing-target
+ok    refresh-flag-set
+ok    refresh-flag-clear
+ok    refresh-flag-restore
+ok    refresh-control-pane
+ok    refresh-control-subscribe
+ok    refresh-control-size
+ok    refresh-missing-argument
+      case refresh-pan-up
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-pan-up recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-pan-down
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-pan-down recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-pan-left
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-pan-left recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-pan-right
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-pan-right recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-pan-cursor
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-pan-cursor recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-clipboard
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-clipboard recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-adjustment
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-adjustment recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+ok    refresh-restored
+ok    capture-range
+ok    capture-past-last-row
+ok    capture-escape
+ok    capture-join
+ok    capture-trailing
+ok    capture-reversed
+ok    capture-history
+ok    capture-quiet-missing
+ok    capture-loud-missing
+ok    capture-buffer
+ok    capture-buffer-shown
+ok    capture-buffer-deleted
+ok    capture-default-range
+ok    capture-default-range-escape
+ok    capture-preserve-trailing
+ok    capture-preserve-trailing-range
+ok    capture-preserve-trailing-positions
+ok    capture-preserve-trailing-default
+ok    capture-mode-screen
+ok    capture-mode-default
+ok    capture-alternate
+ok    capture-alternate-quiet
+      case capture-control
+      exit tmux: 0  zz: 1
+      stdout differs
+        1,3d0
+        < $ printf 'SCENE-%s\\n' %0
+        < SCENE-%0
+        < $
+      stderr differs
+        0a1
+        > unsupported command: capture-pane -C
+note  capture-control recorded, not asserted: capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser
+      case capture-flags
+      exit tmux: 0  zz: 1
+      stdout differs
+        1,3d0
+        < - $ printf 'SCENE-%s\n' %0
+        < - SCENE-%0
+        < - $
+      stderr differs
+        0a1
+        > unsupported command: capture-pane -F
+note  capture-flags recorded, not asserted: capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser
+      case capture-hyperlinks
+      exit tmux: 0  zz: 1
+      stdout differs
+        1d0
+        < 
+      stderr differs
+        0a1
+        > unsupported command: capture-pane -H
+note  capture-hyperlinks recorded, not asserted: capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser
+      case capture-line-numbers
+      exit tmux: 0  zz: 1
+      stdout differs
+        1,3d0
+        < 0 $ printf 'SCENE-%s\n' %0
+        < 1 SCENE-%0
+        < 2 $
+      stderr differs
+        0a1
+        > unsupported command: capture-pane -L
+note  capture-line-numbers recorded, not asserted: capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser
+      case capture-pending
+      exit tmux: 0  zz: 1
+      stdout differs
+        1d0
+        < 
+      stderr differs
+        0a1
+        > unsupported command: capture-pane -P
+note  capture-pending recorded, not asserted: capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser
+      case capture-grid
+      exit tmux: 0  zz: 1
+      stdout differs
+        1,1864d0
+        < G 80x23 (0/2000)
+        < 	L 0 (0) flags=NONE[0] 24/40
+        < 		C 0,0 data=(1,1,$) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,1 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,2 data=(1,1,p) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,3 data=(1,1,r) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,4 data=(1,1,i) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,5 data=(1,1,n) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,6 data=(1,1,t) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,7 data=(1,1,f) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,8 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,9 data=(1,1,') flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,10 data=(1,1,S) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,11 data=(1,1,C) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,12 data=(1,1,E) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,13 data=(1,1,N) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,14 data=(1,1,E) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,15 data=(1,1,-) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,16 data=(1,1,%) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,17 data=(1,1,s) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,18 data=(1,1,\\) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,19 data=(1,1,n) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,20 data=(1,1,') flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,21 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,22 data=(1,1,%) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,23 data=(1,1,0) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,24 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,25 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,26 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,27 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,28 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,29 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,30 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,31 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,32 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,33 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,34 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,35 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,36 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+      stderr differs
+        0a1
+        > unsupported command: capture-pane -R
+note  capture-grid recorded, not asserted: capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser
+ok    capture-restored
+ok    buffer-load-stdin
+ok    buffer-show-named
+ok    buffer-save-stdout
+ok    buffer-save-append
+ok    buffer-show-missing
+ok    buffer-delete
+ok    buffer-show-empty
+ok    stream-source-file
+ok    stream-source-file-effect
+ok    stream-display-message
+ok    stream-split-window
+ok    stream-split-window-restored
+ok    hooks-show
+ok    hooks-show-global
+ok    hooks-show-window
+ok    hooks-show-pane
+ok    hooks-show-before
+ok    hooks-show-one
+ok    hooks-show-missing
+ok    hooks-show-target
+      case messages-log
+      stdout differs
+        1,602c1,623
+        < 07:20: client-1656960 command: show-messages
+        < 07:20: client-1656955 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 07:20: client-1656948 command: list-clients -F "#{client_name}"
+        < 07:20: client-1656470 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 07:20: client-1656469 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 07:20: client-1656466 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 07:20: client-1656463 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 07:20: client-1656462 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 07:20: client-1656169 command: show-hooks -t "%0"
+        < 07:20: client-1656168 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 07:20: client-1656164 command: list-clients -F "#{client_name}"
+        < 07:20: client-1655895 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 07:20: client-1655894 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 07:20: client-1655893 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 07:20: client-1655892 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 07:20: client-1655891 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 07:20: client-1655502 message: invalid option: no-such-hook
+        < 07:20: client-1655502 command: show-hooks -g no-such-hook
+        < 07:20: client-1655500 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 07:20: client-1655493 command: list-clients -F "#{client_name}"
+        < 07:20: client-1655239 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 07:20: client-1655238 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 07:20: client-1655237 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 07:20: client-1655236 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 07:20: client-1655235 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 07:20: client-1654850 command: show-hooks -g after-lock-server
+        < 07:20: client-1654843 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 07:20: client-1654837 command: list-clients -F "#{client_name}"
+        < 07:20: client-1654526 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 07:20: client-1654525 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 07:20: client-1654523 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 07:20: client-1654520 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 07:20: client-1654517 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 07:20: client-1653725 command: show-hooks -B
+        < 07:20: client-1653724 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 07:20: client-1653720 command: list-clients -F "#{client_name}"
+        < 07:20: client-1653392 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 07:20: client-1653391 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 07:20: client-1653390 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+note  messages-log recorded, not asserted: DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. Measured 2026-09-14 on both sides: the pin names ANY tty-bearing client by that tty, including the attached terminal client whose attach-session row reads /dev/pts/<n>, and zz named none of them - it spelled every row by the device name the client sent, which for an interactive client is the hostname. That half is closed: the server log now names a client by its tty whenever it has one. What stays is the clientless CLI, which names a process that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked
+ok    messages-jobs
+ok    messages-terminals
+ok    messages-terminals-target
+ok    messages-terminals-missing-target
+ok    messages-jobs-and-terminals
+ok    messages-jobs-live

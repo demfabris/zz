@@ -1,0 +1,58 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m checking pinned plugin corpus
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-c11-modes-final/target/debug/zz-customize-fix-final
+[1;36m==>[0m running census-hooks
+census-hooks: 152 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running source-file-format
+source-file-format: 40 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running pane-exact-target-prefix
+pane-exact-target-prefix: 31 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running known/known-terminal-runtime
+known/known-terminal-runtime: 28 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 6 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;33mwarn:[0m known/known-terminal-runtime has its exact documented divergence (0 0 6 0 0)
+[1;36m==>[0m running source-file-current-file
+source-file-current-file: 24 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running copy-mode-previous-bracket
+copy-mode-previous-bracket: 23 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running honest-knobs-c1-readback
+honest-knobs-c1-readback: 21 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/kill-filters
+smoke/kill-filters: 17 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running copy-mode-goto-line
+copy-mode-goto-line: 18 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running format-modifier-option-loop
+format-modifier-option-loop: 17 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running command-alias
+command-alias: 16 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/source-file-control
+smoke/source-file-control: 12 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 0 WARN divergence(s)
+[1;33mwarn:[0m smoke/source-file-control failed; it is retried alone after the corpus
+    OUT: divergence
+    --- zz OUT step 12
+    +++ tmux OUT step 12
+    @@ -1 +1 @@
+    -SOURCE_FILE_CONTROL_BACKGROUND=success:rc=1,seq=0:end:_|1:end:_|1:end:_|1:end:_|1:end:_|1:end:_|1:end:BACKGROUND_LATER|0:end:_|0:end:BACKGROUND_CHILD|0:error:No such file or directory: missing.conf|0:error:can't find session: background-runtime-missing|0:end:BACKGROUND_RUN|0:end:BACKGROUND_ELSE|1:end:BACKGROUND_STICKY_LATER;malformed:rc=0,stderr=0,loud=0,ordinary=0,seq=0:end:_|1:end:_|1:end:_|1:end:_|1:end:MALFORMED_LATER|1:end:MALFORMED_DONE;disconnect:rc=0,stderr=0,run=yes,if=_,seq=0:end:_|1:end:_|1:end:_|1:end:DISCONNECT_READY|0:end:_
+    +SOURCE_FILE_CONTROL_BACKGROUND=success:rc=1,seq=0:end:_|1:end:_|1:end:_|1:end:_|1:end:_|1:end:_|1:end:BACKGROUND_LATER|0:end:_|0:end:BACKGROUND_CHILD|0:error:No such file or directory: missing.conf|0:error:can't find session: background-runtime-missing|0:end:BACKGROUND_RUN|0:end:BACKGROUND_ELSE|1:end:BACKGROUND_STICKY_LATER;malformed:rc=0,stderr=0,loud=0,ordinary=0,seq=0:end:_|1:end:_|1:end:_|1:end:_|1:end:MALFORMED_LATER|1:end:MALFORMED_DONE;disconnect:rc=0,stderr=0,run=_,if=_,seq=0:end:_|1:end:_|1:end:_|1:end:DISCONNECT_READY
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    SUMMARY steps=12 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=0
+[1;36m==>[0m running source-file-output
+source-file-output: 12 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running mru-activity
+mru-activity: 11 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running display-panes-format
+display-panes-format: 10 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/alias-group-forgery
+smoke/alias-group-forgery: 7 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running copy-mode-recentre
+copy-mode-recentre: 8 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/pane-tmux-path
+smoke/pane-tmux-path: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running update-environment
+update-environment: 6 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/pane-engine-knobs-input

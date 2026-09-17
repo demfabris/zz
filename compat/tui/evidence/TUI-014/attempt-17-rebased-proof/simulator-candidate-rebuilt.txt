@@ -1,0 +1,28 @@
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-terminal)
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-mux)
+   Compiling zz-client v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-client)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 48.81s
+     Running tests/simulator.rs (target/debug/deps/simulator-b0e404ea95b836e1)
+
+running 1 test
+test seeded_convergence_seed_5eed ... FAILED
+
+failures:
+
+---- seeded_convergence_seed_5eed stdout ----
+
+thread 'seeded_convergence_seed_5eed' (2771273) panicked at crates/zz-client/tests/simulator.rs:415:9:
+assertion `left == right` failed: resync changed the converged snapshot
+  left: [("$0 sim @@0", [("@0 cat", "Split { id: SplitId(1), axis: Vertical, ratio: 0.26086956, first: Pane(PaneId(0)), second: Split { id: SplitId(0), axis: Vertical, ratio: 0.3125, first: Pane(PaneId(2)), second: Split { id: SplitId(2), axis: Vertical, ratio: 0.5, first: Pane(PaneId(1)), second: Pane(PaneId(3)) } } }", ["%0 Terminal", "%1 Terminal", "%2 Terminal", "%3 Terminal"])])]
+ right: [("$0 sim @@0", [("@0 bash", "Split { id: SplitId(1), axis: Vertical, ratio: 0.26086956, first: Pane(PaneId(0)), second: Split { id: SplitId(0), axis: Vertical, ratio: 0.3125, first: Pane(PaneId(2)), second: Split { id: SplitId(2), axis: Vertical, ratio: 0.5, first: Pane(PaneId(1)), second: Pane(PaneId(3)) } } }", ["%0 Terminal", "%1 Terminal", "%2 Terminal", "%3 Terminal"])])]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    seeded_convergence_seed_5eed
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 7.32s
+
+error: test failed, to rerun pass `-p zz-client --test simulator`

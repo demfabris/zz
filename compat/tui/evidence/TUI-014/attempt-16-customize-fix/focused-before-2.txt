@@ -1,0 +1,1337 @@
+      case customize-array-command-alias
+      stdout differs
+        1,8c1
+        < command-alias[0] split-pane=split-window
+        < command-alias[1] splitp=split-window
+        < command-alias[2] "server-info=show-messages -JT"
+        < command-alias[3] "info=show-messages -JT"
+        < command-alias[4] "choose-window=choose-tree -w"
+        < command-alias[5] "choose-session=choose-tree -s"
+        < command-alias[6] "review=display-message review"
+        < command-alias[100] "review=display-message review"
+        ---
+        > command-alias[0] "review=display-message review"
+DIFF  customize-array-command-alias
+      case customize-array-terminal-overrides
+      stdout differs
+        1,3c1
+        < terminal-overrides[0] linux*:AX@
+        < terminal-overrides[1] review*:colors=256
+        < terminal-overrides[100] review*:colors=256
+        ---
+        > terminal-overrides[0] review*:colors=256
+DIFF  customize-array-terminal-overrides
+      case customize-array-terminal-features
+      stdout differs
+        1,5c1
+        < terminal-features[0] xterm*:clipboard:ccolour:cstyle:focus:title
+        < terminal-features[1] screen*:title
+        < terminal-features[2] rxvt*:ignorefkeys
+        < terminal-features[3] review*:RGB
+        < terminal-features[100] review*:RGB
+        ---
+        > terminal-features[0] review*:RGB
+DIFF  customize-array-terminal-features
+      case customize-array-codepoint-widths
+      stdout differs
+        2d1
+        < codepoint-widths[100] U+0041=1
+DIFF  customize-array-codepoint-widths
+      case customize-array-user-keys
+      stdout differs
+        2d1
+        < user-keys[100] review-value
+DIFF  customize-array-user-keys
+      case customize-array-update-environment
+      stdout differs
+        1,15c1
+        < update-environment[0] DISPLAY
+        < update-environment[1] KRB5CCNAME
+        < update-environment[2] MSYSTEM
+        < update-environment[3] SSH_ASKPASS
+        < update-environment[4] SSH_AUTH_SOCK
+        < update-environment[5] SSH_AGENT_PID
+        < update-environment[6] SSH_CONNECTION
+        < update-environment[7] WAYLAND_DISPLAY
+        < update-environment[8] WINDOWID
+        < update-environment[9] XAUTHORITY
+        < update-environment[10] XDG_CURRENT_DESKTOP
+        < update-environment[11] XDG_SESSION_DESKTOP
+        < update-environment[12] XDG_SESSION_TYPE
+        < update-environment[13] review-value
+        < update-environment[100] review-value
+        ---
+        > update-environment[0] review-value
+DIFF  customize-array-update-environment
+      case customize-array-status-format
+      stdout differs
+        1,5c1
+        < status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+        < status-format[1] "#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }"
+        < status-format[2] "#[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }"
+        < status-format[3] review-value
+        < status-format[100] review-value
+        ---
+        > status-format[0] review-value
+      screen differs
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mreview-value
+DIFF  customize-array-status-format
+      case customize-array-pane-colours
+      stdout differs
+        2d1
+        < pane-colours[100] red
+DIFF  customize-array-pane-colours
+      case customize-array-after-bind-key
+      stdout differs
+        1c1
+        < after-bind-key[100] display-message review
+        ---
+        > after-bind-key[0] display-message review
+DIFF  customize-array-after-bind-key
+      case customize-unbound-C-c
+      screen differs
+        1,8c1,20
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %0
+        > SCENE-%0
+        > $
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        12,23d23
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        4c4
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        ---
+        > P cli:0.0 mode=0/ 80x23 ptitle
+DIFF  customize-unbound-C-c
+      case customize-retained-C-c
+      stdout differs
+        1c1
+        < 1/options-mode
+        ---
+        > 0/
+      screen differs
+        1,8c1,20
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %0
+        > SCENE-%0
+        > $
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        12,23d23
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        4c4
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        ---
+        > P cli:0.0 mode=0/ 80x23 ptitle
+DIFF  customize-retained-C-c
+      case customize-unbound-C-d
+      screen differs
+        1,8c1,3
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        > $
+        12,24c7,24
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+DIFF  customize-unbound-C-d
+      case customize-retained-C-d
+      stdout differs
+        1c1
+        < 1/options-mode
+        ---
+        > 0/
+      screen differs
+        1,8c1,3
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        > $
+        12,24c7,24
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+DIFF  customize-retained-C-d
+      case customize-unbound-C-j
+      screen differs
+        1,8c1,4
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        > $
+        > $
+        12,24c8,24
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   2,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+DIFF  customize-unbound-C-j
+      case customize-retained-C-j
+      stdout differs
+        1c1
+        < 1/options-mode
+        ---
+        > 0/
+      screen differs
+        1,8c1,4
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        > $
+        > $
+        12,24c8,24
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   2,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+DIFF  customize-retained-C-j
+      case customize-unbound-Space
+      screen differs
+        1,8c1,4
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        > $
+        > $
+        12,24c8,24
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   3,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+DIFF  customize-unbound-Space
+      case customize-retained-Space
+      stdout differs
+        1c1
+        < 1/options-mode
+        ---
+        > 0/
+      screen differs
+        1,8c1,4
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        > $
+        > $
+        12,24c8,24
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   3,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+DIFF  customize-retained-Space
+      case customize-unbound-M-<
+      screen differs
+        1,8c1,4
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        > $
+        > $ printf 'SCENE-%s\n' %1
+        12,24c8,24
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   24,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+DIFF  customize-unbound-M-<
+      case customize-retained-M-<
+      stdout differs
+        1c1
+        < 1/options-mode
+        ---
+        > 0/
+      screen differs
+        1,8c1,4
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        > $
+        > $ printf 'SCENE-%s\n' %1
+        12,24c8,24
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   24,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+DIFF  customize-retained-M-<
+      case customize-unbound-M->
+      screen differs
+        1,8c1,4
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        > $
+        > $
+        12,24c8,24
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   3,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+DIFF  customize-unbound-M->
+      case customize-retained-M->
+      stdout differs
+        1c1
+        < 1/options-mode
+        ---
+        > 0/
+      screen differs
+        1,8c1,4
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        > $
+        > $
+        12,24c8,24
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   3,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+DIFF  customize-retained-M->
+      case customize-unbound-x
+      screen differs
+        1,8c1,4
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        > $
+        > $  x
+        12,24c8,24
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   4,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+DIFF  customize-unbound-x
+      case customize-retained-x
+      stdout differs
+        1c1
+        < 1/options-mode
+        ---
+        > 0/
+      screen differs
+        1,8c1,4
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        > $
+        > $  x
+        12,24c8,24
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   4,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+DIFF  customize-retained-x
+      case customize-unbound-closed
+      screen differs
+        1,2c1,2
+        < $ printf 'SCENE-%s\n' %0
+        < SCENE-%0
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        3a4
+        > $  x
+        23,24c24
+        < 
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m1:two*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   4,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=0/ 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+DIFF  customize-unbound-closed
+      case customize-exit-q
+      screen differs
+        1,2c1,2
+        < $ printf 'SCENE-%s\n' %0
+        < SCENE-%0
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        3a4
+        > $  x
+        23,24c24
+        < 
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m1:two*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   4,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=0/ 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+DIFF  customize-exit-q
+      case customize-exit-Escape
+      screen differs
+        1,2c1,2
+        < $ printf 'SCENE-%s\n' %0
+        < SCENE-%0
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        3a4
+        > $  x
+        23,24c24
+        < 
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m1:two*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   4,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=0/ 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+DIFF  customize-exit-Escape
+      case customize-exit-C-g
+      screen differs
+        1,2c1,2
+        < $ printf 'SCENE-%s\n' %0
+        < SCENE-%0
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        3a4
+        > $  x
+        23,24c24
+        < 
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m1:two*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   4,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=0/ 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+DIFF  customize-exit-C-g
+      case customize-array-control
+      stdout differs
+        1,8c1
+        < command-alias[0] split-pane=split-window
+        < command-alias[1] splitp=split-window
+        < command-alias[2] "server-info=show-messages -JT"
+        < command-alias[3] "info=show-messages -JT"
+        < command-alias[4] "choose-window=choose-tree -w"
+        < command-alias[5] "choose-session=choose-tree -s"
+        < command-alias[6] "review=display-message review"
+        < command-alias[100] "review=display-message review"
+        ---
+        > command-alias[0] "review=display-message review"
+      screen differs
+        1,2c1,2
+        < $ printf 'SCENE-%s\n' %0
+        < SCENE-%0
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        3a4
+        > $  x
+        23,24c24
+        < 
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m1:two*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   4,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=0/ 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+FAIL  self-check array root insertion preserves every existing alias: stdout reported 1, expected 0
+      case customize-array-sabotage
+      stdout differs
+        1,8c1
+        < command-alias[0] split-pane=split-window
+        < command-alias[1] splitp=split-window
+        < command-alias[2] "server-info=show-messages -JT"
+        < command-alias[3] "info=show-messages -JT"
+        < command-alias[4] "choose-window=choose-tree -w"
+        < command-alias[5] "choose-session=choose-tree -s"
+        < command-alias[6] "review=display-message review"
+        < command-alias[100] "review=display-message review"
+        ---
+        > command-alias[0] "review=display-message review"
+      screen differs
+        1,2c1,2
+        < $ printf 'SCENE-%s\n' %0
+        < SCENE-%0
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        3a4
+        > $  x
+        23,24c24
+        < 
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m1:two*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   4,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=0/ 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+ok    self-check unindexed array replacement erases the seeded aliases
+      case customize-interrupt-control
+      stdout differs
+        1c1
+        < 1/options-mode
+        ---
+        > 0/
+      screen differs
+        1,8c1,4
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        > $
+        > $  x
+        12,24c8,24
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   4,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+FAIL  self-check C-c leaves customize mode open: stdout reported 1, expected 0
+      case customize-interrupt-sabotage
+      stdout differs
+        1c1
+        < 1/options-mode
+        ---
+        > 0/
+      screen differs
+        1,8c1,4
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %1
+        > SCENE-%1
+        > $
+        > $  x
+        12,24c8,24
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   4,3 flag=1 pane=80x24 shape=default
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=0/ 80x23 ptitle
+ok    self-check closing customize mode on C-c changes mode and screen
+      case switch-tail-no-control
+      screen differs
+        1,2c1
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mtwo ^[[2mcli:1^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2msh^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2mptitle^[[0m^[[48;2;184;134;11m
+        < ^[[49mwin ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle^[[0m
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11mtwo ^[[2mcli:1*^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2msh^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2mptitle^[[0m^[[48;2;184;134;11m
+        23,24c22,24
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > 
+        > ^[[38;2;13;13;13m(search) ^[[39m^[[49m
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m1:two*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=1/switch-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=1/switch-mode 80x23 ptitle
+FAIL  self-check switch window tail no control: screen reported 1, expected 0
+      case switch-tail-no-sabotage
+      screen differs
+        1,2c1
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mtwo ^[[2mcli:1^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2msh^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2mptitle^[[0m^[[48;2;184;134;11m
+        < ^[[49mwin ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle^[[0m
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11mtwo ^[[2mcli:1*^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2msh^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2mptitle^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[39m
+        23,24c22,24
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > 
+        > ^[[38;2;13;13;13m(search) ^[[39m^[[49m
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m1:two*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+      state differs
+        1,5c1,3
+        < S cli 2 1
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        < P cli:0.0 mode=1/switch-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > S cli 1 1
+        > W cli:1 two * 1
+        > P cli:1.0 mode=1/switch-mode 80x23 ptitle
+FAIL  self-check default cell after final dim run no changes decoded styles: state reported 1, expected 0
+      case switch-tail-yes-control
+      screen differs
+        1c1
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mtwo ^[[2mcli:1^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2msh^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2mptitle^[[0m^[[48;2;184;134;11m
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11mtwo ^[[2mcli:1*^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2msh^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2mptitle^[[0m^[[48;2;184;134;11m
+        3,4c3,4
+        < win ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle
+        < ^[[0mwin ^[[2mzulu:0*^[[0m ^[[2msh^[[0m
+        ---
+        > win ^[[2mzulu:0*^[[0m ^[[2msh^[[0m
+        > 
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m1:two*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+      state differs
+        2c2
+        < S cli 2 1
+        ---
+        > S cli 1 1
+        5,6c5
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        ---
+        > W cli:1 two * 1
+        9,10c8
+        < P cli:0.0 mode=1/switch-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > P cli:1.0 mode=1/switch-mode 80x23 ptitle
+FAIL  self-check switch window tail yes control: screen reported 1, expected 0
+      case switch-tail-yes-sabotage
+      screen differs
+        1c1
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mtwo ^[[2mcli:1^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2msh^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2mptitle^[[0m^[[48;2;184;134;11m
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11mtwo ^[[2mcli:1*^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2msh^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[2mptitle^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m ^[[39m
+        3,4c3,4
+        < win ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle
+        < ^[[0mwin ^[[2mzulu:0*^[[0m ^[[2msh^[[0m
+        ---
+        > win ^[[2mzulu:0*^[[0m ^[[2msh^[[0m
+        > 
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m1:two*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+      state differs
+        2c2
+        < S cli 2 1
+        ---
+        > S cli 1 1
+        5,6c5
+        < W cli:0 win * 1
+        < W cli:1 two  1
+        ---
+        > W cli:1 two * 1
+        9,10c8
+        < P cli:0.0 mode=1/switch-mode 80x23 ptitle
+        < P cli:1.0 mode=0/ 80x24 ptitle
+        ---
+        > P cli:1.0 mode=1/switch-mode 80x23 ptitle
+FAIL  self-check default cell after final dim run yes changes decoded styles: state reported 1, expected 0
+focused checks=27 failures=27 self-check-failures=6

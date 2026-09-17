@@ -1,0 +1,15 @@
+   Compiling libghostty-vt-sys v0.2.1 (/home/demfabris/dev/zz-c11-modes-rejected-baseline/third_party/rust/libghostty-vt-sys)
+   Compiling libghostty-vt v0.2.1 (https://github.com/uzaaft/libghostty-rs?rev=46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0#46a9d2ac)
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-modes-rejected-baseline/crates/zz-terminal)
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-modes-rejected-baseline/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-modes-rejected-baseline/crates/zz-mux)
+   Compiling zz-client v0.10.0 (/home/demfabris/dev/zz-c11-modes-rejected-baseline/crates/zz-client)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-modes-rejected-baseline/crates/zz-daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 50.36s
+     Running tests/simulator.rs (/home/demfabris/dev/zz-c11-modes-final/target/debug/deps/simulator-b0e404ea95b836e1)
+
+running 1 test
+test seeded_convergence_seed_5eed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 7.00s
+

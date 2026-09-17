@@ -1,0 +1,69 @@
+stock client-command roster at 80x24 (pin tmux)
+ok    baseline
+ok    native-verb-usage: native usage exits 2, exact stdout and stderr
+ok    native-bound-usage: native usage exits 2, exact stdout and stderr
+ok    native-json-format-usage: native usage exits 2, exact stdout and stderr
+ok    native-option-usage: native usage exits 2, exact stdout and stderr
+ok    tmux-unknown-flag
+ok    tmux-unknown-command
+ok    refresh-bare
+ok    refresh-status
+ok    refresh-target
+ok    refresh-missing-target
+ok    refresh-flag-set
+ok    refresh-flag-clear
+ok    refresh-flag-restore
+ok    refresh-control-pane
+ok    refresh-control-subscribe
+ok    refresh-control-size
+ok    refresh-missing-argument
+      case refresh-pan-up
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-pan-up recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-pan-down
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-pan-down recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-pan-left
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-pan-left recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-pan-right
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-pan-right recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-pan-cursor
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-pan-cursor recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-clipboard
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-clipboard recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-adjustment
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-adjustment recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+ok    refresh-restored
+ok    capture-range
+ok    capture-past-last-row
+ok    capture-escape
+ok    capture-join
+ok    capture-trailing
+ok    capture-reversed
+ok    capture-history

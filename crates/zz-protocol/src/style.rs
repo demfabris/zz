@@ -325,6 +325,14 @@ pub fn parse_styled_segments(value: &str) -> Vec<StyledSegment> {
             text.extend(std::iter::repeat_n('#', hashes.div_ceil(2)));
             continue;
         }
+        if current.ignore == Some(true) {
+            if hashes % 2 == 0 {
+                index += 1;
+            } else {
+                text.push('#');
+            }
+            continue;
+        }
         text.extend(std::iter::repeat_n('#', hashes / 2));
         if hashes % 2 == 0 {
             text.push('[');
@@ -840,6 +848,15 @@ mod tests {
         let segments = parse_styled_segments("#[align=right]right#[noalign]default");
         assert_eq!(segments[0].style.align, Some(TmuxAlign::Right));
         assert_eq!(segments[1].style.align, None);
+    }
+
+    #[test]
+    fn ignored_styles_draw_their_markup_like_format_draw() {
+        let segments = parse_styled_segments("#[fg=red]#[ignore]a#[bold]b##[c###[d##e#[default]f");
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text, "a#[bold]bc#[d#e#[default]f");
+        assert_eq!(segments[0].style.fg, Some(TmuxColour::Basic(1)));
+        assert_eq!(segments[0].style.attributes.bold, TmuxAttributeState::Unset);
     }
 
     #[test]

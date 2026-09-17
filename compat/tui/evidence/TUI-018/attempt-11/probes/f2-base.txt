@@ -1,0 +1,16 @@
+zz display open:  cursor=0:0
+zz display split:  cursor=0:0
+zz rc=0 err=
+zz display after:  cursor=0:0
+tmux display open: ^[[31mRED^[[39m cursor=3:0
+tmux display split: ^[[31mRED^[[39mM-CM-)^[[32mGREEN^[[39m cursor=9:0
+tmux rc=0 err=
+tmux display after: ^[[31mRED^[[39mM-CM-)^[[32mGREEN^[[39m cursor=9:0
+zz split open:  cursor=0:0
+zz split split:  cursor=0:0
+zz rc=0 err=
+zz split after:  cursor=0:0
+tmux split open: ^[[31mRED^[[39m cursor=3:0
+tmux split split: ^[[31mRED^[[39mM-CM-)^[[32mGREEN^[[39m cursor=9:0
+tmux rc=0 err=
+tmux split after: ^[[31mRED^[[39mM-CM-)^[[32mGREEN^[[39m cursor=9:0

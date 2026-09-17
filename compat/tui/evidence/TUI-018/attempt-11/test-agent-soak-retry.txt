@@ -1,0 +1,10 @@
+thread 'agent_stream_soak_slow_client' (3813577) panicked at crates/zz-daemon/tests/agent_soak.rs:594:5:
+assertion `left == right` failed: the replay converges the client on the whole transcript
+  left: Some(1501)
+ right: Some(1500)
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 3.90s
+thread 'agent_stream_soak_slow_client' (3814228) panicked at crates/zz-daemon/tests/agent_soak.rs:594:5:
+assertion `left == right` failed: the replay converges the client on the whole transcript
+  left: Some(1501)
+ right: Some(1500)
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 3.84s

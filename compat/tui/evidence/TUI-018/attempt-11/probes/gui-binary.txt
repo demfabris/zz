@@ -1,0 +1,28 @@
+== zz
+zz 0.10.0
+version rc=0
+new-session closed-stdin rc=0
+nonreader
+nonreader closed-stdin rc=0
+[err] evsig_cb: recv: Bad file descriptor
+reader closed-stdin rc=1 before=yes tail=
+reader piped rc=0 piped=yes
+Input/output error: -
+reader writeonly rc=1
+open: ^[[31mRED^[[39m 3:0
+term rc=0
+after: ^[[31mRED^[[39m 3:0
+== zz_cli-final
+zz 0.10.0
+version rc=0
+new-session closed-stdin rc=0
+nonreader
+nonreader closed-stdin rc=0
+[err] evsig_cb: recv: Bad file descriptor
+reader closed-stdin rc=1 before=yes tail=
+reader piped rc=0 piped=yes
+Input/output error: -
+reader writeonly rc=1
+open: ^[[31mRED^[[39m 3:0
+term rc=0
+after: ^[[31mRED^[[39m 3:0

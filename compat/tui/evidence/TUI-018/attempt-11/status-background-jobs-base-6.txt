@@ -1,0 +1,99 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-c11-alias-fix/target/alias6-base/zz_cli
+[1;36m==>[0m running smoke/status-background-jobs
+smoke/status-background-jobs: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 1 WARN divergence(s)
+[1;33mwarn:[0m smoke/status-background-jobs failed; it is retried alone after the corpus
+    SMOKE STDOUT: divergence
+    --- zz SMOKE STDOUT step 1
+    +++ tmux SMOKE STDOUT step 1
+    @@ -1,4 +1,4 @@
+     status jobs: attach below 1.5s; shared job; slow output; cached output; interval rerun
+     status jobs: window and pane loops each key one job per looped item
+     status jobs: long cached output retains TAIL on both binaries
+    -AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 1, 0, b'\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n0:date*                                                                                                           DATE[]\n'))
+    +status jobs: drawn DATE changes at seconds 1, 3, 5 and 7 with interval 2
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 2
+    COMMAND: out: show-environment -g ZZ_STATUS_BACKGROUND_JOBS
+    zz exit: 0
+    tmux exit: 0
+    zz stderr:
+        <empty>
+    tmux stderr:
+        <empty>
+    zz stdout:
+        ZZ_STATUS_BACKGROUND_JOBS=failed:zz-side-only
+    tmux stdout:
+        ZZ_STATUS_BACKGROUND_JOBS=clean:9
+    OUT: divergence
+    --- zz OUT step 2
+    +++ tmux OUT step 2
+    @@ -1 +1 @@
+    -ZZ_STATUS_BACKGROUND_JOBS=failed:zz-side-only
+    +ZZ_STATUS_BACKGROUND_JOBS=clean:9
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=1
+[1;36m==>[0m retrying smoke/status-background-jobs alone
+smoke/status-background-jobs: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 1 WARN divergence(s)
+[1;33mwarn:[0m smoke/status-background-jobs failed again alone; see /home/demfabris/dev/zz-c11-alias-fix/compat/results/smoke/status-background-jobs.log
+    SMOKE STDOUT: divergence
+    --- zz SMOKE STDOUT step 1
+    +++ tmux SMOKE STDOUT step 1
+    @@ -1,4 +1,4 @@
+     status jobs: attach below 1.5s; shared job; slow output; cached output; interval rerun
+     status jobs: window and pane loops each key one job per looped item
+     status jobs: long cached output retains TAIL on both binaries
+    -AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 1, 0, b'\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n0:date*                                                                                                           DATE[]\n'))
+    +status jobs: drawn DATE changes at seconds 1, 3, 5 and 7 with interval 2
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 2
+    COMMAND: out: show-environment -g ZZ_STATUS_BACKGROUND_JOBS
+    zz exit: 0
+    tmux exit: 0
+    zz stderr:
+        <empty>
+    tmux stderr:
+        <empty>
+    zz stdout:
+        ZZ_STATUS_BACKGROUND_JOBS=failed:zz-side-only
+    tmux stdout:
+        ZZ_STATUS_BACKGROUND_JOBS=clean:9
+    OUT: divergence
+    --- zz OUT step 2
+    +++ tmux OUT step 2
+    @@ -1 +1 @@
+    -ZZ_STATUS_BACKGROUND_JOBS=failed:zz-side-only
+    +ZZ_STATUS_BACKGROUND_JOBS=clean:9
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=1
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| smoke/status-background-jobs | 2 | yes | 0 | yes | no | no |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+exit_status=1

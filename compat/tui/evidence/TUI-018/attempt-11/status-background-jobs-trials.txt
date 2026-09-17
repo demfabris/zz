@@ -1,0 +1,16 @@
+status-background-jobs-base-1.txt first_attempt_failed=no red_twice=no
+status-background-jobs-final-1.txt first_attempt_failed=no red_twice=no
+status-background-jobs-base-2.txt first_attempt_failed=no red_twice=no
+status-background-jobs-final-2.txt first_attempt_failed=yes red_twice=yes
+status-background-jobs-base-3.txt first_attempt_failed=no red_twice=no
+status-background-jobs-final-3.txt first_attempt_failed=yes red_twice=yes
+status-background-jobs-base-4.txt first_attempt_failed=no red_twice=no
+status-background-jobs-final-4.txt first_attempt_failed=no red_twice=no
+status-background-jobs-base-5.txt first_attempt_failed=yes red_twice=no
+status-background-jobs-final-5.txt first_attempt_failed=yes red_twice=no
+status-background-jobs-final-6.txt first_attempt_failed=no red_twice=no
+status-background-jobs-base-6.txt first_attempt_failed=yes red_twice=yes
+status-background-jobs-base-7.txt first_attempt_failed=yes red_twice=no
+status-background-jobs-final-7.txt first_attempt_failed=yes red_twice=yes
+status-background-jobs-base-8.txt first_attempt_failed=yes red_twice=no
+status-background-jobs-final-8.txt first_attempt_failed=yes red_twice=no

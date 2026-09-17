@@ -1,0 +1,50 @@
+%begin T I 0
+%end T I 0
+%session-changed $0 cs
+%begin T I 1
+%end T I 1
+%begin T I 1
+%end T I 1
+x
+%begin T I 1
+%end T I 1
+%exit
+rc=0 tail=yes
+SAME [set -g @b yes ; run-shell -t %99 'echo x' ; set -g @tail yes]
+%begin T I 0
+%end T I 0
+%session-changed $0 cs
+%begin T I 1
+%end T I 1
+%begin T I 1
+%end T I 1
+'exit 3' returned 3
+%begin T I 1
+%end T I 1
+%exit
+rc=0 tail=yes
+SAME [set -g @b yes ; run-shell 'exit 3' ; set -g @tail yes]
+%begin T I 0
+%end T I 0
+%session-changed $0 cs
+%begin T I 1
+%end T I 1
+%begin T I 1
+invalid delay time: bogus
+%error T I 1
+%exit
+rc=1 tail=
+SAME [set -g @b yes ; run-shell -d bogus 'echo x' ; set -g @tail yes]
+%begin T I 0
+%end T I 0
+%session-changed $0 cs
+%begin T I 1
+%end T I 1
+%begin T I 1
+%end T I 1
+out
+%begin T I 1
+%end T I 1
+%exit
+rc=0 tail=yes
+SAME [set -g @b yes ; run-shell 'echo out' ; set -g @tail yes]

@@ -86,7 +86,57 @@
  
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -2109,14 +2109,31 @@
+@@ -731,6 +731,7 @@
+         "style_id",
+         "wide",
+         "hyperlink",
++        "tab",
+     }, 4);
+ 
+     // The bit offset of the codepoint content within a Cell, used to
+@@ -1017,7 +1018,8 @@
+                 const cell = &cells[k + offset];
+                 if (cell.wide != .narrow or
+                     cell.hasGrapheme() or
+-                    cell.hyperlink) break :fill;
++                    cell.hyperlink or
++                    cell.tab != 0) break :fill;
+             }
+             for (0..general_count) |offset| {
+                 const cell = &cells[k + offset];
+@@ -1044,6 +1046,11 @@
+         }
+ 
+         if (k > 0) {
++            if (cursor.x + k < self.cols and cells[k].tab >= 128) {
++                var end = k + 1;
++                while (cursor.x + end < self.cols and cells[end].tab >= 128) end += 1;
++                screen.clearCells(page, cursor.page_row, cells[k..end]);
++            }
+             assert(k % cells_per_cp == 0);
+             cursor.page_row.dirty = true;
+             if (style_id != style.default_id) cursor.page_row.styled = true;
+@@ -1476,6 +1483,19 @@
+     };
+ 
+     const cell = self.screens.active.cursor.page_cell;
++    const following: [*]Cell = @ptrCast(cell);
++    if (cell.tab != 0 or (self.screens.active.cursor.x + 1 < self.cols and following[1].tab >= 128)) {
++        const screen = self.screens.active;
++        const cells = screen.cursor.page_pin.cells(.all);
++        var left: usize = screen.cursor.x;
++        var right = left + 1;
++        if (cell.tab >= 128) {
++            while (left > 0 and cells[left].tab >= 128) left -= 1;
++            if (unmapped_c < 128 and cells[left].tab == 0 and cells[left].wide == .narrow) left += 1;
++        }
++        while (right < cells.len and cells[right].tab >= 128) right += 1;
++        screen.clearCells(screen.cursor.page_pin.node.page(), screen.cursor.page_row, cells[left..right]);
++    }
+ 
+     // If the wide property of this cell is the same, then we don't
+     // need to do the special handling here because the structure will
+@@ -2109,15 +2129,31 @@
  /// Horizontal tab moves the cursor to the next tabstop, clearing
  /// the screen to the left the tabstop.
  pub fn horizontalTab(self: *Terminal) void {
@@ -98,34 +148,45 @@
 -        // "last cursor position" because we want a space to be written
 -        // at the tabstop unless we're at the end (the while condition).
 -        if (self.tabstops.get(self.screens.active.cursor.x)) return;
+-    }
 +    const screen = self.screens.active;
 +    const start = screen.cursor.x;
-+    const y = screen.cursor.y;
-+    while (screen.cursor.x < self.scrolling_region.right) {
-+        screen.cursorRight(1);
-+        if (self.tabstops.get(screen.cursor.x)) break;
++    const cells: [*]Cell = @ptrCast(screen.cursor.page_cell);
++    var target = start;
++    while (target < self.scrolling_region.right) {
++        target += 1;
++        if (self.tabstops.get(target)) break;
 +    }
-+    const width = screen.cursor.x - start;
++    const width = target - start;
++    screen.cursorRight(width);
 +    if (width == 0 or width > 32) return;
-+    const first = screen.pages.getCell(.{ .active = .{ .x = start, .y = y } }).?;
-+    const first_cell = first.cell.*;
-+    var x = start;
-+    while (x < start + width) : (x += 1) {
-+        const cell = screen.pages.getCell(.{ .active = .{ .x = x, .y = y } }).?.cell.*;
-+        if (cell.wide != .narrow or cell.hyperlink or cell.tab != 0) return;
-+        if (cell.codepoint() != 0 and cell.codepoint() != ' ') return;
-+        if (cell.style_id != first_cell.style_id or cell.content_tag != first_cell.content_tag or cell.bg_indexed != first_cell.bg_indexed) return;
-+        if (cell.content_tag == .bg_color_palette and cell.content.color_palette.data != first_cell.content.color_palette.data) return;
-+        if (cell.content_tag == .bg_color_rgb and cell.content.color_rgb != first_cell.content.color_rgb) return;
++    const first = cells[0];
++    if (first.wide != .narrow or first.hyperlink or first.tab != 0) return;
++    if (first.content_tag == .codepoint_grapheme) return;
++    if (first.codepoint() != 0 and first.codepoint() != ' ') return;
++    const Ignored = pagepkg.Mask(Cell, &.{ "protected", "semantic_content", "_padding" }, 4);
++    var mask = comptime Ignored.strip(@bitCast(@as(u64, std.math.maxInt(u64))));
++    if (first.content_tag == .codepoint) mask &= ~(@as(u64, ' ') << @bitOffsetOf(Cell, "content"));
++    const expected = @as(u64, @bitCast(first)) & mask;
++    for (cells[0..width]) |cell| {
++        if (@as(u64, @bitCast(cell)) & mask != expected) return;
 +    }
-+    x = start;
-+    while (x < start + width) : (x += 1) {
-+        const rac = screen.pages.getCell(.{ .active = .{ .x = x, .y = y } }).?;
-+        rac.cell.tab = if (x == start) @intCast(width) else 128 + @as(u8, @intCast(x - start));
-+        rac.row.dirty = true;
-     }
++    cells[0].tab = @intCast(width);
++    for (cells[1..width]) |*cell| cell.tab = 128;
++    screen.cursor.page_row.dirty = true;
  }
  
+ // Same as horizontalTab but moves to the previous tabstop instead of the next.
+@@ -3072,7 +3108,8 @@
+     }
+ 
+     // Insert blanks. The blanks preserve the background color.
+-    self.screens.active.clearCells(page, self.screens.active.cursor.page_row, left[0..adjusted_count]);
++    const cleared = if (rem == 1) adjusted_count else @min(adjusted_count, scroll_amount);
++    self.screens.active.clearCells(page, self.screens.active.cursor.page_row, left[0..cleared]);
+ 
+     // Our row is always dirty
+     self.screens.active.cursorMarkDirty();
 --- a/src/terminal/c/cell.zig
 +++ b/src/terminal/c/cell.zig
 @@ -82,6 +82,8 @@

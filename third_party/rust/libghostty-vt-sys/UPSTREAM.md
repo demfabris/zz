@@ -42,6 +42,15 @@ uses its trailing padding for two booleans; cell queries append tags 12 and 13.
 The adjacent safe wrapper exposes these fields. Both wrappers must accompany
 this patch; a stock prebuilt libghostty-vt does not implement the new queries.
 
+The HT path uses the cursor's cached cell pointer, validates at most 32 adjacent
+cells with a packed comparison, and marks the row dirty once. It performs no
+page lookup per column. A head stores the tab width; padding stores 128. Cell
+moves preserve both facts, while printing clears adjacent padding and its head
+where tmux would overwrite them. Capture reads the head and padding separately,
+so inserting, deleting or erasing part of a tab does not erase its surviving
+head. ICH clears the vacated source range, matching the pin when the insert
+count exceeds the number of cells moved.
+
 The build applies the patch to its fetched or explicitly supplied Ghostty source
 and records the applied patch. On a later patch change it reverses only that
 recorded patch before applying the new one; a conflicting source edit fails.

@@ -1077,36 +1077,43 @@
         "compat/tui/evidence/TUI-015/attempt-02/environment.txt",
         "compat/tui/evidence/TUI-017/attempt-04/notes.md",
         "compat/tui/evidence/TUI-017/attempt-04/environment.json",
-        "compat/tui/evidence/TUI-017/attempt-04/failure-comparison.json"
+        "compat/tui/evidence/TUI-017/attempt-04/failure-comparison.json",
+        "compat/tui/evidence/TUI-017/attempt-05/notes.md",
+        "compat/tui/evidence/TUI-017/attempt-05/environment.json",
+        "compat/tui/evidence/TUI-017/attempt-05/exitcode-dependency.json"
       ],
       "acceptance": [
         "Record the decision that zz delegates locking to the OS session rather than drawing a lock surface of its own, with the measurement behind it: the pin spawns lock-command onto the client's tty because its server owns that terminal, and zz's daemon publishes frames its clients draw, so there is no terminal to spawn onto and a desktop window running lock -np has no meaning. Keep the decision in knowledge/designs/tui-parity.md and in the options.lock-program gap.",
         "Keep lock-client, lock-server and lock-session answering exactly what the pin answers: stdout, stderr, exit status, target validation and the after-lock-server hook, which compat/tui-client-commands.sh asserts. lock-after-time and lock-command stay accepted options that arm nothing, named as such rather than silently ignored."
       ],
-      "evidence_note": "RECONCILED CYCLE 12 FIX PASS 2026-09-16, rebased onto origin/main e40a13e1 after v0.10.0. REVIEW, not verified. Fresh source candidate 204c7975 incorporates the later daemon changes and reconciles main's bare pane/window-ID resolver through the existing session-only dispatch, without duplicate ID lookup paths. Main's session_targets_accept_pane_and_window_ids test and twenty-step targets corpus, including its four new pins, are unchanged and pass. The window/pane fallback containment regression passes. Three shared-fixture runs agree: 8 of 186 asserted comparisons differ, 32 recorded (0 for a sibling lane, owners TUI-014=6 TUI-015=3 TUI-017=4 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0). All 18 added regressions and the lock-client closure pass. The eight exact-exit failures reproduce on clean e40a13e1: identical stdout/stderr, main and candidate exit 2 versus pin exit 1. Assertions remain intact. The complete delta corpus ran 163/163 rows: 13 final divergences, with exact clean-main observations establishing twelve as inherited. smoke/split-window-wait is conservatively classified caused-here at the corpus boundary: clean main passes and the candidate fails all three paired repeats; a smaller timing probe varies on both, so no source cause or fix is claimed. Two extra first-pass failures clear on the built-in retry. Every original failure is retained. Current all-payload wire guard passes at 103; no serialized payload changes. Fresh proof is in compat/tui/evidence/TUI-017/attempt-04. Exact-empty compound components and omitted-session global panes remain fixed; explicit session containment is retained. lock-client is the sole recorded-to-asserted flip and has a status-row sabotage. Three pane-base-index records remain owned by TUI-015 for the sibling lane. Fresh self-check passes all sabotage channels and both equivalences. The two-client probe matches all 42 batch-scope comparisons, while retaining 30 tab and eight ordinary 100-column erased-background differences. Lock and rich-transport probes complete with their documented decision differences. The first attached-client run fails at the final reattach marker with a waiting-for-frame screen; the fresh retry passes, and both runs remain in the evidence. The TUI-015 executable claim check exits 1 for the same eight inherited assertions. Clean main also passes attached-client; the initial candidate reattach timeout is retained and is not claimed inherited. The TUI-017 executable claim check also exits 1 for the same eight inherited assertions. Both executable checks were re-run at this base. Worker delivery remains partial: the split-window corpus regression has not been repaired, and the initial attached-client and full daemon-library failures remain visible beside passing reruns.",
-      "next_action": "Keep at review. Gate the target reconciliation after the inherited exit-policy failures and the candidate-only split-window-wait corpus regression are resolved. The sibling lane must close the three pane-base-index records; retain the OS-session locking decisions. See attempt-04/failure-comparison.json for per-row attribution.",
+      "evidence_note": "CAPTURE-12 FOLLOW-UP 2026-09-16, rebased without conflicts onto origin/main d1694e65, including the landed exit-code predecessor. REVIEW, not verified. Source 0bab4e9c repairs the split-window-wait fixture: a child readiness/release handshake replaces the fixed 0.4/1-second timing assumption. The original full row passes two direct pairs, then fails at the same parked-pane line on both candidate and clean e40a13e1 under CPU throttling. A started-child probe reproduces expired panes three times on each binary; remain-on-exit retains the dead child in the correct window three times on each. The target =splitwait: uses TargetSlot::Classified, never the new session-only compound dispatch, and the scenario never calls wait-pane. The fixed fixture passes three pairs and catches early-return and wrong-window sabotages. This supersedes attempt-04's conservative caused-here classification; all old failures remain retained. The scratch candidate plus sibling 888be5af passes all 186 asserted comparisons, including all eight reported exit-policy failures, with 32 records and unattributed=0. No assertion was weakened. Main landed that fix as 81c971f1; protocol 104 is inherited, with no further payload change by this lane. Fresh final-base runs and their exact results are retained in attempt-05. The final-base full daemon run passes 949 and fails two under load, both passing filtered reruns; mux 535, protocol 229 and terminal 280 with one ignored pass. No full daemon-suite green claim is made. A self-check overlapped replacement of its CLI from wire 103 to 104 and is invalid; copied-binary startup attempts lacked libcef.so. Both setup failures are retained beside fresh runs with an immutable executable. The latest delta selection has 193 rows; the fresh focused run covers the thirteen previous failures plus capture-pane and targets, not the entire selection. The prior full 163-row run remains historical at e40a13e1. Exact-empty and omitted-session compound targets retain their fixes; main's bare pane/window-ID pins and fallback-containment tests remain intact. lock-client remains the sole recorded-to-asserted flip. The three pane-base-index records remain owned by TUI-015 for the sibling lane; OS-session locking decisions remain registered. Three final-base fixture runs pass all 192 asserted comparisons with 32 records and unattributed=0; main contributes the six assertions beyond the 186-case scratch proof. Final self-check passes 98 checks, attached-client passes, and the final-base split scenario passes under CPUQuota=25%. Formatting, four-crate clippy with -D warnings and wire validation pass. Both final executable claim checks exit 0 and confirm review with three TUI-015 records and four TUI-017 records; neither obligation is marked verified. The final-base compat/check.sh run exits 0, including all 535 mux tests and the required daemon manifest checks.",
+      "next_action": "Keep at review. Gate the target reconciliation and synchronized split fixture after reading attempt-05. The sibling lane must close the three pane-base-index records; retain the OS-session locking decisions. The exit-code predecessor is now in main, and its dependency proof passes all eight reported assertions.",
       "proof": {
-        "revision": "204c7975da35bcd613b723de3b9363389cf15137",
+        "revision": "0bab4e9c74644962c2914feb56fae415a7e1bdab",
         "tmux_commit": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
-        "environment": "Alienware Linux; pinned tmux; isolated homes and sockets; built candidate and independently compiled clean e40a13e1 archive; hashes and source checks in compat/tui/evidence/TUI-017/attempt-04/environment.json and main-environment.json.",
+        "environment": "Alienware Linux; main d1694e65; isolated homes/sockets; immutable candidate binary and independently compiled clean-main archive. Binary hashes, source equality and initial setup failures are recorded in attempt-05.",
         "commands": [
-          "compat/tui-client-commands.sh (three runs)",
-          "compat/tui-client-commands.sh --self-check",
-          "compat/attached-client.sh target/debug/zz compat/.cache/tmux-src/tmux",
-          "ZZ_COMPAT_ZZ=$PWD/target/debug/zz compat/run.sh --delta e40a13e1c981aa9b707a5a6a54f5e0267c751de9...HEAD --commands capture-pane,lock-session,lock-client,lock-server,has-session,list-windows (all 163 rows in three disjoint batches)",
-          "python3 compat/tui/verify-claims.py --run TUI-015"
+          "compat/tui-client-commands.sh target/capture-12-final-proof/zz compat/.cache/tmux-src/tmux (three final-base runs)",
+          "compat/tui-client-commands.sh --self-check target/capture-12-final-proof/zz compat/.cache/tmux-src/tmux",
+          "compat/attached-client.sh target/capture-12-final-proof/zz compat/.cache/tmux-src/tmux",
+          "compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/split-window-wait.txt target/capture-12-final-proof/zz compat/.cache/tmux-src/tmux (CPUQuota=25%)",
+          "ZZ_COMPAT_ZZ=$PWD/target/capture-12-final-proof/zz compat/run.sh --strict-geometry --delta origin/main...HEAD --commands capture-pane,lock-session,lock-client,lock-server,has-session,list-windows,split-window (15 explicitly named rows; exact argv in runs.jsonl)",
+          "python3 compat/tui/verify-claims.py --run TUI-015 --zz target/capture-12-final-proof/zz"
         ],
         "artifacts": [
-          "compat/tui/evidence/TUI-017/attempt-04/notes.md",
-          "compat/tui/evidence/TUI-017/attempt-04/environment.json",
-          "compat/tui/evidence/TUI-017/attempt-04/main-environment.json",
-          "compat/tui/evidence/TUI-017/attempt-04/main-pins.json",
-          "compat/tui/evidence/TUI-017/attempt-04/runs.jsonl",
-          "compat/tui/evidence/TUI-017/attempt-04/corpus-summary.json",
-          "compat/tui/evidence/TUI-017/attempt-04/failure-comparison.json",
-          "compat/tui/evidence/TUI-017/attempt-04/corpus-retries.json"
+          "compat/tui/evidence/TUI-017/attempt-05/notes.md",
+          "compat/tui/evidence/TUI-017/attempt-05/environment.json",
+          "compat/tui/evidence/TUI-017/attempt-05/final-main-environment.json",
+          "compat/tui/evidence/TUI-017/attempt-05/runs.jsonl",
+          "compat/tui/evidence/TUI-017/attempt-05/exitcode-dependency.json",
+          "compat/tui/evidence/TUI-017/attempt-05/lifetime-summary.json",
+          "compat/tui/evidence/TUI-017/attempt-05/source-audit.json",
+          "compat/tui/evidence/TUI-017/attempt-05/capture-summary.json",
+          "compat/tui/evidence/TUI-017/attempt-05/delta-selection.json",
+          "compat/tui/evidence/TUI-017/attempt-05/fixture-summary.json",
+          "compat/tui/evidence/TUI-017/attempt-05/records.json"
         ],
-        "review": "compat/tui/evidence/TUI-017/attempt-04/review.md"
+        "review": "compat/tui/evidence/TUI-017/attempt-05/review.md"
       }
     },
     {
@@ -1184,36 +1191,43 @@
         "compat/tui/evidence/TUI-017/attempt-03/environment.txt",
         "compat/tui/evidence/TUI-017/attempt-04/notes.md",
         "compat/tui/evidence/TUI-017/attempt-04/environment.json",
-        "compat/tui/evidence/TUI-017/attempt-04/failure-comparison.json"
+        "compat/tui/evidence/TUI-017/attempt-04/failure-comparison.json",
+        "compat/tui/evidence/TUI-017/attempt-05/notes.md",
+        "compat/tui/evidence/TUI-017/attempt-05/environment.json",
+        "compat/tui/evidence/TUI-017/attempt-05/exitcode-dependency.json"
       ],
       "acceptance": [
         "Answer capture-pane -C, -F, -H, -L, -P and -R with the pin's bytes over a rich snapshot the terminal worker owns, or keep each refusal with a measured reason that names the workload it would serve.",
         "Close the three text residues the roster measured: the default range printing every visible row rather than stopping at the last written one, -N keeping trailing spaces to the pane edge, and -M falling back to the pane when it is in no mode, plus the -a wording and the one trailing cell -e keeps."
       ],
-      "evidence_note": "RECONCILED CYCLE 12 FIX PASS 2026-09-16, rebased onto origin/main e40a13e1 after v0.10.0. REVIEW, not verified. Fresh source candidate 204c7975 incorporates the later daemon changes and reconciles main's bare pane/window-ID resolver through the existing session-only dispatch, without duplicate ID lookup paths. Main's session_targets_accept_pane_and_window_ids test and twenty-step targets corpus, including its four new pins, are unchanged and pass. The window/pane fallback containment regression passes. Three shared-fixture runs agree: 8 of 186 asserted comparisons differ, 32 recorded (0 for a sibling lane, owners TUI-014=6 TUI-015=3 TUI-017=4 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0). All 18 added regressions and the lock-client closure pass. The eight exact-exit failures reproduce on clean e40a13e1: identical stdout/stderr, main and candidate exit 2 versus pin exit 1. Assertions remain intact. The complete delta corpus ran 163/163 rows: 13 final divergences, with exact clean-main observations establishing twelve as inherited. smoke/split-window-wait is conservatively classified caused-here at the corpus boundary: clean main passes and the candidate fails all three paired repeats; a smaller timing probe varies on both, so no source cause or fix is claimed. Two extra first-pass failures clear on the built-in retry. Every original failure is retained. Current all-payload wire guard passes at 103; no serialized payload changes. Fresh proof is in compat/tui/evidence/TUI-017/attempt-04. Erased backgrounds contribute retained cells separately from the text extent used by -J/-T, and SpacerHead padding follows capture mode. TUI-017 now carries FOUR ordinary fixture records: capture-low-indexed-colour, capture-tab-trailing, capture-tab-internal and capture-tab-wide. All four must close before TUI-017 can verify. The sibling batch must include all three tab cases as well as indexed colour 1. Tabs share the existing TAB-cell storage limitation and are not waived by the DEC charset decision. Styled frozen-mode capture remains unproven. Fresh self-check passes all sabotage channels and both equivalences. The two-client probe matches all 42 batch-scope comparisons, while retaining 30 tab and eight ordinary 100-column erased-background differences. Lock and rich-transport probes complete with their documented decision differences. The first attached-client run fails at the final reattach marker with a waiting-for-frame screen; the fresh retry passes, and both runs remain in the evidence. The TUI-015 executable claim check exits 1 for the same eight inherited assertions. Clean main also passes attached-client; the initial candidate reattach timeout is retained and is not claimed inherited. The TUI-017 executable claim check also exits 1 for the same eight inherited assertions. Both executable checks were re-run at this base. Worker delivery remains partial: the split-window corpus regression has not been repaired, and the initial attached-client and full daemon-library failures remain visible beside passing reruns.",
-      "next_action": "Keep at review. The sibling handoff must cover all FOUR ordinary records: capture-low-indexed-colour and capture-tab-trailing, capture-tab-internal, capture-tab-wide. Preserve or reconstruct tab provenance independently of the DEC charset decision. Gate after the inherited exit-policy failures and candidate-only split-window-wait corpus regression are resolved. Retain the ordinary erased-background probe residuals and the frozen-mode proof limit.",
+      "evidence_note": "CAPTURE-12 FOLLOW-UP 2026-09-16, rebased without conflicts onto origin/main d1694e65, including the landed exit-code predecessor. REVIEW, not verified. Source 0bab4e9c repairs the split-window-wait fixture: a child readiness/release handshake replaces the fixed 0.4/1-second timing assumption. The original full row passes two direct pairs, then fails at the same parked-pane line on both candidate and clean e40a13e1 under CPU throttling. A started-child probe reproduces expired panes three times on each binary; remain-on-exit retains the dead child in the correct window three times on each. The target =splitwait: uses TargetSlot::Classified, never the new session-only compound dispatch, and the scenario never calls wait-pane. The fixed fixture passes three pairs and catches early-return and wrong-window sabotages. This supersedes attempt-04's conservative caused-here classification; all old failures remain retained. The scratch candidate plus sibling 888be5af passes all 186 asserted comparisons, including all eight reported exit-policy failures, with 32 records and unattributed=0. No assertion was weakened. Main landed that fix as 81c971f1; protocol 104 is inherited, with no further payload change by this lane. Fresh final-base runs and their exact results are retained in attempt-05. The final-base full daemon run passes 949 and fails two under load, both passing filtered reruns; mux 535, protocol 229 and terminal 280 with one ignored pass. No full daemon-suite green claim is made. A self-check overlapped replacement of its CLI from wire 103 to 104 and is invalid; copied-binary startup attempts lacked libcef.so. Both setup failures are retained beside fresh runs with an immutable executable. The latest delta selection has 193 rows; the fresh focused run covers the thirteen previous failures plus capture-pane and targets, not the entire selection. The prior full 163-row run remains historical at e40a13e1. TUI-017 carries FOUR ordinary records: capture-low-indexed-colour, capture-tab-trailing, capture-tab-internal and capture-tab-wide. The sibling must close all four before verification. Tabs share the TAB-cell storage limitation and have no DEC-charset waiver. The current capture probe matches all 44 enumerated batch comparisons and retains 30 tab plus eight ordinary 100-column erased-background differences. Styled frozen-mode capture remains unproven. Three final-base fixture runs pass all 192 asserted comparisons with 32 records and unattributed=0; main contributes the six assertions beyond the 186-case scratch proof. Final self-check passes 98 checks, attached-client passes, and the final-base split scenario passes under CPUQuota=25%. Formatting, four-crate clippy with -D warnings and wire validation pass. Both final executable claim checks exit 0 and confirm review with three TUI-015 records and four TUI-017 records; neither obligation is marked verified. The final-base compat/check.sh run exits 0, including all 535 mux tests and the required daemon manifest checks.",
+      "next_action": "Keep at review. The sibling handoff must cover all FOUR ordinary records: capture-low-indexed-colour and capture-tab-trailing, capture-tab-internal, capture-tab-wide. Preserve or reconstruct tab provenance independently of the DEC charset decision. Retain the ordinary erased-background probe residuals and frozen-mode proof limit. Read attempt-05 for the repaired split fixture and landed exit-code dependency proof.",
       "proof": {
-        "revision": "204c7975da35bcd613b723de3b9363389cf15137",
+        "revision": "0bab4e9c74644962c2914feb56fae415a7e1bdab",
         "tmux_commit": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
-        "environment": "Alienware Linux; pinned tmux; isolated homes and sockets; built candidate and independently compiled clean e40a13e1 archive; hashes and source checks in compat/tui/evidence/TUI-017/attempt-04/environment.json and main-environment.json.",
+        "environment": "Alienware Linux; main d1694e65; isolated homes/sockets; immutable candidate binary and independently compiled clean-main archive. Binary hashes, source equality and initial setup failures are recorded in attempt-05.",
         "commands": [
-          "compat/tui-client-commands.sh (three runs)",
-          "compat/tui-client-commands.sh --self-check",
-          "compat/attached-client.sh target/debug/zz compat/.cache/tmux-src/tmux",
-          "ZZ_COMPAT_ZZ=$PWD/target/debug/zz compat/run.sh --delta e40a13e1c981aa9b707a5a6a54f5e0267c751de9...HEAD --commands capture-pane,lock-session,lock-client,lock-server,has-session,list-windows (all 163 rows in three disjoint batches)",
-          "python3 compat/tui/verify-claims.py --run TUI-017"
+          "compat/tui-client-commands.sh target/capture-12-final-proof/zz compat/.cache/tmux-src/tmux (three final-base runs)",
+          "compat/tui-client-commands.sh --self-check target/capture-12-final-proof/zz compat/.cache/tmux-src/tmux",
+          "compat/attached-client.sh target/capture-12-final-proof/zz compat/.cache/tmux-src/tmux",
+          "compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/split-window-wait.txt target/capture-12-final-proof/zz compat/.cache/tmux-src/tmux (CPUQuota=25%)",
+          "ZZ_COMPAT_ZZ=$PWD/target/capture-12-final-proof/zz compat/run.sh --strict-geometry --delta origin/main...HEAD --commands capture-pane,lock-session,lock-client,lock-server,has-session,list-windows,split-window (15 explicitly named rows; exact argv in runs.jsonl)",
+          "python3 compat/tui/verify-claims.py --run TUI-017 --zz target/capture-12-final-proof/zz"
         ],
         "artifacts": [
-          "compat/tui/evidence/TUI-017/attempt-04/notes.md",
-          "compat/tui/evidence/TUI-017/attempt-04/environment.json",
-          "compat/tui/evidence/TUI-017/attempt-04/main-environment.json",
-          "compat/tui/evidence/TUI-017/attempt-04/main-pins.json",
-          "compat/tui/evidence/TUI-017/attempt-04/runs.jsonl",
-          "compat/tui/evidence/TUI-017/attempt-04/corpus-summary.json",
-          "compat/tui/evidence/TUI-017/attempt-04/failure-comparison.json",
-          "compat/tui/evidence/TUI-017/attempt-04/corpus-retries.json"
+          "compat/tui/evidence/TUI-017/attempt-05/notes.md",
+          "compat/tui/evidence/TUI-017/attempt-05/environment.json",
+          "compat/tui/evidence/TUI-017/attempt-05/final-main-environment.json",
+          "compat/tui/evidence/TUI-017/attempt-05/runs.jsonl",
+          "compat/tui/evidence/TUI-017/attempt-05/exitcode-dependency.json",
+          "compat/tui/evidence/TUI-017/attempt-05/lifetime-summary.json",
+          "compat/tui/evidence/TUI-017/attempt-05/source-audit.json",
+          "compat/tui/evidence/TUI-017/attempt-05/capture-summary.json",
+          "compat/tui/evidence/TUI-017/attempt-05/delta-selection.json",
+          "compat/tui/evidence/TUI-017/attempt-05/fixture-summary.json",
+          "compat/tui/evidence/TUI-017/attempt-05/records.json"
         ],
-        "review": "compat/tui/evidence/TUI-017/attempt-04/review.md"
+        "review": "compat/tui/evidence/TUI-017/attempt-05/review.md"
       }
     },
     {

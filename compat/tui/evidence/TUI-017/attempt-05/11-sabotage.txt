@@ -1,0 +1,5 @@
+command: ["python3", "compat/tui/evidence/TUI-017/attempt-05/sabotage.py"]
+early-return caught 1
+wrong-window caught 1
+
+exit_status: 0

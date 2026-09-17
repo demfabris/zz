@@ -1,0 +1,8 @@
+command: ["python3", "compat/tui/evidence/TUI-017/attempt-05/collect-corpus.py"]
+Traceback (most recent call last):
+  File "/home/demfabris/dev/zz-c11-capture-fix/compat/tui/evidence/TUI-017/attempt-05/collect-corpus.py", line 46, in <module>
+    assert match, scenario
+           ^^^^^
+AssertionError: smoke/status-background-jobs
+
+exit_status: 1

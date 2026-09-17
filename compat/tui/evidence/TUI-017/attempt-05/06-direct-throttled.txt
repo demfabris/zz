@@ -1,0 +1,5 @@
+command: ["systemd-run", "--user", "--scope", "-q", "-p", "CPUQuota=25%", "-p", "MemoryMax=2G", "-p", "MemorySwapMax=1G", "python3", "compat/tui/evidence/TUI-017/attempt-05/direct-pairs.py", "throttled"]
+candidate 1 SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=1
+main 1 SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=1
+
+exit_status: 0

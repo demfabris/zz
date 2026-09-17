@@ -1,0 +1,8 @@
+command: ["env", "PATH=/tmp/zz-capture-12-bin:/home/demfabris/.cargo/bin:/usr/local/bin:/usr/bin:/bin", "/tmp/zz-cargo.sh", "clippy", "-p", "zz-mux", "-p", "zz-terminal", "-p", "zz-daemon", "-p", "zz-protocol", "--all-targets", "--all-features", "--", "-D", "warnings"]
+    Checking zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-terminal)
+    Checking zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-protocol)
+    Checking zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-mux)
+    Checking zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-daemon)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 49.43s
+
+exit_status: 0

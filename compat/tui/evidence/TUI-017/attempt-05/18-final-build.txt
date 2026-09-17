@@ -1,0 +1,15 @@
+command: ["/tmp/zz-cargo.sh", "build", "-p", "zz"]
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-terminal)
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-protocol)
+   Compiling zz-client v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-client)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-mux)
+   Compiling zz-browser v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-browser)
+   Compiling zz-chrome-import v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-chrome-import)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-daemon)
+   Compiling zz-ui v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-ui)
+   Compiling zz-config v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-config)
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-tui)
+   Compiling zz v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 11s
+
+exit_status: 0

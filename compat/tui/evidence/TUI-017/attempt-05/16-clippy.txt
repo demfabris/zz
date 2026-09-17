@@ -1,0 +1,4 @@
+command: ["env", "PATH=/tmp/zz-capture-12-bin:/home/demfabris/.cargo/bin:/usr/local/bin:/usr/bin:/bin", "/tmp/zz-cargo.sh", "clippy", "-p", "zz-mux", "-p", "zz-terminal", "-p", "zz-daemon", "-p", "zz-protocol", "--all-targets", "--all-features", "--", "-D", "warnings"]
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.46s
+
+exit_status: 0

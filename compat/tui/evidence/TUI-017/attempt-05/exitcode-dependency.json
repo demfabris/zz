@@ -1,0 +1,16 @@
+{
+  "source": "4c4c142b plus sibling 888be5af crates patch in detached scratch worktree",
+  "exit_status": 0,
+  "cases": {
+    "refresh-missing-argument": "ok    refresh-missing-argument",
+    "lock-server-arity": "ok    lock-server-arity",
+    "lock-server-unknown-flag": "ok    lock-server-unknown-flag",
+    "lock-session-arity": "ok    lock-session-arity",
+    "lock-client-arity": "ok    lock-client-arity",
+    "lock-client-missing-argument": "ok    lock-client-missing-argument",
+    "client-tree-unknown-flag": "ok    client-tree-unknown-flag",
+    "client-tree-usage": "ok    client-tree-usage"
+  },
+  "summary": "all 186 asserted comparisons identical, 32 recorded not asserted (0 for a sibling lane, owners TUI-014=6 TUI-015=3 TUI-017=4 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0)",
+  "later_landed_on_main": "81c971f1"
+}

@@ -1,0 +1,3 @@
+command: ["env", "PATH=/tmp/zz-capture-12-bin:/home/demfabris/.cargo/bin:/usr/local/bin:/usr/bin:/bin", "/tmp/zz-cargo.sh", "fmt", "--all"]
+
+exit_status: 0

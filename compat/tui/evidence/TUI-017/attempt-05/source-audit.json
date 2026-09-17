@@ -1,0 +1,20 @@
+{
+  "source_revision": "0bab4e9c74644962c2914feb56fae415a7e1bdab",
+  "base": "d1694e65da7552e8ebd53da2ce596ee8ffa748e9",
+  "added_code_comments": [],
+  "production_files": [
+    "compat/scenarios/smoke/fixtures/command-flag-errors.sh",
+    "compat/scenarios/smoke/fixtures/split-window-wait.sh",
+    "compat/tui-client-commands.sh",
+    "compat/tui/verify-claims.py",
+    "crates/zz-daemon/src/daemon.rs",
+    "crates/zz-mux/src/command.rs",
+    "crates/zz-mux/src/model.rs",
+    "crates/zz-protocol/src/catalog.rs",
+    "crates/zz-terminal/src/session.rs"
+  ],
+  "target_scenario_byte_identical_to_main": true,
+  "main_session_id_test_byte_identical": true,
+  "containment_test_present": true,
+  "attribution_trailers": 0
+}

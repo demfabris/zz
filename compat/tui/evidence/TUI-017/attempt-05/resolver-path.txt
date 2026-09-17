@@ -1,0 +1,549 @@
+crates/zz-mux/src/command.rs
+6668:             .update_editor_path(pane, path.map(|path| path.to_string()))?;
+6669:         Ok(Execution::default())
+6670:     }
+6671: 
+6672:     fn split_window_with_options(
+6673:         &mut self,
+6674:         context: &mut ExecutionContext,
+6675:         options: &Options,
+6676:         kind: PaneKind,
+6677:         command: Option<Vec<String>>,
+6678:         size: Option<SplitSize<'_>>,
+6679:         apply_tmux_zoom: bool,
+6680:         hooks: &mut impl StatusHooks,
+6681:     ) -> Result<Execution, ServerError> {
+6682:         let active_session = context.session;
+6683:         let format_client = context.format_client();
+6684:         let target_format_client = context.target_format_client();
+6685:         let target = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+6686:         let empty = pane_spawn_empty(options, command.as_deref())?;
+6687:         let environment = spawn_environment(options);
+6688:         let axis = if options.has("-h") {
+6689:             Axis::Horizontal
+6690:         } else {
+6691:             Axis::Vertical
+6692:         };
+6693:         let placement = self.split_placement(options, size)?;
+6694:         let snapshot_kind = pane_kind_snapshot(&kind);
+6695:         let (inherit_cwd_from, cwd) =
+6696:             spawn_cwd_source(self, options, Some(target), &kind, format_client, hooks);
+6697:         let pane = self.state.split_pane_with(target, axis, kind, placement)?;
+6698:         if empty {
+6699:             self.state.mark_pane_empty(pane)?;
+6700:         }
+6701:         if !placement.detached {
+6702:             let target =
+6703:                 ExecutionContext::for_pane(&self.state, pane).expect("new pane has a context");
+6704:             context.retarget(&target);
+6705:         }
+6706:         let window = self
+6707:             .state
+6708:             .window_for_pane(pane)
+6709:             .expect("new pane belongs to a window");
+6710:         if apply_tmux_zoom {
+
+crates/zz-mux/src/command.rs
+7080:                 MuxEffect::TerminalKnobsChanged {
+7081:                     window: None,
+7082:                     pane: Some(target),
+7083:                 },
+7084:             ]);
+7085:         }
+7086:         Ok(execution)
+7087:     }
+7088: 
+7089:     fn list_panes(
+7090:         &self,
+7091:         context: &ExecutionContext,
+7092:         args: &[RawText],
+7093:         hooks: &mut impl StatusHooks,
+7094:     ) -> Result<Execution, ServerError> {
+7095:         let (options, positional) = parse_command_options("list-panes", args)?;
+7096:         reject_positionals("list-panes", &positional)?;
+7097:         let target_window =
+7098:             self.resolve_window(options.value("-t"), context.session, context.window)?;
+7099:         let sort = TmuxSort::parse(options.value("-O"), options.has("-r"), None)?;
+7100:         let target_session = self.state.windows[&target_window].session;
+7101:         let window_ids = if options.has("-a") {
+7102:             self.state
+7103:                 .sessions_by_name()
+7104:                 .into_iter()
+7105:                 .flat_map(|session| session.windows.iter().copied())
+7106:                 .collect::<Vec<_>>()
+7107:         } else if options.has("-s") {
+7108:             self.state.sessions[&target_session].windows.clone()
+7109:         } else {
+7110:             vec![target_window]
+7111:         };
+7112:         let format = options.value("-F").unwrap_or(if options.has("-a") {
+7113:             DEFAULT_LIST_PANES_WITH_SERVER_FORMAT
+7114:         } else if options.has("-s") {
+7115:             DEFAULT_LIST_PANES_WITH_SESSION_FORMAT
+7116:         } else {
+7117:             DEFAULT_LIST_PANES_FORMAT
+7118:         });
+7119:         let mut output = Vec::new();
+7120:         for window_id in window_ids {
+7121:             let window = self
+7122:                 .state
+7123:                 .windows
+7124:                 .get(&window_id)
+7125:                 .ok_or_else(|| ServerError::MissingTarget(window_id.to_string()))?;
+7126:             let border_status = self.pane_border_status(window_id);
+7127:             let mut panes = window.pane_order().to_vec();
+7128:             sort.apply(&mut panes, |left, right| {
+7129:                 let left_pane = &window.panes[left];
+7130:                 let right_pane = &window.panes[right];
+
+crates/zz-mux/src/model.rs
+2780:                 .map_err(|_| ServerError::PaneNotFound(target.to_owned()))?;
+2781:             return self
+2782:                 .window_for_pane(id)
+2783:                 .map(|_| id)
+2784:                 .ok_or_else(|| ServerError::PaneNotFound(target.to_owned()));
+2785:         }
+2786: 
+2787:         let current_window = current_pane
+2788:             .and_then(|pane| self.window_for_pane(pane))
+2789:             .or_else(|| current_window.filter(|window| self.windows.contains_key(window)));
+2790:         let current_session = current_window
+2791:             .and_then(|window| self.windows.get(&window).map(|window| window.session));
+2792:         let pane_target = normalize_pane_target(target);
+2793:         let pane_error = ServerError::PaneNotFound(pane_target.to_owned());
+2794: 
+2795:         let Some((window_target, pane_target)) = target.split_once('.') else {
+2796:             if !target.contains(':') {
+2797:                 let window = self.resolve_window_core(
+2798:                     None,
+2799:                     current_session,
+2800:                     current_window,
+2801:                     TargetSlot::Classified,
+2802:                 )?;
+2803:                 if let Ok(pane) = self.resolve_pane_in_window(target, window, pane_at_index) {
+2804:                     return Ok(pane);
+2805:                 }
+2806:             }
+2807:             let (fallback, slot) = if target.contains(':') {
+2808:                 (target, TargetSlot::Classified)
+2809:             } else {
+2810:                 (pane_target, TargetSlot::PaneFallback)
+2811:             };
+2812:             let window = match self.resolve_window_core(
+2813:                 Some(fallback),
+2814:                 current_session,
+2815:                 current_window,
+2816:                 slot,
+2817:             ) {
+2818:                 Ok(window) => window,
+2819:                 Err(_) if !target.contains(':') => return Err(pane_error),
+2820:                 Err(error) => return Err(error),
+2821:             };
+2822:             return self
+2823:                 .windows
+2824:                 .get(&window)
+2825:                 .map(|window| window.active_pane)
+2826:                 .ok_or_else(|| ServerError::WindowNotFound(target.to_owned()));
+2827:         };
+2828:         let window = if window_target.is_empty() {
+2829:             self.resolve_window_core(
+2830:                 None,
+2831:                 current_session,
+2832:                 current_window,
+2833:                 TargetSlot::Classified,
+2834:             )?
+2835:         } else {
+
+crates/zz-mux/src/model.rs
+2520:     fn resolve_window_target_core(
+2521:         &self,
+2522:         target: Option<&str>,
+2523:         current_session: Option<SessionId>,
+2524:         current_window: Option<WindowId>,
+2525:         index_mode: bool,
+2526:         slot: TargetSlot,
+2527:     ) -> Result<WindowTargetResolution, ServerError> {
+2528:         let current_session = current_session
+2529:             .filter(|session| self.sessions.contains_key(session))
+2530:             .or_else(|| {
+2531:                 current_window
+2532:                     .and_then(|window| self.windows.get(&window).map(|window| window.session))
+2533:             });
+2534:         let Some(target) = target.filter(|target| !target.is_empty()) else {
+2535:             let window = current_window.filter(|window| self.windows.contains_key(window));
+2536:             let session = window
+2537:                 .map(|window| self.windows[&window].session)
+2538:                 .map_or_else(
+2539:                     || self.resolve_named_session(None, current_session, slot),
+2540:                     Ok,
+2541:                 )?;
+2542:             let window = window.unwrap_or(self.sessions[&session].active_window);
+2543:             return Ok(WindowTargetResolution {
+2544:                 session,
+2545:                 window: Some(window),
+2546:                 index: (!index_mode).then_some(self.windows[&window].index),
+2547:             });
+2548:         };
+2549:         if target.starts_with('$') && !target.contains([':', '.']) {
+2550:             let session = self.resolve_named_session(Some(target), current_session, slot)?;
+2551:             return Ok(WindowTargetResolution {
+2552:                 session,
+2553:                 window: Some(self.sessions[&session].active_window),
+2554:                 index: None,
+2555:             });
+2556:         }
+2557:         if target.starts_with('@') {
+2558:             let window = target
+2559:                 .parse::<WindowId>()
+2560:                 .ok()
+2561:                 .filter(|window| self.windows.contains_key(window))
+2562:                 .ok_or_else(|| ServerError::WindowNotFound(target.to_owned()))?;
+2563:             let state = &self.windows[&window];
+2564:             return Ok(WindowTargetResolution {
+2565:                 session: state.session,
+2566:                 window: Some(window),
+2567:                 index: Some(state.index),
+2568:             });
+2569:         }
+2570:         let (session_target, window_target) = target
+2571:             .split_once(':')
+2572:             .map_or((None, target), |(session, window)| (Some(session), window));
+2573:         let session = match session_target {
+2574:             Some("") | None => self.resolve_named_session(None, current_session, slot)?,
+2575:             Some(session) => self.resolve_named_session(Some(session), current_session, slot)?,
+
+crates/zz-mux/src/model.rs
+2300:         current: Option<SessionId>,
+2301:     ) -> Result<SessionId, ServerError> {
+2302:         if target.is_some_and(is_marked_target) {
+2303:             return Ok(self.windows[&self.marked_window()?].session);
+2304:         }
+2305:         self.resolve_named_session(target, current, TargetSlot::Session)
+2306:     }
+2307: 
+2308:     fn resolve_named_session(
+2309:         &self,
+2310:         target: Option<&str>,
+2311:         current: Option<SessionId>,
+2312:         slot: TargetSlot,
+2313:     ) -> Result<SessionId, ServerError> {
+2314:         let target = target.map(|target| {
+2315:             if target == "=" && slot != TargetSlot::PaneFallback {
+2316:                 ""
+2317:             } else {
+2318:                 target
+2319:             }
+2320:         });
+2321:         let Some(target) = target.filter(|target| !target.is_empty()) else {
+2322:             return current
+2323:                 .filter(|session| self.sessions.contains_key(session))
+2324:                 .or_else(|| self.sessions.keys().next().copied())
+2325:                 .ok_or_else(|| ServerError::SessionNotFound("current session".to_owned()));
+2326:         };
+2327:         if slot == TargetSlot::Session {
+2328:             if let Some((session, window)) = target.split_once(':')
+2329:                 && (session == "=" || window == "=")
+2330:             {
+2331:                 let session = if session == "=" { "" } else { session };
+2332:                 let window = if window == "=" { "" } else { window };
+2333:                 return self.resolve_named_session(
+2334:                     Some(&format!("{session}:{window}")),
+2335:                     current,
+2336:                     slot,
+2337:                 );
+2338:             }
+2339:             let window_target = target.split_once(':').map_or(target, |(_, window)| window);
+2340:             let current_window = current
+2341:                 .and_then(|session| self.sessions.get(&session))
+2342:                 .map(|session| session.active_window);
+2343:             if let Some((session_target, pane_target)) = target.split_once(":.")
+2344:                 && pane_target.starts_with('%')
+2345:             {
+2346:                 let session = if session_target.is_empty() {
+2347:                     None
+2348:                 } else {
+2349:                     Some(self.resolve_named_session(Some(session_target), current, slot)?)
+2350:                 };
+2351:                 let pane = self.resolve_pane(Some(pane_target), current_window, None)?;
+2352:                 let window = self
+2353:                     .window_for_pane(pane)
+2354:                     .ok_or_else(|| ServerError::PaneNotFound(pane_target.to_owned()))?;
+2355:                 let pane_session = self.windows[&window].session;
+2356:                 let Some(session) = session else {
+2357:                     return Ok(pane_session);
+2358:                 };
+2359:                 return (pane_session == session)
+2360:                     .then_some(session)
+2361:                     .ok_or_else(|| ServerError::PaneNotFound(pane_target.to_owned()));
+2362:             }
+2363:             if window_target.contains('.') {
+2364:                 let pane = self.resolve_pane(Some(target), current_window, None)?;
+2365:                 let window = self
+2366:                     .window_for_pane(pane)
+2367:                     .ok_or_else(|| ServerError::PaneNotFound(target.to_owned()))?;
+2368:                 return Ok(self.windows[&window].session);
+2369:             }
+2370:             if target.contains(':') || target.starts_with(['%', '@']) {
+2371:                 let window = self.resolve_window(Some(target), current, current_window)?;
+2372:                 return Ok(self.windows[&window].session);
+2373:             }
+2374:         }
+2375:         let (target, exact) = if slot == TargetSlot::PaneFallback {
+2376:             (target, false)
+2377:         } else {
+2378:             target
+2379:                 .strip_prefix('=')
+2380:                 .map_or((target, false), |target| (target, true))
+2381:         };
+2382:         if target.starts_with('$') {
+2383:             let id = target
+2384:                 .parse::<SessionId>()
+2385:                 .map_err(|_| ServerError::SessionNotFound(target.to_owned()))?;
+2386:             return self
+2387:                 .sessions
+2388:                 .contains_key(&id)
+2389:                 .then_some(id)
+2390:                 .ok_or_else(|| ServerError::SessionNotFound(target.to_owned()));
+2391:         }
+2392:         if let Some(session) = self
+2393:             .sessions
+2394:             .values()
+2395:             .find(|session| session.name == target)
+2396:             .map(|session| session.id)
+2397:         {
+2398:             return Ok(session);
+2399:         }
+2400:         if exact {
+2401:             return Err(ServerError::SessionNotFound(target.to_owned()));
+2402:         }
+2403:         match unique_candidate(
+2404:             self.sessions
+2405:                 .values()
+2406:                 .filter(|session| session.name.starts_with(target))
+2407:                 .map(|session| session.id),
+2408:         ) {
+2409:             Ok(Some(session)) => return Ok(session),
+2410:             Err(()) => return Err(ServerError::SessionNotFound(target.to_owned())),
+2411:             Ok(None) => {}
+2412:         }
+2413:         match unique_candidate(
+2414:             self.sessions
+2415:                 .values()
+2416:                 .filter(|session| fnmatch(target, &session.name))
+2417:                 .map(|session| session.id),
+2418:         ) {
+2419:             Ok(Some(session)) => Ok(session),
+2420:             Ok(None) | Err(()) => Err(ServerError::SessionNotFound(target.to_owned())),
+2421:         }
+2422:     }
+2423: 
+2424:     pub fn resolve_window(
+2425:         &self,
+2426:         target: Option<&str>,
+2427:         current_session: Option<SessionId>,
+2428:         current_window: Option<WindowId>,
+2429:     ) -> Result<WindowId, ServerError> {
+2430:         self.resolve_window_with_pane_index(
+2431:             target,
+2432:             current_session,
+2433:             current_window,
+
+Main-to-candidate resolver diff:
+diff --git a/crates/zz-mux/src/model.rs b/crates/zz-mux/src/model.rs
+index ea7e7d50..60a7a217 100644
+--- a/crates/zz-mux/src/model.rs
++++ b/crates/zz-mux/src/model.rs
+@@ -2302,7 +2302,7 @@ impl MuxState {
+         if target.is_some_and(is_marked_target) {
+             return Ok(self.windows[&self.marked_window()?].session);
+         }
+-        self.resolve_named_session(target, current, TargetSlot::Classified)
++        self.resolve_named_session(target, current, TargetSlot::Session)
+     }
+ 
+     fn resolve_named_session(
+@@ -2311,12 +2311,67 @@ impl MuxState {
+         current: Option<SessionId>,
+         slot: TargetSlot,
+     ) -> Result<SessionId, ServerError> {
++        let target = target.map(|target| {
++            if target == "=" && slot != TargetSlot::PaneFallback {
++                ""
++            } else {
++                target
++            }
++        });
+         let Some(target) = target.filter(|target| !target.is_empty()) else {
+             return current
+                 .filter(|session| self.sessions.contains_key(session))
+                 .or_else(|| self.sessions.keys().next().copied())
+                 .ok_or_else(|| ServerError::SessionNotFound("current session".to_owned()));
+         };
++        if slot == TargetSlot::Session {
++            if let Some((session, window)) = target.split_once(':')
++                && (session == "=" || window == "=")
++            {
++                let session = if session == "=" { "" } else { session };
++                let window = if window == "=" { "" } else { window };
++                return self.resolve_named_session(
++                    Some(&format!("{session}:{window}")),
++                    current,
++                    slot,
++                );
++            }
++            let window_target = target.split_once(':').map_or(target, |(_, window)| window);
++            let current_window = current
++                .and_then(|session| self.sessions.get(&session))
++                .map(|session| session.active_window);
++            if let Some((session_target, pane_target)) = target.split_once(":.")
++                && pane_target.starts_with('%')
++            {
++                let session = if session_target.is_empty() {
++                    None
++                } else {
++                    Some(self.resolve_named_session(Some(session_target), current, slot)?)
++                };
++                let pane = self.resolve_pane(Some(pane_target), current_window, None)?;
++                let window = self
++                    .window_for_pane(pane)
++                    .ok_or_else(|| ServerError::PaneNotFound(pane_target.to_owned()))?;
++                let pane_session = self.windows[&window].session;
++                let Some(session) = session else {
++                    return Ok(pane_session);
++                };
++                return (pane_session == session)
++                    .then_some(session)
++                    .ok_or_else(|| ServerError::PaneNotFound(pane_target.to_owned()));
++            }
++            if window_target.contains('.') {
++                let pane = self.resolve_pane(Some(target), current_window, None)?;
++                let window = self
++                    .window_for_pane(pane)
++                    .ok_or_else(|| ServerError::PaneNotFound(target.to_owned()))?;
++                return Ok(self.windows[&window].session);
++            }
++            if target.contains(':') || target.starts_with(['%', '@']) {
++                let window = self.resolve_window(Some(target), current, current_window)?;
++                return Ok(self.windows[&window].session);
++            }
++        }
+         let (target, exact) = if slot == TargetSlot::PaneFallback {
+             (target, false)
+         } else {
+@@ -2324,22 +2379,6 @@ impl MuxState {
+                 .strip_prefix('=')
+                 .map_or((target, false), |target| (target, true))
+         };
+-        if target.starts_with('%') {
+-            let pane = target
+-                .parse::<PaneId>()
+-                .ok()
+-                .and_then(|pane| self.window_for_pane(pane))
+-                .ok_or_else(|| ServerError::PaneNotFound(target.to_owned()))?;
+-            return Ok(self.windows[&pane].session);
+-        }
+-        if target.starts_with('@') {
+-            return target
+-                .parse::<WindowId>()
+-                .ok()
+-                .and_then(|window| self.windows.get(&window))
+-                .map(|window| window.session)
+-                .ok_or_else(|| ServerError::WindowNotFound(target.to_owned()));
+-        }
+         if target.starts_with('$') {
+             let id = target
+                 .parse::<SessionId>()
+@@ -3945,6 +3984,7 @@ fn validate_window_index_run(base_index: u32, count: usize) -> Result<(), Server
+ /// search for the token exactly as written (cmd-find.c).
+ #[derive(Clone, Copy, PartialEq, Eq)]
+ enum TargetSlot {
++    Session,
+     Classified,
+     PaneFallback,
+ }
+@@ -4944,6 +4984,84 @@ mod tests {
+         assert!(matches!(malformed, ServerError::PaneNotFound(target) if target == "%x"));
+     }
+ 
++    #[test]
++    fn session_targets_validate_window_and_pane_components() {
++        let mut state = MuxState::default();
++        let (session, window, pane) = state.create_session("cli").unwrap();
++        state.rename_window(window, "win").unwrap();
++        let (_, other_pane) = state
++            .create_window(session, Some("other".to_owned()), PaneKind::Terminal)
++            .unwrap();
++        state.select_window(session, window).unwrap();
++        for target in [
++            "cli",
++            "=cli:win",
++            "cli:win.0",
++            "cli:.0",
++            ":win.0",
++            "win.0",
++            "%0",
++            "@0",
++            "=cli:=win",
++            "cli:win.",
++            "cli:=",
++            "=:",
++            "=cli:=",
++        ] {
++            assert_eq!(
++                state.resolve_session(Some(target), Some(session)),
++                Ok(session),
++                "{target}"
++            );
++        }
++        assert_eq!(
++            state.resolve_session(Some(&format!("cli:.{other_pane}")), None),
++            Ok(session)
++        );
++        for (target, error) in [
++            (
++                "=cli:nosuchwin",
++                ServerError::WindowNotFound("nosuchwin".to_owned()),
++            ),
++            (
++                "=nosuch:win",
++                ServerError::SessionNotFound("nosuch".to_owned()),
++            ),
++            ("cli:win.9", ServerError::PaneNotFound("9".to_owned())),
++            (
++                "cli:nosuchwin.9",
++                ServerError::WindowNotFound("nosuchwin".to_owned()),
++            ),
++            ("%99", ServerError::PaneNotFound("%99".to_owned())),
++            ("@99", ServerError::WindowNotFound("@99".to_owned())),
++            ("=%0", ServerError::SessionNotFound("%0".to_owned())),
++            ("=cl:win", ServerError::SessionNotFound("cl".to_owned())),
++        ] {
++            assert_eq!(
++                state.resolve_session(Some(target), Some(session)),
++                Err(error),
++                "{target}"
++            );
++        }
++        let (other_session, _, foreign_pane) = state.create_session("foreign").unwrap();
++        for target in [format!(":.{foreign_pane}"), format!("=:.{foreign_pane}")] {
++            assert_eq!(
++                state.resolve_session(Some(&target), Some(session)),
++                Ok(other_session),
++                "{target}"
++            );
++        }
++        assert_eq!(
++            state.resolve_session(Some(&format!("cli:.{foreign_pane}")), Some(session)),
++            Err(ServerError::PaneNotFound(foreign_pane.to_string()))
++        );
++        assert_eq!(pane, PaneId(0));
++        assert_eq!(
++            state.resolve_session(Some(&format!("cli:win.{other_pane}")), None),
++            Err(ServerError::PaneNotFound(other_pane.to_string()))
++        );
++    }
++
+     #[test]
+     fn window_targets_follow_tokens_indexes_names_prefixes_and_fnmatch() {
+         let mut state = MuxState::default();
+

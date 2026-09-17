@@ -1,0 +1,17 @@
+command: ["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=2G", "-p", "MemorySwapMax=1G", "compat/tui-client-commands.sh", "/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-final-proof/zz", "/home/demfabris/dev/zz-c11-capture-fix/compat/.cache/tmux-src/tmux"]
+wait that ran out: zz daemon socket (case none yet)
+--- zz screen ---
+error connecting to /tmp/tmux-1000/zzcco-SRubef (No such file or directory)
+--- zz clients ---
+/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-final-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory
+--- zz panes ---
+/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-final-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory
+--- tmux screen ---
+error connecting to /tmp/tmux-1000/zzcco-SRubef (No such file or directory)
+--- tmux clients ---
+error connecting to /tmp/tmux-1000/zzcci-SRubef (No such file or directory)
+--- tmux panes ---
+error connecting to /tmp/tmux-1000/zzcci-SRubef (No such file or directory)
+error: zz daemon socket did not happen within 10 seconds
+
+exit_status: 2

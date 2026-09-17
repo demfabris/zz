@@ -1,0 +1,9 @@
+Applied patch to 'crates/zz-daemon/src/daemon.rs' cleanly.
+Applied patch to 'crates/zz-mux/src/command.rs' cleanly.
+Applied patch to 'crates/zz-mux/tests/catalog_floor.rs' cleanly.
+Applied patch to 'crates/zz-mux/tests/hunt_claims.rs' cleanly.
+Applied patch to 'crates/zz-protocol/src/catalog.rs' cleanly.
+Applied patch to 'crates/zz-protocol/src/message.rs' cleanly.
+Applied patch to 'crates/zz-protocol/tests/hunt_claims.rs' cleanly.
+Applied patch to 'crates/zz/src/lib.rs' cleanly.
+Applied patch to 'crates/zz/tests/cli_binary.rs' cleanly.

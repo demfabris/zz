@@ -1,0 +1,452 @@
+[
+  {
+    "side": "candidate",
+    "retain": false,
+    "iteration": 1,
+    "split_start_ns": 1789589366244746867,
+    "child_start_ns": 1789589366441597257,
+    "child_end_ns": 1789589367444048161,
+    "query": {
+      "start_ns": 1789589366645203820,
+      "end_ns": 1789589367016184461,
+      "exit": 0,
+      "stdout": "splitwait:0:%1:dead=0\nsplitwait:0:%2:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589367016189439,
+      "end_ns": 1789589367247373288,
+      "exit": 0,
+      "stdout": "splitwait:0:%1:dead=0\nsplitwait:0:%2:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  },
+  {
+    "side": "candidate",
+    "retain": false,
+    "iteration": 2,
+    "split_start_ns": 1789589368488194717,
+    "child_start_ns": 1789589368705431090,
+    "child_end_ns": 1789589369707591875,
+    "query": {
+      "start_ns": 1789589368888632656,
+      "end_ns": 1789589369267531080,
+      "exit": 0,
+      "stdout": "splitwait:0:%3:dead=0\nsplitwait:0:%4:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589369267535691,
+      "end_ns": 1789589369502251494,
+      "exit": 0,
+      "stdout": "splitwait:0:%3:dead=0\nsplitwait:0:%4:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  },
+  {
+    "side": "candidate",
+    "retain": false,
+    "iteration": 3,
+    "split_start_ns": 1789589370756162538,
+    "child_start_ns": 1789589371003936633,
+    "child_end_ns": 1789589372005701455,
+    "query": {
+      "start_ns": 1789589371156623743,
+      "end_ns": 1789589371542853898,
+      "exit": 0,
+      "stdout": "splitwait:0:%5:dead=0\nsplitwait:0:%6:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589371542857969,
+      "end_ns": 1789589371838464178,
+      "exit": 0,
+      "stdout": "splitwait:0:%5:dead=0\nsplitwait:0:%6:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  },
+  {
+    "side": "candidate",
+    "retain": true,
+    "iteration": 1,
+    "split_start_ns": 1789589373376632498,
+    "child_start_ns": 1789589373576835447,
+    "child_end_ns": 1789589374578872813,
+    "query": {
+      "start_ns": 1789589373777061783,
+      "end_ns": 1789589374188895159,
+      "exit": 0,
+      "stdout": "splitwait:0:%7:dead=0\nsplitwait:0:%8:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589374188899127,
+      "end_ns": 1789589374479418450,
+      "exit": 0,
+      "stdout": "splitwait:0:%7:dead=0\nsplitwait:0:%8:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  },
+  {
+    "side": "candidate",
+    "retain": true,
+    "iteration": 2,
+    "split_start_ns": 1789589375949322253,
+    "child_start_ns": 1789589376169259905,
+    "child_end_ns": 1789589377170901589,
+    "query": {
+      "start_ns": 1789589376350219023,
+      "end_ns": 1789589376699759601,
+      "exit": 0,
+      "stdout": "splitwait:0:%9:dead=0\nsplitwait:0:%10:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589376699765870,
+      "end_ns": 1789589376952524206,
+      "exit": 0,
+      "stdout": "splitwait:0:%9:dead=0\nsplitwait:0:%10:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  },
+  {
+    "side": "candidate",
+    "retain": true,
+    "iteration": 3,
+    "split_start_ns": 1789589378366931161,
+    "child_start_ns": 1789589378581047154,
+    "child_end_ns": 1789589379582850523,
+    "query": {
+      "start_ns": 1789589378767432363,
+      "end_ns": 1789589379316128789,
+      "exit": 0,
+      "stdout": "splitwait:0:%11:dead=0\nsplitwait:0:%12:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589379316133471,
+      "end_ns": 1789589379537973363,
+      "exit": 0,
+      "stdout": "splitwait:0:%11:dead=0\nsplitwait:0:%12:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  },
+  {
+    "side": "main",
+    "retain": false,
+    "iteration": 1,
+    "split_start_ns": 1789589381654320001,
+    "child_start_ns": 1789589381850287029,
+    "child_end_ns": 1789589382852053667,
+    "query": {
+      "start_ns": 1789589382054679080,
+      "end_ns": 1789589382387856221,
+      "exit": 0,
+      "stdout": "splitwait:0:%1:dead=0\nsplitwait:0:%2:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589382387860310,
+      "end_ns": 1789589382627424444,
+      "exit": 0,
+      "stdout": "splitwait:0:%1:dead=0\nsplitwait:0:%2:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  },
+  {
+    "side": "main",
+    "retain": false,
+    "iteration": 2,
+    "split_start_ns": 1789589383801672733,
+    "child_start_ns": 1789589384009116544,
+    "child_end_ns": 1789589385010942865,
+    "query": {
+      "start_ns": 1789589384202067476,
+      "end_ns": 1789589384524781596,
+      "exit": 0,
+      "stdout": "splitwait:0:%3:dead=0\nsplitwait:0:%4:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589384524786595,
+      "end_ns": 1789589384757621991,
+      "exit": 0,
+      "stdout": "splitwait:0:%3:dead=0\nsplitwait:0:%4:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  },
+  {
+    "side": "main",
+    "retain": false,
+    "iteration": 3,
+    "split_start_ns": 1789589385938954648,
+    "child_start_ns": 1789589386127566135,
+    "child_end_ns": 1789589387129416185,
+    "query": {
+      "start_ns": 1789589386339376359,
+      "end_ns": 1789589386645942676,
+      "exit": 0,
+      "stdout": "splitwait:0:%5:dead=0\nsplitwait:0:%6:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589386645947063,
+      "end_ns": 1789589386854869388,
+      "exit": 0,
+      "stdout": "splitwait:0:%5:dead=0\nsplitwait:0:%6:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  },
+  {
+    "side": "main",
+    "retain": true,
+    "iteration": 1,
+    "split_start_ns": 1789589388226031845,
+    "child_start_ns": 1789589388418401856,
+    "child_end_ns": 1789589389420488042,
+    "query": {
+      "start_ns": 1789589388626539913,
+      "end_ns": 1789589388937068420,
+      "exit": 0,
+      "stdout": "splitwait:0:%7:dead=0\nsplitwait:0:%8:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589388937072956,
+      "end_ns": 1789589389153548647,
+      "exit": 0,
+      "stdout": "splitwait:0:%7:dead=0\nsplitwait:0:%8:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  },
+  {
+    "side": "main",
+    "retain": true,
+    "iteration": 2,
+    "split_start_ns": 1789589390578265408,
+    "child_start_ns": 1789589390778880101,
+    "child_end_ns": 1789589391781345912,
+    "query": {
+      "start_ns": 1789589390978765158,
+      "end_ns": 1789589391357824711,
+      "exit": 0,
+      "stdout": "splitwait:0:%9:dead=0\nsplitwait:0:%10:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589391357830254,
+      "end_ns": 1789589391605412765,
+      "exit": 0,
+      "stdout": "splitwait:0:%9:dead=0\nsplitwait:0:%10:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  },
+  {
+    "side": "main",
+    "retain": true,
+    "iteration": 3,
+    "split_start_ns": 1789589393137614132,
+    "child_start_ns": 1789589393330864423,
+    "child_end_ns": 1789589394332602201,
+    "query": {
+      "start_ns": 1789589393538029050,
+      "end_ns": 1789589393844870100,
+      "exit": 0,
+      "stdout": "splitwait:0:%11:dead=0\nsplitwait:0:%12:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589393844874319,
+      "end_ns": 1789589394052524204,
+      "exit": 0,
+      "stdout": "splitwait:0:%11:dead=0\nsplitwait:0:%12:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  },
+  {
+    "side": "pin",
+    "retain": false,
+    "iteration": 1,
+    "split_start_ns": 1789589395092555292,
+    "child_start_ns": 1789589395096402411,
+    "child_end_ns": 1789589396097758438,
+    "query": {
+      "start_ns": 1789589395492912703,
+      "end_ns": 1789589395494878074,
+      "exit": 0,
+      "stdout": "splitwait:0:%1:dead=0\nsplitwait:0:%2:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589395494881075,
+      "end_ns": 1789589395496339451,
+      "exit": 0,
+      "stdout": "splitwait:0:%1:dead=0\nsplitwait:0:%2:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  },
+  {
+    "side": "pin",
+    "retain": false,
+    "iteration": 2,
+    "split_start_ns": 1789589396102859284,
+    "child_start_ns": 1789589396106143216,
+    "child_end_ns": 1789589397107440027,
+    "query": {
+      "start_ns": 1789589396503134934,
+      "end_ns": 1789589396505420570,
+      "exit": 0,
+      "stdout": "splitwait:0:%3:dead=0\nsplitwait:0:%4:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589396505424680,
+      "end_ns": 1789589396507123280,
+      "exit": 0,
+      "stdout": "splitwait:0:%3:dead=0\nsplitwait:0:%4:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  },
+  {
+    "side": "pin",
+    "retain": false,
+    "iteration": 3,
+    "split_start_ns": 1789589397112456867,
+    "child_start_ns": 1789589397115883802,
+    "child_end_ns": 1789589398117634820,
+    "query": {
+      "start_ns": 1789589397512829585,
+      "end_ns": 1789589397515011386,
+      "exit": 0,
+      "stdout": "splitwait:0:%5:dead=0\nsplitwait:0:%6:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589397515019832,
+      "end_ns": 1789589397516871040,
+      "exit": 0,
+      "stdout": "splitwait:0:%5:dead=0\nsplitwait:0:%6:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  },
+  {
+    "side": "pin",
+    "retain": true,
+    "iteration": 1,
+    "split_start_ns": 1789589398124695596,
+    "child_start_ns": 1789589398128140503,
+    "child_end_ns": 1789589399129737923,
+    "query": {
+      "start_ns": 1789589398525053232,
+      "end_ns": 1789589398526873832,
+      "exit": 0,
+      "stdout": "splitwait:0:%7:dead=0\nsplitwait:0:%8:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589398526877424,
+      "end_ns": 1789589398528429196,
+      "exit": 0,
+      "stdout": "splitwait:0:%7:dead=0\nsplitwait:0:%8:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  },
+  {
+    "side": "pin",
+    "retain": true,
+    "iteration": 2,
+    "split_start_ns": 1789589399136602947,
+    "child_start_ns": 1789589399139854417,
+    "child_end_ns": 1789589400141319078,
+    "query": {
+      "start_ns": 1789589399536966151,
+      "end_ns": 1789589399539058174,
+      "exit": 0,
+      "stdout": "splitwait:0:%9:dead=0\nsplitwait:0:%10:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589399539060839,
+      "end_ns": 1789589399540562100,
+      "exit": 0,
+      "stdout": "splitwait:0:%9:dead=0\nsplitwait:0:%10:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  },
+  {
+    "side": "pin",
+    "retain": true,
+    "iteration": 3,
+    "split_start_ns": 1789589400147909084,
+    "child_start_ns": 1789589400151362164,
+    "child_end_ns": 1789589401153055610,
+    "query": {
+      "start_ns": 1789589400548325171,
+      "end_ns": 1789589400550392513,
+      "exit": 0,
+      "stdout": "splitwait:0:%11:dead=0\nsplitwait:0:%12:dead=0\n",
+      "stderr": ""
+    },
+    "all_windows": {
+      "start_ns": 1789589400550395148,
+      "end_ns": 1789589400551958908,
+      "exit": 0,
+      "stdout": "splitwait:0:%11:dead=0\nsplitwait:0:%12:dead=0\nw:0:%0:dead=0\n",
+      "stderr": ""
+    },
+    "split_exit": 0,
+    "split_stdout": "",
+    "split_stderr": ""
+  }
+]

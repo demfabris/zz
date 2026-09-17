@@ -1,0 +1,33 @@
+{
+  "base": "e40a13e1c981aa9b707a5a6a54f5e0267c751de9",
+  "tip_before": "4c4c142bbc37dbae46adeecf50ba3a0caf0eedcb",
+  "exitcode_branch": "c11be2bb2ae37f1cc8e391b335be6da45747c09e",
+  "exitcode_applied_commit": "888be5af",
+  "binaries": {
+    "candidate": {
+      "path": "/home/demfabris/dev/zz-c11-capture-fix/target/debug/zz",
+      "sha256": "3ecf75a60c3e7c2bc3309fc605cb9601f8fdf0411c2dde4558ffec83c6c9a1fe"
+    },
+    "main": {
+      "path": "/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-reconciled-main-build/debug/zz",
+      "sha256": "d9993f4670a94a10fd23d5c8db4e08e259e2700dfbd3cdab0016b3d794145384"
+    },
+    "exitcode_candidate": {
+      "path": "/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-exitcode-build/debug/zz",
+      "sha256": "da965628ac2a64d9493a776831bdd8ab6f1069b8b9ff0a24e9c1520c3af24c2d"
+    },
+    "pin": {
+      "path": "/home/demfabris/dev/zz-c11-capture-fix/compat/.cache/tmux-src/tmux",
+      "sha256": "df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5"
+    }
+  },
+  "final_base": "d1694e65da7552e8ebd53da2ce596ee8ffa748e9",
+  "final_source": "0bab4e9c74644962c2914feb56fae415a7e1bdab",
+  "final_binary": {
+    "path": "/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-final-proof/zz",
+    "sha256": "4de76d0e07897c47e9cd3fc498559211765f449cee200a42973a2848df4c2525",
+    "libcef_path": "/home/demfabris/dev/zz-c11-capture-fix/target/debug/libcef.so"
+  },
+  "wire": "104 inherited from main 81c971f1; no lane payload change",
+  "rebase": "4c4c142b plus fixture commit 384d9830 rebased without conflicts onto d1694e65; resulting source 0bab4e9c"
+}

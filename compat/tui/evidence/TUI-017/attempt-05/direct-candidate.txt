@@ -1,0 +1,4 @@
+command: ["compat/diff-scenario.sh", "--strict-geometry", "compat/scenarios/smoke/split-window-wait.txt", "/home/demfabris/dev/zz-c11-capture-fix/target/debug/zz", "/home/demfabris/dev/zz-c11-capture-fix/compat/.cache/tmux-src/tmux"]
+smoke/split-window-wait: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+exit_status: 0

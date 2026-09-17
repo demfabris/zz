@@ -1,0 +1,2 @@
+command: ["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=2G", "-p", "MemorySwapMax=1G", "bash", "compat/tui/evidence/TUI-017/attempt-05/status-repeats.sh", "main"]
+main repeat 1: exit 1

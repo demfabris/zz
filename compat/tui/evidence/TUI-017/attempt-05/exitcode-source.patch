@@ -1,0 +1,1159 @@
+diff --git a/crates/zz-daemon/src/daemon.rs b/crates/zz-daemon/src/daemon.rs
+index b333f1e6..a6e99716 100644
+--- a/crates/zz-daemon/src/daemon.rs
++++ b/crates/zz-daemon/src/daemon.rs
+@@ -6818,7 +6818,14 @@ impl Shared {
+                 self.inner.lock().engine.repair_context(context);
+             }
+             self.enforce_destroy_unattached_if_changed(unattached_watch);
+-            return result;
++            return result.map_err(|error| match error {
++                DaemonError::Server(error) => {
++                    let spec = zz_protocol::catalog_command_spec(canonical)
++                        .expect("daemon command has catalog metadata");
++                    spec.classify_usage_error(error).into()
++                }
++                error => error,
++            });
+         }
+         let generation = self.inner.lock().engine.state.generation();
+         let display_panes_target = if canonical == "display-panes" {
+@@ -15736,6 +15743,9 @@ impl Shared {
+             ServerError::CommandParse(message) if !typed => {
+                 ServerError::InvalidCommand(message).into()
+             }
++            ServerError::NativeCommandParse(message) if !typed => {
++                ServerError::NativeInvalidCommand(message).into()
++            }
+             error => error.into(),
+         })
+     }
+@@ -26205,7 +26215,10 @@ impl Shared {
+                             _ => None,
+                         })
+                         .collect::<Vec<_>>(),
+-                    Err(ServerError::UnsupportedCommand(unsupported)) => {
++                    Err(
++                        ServerError::UnsupportedCommand(unsupported)
++                        | ServerError::NativeUnsupportedCommand(unsupported),
++                    ) => {
+                         log::warn!(
+                             "{}: ignoring unsupported tmux command: {unsupported}",
+                             path.display()
+@@ -26219,7 +26232,10 @@ impl Shared {
+                         );
+                         continue;
+                     }
+-                    Err(ServerError::CommandParse(message)) => {
++                    Err(
++                        ServerError::CommandParse(message)
++                        | ServerError::NativeCommandParse(message),
++                    ) => {
+                         log::warn!(
+                             "{}: ignoring invalid tmux command: {message}",
+                             path.display()
+@@ -26619,7 +26635,10 @@ impl Shared {
+             }
+             match result.map_err(discard_command_output) {
+                 Ok(_) => publish_guard(captured_output, false, false, captured_events),
+-                Err(DaemonError::Server(ServerError::UnsupportedCommand(unsupported))) => {
++                Err(DaemonError::Server(
++                    ServerError::UnsupportedCommand(unsupported)
++                    | ServerError::NativeUnsupportedCommand(unsupported),
++                )) => {
+                     log::warn!(
+                         "{}: ignoring unsupported tmux command: {unsupported}",
+                         path.display()
+@@ -26683,7 +26702,9 @@ impl Shared {
+                         failed_group = group;
+                     }
+                 }
+-                Err(DaemonError::Server(ServerError::CommandParse(message))) => {
++                Err(DaemonError::Server(
++                    ServerError::CommandParse(message) | ServerError::NativeCommandParse(message),
++                )) => {
+                     log::warn!(
+                         "{}: ignoring invalid tmux command: {message}",
+                         path.display()
+@@ -38499,9 +38520,13 @@ fn control_command_guard_error(error: &DaemonError) -> (bool, bool, String) {
+     match error {
+         DaemonError::CommandFailed { error, .. } => control_command_guard_error(error),
+         DaemonError::ReportedCommandExit { .. }
+-        | DaemonError::Server(ServerError::UnsupportedCommand(_)) => (false, false, String::new()),
++        | DaemonError::Server(
++            ServerError::UnsupportedCommand(_) | ServerError::NativeUnsupportedCommand(_),
++        ) => (false, false, String::new()),
+         DaemonError::InsertedCommandParse(message)
+-        | DaemonError::Server(ServerError::CommandParse(message)) => (true, false, message.clone()),
++        | DaemonError::Server(
++            ServerError::CommandParse(message) | ServerError::NativeCommandParse(message),
++        ) => (true, false, message.clone()),
+         DaemonError::Server(error) => (true, true, error.tmux_message()),
+         error => (true, true, daemon_error_text(error)),
+     }
+@@ -38518,7 +38543,9 @@ fn post_admission_callback_parse_depth(error: &DaemonError) -> usize {
+ fn command_parse_error(error: &DaemonError) -> bool {
+     match error {
+         DaemonError::CommandFailed { error, .. } => command_parse_error(error),
+-        DaemonError::Server(ServerError::CommandParse(_)) => true,
++        DaemonError::Server(ServerError::CommandParse(_) | ServerError::NativeCommandParse(_)) => {
++            true
++        }
+         _ => false,
+     }
+ }
+@@ -63113,7 +63140,7 @@ set-option -g @alias-mixed-next yes
+                 .expect_err("usage error before target resolution");
+             assert!(matches!(
+                 error,
+-                DaemonError::Server(ServerError::CommandParse(_))
++                DaemonError::Server(ServerError::NativeCommandParse(_))
+             ));
+         }
+         for (verb, args) in [("wait-pane", vec![]), ("run-pane", vec!["true"])] {
+@@ -73346,7 +73373,7 @@ set-option -g @alias-mixed-next yes
+             .expect_err("missing output path");
+         assert!(matches!(
+             error,
+-            DaemonError::Server(ServerError::CommandParse(message))
++            DaemonError::Server(ServerError::NativeCommandParse(message))
+                 if message == "capture-browser needs an output path (-o)"
+         ));
+ 
+@@ -86723,6 +86750,29 @@ bind - split-window -v -c "#{pane_current_path}"
+         worker.join().expect("menu command worker");
+     }
+ 
++    #[test]
++    fn native_callback_usage_preserves_runtime_phase() {
++        let shared = Shared::new(1);
++        for typed in [false, true] {
++            let error = shared
++                .parse_confirm_commands("agent-send --bogus", typed)
++                .unwrap_err();
++            let DaemonError::Server(server_error) = &error else {
++                panic!("unexpected callback error: {error}");
++            };
++            assert_eq!(server_error.exit_code(), 2);
++            assert_eq!(server_error.is_command_parse(), typed);
++            assert_eq!(
++                control_command_guard_error(&error),
++                (
++                    true,
++                    !typed,
++                    "agent-send does not support --bogus".to_owned()
++                )
++            );
++        }
++    }
++
+     #[test]
+     fn confirm_before_parses_first_shapes_prompts_and_uses_one_reply() {
+         let (shared, client, _, mut context) = popup_test_workspace("desktop");
+diff --git a/crates/zz-mux/src/command.rs b/crates/zz-mux/src/command.rs
+index df5a86af..9b46b392 100644
+--- a/crates/zz-mux/src/command.rs
++++ b/crates/zz-mux/src/command.rs
+@@ -4484,6 +4484,22 @@ impl MuxEngine {
+         command: &CommandInvocation,
+         hooks: &mut impl StatusHooks,
+         default_shell_is_valid: &mut impl FnMut(&str) -> bool,
++    ) -> Result<Execution, ServerError> {
++        self.execute_without_alias_expansion_inner(context, command, hooks, default_shell_is_valid)
++            .map_err(
++                |error| match catalog_command_spec(canonical_command(&command.name)) {
++                    Some(spec) => spec.classify_usage_error(error),
++                    None => error,
++                },
++            )
++    }
++
++    fn execute_without_alias_expansion_inner(
++        &mut self,
++        context: &mut ExecutionContext,
++        command: &CommandInvocation,
++        hooks: &mut impl StatusHooks,
++        default_shell_is_valid: &mut impl FnMut(&str) -> bool,
+     ) -> Result<Execution, ServerError> {
+         if let Some(commands) = parse_command_alias_group(command)? {
+             validate_static_command_chain(&commands)?;
+@@ -11775,7 +11791,7 @@ impl MuxEngine {
+             .iter()
+             .find(|flag| !matches!(flag.as_str(), "-F" | "-g" | "-o" | "-q"))
+         {
+-            return Err(ServerError::UnsupportedCommand(format!(
++            return Err(ServerError::NativeUnsupportedCommand(format!(
+                 "set-option {flag} {option}"
+             )));
+         }
+@@ -12048,7 +12064,7 @@ impl MuxEngine {
+             .iter()
+             .find(|flag| !matches!(flag.as_str(), "-F" | "-g" | "-o" | "-q" | "-u"))
+         {
+-            return Err(ServerError::UnsupportedCommand(format!(
++            return Err(ServerError::NativeUnsupportedCommand(format!(
+                 "set-option {flag} history-trickle"
+             )));
+         }
+@@ -15601,6 +15617,7 @@ fn parse_options_for_spec(
+         .filter_map(|option| option.attached_value.then_some(option.name))
+         .collect::<Vec<_>>();
+     parse_options(args, &value_options, &attached_options)
++        .map_err(|error| spec.classify_usage_error(error))
+ }
+ 
+ fn validate_options(
+@@ -15624,9 +15641,7 @@ fn validate_options_allowing_unsupported(
+         .chain(options.values.iter().map(|(name, _)| name.as_str()))
+     {
+         let Some(option) = spec.option(name) else {
+-            return Err(ServerError::CommandParse(format!(
+-                "{command} does not support {name}"
+-            )));
++            return Err(spec.parse_error(format!("{command} does not support {name}")));
+         };
+         if option.unsupported && allowed != Some(name) {
+             return Err(ServerError::UnsupportedCommand(format!("{command} {name}")));
+@@ -16932,6 +16947,9 @@ fn command_template_replace(template: &str, input: &str, index: u8) -> String {
+ fn callback_construction_error(owner: &str, error: ServerError) -> ServerError {
+     match (owner, error) {
+         ("bind-key", ServerError::CommandParse(message)) => ServerError::InvalidCommand(message),
++        ("bind-key", ServerError::NativeCommandParse(message)) => {
++            ServerError::NativeInvalidCommand(message)
++        }
+         (_, error) => error,
+     }
+ }
+@@ -17632,6 +17650,36 @@ mod tests {
+         expand_format_with_hooks(&format!("#{{{name}}}"), engine, context, hooks).to_string()
+     }
+ 
++    #[test]
++    fn usage_exit_status_distinguishes_native_errors_and_tmux_errors() {
++        let mut engine = MuxEngine::default();
++        let mut context = ExecutionContext::default();
++        engine
++            .execute(
++                &mut context,
++                &command("new-session", &["-d", "-s", "usage-contract"]),
++            )
++            .unwrap();
++        for (name, args, status) in [
++            ("list-panes", vec!["-Z"], 1),
++            ("list-panes", vec!["--json", "-Z"], 1),
++            ("list-panes", vec!["--json", "-F", "x"], 2),
++            ("split-browser", vec!["-Q"], 2),
++            ("set-browser-url", vec![], 2),
++            ("reload-config", vec!["extra"], 2),
++            ("set-option", vec!["-a", "history-trickle", "1"], 2),
++            ("set-option", vec!["-a", "experimental-agent-pane", "on"], 2),
++            ("rename-window", vec![], 1),
++            ("no-such-command", vec![], 1),
++            ("clock-mode", vec![], 1),
++        ] {
++            let error = engine
++                .execute(&mut context, &command(name, &args))
++                .unwrap_err();
++            assert_eq!(error.exit_code(), status, "{name} {args:?}: {error}");
++        }
++    }
++
+     #[test]
+     fn static_command_chain_accepts_canonical_alias_and_unique_prefix_names() {
+         let commands = [
+@@ -24952,7 +25000,7 @@ mod tests {
+         assert_eq!(execution.effects, [MuxEffect::ReloadConfig]);
+         assert!(matches!(
+             engine.execute(&mut context, &command("reload-config", &["unexpected"])),
+-            Err(ServerError::CommandParse(_))
++            Err(ServerError::NativeCommandParse(_))
+         ));
+     }
+ 
+@@ -24981,7 +25029,7 @@ mod tests {
+                 &mut context,
+                 &command("import-tmux-config", &["one", "two"])
+             ),
+-            Err(ServerError::CommandParse(_))
++            Err(ServerError::NativeCommandParse(_))
+         ));
+     }
+ 
+@@ -29523,7 +29571,7 @@ mod tests {
+                     &command("bind-key", &["F9", "agent-send", "--bogus"]),
+                 )
+                 .unwrap_err(),
+-            ServerError::InvalidCommand("agent-send does not support --bogus".to_owned())
++            ServerError::NativeInvalidCommand("agent-send does not support --bogus".to_owned())
+         );
+     }
+ 
+diff --git a/crates/zz-mux/tests/catalog_floor.rs b/crates/zz-mux/tests/catalog_floor.rs
+index 8f14a4b6..2c177298 100644
+--- a/crates/zz-mux/tests/catalog_floor.rs
++++ b/crates/zz-mux/tests/catalog_floor.rs
+@@ -36,7 +36,7 @@ fn every_catalog_command_rejects_a_mechanically_absent_flag() {
+         } else {
+             assert_eq!(
+                 error,
+-                ServerError::CommandParse(format!("{} does not support {flag}", spec.name))
++                ServerError::NativeCommandParse(format!("{} does not support {flag}", spec.name))
+             );
+         }
+     }
+diff --git a/crates/zz-mux/tests/hunt_claims.rs b/crates/zz-mux/tests/hunt_claims.rs
+index 26335282..58f87603 100644
+--- a/crates/zz-mux/tests/hunt_claims.rs
++++ b/crates/zz-mux/tests/hunt_claims.rs
+@@ -867,7 +867,9 @@ fn split_picker_rejects_positional_arguments() {
+             &command("split-picker", &["printf", "not-a-shell-command"]),
+         )
+         .unwrap_err();
+-    assert!(matches!(error, ServerError::CommandParse(message) if message.contains("positional")));
++    assert!(
++        matches!(error, ServerError::NativeCommandParse(message) if message.contains("positional"))
++    );
+     assert_eq!(
+         engine.state.windows.values().next().unwrap().panes.len(),
+         pane_count
+diff --git a/crates/zz-protocol/src/catalog.rs b/crates/zz-protocol/src/catalog.rs
+index 4bd9cbdd..baf2ca30 100644
+--- a/crates/zz-protocol/src/catalog.rs
++++ b/crates/zz-protocol/src/catalog.rs
+@@ -30,6 +30,7 @@ pub struct CommandOptionSpec {
+     pub optional_value: bool,
+     /// Whether the option is catalogued only so its value can be rejected.
+     pub unsupported: bool,
++    pub native: bool,
+ }
+ 
+ #[derive(Clone, Debug, PartialEq, Eq)]
+@@ -45,6 +46,11 @@ pub struct TmuxOptionParse<'a> {
+ }
+ 
+ impl CommandOptionSpec {
++    const fn native(mut self) -> Self {
++        self.native = true;
++        self
++    }
++
+     const fn flag(name: &'static str, description: &'static str) -> Self {
+         Self {
+             name,
+@@ -54,6 +60,7 @@ impl CommandOptionSpec {
+             attached_value: false,
+             optional_value: false,
+             unsupported: false,
++            native: false,
+         }
+     }
+ 
+@@ -66,6 +73,7 @@ impl CommandOptionSpec {
+             attached_value: true,
+             optional_value: true,
+             unsupported: false,
++            native: false,
+         }
+     }
+ 
+@@ -78,6 +86,7 @@ impl CommandOptionSpec {
+             attached_value: false,
+             optional_value: false,
+             unsupported: false,
++            native: false,
+         }
+     }
+ 
+@@ -90,6 +99,7 @@ impl CommandOptionSpec {
+             attached_value: false,
+             optional_value: false,
+             unsupported: true,
++            native: false,
+         }
+     }
+ 
+@@ -102,6 +112,7 @@ impl CommandOptionSpec {
+             attached_value: false,
+             optional_value: false,
+             unsupported: true,
++            native: false,
+         }
+     }
+ 
+@@ -114,6 +125,7 @@ impl CommandOptionSpec {
+             attached_value: true,
+             optional_value: true,
+             unsupported: true,
++            native: false,
+         }
+     }
+ }
+@@ -169,10 +181,34 @@ impl CommandSpec {
+             .unwrap_or(0)
+     }
+ 
++    pub fn classify_usage_error(&self, error: ServerError) -> ServerError {
++        match error {
++            ServerError::CommandParse(message) if !self.uses_tmux_option_grammar() => {
++                ServerError::NativeCommandParse(message)
++            }
++            ServerError::UnsupportedCommand(message) if !self.uses_tmux_option_grammar() => {
++                ServerError::NativeUnsupportedCommand(message)
++            }
++            error => error,
++        }
++    }
++
++    pub fn parse_error(&self, message: String) -> ServerError {
++        self.classify_usage_error(ServerError::CommandParse(message))
++    }
++
++    fn option_parse_error(&self, option: &CommandOptionSpec, message: String) -> ServerError {
++        if option.native {
++            ServerError::NativeCommandParse(message)
++        } else {
++            self.parse_error(message)
++        }
++    }
++
+     pub fn validate_positional_minimum(&self, actual: usize) -> Result<(), ServerError> {
+         let minimum = self.positional_minimum();
+         if actual < minimum {
+-            return Err(ServerError::CommandParse(format!(
++            return Err(self.parse_error(format!(
+                 "command {}: too few arguments (need at least {minimum})",
+                 self.name
+             )));
+@@ -194,7 +230,7 @@ impl CommandSpec {
+             return Ok(());
+         };
+         if actual > maximum {
+-            return Err(ServerError::CommandParse(format!(
++            return Err(self.parse_error(format!(
+                 "command {}: too many arguments (need at most {maximum})",
+                 self.name
+             )));
+@@ -254,16 +290,19 @@ fn parse_tmux_options_with_command<'a>(
+                 || option.optional_value && value.is_some()
+             {
+                 let value = value.ok_or_else(|| {
+-                    ServerError::CommandParse(format!(
+-                        "command {}: {} expects an argument",
+-                        spec.name, option.name
+-                    ))
++                    spec.option_parse_error(
++                        option,
++                        format!("command {}: {} expects an argument", spec.name, option.name),
++                    )
+                 })?;
+                 if command.is_some_and(|command| command.argument_is_command_block(index)) {
+-                    return Err(ServerError::CommandParse(format!(
+-                        "command {}: {} argument must be a string",
+-                        spec.name, option.name
+-                    )));
++                    return Err(spec.option_parse_error(
++                        option,
++                        format!(
++                            "command {}: {} argument must be a string",
++                            spec.name, option.name
++                        ),
++                    ));
+                 }
+                 options.push(TmuxOption::Value(option.name, value));
+                 index += 1;
+@@ -275,17 +314,21 @@ fn parse_tmux_options_with_command<'a>(
+ 
+         for (offset, flag) in argument[1..].char_indices() {
+             if flag == '?' {
+-                return Err(ServerError::CommandParse(format!(
++                return Err(spec.parse_error(format!(
+                     "usage: {} {}",
+                     spec.name,
+                     spec.pinned_tmux_usage()
+                 )));
+             }
+             if !flag.is_ascii_alphanumeric() {
+-                return Err(ServerError::CommandParse(format!(
+-                    "command {}: invalid flag -{flag}",
+-                    spec.name
+-                )));
++                let message = format!("command {}: invalid flag -{flag}", spec.name);
++                let extension = argument
++                    .split_once('=')
++                    .and_then(|(name, _)| spec.option(name));
++                return Err(match extension {
++                    Some(option) => spec.option_parse_error(option, message),
++                    None => spec.parse_error(message),
++                });
+             }
+             let option = spec
+                 .options
+@@ -295,10 +338,7 @@ fn parse_tmux_options_with_command<'a>(
+                     name.next() == Some('-') && name.next() == Some(flag) && name.next().is_none()
+                 })
+                 .ok_or_else(|| {
+-                    ServerError::CommandParse(format!(
+-                        "command {}: unknown flag -{flag}",
+-                        spec.name
+-                    ))
++                    spec.parse_error(format!("command {}: unknown flag -{flag}", spec.name))
+                 })?;
+             let value_start = offset + flag.len_utf8() + 1;
+             let attached = &argument[value_start..];
+@@ -310,10 +350,13 @@ fn parse_tmux_options_with_command<'a>(
+                     .filter(|value| !optional_value_starts_option(value))
+                 {
+                     if command.is_some_and(|command| command.argument_is_command_block(index)) {
+-                        return Err(ServerError::CommandParse(format!(
+-                            "command {}: {} argument must be a string",
+-                            spec.name, option.name
+-                        )));
++                        return Err(spec.option_parse_error(
++                            option,
++                            format!(
++                                "command {}: {} argument must be a string",
++                                spec.name, option.name
++                            ),
++                        ));
+                     }
+                     options.push(TmuxOption::Value(option.name, value));
+                     index += 1;
+@@ -325,16 +368,19 @@ fn parse_tmux_options_with_command<'a>(
+             if option.value.is_some() || option.attached_value {
+                 let value = if attached.is_empty() {
+                     let value = args.get(index).ok_or_else(|| {
+-                        ServerError::CommandParse(format!(
+-                            "command {}: {} expects an argument",
+-                            spec.name, option.name
+-                        ))
++                        spec.option_parse_error(
++                            option,
++                            format!("command {}: {} expects an argument", spec.name, option.name),
++                        )
+                     })?;
+                     if command.is_some_and(|command| command.argument_is_command_block(index)) {
+-                        return Err(ServerError::CommandParse(format!(
+-                            "command {}: {} argument must be a string",
+-                            spec.name, option.name
+-                        )));
++                        return Err(spec.option_parse_error(
++                            option,
++                            format!(
++                                "command {}: {} argument must be a string",
++                                spec.name, option.name
++                            ),
++                        ));
+                     }
+                     index += 1;
+                     value.as_str()
+@@ -352,7 +398,7 @@ fn parse_tmux_options_with_command<'a>(
+             .iter()
+             .any(|option| matches!(option, TmuxOption::Value("-F", _)))
+     {
+-        return Err(ServerError::CommandParse(format!(
++        return Err(ServerError::NativeCommandParse(format!(
+             "command {}: --json cannot be combined with -F",
+             spec.name
+         )));
+@@ -418,7 +464,7 @@ fn validate_command_args_parse(
+             Some(CommandArgsParseRule::SetOptionValue) => position == 1,
+         };
+         if is_command_block && !accepts_command_block {
+-            return Err(ServerError::CommandParse(format!(
++            return Err(spec.parse_error(format!(
+                 "command {}: argument {} must be \"string\"",
+                 spec.name,
+                 position + 1
+@@ -1104,6 +1150,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
+                 attached_value: false,
+                 optional_value: false,
+                 unsupported: false,
++                native: false,
+             },
+         ],
+         positionals: &[FreeForm],
+@@ -1340,6 +1387,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
+                 attached_value: false,
+                 optional_value: false,
+                 unsupported: false,
++                native: false,
+             },
+         ],
+         positionals: &[],
+@@ -1383,7 +1431,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
+         description: "List sessions",
+         usage: "[--json] [-r] [-F format] [-f filter] [-O order]",
+         options: &[
+-            CommandOptionSpec::flag("--json", "one JSON object per line"),
++            CommandOptionSpec::flag("--json", "one JSON object per line").native(),
+             CommandOptionSpec::value("-F", FreeForm, "output format"),
+             CommandOptionSpec::value("-f", FreeForm, "filter"),
+             CommandOptionSpec::value("-O", FreeForm, "sort order"),
+@@ -1463,7 +1511,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
+         description: "List attached clients",
+         usage: "[--json] [-r] [-F format] [-f filter] [-O order] [-t target-session]",
+         options: &[
+-            CommandOptionSpec::flag("--json", "one JSON object per line"),
++            CommandOptionSpec::flag("--json", "one JSON object per line").native(),
+             CommandOptionSpec::value("-F", FreeForm, "output format"),
+             CommandOptionSpec::value("-t", Session, "target session"),
+             CommandOptionSpec::value("-f", FreeForm, "filter"),
+@@ -1542,7 +1590,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
+         description: "List windows",
+         usage: "[--json] [-ar] [-F format] [-f filter] [-O order] [-t target-session]",
+         options: &[
+-            CommandOptionSpec::flag("--json", "one JSON object per line"),
++            CommandOptionSpec::flag("--json", "one JSON object per line").native(),
+             CommandOptionSpec::value("-t", Session, "target session"),
+             CommandOptionSpec::value("-F", FreeForm, "output format"),
+             CommandOptionSpec::flag("-a", "list windows from every session"),
+@@ -1994,7 +2042,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
+         description: "List panes",
+         usage: "[--json] [-asr] [-F format] [-f filter] [-O order] [-t target-window]",
+         options: &[
+-            CommandOptionSpec::flag("--json", "one JSON object per line"),
++            CommandOptionSpec::flag("--json", "one JSON object per line").native(),
+             CommandOptionSpec::value("-t", Window, "target window"),
+             CommandOptionSpec::value("-F", FreeForm, "output format"),
+             CommandOptionSpec::value("-f", FreeForm, "filter"),
+@@ -2499,7 +2547,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
+         description: "Show server, session, window, or pane options",
+         usage: "[--json] [-AgHpqsvw] [-t target-pane] [option]",
+         options: &[
+-            CommandOptionSpec::flag("--json", "one JSON object per line"),
++            CommandOptionSpec::flag("--json", "one JSON object per line").native(),
+             CommandOptionSpec::flag("-A", "include inherited values"),
+             CommandOptionSpec::flag("-g", "global scope"),
+             CommandOptionSpec::flag("-H", "include hooks"),
+@@ -3106,6 +3154,43 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn usage_status_follows_the_error_surface() {
++        for (name, args, status) in [
++            ("list-panes", vec!["-Z"], 1),
++            ("list-panes", vec!["--nope"], 1),
++            ("list-panes", vec!["--json", "-Z"], 1),
++            ("list-panes", vec!["--json", "-F"], 1),
++            ("list-panes", vec!["--json", "-F", "x"], 2),
++            ("list-panes", vec!["--json=true"], 2),
++            ("display-message", vec!["--json"], 1),
++            ("choose-tree", vec!["-?"], 1),
++            ("agent-catalog", vec!["-t"], 2),
++            ("agent-catalog", vec!["-Q"], 2),
++        ] {
++            let spec = catalog_command_spec(name).unwrap();
++            let args = owned(&args);
++            let error = parse_tmux_options(spec, &args).unwrap_err();
++            assert_eq!(error.exit_code(), status, "{name} {args:?}: {error}");
++            assert!(error.is_command_parse());
++        }
++        for (name, status) in [("rename-window", 1), ("reload-config", 2)] {
++            let spec = catalog_command_spec(name).unwrap();
++            assert_eq!(
++                spec.validate_positional_maximum(2).unwrap_err().exit_code(),
++                status
++            );
++        }
++        const NATIVE_OPTIONS: &[CommandOptionSpec] =
++            &[CommandOptionSpec::value("--native", FreeForm, "native option").native()];
++        let spec = CommandSpec {
++            options: NATIVE_OPTIONS,
++            ..*command_spec("list-panes").unwrap()
++        };
++        let args = owned(&["--native"]);
++        assert_eq!(parse_tmux_options(&spec, &args).unwrap_err().exit_code(), 2);
++    }
++
+     #[test]
+     fn tmux_declared_long_options_are_accepted() {
+         for name in [
+@@ -3171,7 +3256,7 @@ mod tests {
+             CommandOptionSpec::flag("-a", "first"),
+             CommandOptionSpec::flag("-b", "second"),
+             CommandOptionSpec::flag("-c", "third"),
+-            CommandOptionSpec::flag("--json", "one JSON object per line"),
++            CommandOptionSpec::flag("--json", "one JSON object per line").native(),
+         ];
+         let spec = CommandSpec {
+             options: OPTIONS,
+diff --git a/crates/zz-protocol/src/message.rs b/crates/zz-protocol/src/message.rs
+index fcf1f69b..b0afbfbf 100644
+--- a/crates/zz-protocol/src/message.rs
++++ b/crates/zz-protocol/src/message.rs
+@@ -18,7 +18,7 @@ use crate::{Axis, ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, Sp
+ 
+ /// Client and daemon must match this exactly. The handshake rejects any
+ /// mismatch instead of negotiating down.
+-pub const PROTOCOL_VERSION: u16 = 103;
++pub const PROTOCOL_VERSION: u16 = 104;
+ pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
+ pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
+ pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
+@@ -1979,13 +1979,21 @@ pub enum ServerError {
+     CommandParse(String),
+     #[error("{0}")]
+     PostAdmissionCallback(Box<ServerError>),
++    #[error("invalid command: {0}")]
++    NativeCommandParse(String),
++    #[error("unsupported command: {0}")]
++    NativeUnsupportedCommand(String),
++    #[error("invalid command: {0}")]
++    NativeInvalidCommand(String),
+ }
+ 
+ impl ServerError {
+     #[must_use]
+     pub fn exit_code(&self) -> u8 {
+         match self {
+-            Self::UnsupportedCommand(_) | Self::CommandParse(_) => 2,
++            Self::NativeCommandParse(_)
++            | Self::NativeUnsupportedCommand(_)
++            | Self::NativeInvalidCommand(_) => 2,
+             Self::PostAdmissionCallback(error) => error.exit_code(),
+             _ => 1,
+         }
+@@ -1994,7 +2002,7 @@ impl ServerError {
+     #[must_use]
+     pub const fn is_command_parse(&self) -> bool {
+         match self {
+-            Self::CommandParse(_) => true,
++            Self::CommandParse(_) | Self::NativeCommandParse(_) => true,
+             Self::PostAdmissionCallback(error) => error.is_command_parse(),
+             _ => false,
+         }
+@@ -2008,7 +2016,10 @@ impl ServerError {
+     #[must_use]
+     pub fn tmux_message(&self) -> String {
+         match self {
+-            Self::InvalidCommand(message) | Self::CommandParse(message) => message.clone(),
++            Self::InvalidCommand(message)
++            | Self::CommandParse(message)
++            | Self::NativeCommandParse(message)
++            | Self::NativeInvalidCommand(message) => message.clone(),
+             Self::PostAdmissionCallback(error) => error.tmux_message(),
+             error => error.to_string(),
+         }
+@@ -3953,6 +3964,54 @@ mod tests {
+         assert!(!super::ServerError::InvalidCommand(String::new()).is_command_parse());
+     }
+ 
++    #[test]
++    fn native_usage_errors_preserve_messages_phases_and_wire_tags() {
++        use super::ServerError;
++
++        let message = "command list-panes: --json cannot be combined with -F".to_owned();
++        let error = ServerError::NativeCommandParse(message.clone());
++        let bytes = postcard::to_stdvec(&error).unwrap();
++        assert_eq!(bytes[0], 14);
++        assert_eq!(postcard::from_bytes::<ServerError>(&bytes).unwrap(), error);
++        for error in [
++            error.clone(),
++            ServerError::PostAdmissionCallback(Box::new(error)),
++        ] {
++            assert_eq!(error.exit_code(), 2);
++            assert_eq!(error.tmux_message(), message);
++            assert!(error.is_command_parse());
++        }
++        let unsupported =
++            ServerError::NativeUnsupportedCommand("set-option -a history-trickle".to_owned());
++        let bytes = postcard::to_stdvec(&unsupported).unwrap();
++        assert_eq!(bytes[0], 15);
++        assert_eq!(
++            postcard::from_bytes::<ServerError>(&bytes).unwrap(),
++            unsupported
++        );
++        assert_eq!(unsupported.exit_code(), 2);
++        assert!(!unsupported.is_command_parse());
++        assert_eq!(
++            unsupported.tmux_message(),
++            "unsupported command: set-option -a history-trickle"
++        );
++        let invalid = ServerError::NativeInvalidCommand(message.clone());
++        let bytes = postcard::to_stdvec(&invalid).unwrap();
++        assert_eq!(bytes[0], 16);
++        assert_eq!(
++            postcard::from_bytes::<ServerError>(&bytes).unwrap(),
++            invalid
++        );
++        assert_eq!(invalid.exit_code(), 2);
++        assert_eq!(invalid.tmux_message(), message);
++        assert!(!invalid.is_command_parse());
++        assert_eq!(ServerError::CommandParse(message).exit_code(), 1);
++        assert_eq!(
++            ServerError::UnsupportedCommand("clock-mode".to_owned()).exit_code(),
++            1
++        );
++    }
++
+     #[test]
+     fn post_admission_callback_holds_wire_tag_thirteen() {
+         let error = super::ServerError::PostAdmissionCallback(Box::new(
+@@ -5075,7 +5134,7 @@ mod tests {
+ 
+     #[test]
+     fn detached_reason_holds_its_appended_wire_field() {
+-        assert_eq!(super::PROTOCOL_VERSION, 103);
++        assert_eq!(super::PROTOCOL_VERSION, 104);
+         for (reason, tag) in [
+             (super::DetachReason::Requested, 0),
+             (super::DetachReason::Evicted, 1),
+diff --git a/crates/zz-protocol/tests/hunt_claims.rs b/crates/zz-protocol/tests/hunt_claims.rs
+index d685171c..6e9a55d9 100644
+--- a/crates/zz-protocol/tests/hunt_claims.rs
++++ b/crates/zz-protocol/tests/hunt_claims.rs
+@@ -14,8 +14,8 @@ fn payload(frame: &[u8]) -> &[u8] {
+ }
+ 
+ #[test]
+-fn protocol_version_on_this_commit_is_one_hundred_and_three() {
+-    assert_eq!(PROTOCOL_VERSION, 103);
++fn protocol_version_on_this_commit_is_one_hundred_and_four() {
++    assert_eq!(PROTOCOL_VERSION, 104);
+ }
+ 
+ #[test]
+@@ -322,7 +322,7 @@ fn dark_interactive_hello_encodes_version_instance_and_process_id_as_varints() {
+     assert_eq!(
+         frame,
+         [
+-            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x67, 0x00, 0x00, 0x67, 0x00, 0x00, 0x00, 0x00,
++            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00, 0x68, 0x00, 0x00, 0x00, 0x00,
+             0x01, 0x01, 0x00, 0x00, 0x00, 0x07,
+         ]
+     );
+diff --git a/crates/zz/src/lib.rs b/crates/zz/src/lib.rs
+index b265179b..718744fa 100644
+--- a/crates/zz/src/lib.rs
++++ b/crates/zz/src/lib.rs
+@@ -214,6 +214,7 @@ struct NativeAttachArguments {
+ #[derive(Debug, PartialEq, Eq)]
+ enum NativeAttachArgumentError {
+     Usage,
++    NativeUsage,
+     Command(ServerError),
+ }
+ 
+@@ -234,11 +235,11 @@ fn run_startup(socket_path: PathBuf) -> Startup {
+         }
+         Err(ApplicationArgumentError::Raw(error)) => {
+             eprintln!("{error}");
+-            return Startup::Exit(exit_code_for(CliFailure::Usage));
++            return Startup::Exit(exit_code_for(CliFailure::TmuxUsage));
+         }
+         Err(ApplicationArgumentError::Usage) => {
+             eprintln!("{TMUX_USAGE}");
+-            return Startup::Exit(exit_code_for(CliFailure::Usage));
++            return Startup::Exit(exit_code_for(CliFailure::TmuxUsage));
+         }
+     };
+     let ApplicationArguments {
+@@ -1007,8 +1008,7 @@ fn run_command_mode(
+     if prepared.is_none() && host.is_none() {
+         let static_commands = if native_attach_spelling {
+             if let Err(error) = parse_native_attach_arguments(command_chain[0].args.clone()) {
+-                print_native_attach_argument_error(error);
+-                return Some(exit_code_for(CliFailure::Usage));
++                return Some(print_native_attach_argument_error(error));
+             }
+             &command_chain[1..]
+         } else {
+@@ -1092,7 +1092,7 @@ fn run_command_mode(
+         .and_then(|prepared| prepared_command_error(&prepared.commands))
+     {
+         eprintln!("{}", server_error_message(error));
+-        return Some(exit_code_for(CliFailure::Usage));
++        return Some(exit_code_for(CliFailure::Server(error)));
+     }
+ 
+     if command == "kill-server" && host.is_none() && prepared.is_none() {
+@@ -1197,8 +1197,7 @@ fn run_command_mode(
+         let options = match parse_native_attach_arguments(command_chain[0].args.clone()) {
+             Ok(options) => options,
+             Err(error) => {
+-                print_native_attach_argument_error(error);
+-                return Some(exit_code_for(CliFailure::Usage));
++                return Some(print_native_attach_argument_error(error));
+             }
+         };
+         if options.restart_daemon && host.is_some() {
+@@ -1403,11 +1402,11 @@ fn command_help(command: &str) -> Result<String, ServerError> {
+             zz_protocol::unimplemented_tmux_command_spec(name)
+         }
+         zz_protocol::CommandResolution::Ambiguous(message) => {
+-            return Err(ServerError::CommandParse(message));
++            return Err(ServerError::NativeCommandParse(message));
+         }
+         zz_protocol::CommandResolution::Unknown => None,
+     }
+-    .ok_or_else(|| ServerError::CommandParse(format!("unknown command: {command}")))?;
++    .ok_or_else(|| ServerError::NativeCommandParse(format!("unknown command: {command}")))?;
+     let mut help = format!(
+         "{}{}\n{}\nusage: zz {} {}\n",
+         spec.name,
+@@ -1842,7 +1841,7 @@ fn parse_native_attach_arguments(
+     while let Some(argument) = arguments.next() {
+         if !explicit_boundary && argument == "--restart-daemon" {
+             if restart_daemon {
+-                return Err(NativeAttachArgumentError::Usage);
++                return Err(NativeAttachArgumentError::NativeUsage);
+             }
+             restart_daemon = true;
+             continue;
+@@ -1936,13 +1935,21 @@ fn parse_native_attach_arguments(
+ }
+ 
+ #[cfg(not(target_os = "ios"))]
+-fn print_native_attach_argument_error(error: NativeAttachArgumentError) {
++fn print_native_attach_argument_error(error: NativeAttachArgumentError) -> ExitCode {
++    let status = match &error {
++        NativeAttachArgumentError::Usage => exit_code_for(CliFailure::TmuxUsage),
++        NativeAttachArgumentError::NativeUsage => exit_code_for(CliFailure::Usage),
++        NativeAttachArgumentError::Command(error) => exit_code_for(CliFailure::Server(error)),
++    };
+     match error {
+-        NativeAttachArgumentError::Usage => eprintln!("{NATIVE_ATTACH_USAGE}"),
++        NativeAttachArgumentError::Usage | NativeAttachArgumentError::NativeUsage => {
++            eprintln!("{NATIVE_ATTACH_USAGE}");
++        }
+         NativeAttachArgumentError::Command(error) => {
+             eprintln!("{}", command_error_message(&DaemonError::Server(error)));
+         }
+     }
++    status
+ }
+ 
+ #[cfg(not(target_os = "ios"))]
+@@ -2132,6 +2139,7 @@ fn print_command_error(output: &str) {
+ #[derive(Clone, Copy)]
+ enum CliFailure<'a> {
+     Usage,
++    TmuxUsage,
+     Runtime,
+     Server(&'a ServerError),
+     Daemon(&'a DaemonError),
+@@ -2141,11 +2149,10 @@ enum CliFailure<'a> {
+ fn exit_code_for(error: CliFailure<'_>) -> ExitCode {
+     ExitCode::from(match error {
+         CliFailure::Usage => 2,
+-        CliFailure::Runtime => 1,
++        CliFailure::Runtime | CliFailure::TmuxUsage => 1,
+         CliFailure::Server(error) => error.exit_code(),
+         CliFailure::Daemon(error) => match error {
+             DaemonError::Server(error) => error.exit_code(),
+-            DaemonError::InsertedCommandParse(_) => 2,
+             DaemonError::CommandExit { exit_code, .. }
+             | DaemonError::ReportedCommandExit { exit_code, .. } => *exit_code,
+             _ => 1,
+@@ -3064,10 +3071,15 @@ mod tests {
+             );
+         }
+         let usage = ServerError::CommandParse("command list-panes: invalid flag --".to_owned());
+-        assert_eq!(exit_code_for(CliFailure::Server(&usage)), ExitCode::from(2));
++        assert_eq!(exit_code_for(CliFailure::Server(&usage)), ExitCode::from(1));
+         let unsupported = ServerError::UnsupportedCommand("unknown command: bogus".to_owned());
+         assert_eq!(
+             exit_code_for(CliFailure::Server(&unsupported)),
++            ExitCode::from(1)
++        );
++        let native = ServerError::NativeCommandParse("native usage".to_owned());
++        assert_eq!(
++            exit_code_for(CliFailure::Server(&native)),
+             ExitCode::from(2)
+         );
+         let runtime = ServerError::InvalidCommand("duplicate session: dup".to_owned());
+diff --git a/crates/zz/tests/cli_binary.rs b/crates/zz/tests/cli_binary.rs
+index 7b83a961..65278d92 100644
+--- a/crates/zz/tests/cli_binary.rs
++++ b/crates/zz/tests/cli_binary.rs
+@@ -38,7 +38,7 @@ fn unknown_tmux_flag_uses_tmux_usage_shape() {
+         .arg("-8")
+         .output()
+         .expect("run zz with an unknown tmux flag");
+-    assert_eq!(output.status.code(), Some(2));
++    assert_eq!(output.status.code(), Some(1));
+     assert!(output.stdout.is_empty());
+     assert_eq!(
+         output.stderr,
+@@ -80,13 +80,17 @@ fn catalog_help_is_available_without_a_daemon() {
+ }
+ 
+ #[test]
+-fn invalid_cli_arguments_exit_two_without_a_daemon() {
+-    for (arguments, expected) in [
+-        (&["bogus-verb"][..], "unknown command: bogus-verb"),
+-        (&["bogus-verb", "--help"][..], "unknown command: bogus-verb"),
+-        (&["split-window", "--nope"][..], "invalid flag"),
+-        (&["-Z"][..], "unknown option -- Z"),
+-        (&["list-sessions", "-F", "x", "--json"][..], "--json"),
++fn usage_errors_keep_their_surface_status_without_a_daemon() {
++    for (arguments, expected, status) in [
++        (&["bogus-verb"][..], "unknown command: bogus-verb", 1),
++        (
++            &["bogus-verb", "--help"][..],
++            "unknown command: bogus-verb",
++            2,
++        ),
++        (&["split-window", "--nope"][..], "invalid flag", 1),
++        (&["-Z"][..], "unknown option -- Z", 1),
++        (&["list-sessions", "-F", "x", "--json"][..], "--json", 2),
+     ] {
+         let (home, mut zz) = isolated_zz();
+         let socket = home.path().join("absent.sock");
+@@ -97,7 +101,7 @@ fn invalid_cli_arguments_exit_two_without_a_daemon() {
+             .args(arguments)
+             .output()
+             .expect("run invalid CLI arguments");
+-        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
++        assert_eq!(output.status.code(), Some(status), "{arguments:?}");
+         assert!(output.stdout.is_empty(), "{arguments:?}");
+         assert!(
+             String::from_utf8_lossy(&output.stderr).contains(expected),
+@@ -438,6 +442,56 @@ mod daemon_autostart {
+         assert!(String::from_utf8_lossy(&output.stderr).contains("--json"));
+     }
+ 
++    #[test]
++    fn usage_errors_keep_their_surface_status_with_a_daemon() {
++        let fixture = Fixture::new();
++        if !local_socket_bind_available(&fixture.socket) {
++            return;
++        }
++        assert!(
++            fixture
++                .run(&["new-session", "-d", "-s", "usage-contract"])
++                .status
++                .success()
++        );
++        for (args, status) in [
++            (&["refresh-client", "-X"][..], 1),
++            (&["choose-tree", "-Q"][..], 1),
++            (&["list-panes", "-Z"][..], 1),
++            (&["set-option"][..], 1),
++            (&["new-window", "-Q"][..], 1),
++            (&["display-message", "-Q"][..], 1),
++            (&["kill-pane", "-Q"][..], 1),
++            (&["rename-window"][..], 1),
++            (&["bogus-verb"][..], 1),
++            (&["clock-mode"][..], 1),
++            (&["list-panes", "--json", "-Z"][..], 1),
++            (&["list-panes", "--json", "-F"][..], 1),
++            (&["list-panes", "--json", "-F", "x"][..], 2),
++            (&["list-panes", "--json=true"][..], 2),
++            (&["reload-config", "extra"][..], 2),
++            (&["set-option", "-a", "history-trickle", "1"][..], 2),
++            (
++                &["set-option", "-a", "experimental-agent-pane", "on"][..],
++                2,
++            ),
++            (&["split-browser", "-Q"][..], 2),
++            (&["agent-catalog", "-Q"][..], 2),
++            (&["agent-catalog", "claude", "not-a-number"][..], 2),
++            (&["set-browser-url"][..], 2),
++        ] {
++            let output = fixture.run(args);
++            assert_eq!(
++                output.status.code(),
++                Some(status),
++                "{args:?}: {:?}",
++                output.stderr
++            );
++            assert!(output.stdout.is_empty(), "{args:?}");
++            assert!(!output.stderr.is_empty(), "{args:?}");
++        }
++    }
++
+     #[test]
+     fn new_session_immediately_after_kill_server_starts_a_fresh_daemon() {
+         let fixture = Fixture::new();
+@@ -477,7 +531,7 @@ mod daemon_autostart {
+             fixture.assert_not_started();
+         }
+         let output = fixture.run(&["source-file"]);
+-        assert_eq!(output.status.code(), Some(2));
++        assert_eq!(output.status.code(), Some(1));
+         assert!(output.stdout.is_empty());
+         assert_eq!(
+             output.stderr,
+@@ -2704,7 +2758,7 @@ mod daemon_autostart {
+             assert_eq!(output.stderr, b"open terminal failed: not a terminal\n");
+ 
+             let positional = fixture.run(&[command, "named", "-@"]);
+-            assert_eq!(positional.status.code(), Some(2));
++            assert_eq!(positional.status.code(), Some(1));
+             assert!(positional.stdout.is_empty());
+             assert_eq!(
+                 positional.stderr,
+@@ -2794,7 +2848,7 @@ mod daemon_autostart {
+                 let output = fixture.run(&invocation);
+                 assert_eq!(
+                     output.status.code(),
+-                    Some(if arguments == ["-x"] { 1 } else { 2 }),
++                    Some(1),
+                     "{invocation:?}"
+                 );
+                 assert!(output.stdout.is_empty(), "{invocation:?}");
+@@ -3101,7 +3155,7 @@ mod daemon_autostart {
+             ";",
+             "broken",
+         ]);
+-        assert_eq!(rejected.status.code(), Some(2));
++        assert_eq!(rejected.status.code(), Some(1));
+         assert!(rejected.stdout.is_empty());
+         assert_eq!(rejected.stderr, b"unknown command: broken\n");
+ 
+@@ -3160,7 +3214,7 @@ mod daemon_autostart {
+             let mut arguments = vec!["set-environment", "-g", marker, "mutated", ";"];
+             arguments.extend_from_slice(later);
+             let rejected = fixture.run(&arguments);
+-            assert_eq!(rejected.status.code(), Some(2), "{marker}");
++            assert_eq!(rejected.status.code(), Some(1), "{marker}");
+             assert!(rejected.stdout.is_empty(), "{marker}");
+             assert_eq!(rejected.stderr, expected, "{marker}");
+ 
+@@ -3278,7 +3332,7 @@ mod daemon_autostart {
+                     Some("extra") => "command list-sessions: too many arguments (need at most 0)",
+                     _ => unreachable!("covered cold invocation"),
+                 };
+-                assert_eq!(output.status.code(), Some(2), "{arguments:?}");
++                assert_eq!(output.status.code(), Some(1), "{arguments:?}");
+                 assert!(output.stdout.is_empty(), "{arguments:?}");
+                 assert_eq!(
+                     output.stderr,
+@@ -3323,7 +3377,7 @@ mod daemon_autostart {
+         )
+         .expect("write startup alias");
+         let output = fixture.run(&["go"]);
+-        assert_eq!(output.status.code(), Some(2));
++        assert_eq!(output.status.code(), Some(1));
+         assert!(output.stdout.is_empty());
+         assert_eq!(output.stderr, b"unknown command: go\n");
+         fixture.assert_not_started();
+@@ -3387,7 +3441,7 @@ mod daemon_autostart {
+         });
+         let output = fixture.run(&["new-session", "-d", "-s", "before-reset", ";", "frobnicate"]);
+         fake.join().expect("join fake listener");
+-        assert_eq!(output.status.code(), Some(2));
++        assert_eq!(output.status.code(), Some(1));
+         assert!(output.stdout.is_empty());
+         assert!(!output.stderr.is_empty());
+         fixture.assert_not_started();
+@@ -3409,7 +3463,7 @@ mod daemon_autostart {
+             )
+             .expect("write startup alias");
+             let output = fixture.run(&["new-session", "-d", "-s", "before", ";", "list-sessions"]);
+-            assert_eq!(output.status.code(), Some(2));
++            assert_eq!(output.status.code(), Some(1));
+             assert!(output.stdout.is_empty());
+             assert_eq!(output.stderr, b"unknown command: frobnicate\n");
+             fixture.assert_stopped();
+@@ -4072,7 +4126,7 @@ mod daemon_autostart {
+                 b"can't find session: bogus\n" as &[u8],
+                 1,
+             ),
+-            (&["wibble"], b"unknown command: wibble\n", 2),
++            (&["wibble"], b"unknown command: wibble\n", 1),
+         ] {
+             let output = fixture.run(arguments);
+             assert_eq!(output.status.code(), Some(exit_code));

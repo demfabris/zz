@@ -1,0 +1,5 @@
+command: ["python3", "compat/tui/evidence/TUI-017/attempt-05/direct-pairs.py", "fixed-direct"]
+candidate 0 SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0
+main 0 SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0
+
+exit_status: 0

@@ -1,0 +1,6 @@
+{
+  "base": "eef2df941183af8ab7b16bf648dfadcc4486d22e",
+  "archive": "target/capture-12-current-main-src",
+  "crate_files_compared": 524,
+  "all_byte_identical": true
+}

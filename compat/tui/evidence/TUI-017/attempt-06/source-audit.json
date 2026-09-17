@@ -1,0 +1,16 @@
+{
+  "production_and_fixture_code_files": [
+    "compat/scenarios/smoke/fixtures/command-flag-errors.sh",
+    "compat/scenarios/smoke/fixtures/split-window-wait.sh",
+    "compat/tui-client-commands.sh",
+    "compat/tui/verify-claims.py",
+    "crates/zz-daemon/src/daemon.rs",
+    "crates/zz-mux/src/command.rs",
+    "crates/zz-mux/src/model.rs",
+    "crates/zz-protocol/src/catalog.rs",
+    "crates/zz-terminal/src/session.rs"
+  ],
+  "added_code_comments": [],
+  "attribution_trailers": false,
+  "native_inventory_adjustment": "two usage expectations in one test and one registry declaration; no runtime implementation change"
+}

@@ -1,0 +1,2 @@
+RANDOM=1
+unset BASH_ENV

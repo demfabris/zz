@@ -1,0 +1,5 @@
+{
+  "session_targets_accept_pane_and_window_ids": "byte-identical to main",
+  "targets.txt": "byte-identical to main",
+  "containment_test_present": true
+}

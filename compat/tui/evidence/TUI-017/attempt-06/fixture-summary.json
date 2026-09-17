@@ -1,0 +1,23 @@
+[
+  {
+    "artifact": "client-1.txt",
+    "summary": "all 192 asserted comparisons identical, 32 recorded not asserted (0 for a sibling lane, owners TUI-014=6 TUI-015=3 TUI-017=4 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0)",
+    "exit_status": 0
+  },
+  {
+    "artifact": "client-2.txt",
+    "summary": "all 192 asserted comparisons identical, 32 recorded not asserted (0 for a sibling lane, owners TUI-014=6 TUI-015=3 TUI-017=4 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0)",
+    "exit_status": 0
+  },
+  {
+    "artifact": "client-3.txt",
+    "summary": "all 192 asserted comparisons identical, 32 recorded not asserted (0 for a sibling lane, owners TUI-014=6 TUI-015=3 TUI-017=4 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0)",
+    "exit_status": 0
+  },
+  {
+    "artifact": "self-check.txt",
+    "checks": 98,
+    "summary": "self-check complete: every sabotage was caught in its own channel and both equivalences passed",
+    "exit_status": 0
+  }
+]

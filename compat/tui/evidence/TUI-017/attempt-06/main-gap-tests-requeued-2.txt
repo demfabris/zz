@@ -1,0 +1,35 @@
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-current-main-src/crates/zz-terminal)
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-current-main-src/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-current-main-src/crates/zz-mux)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 00s
+     Running unittests src/lib.rs (target/capture-12-final-main-build/debug/deps/zz_mux-eed3ba838a6892ab)
+
+running 4 tests
+test command::tests::automatic_session_names_use_the_first_canonical_numeric_gap ... ok
+test compat_manifest_tests::command_and_flag_gaps_match_the_pinned_oracle ... FAILED
+test compat_manifest_tests::args_parse_gaps_match_the_pinned_oracle ... ok
+test command::tests::gap_queries_are_silent_sorted_and_catalog_backed ... FAILED
+
+failures:
+
+---- compat_manifest_tests::command_and_flag_gaps_match_the_pinned_oracle stdout ----
+
+thread 'compat_manifest_tests::command_and_flag_gaps_match_the_pinned_oracle' (1137011) panicked at crates/zz-mux/src/compat_manifest_tests.rs:284:5:
+unclassified zz catalog extensions: ["native-command:new-agent-session"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- command::tests::gap_queries_are_silent_sorted_and_catalog_backed stdout ----
+
+thread 'command::tests::gap_queries_are_silent_sorted_and_catalog_backed' (1137009) panicked at crates/zz-mux/src/command.rs:43577:9:
+assertion failed: rows.contains(&"agent-send [-t target-pane] [--target target-pane] [--submit] [--wait] [--timeout seconds] [--on-block wait|fail] [--context context] [text ...]")
+
+
+failures:
+    command::tests::gap_queries_are_silent_sorted_and_catalog_backed
+    compat_manifest_tests::command_and_flag_gaps_match_the_pinned_oracle
+
+test result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 530 filtered out; finished in 0.53s
+
+error: test failed, to rerun pass `-p zz-mux --lib`
+
+exit_status=101

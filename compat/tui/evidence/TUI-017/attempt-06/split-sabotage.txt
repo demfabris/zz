@@ -1,0 +1,4 @@
+early-return caught 1
+wrong-window caught 1
+
+exit_status=0

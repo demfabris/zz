@@ -1,0 +1,380 @@
+{
+  "batch_scope": [
+    {
+      "scene": "100x30/clear",
+      "mode": "join",
+      "matches": true
+    },
+    {
+      "scene": "100x30/clear",
+      "mode": "trim",
+      "matches": true
+    },
+    {
+      "scene": "100x30/wide-wrap",
+      "mode": "join",
+      "matches": true
+    },
+    {
+      "scene": "100x30/wide-wrap",
+      "mode": "trim",
+      "matches": true
+    },
+    {
+      "scene": "100x30/wide-wrap",
+      "mode": "escape",
+      "matches": true
+    },
+    {
+      "scene": "100x30/wide-wrap",
+      "mode": "padding",
+      "matches": true
+    },
+    {
+      "scene": "resized-erase",
+      "mode": "join",
+      "matches": true
+    },
+    {
+      "scene": "resized-erase",
+      "mode": "trim",
+      "matches": true
+    },
+    {
+      "scene": "target/:.%1",
+      "mode": "lock-session",
+      "matches": true
+    },
+    {
+      "scene": "target/:.%1",
+      "mode": "has-session",
+      "matches": true
+    },
+    {
+      "scene": "target/:.%1",
+      "mode": "list-windows",
+      "matches": true
+    },
+    {
+      "scene": "target/%1",
+      "mode": "lock-session",
+      "matches": true
+    },
+    {
+      "scene": "target/%1",
+      "mode": "has-session",
+      "matches": true
+    },
+    {
+      "scene": "target/%1",
+      "mode": "list-windows",
+      "matches": true
+    },
+    {
+      "scene": "target/cli:=",
+      "mode": "lock-session",
+      "matches": true
+    },
+    {
+      "scene": "target/cli:=",
+      "mode": "has-session",
+      "matches": true
+    },
+    {
+      "scene": "target/cli:=",
+      "mode": "list-windows",
+      "matches": true
+    },
+    {
+      "scene": "100x30/erase-line",
+      "mode": "join",
+      "matches": true
+    },
+    {
+      "scene": "100x30/erase-line",
+      "mode": "trim",
+      "matches": true
+    },
+    {
+      "scene": "target/foreign",
+      "mode": "lock-session",
+      "matches": true
+    },
+    {
+      "scene": "target/foreign",
+      "mode": "has-session",
+      "matches": true
+    },
+    {
+      "scene": "target/foreign",
+      "mode": "list-windows",
+      "matches": true
+    },
+    {
+      "scene": "100x30/scroll-region",
+      "mode": "join",
+      "matches": true
+    },
+    {
+      "scene": "100x30/scroll-region",
+      "mode": "trim",
+      "matches": true
+    },
+    {
+      "scene": "80x24/erase-line",
+      "mode": "join",
+      "matches": true
+    },
+    {
+      "scene": "80x24/erase-line",
+      "mode": "trim",
+      "matches": true
+    },
+    {
+      "scene": "80x24/wide-wrap",
+      "mode": "join",
+      "matches": true
+    },
+    {
+      "scene": "80x24/wide-wrap",
+      "mode": "trim",
+      "matches": true
+    },
+    {
+      "scene": "80x24/wide-wrap",
+      "mode": "escape",
+      "matches": true
+    },
+    {
+      "scene": "80x24/wide-wrap",
+      "mode": "padding",
+      "matches": true
+    },
+    {
+      "scene": "target/cli:.%1",
+      "mode": "lock-session",
+      "matches": true
+    },
+    {
+      "scene": "target/cli:.%1",
+      "mode": "has-session",
+      "matches": true
+    },
+    {
+      "scene": "target/cli:.%1",
+      "mode": "list-windows",
+      "matches": true
+    },
+    {
+      "scene": "100x30/erase-display",
+      "mode": "join",
+      "matches": true
+    },
+    {
+      "scene": "100x30/erase-display",
+      "mode": "trim",
+      "matches": true
+    },
+    {
+      "scene": "80x24/scroll-region",
+      "mode": "join",
+      "matches": true
+    },
+    {
+      "scene": "80x24/scroll-region",
+      "mode": "trim",
+      "matches": true
+    },
+    {
+      "scene": "80x24/clear",
+      "mode": "join",
+      "matches": true
+    },
+    {
+      "scene": "80x24/clear",
+      "mode": "trim",
+      "matches": true
+    },
+    {
+      "scene": "target/=:",
+      "mode": "lock-session",
+      "matches": true
+    },
+    {
+      "scene": "target/=:",
+      "mode": "has-session",
+      "matches": true
+    },
+    {
+      "scene": "target/=:",
+      "mode": "list-windows",
+      "matches": true
+    },
+    {
+      "scene": "80x24/erase-display",
+      "mode": "join",
+      "matches": true
+    },
+    {
+      "scene": "80x24/erase-display",
+      "mode": "trim",
+      "matches": true
+    }
+  ],
+  "batch_matches": 44,
+  "batch_count": 44,
+  "remaining_differences": [
+    {
+      "scene": "80x24/tab-trailing",
+      "mode": "join"
+    },
+    {
+      "scene": "80x24/tab-trailing",
+      "mode": "trim"
+    },
+    {
+      "scene": "80x24/tab-trailing",
+      "mode": "escape"
+    },
+    {
+      "scene": "80x24/tab-trailing",
+      "mode": "padding"
+    },
+    {
+      "scene": "80x24/tab-trailing",
+      "mode": "tabs"
+    },
+    {
+      "scene": "100x30/tab-wide",
+      "mode": "join"
+    },
+    {
+      "scene": "100x30/tab-wide",
+      "mode": "trim"
+    },
+    {
+      "scene": "100x30/tab-wide",
+      "mode": "escape"
+    },
+    {
+      "scene": "100x30/tab-wide",
+      "mode": "padding"
+    },
+    {
+      "scene": "100x30/tab-wide",
+      "mode": "tabs"
+    },
+    {
+      "scene": "80x24/tab-wide",
+      "mode": "join"
+    },
+    {
+      "scene": "80x24/tab-wide",
+      "mode": "trim"
+    },
+    {
+      "scene": "80x24/tab-wide",
+      "mode": "escape"
+    },
+    {
+      "scene": "80x24/tab-wide",
+      "mode": "padding"
+    },
+    {
+      "scene": "80x24/tab-wide",
+      "mode": "tabs"
+    },
+    {
+      "scene": "100x30/erase-line",
+      "mode": "escape"
+    },
+    {
+      "scene": "100x30/erase-line",
+      "mode": "padding"
+    },
+    {
+      "scene": "100x30/tab-internal",
+      "mode": "join"
+    },
+    {
+      "scene": "100x30/tab-internal",
+      "mode": "trim"
+    },
+    {
+      "scene": "100x30/tab-internal",
+      "mode": "escape"
+    },
+    {
+      "scene": "100x30/tab-internal",
+      "mode": "padding"
+    },
+    {
+      "scene": "100x30/tab-internal",
+      "mode": "tabs"
+    },
+    {
+      "scene": "100x30/erase-display",
+      "mode": "escape"
+    },
+    {
+      "scene": "100x30/erase-display",
+      "mode": "padding"
+    },
+    {
+      "scene": "100x30/scroll-region",
+      "mode": "escape"
+    },
+    {
+      "scene": "100x30/scroll-region",
+      "mode": "padding"
+    },
+    {
+      "scene": "100x30/clear",
+      "mode": "escape"
+    },
+    {
+      "scene": "100x30/clear",
+      "mode": "padding"
+    },
+    {
+      "scene": "100x30/tab-trailing",
+      "mode": "join"
+    },
+    {
+      "scene": "100x30/tab-trailing",
+      "mode": "trim"
+    },
+    {
+      "scene": "100x30/tab-trailing",
+      "mode": "escape"
+    },
+    {
+      "scene": "100x30/tab-trailing",
+      "mode": "padding"
+    },
+    {
+      "scene": "100x30/tab-trailing",
+      "mode": "tabs"
+    },
+    {
+      "scene": "80x24/tab-internal",
+      "mode": "join"
+    },
+    {
+      "scene": "80x24/tab-internal",
+      "mode": "trim"
+    },
+    {
+      "scene": "80x24/tab-internal",
+      "mode": "escape"
+    },
+    {
+      "scene": "80x24/tab-internal",
+      "mode": "padding"
+    },
+    {
+      "scene": "80x24/tab-internal",
+      "mode": "tabs"
+    }
+  ]
+}

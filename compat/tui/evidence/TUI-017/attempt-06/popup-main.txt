@@ -1,0 +1,3 @@
+attached popup-only compatibility: PASS
+
+exit_status=0

@@ -1,0 +1,6 @@
+{
+  "previous_fixture": "0bab4e9c",
+  "difference": "Main removed only export ZZ_TRAY=0; the initial full-file equality check rejected that setup change. Removing that line makes the complete files byte-identical.",
+  "records": "unchanged 32-case roster copied from attempt-05; current run independently confirms all owner tallies",
+  "runtime_asserted": 192
+}

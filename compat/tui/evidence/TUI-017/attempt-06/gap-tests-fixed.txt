@@ -1,0 +1,26 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.45s
+     Running unittests src/lib.rs (target/debug/deps/zz_mux-eed3ba838a6892ab)
+
+running 4 tests
+test command::tests::automatic_session_names_use_the_first_canonical_numeric_gap ... ok
+test compat_manifest_tests::args_parse_gaps_match_the_pinned_oracle ... ok
+test compat_manifest_tests::command_and_flag_gaps_match_the_pinned_oracle ... ok
+test command::tests::gap_queries_are_silent_sorted_and_catalog_backed ... FAILED
+
+failures:
+
+---- command::tests::gap_queries_are_silent_sorted_and_catalog_backed stdout ----
+
+thread 'command::tests::gap_queries_are_silent_sorted_and_catalog_backed' (774502) panicked at crates/zz-mux/src/command.rs:43583:9:
+assertion failed: rows.contains(&"tools [--skill]")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    command::tests::gap_queries_are_silent_sorted_and_catalog_backed
+
+test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 531 filtered out; finished in 0.44s
+
+error: test failed, to rerun pass `-p zz-mux --lib`
+
+exit_status=101

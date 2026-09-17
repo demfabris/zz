@@ -1,0 +1,42 @@
+{
+  "full_library_run": {
+    "zz-daemon": {
+      "passed": 975,
+      "failed": 4
+    },
+    "zz-mux": {
+      "passed": 533,
+      "failed": 2
+    },
+    "zz-protocol": {
+      "passed": 229,
+      "failed": 0
+    },
+    "zz-terminal": {
+      "passed": 285,
+      "failed": 0,
+      "ignored": 1
+    }
+  },
+  "final_full_mux": {
+    "passed": 535,
+    "failed": 0
+  },
+  "daemon_filtered_reruns": {
+    "passed": 4,
+    "failed": 0
+  },
+  "main_gap_reproduction": {
+    "passed": 2,
+    "failed": 2,
+    "expected": "same two inherited failures"
+  },
+  "candidate_gap_repair": {
+    "passed": 4,
+    "failed": 0
+  },
+  "clippy": "four crates, all targets/features, -D warnings, exit 0",
+  "fmt": "exit 0",
+  "compat_check": "exit 0",
+  "cargo_queue_cancellations": "143 means childless waiter cancellation; original outputs retained, successful retries separately named"
+}

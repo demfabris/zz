@@ -1,0 +1,14 @@
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-terminal)
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-mux)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 05s
+     Running unittests src/lib.rs (target/debug/deps/zz_daemon-7a6e412177cab2ac)
+
+running 1 test
+test daemon::tests::control_background_callbacks_cancel_after_disconnect ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 1.63s
+
+
+exit_status=0

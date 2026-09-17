@@ -1,0 +1,227 @@
+[
+  {
+    "artifact": "build-candidate.txt",
+    "command": "/tmp/zz-cargo.sh build -p zz-cli",
+    "exit_status": 0
+  },
+  {
+    "artifact": "build-main.txt",
+    "command": "CARGO_TARGET_DIR=$PWD/target/capture-12-final-main-build /tmp/zz-cargo.sh build -p zz-cli --manifest-path target/capture-12-current-main-src/Cargo.toml",
+    "exit_status": 0
+  },
+  {
+    "artifact": "startup-latency.txt",
+    "command": "python3 compat/tui/evidence/TUI-017/attempt-06/startup-latency.py target/capture-12-resumed-proof/zz target/capture-12-resumed-proof/main",
+    "exit_status": 0
+  },
+  {
+    "artifact": "packages.txt",
+    "command": "HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup /tmp/zz-cargo.sh test -p zz-mux -p zz-terminal -p zz-daemon -p zz-protocol --lib --no-fail-fast",
+    "exit_status": 101
+  },
+  {
+    "artifact": "clippy.txt",
+    "command": "/tmp/zz-cargo.sh clippy -p zz-mux -p zz-terminal -p zz-daemon -p zz-protocol --all-targets --all-features -- -D warnings",
+    "exit_status": 143
+  },
+  {
+    "artifact": "fmt.txt",
+    "command": "/tmp/zz-cargo.sh fmt --all",
+    "exit_status": 143
+  },
+  {
+    "artifact": "main-gap-tests.txt",
+    "command": "CARGO_TARGET_DIR=$PWD/target/capture-12-final-main-build /tmp/zz-cargo.sh test --manifest-path target/capture-12-current-main-src/Cargo.toml -p zz-mux --lib gap",
+    "exit_status": 143
+  },
+  {
+    "artifact": "gap-tests-fixed.txt",
+    "command": "/tmp/zz-cargo.sh test -p zz-mux --lib gap",
+    "exit_status": 101
+  },
+  {
+    "artifact": "attached.txt",
+    "command": "compat/attached-client.sh $PWD/target/capture-12-resumed-proof/zz $PWD/compat/.cache/tmux-src/tmux",
+    "exit_status": 1
+  },
+  {
+    "artifact": "attached-retry.txt",
+    "command": "compat/attached-client.sh $PWD/target/capture-12-resumed-proof/zz $PWD/compat/.cache/tmux-src/tmux",
+    "exit_status": 0
+  },
+  {
+    "artifact": "attached-main.txt",
+    "command": "compat/attached-client.sh $PWD/target/capture-12-resumed-proof/main $PWD/compat/.cache/tmux-src/tmux",
+    "exit_status": 1
+  },
+  {
+    "artifact": "capture-probe.txt",
+    "command": "ZZ_COMPAT_ZZ=$PWD/target/capture-12-resumed-proof/zz python3 compat/tui/evidence/TUI-017/attempt-06/capture-probe.py",
+    "exit_status": 0
+  },
+  {
+    "artifact": "lock-probe.txt",
+    "command": "ZZ_BIN=$PWD/target/capture-12-resumed-proof/zz bash compat/tui/evidence/TUI-015/attempt-02/lock-probe.sh",
+    "exit_status": 0
+  },
+  {
+    "artifact": "split-sabotage.txt",
+    "command": "python3 compat/tui/evidence/TUI-017/attempt-06/split-sabotage.py",
+    "exit_status": 0
+  },
+  {
+    "artifact": "compat-check.txt",
+    "command": "cargo() { /tmp/zz-cargo.sh \"$@\"; }; export -f cargo; HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup compat/check.sh",
+    "exit_status": 143
+  },
+  {
+    "artifact": "client-1.txt",
+    "command": "compat/tui-client-commands.sh $PWD/target/capture-12-resumed-proof/zz $PWD/compat/.cache/tmux-src/tmux",
+    "exit_status": 0
+  },
+  {
+    "artifact": "split-candidate-1.txt",
+    "command": "ZZ_COMPAT_ZZ=$PWD/target/capture-12-resumed-proof/zz compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/split-window-wait.txt $PWD/target/capture-12-resumed-proof/zz $PWD/compat/.cache/tmux-src/tmux",
+    "exit_status": 0
+  },
+  {
+    "artifact": "split-main-1.txt",
+    "command": "ZZ_COMPAT_ZZ=$PWD/target/capture-12-resumed-proof/main compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/split-window-wait.txt $PWD/target/capture-12-resumed-proof/main $PWD/compat/.cache/tmux-src/tmux",
+    "exit_status": 0
+  },
+  {
+    "artifact": "client-2.txt",
+    "command": "compat/tui-client-commands.sh $PWD/target/capture-12-resumed-proof/zz $PWD/compat/.cache/tmux-src/tmux",
+    "exit_status": 0
+  },
+  {
+    "artifact": "split-candidate-2.txt",
+    "command": "ZZ_COMPAT_ZZ=$PWD/target/capture-12-resumed-proof/zz compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/split-window-wait.txt $PWD/target/capture-12-resumed-proof/zz $PWD/compat/.cache/tmux-src/tmux",
+    "exit_status": 0
+  },
+  {
+    "artifact": "split-main-2.txt",
+    "command": "ZZ_COMPAT_ZZ=$PWD/target/capture-12-resumed-proof/main compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/split-window-wait.txt $PWD/target/capture-12-resumed-proof/main $PWD/compat/.cache/tmux-src/tmux",
+    "exit_status": 0
+  },
+  {
+    "artifact": "client-3.txt",
+    "command": "compat/tui-client-commands.sh $PWD/target/capture-12-resumed-proof/zz $PWD/compat/.cache/tmux-src/tmux",
+    "exit_status": 0
+  },
+  {
+    "artifact": "split-candidate-3.txt",
+    "command": "ZZ_COMPAT_ZZ=$PWD/target/capture-12-resumed-proof/zz compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/split-window-wait.txt $PWD/target/capture-12-resumed-proof/zz $PWD/compat/.cache/tmux-src/tmux",
+    "exit_status": 0
+  },
+  {
+    "artifact": "split-main-3.txt",
+    "command": "ZZ_COMPAT_ZZ=$PWD/target/capture-12-resumed-proof/main compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/split-window-wait.txt $PWD/target/capture-12-resumed-proof/main $PWD/compat/.cache/tmux-src/tmux",
+    "exit_status": 0
+  },
+  {
+    "artifact": "self-check.txt",
+    "command": "compat/tui-client-commands.sh --self-check $PWD/target/capture-12-resumed-proof/zz $PWD/compat/.cache/tmux-src/tmux",
+    "exit_status": 0
+  },
+  {
+    "artifact": "popup-candidate.txt",
+    "command": "bash compat/tui/evidence/TUI-017/attempt-06/popup-only.sh $PWD/target/capture-12-resumed-proof/zz $PWD/compat/.cache/tmux-src/tmux",
+    "exit_status": 0
+  },
+  {
+    "artifact": "popup-main.txt",
+    "command": "bash compat/tui/evidence/TUI-017/attempt-06/popup-only.sh $PWD/target/capture-12-resumed-proof/main $PWD/compat/.cache/tmux-src/tmux",
+    "exit_status": 0
+  },
+  {
+    "artifact": "claims-015.txt",
+    "command": "python3 compat/tui/verify-claims.py --run TUI-015 --zz $PWD/target/capture-12-resumed-proof/zz",
+    "exit_status": 0
+  },
+  {
+    "artifact": "claims-017.txt",
+    "command": "python3 compat/tui/verify-claims.py --run TUI-017 --zz $PWD/target/capture-12-resumed-proof/zz",
+    "exit_status": 0
+  },
+  {
+    "artifact": "solo-control_background_callbacks_cancel_after_disconnect.txt",
+    "command": "HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup /tmp/zz-cargo.sh test -p zz-daemon --lib control_background_callbacks_cancel_after_disconnect",
+    "exit_status": 0
+  },
+  {
+    "artifact": "solo-default_shell_rejects_invalid_values_and_unset_controls_the_child_shell.txt",
+    "command": "HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup /tmp/zz-cargo.sh test -p zz-daemon --lib default_shell_rejects_invalid_values_and_unset_controls_the_child_shell",
+    "exit_status": 0
+  },
+  {
+    "artifact": "solo-positive_delay_shell_job_retains_destroyed_target_and_keeps_missing_target_sessionless.txt",
+    "command": "HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup /tmp/zz-cargo.sh test -p zz-daemon --lib positive_delay_shell_job_retains_destroyed_target_and_keeps_missing_target_sessionless",
+    "exit_status": 0
+  },
+  {
+    "artifact": "solo-switch_client_key_table_and_formats_are_client_local.txt",
+    "command": "HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup /tmp/zz-cargo.sh test -p zz-daemon --lib switch_client_key_table_and_formats_are_client_local",
+    "exit_status": 143
+  },
+  {
+    "artifact": "delta-selection.txt",
+    "command": "ZZ_COMPAT_ZZ=$PWD/target/capture-12-resumed-proof/zz compat/run.sh --strict-geometry --delta origin/main...HEAD --commands capture-pane,lock-session,lock-client,lock-server,has-session,list-windows,split-window --list",
+    "exit_status": 0
+  },
+  {
+    "artifact": "delta-focused.txt",
+    "command": "ZZ_COMPAT_ZZ=$PWD/target/capture-12-resumed-proof/zz compat/run.sh --strict-geometry --delta origin/main...HEAD --commands capture-pane,lock-session,lock-client,lock-server,has-session,list-windows,split-window capture-pane targets smoke/split-window-wait",
+    "exit_status": 0
+  },
+  {
+    "artifact": "clippy-requeued.txt",
+    "command": "/tmp/zz-cargo.sh clippy -p zz-mux -p zz-terminal -p zz-daemon -p zz-protocol --all-targets --all-features -- -D warnings",
+    "exit_status": 0
+  },
+  {
+    "artifact": "main-gap-tests-requeued.txt",
+    "command": "CARGO_TARGET_DIR=$PWD/target/capture-12-final-main-build /tmp/zz-cargo.sh test --manifest-path target/capture-12-current-main-src/Cargo.toml -p zz-mux --lib gap",
+    "exit_status": 143
+  },
+  {
+    "artifact": "main-gap-tests-requeued-2.txt",
+    "command": "CARGO_TARGET_DIR=$PWD/target/capture-12-final-main-build /tmp/zz-cargo.sh test --manifest-path target/capture-12-current-main-src/Cargo.toml -p zz-mux --lib gap",
+    "exit_status": 101
+  },
+  {
+    "artifact": "fmt-requeued.txt",
+    "command": "/tmp/zz-cargo.sh fmt --all",
+    "exit_status": 0
+  },
+  {
+    "artifact": "gap-tests-fixed-2.txt",
+    "command": "/tmp/zz-cargo.sh test -p zz-mux --lib gap",
+    "exit_status": 0
+  },
+  {
+    "artifact": "solo-switch-client-requeued.txt",
+    "command": "HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup /tmp/zz-cargo.sh test -p zz-daemon --lib switch_client_key_table_and_formats_are_client_local",
+    "exit_status": 0
+  },
+  {
+    "artifact": "compat-check-requeued.txt",
+    "command": "cargo() { BASH_ENV=$PWD/compat/tui/evidence/TUI-017/attempt-06/cargo-slot-one.sh /tmp/zz-cargo.sh \"$@\"; }; export -f cargo; HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup compat/check.sh",
+    "exit_status": 0
+  },
+  {
+    "artifact": "tracker-final.txt",
+    "command": "python3 compat/tui/tracker.py check",
+    "exit_status": 0
+  },
+  {
+    "artifact": "tmux-tracker-final.txt",
+    "command": "python3 compat/tmux-tracker.py check",
+    "exit_status": 0
+  },
+  {
+    "artifact": "wire-final.txt",
+    "command": "python3 compat/wire-version.py",
+    "exit_status": 0
+  }
+]

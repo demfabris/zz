@@ -1,0 +1,127 @@
+{
+  "reason": "Requeue our own childless lock waiters after more than half an hour on slot 1; no compiler or other lane process was stopped. Retry still goes through the unmodified two-slot wrapper.",
+  "cancelled": [
+    {
+      "pid": 318900,
+      "args": [
+        "/usr/bin/flock",
+        "-w",
+        "3600",
+        "/tmp/zz-cargo-slot-1.lock",
+        "cargo",
+        "clippy",
+        "-p",
+        "zz-mux",
+        "-p",
+        "zz-terminal",
+        "-p",
+        "zz-daemon",
+        "-p",
+        "zz-protocol",
+        "--all-targets",
+        "--all-features",
+        "--jobs",
+        "2",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "children": "",
+      "wait_channel": "locks_lock_inode_wait"
+    },
+    {
+      "pid": 334572,
+      "args": [
+        "/usr/bin/flock",
+        "-w",
+        "3600",
+        "/tmp/zz-cargo-slot-1.lock",
+        "cargo",
+        "test",
+        "--manifest-path",
+        "target/capture-12-current-main-src/Cargo.toml",
+        "-p",
+        "zz-mux",
+        "--lib",
+        "gap",
+        "--jobs",
+        "2"
+      ],
+      "children": "",
+      "wait_channel": "locks_lock_inode_wait"
+    }
+  ],
+  "second_requeue": {
+    "reason": "Only one Cargo job remains active, while these own childless requests wait on its occupied slot. Requeue through the same wrapper to use the other shared slot if selected.",
+    "cancelled": [
+      {
+        "pid": 835085,
+        "args": [
+          "/usr/bin/flock",
+          "-w",
+          "3600",
+          "/tmp/zz-cargo-slot-0.lock",
+          "cargo",
+          "test",
+          "-p",
+          "zz-daemon",
+          "--lib",
+          "switch_client_key_table_and_formats_are_client_local",
+          "--jobs",
+          "2"
+        ]
+      },
+      {
+        "pid": 1015441,
+        "args": [
+          "/usr/bin/flock",
+          "-w",
+          "3600",
+          "/tmp/zz-cargo-slot-0.lock",
+          "cargo",
+          "fmt",
+          "--all"
+        ]
+      },
+      {
+        "pid": 1015742,
+        "args": [
+          "/usr/bin/flock",
+          "-w",
+          "3600",
+          "/tmp/zz-cargo-slot-0.lock",
+          "cargo",
+          "test",
+          "--manifest-path",
+          "target/capture-12-current-main-src/Cargo.toml",
+          "-p",
+          "zz-mux",
+          "--lib",
+          "gap",
+          "--jobs",
+          "2"
+        ]
+      }
+    ]
+  },
+  "final_gate_requeue": {
+    "pid": 1052473,
+    "args": [
+      "/usr/bin/flock",
+      "-w",
+      "3600",
+      "/tmp/zz-cargo-slot-0.lock",
+      "cargo",
+      "test",
+      "-p",
+      "zz-daemon",
+      "--lib",
+      "status::tests::daemon_delegated_format_consumers_match_mux_inventory",
+      "--jobs",
+      "2",
+      "--",
+      "--exact"
+    ],
+    "reason": "Restart complete gate through unchanged wrapper with Bash RANDOM seed 1 selecting shared slot 1; BASH_ENV is unset before Cargo starts. Memory caps, job count and flock remain unchanged."
+  }
+}

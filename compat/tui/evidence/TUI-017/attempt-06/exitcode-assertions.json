@@ -1,0 +1,34 @@
+{
+  "base": "eef2df94",
+  "assertions_changed": false,
+  "run_1": {
+    "refresh-missing-argument": true,
+    "lock-server-arity": true,
+    "lock-server-unknown-flag": true,
+    "lock-session-arity": true,
+    "lock-client-arity": true,
+    "lock-client-missing-argument": true,
+    "client-tree-unknown-flag": true,
+    "client-tree-usage": true
+  },
+  "run_2": {
+    "refresh-missing-argument": true,
+    "lock-server-arity": true,
+    "lock-server-unknown-flag": true,
+    "lock-session-arity": true,
+    "lock-client-arity": true,
+    "lock-client-missing-argument": true,
+    "client-tree-unknown-flag": true,
+    "client-tree-usage": true
+  },
+  "run_3": {
+    "refresh-missing-argument": true,
+    "lock-server-arity": true,
+    "lock-server-unknown-flag": true,
+    "lock-session-arity": true,
+    "lock-client-arity": true,
+    "lock-client-missing-argument": true,
+    "client-tree-unknown-flag": true,
+    "client-tree-usage": true
+  }
+}

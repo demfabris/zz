@@ -1,0 +1,109 @@
+[
+  {
+    "pid": 318900,
+    "args": [
+      "/usr/bin/flock",
+      "-w",
+      "3600",
+      "/tmp/zz-cargo-slot-1.lock",
+      "cargo",
+      "clippy",
+      "-p",
+      "zz-mux",
+      "-p",
+      "zz-terminal",
+      "-p",
+      "zz-daemon",
+      "-p",
+      "zz-protocol",
+      "--all-targets",
+      "--all-features",
+      "--jobs",
+      "2",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "children": "",
+    "wait_channel": "locks_lock_inode_wait"
+  },
+  {
+    "pid": 334572,
+    "args": [
+      "/usr/bin/flock",
+      "-w",
+      "3600",
+      "/tmp/zz-cargo-slot-1.lock",
+      "cargo",
+      "test",
+      "--manifest-path",
+      "target/capture-12-current-main-src/Cargo.toml",
+      "-p",
+      "zz-mux",
+      "--lib",
+      "gap",
+      "--jobs",
+      "2"
+    ],
+    "children": "",
+    "wait_channel": "locks_lock_inode_wait"
+  },
+  {
+    "pid": 790915,
+    "args": [
+      "/usr/bin/flock",
+      "-w",
+      "3600",
+      "/tmp/zz-cargo-slot-1.lock",
+      "cargo",
+      "test",
+      "-p",
+      "zz-mux",
+      "--lib",
+      "gap",
+      "--jobs",
+      "2"
+    ],
+    "children": "",
+    "wait_channel": "locks_lock_inode_wait"
+  },
+  {
+    "pid": 830650,
+    "args": [
+      "/usr/bin/flock",
+      "-w",
+      "3600",
+      "/tmp/zz-cargo-slot-1.lock",
+      "cargo",
+      "test",
+      "-p",
+      "zz-daemon",
+      "--lib",
+      "--jobs",
+      "2",
+      "--",
+      "--list"
+    ],
+    "children": "",
+    "wait_channel": "locks_lock_inode_wait"
+  },
+  {
+    "pid": 835085,
+    "args": [
+      "/usr/bin/flock",
+      "-w",
+      "3600",
+      "/tmp/zz-cargo-slot-0.lock",
+      "cargo",
+      "test",
+      "-p",
+      "zz-daemon",
+      "--lib",
+      "switch_client_key_table_and_formats_are_client_local",
+      "--jobs",
+      "2"
+    ],
+    "children": "",
+    "wait_channel": "locks_lock_inode_wait"
+  }
+]

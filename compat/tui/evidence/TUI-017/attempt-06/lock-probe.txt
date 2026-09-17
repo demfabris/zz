@@ -1,0 +1,125 @@
+clientless throwaway servers, one session cli:win, lock-command true on both
+
+== A. arity, flags and target validation of the three lock commands
+--- lock-server zzcc-extra
+  tmux  rc=1 stdout=[] stderr=[command lock-server: too many arguments (need at most 0)|]
+  zz    rc=1 stdout=[] stderr=[command lock-server: too many arguments (need at most 0)|]
+--- lock-server -t zzcc-nope
+  tmux  rc=1 stdout=[] stderr=[command lock-server: unknown flag -t|]
+  zz    rc=1 stdout=[] stderr=[command lock-server: unknown flag -t|]
+--- lock-session zzcc-extra
+  tmux  rc=1 stdout=[] stderr=[command lock-session: too many arguments (need at most 0)|]
+  zz    rc=1 stdout=[] stderr=[command lock-session: too many arguments (need at most 0)|]
+--- lock-session -t zzcc-nope
+  tmux  rc=1 stdout=[] stderr=[can't find session: zzcc-nope|]
+  zz    rc=1 stdout=[] stderr=[can't find session: zzcc-nope|]
+--- lock-session
+  tmux  rc=0 stdout=[] stderr=[]
+  zz    rc=0 stdout=[] stderr=[]
+--- lock-client zzcc-extra
+  tmux  rc=1 stdout=[] stderr=[command lock-client: too many arguments (need at most 0)|]
+  zz    rc=1 stdout=[] stderr=[command lock-client: too many arguments (need at most 0)|]
+--- lock-client -t
+  tmux  rc=1 stdout=[] stderr=[command lock-client: -t expects an argument|]
+  zz    rc=1 stdout=[] stderr=[command lock-client: -t expects an argument|]
+--- lock-client -t /dev/zzcc-nope
+  tmux  rc=1 stdout=[] stderr=[can't find client: /dev/zzcc-nope|]
+  zz    rc=1 stdout=[] stderr=[can't find client: /dev/zzcc-nope|]
+--- lock-client
+  tmux  rc=1 stdout=[] stderr=[no current client|]
+  zz    rc=1 stdout=[] stderr=[no current client|]
+
+== B. the one hook name: cmd-lock-server.c gives all three CMD_AFTERHOOK, so
+      the pin fires after-lock-<command name> and only after-lock-server exists
+--- set-hook -g after-lock-server set -g @m yes
+  tmux  rc=0 stdout=[] stderr=[]
+  zz    rc=0 stdout=[] stderr=[]
+--- set-hook -g after-lock-session set -g @m yes
+  tmux  rc=1 stdout=[] stderr=[invalid option: after-lock-session|]
+  zz    rc=1 stdout=[] stderr=[invalid option: after-lock-session|]
+--- set-hook -g after-lock-client set -g @m yes
+  tmux  rc=1 stdout=[] stderr=[invalid option: after-lock-client|]
+  zz    rc=1 stdout=[] stderr=[invalid option: after-lock-client|]
+--- show-options -gqv @m
+  tmux  rc=0 stdout=[] stderr=[]
+  zz    rc=0 stdout=[] stderr=[]
+--- lock-session -t =cli
+  tmux  rc=0 stdout=[] stderr=[]
+  zz    rc=0 stdout=[] stderr=[]
+--- show-options -gqv @m
+  tmux  rc=0 stdout=[] stderr=[]
+  zz    rc=0 stdout=[] stderr=[]
+--- lock-client
+  tmux  rc=1 stdout=[] stderr=[no current client|]
+  zz    rc=1 stdout=[] stderr=[no current client|]
+--- show-options -gqv @m
+  tmux  rc=0 stdout=[] stderr=[]
+  zz    rc=0 stdout=[] stderr=[]
+--- lock-server
+  tmux  rc=0 stdout=[] stderr=[]
+  zz    rc=0 stdout=[] stderr=[]
+--- show-options -gqv @m
+  tmux  rc=0 stdout=[yes] stderr=[]
+  zz    rc=0 stdout=[yes] stderr=[]
+
+== C. both knobs, stored at both scopes and validated, arming nothing
+--- show-options -g lock-after-time
+  tmux  rc=0 stdout=[lock-after-time 0] stderr=[]
+  zz    rc=0 stdout=[lock-after-time 0] stderr=[]
+--- show-options -g lock-command
+  tmux  rc=0 stdout=[lock-command true] stderr=[]
+  zz    rc=0 stdout=[lock-command true] stderr=[]
+--- set-option -g lock-after-time zzcc-nope
+  tmux  rc=1 stdout=[] stderr=[value is invalid: zzcc-nope|]
+  zz    rc=1 stdout=[] stderr=[value is invalid: zzcc-nope|]
+--- set-option -t cli lock-command zzcc-locker
+  tmux  rc=0 stdout=[] stderr=[]
+  zz    rc=0 stdout=[] stderr=[]
+--- show-options -t cli lock-command
+  tmux  rc=0 stdout=[lock-command zzcc-locker] stderr=[]
+  zz    rc=0 stdout=[lock-command zzcc-locker] stderr=[]
+--- set-option -t cli lock-after-time 45
+  tmux  rc=0 stdout=[] stderr=[]
+  zz    rc=0 stdout=[] stderr=[]
+--- show-options -t cli lock-after-time
+  tmux  rc=0 stdout=[lock-after-time 45] stderr=[]
+  zz    rc=0 stdout=[lock-after-time 45] stderr=[]
+--- set-option -t cli -u lock-command
+  tmux  rc=0 stdout=[] stderr=[]
+  zz    rc=0 stdout=[] stderr=[]
+--- set-option -t cli -u lock-after-time
+  tmux  rc=0 stdout=[] stderr=[]
+  zz    rc=0 stdout=[] stderr=[]
+--- show-options -t cli lock-command
+  tmux  rc=0 stdout=[] stderr=[]
+  zz    rc=0 stdout=[] stderr=[]
+
+== D. THE FINDING, and the control that shows it is not a lock fact:
+      a session target carrying a window or pane suffix
+--- lock-session -t =cli:win
+  tmux  rc=0 stdout=[] stderr=[]
+  zz    rc=0 stdout=[] stderr=[]
+--- lock-session -t =nosuch:win
+  tmux  rc=1 stdout=[] stderr=[can't find session: nosuch|]
+  zz    rc=1 stdout=[] stderr=[can't find session: nosuch|]
+--- lock-session -t =cli:nosuchwin
+  tmux  rc=1 stdout=[] stderr=[can't find window: nosuchwin|]
+  zz    rc=1 stdout=[] stderr=[can't find window: nosuchwin|]
+--- lock-session -t %0
+  tmux  rc=0 stdout=[] stderr=[]
+  zz    rc=0 stdout=[] stderr=[]
+--- lock-session -t %99
+  tmux  rc=1 stdout=[] stderr=[can't find pane: %99|]
+  zz    rc=1 stdout=[] stderr=[can't find pane: %99|]
+--- lock-session -t =cli:win.9
+  tmux  rc=1 stdout=[] stderr=[can't find pane: 9|]
+  zz    rc=1 stdout=[] stderr=[can't find pane: 9|]
+  CONTROL, commands with no lock in them at all:
+--- has-session -t =cli:win
+  tmux  rc=0 stdout=[] stderr=[]
+  zz    rc=0 stdout=[] stderr=[]
+--- list-windows -t =cli:win
+  tmux  rc=0 stdout=[0: win* (1 panes) [80x24] [layout b25d,80x24,0,0,0] @0 (active)] stderr=[]
+  zz    rc=0 stdout=[0: win* (1 panes) [80x24] [layout b25d,80x24,0,0,0] @0 (active)] stderr=[]
+
+exit_status=0

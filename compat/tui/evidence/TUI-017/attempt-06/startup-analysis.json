@@ -1,0 +1,14 @@
+{
+  "method": "10000 paired bootstrap mean resamples, seed 20260916; shared campaign load, not an isolated microbenchmark",
+  "paired_mean_delta_95_percentile_ci_ms": [
+    -107.19011197500001,
+    57.47798749999999
+  ],
+  "warmups_per_side": 2,
+  "measured_pairs": 40,
+  "all_84_children_parked_in_correct_window": true,
+  "load_1m_range": [
+    16.40869140625,
+    22.48388671875
+  ]
+}

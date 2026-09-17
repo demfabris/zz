@@ -1,0 +1,39 @@
+{
+  "source": "3209ffb704182b170471c3eac8707f6474d96de9",
+  "base": "eef2df941183af8ab7b16bf648dfadcc4486d22e",
+  "remote_before": "4c4c142bbc37dbae46adeecf50ba3a0caf0eedcb",
+  "kernel": "Linux-7.2.3-1-cachyos-deckify-x86_64-with-glibc2.44",
+  "rebase": "23 commits replayed without conflicts",
+  "merge_tree": "0ecd257fd0c2d67aeba2900f1c211ed374ff181f",
+  "pin_commit": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
+  "cargo_wrapper": "#!/usr/bin/env bash\nset -uo pipefail\nCAP=\"${ZZ_CARGO_CAP:-4G}\"\nSWAP=\"${ZZ_CARGO_SWAP:-2G}\"\nJOBS=\"${ZZ_CARGO_JOBS:-2}\"\nS=$((RANDOM % 2))\nARGS=()\nif [ \"${1:-}\" = fmt ]; then\n  ARGS=(\"$@\")\nelse\n  for ARG in \"$@\"; do\n    if [ \"$ARG\" = -- ]; then\n      ARGS+=(--jobs \"$JOBS\")\n      JOBS=\"\"\n    fi\n    ARGS+=(\"$ARG\")\n  done\n  [ -z \"$JOBS\" ] || ARGS+=(--jobs \"$JOBS\")\nfi\nexec systemd-run --user --scope -q \\\n  -p MemoryMax=\"$CAP\" -p MemorySwapMax=\"$SWAP\" \\\n  flock -w 3600 /tmp/zz-cargo-slot-$S.lock \\\n  cargo \"${ARGS[@]}\"\n",
+  "binaries": {
+    "candidate": {
+      "path": "/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-resumed-proof/zz",
+      "sha256": "9147964c76a752452bfdb3798ceef0c043102271b70487a25ba95489d1f275e1",
+      "bytes": 245656024
+    },
+    "main": {
+      "path": "/home/demfabris/dev/zz-c11-capture-fix/target/capture-12-resumed-proof/main",
+      "sha256": "233255049aa67c9a638e509870d0f3919d1cb564dd1c039d06eeb4ea7cadfc6b",
+      "bytes": 245480208
+    },
+    "pin": {
+      "path": "/home/demfabris/dev/zz-c11-capture-fix/compat/.cache/tmux-src/tmux",
+      "sha256": "df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5",
+      "bytes": 7389712
+    }
+  },
+  "cpu_count": 16,
+  "latency_start_load_average": [
+    22.48388671875,
+    16.146484375,
+    8.904296875
+  ],
+  "metadata_only_revision": "7c807b923058fc2607a9f1b0a950dd1a76ac2ff3",
+  "runtime_changes_after_binary_build": "none; only test literals and native command inventory/report changed",
+  "wire": "104 inherited from main; no lane payload edit",
+  "cargo_wrapper_unchanged_during_lane": true,
+  "final_gate_slot_selection": "BASH_ENV sources task-local RANDOM=1 and unsets BASH_ENV before Cargo; same /tmp/zz-cargo.sh, same systemd caps, same shared slot-1 flock",
+  "toolchain": "rustc 1.97.0 (2d8144b78 2026-07-07)"
+}

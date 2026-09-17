@@ -1,0 +1,10 @@
+verified: TUI-001, TUI-002, TUI-003, TUI-004, TUI-005, TUI-006, TUI-007, TUI-008, TUI-009, TUI-010, TUI-012, TUI-016
+re-measuring: TUI-015
+  comparing /home/demfabris/dev/zz-c11-capture-fix/target/capture-12-resumed-proof/zz
+  running compat/tui-client-commands.sh for TUI-015 ...
+    all 192 asserted comparisons identical, 32 recorded not asserted (0 for a sibling lane, owners TUI-014=6 TUI-015=3 TUI-017=4 decided:TUI-015=4 decided
+    (review, 3 recorded for TUI-015, which is consistent)
+
+every verified obligation holds up
+
+exit_status=0

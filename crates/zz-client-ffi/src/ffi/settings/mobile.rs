@@ -266,9 +266,7 @@ fn restyle(
 ) -> TerminalViewport {
     let resolve_color = |class: ColourClass, color: Color, default: Color| match class {
         ColourClass::Default => default,
-        ColourClass::Palette(index) | ColourClass::IndexedLow(index) => {
-            appearance.palette.as_array()[index as usize]
-        }
+        ColourClass::Palette(index) => appearance.palette.as_array()[index as usize],
         ColourClass::Resolved | ColourClass::Rgb => color,
     };
     let styles = viewport

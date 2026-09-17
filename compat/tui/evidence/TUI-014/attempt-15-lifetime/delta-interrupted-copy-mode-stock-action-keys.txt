@@ -1,0 +1,177 @@
+# Scenario: copy-mode-stock-action-keys
+# Source: /home/demfabris/dev/zz-c11-modes-final/compat/scenarios/copy-mode-stock-action-keys.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: out: list-keys -T copy-mode-vi -1 P
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode-vi P send-keys -X toggle-position
+tmux stdout:
+    bind-key  -T copy-mode-vi P send-keys -X toggle-position
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: list-keys -T copy-mode -1 P
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode P send-keys -X toggle-position
+tmux stdout:
+    bind-key  -T copy-mode P send-keys -X toggle-position
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: list-keys -T copy-mode -1 C-M-b
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode C-M-b send-keys -X previous-matching-bracket
+tmux stdout:
+    bind-key  -T copy-mode C-M-b send-keys -X previous-matching-bracket
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: list-keys -T copy-mode -1 C-l
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode C-l send-keys -X recentre-top-bottom
+tmux stdout:
+    bind-key  -T copy-mode C-l send-keys -X recentre-top-bottom
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: list-keys -T copy-mode -1 M-l
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode M-l send-keys -X cursor-centre-horizontal
+tmux stdout:
+    bind-key  -T copy-mode M-l send-keys -X cursor-centre-horizontal
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: list-keys -1 -T copy-mode-vi -F #{key_table}|#{key_string}|#{key_repeat}|#{key_has_repeat} P
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    copy-mode-vi|P|0|0
+tmux stdout:
+    copy-mode-vi|P|0|0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: list-keys -1 -T copy-mode -F #{key_table}|#{key_string}|#{key_repeat}|#{key_has_repeat} P
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    copy-mode|P|0|0
+tmux stdout:
+    copy-mode|P|0|0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: list-keys -1 -T copy-mode -F #{key_table}|#{key_string}|#{key_repeat}|#{key_has_repeat} C-M-b
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    copy-mode|C-M-b|0|0
+tmux stdout:
+    copy-mode|C-M-b|0|0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: list-keys -1 -T copy-mode -F #{key_table}|#{key_string}|#{key_repeat}|#{key_has_repeat} C-l
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    copy-mode|C-l|0|0
+tmux stdout:
+    copy-mode|C-l|0|0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: list-keys -1 -T copy-mode -F #{key_table}|#{key_string}|#{key_repeat}|#{key_has_repeat} M-l
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    copy-mode|M-l|0|0
+tmux stdout:
+    copy-mode|M-l|0|0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: list-keys -1 -T copy-mode -F #{key_string}|#{key_repeat} C-M-f
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-M-f|0
+tmux stdout:
+    C-M-f|0
+OUT: clean

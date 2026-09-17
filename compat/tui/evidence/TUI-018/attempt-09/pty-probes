@@ -1,0 +1,45 @@
+case=matrix-direct-attached
+zz_exit=0
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=yes
+tmux state
+input=
+before=yes
+tail=yes
+case=matrix-alias-attached
+zz_exit=0
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=yes
+tmux state
+input=
+before=yes
+tail=yes
+case=matrix-file-attached
+zz_exit=0
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=yes
+tmux state
+input=
+before=yes
+tail=yes

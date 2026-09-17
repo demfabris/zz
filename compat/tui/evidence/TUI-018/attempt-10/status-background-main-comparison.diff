@@ -1,0 +1,35 @@
+--- main
+
++++ candidate
+
+@@ -10,7 +10,10 @@
+
+ tmux stderr:
+     <empty>
+ zz stdout:
+-    AssertionError(('first drawn expansion is empty', b'\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n[]\n'))
++    status jobs: attach below 1.5s; shared job; slow output; cached output; interval rerun
++    status jobs: window and pane loops each key one job per looped item
++    status jobs: long cached output retains TAIL on both binaries
++    AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 1, 0, b'\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n[]\n'))
+ tmux stdout:
+     status jobs: attach below 1.5s; shared job; slow output; cached output; interval rerun
+     status jobs: window and pane loops each key one job per looped item
+@@ -20,11 +23,11 @@
+
+ SMOKE STDOUT: divergence
+ --- zz SMOKE STDOUT step 1
+ +++ tmux SMOKE STDOUT step 1
+-@@ -1 +1,4 @@
+--AssertionError(('first drawn expansion is empty', b'\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n[]\n'))
+-+status jobs: attach below 1.5s; shared job; slow output; cached output; interval rerun
+-+status jobs: window and pane loops each key one job per looped item
+-+status jobs: long cached output retains TAIL on both binaries
++@@ -1,4 +1,4 @@
++ status jobs: attach below 1.5s; shared job; slow output; cached output; interval rerun
++ status jobs: window and pane loops each key one job per looped item
++ status jobs: long cached output retains TAIL on both binaries
++-AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 1, 0, b'\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n[]\n'))
+ +status jobs: drawn DATE changes at seconds 1, 3, 5 and 7 with interval 2
+ SMOKE STDERR: clean
+ TOPO: clean

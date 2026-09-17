@@ -1,0 +1,11 @@
+smoke/config-chain-parse-abort.txt
+smoke/control-tilde-environment.txt
+smoke/daemon-invalid-flags.txt
+smoke/display-popup-kitty-noresize.txt
+smoke/format-listing.txt
+smoke/jobs-command-environment.txt
+smoke/pane-border-indicators.txt
+smoke/plugin-runtime-resurrect-restore.txt
+smoke/send-keys-inject.txt
+smoke/tpm-init.txt
+status-options.txt

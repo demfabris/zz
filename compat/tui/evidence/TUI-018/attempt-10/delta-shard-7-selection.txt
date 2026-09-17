@@ -1,0 +1,10 @@
+smoke/control-alias-prepare.txt
+smoke/copy-mode-refresh.txt
+smoke/display-menu-style-refresh.txt
+smoke/fixture-conf.txt
+smoke/format-window-bigger.txt
+smoke/kill-filters.txt
+smoke/pane-tmux-path.txt
+smoke/resurrect-init.txt
+smoke/split-window-wait.txt
+source-hook-cwd-sourced.txt

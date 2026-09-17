@@ -1,0 +1,9 @@
+{
+  "old_tip": "6a16b4286dfa97bd27047a7d797acec569eac15c",
+  "base": "38c50df4c4d51401752c49b72bb689b09e33427d",
+  "source": "571608659d0f8013ddb973d27f2171d9e1af224e",
+  "engine_and_vendor_diff_from_old_tip": [],
+  "resolver_resolution": "Preserve main empty-exact-window normalization and pass pane_at_index through its recursive call.",
+  "additional_code": "Extend session_targets_use_configured_pane_indices with empty-exact-window forms and missing indices.",
+  "credential_scrubbing_harnesses": "compat/run.sh and compat/diff-scenario.sh byte-identical to origin/main."
+}

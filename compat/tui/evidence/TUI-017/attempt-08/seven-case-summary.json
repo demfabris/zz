@@ -1,0 +1,20 @@
+{
+  "fixed": {
+    "capture-low-indexed-colour": 0,
+    "capture-tab-trailing": 0,
+    "capture-tab-internal": 0,
+    "capture-tab-wide": 0,
+    "lock-session": 0,
+    "has-session": 0,
+    "list-windows": 0
+  },
+  "reverted": {
+    "capture-low-indexed-colour": 1,
+    "capture-tab-trailing": 1,
+    "capture-tab-internal": 1,
+    "capture-tab-wide": 1,
+    "lock-session": 1,
+    "has-session": 1,
+    "list-windows": 1
+  }
+}

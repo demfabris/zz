@@ -1,0 +1,18 @@
+{
+  "reason": "The wrapper selected occupied slot 1 while slot 0 was free. Only this lane's childless flock waits were terminated and requeued through the unchanged wrapper. No running compiler or test was cancelled.",
+  "interrupted_exit": 143,
+  "artifacts": [
+    "../../TUI-015/attempt-05/mux-focused.txt",
+    "fmt.txt",
+    "fmt-requeued.txt",
+    "build.txt",
+    "build-requeued.txt",
+    "build-requeued-02.txt",
+    "compat-check.txt",
+    "compat-check-requeued.txt",
+    "compat-check-requeued-02.txt",
+    "compat-check-final.txt"
+  ],
+  "compat_check_requeues": "Final compat/check.sh retries only exit 143 from manually terminated childless flock waits, preserving completed checks. Running compilers and tests were not terminated.",
+  "final_gate_requeue": "compat-check-final-requeued.txt retries only manually terminated childless flock waits through the unchanged wrapper."
+}

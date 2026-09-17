@@ -1,0 +1,510 @@
+
+===== before-reboot/environment.txt =====
+2026-09-16T17:23:25-03:00
+Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+d1694e65da7552e8ebd53da2ce596ee8ffa748e9
+d1694e65da7552e8ebd53da2ce596ee8ffa748e9
+bb4a4288c0f9fbb195a899d460fb84d88b1079f5
+936e15ee33b3c51d692b52381a7c757f6ab89c31
+?? compat/tui/evidence/TUI-012/attempt-sidebar-11/
+rustc 1.97.0 (2d8144b78 2026-07-07)
+TERM=xterm-ghostty SHELL=/bin/bash
+LANG=en_US.UTF-8
+LC_CTYPE="C.UTF-8"
+LC_NUMERIC="C.UTF-8"
+LC_TIME="C.UTF-8"
+LC_COLLATE="C.UTF-8"
+LC_MONETARY="C.UTF-8"
+LC_MESSAGES="C.UTF-8"
+LC_PAPER="C.UTF-8"
+LC_NAME="C.UTF-8"
+LC_ADDRESS="C.UTF-8"
+LC_TELEPHONE="C.UTF-8"
+LC_MEASUREMENT="C.UTF-8"
+LC_IDENTIFICATION="C.UTF-8"
+LC_ALL=C.UTF-8
+df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  compat/.cache/tmux-src/tmux
+3718ef3abf23b1bea91b5e1d0853e00d94442b6295bb596924a99d234d533cd9  /tmp/zz-cargo.sh
+{
+  "schema": 5,
+  "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
+  "version": "tmux next-3.8",
+  "commands": [
+    {
+      "name": "attach-session",
+      "aliases": [
+        "attach"
+      ],
+      "usage": "[-dErx] [-c working-directory] [-f flags] [-t target-session]",
+      "flags": {
+        "-E": "none",
+        "-c": "required",
+6354d0a46c8fac4ad6e489348b317e1d912bb1352301c9559ab766ccf8294a91  target/sidebar-bisect/main/zz
+c8b56297ed2adafcfb5e931e8f3942a928cb230821e1b7602cf47ebb5fbdee4c  target/sidebar-bisect/parent/zz
+
+===== before-reboot/superset-main.txt =====
+superset commands beside tmux behaviour (pin tmux)
+ok    names name-agent-catalog
+ok    names name-agent-respond
+ok    names name-agent-send
+ok    names name-capture-browser
+ok    names name-copy-mode-search-prompt
+ok    names name-debug-marker
+ok    names name-events
+ok    names name-focus-sidebar
+ok    names name-import-tmux-config
+ok    names name-inspect
+ok    names name-new-browser
+ok    names name-reload-config
+ok    names name-restart-agent-pane
+ok    names name-run-pane
+ok    names name-select-pane-kind
+ok    names name-send-last-output
+ok    names name-send-text
+ok    names name-set-agent-provider
+ok    names name-set-agent-session
+ok    names name-set-browser-profile
+ok    names name-set-browser-tabs
+ok    names name-set-browser-url
+ok    names name-set-editor-path
+ok    names name-show-agent-permission
+ok    names name-show-last-output
+ok    names name-split-agent
+ok    names name-split-browser
+ok    names name-split-picker
+ok    names name-tools
+ok    names name-wait-for-exit
+ok    names name-wait-pane
+      31 declared native names, every one reachable by that name
+ok    sidebar direct
+ok    sidebar binding
+ok    sidebar window-columns
+ok    sidebar focused-key-is-the-sidebars
+ok    sidebar window-columns-restored
+ok    sidebar unfocused-hands-the-key-to-the-pane
+ok    sidebar still-drawn-while-unfocused
+diagnostics retained in /home/demfabris/dev/zz-c11-sidebar/compat/tui/evidence/TUI-012/attempt-sidebar-11/main-diagnostics:
+outer-tmux.screen.txt
+outer-tmuxb.screen.txt
+outer-zz.screen.txt
+outer-zzb.screen.txt
+ring-zz.daemon.log.txt
+ring-zz.tui.log.txt
+tmux.list-panes.txt
+what-fired.txt
+zz-client.stderr.txt
+zz-daemon.stderr.txt
+zz-daemon.stdout.txt
+zz.active-pane.txt
+zz.list-clients.txt
+zz.list-panes.txt
+error: the sidebar withdrawn did not happen within 12 seconds
+
+exit_status=2
+
+===== before-reboot/superset-parent.txt =====
+superset commands beside tmux behaviour (pin tmux)
+ok    names name-agent-catalog
+ok    names name-agent-respond
+ok    names name-agent-send
+ok    names name-capture-browser
+ok    names name-copy-mode-search-prompt
+ok    names name-debug-marker
+ok    names name-focus-sidebar
+ok    names name-import-tmux-config
+ok    names name-new-browser
+ok    names name-reload-config
+ok    names name-restart-agent-pane
+ok    names name-select-pane-kind
+ok    names name-send-last-output
+ok    names name-send-text
+ok    names name-set-agent-provider
+ok    names name-set-agent-session
+ok    names name-set-browser-profile
+ok    names name-set-browser-tabs
+ok    names name-set-browser-url
+ok    names name-set-editor-path
+ok    names name-show-agent-permission
+ok    names name-show-last-output
+ok    names name-split-agent
+ok    names name-split-browser
+ok    names name-split-picker
+ok    names name-tools
+      26 declared native names, every one reachable by that name
+ok    sidebar direct
+ok    sidebar binding
+ok    sidebar window-columns
+ok    sidebar focused-key-is-the-sidebars
+ok    sidebar window-columns-restored
+ok    sidebar unfocused-hands-the-key-to-the-pane
+ok    sidebar still-drawn-while-unfocused
+diagnostics retained in /home/demfabris/dev/zz-c11-sidebar/compat/tui/evidence/TUI-012/attempt-sidebar-11/parent-diagnostics:
+outer-tmux.screen.txt
+outer-tmuxb.screen.txt
+outer-zz.screen.txt
+outer-zzb.screen.txt
+ring-zz.daemon.log.txt
+ring-zz.tui.log.txt
+tmux.list-panes.txt
+what-fired.txt
+zz-client.stderr.txt
+zz-daemon.stderr.txt
+zz-daemon.stdout.txt
+zz.active-pane.txt
+zz.list-clients.txt
+zz.list-panes.txt
+error: the sidebar withdrawn did not happen within 12 seconds
+
+exit_status=2
+
+===== before-reboot/main-focus-probe.txt =====
+superset commands beside tmux behaviour (pin tmux)
+ok    sidebar direct
+ok    sidebar binding
+ok    sidebar window-columns
+ok    sidebar focused-key-is-the-sidebars
+ok    sidebar window-columns-restored
+ok    sidebar unfocused-hands-the-key-to-the-pane
+ok    sidebar still-drawn-while-unfocused
+ok    sidebar withdrawn
+all 8 asserted cases hold, 0 recorded not asserted
+
+exit_status=0
+
+===== before-reboot/main-focus-timing-clean.txt =====
+superset commands beside tmux behaviour (pin tmux)
+ok    sidebar direct
+ok    sidebar binding
+ok    sidebar window-columns
+ok    sidebar focused-key-is-the-sidebars
+ok    sidebar window-columns-restored
+ok    sidebar unfocused-hands-the-key-to-the-pane
+ok    sidebar still-drawn-while-unfocused
+ok    sidebar withdrawn
+all 8 asserted cases hold, 0 recorded not asserted
+
+exit_status=0
+
+===== before-reboot/parent-focus-timing.txt =====
+superset commands beside tmux behaviour (pin tmux)
+ok    sidebar direct
+ok    sidebar binding
+ok    sidebar window-columns
+ok    sidebar focused-key-is-the-sidebars
+ok    sidebar window-columns-restored
+ok    sidebar unfocused-hands-the-key-to-the-pane
+ok    sidebar still-drawn-while-unfocused
+ok    sidebar withdrawn
+all 8 asserted cases hold, 0 recorded not asserted
+
+exit_status=0
+
+===== before-reboot/timings.txt =====
+main: refocus wait to q = 76.160 ms; q to withdrawn assertion = 9.793 ms
+parent: refocus wait to q = 24.438 ms; q to withdrawn assertion = 22.456 ms
+
+===== before-reboot/verified-to-parent-stat.txt =====
+ compat/tui/HANDOFF.md                              | 302 ++++++++++-----------
+ compat/tui/README.md                               | 157 ++---------
+ .../TUI-014/attempt-04/review-2026-09-15-reject.md | 100 +++++++
+ .../attempt-02/review-2026-09-15-reject.json       |  93 +++++++
+ knowledge/log.md                                   |   3 +
+ 5 files changed, 362 insertions(+), 293 deletions(-)
+
+===== before-reboot/verified-to-parent-relevant.diff =====
+
+===== resume/main-original.txt =====
+superset commands beside tmux behaviour (pin tmux)
+ok    names name-agent-catalog
+ok    names name-agent-respond
+ok    names name-agent-send
+ok    names name-capture-browser
+ok    names name-copy-mode-search-prompt
+ok    names name-debug-marker
+ok    names name-events
+ok    names name-focus-sidebar
+ok    names name-import-tmux-config
+ok    names name-inspect
+ok    names name-new-agent-session
+ok    names name-new-browser
+ok    names name-reload-config
+ok    names name-restart-agent-pane
+ok    names name-run-pane
+ok    names name-select-pane-kind
+ok    names name-send-last-output
+ok    names name-send-text
+ok    names name-set-agent-provider
+ok    names name-set-agent-session
+ok    names name-set-browser-profile
+ok    names name-set-browser-tabs
+ok    names name-set-browser-url
+ok    names name-set-editor-path
+ok    names name-show-agent-permission
+ok    names name-show-last-output
+ok    names name-split-agent
+ok    names name-split-browser
+ok    names name-split-picker
+ok    names name-tools
+ok    names name-wait-for-exit
+ok    names name-wait-pane
+      32 declared native names, every one reachable by that name
+ok    sidebar direct
+ok    sidebar binding
+ok    sidebar window-columns
+ok    sidebar focused-key-is-the-sidebars
+ok    sidebar window-columns-restored
+ok    sidebar unfocused-hands-the-key-to-the-pane
+ok    sidebar still-drawn-while-unfocused
+ok    sidebar withdrawn
+ok    picker direct
+ok    picker card
+ok    picker card-terminal
+ok    picker card-browser
+ok    picker card-agent
+ok    picker card-editor
+ok    picker card-keys
+ok    picker editor-refused
+ok    picker survives-a-refusal
+ok    picker cancelled
+ok    picker binding
+ok    picker enter-materializes
+ok    picker enter-keeps-the-pane
+ok    picker kind-needs-a-choice
+ok    picker kind-editor-is-gated
+ok    picker kind-on-a-pane-not-awaiting-one
+ok    picker split-again
+ok    picker kind-browser
+ok    picker kind-browser-card
+ok    picker kind-browser-replaces-the-card
+ok    browser url-needs-a-value
+ok    browser tabs-need-a-value
+ok    browser profile-needs-a-value
+ok    browser capture-needs-a-path
+ok    browser split
+ok    browser card
+ok    browser card-url
+ok    browser card-footer
+ok    browser screenshot-in-a-raw-tui
+ok    browser url
+ok    browser card-follows-url
+ok    browser tabs
+ok    browser card-follows-tabs
+ok    browser profile
+ok    browser binding
+ok    browser new-window
+ok    browser new-browser-adds-a-window
+ok    agent send-needs-text
+ok    agent respond-needs-a-choice
+ok    agent provider-needs-a-value
+ok    agent session-needs-a-value
+ok    agent permission-without-an-agent-pane
+ok    agent restart-on-another-kind
+ok    agent split
+ok    agent card
+ok    agent card-footer
+ok    agent send-in-a-raw-tui
+ok    agent restart
+ok    agent card-after-restart
+ok    agent provider
+ok    agent card-follows-provider
+ok    agent session
+ok    agent binding
+ok    agent editor-path-on-another-kind
+ok    output show-needs-marks
+ok    output send-needs-marks
+ok    output tools-direct
+ok    output tools-overlay
+ok    output overlay-owns-its-keys
+ok    output tools-overlay-closed
+ok    output search-direct
+ok    output search-without-an-overlay-direct
+ok    output search-without-an-overlay-bound
+ok    misc text-needs-a-value
+ok    misc text
+ok    misc text-reaches-the-pane
+ok    misc text-through-a-binding
+ok    misc marker
+ok    misc reload
+ok    misc import-with-nothing-to-import
+ok    bindings debug-marker
+ok    bindings reload-config
+ok    bindings agent-respond
+ok    bindings agent-send
+ok    bindings capture-browser
+ok    bindings copy-mode-search-prompt
+ok    bindings import-tmux-config
+ok    bindings restart-agent-pane
+ok    bindings select-pane-kind
+ok    bindings send-last-output
+ok    bindings show-last-output
+ok    bindings set-agent-provider
+ok    bindings set-agent-session
+ok    bindings set-browser-profile
+ok    bindings set-browser-tabs
+ok    bindings set-browser-url
+ok    bindings set-editor-path
+ok    bindings show-agent-permission
+ok    bindings send-text
+ok    bindings focus-sidebar
+ok    bindings tools
+ok    bindings split-picker
+ok    bindings split-browser
+ok    bindings split-agent
+ok    bindings new-browser
+ok    around-sidebar baseline
+ok    around-sidebar with-the-sidebar-up-layout
+ok    around-sidebar with-the-sidebar-up-zz-panes-fill-the-window
+ok    around-sidebar with-the-sidebar-up-pin-panes-fill-the-window
+ok    around-sidebar with-the-sidebar-up-window-inventory-apart-from-the-sidebar-columns
+ok    around-sidebar with-the-sidebar-up-window-columns-under-the-sidebar
+ok    around-sidebar withdrawn
+ok    around-sidebar reattached-without-the-sidebar
+ok    around-sidebar reattached-window-columns
+ok    around-sidebar reattached
+ok    around-sidebar one-pane-again
+ok    around-picker baseline
+ok    around-picker surface
+ok    around-picker layout
+ok    around-picker surface-survives-a-reattach
+ok    around-picker layout-after-a-reattach
+ok    around-picker layout-after-ordinary-commands
+ok    around-picker surface-after-ordinary-commands
+ok    around-picker surface-gone
+ok    around-picker removed
+ok    around-browser baseline
+ok    around-browser surface
+ok    around-browser layout
+ok    around-browser surface-survives-a-reattach
+ok    around-browser layout-after-a-reattach
+ok    around-browser layout-after-ordinary-commands
+ok    around-browser surface-after-ordinary-commands
+ok    around-browser surface-gone
+ok    around-browser removed
+ok    around-agent baseline
+ok    around-agent surface
+ok    around-agent layout
+ok    around-agent surface-survives-a-reattach
+ok    around-agent layout-after-a-reattach
+ok    around-agent layout-after-ordinary-commands
+ok    around-agent surface-after-ordinary-commands
+ok    around-agent surface-gone
+ok    around-agent removed
+ok    around-overlay baseline
+ok    around-overlay overlay
+ok    around-overlay overlay-does-not-survive-a-reattach
+ok    around-overlay reattached
+ok    around-overlay overlay-again
+ok    around-overlay overlay-survives-commands-that-keep-the-layout
+ok    around-overlay layout-under-those-commands
+ok    around-overlay with-the-overlay-up-layout
+ok    around-overlay with-the-overlay-up-zz-panes-fill-the-window
+ok    around-overlay with-the-overlay-up-pin-panes-fill-the-window
+ok    around-overlay with-the-overlay-up-windows
+ok    around-overlay withdrawn-by-a-layout-change
+ok    around-overlay withdrawn
+ok    around-overlay one-pane-again
+ok    clients second-client-baseline
+ok    clients sidebar-on-the-first-client
+ok    clients sidebar-not-on-the-second-client
+ok    clients second-client-unchanged-while-shown
+ok    clients window-columns-under-the-sidebar
+ok    clients second-client-unchanged-after-withdrawal
+ok    clients browser-card-on-the-first-client
+ok    clients browser-card-on-the-second-client
+ok    clients browser-screenshot-without-the-app
+all 196 asserted cases hold, 0 recorded not asserted
+exit_status=0
+
+===== resume/parent-geometry-1.txt =====
+superset commands beside tmux behaviour (pin tmux)
+ok    around-sidebar baseline
+ok    around-sidebar with-the-sidebar-up-layout
+ok    around-sidebar with-the-sidebar-up-zz-panes-fill-the-window
+ok    around-sidebar with-the-sidebar-up-pin-panes-fill-the-window
+ok    around-sidebar with-the-sidebar-up-window-inventory-apart-from-the-sidebar-columns
+ok    around-sidebar with-the-sidebar-up-window-columns-under-the-sidebar
+ok    around-sidebar withdrawn
+ok    around-sidebar reattached-without-the-sidebar
+ok    around-sidebar reattached-window-columns
+ok    around-sidebar reattached
+ok    around-sidebar one-pane-again
+all 11 asserted cases hold, 0 recorded not asserted
+exit_status=0
+
+===== resume/parent-geometry-2.txt =====
+superset commands beside tmux behaviour (pin tmux)
+ok    around-sidebar baseline
+ok    around-sidebar with-the-sidebar-up-layout
+ok    around-sidebar with-the-sidebar-up-zz-panes-fill-the-window
+ok    around-sidebar with-the-sidebar-up-pin-panes-fill-the-window
+ok    around-sidebar with-the-sidebar-up-window-inventory-apart-from-the-sidebar-columns
+ok    around-sidebar with-the-sidebar-up-window-columns-under-the-sidebar
+ok    around-sidebar withdrawn
+ok    around-sidebar reattached-without-the-sidebar
+ok    around-sidebar reattached-window-columns
+ok    around-sidebar reattached
+ok    around-sidebar one-pane-again
+all 11 asserted cases hold, 0 recorded not asserted
+exit_status=0
+
+===== resume/parent-geometry-3.txt =====
+superset commands beside tmux behaviour (pin tmux)
+ok    around-sidebar baseline
+ok    around-sidebar with-the-sidebar-up-layout
+ok    around-sidebar with-the-sidebar-up-zz-panes-fill-the-window
+ok    around-sidebar with-the-sidebar-up-pin-panes-fill-the-window
+ok    around-sidebar with-the-sidebar-up-window-inventory-apart-from-the-sidebar-columns
+ok    around-sidebar with-the-sidebar-up-window-columns-under-the-sidebar
+ok    around-sidebar withdrawn
+ok    around-sidebar reattached-without-the-sidebar
+ok    around-sidebar reattached-window-columns
+ok    around-sidebar reattached
+ok    around-sidebar one-pane-again
+all 11 asserted cases hold, 0 recorded not asserted
+exit_status=0
+
+===== resume/parent-geometry-4.txt =====
+superset commands beside tmux behaviour (pin tmux)
+ok    around-sidebar baseline
+ok    around-sidebar with-the-sidebar-up-layout
+ok    around-sidebar with-the-sidebar-up-zz-panes-fill-the-window
+ok    around-sidebar with-the-sidebar-up-pin-panes-fill-the-window
+ok    around-sidebar with-the-sidebar-up-window-inventory-apart-from-the-sidebar-columns
+ok    around-sidebar with-the-sidebar-up-window-columns-under-the-sidebar
+ok    around-sidebar withdrawn
+ok    around-sidebar reattached-without-the-sidebar
+ok    around-sidebar reattached-window-columns
+ok    around-sidebar reattached
+ok    around-sidebar one-pane-again
+all 11 asserted cases hold, 0 recorded not asserted
+exit_status=0
+
+===== resume/parent-geometry-5.txt =====
+superset commands beside tmux behaviour (pin tmux)
+ok    around-sidebar baseline
+ok    around-sidebar with-the-sidebar-up-layout
+ok    around-sidebar with-the-sidebar-up-zz-panes-fill-the-window
+ok    around-sidebar with-the-sidebar-up-pin-panes-fill-the-window
+ok    around-sidebar with-the-sidebar-up-window-inventory-apart-from-the-sidebar-columns
+ok    around-sidebar with-the-sidebar-up-window-columns-under-the-sidebar
+ok    around-sidebar withdrawn
+ok    around-sidebar reattached-without-the-sidebar
+DIFF  around-sidebar reattached-window-columns
+      want: 120x29
+      got:  91x29
+ok    around-sidebar reattached
+ok    around-sidebar one-pane-again
+1 of 11 asserted cases failed, 0 recorded
+exit_status=1
+
+===== frozen/default-client-bootstrap-probe.txt =====
+usage: zz [-2CDhlNuVv] [-c shell-command] [-f file] [-L socket-name]
+            [-S socket-path] [-T features] [command [flags]]
+exit_status=1
+
+===== frozen/default-bare-bytes.txt =====
+2026-09-17T01:14:06.224228Z elapsed_us=187 level=INFO role=app pid=935917 thread="main" thread_id=ThreadId(1) target=zz::diagnostics::lifecycle process_start role=app package_version=0.10.0 os=linux arch=x86_64 pointer_width=64 cpus=Ok(16) executable=Ok("/home/demfabris/dev/zz-c11-sidebar/target/sidebar-bisect/rebased/zz_cli") cwd=Ok("/home/demfabris/dev/zz-c11-sidebar") args=["/home/demfabris/dev/zz-c11-sidebar/target/sidebar-bisect/rebased/zz_cli", "--socket", "/tmp/zz-sidebar-default.v7erBZ/sock"] log_path=Some("/tmp/zz-sidebar-default.v7erBZ/home/.local/state/zz/logs/zz.app.log")
+custom
+
+===== frozen/default-bare-exit.txt =====
+exit=0

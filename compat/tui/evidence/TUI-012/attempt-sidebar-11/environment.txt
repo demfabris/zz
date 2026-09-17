@@ -1,0 +1,38 @@
+
+===== resume/base.txt =====
+eef2df941183af8ab7b16bf648dfadcc4486d22e
+
+===== resume/environment.txt =====
+2026-09-16T21:22:42-03:00
+Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+eef2df941183af8ab7b16bf648dfadcc4486d22e
+LANG=en_US.UTF-8
+LC_CTYPE="C.UTF-8"
+LC_NUMERIC="C.UTF-8"
+LC_TIME="C.UTF-8"
+LC_COLLATE="C.UTF-8"
+LC_MONETARY="C.UTF-8"
+LC_MESSAGES="C.UTF-8"
+LC_PAPER="C.UTF-8"
+LC_NAME="C.UTF-8"
+LC_ADDRESS="C.UTF-8"
+LC_TELEPHONE="C.UTF-8"
+LC_MEASUREMENT="C.UTF-8"
+LC_IDENTIFICATION="C.UTF-8"
+LC_ALL=C.UTF-8
+09ae179d82da0015cb45e332dd00e2f881acbb87e9c4c22b030c0417be8bf2cd  target/debug/zz_cli
+c8b56297ed2adafcfb5e931e8f3942a928cb230821e1b7602cf47ebb5fbdee4c  target/sidebar-bisect/parent/zz
+6354d0a46c8fac4ad6e489348b317e1d912bb1352301c9559ab766ccf8294a91  target/sidebar-bisect/main/zz
+df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  compat/.cache/tmux-src/tmux
+09ae179d82da0015cb45e332dd00e2f881acbb87e9c4c22b030c0417be8bf2cd  target/sidebar-bisect/rebased/zz_cli
+TERM=xterm-256color SHELL=/bin/bash
+GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)
+rustc 1.97.0 (2d8144b78 2026-07-07)
+
+===== frozen/superset-1.sha256.txt =====
+6d5e806952ed2861fe5fed512d039da8aace717da87fa1703b59ca76c2f5d5bd  compat/tui-superset.sh
+09ae179d82da0015cb45e332dd00e2f881acbb87e9c4c22b030c0417be8bf2cd  target/sidebar-bisect/rebased/zz_cli
+
+===== resume/original-fixture-sha256.txt =====
+9227f0ec93c813d65e2373e9f5011c1cb932c269addf7b7cb1313c57bb6d791a  compat/.sidebar-original.sh
+9227f0ec93c813d65e2373e9f5011c1cb932c269addf7b7cb1313c57bb6d791a  -

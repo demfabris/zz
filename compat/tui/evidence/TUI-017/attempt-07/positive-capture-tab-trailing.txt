@@ -1,0 +1,11 @@
+ok    self-check capture-tab-trailing exact bytes before sabotage
+      case capture-tab-trailing-sabotage
+      stdout differs
+        1c1
+        < ABC	
+        ---
+        > ABC
+ok    self-check capture-tab-trailing one-sided scene change
+residual self-check capture-tab-trailing: 0 failures
+
+EXIT=0

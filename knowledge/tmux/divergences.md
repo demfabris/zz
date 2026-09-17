@@ -5,7 +5,7 @@ description: "Dated rationale and source evidence for measured tmux divergences,
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-09-07
+last_updated: 2026-09-17
 last_updated_by: Claude
 ---
 
@@ -666,14 +666,17 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   decision in TUI-017. `-L` numbers physical rows from the history size and uses each row's wrap
   flag when joining, preserving the number of each continuation row.
   Live `-e` captures retain style state across rows and emit the pin's named, indexed and RGB
-  colour codes and attribute resets. Explicit indexed colours 0 through 15 remain a TUI-017
-  divergence: Ghostty merges them with named colours in the stored cell. Styled frozen mode
+  colour codes and attribute resets. The local Ghostty patch retains explicit indexed colour
+  class in spare style bits, including indices 0 through 15. Styled frozen mode
   captures still use the existing snapshot formatter; the mode-fallback text cases do not prove
   their SGR bytes.
-  TUI-017 carries four ordinary fixture records: `capture-low-indexed-colour`,
-  `capture-tab-trailing`, `capture-tab-internal`, and `capture-tab-wide`. All four must close
-  before verification. The tab records share the existing TAB-cell storage limitation;
-  they are separate from the DEC charset decision and belong in the sibling capture batch.
+  At the 2026-09-17 cycle-11 residuals checkpoint, `capture-low-indexed-colour`,
+  `capture-tab-trailing`, `capture-tab-internal`, and `capture-tab-wide` are asserted. Native
+  cell bits retain HT spans; capture checks the full span before emitting a literal tab.
+  All four reverted-fix self-checks fail. TUI-017 stays at review with zero ordinary roster
+  records, eight wider 100-column erased-background probe differences, and the frozen-mode
+  proof limit above. See `compat/tui/evidence/TUI-017/attempt-07/notes.md` and
+  `third_party/rust/libghostty-vt-sys/provenance.patch`.
   Capture has no retained saved-alternate grid, pending raw-byte stream, raw-grid dump,
   hyperlink list, or complete line-flag prefix, so `-P`/`-R`/`-H`/`-F` remain refused with measured
   workload-specific decisions in the fixture.
@@ -1235,9 +1238,9 @@ nobody intends to drain. `accepted` plus `native` means zz's own surface serves 
 `accepted` plus `never` means the capability is deliberately outside zz. Live status stays in
 `compat/tmux-gaps.json`; the one-line rationale is here.
 
-- `capture.rich-transports` (native): `-R`, `-P`, `-C`, `-F`, `-H`, and `-L` read tmux's grid and
-  input-parser internals, while zz's capture surface is the terminal worker's retained UTF-8 text
-  snapshot plus the zz-native output verbs; the six forms stay loudly refused.
+- `capture.rich-transports` (native): `-R`, `-P`, `-F` and `-H` keep measured refusals for
+  tmux grid and input-parser internals. `-C` and `-L` transform the terminal worker's retained
+  capture and have byte assertions, including ordinary tab and colour-class provenance.
 - `clients.interactive-refresh` (native): the pin keeps mode and redraw ownership on the server,
   while zz's clients render themselves and copy or view mode lives on the per-client terminal view,
   so `switch-mode` and the pan family have no zz counterpart. Bare `refresh-client` and `-S`

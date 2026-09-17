@@ -1,0 +1,11 @@
+     Locking 1 package to latest Rust 1.97 compatible version
+      Adding libghostty-vt v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-mux)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.16s
+     Running unittests src/lib.rs (target/debug/deps/zz_mux-eed3ba838a6892ab)
+
+running 1 test
+test command::tests::session_targets_use_configured_pane_indices ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 535 filtered out; finished in 0.02s
+

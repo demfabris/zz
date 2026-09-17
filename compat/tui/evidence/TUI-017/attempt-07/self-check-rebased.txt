@@ -1,0 +1,696 @@
+self-check: one deliberate one-sided difference per channel, plus two equivalences
+ok    self-check equivalence: the same command on both sides
+ok    self-check refresh-missing-argument control
+      case refresh-missing-argument-sabotage
+      exit tmux: 1  zz: 2
+ok    self-check refresh-missing-argument rejects exit 2
+ok    self-check client-tree-unknown-flag control
+      case client-tree-unknown-flag-sabotage
+      exit tmux: 1  zz: 2
+ok    self-check client-tree-unknown-flag rejects exit 2
+ok    self-check client-tree-usage control
+      case client-tree-usage-sabotage
+      exit tmux: 1  zz: 2
+ok    self-check client-tree-usage rejects exit 2
+ok    self-check tmux-unknown-flag control
+      case tmux-unknown-flag-sabotage
+      exit tmux: 1  zz: 2
+ok    self-check tmux-unknown-flag rejects exit 2
+ok    self-check tmux-unknown-command control
+      case tmux-unknown-command-sabotage
+      exit tmux: 1  zz: 2
+ok    self-check tmux-unknown-command rejects exit 2
+ok    self-check native-verb-usage control
+ok    self-check native-verb-usage rejects exit 1
+ok    self-check native-bound-usage control
+ok    self-check native-bound-usage rejects exit 1
+ok    self-check native-json-format-usage control
+ok    self-check native-json-format-usage rejects exit 1
+ok    self-check native-option-usage control
+ok    self-check native-option-usage rejects exit 1
+      case stdout-sabotage
+      stdout differs
+        0a1
+        > zzcc-sabotage
+      state differs
+        5a6
+        > B zzcc-sabotage 8
+ok    self-check stdout, a buffer on one side only
+      case exit-sabotage
+      exit tmux: 1  zz: 0
+      stdout differs
+        0a1
+        > SABOTAGE
+        \ No newline at end of file
+      stderr differs
+        1d0
+        < no buffer zzcc-sabotage
+      state differs
+        5a6
+        > B zzcc-sabotage 8
+ok    self-check exit and stderr, a buffer missing on one side
+      case state-sabotage
+      state differs
+        1a2
+        > S zzcc-sab 1 0
+        3a5
+        > W zzcc-sab:0 0 * 1
+        5a8
+        > P zzcc-sab:0.0 mode=0/ 80x24 alienware
+ok    self-check state, a session on one side only
+      case screen-sabotage
+      screen differs
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   3,2 flag=1 pane=80x24 shape=default
+ok    self-check screen, one column at one prompt
+      case normalize-off
+      stdout differs
+        1c1
+        < tty /dev/pts/50
+        ---
+        > tty /dev/pts/49
+ok    self-check two pts numbers differ while nothing normalizes them
+ok    self-check the same two numbers compare equal once normalized
+      case normalize-keeps-the-line
+      stdout differs
+        1a2
+        > zzcc-norm /dev/pts/N
+      state differs
+        1a2
+        > S zzcc-norm 1 0
+        3a5
+        > W zzcc-norm:0 0 * 1
+        5a8
+        > P zzcc-norm:0.0 mode=0/ 80x24 alienware
+ok    self-check a one-sided line beside a normalized number is still reported
+      case live-job-sabotage
+      stdout differs
+        0a1
+        > Job 0: sleep 40; echo zzcc-job [fd=N, pid=N, status=0]
+      screen differs
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50m<'sleep 40^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+ok    self-check a format job armed on one side only
+      case lock-target-sabotage
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < can't find session: zzcc-sab-lock
+      state differs
+        1a2
+        > S zzcc-sab-lock 1 0
+        3a5
+        > W zzcc-sab-lock:0 0 * 1
+        5a8
+        > P zzcc-sab-lock:0.0 mode=0/ 80x24 alienware
+ok    self-check the lock target on one side only
+      case lock-hook-sabotage
+      stdout differs
+        0a1
+        > yes
+ok    self-check the after-lock-server hook armed on one side only
+ok    self-check lock-session does not fire the server hook
+      case lock-session-negative-sabotage
+      stdout differs
+        0a1
+        > yes
+ok    self-check lock-session inappropriate server hook on zz only
+ok    self-check lock-client does not fire the server hook
+      case lock-client-negative-sabotage
+      stdout differs
+        0a1
+        > yes
+ok    self-check lock-client inappropriate server hook on zz only
+      case lock-client-screen-sabotage
+      screen differs
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mLOCK-SABOT^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+ok    self-check lock-client one-sided status row
+      case capture-line-numbers-sabotage
+      stdout differs
+        3c3
+        < 2 $
+        ---
+        > 2 $ zzq
+      screen differs
+        3c3
+        < $
+        ---
+        > $ zzq
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   5,2 flag=1 pane=80x24 shape=default
+ok    self-check a numbered capture of three columns on one side only
+ok    self-check capture-colour-wrap exact bytes before sabotage
+      case capture-colour-wrap-sabotage
+      stdout differs
+        1c1
+        < 0 ^[[31mAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2 AAAAAAAAAA
+        ---
+        > 0 X^[[31mAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2 AAAAAAAAAAA
+ok    self-check capture-colour-wrap one-sided scene change
+ok    self-check capture-real-wrap exact bytes before sabotage
+      case capture-real-wrap-sabotage
+      stdout differs
+        1c1
+        < 0 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2 AAAAAAAAAA
+        ---
+        > 0 XAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2 AAAAAAAAAAA
+ok    self-check capture-real-wrap one-sided scene change
+ok    self-check capture-real-history exact bytes before sabotage
+      case capture-real-history-sabotage
+      stdout differs
+        1,4c1,4
+        < -3 H09
+        < -2 H10
+        < -1 H11
+        < 0 H12
+        ---
+        > -3 Z09
+        > -2 Z10
+        > -1 Z11
+        > 0 Z12
+ok    self-check capture-real-history one-sided scene change
+ok    self-check capture-named-colour exact bytes before sabotage
+      case capture-named-colour-sabotage
+      stdout differs
+        1c1
+        < \033[31mRED\033[39m
+        ---
+        > X\033[31mRED\033[39m
+ok    self-check capture-named-colour one-sided scene change
+ok    self-check capture-named-background exact bytes before sabotage
+      case capture-named-background-sabotage
+      stdout differs
+        1c1
+        < \033[32m\033[44mCOLOUR\033[39m\033[49m
+        ---
+        > X\033[32m\033[44mCOLOUR\033[39m\033[49m
+ok    self-check capture-named-background one-sided scene change
+ok    self-check capture-bright-colours exact bytes before sabotage
+      case capture-bright-colours-sabotage
+      stdout differs
+        1c1
+        < \033[91m\033[104mBRIGHT\033[39m\033[49m
+        ---
+        > X\033[91m\033[104mBRIGHT\033[39m\033[49m
+ok    self-check capture-bright-colours one-sided scene change
+ok    self-check capture-indexed-colour exact bytes before sabotage
+      case capture-indexed-colour-sabotage
+      stdout differs
+        1c1
+        < \033[38;5;196mINDEX\033[39m
+        ---
+        > X\033[38;5;196mINDEX\033[39m
+ok    self-check capture-indexed-colour one-sided scene change
+ok    self-check capture-rgb-colour exact bytes before sabotage
+      case capture-rgb-colour-sabotage
+      stdout differs
+        1c1
+        < \033[38;2;1;2;3mRGB\033[39m
+        ---
+        > X\033[38;2;1;2;3mRGB\033[39m
+ok    self-check capture-rgb-colour one-sided scene change
+ok    self-check capture-bold exact bytes before sabotage
+      case capture-bold-sabotage
+      stdout differs
+        1c1
+        < \033[1mBOLD\033[0m
+        ---
+        > X\033[1mBOLD\033[0m
+ok    self-check capture-bold one-sided scene change
+ok    self-check capture-underline exact bytes before sabotage
+      case capture-underline-sabotage
+      stdout differs
+        1c1
+        < \033[4mUNDER\033[0m
+        ---
+        > X\033[4mUNDER\033[0m
+ok    self-check capture-underline one-sided scene change
+ok    self-check capture-attribute-reset exact bytes before sabotage
+      case capture-attribute-reset-sabotage
+      stdout differs
+        1c1
+        < \033[1;4m\033[31mONE\033[0;4m\033[31mTWO\033[0m
+        ---
+        > X\033[1;4m\033[31mONE\033[0;4m\033[31mTWO\033[0m
+ok    self-check capture-attribute-reset one-sided scene change
+ok    self-check capture-unicode-lines exact bytes before sabotage
+      case capture-unicode-lines-sabotage
+      stdout differs
+        1c1
+        < M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+        ---
+        > XM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+ok    self-check capture-unicode-lines one-sided scene change
+ok    self-check capture-erased-background-join exact bytes before sabotage
+      case capture-erased-background-join-sabotage
+      stdout differs
+        2c2
+        < 1 NEXT
+        ---
+        > 1 NEXT-X
+ok    self-check capture-erased-background-join one-sided scene change
+ok    self-check capture-erased-background-trim exact bytes before sabotage
+      case capture-erased-background-trim-sabotage
+      stdout differs
+        2c2
+        < NEXT
+        ---
+        > NEXT-X
+ok    self-check capture-erased-background-trim one-sided scene change
+ok    self-check capture-erased-display-join exact bytes before sabotage
+      case capture-erased-display-join-sabotage
+      stdout differs
+        2c2
+        < 1 NEXT
+        ---
+        > 1 NEXT-X
+ok    self-check capture-erased-display-join one-sided scene change
+ok    self-check capture-erased-display-trim exact bytes before sabotage
+      case capture-erased-display-trim-sabotage
+      stdout differs
+        2c2
+        < NEXT
+        ---
+        > NEXT-X
+ok    self-check capture-erased-display-trim one-sided scene change
+ok    self-check capture-wide-wrap-escape exact bytes before sabotage
+      case capture-wide-wrap-escape-sabotage
+      stdout differs
+        1c1
+        < \033[31mAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\033[39m
+        ---
+        > \033[31mZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\033[39m
+ok    self-check capture-wide-wrap-escape one-sided scene change
+ok    self-check capture-wide-wrap-padding exact bytes before sabotage
+      case capture-wide-wrap-padding-sabotage
+      stdout differs
+        1c1
+        < ^[[31mAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA^[[39m 
+        ---
+        > ^[[31mZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA^[[39m 
+ok    self-check capture-wide-wrap-padding one-sided scene change
+ok    self-check capture-wide-wrap-join exact bytes before sabotage
+      case capture-wide-wrap-join-sabotage
+      stdout differs
+        1c1
+        < 0 ^[[31mAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1 M-gM-^UM-^LM-gM-^UM-^L^[[39mNEXT
+        ---
+        > 0 ^[[31mZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1 M-gM-^UM-^LM-gM-^UM-^L^[[39mNEXT
+ok    self-check capture-wide-wrap-join one-sided scene change
+ok    self-check capture-tab-trailing exact bytes before sabotage
+      case capture-tab-trailing-sabotage
+      stdout differs
+        1c1
+        < ABC	
+        ---
+        > ABC
+ok    self-check capture-tab-trailing one-sided scene change
+ok    self-check capture-tab-internal exact bytes before sabotage
+      case capture-tab-internal-sabotage
+      stdout differs
+        1c1
+        < ABC	DEF
+        ---
+        > ABC     DEF
+ok    self-check capture-tab-internal one-sided scene change
+ok    self-check capture-tab-wide exact bytes before sabotage
+      case capture-tab-wide-sabotage
+      stdout differs
+        1c1
+        < M-gM-^UM-^L	
+        ---
+        > M-gM-^UM-^L
+ok    self-check capture-tab-wide one-sided scene change
+ok    self-check capture-low-indexed-colour exact bytes before sabotage
+      case capture-low-indexed-colour-sabotage
+      stdout differs
+        1c1
+        < \033[38;5;1mRED\033[39m
+        ---
+        > \033[31mRED\033[39m
+ok    self-check capture-low-indexed-colour one-sided scene change
+ok    self-check lock-session accepts cli:=
+      case lock-session-cli:=-rejection-sabotage
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > can't find window: 
+ok    self-check lock-session rejects cli:= on zz only
+ok    self-check has-session accepts cli:=
+      case has-session-cli:=-rejection-sabotage
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > can't find window: 
+ok    self-check has-session rejects cli:= on zz only
+ok    self-check list-windows accepts cli:=
+      case list-windows-cli:=-rejection-sabotage
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > can't find window: 
+ok    self-check list-windows rejects cli:= on zz only
+ok    self-check lock-session accepts =:
+      case lock-session-=:-rejection-sabotage
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > can't find window: 
+ok    self-check lock-session rejects =: on zz only
+ok    self-check has-session accepts =:
+      case has-session-=:-rejection-sabotage
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > can't find window: 
+ok    self-check has-session rejects =: on zz only
+ok    self-check list-windows accepts =:
+      case list-windows-=:-rejection-sabotage
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > can't find window: 
+ok    self-check list-windows rejects =: on zz only
+ok    self-check lock-session resolves pane-base-index 1
+      case lock-session-base-index-sabotage
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > can't find pane: 1
+      state differs
+        4,5c4,5
+        < P cli:0.1 mode=0/ 80x23 ptitle
+        < P cli:1.1 mode=0/ 80x24 ptitle
+        ---
+        > P cli:0.2 mode=0/ 80x23 ptitle
+        > P cli:1.2 mode=0/ 80x24 ptitle
+ok    self-check lock-session loses configured pane 1 on zz only
+ok    self-check has-session resolves pane-base-index 1
+      case has-session-base-index-sabotage
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > can't find pane: 1
+      state differs
+        4,5c4,5
+        < P cli:0.1 mode=0/ 80x23 ptitle
+        < P cli:1.1 mode=0/ 80x24 ptitle
+        ---
+        > P cli:0.2 mode=0/ 80x23 ptitle
+        > P cli:1.2 mode=0/ 80x24 ptitle
+ok    self-check has-session loses configured pane 1 on zz only
+ok    self-check list-windows resolves pane-base-index 1
+      case list-windows-base-index-sabotage
+      exit tmux: 0  zz: 1
+      stdout differs
+        1,2d0
+        < 0: win* (1 panes) [80x23] [layout ae5d,80x23,0,0,0] @0 (active)
+        < 1: two (1 panes) [80x24] [layout b25e,80x24,0,0,1] @1
+      stderr differs
+        0a1
+        > can't find pane: 1
+      state differs
+        4,5c4,5
+        < P cli:0.1 mode=0/ 80x23 ptitle
+        < P cli:1.1 mode=0/ 80x24 ptitle
+        ---
+        > P cli:0.2 mode=0/ 80x23 ptitle
+        > P cli:1.2 mode=0/ 80x24 ptitle
+ok    self-check list-windows loses configured pane 1 on zz only
+      case lock-session-=cli:zzcc-target-sabotage
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < can't find window: zzcc-target
+      screen differs
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two  2:zzcc-target
+      state differs
+        1c1
+        < S cli 2 1
+        ---
+        > S cli 3 1
+        3a4
+        > W cli:2 zzcc-target  1
+        5a7
+        > P cli:2.0 mode=0/ 80x23 alienware
+ok    self-check lock-session target =cli:zzcc-target exists on zz only
+      case has-session-=cli:zzcc-target-sabotage
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < can't find window: zzcc-target
+      screen differs
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two  2:zzcc-target
+      state differs
+        1c1
+        < S cli 2 1
+        ---
+        > S cli 3 1
+        3a4
+        > W cli:2 zzcc-target  1
+        5a7
+        > P cli:2.0 mode=0/ 80x23 alienware
+ok    self-check has-session target =cli:zzcc-target exists on zz only
+      case list-windows-=cli:zzcc-target-sabotage
+      exit tmux: 1  zz: 0
+      stdout differs
+        0a1,3
+        > 0: win* (1 panes) [80x23] [layout ae5d,80x23,0,0,0] @0 (active)
+        > 1: two (1 panes) [80x24] [layout b25e,80x24,0,0,1] @1
+        > 2: zzcc-target (1 panes) [80x23] [layout d767,80x23,0,0,28] @28
+      stderr differs
+        1d0
+        < can't find window: zzcc-target
+      screen differs
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two  2:zzcc-target
+      state differs
+        1c1
+        < S cli 2 1
+        ---
+        > S cli 3 1
+        3a4
+        > W cli:2 zzcc-target  1
+        5a7
+        > P cli:2.0 mode=0/ 80x23 alienware
+ok    self-check list-windows target =cli:zzcc-target exists on zz only
+      case lock-session-%28-sabotage
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < can't find pane: %28
+      screen differs
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two  2:zzcc-target
+      state differs
+        1c1
+        < S cli 2 1
+        ---
+        > S cli 3 1
+        3a4
+        > W cli:2 zzcc-target  1
+        5a7
+        > P cli:2.0 mode=0/ 80x23 alienware
+ok    self-check lock-session target %28 exists on zz only
+      case has-session-%28-sabotage
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < can't find pane: %28
+      screen differs
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two  2:zzcc-target
+      state differs
+        1c1
+        < S cli 2 1
+        ---
+        > S cli 3 1
+        3a4
+        > W cli:2 zzcc-target  1
+        5a7
+        > P cli:2.0 mode=0/ 80x23 alienware
+ok    self-check has-session target %28 exists on zz only
+      case list-windows-%28-sabotage
+      exit tmux: 1  zz: 0
+      stdout differs
+        0a1,3
+        > 0: win* (1 panes) [80x23] [layout ae5d,80x23,0,0,0] @0 (active)
+        > 1: two (1 panes) [80x24] [layout b25e,80x24,0,0,1] @1
+        > 2: zzcc-target (1 panes) [80x23] [layout d767,80x23,0,0,28] @28
+      stderr differs
+        1d0
+        < can't find pane: %28
+      screen differs
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two  2:zzcc-target
+      state differs
+        1c1
+        < S cli 2 1
+        ---
+        > S cli 3 1
+        3a4
+        > W cli:2 zzcc-target  1
+        5a7
+        > P cli:2.0 mode=0/ 80x23 alienware
+ok    self-check list-windows target %28 exists on zz only
+      case lock-session-:.%28-sabotage
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < can't find pane: %28
+      screen differs
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two  2:zzcc-target
+      state differs
+        1c1
+        < S cli 2 1
+        ---
+        > S cli 3 1
+        3a4
+        > W cli:2 zzcc-target  1
+        5a7
+        > P cli:2.0 mode=0/ 80x23 alienware
+ok    self-check lock-session target :.%28 exists on zz only
+      case has-session-:.%28-sabotage
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < can't find pane: %28
+      screen differs
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two  2:zzcc-target
+      state differs
+        1c1
+        < S cli 2 1
+        ---
+        > S cli 3 1
+        3a4
+        > W cli:2 zzcc-target  1
+        5a7
+        > P cli:2.0 mode=0/ 80x23 alienware
+ok    self-check has-session target :.%28 exists on zz only
+      case list-windows-:.%28-sabotage
+      exit tmux: 1  zz: 0
+      stdout differs
+        0a1,3
+        > 0: win* (1 panes) [80x23] [layout ae5d,80x23,0,0,0] @0 (active)
+        > 1: two (1 panes) [80x24] [layout b25e,80x24,0,0,1] @1
+        > 2: zzcc-target (1 panes) [80x23] [layout d767,80x23,0,0,28] @28
+      stderr differs
+        1d0
+        < can't find pane: %28
+      screen differs
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two  2:zzcc-target
+      state differs
+        1c1
+        < S cli 2 1
+        ---
+        > S cli 3 1
+        3a4
+        > W cli:2 zzcc-target  1
+        5a7
+        > P cli:2.0 mode=0/ 80x23 alienware
+ok    self-check list-windows target :.%28 exists on zz only
+      case lock-session-pane-component-sabotage
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < can't find pane: 1
+      screen differs
+        12,13c12,13
+        < 
+        < 
+        ---
+        > ^[[38;2;154;205;50mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@^[[38;2;179;179;179mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+        > ^[[39m$
+      state differs
+        2c2
+        < W cli:0 win * 1
+        ---
+        > W cli:0 win * 2
+        4c4,5
+        < P cli:0.0 mode=0/ 80x23 ptitle
+        ---
+        > P cli:0.0 mode=0/ 80x11 ptitle
+        > P cli:0.1 mode=0/ 80x11 alienware
+ok    self-check lock-session pane index exists on zz only
+      case has-session-pane-component-sabotage
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < can't find pane: 1
+      screen differs
+        12,13c12,13
+        < 
+        < 
+        ---
+        > ^[[38;2;154;205;50mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@^[[38;2;179;179;179mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+        > ^[[39m$
+      state differs
+        2c2
+        < W cli:0 win * 1
+        ---
+        > W cli:0 win * 2
+        4c4,5
+        < P cli:0.0 mode=0/ 80x23 ptitle
+        ---
+        > P cli:0.0 mode=0/ 80x11 ptitle
+        > P cli:0.1 mode=0/ 80x11 alienware
+ok    self-check has-session pane index exists on zz only
+      case list-windows-pane-component-sabotage
+      exit tmux: 1  zz: 0
+      stdout differs
+        0a1,2
+        > 0: win* (2 panes) [80x23] [layout 0914,80x23,0,0[80x11,0,0,0,80x11,0,12,29]] @0 (active)
+        > 1: two (1 panes) [80x24] [layout b25e,80x24,0,0,1] @1
+      stderr differs
+        1d0
+        < can't find pane: 1
+      screen differs
+        12,13c12,13
+        < 
+        < 
+        ---
+        > ^[[38;2;154;205;50mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@^[[38;2;179;179;179mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+        > ^[[39m$
+      state differs
+        2c2
+        < W cli:0 win * 1
+        ---
+        > W cli:0 win * 2
+        4c4,5
+        < P cli:0.0 mode=0/ 80x23 ptitle
+        ---
+        > P cli:0.0 mode=0/ 80x11 ptitle
+        > P cli:0.1 mode=0/ 80x11 alienware
+ok    self-check list-windows pane index exists on zz only
+ok    self-check equivalence: every sabotage withdrawn
+self-check complete: every sabotage was caught in its own channel and both equivalences passed
+
+EXIT=0

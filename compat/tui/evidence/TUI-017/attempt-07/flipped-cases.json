@@ -1,0 +1,65 @@
+[
+  {
+    "name": "capture-tab-trailing",
+    "owner": "TUI-017",
+    "before": "recorded",
+    "after": "asserted",
+    "fixed_self_check_exit": 0,
+    "reverted_self_check_exit": 1,
+    "previous_reason": "TUI-017 ordinary residual: tmux retains a TAB cell and emits a literal tab under -C; Ghostty expands HT into cursor motion and the retained grid loses the tab origin. This is the same engine-storage root as the campaign TAB-cell residual, separate from DEC charset provenance. Trailing, internal and wide-text tabs remain open"
+  },
+  {
+    "name": "capture-tab-internal",
+    "owner": "TUI-017",
+    "before": "recorded",
+    "after": "asserted",
+    "fixed_self_check_exit": 0,
+    "reverted_self_check_exit": 1,
+    "previous_reason": "TUI-017 ordinary residual: tmux retains a TAB cell and emits a literal tab under -C; Ghostty expands HT into cursor motion and the retained grid loses the tab origin. This is the same engine-storage root as the campaign TAB-cell residual, separate from DEC charset provenance. Trailing, internal and wide-text tabs remain open"
+  },
+  {
+    "name": "capture-tab-wide",
+    "owner": "TUI-017",
+    "before": "recorded",
+    "after": "asserted",
+    "fixed_self_check_exit": 0,
+    "reverted_self_check_exit": 1,
+    "previous_reason": "TUI-017 ordinary residual: tmux retains a TAB cell and emits a literal tab under -C; Ghostty expands HT into cursor motion and the retained grid loses the tab origin. This is the same engine-storage root as the campaign TAB-cell residual, separate from DEC charset provenance. Trailing, internal and wide-text tabs remain open"
+  },
+  {
+    "name": "capture-low-indexed-colour",
+    "owner": "TUI-017",
+    "before": "recorded",
+    "after": "asserted",
+    "fixed_self_check_exit": 0,
+    "reverted_self_check_exit": 1,
+    "previous_reason": "TUI-017 divergence measured at 80x24: explicit 38;5;1 produces literal \\033[38;5;1mRED\\033[39m on the pin, while zz produces \\033[31mRED\\033[39m. Ghostty stores both named 31 and indexed 38;5;1 as Palette(1), so the capture cannot distinguish their original colour class. Indices 16 through 255 and RGB retain their class"
+  },
+  {
+    "name": "lock-target-base-index-lock-session",
+    "owner": "TUI-015",
+    "before": "recorded",
+    "after": "asserted",
+    "fixed_self_check_exit": 0,
+    "reverted_self_check_exit": 1,
+    "previous_reason": "TUI-015 divergence with pane-base-index=1: the pin resolves =cli:win.1 and zz reports cannot find pane 1. resolve_named_session in MuxState has no access to CommandEngine pane-base-index options; plumbing configured indices crosses the authorized single-function grammar excursion. lock-session, has-session and list-windows each retain this owned measurement, without a decision waiver"
+  },
+  {
+    "name": "lock-target-base-index-has-session",
+    "owner": "TUI-015",
+    "before": "recorded",
+    "after": "asserted",
+    "fixed_self_check_exit": 0,
+    "reverted_self_check_exit": 1,
+    "previous_reason": "TUI-015 divergence with pane-base-index=1: the pin resolves =cli:win.1 and zz reports cannot find pane 1. resolve_named_session in MuxState has no access to CommandEngine pane-base-index options; plumbing configured indices crosses the authorized single-function grammar excursion. lock-session, has-session and list-windows each retain this owned measurement, without a decision waiver"
+  },
+  {
+    "name": "lock-target-base-index-list-windows",
+    "owner": "TUI-015",
+    "before": "recorded",
+    "after": "asserted",
+    "fixed_self_check_exit": 0,
+    "reverted_self_check_exit": 1,
+    "previous_reason": "TUI-015 divergence with pane-base-index=1: the pin resolves =cli:win.1 and zz reports cannot find pane 1. resolve_named_session in MuxState has no access to CommandEngine pane-base-index options; plumbing configured indices crosses the authorized single-function grammar excursion. lock-session, has-session and list-windows each retain this owned measurement, without a decision waiver"
+  }
+]

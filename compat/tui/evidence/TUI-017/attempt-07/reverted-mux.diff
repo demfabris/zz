@@ -1,0 +1,16 @@
+diff --git a/crates/zz-mux/src/command.rs b/tmp/zzcr-reverted.jKXeN6/crates/zz-mux/src/command.rs
+index da808307..1bf4bbc4 100644
+--- a/crates/zz-mux/src/command.rs
++++ b/tmp/zzcr-reverted.jKXeN6/crates/zz-mux/src/command.rs
+@@ -4039,10 +4039,7 @@ impl MuxEngine {
+         target: Option<&str>,
+         current: Option<SessionId>,
+     ) -> Result<SessionId, ServerError> {
+-        self.state
+-            .resolve_session_with_pane_index(target, current, &|window, index| {
+-                self.pane_at_index(window, index)
+-            })
++        self.state.resolve_session(target, current)
+     }
+ 
+     pub fn resolve_window(

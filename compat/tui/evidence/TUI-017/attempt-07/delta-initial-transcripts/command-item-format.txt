@@ -1,0 +1,1751 @@
+# Scenario: command-item-format
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/command-item-format.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: fmt: [#{command}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [display-message]
+tmux stdout:
+    [display-message]
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: display-message -p [#{command}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [display-message]
+tmux stdout:
+    [display-message]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: display -p [#{command}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [display-message]
+tmux stdout:
+    [display-message]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: display-mes -p [#{command}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [display-message]
+tmux stdout:
+    [display-message]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: display-message -p [#{?command,set,unset}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [set]
+tmux stdout:
+    [set]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: display-message -p [#{command}]|[#{command_list_name}]|[#{key_command}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [display-message]|[]|[]
+tmux stdout:
+    [display-message]|[]|[]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: set-option -s command-alias[30] zzitem=display-message
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: show-options -sv command-alias[30]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    zzitem=display-message
+tmux stdout:
+    zzitem=display-message
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: zzitem -p [#{command}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [display-message]
+tmux stdout:
+    [display-message]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: bind-key -T zzitem F1 next-window
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: bind-key -T zzitem F2 previous-window
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: list-keys -T zzitem -F [#{command}]|#{key_string}|#{key_command}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [list-keys]|F1|next-window
+    [list-keys]|F2|previous-window
+tmux stdout:
+    [list-keys]|F1|next-window
+    [list-keys]|F2|previous-window
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: lsk -T zzitem -F [#{command}]|#{key_table}|[#{key_note}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [list-keys]|zzitem|[]
+    [list-keys]|zzitem|[]
+tmux stdout:
+    [list-keys]|zzitem|[]
+    [list-keys]|zzitem|[]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: out: list-commands -F [#{command}]|#{command_list_name}|#{command_list_alias} list-keys
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [list-commands]|list-keys|lsk
+tmux stdout:
+    [list-commands]|list-keys|lsk
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: lscm -F [#{command}]|#{command_list_name} display-message
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [list-commands]|display-message
+tmux stdout:
+    [list-commands]|display-message
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: set-option -sF @zzitem-fopt [#{command}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: show-options -sv @zzitem-fopt
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [set-option]
+tmux stdout:
+    [set-option]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: set-environment -gF ZZITEM [#{command}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: show-environment -g ZZITEM
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    ZZITEM=[set-environment]
+tmux stdout:
+    ZZITEM=[set-environment]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: out: set-environment -g command SHADOW
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: display-message -p [#{command}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [display-message]
+tmux stdout:
+    [display-message]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: set-option -s command SHADOW
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    ambiguous option: command
+tmux stderr:
+    ambiguous option: command
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: out: set-environment -gu command
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: out: set-window-option -t =w:0 automatic-rename-format zzauto[#{command}]#{?command,SET,UNSET}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: out: show-options -wv -t =w:0 automatic-rename-format
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    zzauto[#{command}]#{?command,SET,UNSET}
+tmux stdout:
+    zzauto[#{command}]#{?command,SET,UNSET}
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: out: set-window-option -t =w:0 automatic-rename on
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: out: display-message -p [#{window_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [zzauto[]UNSET]
+tmux stdout:
+    [zzauto[]UNSET]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: new-session -d -s rs-c -n rs-window
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: select-pane -t =rs-c:0.0 -T rs-pane
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: new-session -d -s rs-a
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 31
+COMMAND: new-session -d -s rs-p
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 32
+COMMAND: new-session -d -s rw -n rw-c
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 33
+COMMAND: new-window -d -t =rw:1 -n rw-a
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 34
+COMMAND: new-window -d -t =rw:2 -n rw-p
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 35
+COMMAND: new-session -d -s so -n so-window
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 36
+COMMAND: select-pane -t =so:0.0 -T so-pane
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 37
+COMMAND: set-option -t =so:0.0 @so-so-window-so-pane-show-options so-target
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 38
+COMMAND: new-session -d -s swo -n swo-window
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 39
+COMMAND: select-pane -t =swo:0.0 -T swo-pane
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 40
+COMMAND: set-window-option -t =swo:0 @swo-swo-window-swo-pane-show-window-options swo-target
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 41
+COMMAND: new-session -d -s sp -n sp-window
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 42
+COMMAND: select-pane -t =sp:0.0 -T sp-origin
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 43
+COMMAND: split-window -d -h -t =sp:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 44
+COMMAND: select-pane -t =sp:0.1 -T sp-destination
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 45
+COMMAND: new-session -d -s argfmt-current -n current
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 46
+COMMAND: rename-session -t =rs-c '#{session_name}-#{window_name}-#{pane_title}-#{session_format}-#{pane_format}-#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 47
+COMMAND: out: display-message -p -t =rs-c-rs-window-rs-pane-0-1-rename-session: [#{session_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [rs-c-rs-window-rs-pane-0-1-rename-session]
+tmux stdout:
+    [rs-c-rs-window-rs-pane-0-1-rename-session]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 48
+COMMAND: rename -t =rs-a '#{session_name}-#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 49
+COMMAND: out: display-message -p -t =rs-a-rename-session: [#{session_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [rs-a-rename-session]
+tmux stdout:
+    [rs-a-rename-session]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 50
+COMMAND: rename-s -t =rs-p '#{session_name}-#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 51
+COMMAND: out: display-message -p -t =rs-p-rename-session: [#{session_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [rs-p-rename-session]
+tmux stdout:
+    [rs-p-rename-session]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 52
+COMMAND: rename-window -t =rw:0 '#{window_name}-#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 53
+COMMAND: out: display-message -p -t =rw:0 [#{window_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [rw-c-rename-window]
+tmux stdout:
+    [rw-c-rename-window]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 54
+COMMAND: renamew -t =rw:1 '#{window_name}-#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 55
+COMMAND: out: display-message -p -t =rw:1 [#{window_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [rw-a-rename-window]
+tmux stdout:
+    [rw-a-rename-window]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 56
+COMMAND: rename-w -t =rw:2 '#{window_name}-#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 57
+COMMAND: out: display-message -p -t =rw:2 [#{window_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [rw-p-rename-window]
+tmux stdout:
+    [rw-p-rename-window]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 58
+COMMAND: out: show-options -v -t =so:0.0 @#{session_name}-#{window_name}-#{pane_title}-#{command}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    so-target
+tmux stdout:
+    so-target
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 59
+COMMAND: out: show -v -t =so:0.0 @#{session_name}-#{window_name}-#{pane_title}-#{command}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    so-target
+tmux stdout:
+    so-target
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 60
+COMMAND: out: show-o -v -t =so:0.0 @#{session_name}-#{window_name}-#{pane_title}-#{command}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    so-target
+tmux stdout:
+    so-target
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 61
+COMMAND: out: show-window-options -v -t =swo:0 @#{session_name}-#{window_name}-#{pane_title}-#{command}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    swo-target
+tmux stdout:
+    swo-target
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 62
+COMMAND: out: showw -v -t =swo:0 @#{session_name}-#{window_name}-#{pane_title}-#{command}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    swo-target
+tmux stdout:
+    swo-target
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 63
+COMMAND: out: show-window-o -v -t =swo:0 @#{session_name}-#{window_name}-#{pane_title}-#{command}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    swo-target
+tmux stdout:
+    swo-target
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 64
+COMMAND: set-option -g @current CURRENT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 65
+COMMAND: set-option -g @missing MISSING
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 66
+COMMAND: set-window-option -g @current-window CURRENT-WINDOW
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 67
+COMMAND: set-window-option -g @missing-window MISSING-WINDOW
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 68
+COMMAND: out: show-options -g -v -t =argfmt-absent @#{?session_name,current,missing}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    MISSING
+tmux stdout:
+    MISSING
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 69
+COMMAND: out: show-window-options -g -v -t =argfmt-absent:0 @#{?window_name,current-window,missing-window}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    MISSING-WINDOW
+tmux stdout:
+    MISSING-WINDOW
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 70
+COMMAND: set-option -g -t =so:0.0 -- '@##{session_name}' literal
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 71
+COMMAND: out: show-hooks -g -t =so:0.0 @##{session_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    @#{session_name} literal
+tmux stdout:
+    @#{session_name} literal
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 72
+COMMAND: select-pane -t =sp:0.0 -R -T '#{pane_title}-#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 73
+COMMAND: out: display-message -p -t =sp:0.1 [#{pane_title}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [sp-origin-select-pane]
+tmux stdout:
+    [sp-origin-select-pane]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 74
+COMMAND: select-pane -t =sp:0.0 -T sp-alias
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 75
+COMMAND: selectp -t =sp:0.0 -R -T '#{pane_title}-#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 76
+COMMAND: out: display-message -p -t =sp:0.1 [#{pane_title}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [sp-alias-select-pane]
+tmux stdout:
+    [sp-alias-select-pane]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 77
+COMMAND: new-session -d -s '#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 78
+COMMAND: new-session -d -s '#{command}'
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    duplicate session: new-session
+tmux stderr:
+    duplicate session: new-session
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 79
+COMMAND: new -d -s 'alias-#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 80
+COMMAND: new-s -d -s 'prefix-#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 81
+COMMAND: new-session -d -s '#{session_name}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 82
+COMMAND: new-session -d -s 'slash\#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 83
+COMMAND: new-session -d -s name-window-clean -n 'window\#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 84
+COMMAND: out: display-message -p -t =name-window-clean:0 [#{window_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [window\\new-session]
+tmux stdout:
+    [window\\new-session]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 85
+COMMAND: new -d -s name-window-unicode -n 'janela-日本語-#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 86
+COMMAND: out: display-message -p -t =name-window-unicode:0 [#{window_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [janela-日本語-new-session]
+tmux stdout:
+    [janela-日本語-new-session]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 87
+COMMAND: new-s -d -s name-window-empty -n '#{missing_name}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 88
+COMMAND: out: display-message -p -t =name-window-empty:0 [#{window_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    []
+tmux stdout:
+    []
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 89
+COMMAND: new-session -d -s new-window-name-target -n new-window-name-origin
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 90
+COMMAND: select-pane -t =new-window-name-target:0.0 -T new-window-name-pane
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 91
+COMMAND: new-session -d -s new-window-name-current
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 92
+COMMAND: neww -d -t =new-window-name-target:5 -n 'janela-日本語\#{command}-#{session_name}-#{window_name}-#{pane_title}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 93
+COMMAND: out: display-message -p -t =new-window-name-target:5 [#{window_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [janela-日本語\\new-window-new-window-name-target-new-window-name-origin-new-window-name-pane]
+tmux stdout:
+    [janela-日本語\\new-window-new-window-name-target-new-window-name-origin-new-window-name-pane]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 94
+COMMAND: select-window -t =new-window-name-target:0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 95
+COMMAND: new-window -d -n 'collision\#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 96
+COMMAND: new-window -d -S -n 'collision\#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 97
+COMMAND: new-session -d -s new-window-reuse-hit -n new-window-reuse-hit
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 98
+COMMAND: new-window -d -S -t =new-window-reuse-hit: -n '##{session_name}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 99
+COMMAND: out: list-windows -t =new-window-reuse-hit -F [#{window_index}:#{window_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [0:new-window-reuse-hit]
+tmux stdout:
+    [0:new-window-reuse-hit]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 100
+COMMAND: new-session -d -s new-window-reuse-miss -n anchor
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 101
+COMMAND: new-window -d -S -t =new-window-reuse-miss: -n '##{session_name}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 102
+COMMAND: out: list-windows -t =new-window-reuse-miss -F [#{window_index}:#{window_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [0:anchor]
+    [1:#{session_name}]
+tmux stdout:
+    [0:anchor]
+    [1:#{session_name}]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 103
+COMMAND: new-session -d -s new-window-reuse-index -n new-window-reuse-index
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 104
+COMMAND: new-window -d -S -t =new-window-reuse-index:5 -n '##{session_name}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 105
+COMMAND: out: list-windows -t =new-window-reuse-index -F [#{window_index}:#{window_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [0:new-window-reuse-index]
+    [5:#{session_name}]
+tmux stdout:
+    [0:new-window-reuse-index]
+    [5:#{session_name}]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 106
+COMMAND: new-session -d -s break-pane-name -n break-pane-origin
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 107
+COMMAND: split-window -d -h -t =break-pane-name:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 108
+COMMAND: breakp -d -s =break-pane-name:0.1 -n 'janela-日本語\#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 109
+COMMAND: out: display-message -p -t =break-pane-name:1 [#{window_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [janela-日本語\\#{command}]
+tmux stdout:
+    [janela-日本語\\#{command}]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 110
+COMMAND: split-window -d -h -t =break-pane-name:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 111
+COMMAND: break-pane -d -s =break-pane-name:0.1 -n 'janela-日本語\#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 112
+COMMAND: out: list-windows -t =break-pane-name -F [#{window_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [break-pane-origin]
+    [janela-日本語\\#{command}]
+    [janela-日本語\\#{command}]
+tmux stdout:
+    [break-pane-origin]
+    [janela-日本語\\#{command}]
+    [janela-日本語\\#{command}]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 113
+COMMAND: new-session -d -s rename-clean-session
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 114
+COMMAND: rename-session -t =rename-clean-session 'renamed\#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 115
+COMMAND: out: list-sessions -F [#{session_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    []
+    [alias-new-session]
+    [argfmt-current]
+    [break-pane-name]
+    [name-window-clean]
+    [name-window-empty]
+    [name-window-unicode]
+    [new-session]
+    [new-window-name-current]
+    [new-window-name-target]
+    [new-window-reuse-hit]
+    [new-window-reuse-index]
+    [new-window-reuse-miss]
+    [prefix-new-session]
+    [renamed\\rename-session]
+    [rs-a-rename-session]
+    [rs-c-rs-window-rs-pane-0-1-rename-session]
+    [rs-p-rename-session]
+    [rw]
+    [slash\\new-session]
+    [so]
+    [sp]
+    [swo]
+    [w]
+tmux stdout:
+    []
+    [alias-new-session]
+    [argfmt-current]
+    [break-pane-name]
+    [name-window-clean]
+    [name-window-empty]
+    [name-window-unicode]
+    [new-session]
+    [new-window-name-current]
+    [new-window-name-target]
+    [new-window-reuse-hit]
+    [new-window-reuse-index]
+    [new-window-reuse-miss]
+    [prefix-new-session]
+    [renamed\\rename-session]
+    [rs-a-rename-session]
+    [rs-c-rs-window-rs-pane-0-1-rename-session]
+    [rs-p-rename-session]
+    [rw]
+    [slash\\new-session]
+    [so]
+    [sp]
+    [swo]
+    [w]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 116
+COMMAND: new-session -d -s rename-clean-window -n original
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 117
+COMMAND: rename-window -t =rename-clean-window:0 'renamed\#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 118
+COMMAND: out: list-windows -t =rename-clean-window -F [#{window_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [renamed\\rename-window]
+tmux stdout:
+    [renamed\\rename-window]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 119
+COMMAND: rename-window -t =rename-clean-window:0 'janela-日本語-#{command}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 120
+COMMAND: out: display-message -p -t =rename-clean-window:0 [#{window_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [janela-日本語-rename-window]
+tmux stdout:
+    [janela-日本語-rename-window]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 121
+COMMAND: rename-window -t =rename-clean-window:0 '#{missing_name}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 122
+COMMAND: out: display-message -p -t =rename-clean-window:0 [#{window_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    []
+tmux stdout:
+    []
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 123
+COMMAND: new-session -d -s rename-collision-source
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 124
+COMMAND: new-session -d -s 'collision\rename-session'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 125
+COMMAND: rename-session -t =rename-collision-source 'collision\rename-session'
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    duplicate session: collision\\rename-session
+tmux stderr:
+    duplicate session: collision\\rename-session
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=125 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

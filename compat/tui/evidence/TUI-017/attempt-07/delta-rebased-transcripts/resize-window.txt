@@ -1,0 +1,217 @@
+# Scenario: resize-window
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/resize-window.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: out: display-message -p -t w:0 #{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    80x24|:
+tmux stdout:
+    80x24|:
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: resize-window -t w:0 -x 90 -y 20
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: display-message -p -t w:0 #{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    90x20|90:20
+tmux stdout:
+    90x20|90:20
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: resizew -t w:0 -R 3
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: resize-window -t w:0 -D 2
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: resize-window -t w:0 -L
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: resize-window -t w:0 -U
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: display-message -p -t w:0 #{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    92x21|92:21
+tmux stdout:
+    92x21|92:21
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: set-window-option -t w:0 window-size latest
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: display-message -p -t w:0 #{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    92x21|:
+tmux stdout:
+    92x21|:
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: set-window-option -t w:0 window-size manual
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: display-message -p -t w:0 #{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    92x21|92:21
+tmux stdout:
+    92x21|92:21
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: resize-window -t w:0 -x 0
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    width too small
+tmux stderr:
+    width too small
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: resize-window -t w:0 -x 10001
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    width too large
+tmux stderr:
+    width too large
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: resize-window -t w:0 banana
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    adjustment invalid
+tmux stderr:
+    adjustment invalid
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: resize-window -t missing -x bad
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    can't find window: missing
+tmux stderr:
+    can't find window: missing
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=16 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

@@ -1,0 +1,749 @@
+# Scenario: list-keys-padding
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/list-keys-padding.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: bind-key -T zzpad 1 kill-pane
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: bind-key -r -T zzpad C-a new-window
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: list-keys -T zzpad
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key    -T zzpad 1   kill-pane
+    bind-key -r -T zzpad C-a new-window
+tmux stdout:
+    bind-key    -T zzpad 1   kill-pane
+    bind-key -r -T zzpad C-a new-window
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: list-keys -T zzpad -F #{key_string}|#{key_has_repeat}|#{key_string_width}|#{key_table_width}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1|1|3|5
+    C-a|1|3|5
+tmux stdout:
+    1|1|3|5
+    C-a|1|3|5
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: unbind-key -a -T prefix
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: list-keys -T prefix
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    table prefix doesn't exist
+tmux stderr:
+    table prefix doesn't exist
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: unbind-key -aq -T root
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: list-keys -T root
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: bind-key -T prefix -N alpha-note a display-message alpha
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: bind-key -T root b display-message beta
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: bind-key -T root -N '' c display-message empty-note
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: bind-key -T prefix -N zeta-note z display-message zeta
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: bind-key -T root -N yankee-note y display-message yankee
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: bind-key -T ignored -N ignored-note x display-message ignored
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: list-keys -N
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b a alpha-note
+    C-b z zeta-note
+    C-b c display-message empty-note
+    C-b y yankee-note
+tmux stdout:
+    C-b a alpha-note
+    C-b z zeta-note
+    C-b c display-message empty-note
+    C-b y yankee-note
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: list-keys -Na
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b a alpha-note
+    C-b z zeta-note
+    C-b b display-message beta
+    C-b c display-message empty-note
+    C-b y yankee-note
+tmux stdout:
+    C-b a alpha-note
+    C-b z zeta-note
+    C-b b display-message beta
+    C-b c display-message empty-note
+    C-b y yankee-note
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: list-keys -NaPZZ
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    ZZ a alpha-note
+    ZZ z zeta-note
+    ZZ b display-message beta
+    ZZ c display-message empty-note
+    ZZ y yankee-note
+tmux stdout:
+    ZZ a alpha-note
+    ZZ z zeta-note
+    ZZ b display-message beta
+    ZZ c display-message empty-note
+    ZZ y yankee-note
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: list-keys -Na -O key -F #{key_table}:#{key_string}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix:a
+    prefix:z
+    root:b
+    root:c
+    root:y
+tmux stdout:
+    prefix:a
+    prefix:z
+    root:b
+    root:c
+    root:y
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: list-keys -Na -O key -r -F #{key_table}:#{key_string}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix:z
+    prefix:a
+    root:y
+    root:c
+    root:b
+tmux stdout:
+    prefix:z
+    prefix:a
+    root:y
+    root:c
+    root:b
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: bind-key -T zzlk a display-message alpha
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: bind-key -T zzlk b display-message beta
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: bind-key -r -T zzlk x display-message repeat
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: bind-key -T zzlk z display-message zeta
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: bind-key -T zzlk M-a display-message meta
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: bind-key -T zzlk C-a display-message control
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: out: list-keys -T zzlk -F #{key_string}|#{key_repeat}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    a|0
+    b|0
+    x|1
+    z|0
+    M-a|0
+    C-a|0
+tmux stdout:
+    a|0
+    b|0
+    x|1
+    z|0
+    M-a|0
+    C-a|0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: out: list-keys -r -T zzlk -F #{key_string}|#{key_repeat}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    a|0
+    b|0
+    x|1
+    z|0
+    M-a|0
+    C-a|0
+tmux stdout:
+    a|0
+    b|0
+    x|1
+    z|0
+    M-a|0
+    C-a|0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: out: list-keys -O order -T zzlk -F #{key_string}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    a
+    b
+    x
+    z
+    M-a
+    C-a
+tmux stdout:
+    a
+    b
+    x
+    z
+    M-a
+    C-a
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: out: list-keys -O order -r -T zzlk -F #{key_string}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-a
+    M-a
+    z
+    x
+    b
+    a
+tmux stdout:
+    C-a
+    M-a
+    z
+    x
+    b
+    a
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: unbind-key -T zzlk M-a
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 31
+COMMAND: unbind-key -T zzlk C-a
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 32
+COMMAND: out: list-keys -O key -T zzlk -F #{key_string}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    a
+    b
+    x
+    z
+tmux stdout:
+    a
+    b
+    x
+    z
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 33
+COMMAND: out: list-keys -O key -r -T zzlk -F #{key_string}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    z
+    x
+    b
+    a
+tmux stdout:
+    z
+    x
+    b
+    a
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 34
+COMMAND: out: list-keys -O key -O order -T zzlk -F #{key_string}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    a
+    b
+    x
+    z
+tmux stdout:
+    a
+    b
+    x
+    z
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 35
+COMMAND: out: list-keys -T zzlk -F #{key_table}:#{key_string} a
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    zzlk:a
+tmux stdout:
+    zzlk:a
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 36
+COMMAND: out: list-keys -T zzlk -F #{key_table}:#{key_string} -- a
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    zzlk:a
+tmux stdout:
+    zzlk:a
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 37
+COMMAND: out: list-keys -1 -O key -T zzlk -F #{key_string}|#{key_repeat}|#{key_has_repeat}|#{key_string_width}|#{key_table_width}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    a|0|0|1|4
+tmux stdout:
+    a|0|0|1|4
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 38
+COMMAND: out: list-keys -1 -T zzlk -F #{key_string}|#{key_repeat}|#{key_has_repeat}|#{key_string_width} x
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    x|1|1|1
+tmux stdout:
+    x|1|1|1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 39
+COMMAND: bind-key -T zzspace Space display-message space
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 40
+COMMAND: out: list-keys -T zzspace -F #{key_string}|#{key_string_width}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    Space|5
+tmux stdout:
+    Space|5
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 41
+COMMAND: out: list-keys -T zzspace -F #{key_string}|#{key_string_width} Space
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    Space|5
+tmux stdout:
+    Space|5
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 42
+COMMAND: out: list-keys -T copy-mode -F #{key_string}|#{key_string_width} C-Space
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-Space|7
+tmux stdout:
+    C-Space|7
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 43
+COMMAND: out: list-keys -1 -T copy-mode -F #{key_table}|#{key_string}|#{key_repeat}|#{key_has_repeat} Left
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    copy-mode|Left|0|0
+tmux stdout:
+    copy-mode|Left|0|0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 44
+COMMAND: out: list-keys -T copy-mode -F #{?key_repeat,REPEAT:#{key_string},}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 45
+COMMAND: out: list-keys -1 -T copy-mode-vi -F #{key_table}|#{key_string}|#{key_repeat}|#{key_has_repeat} h
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    copy-mode-vi|h|0|0
+tmux stdout:
+    copy-mode-vi|h|0|0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 46
+COMMAND: out: list-keys -T copy-mode-vi -F #{?key_repeat,REPEAT:#{key_string},}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=46 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

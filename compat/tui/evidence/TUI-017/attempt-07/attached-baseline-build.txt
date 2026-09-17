@@ -1,0 +1,3 @@
+
+EXIT=143
+STOP_REASON=Cancelled this lane childless baseline CLI build queue and requeued through the capped wrapper.

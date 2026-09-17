@@ -1,0 +1,3 @@
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+
+EXIT=0

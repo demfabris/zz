@@ -1,0 +1,569 @@
+# Scenario: source-file-format
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-format.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: source-file -F 'compat/scenarios/source-file-format-#{session_name}-#{window_index}-#{pane_index}-[12]0.conf'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-options -gv @source_file_format
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    glob-second
+tmux stdout:
+    glob-second
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: source-file -F 'compat/scenarios/source-file-format-#{session_name}-#{window_index}-#{pane_index}-20.conf' 'compat/scenarios/source-file-format-#{session_name}-#{window_index}-#{pane_index}-10.conf'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: show-options -gv @source_file_format
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    glob-first
+tmux stdout:
+    glob-first
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: source-file -Fq 'compat/scenarios/source-file-format-#{session_name}-missing.conf' 'compat/scenarios/source-file-format-#{session_name}-#{window_index}-#{pane_index}-20.conf'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: show-options -gv @source_file_format
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    glob-second
+tmux stdout:
+    glob-second
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: source-file 'compat/scenarios/source-file-glob/literal\q.conf'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: show-options -gv @source_file_backslash
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    loaded
+tmux stdout:
+    loaded
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: set-option -g @source_file_dotfile excluded
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: source-file 'compat/scenarios/source-file-glob/*.conf'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: show-options -gv @source_file_dotfile
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    excluded
+tmux stdout:
+    excluded
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: set-option -g @source_file_double_star_deep excluded
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: source-file 'compat/scenarios/source-file-glob/**/*.conf'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: out: show-options -gv @source_file_double_star_shallow
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    loaded
+tmux stdout:
+    loaded
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: show-options -gv @source_file_double_star_deep
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    excluded
+tmux stdout:
+    excluded
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: source-file 'compat/scenarios/source-file-glob/prefix-siblings/zz*/match.conf'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: show-options -gv @source_file_prefix_order
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    zz
+tmux stdout:
+    zz
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: source-file 'compat/scenarios/source-file-nested-client-cwd/a/entry.conf'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: show-options -gv @source_file_nested_replay_started
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    yes
+tmux stdout:
+    yes
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: out: show-options -gv @source_file_nested_client_cwd
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    client-root
+tmux stdout:
+    client-root
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: set-option -g @source_file_parse_only baseline
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: set-environment -g SOURCE_FILE_PARSE_ASSIGN baseline
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: set-environment -g SOURCE_FILE_PARSE_COMMAND baseline
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: out: source-file -nv compat/scenarios/source-file-flags-parse-only.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-flags-parse-only.conf:2: set-option -g @source_file_parse_only changed
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-flags-parse-only.conf:3: set-environment -g SOURCE_FILE_PARSE_COMMAND changed
+tmux stdout:
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-flags-parse-only.conf:2: set-option -g @source_file_parse_only changed
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-flags-parse-only.conf:3: set-environment -g SOURCE_FILE_PARSE_COMMAND changed
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: out: show-options -gqv @source_file_parse_only
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    baseline
+tmux stdout:
+    baseline
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: out: show-environment -g SOURCE_FILE_PARSE_ASSIGN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_FILE_PARSE_ASSIGN=baseline
+tmux stdout:
+    SOURCE_FILE_PARSE_ASSIGN=baseline
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: out: show-environment -g SOURCE_FILE_PARSE_COMMAND
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_FILE_PARSE_COMMAND=baseline
+tmux stdout:
+    SOURCE_FILE_PARSE_COMMAND=baseline
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: new-session -d -s source-target
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: set-environment -t w SOURCE_FILE_TARGET invoking
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: set-environment -t source-target SOURCE_FILE_TARGET target-before
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 31
+COMMAND: source-file -t source-target:0 compat/scenarios/source-file-flags-target.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 32
+COMMAND: out: show-environment -t source-target SOURCE_FILE_TARGET
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_FILE_TARGET=selected
+tmux stdout:
+    SOURCE_FILE_TARGET=selected
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 33
+COMMAND: out: show-environment -t w SOURCE_FILE_TARGET
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_FILE_TARGET=invoking
+tmux stdout:
+    SOURCE_FILE_TARGET=invoking
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 34
+COMMAND: set-environment -t source-target SOURCE_FILE_FORMAT_TARGET target-before
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 35
+COMMAND: source-file -F -t source-target:0 compat/scenarios/source-file-flags-#{session_name}.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 36
+COMMAND: out: show-environment -t source-target SOURCE_FILE_FORMAT_TARGET
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_FILE_FORMAT_TARGET=selected
+tmux stdout:
+    SOURCE_FILE_FORMAT_TARGET=selected
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 37
+COMMAND: source-file -t missing:0 compat/scenarios/source-file-flags-targetless.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 38
+COMMAND: out: show-options -gqv @source_file_targetless
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    loaded
+tmux stdout:
+    loaded
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 39
+COMMAND: out: source-file -v compat/scenarios/source-file-flags-beta.conf compat/scenarios/source-file-flags-alpha.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-flags-beta.conf:1: set-option -g @source_file_verbose_order beta
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-flags-alpha.conf:1: set-option -g @source_file_verbose_order alpha
+tmux stdout:
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-flags-beta.conf:1: set-option -g @source_file_verbose_order beta
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-flags-alpha.conf:1: set-option -g @source_file_verbose_order alpha
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 40
+COMMAND: out: show-options -gqv @source_file_verbose_order
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alpha
+tmux stdout:
+    alpha
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=40 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

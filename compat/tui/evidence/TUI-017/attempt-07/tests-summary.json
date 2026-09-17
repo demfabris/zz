@@ -1,0 +1,243 @@
+{
+  "agent-soak-baseline-isolated.txt": {
+    "exit": 101,
+    "results": [
+      "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 11.77s"
+    ]
+  },
+  "agent-soak-solo.txt": {
+    "exit": 101,
+    "results": [
+      "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 8.87s"
+    ]
+  },
+  "baseline-cli-control-serial.txt": {
+    "exit": 101,
+    "results": [
+      "test result: FAILED. 50 passed; 2 failed; 0 ignored; 0 measured; 81 filtered out; finished in 522.98s"
+    ]
+  },
+  "cli-alias-attach-solo.txt": {
+    "exit": 0,
+    "results": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 132 filtered out; finished in 6.31s"
+    ]
+  },
+  "cli-background-solo.txt": {
+    "exit": 0,
+    "results": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 132 filtered out; finished in 2.59s"
+    ]
+  },
+  "cli-control-serial.txt": {
+    "exit": 101,
+    "results": [
+      "test result: FAILED. 49 passed; 3 failed; 0 ignored; 0 measured; 81 filtered out; finished in 280.01s"
+    ]
+  },
+  "cli-refresh-filtered.txt": {
+    "exit": 0,
+    "results": [
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 130 filtered out; finished in 13.20s"
+    ]
+  },
+  "cli-wait-exit-solo.txt": {
+    "exit": 0,
+    "results": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 132 filtered out; finished in 1.56s"
+    ]
+  },
+  "client-protocol-tests.txt": {
+    "exit": 0,
+    "results": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 105 filtered out; finished in 0.00s",
+      "test result: ok. 106 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s",
+      "test result: ok. 229 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s",
+      "test result: ok. 207 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s"
+    ]
+  },
+  "compat-check-rebased.txt": {
+    "exit": 0,
+    "results": [
+      "test result: ok. 536 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.26s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.03s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.05s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.02s"
+    ]
+  },
+  "compat-check.txt": {
+    "exit": 0,
+    "results": [
+      "test result: ok. 536 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.14s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.01s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.02s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.00s"
+    ]
+  },
+  "daemon-full-02.txt": {
+    "exit": 101,
+    "results": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 1.48s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.89s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 1.06s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.47s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.75s",
+      "test result: FAILED. 978 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 75.29s"
+    ]
+  },
+  "daemon-integration.txt": {
+    "exit": 101,
+    "results": [
+      "test result: FAILED. 1 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 7.93s",
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.41s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.74s",
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.03s",
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.32s",
+      "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.80s",
+      "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.75s",
+      "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.76s",
+      "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.36s"
+    ]
+  },
+  "daemon-solo.txt": {
+    "exit": 0,
+    "results": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.69s"
+    ]
+  },
+  "packages-full.txt": {
+    "exit": 101,
+    "results": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 105 filtered out; finished in 0.00s",
+      "test result: ok. 106 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.75s",
+      "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.91s",
+      "test result: FAILED. 130 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 257.95s"
+    ]
+  },
+  "packages-mux-terminal-tui-protocol.txt": {
+    "exit": 0,
+    "results": [
+      "test result: ok. 536 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.13s",
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+      "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.38s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+      "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+      "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s",
+      "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+      "test result: ok. 60 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s",
+      "test result: ok. 229 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s",
+      "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 286 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.41s",
+      "test result: ok. 207 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    ]
+  },
+  "packages-rebased.txt": {
+    "exit": 101,
+    "results": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 105 filtered out; finished in 0.00s",
+      "test result: ok. 106 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.84s",
+      "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.96s",
+      "test result: FAILED. 129 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 410.37s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 1.54s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.94s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.82s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.66s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 1.09s",
+      "test result: ok. 979 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 509.04s",
+      "test result: FAILED. 1 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 12.54s",
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.80s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.64s",
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.24s",
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.13s",
+      "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.05s",
+      "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.38s",
+      "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.29s",
+      "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.60s",
+      "test result: ok. 536 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.07s",
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s",
+      "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.96s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s",
+      "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+      "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s",
+      "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s",
+      "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s",
+      "test result: ok. 60 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s",
+      "test result: ok. 286 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.91s",
+      "test result: ok. 208 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.60s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    ]
+  },
+  "packages-rest.txt": {
+    "exit": 101,
+    "results": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 2.14s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 1.03s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.69s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.29s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 1.09s",
+      "test result: FAILED. 976 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 104.94s"
+    ]
+  },
+  "solo-control_background_callbacks_cancel_after_disconnect.txt": {
+    "exit": 0,
+    "results": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 1.32s"
+    ]
+  },
+  "solo-positive_delay_shell_job_retains_destroyed_target_and_keeps_missing_target_sessionless.txt": {
+    "exit": 0,
+    "results": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 1.13s"
+    ]
+  },
+  "solo-switch_client_key_table_and_formats_are_client_local.txt": {
+    "exit": 0,
+    "results": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.88s"
+    ]
+  },
+  "terminal-final.txt": {
+    "exit": 0,
+    "results": [
+      "test result: ok. 286 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.45s"
+    ]
+  },
+  "terminal-focused-03.txt": {
+    "exit": null,
+    "results": [
+      "test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 272 filtered out; finished in 0.01s"
+    ]
+  },
+  "terminal-full.txt": {
+    "exit": null,
+    "results": [
+      "test result: ok. 286 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.31s"
+    ]
+  },
+  "tui-low-indexed.txt": {
+    "exit": 0,
+    "results": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 207 filtered out; finished in 0.00s"
+    ]
+  }
+}

@@ -1,0 +1,2719 @@
+{
+  "base": "f9c52359e3da88cbde735076b38e22cdf3e003c6",
+  "source": "bb693da5c5654dbf97129857b36e6e63e0b18cbc",
+  "binary_source": "ddbd4bed52f597afed92afba4d05de9e8c854ae7",
+  "selected": 205,
+  "completed": 205,
+  "matched": 197,
+  "failed": 8,
+  "unrun": [],
+  "batches": [
+    {
+      "batch": 1,
+      "rows": 68,
+      "exit": 1,
+      "matched": 63,
+      "artifact": "delta-batch-1-run.txt"
+    },
+    {
+      "batch": 2,
+      "rows": 68,
+      "exit": 0,
+      "matched": 68,
+      "artifact": "delta-batch-2-run.txt"
+    },
+    {
+      "batch": 3,
+      "rows": 69,
+      "exit": 1,
+      "matched": 66,
+      "artifact": "delta-batch-3-run.txt"
+    }
+  ],
+  "first_failures": [
+    "lane2-store",
+    "smoke/cli-chain-parse-abort",
+    "smoke/display-popup-resize-lifecycle",
+    "smoke/jobs-command-environment",
+    "smoke/plugin-runtime-resurrect-restore",
+    "smoke/source-replay-diagnostics",
+    "show-options-hooks",
+    "smoke/chooser-buffer-confirm-flag",
+    "smoke/command-prompt-chain",
+    "smoke/default-client-command",
+    "smoke/status-background-jobs"
+  ],
+  "passed_on_retry": [
+    "smoke/display-popup-resize-lifecycle",
+    "smoke/chooser-buffer-confirm-flag",
+    "smoke/command-prompt-chain"
+  ],
+  "rows": [
+    {
+      "scenario": "alerts.txt",
+      "steps": 62,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/alerts.txt"
+    },
+    {
+      "scenario": "aliases-multi-body.txt",
+      "steps": 8,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/aliases-multi-body.txt"
+    },
+    {
+      "scenario": "behavior-options.txt",
+      "steps": 12,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/behavior-options.txt"
+    },
+    {
+      "scenario": "break-pane.txt",
+      "steps": 30,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/break-pane.txt"
+    },
+    {
+      "scenario": "buffer-client-file-load.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/buffer-client-file-load.txt"
+    },
+    {
+      "scenario": "buffer-client-file-save.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/buffer-client-file-save.txt"
+    },
+    {
+      "scenario": "capture-pane.txt",
+      "steps": 34,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/capture-pane.txt"
+    },
+    {
+      "scenario": "census-formats.txt",
+      "steps": 40,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/census-formats.txt"
+    },
+    {
+      "scenario": "census-hooks.txt",
+      "steps": 152,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/census-hooks.txt",
+      "evidence_redaction": "Inherited credential values redacted after comparison; see evidence-redactions.json."
+    },
+    {
+      "scenario": "command-alias.txt",
+      "steps": 16,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/command-alias.txt"
+    },
+    {
+      "scenario": "command-item-format.txt",
+      "steps": 125,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/command-item-format.txt"
+    },
+    {
+      "scenario": "copy-mode-bindings.txt",
+      "steps": 20,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/copy-mode-bindings.txt"
+    },
+    {
+      "scenario": "display-message.txt",
+      "steps": 27,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/display-message.txt"
+    },
+    {
+      "scenario": "exec-family.txt",
+      "steps": 30,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/exec-family.txt"
+    },
+    {
+      "scenario": "format-environment-fallback.txt",
+      "steps": 27,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/format-environment-fallback.txt"
+    },
+    {
+      "scenario": "format-modifier-option-loop.txt",
+      "steps": 17,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/format-modifier-option-loop.txt"
+    },
+    {
+      "scenario": "format-option-loop-context.txt",
+      "steps": 14,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/format-option-loop-context.txt"
+    },
+    {
+      "scenario": "format-window-cell-metrics.txt",
+      "steps": 8,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/format-window-cell-metrics.txt"
+    },
+    {
+      "scenario": "format-window-neighbour-user-options.txt",
+      "steps": 26,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/format-window-neighbour-user-options.txt"
+    },
+    {
+      "scenario": "formats-values.txt",
+      "steps": 45,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/formats-values.txt"
+    },
+    {
+      "scenario": "hooks-pane-clipboard.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/hooks-pane-clipboard.txt"
+    },
+    {
+      "scenario": "jobs-environment.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/jobs-environment.txt"
+    },
+    {
+      "scenario": "jobs-run-shell-order.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/jobs-run-shell-order.txt"
+    },
+    {
+      "scenario": "lane2-store.txt",
+      "steps": 193,
+      "match": false,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 2,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/lane2-store.txt"
+    },
+    {
+      "scenario": "list-keys-padding.txt",
+      "steps": 46,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/list-keys-padding.txt"
+    },
+    {
+      "scenario": "list-sort-filter.txt",
+      "steps": 12,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/list-sort-filter.txt"
+    },
+    {
+      "scenario": "manual-window-size-transition.txt",
+      "steps": 24,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/manual-window-size-transition.txt"
+    },
+    {
+      "scenario": "micro-flags.txt",
+      "steps": 17,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/micro-flags.txt"
+    },
+    {
+      "scenario": "move-swap.txt",
+      "steps": 12,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/move-swap.txt"
+    },
+    {
+      "scenario": "mru-activity.txt",
+      "steps": 11,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/mru-activity.txt"
+    },
+    {
+      "scenario": "native-prefix-isolation.txt",
+      "steps": 29,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/native-prefix-isolation.txt"
+    },
+    {
+      "scenario": "new-session-cwd.txt",
+      "steps": 10,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/new-session-cwd.txt"
+    },
+    {
+      "scenario": "new-session-environment.txt",
+      "steps": 18,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/new-session-environment.txt"
+    },
+    {
+      "scenario": "option-name-formats.txt",
+      "steps": 60,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/option-name-formats.txt"
+    },
+    {
+      "scenario": "options-readback.txt",
+      "steps": 15,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/options-readback.txt"
+    },
+    {
+      "scenario": "pane-border-span-owner.txt",
+      "steps": 10,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/pane-border-span-owner.txt"
+    },
+    {
+      "scenario": "pane-dead-time.txt",
+      "steps": 6,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/pane-dead-time.txt"
+    },
+    {
+      "scenario": "pane-exact-target-prefix.txt",
+      "steps": 31,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/pane-exact-target-prefix.txt"
+    },
+    {
+      "scenario": "pane-selection-input-style.txt",
+      "steps": 40,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/pane-selection-input-style.txt"
+    },
+    {
+      "scenario": "pane-selection-marked.txt",
+      "steps": 73,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/pane-selection-marked.txt"
+    },
+    {
+      "scenario": "pane-spawn-options.txt",
+      "steps": 25,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/pane-spawn-options.txt"
+    },
+    {
+      "scenario": "pane-spawn-retain.txt",
+      "steps": 27,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/pane-spawn-retain.txt"
+    },
+    {
+      "scenario": "pane-target-grammar.txt",
+      "steps": 70,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/pane-target-grammar.txt"
+    },
+    {
+      "scenario": "resize-window.txt",
+      "steps": 16,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/resize-window.txt"
+    },
+    {
+      "scenario": "send-keys-reset.txt",
+      "steps": 16,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/send-keys-reset.txt"
+    },
+    {
+      "scenario": "session-activity.txt",
+      "steps": 5,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/session-activity.txt"
+    },
+    {
+      "scenario": "sessions.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/sessions.txt"
+    },
+    {
+      "scenario": "show-options-hooks.txt",
+      "steps": 34,
+      "match": false,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 7,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/show-options-hooks.txt"
+    },
+    {
+      "scenario": "smoke/alias-group-forgery.txt",
+      "steps": 7,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/alias-group-forgery.txt"
+    },
+    {
+      "scenario": "smoke/args-parse-bind-key.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/args-parse-bind-key.txt"
+    },
+    {
+      "scenario": "smoke/args-parse-choosers.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/args-parse-choosers.txt"
+    },
+    {
+      "scenario": "smoke/args-parse-command-prompt.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/args-parse-command-prompt.txt"
+    },
+    {
+      "scenario": "smoke/args-parse-confirm-before.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/args-parse-confirm-before.txt"
+    },
+    {
+      "scenario": "smoke/args-parse-display-menu.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/args-parse-display-menu.txt"
+    },
+    {
+      "scenario": "smoke/args-parse-display-panes.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/args-parse-display-panes.txt"
+    },
+    {
+      "scenario": "smoke/args-parse-if-shell.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/args-parse-if-shell.txt"
+    },
+    {
+      "scenario": "smoke/args-parse-run-shell.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/args-parse-run-shell.txt"
+    },
+    {
+      "scenario": "smoke/args-parse-set-hook.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/args-parse-set-hook.txt"
+    },
+    {
+      "scenario": "smoke/args-parse-set-option.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/args-parse-set-option.txt"
+    },
+    {
+      "scenario": "smoke/buffer-clipboard-write.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/buffer-clipboard-write.txt"
+    },
+    {
+      "scenario": "smoke/buffer-standard-streams.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/buffer-standard-streams.txt"
+    },
+    {
+      "scenario": "smoke/cheap-flags.txt",
+      "steps": 22,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/cheap-flags.txt"
+    },
+    {
+      "scenario": "smoke/chooser-buffer-confirm-flag.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/chooser-buffer-confirm-flag.txt"
+    },
+    {
+      "scenario": "smoke/chooser-buffer-vocabulary.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/chooser-buffer-vocabulary.txt"
+    },
+    {
+      "scenario": "smoke/chooser-kill-keys.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/chooser-kill-keys.txt"
+    },
+    {
+      "scenario": "smoke/chooser-kill-on-exit.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/chooser-kill-on-exit.txt"
+    },
+    {
+      "scenario": "smoke/chooser-row-flags.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/chooser-row-flags.txt"
+    },
+    {
+      "scenario": "smoke/chooser-tree-vocabulary.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/chooser-tree-vocabulary.txt"
+    },
+    {
+      "scenario": "smoke/clear-history-hyperlinks.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/clear-history-hyperlinks.txt"
+    },
+    {
+      "scenario": "smoke/cli-chain-parse-abort.txt",
+      "steps": 3,
+      "match": false,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 1,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/cli-chain-parse-abort.txt"
+    },
+    {
+      "scenario": "smoke/cli-output-bytes.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/cli-output-bytes.txt"
+    },
+    {
+      "scenario": "smoke/client-exit-actions.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/client-exit-actions.txt"
+    },
+    {
+      "scenario": "smoke/client-non-utf8-cwd.txt",
+      "steps": 4,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/client-non-utf8-cwd.txt"
+    },
+    {
+      "scenario": "smoke/client-resized-context.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/client-resized-context.txt"
+    },
+    {
+      "scenario": "smoke/client-utf8-sanitizer.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/client-utf8-sanitizer.txt"
+    },
+    {
+      "scenario": "smoke/command-flag-errors.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/command-flag-errors.txt"
+    },
+    {
+      "scenario": "smoke/command-prompt-chain.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/command-prompt-chain.txt"
+    },
+    {
+      "scenario": "smoke/command-prompt-editing.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/command-prompt-editing.txt"
+    },
+    {
+      "scenario": "smoke/command-prompt-target.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/command-prompt-target.txt"
+    },
+    {
+      "scenario": "smoke/config-alias-parse-unit.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/config-alias-parse-unit.txt"
+    },
+    {
+      "scenario": "smoke/config-chain-parse-abort.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/config-chain-parse-abort.txt"
+    },
+    {
+      "scenario": "smoke/config-discovery-explicit.txt",
+      "steps": 13,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/config-discovery-explicit.txt"
+    },
+    {
+      "scenario": "smoke/config-discovery-launcher.txt",
+      "steps": 12,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/config-discovery-launcher.txt"
+    },
+    {
+      "scenario": "smoke/config-discovery.txt",
+      "steps": 12,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/config-discovery.txt"
+    },
+    {
+      "scenario": "smoke/config-grammar.txt",
+      "steps": 17,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/config-grammar.txt"
+    },
+    {
+      "scenario": "smoke/config-non-utf8-byte-matrix.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/config-non-utf8-byte-matrix.txt"
+    },
+    {
+      "scenario": "smoke/config-non-utf8-file-bytes.txt",
+      "steps": 8,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/config-non-utf8-file-bytes.txt"
+    },
+    {
+      "scenario": "smoke/continuum-init.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/continuum-init.txt"
+    },
+    {
+      "scenario": "smoke/control-alias-prepare.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/control-alias-prepare.txt"
+    },
+    {
+      "scenario": "smoke/control-eof-drain.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/control-eof-drain.txt"
+    },
+    {
+      "scenario": "smoke/control-hard-loss.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/control-hard-loss.txt"
+    },
+    {
+      "scenario": "smoke/control-notify.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/control-notify.txt"
+    },
+    {
+      "scenario": "smoke/control-tilde-environment.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/control-tilde-environment.txt"
+    },
+    {
+      "scenario": "smoke/copy-mode-command-errors.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/copy-mode-command-errors.txt"
+    },
+    {
+      "scenario": "smoke/copy-mode-copy-line.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/copy-mode-copy-line.txt"
+    },
+    {
+      "scenario": "smoke/copy-mode-formats.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/copy-mode-formats.txt"
+    },
+    {
+      "scenario": "smoke/copy-mode-kill-on-exit.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/copy-mode-kill-on-exit.txt"
+    },
+    {
+      "scenario": "smoke/copy-mode-mode-keys-tail.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/copy-mode-mode-keys-tail.txt"
+    },
+    {
+      "scenario": "smoke/copy-mode-mode-keys.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/copy-mode-mode-keys.txt"
+    },
+    {
+      "scenario": "smoke/copy-mode-prompt-bindings.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/copy-mode-prompt-bindings.txt"
+    },
+    {
+      "scenario": "smoke/copy-mode-refresh.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/copy-mode-refresh.txt"
+    },
+    {
+      "scenario": "smoke/copy-mode-search.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/copy-mode-search.txt"
+    },
+    {
+      "scenario": "smoke/copy-mode-source-pane.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/copy-mode-source-pane.txt"
+    },
+    {
+      "scenario": "smoke/copy-selection-clipboard-bytes.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/copy-selection-clipboard-bytes.txt"
+    },
+    {
+      "scenario": "smoke/daemon-invalid-flags.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/daemon-invalid-flags.txt"
+    },
+    {
+      "scenario": "smoke/default-client-command.txt",
+      "steps": 3,
+      "match": false,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 1,
+        "WARN": 2
+      },
+      "transcript": "delta-rebased-transcripts/smoke/default-client-command.txt"
+    },
+    {
+      "scenario": "smoke/display-menu-action-queue.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/display-menu-action-queue.txt"
+    },
+    {
+      "scenario": "smoke/display-menu-cell-layout.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/display-menu-cell-layout.txt"
+    },
+    {
+      "scenario": "smoke/display-menu-mouse.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/display-menu-mouse.txt"
+    },
+    {
+      "scenario": "smoke/display-menu-paste.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/display-menu-paste.txt"
+    },
+    {
+      "scenario": "smoke/display-menu-resize-lifecycle.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/display-menu-resize-lifecycle.txt"
+    },
+    {
+      "scenario": "smoke/display-menu-shortcut-grammar.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/display-menu-shortcut-grammar.txt"
+    },
+    {
+      "scenario": "smoke/display-menu-style-refresh.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/display-menu-style-refresh.txt"
+    },
+    {
+      "scenario": "smoke/display-message-client-aliases.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/display-message-client-aliases.txt"
+    },
+    {
+      "scenario": "smoke/display-panes-template.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/display-panes-template.txt"
+    },
+    {
+      "scenario": "smoke/display-popup-drag.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/display-popup-drag.txt"
+    },
+    {
+      "scenario": "smoke/display-popup-kitty-noresize.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/display-popup-kitty-noresize.txt"
+    },
+    {
+      "scenario": "smoke/display-popup-kitty.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/display-popup-kitty.txt"
+    },
+    {
+      "scenario": "smoke/display-popup-menu-policy.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/display-popup-menu-policy.txt"
+    },
+    {
+      "scenario": "smoke/display-popup-menu.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/display-popup-menu.txt"
+    },
+    {
+      "scenario": "smoke/display-popup-resize-lifecycle.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/display-popup-resize-lifecycle.txt"
+    },
+    {
+      "scenario": "smoke/display-popup-style-refresh.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/display-popup-style-refresh.txt"
+    },
+    {
+      "scenario": "smoke/display-popup-to-pane.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/display-popup-to-pane.txt"
+    },
+    {
+      "scenario": "smoke/environment-bytes.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/environment-bytes.txt"
+    },
+    {
+      "scenario": "smoke/fixture-conf.txt",
+      "steps": 5,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/fixture-conf.txt"
+    },
+    {
+      "scenario": "smoke/focus-follows-mouse.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/focus-follows-mouse.txt"
+    },
+    {
+      "scenario": "smoke/format-client-loop-context.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/format-client-loop-context.txt"
+    },
+    {
+      "scenario": "smoke/format-environment-loop-context.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/format-environment-loop-context.txt"
+    },
+    {
+      "scenario": "smoke/format-listing.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/format-listing.txt"
+    },
+    {
+      "scenario": "smoke/format-modifier-client-loop.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/format-modifier-client-loop.txt"
+    },
+    {
+      "scenario": "smoke/format-modifier-environment-loop.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/format-modifier-environment-loop.txt"
+    },
+    {
+      "scenario": "smoke/format-modifier-interrogate.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/format-modifier-interrogate.txt"
+    },
+    {
+      "scenario": "smoke/format-monitor-hooks.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/format-monitor-hooks.txt"
+    },
+    {
+      "scenario": "smoke/format-pane-process.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/format-pane-process.txt"
+    },
+    {
+      "scenario": "smoke/format-pane-progress.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/format-pane-progress.txt"
+    },
+    {
+      "scenario": "smoke/format-trace.txt",
+      "steps": 29,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/format-trace.txt"
+    },
+    {
+      "scenario": "smoke/format-window-bigger.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/format-window-bigger.txt"
+    },
+    {
+      "scenario": "smoke/fpp-init.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/fpp-init.txt"
+    },
+    {
+      "scenario": "smoke/hooks-pane-focus-clients.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/hooks-pane-focus-clients.txt"
+    },
+    {
+      "scenario": "smoke/hooks-pane-focus.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/hooks-pane-focus.txt"
+    },
+    {
+      "scenario": "smoke/jobs-command-environment.txt",
+      "steps": 3,
+      "match": false,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 1,
+        "WARN": 2
+      },
+      "transcript": "delta-rebased-transcripts/smoke/jobs-command-environment.txt"
+    },
+    {
+      "scenario": "smoke/jobs-display-popup-environment.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/jobs-display-popup-environment.txt"
+    },
+    {
+      "scenario": "smoke/jobs-shell-job-cwd.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/jobs-shell-job-cwd.txt"
+    },
+    {
+      "scenario": "smoke/keys-prefix-attached.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/keys-prefix-attached.txt"
+    },
+    {
+      "scenario": "smoke/keys-prefix-remainder.txt",
+      "steps": 6,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/keys-prefix-remainder.txt"
+    },
+    {
+      "scenario": "smoke/keys-prefix-stock.txt",
+      "steps": 40,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/keys-prefix-stock.txt"
+    },
+    {
+      "scenario": "smoke/keys-shift-attached.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/keys-shift-attached.txt"
+    },
+    {
+      "scenario": "smoke/keys-table-lifecycle.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/keys-table-lifecycle.txt"
+    },
+    {
+      "scenario": "smoke/kill-filters.txt",
+      "steps": 17,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/kill-filters.txt"
+    },
+    {
+      "scenario": "smoke/launcher-installed-layout.txt",
+      "steps": 7,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/launcher-installed-layout.txt"
+    },
+    {
+      "scenario": "smoke/oh-my-tmux.txt",
+      "steps": 15,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/oh-my-tmux.txt"
+    },
+    {
+      "scenario": "smoke/own-conf.txt",
+      "steps": 6,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/own-conf.txt"
+    },
+    {
+      "scenario": "smoke/pane-border-indicators.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/pane-border-indicators.txt"
+    },
+    {
+      "scenario": "smoke/pane-border-lines.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/pane-border-lines.txt"
+    },
+    {
+      "scenario": "smoke/pane-border-status.txt",
+      "steps": 34,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/pane-border-status.txt"
+    },
+    {
+      "scenario": "smoke/pane-border-zorder.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/pane-border-zorder.txt"
+    },
+    {
+      "scenario": "smoke/pane-colours-palette.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/pane-colours-palette.txt"
+    },
+    {
+      "scenario": "smoke/pane-engine-knobs-input.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/pane-engine-knobs-input.txt"
+    },
+    {
+      "scenario": "smoke/pane-engine-knobs.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/pane-engine-knobs.txt"
+    },
+    {
+      "scenario": "smoke/pane-runtime-facts.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/pane-runtime-facts.txt"
+    },
+    {
+      "scenario": "smoke/pane-tmux-path.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/pane-tmux-path.txt"
+    },
+    {
+      "scenario": "smoke/plugin-runtime-continuum.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/plugin-runtime-continuum.txt"
+    },
+    {
+      "scenario": "smoke/plugin-runtime-fpp.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/plugin-runtime-fpp.txt"
+    },
+    {
+      "scenario": "smoke/plugin-runtime-oh-my-tmux.txt",
+      "steps": 4,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/plugin-runtime-oh-my-tmux.txt"
+    },
+    {
+      "scenario": "smoke/plugin-runtime-resurrect-restore.txt",
+      "steps": 2,
+      "match": false,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 1,
+        "WARN": 1
+      },
+      "transcript": "delta-rebased-transcripts/smoke/plugin-runtime-resurrect-restore.txt"
+    },
+    {
+      "scenario": "smoke/plugin-runtime-tpm-install.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/plugin-runtime-tpm-install.txt"
+    },
+    {
+      "scenario": "smoke/plugin-runtime-vim-tmux-navigator.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/plugin-runtime-vim-tmux-navigator.txt"
+    },
+    {
+      "scenario": "smoke/plugin-runtime-yank.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/plugin-runtime-yank.txt"
+    },
+    {
+      "scenario": "smoke/positional-maximums.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/positional-maximums.txt"
+    },
+    {
+      "scenario": "smoke/positional-minimums.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/positional-minimums.txt"
+    },
+    {
+      "scenario": "smoke/refresh-status.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/refresh-status.txt"
+    },
+    {
+      "scenario": "smoke/remain-on-exit-format.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/remain-on-exit-format.txt"
+    },
+    {
+      "scenario": "smoke/resurrect-init.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/resurrect-init.txt"
+    },
+    {
+      "scenario": "smoke/resurrect-save.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/resurrect-save.txt"
+    },
+    {
+      "scenario": "smoke/send-keys-client-selection.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/send-keys-client-selection.txt"
+    },
+    {
+      "scenario": "smoke/send-keys-control.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/send-keys-control.txt"
+    },
+    {
+      "scenario": "smoke/send-keys-inject.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/send-keys-inject.txt"
+    },
+    {
+      "scenario": "smoke/sensible.txt",
+      "steps": 6,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/sensible.txt"
+    },
+    {
+      "scenario": "smoke/source-file-byte-name.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/source-file-byte-name.txt"
+    },
+    {
+      "scenario": "smoke/source-file-control.txt",
+      "steps": 12,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/source-file-control.txt"
+    },
+    {
+      "scenario": "smoke/source-file-depth.txt",
+      "steps": 4,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/source-file-depth.txt"
+    },
+    {
+      "scenario": "smoke/source-file-diagnostics.txt",
+      "steps": 12,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/source-file-diagnostics.txt"
+    },
+    {
+      "scenario": "smoke/source-file-tilde.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/source-file-tilde.txt"
+    },
+    {
+      "scenario": "smoke/source-replay-diagnostics.txt",
+      "steps": 60,
+      "match": false,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 1,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/source-replay-diagnostics.txt"
+    },
+    {
+      "scenario": "smoke/split-window-wait.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/split-window-wait.txt"
+    },
+    {
+      "scenario": "smoke/status-background-jobs.txt",
+      "steps": 2,
+      "match": false,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 1,
+        "WARN": 1
+      },
+      "transcript": "delta-rebased-transcripts/smoke/status-background-jobs.txt"
+    },
+    {
+      "scenario": "smoke/status-keys-editor-default.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/status-keys-editor-default.txt"
+    },
+    {
+      "scenario": "smoke/terminal-facts.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/terminal-facts.txt"
+    },
+    {
+      "scenario": "smoke/tpm-init.txt",
+      "steps": 5,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/tpm-init.txt"
+    },
+    {
+      "scenario": "smoke/tui-client-input-backpressure.txt",
+      "steps": 2,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/tui-client-input-backpressure.txt"
+    },
+    {
+      "scenario": "smoke/vim-tmux-navigator.txt",
+      "steps": 8,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/vim-tmux-navigator.txt"
+    },
+    {
+      "scenario": "smoke/yank.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/smoke/yank.txt"
+    },
+    {
+      "scenario": "source-file-current-file.txt",
+      "steps": 24,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/source-file-current-file.txt"
+    },
+    {
+      "scenario": "source-file-format.txt",
+      "steps": 40,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/source-file-format.txt"
+    },
+    {
+      "scenario": "source-file-output.txt",
+      "steps": 12,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/source-file-output.txt"
+    },
+    {
+      "scenario": "source-hook-cwd-event.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/source-hook-cwd-event.txt"
+    },
+    {
+      "scenario": "source-hook-cwd-sourced.txt",
+      "steps": 3,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/source-hook-cwd-sourced.txt"
+    },
+    {
+      "scenario": "split-window-zoom-hidden-width.txt",
+      "steps": 21,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/split-window-zoom-hidden-width.txt"
+    },
+    {
+      "scenario": "split-window-zoom.txt",
+      "steps": 11,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/split-window-zoom.txt"
+    },
+    {
+      "scenario": "stderr-parity.txt",
+      "steps": 14,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/stderr-parity.txt"
+    },
+    {
+      "scenario": "strict-key-validation.txt",
+      "steps": 40,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/strict-key-validation.txt"
+    },
+    {
+      "scenario": "switch-client.txt",
+      "steps": 6,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/switch-client.txt"
+    },
+    {
+      "scenario": "targets.txt",
+      "steps": 20,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/targets.txt"
+    },
+    {
+      "scenario": "update-environment.txt",
+      "steps": 6,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/update-environment.txt"
+    },
+    {
+      "scenario": "windows.txt",
+      "steps": 9,
+      "match": true,
+      "divergences": {
+        "TOPO": 0,
+        "GEO": 0,
+        "FMT": 0,
+        "OUT": 0,
+        "WARN": 0
+      },
+      "transcript": "delta-rebased-transcripts/windows.txt"
+    }
+  ]
+}

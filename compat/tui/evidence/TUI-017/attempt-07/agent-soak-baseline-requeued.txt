@@ -1,0 +1,5 @@
+
+EXIT=143
+STOP_REASON=Cancelled this lane second childless wait on the same occupied Cargo slot and requeued through the capped wrapper; no baseline test had started.
+
+EXIT=143

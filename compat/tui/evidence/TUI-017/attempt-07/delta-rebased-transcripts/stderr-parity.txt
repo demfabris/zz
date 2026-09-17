@@ -1,0 +1,199 @@
+# Scenario: stderr-parity
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/stderr-parity.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: err: list-sessions -t nosuchsession
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    command list-sessions: unknown flag -t
+tmux stderr:
+    command list-sessions: unknown flag -t
+ERR: clean
+ERR STDOUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: err: list-panes -t nosuchwindow
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    can't find window: nosuchwindow
+tmux stderr:
+    can't find window: nosuchwindow
+ERR: clean
+ERR STDOUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: err: select-window -t w:99
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    can't find window: 99
+tmux stderr:
+    can't find window: 99
+ERR: clean
+ERR STDOUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: err: kill-pane -t w:0.99
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    can't find pane: 99
+tmux stderr:
+    can't find pane: 99
+ERR: clean
+ERR STDOUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: err: set-option -g nosuch-option value
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    invalid option: nosuch-option
+tmux stderr:
+    invalid option: nosuch-option
+ERR: clean
+ERR STDOUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: err: show-options -gv nosuch-option
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    invalid option: nosuch-option
+tmux stderr:
+    invalid option: nosuch-option
+ERR: clean
+ERR STDOUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: err: set-window-option -t w:0 nosuch-window-option value
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    invalid option: nosuch-window-option
+tmux stderr:
+    invalid option: nosuch-window-option
+ERR: clean
+ERR STDOUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: err: unbind-key -T nosuchtable C-z
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    table nosuchtable doesn't exist
+tmux stderr:
+    table nosuchtable doesn't exist
+ERR: clean
+ERR STDOUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: err: source-file /nonexistent-census-path
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    No such file or directory: /nonexistent-census-path
+tmux stderr:
+    No such file or directory: /nonexistent-census-path
+ERR: clean
+ERR STDOUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: err: display-message -p -t nosuchpane #{pane_id}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    
+tmux stdout:
+    
+ERR: clean
+ERR STDOUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: err: swap-pane -s w:0.0 -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+ERR: clean
+ERR STDOUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: err: rename-window
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    command rename-window: too few arguments (need at least 1)
+tmux stderr:
+    command rename-window: too few arguments (need at least 1)
+ERR: clean
+ERR STDOUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: err: display-message -p census-ok
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    census-ok
+tmux stdout:
+    census-ok
+ERR: clean
+ERR STDOUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: err: show-options -gv status-interval
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    15
+tmux stdout:
+    15
+ERR: clean
+ERR STDOUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=14 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

@@ -1,0 +1,22 @@
+{
+  "machine": "alienware",
+  "platform": "Linux-7.2.3-1-cachyos-deckify-x86_64-with-glibc2.44",
+  "architecture": "x86_64",
+  "date": "2026-09-17",
+  "lane": "capture-residuals",
+  "base": "f9c52359e3da88cbde735076b38e22cdf3e003c6",
+  "initial_source": "c8887b3bcd582f02badf57a7787886ab587256f0",
+  "rebased_source": "ddbd4bed52f597afed92afba4d05de9e8c854ae7",
+  "tmux_commit": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
+  "build": "debug zz-cli headless binary; immutable copies; /tmp/zz-cargo.sh caps 4G and two jobs through two shared flock slots",
+  "daemon_test_environment": {
+    "HOME": "/tmp/zz-emptyhome",
+    "XDG_CONFIG_HOME": "/tmp/zz-emptyhome/config",
+    "CARGO_HOME": "/home/demfabris/.cargo",
+    "RUSTUP_HOME": "/home/demfabris/.rustup"
+  },
+  "runtime": "repository fixtures create isolated homes and sockets under /tmp; machine shared with other campaign lanes",
+  "wire": "No new payload/version change in residuals lane. Version 104 inherited; 103 shipped in v0.10.0.",
+  "fixture_source": "bb693da5c5654dbf97129857b36e6e63e0b18cbc",
+  "baseline_source": "327eb1af (capture-12 carried onto the same origin/main; no residual fixes)"
+}

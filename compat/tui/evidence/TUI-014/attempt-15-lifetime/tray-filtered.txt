@@ -1,0 +1,28 @@
+   Compiling rusty-fork v0.3.1
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-mux)
+   Compiling proptest v1.10.0 (https://github.com/proptest-rs/proptest?rev=3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b#3dca198a)
+   Compiling gpui v0.2.2 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling cef-dll-sys v152.2.0+152.0.6
+   Compiling merman-core v0.6.2
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-daemon)
+   Compiling merman-render v0.6.2
+   Compiling cef v152.2.0+152.0.6
+   Compiling gpui_wgpu v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling zz-browser v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-browser)
+   Compiling gpui_linux v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling merman v0.6.2
+   Compiling zz-config v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-config)
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-tui)
+   Compiling zz-ui v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-ui)
+   Compiling zz-cli v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-cli)
+   Compiling zz-chrome-import v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-chrome-import)
+   Compiling gpui_platform v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling zz v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5m 48s
+     Running unittests src/lib.rs (target/debug/deps/zz-9f4d9f6d3c097786)
+
+running 1 test
+test tray::facts::tests::snapshot_facts_include_sessions_and_only_agents_needing_input ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 559 filtered out; finished in 0.00s
+

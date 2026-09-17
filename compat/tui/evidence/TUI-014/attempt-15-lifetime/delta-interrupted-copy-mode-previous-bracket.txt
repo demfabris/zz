@@ -1,0 +1,293 @@
+# Scenario: copy-mode-previous-bracket
+# Source: /home/demfabris/dev/zz-c11-modes-final/compat/scenarios/copy-mode-previous-bracket.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: send-keys -t =w:0.0 -X previous-matching-bracket
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: send-keys -t =w:0.0 -X next-matching-bracket
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: send-keys -t =w:0.0 -N 3 -X previous-matching-bracket
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: send-keys -t =w:0.0 -X jump-again
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: send-keys -t =w:0.0 -X jump-reverse
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: send-keys -t =w:0.0 -X jump-forward x
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: send-keys -t =w:0.0 -X jump-backward x
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: send-keys -t =w:0.0 -X jump-to-forward x
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: send-keys -t =w:0.0 -X jump-to-backward x
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: send-keys -t =w:0.0 -X jump-to-mark
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: send-keys -t =w:0.0 -X set-mark
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: send-keys -t =w:0.0 -X next-prompt
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: send-keys -t =w:0.0 -X next-prompt -o
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: send-keys -t =w:0.0 -X previous-prompt
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: send-keys -t =w:0.0 -X previous-prompt -o
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: send-keys -t =w:0.0 -X page-up
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: send-keys -t =w:0.0 -X halfpage-up
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: send-keys -t =w:0.0 -X cancel
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    not in a mode
+tmux stderr:
+    not in a mode
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: bind-key -T copy-mode-vi B send-keys -X previous-matching-bracket
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: out: list-keys -T copy-mode-vi -1 B
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode-vi B send-keys -X previous-matching-bracket
+tmux stdout:
+    bind-key  -T copy-mode-vi B send-keys -X previous-matching-bracket
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: bind-key -T copy-mode B send-keys -X previous-matching-bracket
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: list-keys -T copy-mode -1 B
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode B send-keys -X previous-matching-bracket
+tmux stdout:
+    bind-key  -T copy-mode B send-keys -X previous-matching-bracket
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: out: list-keys -T copy-mode-vi -1 %
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode-vi \% send-keys -X next-matching-bracket
+tmux stdout:
+    bind-key  -T copy-mode-vi \% send-keys -X next-matching-bracket
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=23 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

@@ -1,0 +1,3 @@
+command: bash /home/demfabris/dev/zz-c11-modes-final/compat/tui-choosers.sh
+ZZ_BIN=target/debug/zz-modes-lifetime
+exit: 0

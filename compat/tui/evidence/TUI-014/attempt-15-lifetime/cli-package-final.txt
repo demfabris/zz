@@ -1,0 +1,319 @@
+   Compiling zz-cli v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.95s
+     Running unittests src/lib.rs (target/debug/deps/zz_cli-f965dc967ecbbed2)
+
+running 107 tests
+test control_mode::tests::a_command_block_carries_the_output_bytes_it_was_given ... ok
+test control_mode::tests::authoritative_caller_detach_discards_return_observed_while_it_waits ... ok
+test control_mode::tests::blank_and_eof_discard_queued_and_future_pane_output_only ... ok
+test control_mode::tests::blank_and_eof_suppress_layout_notifications_while_live_clients_keep_them ... ok
+test control_mode::tests::clean_control_exit_releases_only_the_initiating_alias ... ok
+test control_mode::tests::config_errors_route_on_their_payload_type_and_not_on_their_prose ... ok
+test control_mode::tests::control_command_guard_status_is_independent_of_its_terminator ... ok
+test control_mode::tests::control_command_guards_defer_fifo_with_their_own_flags ... ok
+test control_mode::tests::control_command_output_follows_the_guard_raw_and_command_mode_stays_inside ... ok
+test control_mode::tests::control_lines_expand_tildes_from_the_daemon_answer ... ok
+test control_mode::tests::control_lines_expand_variables_from_the_daemon_global_environment ... ok
+test control_mode::tests::control_source_file_events_defer_raw_errors_and_consume_hidden_numbers ... ok
+test control_mode::tests::daemon_source_read_failures_keep_their_own_channel ... ok
+test control_mode::tests::detach_and_server_stop_keep_distinct_exit_signals ... ok
+test control_mode::tests::double_control_wraps_the_stream ... ok
+test control_mode::tests::dropping_a_double_writer_without_exit_still_terminates_the_dcs ... ok
+test control_mode::tests::exit_drain_keeps_wait_exit_acknowledgements ... ok
+test control_mode::tests::expansion_answers_are_matched_by_kind_and_request_id ... ok
+test control_mode::tests::generic_nonzero_success_ends_and_continues ... ok
+test control_mode::tests::initial_eof_waits_behind_every_queued_input ... ok
+test control_mode::tests::input_error_keeps_pane_output_enabled ... ok
+test control_mode::tests::layout_notifications_ignore_windows_only_linked_to_another_session ... ok
+test control_mode::tests::layout_notifications_use_snapshot_dumps_and_raw_flag_order ... ok
+test control_mode::tests::legacy_diagnostic_errors_still_defer_after_open_commands ... ok
+test control_mode::tests::legacy_nested_source_warning_defers_a_plain_error_without_config_error ... ok
+test control_mode::tests::logical_command_holds_server_exit_until_child_events_finish ... ok
+test control_mode::tests::message_escaping_is_separate_from_output_escaping ... ok
+test control_mode::tests::notifications_defer_while_a_block_is_open ... ok
+test control_mode::tests::opaque_commands_render_children_and_only_fallback_before_them ... ok
+test control_mode::tests::open_guard_holds_server_exit_until_deferred_children_finish ... ok
+test control_mode::tests::output_escaping_preserves_del_and_raw_eight_bit_bytes ... ok
+test control_mode::tests::pane_output_state_and_flags_follow_the_control_event_channel ... ok
+test control_mode::tests::parser_distinguishes_return_ignores_chains_and_errors ... ok
+test control_mode::tests::pending_return_waits_for_input_observed_before_it ... ok
+test control_mode::tests::preparation_error_releases_eof_after_the_last_queued_input ... ok
+test control_mode::tests::prepared_response_matching_ignores_stale_request_ids ... ok
+test control_mode::tests::separate_nested_source_warnings_defer_separate_error_frames ... ok
+test control_mode::tests::serializer_keeps_frame_identity_payload_and_error_shapes ... ok
+test control_mode::tests::standalone_diagnostics_only_set_source_read_return_codes ... ok
+test control_mode::tests::startup_config_causes_are_immediate_and_prefix_each_element_once ... ok
+test control_mode::tests::subscription_changes_render_the_three_pin_shapes_byte_exact ... ok
+test control_mode::tests::typed_error_messages_use_standalone_frames_without_text_classification ... ok
+test control_mode::tests::wait_exit_releases_on_empty_line_and_eof ... ok
+test control_mode::tests::window_notifications_use_live_membership_instead_of_the_event_session ... ok
+test diagnostics::tests::classifies_process_roles_after_global_flags ... ok
+test diagnostics::tests::computes_nearest_rank_timing_percentiles ... ok
+test diagnostics::tests::detects_equals_form_of_shared_log_argument ... ok
+test diagnostics::tests::detects_verbose_and_shared_log_arguments ... ok
+test diagnostics::tests::every_spelling_of_the_raw_terminal_client_owns_the_ring_log ... ok
+test diagnostics::tests::formats_frame_rates_and_invalidation_averages ... ok
+test diagnostics::tests::non_utf8_bootstrap_client_cwd_reaches_the_daemon_as_bytes ... ok
+test diagnostics::tests::ring_log_rotates_one_old_generation ... ok
+test diagnostics::tests::the_raw_terminal_client_never_mirrors_its_log_to_the_screen ... ok
+test events::tests::filters_match_exact_target_fields_and_keep_ready_and_gap ... ok
+test events::tests::progress_argument_gate_handles_values_and_payloads ... ok
+test events::tests::progress_caps_and_quotes_titles_and_filters_events ... ok
+test events::tests::progress_formats_tools_states_permissions_and_heartbeat ... ok
+test events::tests::ready_hooks_and_gap_use_connection_sequence_and_copy_variables ... ok
+test fleet::tests::add_arguments_become_an_ssh_endpoint_and_reject_bad_names ... ok
+test fleet::tests::add_list_and_remove_round_trip_through_the_config_file ... 
+running 1 test
+test fleet::tests::add_list_and_remove_round_trip_through_the_config_file ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 106 filtered out; finished in 0.00s
+
+ok
+test fleet::tests::formatted_list_rows_use_literal_host_substitution ... ok
+test fleet::tests::list_rows_align_on_the_name_column ... ok
+test fleet::tests::listing_names_the_lines_the_parser_dropped ... ok
+test tests::a_bare_command_line_is_a_client_unless_launch_services_or_windows_opened_it ... ok
+test tests::a_prompt_would_reach_the_command_dispatcher_if_askpass_mode_did_not_come_first ... ok
+test tests::agent_permission_commands_pass_preflight_and_route_stdin ... ok
+test tests::agent_send_progress_usage_errors_exit_two_before_connecting ... ok
+test tests::agent_send_stdin_routing_uses_the_canonical_static_command ... ok
+test tests::app_is_an_exact_native_gui_verb_even_inside_tmux ... ok
+test tests::app_working_directory_prefers_the_launcher_and_uses_home_for_launch_services ... ok
+test tests::attach_prefix_routing_keeps_exact_native_attach_commands ... ok
+test tests::bare_semicolons_split_commands_and_escaped_semicolons_stay_arguments ... ok
+test tests::cli_exit_contract_preserves_explicit_status_and_classifies_errors ... ok
+test tests::command_chains_continue_after_output_stream_errors ... ok
+test tests::command_chains_continue_past_a_nonzero_exit_and_keep_the_last_status ... ok
+test tests::command_chains_preserve_output_and_abort_on_the_first_error ... ok
+test tests::command_output_empty_results_do_not_claim_stdout ... ok
+test tests::command_output_file_stream_owns_stdout_after_its_first_write ... ok
+test tests::command_output_print_stream_survives_a_later_file_collision ... ok
+test tests::control_flags_count_and_compose_with_tmux_options ... ok
+test tests::daemon_bootstrap_arguments_accept_only_the_ordered_private_grammar ... ok
+test tests::daemon_bootstrap_client_cwd_filter_accepts_only_bounded_absolute_utf8 ... ok
+test tests::daemon_bootstrap_client_cwd_filter_rejects_non_utf8 ... ok
+test tests::daemon_executable_selects_the_installed_cli_and_keeps_a_lone_cli ... ok
+test tests::host_flag_accepts_both_spellings_and_conflicts_with_socket ... ok
+test tests::kill_recovery_accepts_only_transport_and_handshake_failures ... ok
+test tests::kill_server_only_classifies_absent_endpoints_as_missing ... ok
+test tests::native_attach_parser_keeps_the_zz_superset_and_tmux_target ... ok
+test tests::new_session_tui_routing_resolves_prefixes_and_tmux_argv_edges ... ok
+test tests::new_session_tui_routing_scans_the_complete_command_chain ... ok
+test tests::prepared_cli_routing_scans_alias_groups_but_stdin_uses_the_final_command ... ok
+test tests::prepared_cli_routing_uses_canonical_identity_and_alias_match ... ok
+test tests::protocol_version_command_prints_only_the_wire_version ... ok
+test tests::refresh_client_detached_error_has_no_zz_prefix ... ok
+test tests::socket_flag_overrides_the_environment_resolved_path ... ok
+test tests::socket_flag_requires_a_non_empty_path ... ok
+test tests::stdin_payload_boundary_distinguishes_terminators_from_option_values ... ok
+test tests::the_last_zz_or_tmux_socket_selector_wins ... ok
+test tests::the_option_default_keeps_the_launcher_create_or_attach_and_a_set_list_wins ... ok
+test tests::tmux_environment_never_becomes_an_implicit_zz_endpoint ... ok
+test tests::tmux_flags_compose_before_the_command_word ... ok
+test tests::tmux_import_hint_only_when_cli_spawns_without_mux_config ... ok
+test tests::tmux_label_uses_tmpdir_then_the_tmp_fallback ... ok
+test tests::tmux_shell_command_is_exclusive_and_preserves_login_mode ... ok
+test tests::tmux_start_server_policy_matches_the_pin ... ok
+test tests::tmux_version_and_help_are_exact_early_outputs ... ok
+test tests::unsupported_and_unknown_tmux_flags_fail_loudly ... ok
+
+test result: ok. 107 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running unittests src/main.rs (target/debug/deps/zz_cli-0ec64ab849bf3159)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/buffer_client_file_load.rs (target/debug/deps/buffer_client_file_load-330814ba82551ab2)
+
+running 6 tests
+test a_missing_file_reports_the_reason_then_the_expanded_path ... ok
+test a_nested_relative_path_hangs_from_the_client_directory ... ok
+test a_read_that_fails_after_the_open_reports_the_pins_io_error ... ok
+test a_relative_path_reads_the_clients_own_directory ... ok
+test a_tilde_path_hangs_from_the_daemons_home ... ok
+test an_absolute_path_is_read_as_written ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.73s
+
+     Running tests/buffer_client_file_save.rs (target/debug/deps/buffer_client_file_save-0ae539bbe4a17091)
+
+running 5 tests
+test a_directory_that_is_not_there_reports_the_reason_then_the_expanded_path ... ok
+test a_relative_path_writes_the_clients_own_directory ... ok
+test a_second_save_truncates_and_dash_a_appends ... ok
+test a_tilde_path_hangs_from_the_daemons_home ... ok
+test an_absolute_path_is_written_as_written ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.91s
+
+     Running tests/cli_binary.rs (target/debug/deps/cli_binary-8b5c06dbd1308a7d)
+
+running 134 tests
+test catalog_help_is_available_without_a_daemon ... ok
+test daemon_autostart::agent_send_prefix_reads_stdin_before_dispatch ... ok
+test daemon_autostart::arbitrary_attach_alias_uses_the_tui_path ... ok
+test daemon_autostart::arbitrary_startup_alias_cannot_trigger_cold_autostart ... ok
+test daemon_autostart::attach_prefix_defers_live_user_aliases_to_the_daemon ... ok
+test daemon_autostart::attach_restart_daemon_survives_missing_preflight_daemon ... ok
+test daemon_autostart::attached_tui_renders_daemon_authored_styled_status_labels ... ok
+test daemon_autostart::attaching_new_session_inside_a_later_alias_enters_the_alternate_screen ... ok
+test daemon_autostart::canonical_attach_startup_alias_shadow_is_prepared_after_config ... ok
+test daemon_autostart::canonical_startup_alias_shadow_is_prepared_after_config ... ok
+test daemon_autostart::chain_error_after_attachment_is_rendered_inside_the_tui ... ok
+test daemon_autostart::cli_prepare_freezes_aliases_for_the_whole_command_chain ... ok
+test daemon_autostart::cold_autospawn_uses_the_launching_client_cwd_for_startup_sources ... ok
+test daemon_autostart::cold_cli_parse_errors_do_not_start_or_mutate_a_daemon ... ok
+test daemon_autostart::cold_cli_valid_builtin_alias_chain_still_starts_and_executes ... ok
+test daemon_autostart::control_mode::attached_control_executes_stdin_until_empty_line ... ok
+test daemon_autostart::control_mode::bare_control_defaults_to_attached_new_session ... ok
+test daemon_autostart::control_mode::config_file_bytes_load_like_the_pinned_signed_buffer ... ok
+test daemon_autostart::control_mode::control_alias_groups_inherit_flags_and_continue_after_shell_status ... ok
+test daemon_autostart::control_mode::control_attached_eof_releases_the_queue_at_the_first_parked_command ... ok
+test daemon_autostart::control_mode::control_background_inserted_commands_use_flags_zero_after_later_input ... ok
+test daemon_autostart::control_mode::control_background_malformed_lists_and_shell_jobs_stay_unframed ... ok
+test daemon_autostart::control_mode::control_chains_frame_each_command_and_abort_only_the_failing_line ... ok
+test daemon_autostart::control_mode::control_command_error_uses_the_inner_server_message ... ok
+test daemon_autostart::control_mode::control_command_hook_frames_are_inserted_and_retain_failure_status ... ok
+test daemon_autostart::control_mode::control_config_error_keeps_the_source_line_and_inner_message ... ok
+test daemon_autostart::control_mode::control_config_file_bytes_keep_the_pinned_hidden_item_numbering ... ok
+test daemon_autostart::control_mode::control_detach_aliases_follow_the_authoritative_self_victim ... ok
+test daemon_autostart::control_mode::control_disconnect_cancels_background_inserted_side_effects ... ok
+test daemon_autostart::control_mode::control_eof_drops_a_parked_wrappers_later_failure_and_detach_eof_is_zero ... ok
+test daemon_autostart::control_mode::control_first_sourced_construction_failure_uses_config_error ... ok
+test daemon_autostart::control_mode::control_foreground_run_shell_closes_before_raw_output_and_continues ... ok
+test daemon_autostart::control_mode::control_hook_source_diagnostics_keep_trigger_frames_and_status ... ok
+test daemon_autostart::control_mode::control_if_shell_config_file_bytes_continue_the_root_file ... ok
+test daemon_autostart::control_mode::control_immediate_eof_keeps_a_direct_source_failure_status ... ok
+test daemon_autostart::control_mode::control_initial_command_uses_a_live_daemon_alias ... ok
+test daemon_autostart::control_mode::control_kill_server_closes_its_block_before_exit ... ok
+test daemon_autostart::control_mode::control_list_commands_autostarts_and_frames_the_initial_command ... ok
+test daemon_autostart::control_mode::control_ls_with_a_daemon_frames_session_output ... ok
+test daemon_autostart::control_mode::control_nested_source_depth_limit_uses_sourced_command_guards ... ok
+test daemon_autostart::control_mode::control_nonself_detach_stays_attached_and_preserves_queued_return ... ok
+test daemon_autostart::control_mode::control_notifications_layout_and_output_follow_the_live_socket_stream ... ok
+test daemon_autostart::control_mode::control_parse_and_generic_nonzero_results_do_not_set_retval ... ok
+test daemon_autostart::control_mode::control_read_only_connect_failure_has_no_framing_or_exit ... ok
+test daemon_autostart::control_mode::control_replayed_runtime_errors_use_bare_error_blocks_and_continue ... ok
+test daemon_autostart::control_mode::control_return_and_explicit_detach_follow_the_full_retval_matrix ... FAILED
+test daemon_autostart::control_mode::control_server_stop_preserves_the_completed_return_code ... ok
+test daemon_autostart::control_mode::control_source_diagnostics_keep_tmux_chain_semantics ... ok
+test daemon_autostart::control_mode::control_source_read_error_follows_the_parent_guard_and_sets_retval ... ok
+test daemon_autostart::control_mode::control_sourced_run_shell_closes_before_raw_output_and_same_line_continues ... ok
+test daemon_autostart::control_mode::control_sourced_success_quiet_and_partial_guards_keep_fifo_status ... ok
+test daemon_autostart::control_mode::control_stdin_parse_error_is_framed_and_the_loop_continues ... ok
+test daemon_autostart::control_mode::control_stdin_preflight_errors_abort_the_whole_line ... ok
+test daemon_autostart::control_mode::control_stdin_prepares_each_complete_alias_chain_once ... ok
+test daemon_autostart::control_mode::control_unknown_initial_command_is_bare_after_connect ... ok
+test daemon_autostart::control_mode::detached_control_new_session_exits_without_reading_stdin ... ok
+test daemon_autostart::control_mode::double_control_wraps_stdout_in_dcs_and_st ... ok
+test daemon_autostart::control_mode::draining_alias_shutdown_tears_down_panes_and_rejects_late_commands_cleanly ... ok
+test daemon_autostart::control_mode::foreground_callback_error_prevents_later_shutdown_without_losing_guards ... ok
+test daemon_autostart::control_mode::held_control_detached_shutdown_drains_callback_guards_before_exit ... ok
+test daemon_autostart::control_mode::pause_after_emits_extended_output_then_pauses_a_slow_control_client ... ok
+test daemon_autostart::control_mode::refresh_client_b_reports_initial_change_and_exact_removal ... ok
+test daemon_autostart::control_mode::refresh_client_c_sizes_a_control_target_for_menu_gating ... ok
+test daemon_autostart::control_mode::refresh_client_pane_states_gate_the_live_control_stream ... ok
+test daemon_autostart::control_mode::shutdown_hook_source_yields_locally_without_replaying_the_after_hook ... ok
+test daemon_autostart::control_mode::startup_config_bytes_keep_the_pinned_file_command_name ... ok
+test daemon_autostart::control_mode::wait_exit_holds_the_control_process_until_a_second_blank_line ... FAILED
+test daemon_autostart::detached_new_session_accepts_dash_dimensions ... ok
+test daemon_autostart::detached_new_session_prints_default_and_custom_formats ... ok
+test daemon_autostart::detached_new_session_still_autostarts_the_daemon ... ok
+test daemon_autostart::duplicate_new_session_error_is_exact_and_precedes_the_terminal_check ... ok
+test daemon_autostart::event_hooks_are_clientless_and_command_hooks_retain_the_command_client ... ok
+test daemon_autostart::events_stream_ready_then_window_hook ... ok
+test daemon_autostart::exact_attach_aliases_bypass_the_native_attach_wrapper ... ok
+test daemon_autostart::exact_native_attach_executes_a_valid_command_chain_tail_after_a_positional_session ... ok
+test daemon_autostart::explicit_attach_can_fall_back_to_new_session ... ok
+test daemon_autostart::explicit_targetless_attach_autostarts_then_reports_no_sessions ... ok
+test daemon_autostart::failed_preflight_handshake_still_runs_the_cold_static_gate ... ok
+test daemon_autostart::failing_kill_server_alias_does_not_enter_recovery ... ok
+test daemon_autostart::gui_style_default_attach_uses_its_working_directory_with_an_empty_daemon ... ok
+test daemon_autostart::has_session_on_a_fresh_socket_leaves_no_daemon ... ok
+test daemon_autostart::headless_attach_resolves_the_target_before_rejecting_the_terminal ... ok
+test daemon_autostart::headless_attaching_new_session_fails_without_creating_the_session ... ok
+test daemon_autostart::headless_dash_a_ignores_detach_for_existing_but_not_new_sessions ... ok
+test daemon_autostart::inspect_json_contains_pane_facts_verbs_and_events ... ok
+test daemon_autostart::installed_layout_routes_bare_new_and_attach_across_empty_and_existing_daemons ... ok
+test daemon_autostart::invalid_startup_alias_shadows_abort_before_cold_effects ... ok
+test daemon_autostart::json_and_format_conflict_exits_two_with_a_daemon ... ok
+test daemon_autostart::live_agent_send_aliases_control_stdin_capture ... ok
+test daemon_autostart::ls_or_new_session_idiom_starts_one_fresh_daemon ... ok
+test daemon_autostart::mouse_option_gates_the_outer_terminal_mouse_modes ... ok
+test daemon_autostart::native_attach_accepts_targets_and_stops_options_at_positional_sessions ... ok
+test daemon_autostart::native_attach_e_preserves_the_session_environment ... ok
+test daemon_autostart::native_attach_flag_errors_match_tmux_for_both_spellings ... ok
+test daemon_autostart::native_attach_rejects_unsupported_x_like_the_engine ... ok
+test daemon_autostart::nested_attach_inside_a_pane_prints_the_pinned_refusal ... ok
+test daemon_autostart::new_session_immediately_after_kill_server_starts_a_fresh_daemon ... ok
+test daemon_autostart::no_start_server_suppresses_new_session_autostart ... ok
+test daemon_autostart::non_start_server_commands_do_not_spawn_a_daemon ... ok
+test daemon_autostart::option_value_errors_match_pinned_tmux_stderr ... ok
+test daemon_autostart::pane_json_contains_format_ids_and_native_kind ... ok
+test daemon_autostart::pane_mode_syntax_errors_keep_the_pinned_exit_status_with_a_daemon ... ok
+test daemon_autostart::prepared_cli_chain_rejects_later_alias_parse_errors_before_effects ... ok
+test daemon_autostart::prepared_cli_chain_rejects_later_unaliased_argument_errors_before_effects ... ok
+test daemon_autostart::prepared_kill_server_stops_the_daemon_without_recovery ... ok
+test daemon_autostart::raw_kill_server_flag_ignores_the_live_alias_table ... ok
+test daemon_autostart::read_only_attach_renders_but_typed_keys_never_reach_the_pane ... ok
+test daemon_autostart::read_only_command_without_a_daemon_uses_the_pin_connect_error ... ok
+test daemon_autostart::reload_config_of_the_default_config_stays_silent_and_resets_keys ... ok
+test daemon_autostart::runtime_config_commands_keep_the_command_client_terminal_state ... ok
+test daemon_autostart::slash_label_never_creates_intermediate_directories ... ok
+test daemon_autostart::source_file_allows_fifty_invocations_and_refuses_the_fifty_first ... ok
+test daemon_autostart::source_file_diagnoses_a_malformed_refused_invocation_instead_of_the_depth_limit ... ok
+test daemon_autostart::source_file_diagnostics_split_stdout_stderr_and_the_exit_code ... ok
+test daemon_autostart::source_file_replayed_output_batches_top_level_paths ... ok
+test daemon_autostart::source_file_replayed_runtime_errors_are_bare_and_propagate_outward ... ok
+test daemon_autostart::source_file_resolves_relative_paths_from_the_command_client_cwd ... ok
+test daemon_autostart::source_file_treats_the_default_config_as_an_ordinary_ordered_path ... ok
+test daemon_autostart::startup_config_new_session_is_forced_detached ... ok
+test daemon_autostart::startup_config_reenters_through_the_private_tmux_shim ... ok
+test daemon_autostart::startup_config_shares_a_fifty_source_command_budget ... ok
+test daemon_autostart::status_position_top_puts_the_status_block_at_row_zero ... ok
+test daemon_autostart::stock_eighty_column_attach_draws_the_whole_status_row ... ok
+test daemon_autostart::styled_multi_row_status_renders_two_rows_without_literal_markers ... ok
+test daemon_autostart::switch_client_from_a_plain_shell_reports_the_pinned_client_errors ... ok
+test daemon_autostart::target_and_unknown_command_errors_match_pinned_tmux_stderr ... ok
+test daemon_autostart::tty_new_session_error_is_bare_and_does_not_start_the_browser ... ok
+test daemon_autostart::tui_handoff_executes_the_prepared_alias_snapshot ... ok
+test daemon_autostart::usage_errors_keep_their_surface_status_with_a_daemon ... ok
+test short_help_retains_tmux_usage ... ok
+test tmux_version_is_exact ... ok
+test tmux_without_a_zz_socket_fails_before_dialing_a_foreign_server ... ok
+test unknown_tmux_flag_uses_tmux_usage_shape ... ok
+test usage_errors_keep_their_surface_status_without_a_daemon ... ok
+
+failures:
+
+---- daemon_autostart::control_mode::control_return_and_explicit_detach_follow_the_full_retval_matrix stdout ----
+
+thread 'daemon_autostart::control_mode::control_return_and_explicit_detach_follow_the_full_retval_matrix' (2164081) panicked at crates/zz-cli/tests/cli_binary.rs:4597:21:
+control process did not reach generic-nonzero-eof
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- daemon_autostart::control_mode::wait_exit_holds_the_control_process_until_a_second_blank_line stdout ----
+
+thread 'daemon_autostart::control_mode::wait_exit_holds_the_control_process_until_a_second_blank_line' (2213570) panicked at crates/zz-cli/tests/cli_binary.rs:8078:13:
+assertion `left == right` failed
+  left: None
+ right: Some(0)
+
+
+failures:
+    daemon_autostart::control_mode::control_return_and_explicit_detach_follow_the_full_retval_matrix
+    daemon_autostart::control_mode::wait_exit_holds_the_control_process_until_a_second_blank_line
+
+test result: FAILED. 132 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 718.85s
+
+error: test failed, to rerun pass `-p zz-cli --test cli_binary`
+   Doc-tests zz_cli
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: 1 target failed:
+    `-p zz-cli --test cli_binary`

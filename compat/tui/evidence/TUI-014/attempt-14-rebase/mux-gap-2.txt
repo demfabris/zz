@@ -1,0 +1,11 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.84s
+     Running unittests src/lib.rs (target/debug/deps/zz_mux-eed3ba838a6892ab)
+
+running 4 tests
+test command::tests::automatic_session_names_use_the_first_canonical_numeric_gap ... ok
+test compat_manifest_tests::args_parse_gaps_match_the_pinned_oracle ... ok
+test compat_manifest_tests::command_and_flag_gaps_match_the_pinned_oracle ... ok
+test command::tests::gap_queries_are_silent_sorted_and_catalog_backed ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 534 filtered out; finished in 0.52s
+

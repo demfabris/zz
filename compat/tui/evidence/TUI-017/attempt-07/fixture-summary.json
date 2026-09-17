@@ -1,0 +1,178 @@
+{
+  "attached-02.txt": {
+    "exit": 0,
+    "results": [
+      "attached-client compatibility: PASS"
+    ]
+  },
+  "attached-baseline-retry.txt": {
+    "exit": 0,
+    "results": [
+      "attached-client compatibility: PASS"
+    ]
+  },
+  "attached-baseline.txt": {
+    "exit": 0,
+    "results": [
+      "attached-client compatibility: PASS"
+    ]
+  },
+  "attached-final.txt": {
+    "exit": 1,
+    "results": [
+      "error: zz screen did not show ATTACHED_REATTACH_MARKER within 10 seconds"
+    ]
+  },
+  "attached-lifecycle-rebased.txt": {
+    "exit": 0,
+    "results": [
+      "client lifecycle compatibility: PASS"
+    ]
+  },
+  "attached-no-resolver.txt": {
+    "exit": 0,
+    "results": [
+      "attached-client compatibility: PASS"
+    ]
+  },
+  "attached-no-tab-scan.txt": {
+    "exit": 0,
+    "results": [
+      "attached-client compatibility: PASS"
+    ]
+  },
+  "attached-rebased-controlled.txt": {
+    "exit": 0,
+    "results": [
+      "attached-client compatibility: PASS"
+    ]
+  },
+  "attached-rebased-retry.txt": {
+    "exit": 1,
+    "results": [
+      "error: zz screen did not show ATTACHED_REATTACH_MARKER within 10 seconds"
+    ]
+  },
+  "attached-rebased.txt": {
+    "exit": 1,
+    "results": [
+      "error: zz screen did not show ATTACHED_REATTACH_MARKER within 10 seconds"
+    ]
+  },
+  "attached-reverted.txt": {
+    "exit": 0,
+    "results": [
+      "attached-client compatibility: PASS"
+    ]
+  },
+  "attached-tail-probe.txt": {
+    "exit": 0,
+    "results": [
+      "attached-client compatibility: PASS"
+    ]
+  },
+  "copy-mode-final.txt": {
+    "exit": 1,
+    "results": []
+  },
+  "copy-mode-ready.txt": {
+    "exit": 0,
+    "results": []
+  },
+  "copy-mode-rebased.txt": {
+    "exit": 1,
+    "results": []
+  },
+  "copy-mode.txt": {
+    "exit": 0,
+    "results": []
+  },
+  "copy-self-check-rebased.txt": {
+    "exit": 0,
+    "results": [
+      "self-check complete: every sabotage was caught in its own channel and every equivalence passed"
+    ]
+  },
+  "fixture-01.txt": {
+    "exit": 0,
+    "results": [
+      "all 199 asserted comparisons identical, 25 recorded not asserted (0 for a sibling lane, owners TUI-014=6 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0)"
+    ]
+  },
+  "fixture-02.txt": {
+    "exit": 0,
+    "results": [
+      "all 199 asserted comparisons identical, 25 recorded not asserted (0 for a sibling lane, owners TUI-014=6 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0)"
+    ]
+  },
+  "fixture-03.txt": {
+    "exit": 0,
+    "results": [
+      "all 199 asserted comparisons identical, 25 recorded not asserted (0 for a sibling lane, owners TUI-014=6 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0)"
+    ]
+  },
+  "fixture-final.txt": {
+    "exit": 0,
+    "results": [
+      "all 199 asserted comparisons identical, 25 recorded not asserted (0 for a sibling lane, owners TUI-014=6 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0)"
+    ]
+  },
+  "fixture-rebased.txt": {
+    "exit": 0,
+    "results": [
+      "all 199 asserted comparisons identical, 25 recorded not asserted (0 for a sibling lane, owners TUI-014=6 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0)"
+    ]
+  },
+  "screen-diff-02.txt": {
+    "exit": 1,
+    "results": []
+  },
+  "screen-diff-final.txt": {
+    "exit": 0,
+    "results": [
+      "all 147 asserted checkpoints identical, 6 recorded not asserted"
+    ]
+  },
+  "screen-diff-rebased.txt": {
+    "exit": 0,
+    "results": [
+      "all 147 asserted checkpoints identical, 6 recorded not asserted"
+    ]
+  },
+  "screen-diff.txt": {
+    "exit": 2,
+    "results": []
+  },
+  "self-check-01.txt": {
+    "exit": 0,
+    "results": [
+      "self-check complete: every sabotage was caught in its own channel and both equivalences passed"
+    ]
+  },
+  "self-check-final.txt": {
+    "exit": 0,
+    "results": [
+      "self-check complete: every sabotage was caught in its own channel and both equivalences passed"
+    ]
+  },
+  "self-check-rebased.txt": {
+    "exit": 0,
+    "results": [
+      "self-check complete: every sabotage was caught in its own channel and both equivalences passed"
+    ]
+  },
+  "verify-claims-rebased.txt": {
+    "exit": 0,
+    "results": [
+      "    all 199 asserted comparisons identical, 25 recorded not asserted (0 for a sibling lane, owners TUI-014=6 decided:TUI-015=4 decided:TUI-016=1 decided:T",
+      "every verified obligation holds up"
+    ]
+  },
+  "verify-claims.txt": {
+    "exit": 0,
+    "results": [
+      "    all 199 asserted comparisons identical, 25 recorded not asserted (0 for a sibling lane, owners TUI-014=6 decided:TUI-015=4 decided:TUI-016=1 decided:T",
+      "every verified obligation holds up"
+    ]
+  }
+}

@@ -1,0 +1,255 @@
+# Scenario: command-alias
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/command-alias.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: set-option -s command-alias[10] lsw=list-windows
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-options -sv command-alias[10]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    lsw=list-windows
+tmux stdout:
+    lsw=list-windows
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: lsw -F #{window_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    main
+tmux stdout:
+    main
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: split-pane -d
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: set-option -s command-alias[11] chain1=chain2
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: set-option -s command-alias[12] chain2=list-sessions
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: chain1
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    unknown command: chain2
+tmux stderr:
+    unknown command: chain2
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: chain2
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    w: 1 windows (created Thu Sep 17 00:31:59 2026)
+tmux stdout:
+    w: 1 windows (created Thu Sep 17 00:32:00 2026)
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: set-option -s command-alias[13] grab=capture-pane
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: grab -p
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [demfabris@alienware zz-c11-capture-residuals]$
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+tmux stdout:
+    [demfabris@alienware zz-c11-capture-residuals]$
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: bind-key -T zzc6 F6 lsw
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: list-keys -T zzc6 -F #{key_string}=#{key_command}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    F6=list-windows
+tmux stdout:
+    F6=list-windows
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: unbind-key -T zzc6 F6
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: set-hook -g session-created lsw
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: show-hooks -g session-created
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    session-created[0] list-windows
+tmux stdout:
+    session-created[0] list-windows
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: set-hook -gu session-created
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=16 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

@@ -1,0 +1,3 @@
+compat/tui/campaign.json is valid and knowledge/tmux/tui-parity.md is current
+
+EXIT=0

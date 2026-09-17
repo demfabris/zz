@@ -1,0 +1,23 @@
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-terminal)
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-mux)
+error[E0433]: cannot find type `CommandEngine` in this scope
+     --> crates/zz-mux/src/command.rs:22398:26
+      |
+22398 |         let mut engine = CommandEngine::default();
+      |                          ^^^^^^^^^^^^^ use of undeclared type `CommandEngine`
+
+error[E0433]: cannot find type `CommandContext` in this scope
+     --> crates/zz-mux/src/command.rs:22399:27
+      |
+22399 |         let mut context = CommandContext::default();
+      |                           ^^^^^^^^^^^^^^ use of undeclared type `CommandContext`
+      |
+help: a struct with a similar name exists
+      |
+22399 -         let mut context = CommandContext::default();
+22399 +         let mut context = FormatContext::default();
+      |
+
+For more information about this error, try `rustc --explain E0433`.
+error: could not compile `zz-mux` (lib test) due to 2 previous errors

@@ -1,0 +1,173 @@
+# Scenario: split-window-zoom
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/split-window-zoom.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: new-session -d -s zoomcase -x 80 -y 24
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: split-window -d -h -t zoomcase:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: resize-pane -Z -t zoomcase:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: list-panes -t zoomcase:0 -F #{pane_index}:#{pane_active}:#{window_zoomed_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:1:1
+    1:0:1
+tmux stdout:
+    0:1:1
+    1:0:1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: split-window -d -h -t zoomcase:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: list-panes -t zoomcase:0 -F #{pane_index}:#{pane_active}:#{window_zoomed_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:1:0
+    1:0:0
+    2:0:0
+tmux stdout:
+    0:1:0
+    1:0:0
+    2:0:0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: split-window -d -hZ -t zoomcase:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: list-panes -t zoomcase:0 -F #{pane_index}:#{pane_active}:#{window_zoomed_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:1:1
+    1:0:1
+    2:0:1
+    3:0:1
+tmux stdout:
+    0:1:1
+    1:0:1
+    2:0:1
+    3:0:1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: resize-pane -Z -t zoomcase:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: split-window -hZ -t zoomcase:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: list-panes -t zoomcase:0 -F #{pane_index}:#{pane_active}:#{window_zoomed_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:0:1
+    1:1:1
+    2:0:1
+    3:0:1
+    4:0:1
+tmux stdout:
+    0:0:1
+    1:1:1
+    2:0:1
+    3:0:1
+    4:0:1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=11 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

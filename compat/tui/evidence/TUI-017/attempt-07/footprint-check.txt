@@ -1,0 +1,2 @@
+PASS: all 1360 files in the staged delivery relative to origin/main f9c52359 are declared in footprint.json.
+EXIT=0

@@ -1,0 +1,32 @@
+[
+  {
+    "variant": "no-tab-scan",
+    "source_revision": "bb693da5c5654dbf97129857b36e6e63e0b18cbc",
+    "audited_files": 469,
+    "only_source_change": [
+      {
+        "path": "crates/zz-terminal/src/session.rs",
+        "expected_blob": "947f5ba3070990514632e42cf3f1c518cb25f33c",
+        "actual_blob": "0c22f43b07592975479c02af1f59394b3809c45a"
+      }
+    ],
+    "tab_self_check_exit": 1,
+    "target_self_check_exit": 0,
+    "full_attached_artifact": "attached-no-tab-scan.txt"
+  },
+  {
+    "variant": "no-resolver",
+    "source_revision": "bb693da5c5654dbf97129857b36e6e63e0b18cbc",
+    "audited_files": 469,
+    "only_source_change": [
+      {
+        "path": "crates/zz-mux/src/command.rs",
+        "expected_blob": "da808307fad0b85489c9db6ca5c0875c3276f08a",
+        "actual_blob": "1bf4bbc488957b871a105fb6fec8327b4a8c0cef"
+      }
+    ],
+    "tab_self_check_exit": 0,
+    "target_self_check_exit": 1,
+    "full_attached_artifact": "attached-no-resolver.txt"
+  }
+]

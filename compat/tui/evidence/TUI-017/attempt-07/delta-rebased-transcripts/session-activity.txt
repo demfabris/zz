@@ -1,0 +1,81 @@
+# Scenario: session-activity
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/session-activity.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: fmt: #{==:#{session_activity},#{session_created}}|#{!!:#{t:session_activity}}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1|1
+tmux stdout:
+    1|1
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: new-session -d -s activity-a
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: new-session -d -s activity-b
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: fmt: #{S/t:#{session_name}|}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    activity-b|activity-a|w|
+tmux stdout:
+    activity-b|activity-a|w|
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: list-sessions -O activity -F #{session_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    activity-b
+    activity-a
+    w
+tmux stdout:
+    activity-b
+    activity-a
+    w
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=5 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

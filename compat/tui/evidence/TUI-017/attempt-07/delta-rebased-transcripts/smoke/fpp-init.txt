@@ -1,0 +1,52 @@
+# Scenario: smoke/fpp-init
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/smoke/fpp-init.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: conf: fixtures/fpp-init.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    %begin 1789618957 1 0
+    %end 1789618957 1 0
+    %begin 1789618958 2 0
+    %end 1789618958 2 0
+    %exit
+tmux stdout:
+    %begin 1789618958 316 0
+    %end 1789618958 316 0
+    %begin 1789618958 317 0
+    %end 1789618958 317 0
+    %exit
+COMMAND EXIT-CLASS: clean
+WARN zz: clean
+WARN tmux: clean
+WARN terminator: clean (%end / %end)
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: keys: prefix f
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|f|0|run-shell "/home/demfabris/dev/zz-c11-capture-residuals/compat/results/.smoke-fpp-init.y35oqA/home/.tmux/plugins/tmux-fpp/fpp.tmux start edit"
+tmux stdout:
+    prefix|f|0|run-shell "/home/demfabris/dev/zz-c11-capture-residuals/compat/results/.smoke-fpp-init.y35oqA/home/.tmux/plugins/tmux-fpp/fpp.tmux start edit"
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

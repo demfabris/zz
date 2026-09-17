@@ -1,0 +1,36 @@
+# Scenario: smoke/hooks-pane-focus-clients
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/smoke/hooks-pane-focus-clients.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: run-shell 'sh ~/hooks-pane-focus-clients.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g HOOKS_PANE_FOCUS_CLIENTS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    HOOKS_PANE_FOCUS_CLIENTS=pane-focus-in:%0 client-session-changed:%0 client-session-changed:%0 |attached| client-focus-out:%0 |first-out| pane-focus-out:%0 client-focus-out:%0 |second-out| client-focus-in:%0 pane-focus-in:%0 |first-in| client-focus-in:%0 |second-in| client-focus-out:%0 |second-out-again| pane-focus-out:%0 |overlay-open| pane-focus-in:%0 |overlay-closed| pane-focus-out:%0 pane-focus-in:%1 client-session-changed:%1 |switch-away| pane-focus-out:%1 pane-focus-in:%0 client-session-changed:%0 |switch-back| pane-focus-out:%0 |detach| 
+tmux stdout:
+    HOOKS_PANE_FOCUS_CLIENTS=pane-focus-in:%0 client-session-changed:%0 client-session-changed:%0 |attached| client-focus-out:%0 |first-out| pane-focus-out:%0 client-focus-out:%0 |second-out| client-focus-in:%0 pane-focus-in:%0 |first-in| client-focus-in:%0 |second-in| client-focus-out:%0 |second-out-again| pane-focus-out:%0 |overlay-open| pane-focus-in:%0 |overlay-closed| pane-focus-out:%0 pane-focus-in:%1 client-session-changed:%1 |switch-away| pane-focus-out:%1 pane-focus-in:%0 client-session-changed:%0 |switch-back| pane-focus-out:%0 |detach| 
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

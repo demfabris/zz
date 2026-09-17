@@ -1,0 +1,21 @@
+   Compiling libghostty-vt-sys v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt-sys)
+   Compiling libghostty-vt v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt)
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-terminal)
+error[E0061]: this method takes 4 arguments but 2 arguments were supplied
+     --> crates/zz-terminal/src/session.rs:18414:26
+      |
+18414 |                 terminal.resize(100, 24).unwrap();
+      |                          ^^^^^^--------- two arguments of type `u32` and `u32` are missing
+      |
+note: method defined here
+     --> third_party/rust/libghostty-vt/src/terminal.rs:87:12
+      |
+   87 |     pub fn resize(
+      |            ^^^^^^
+help: provide the arguments
+      |
+18414 |                 terminal.resize(100, 24, /* u32 */, /* u32 */).unwrap();
+      |                                        ++++++++++++++++++++++
+
+For more information about this error, try `rustc --explain E0061`.
+error: could not compile `zz-terminal` (lib test) due to 1 previous error

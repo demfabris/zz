@@ -1,0 +1,11 @@
+   Compiling zz-cli v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.77s
+     Running tests/cli_binary.rs (target/debug/deps/cli_binary-15c07f6383f0fd89)
+
+running 1 test
+test daemon_autostart::attaching_new_session_inside_a_later_alias_enters_the_alternate_screen ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 132 filtered out; finished in 6.31s
+
+
+EXIT=0

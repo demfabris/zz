@@ -1,0 +1,36 @@
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling thiserror-impl v1.0.69
+   Compiling rustix v1.1.4
+   Compiling libghostty-vt-sys v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt-sys)
+   Compiling thiserror v1.0.69
+   Compiling event-listener v5.4.2
+   Compiling smallvec v1.16.1
+   Compiling proc-macro2-diagnostics v0.10.1
+   Compiling linux-raw-sys v0.12.1
+   Compiling int-enum v1.2.0
+   Compiling parking_lot_core v0.9.12
+   Compiling event-listener-strategy v0.5.4
+   Compiling filedescriptor v0.8.3
+   Compiling concurrent-queue v2.5.0
+   Compiling futures-core v0.3.34
+   Compiling once_cell v1.21.4
+   Compiling tempfile v3.27.0
+   Compiling portable-pty v0.9.0
+   Compiling async-channel v2.5.0
+   Compiling parking_lot v0.12.5
+   Compiling csscolorparser v0.8.4
+   Compiling libghostty-vt v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt)
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-terminal)
+error: character constant must be escaped: `\t`
+    --> crates/zz-terminal/src/session.rs:8741:28
+     |
+8741 |                 line.push('    ');
+     |                            ^^^^
+     |
+help: escape the character
+     |
+8741 |                 line.push('\t');
+     |                            ++
+
+error: could not compile `zz-terminal` (lib test) due to 1 previous error

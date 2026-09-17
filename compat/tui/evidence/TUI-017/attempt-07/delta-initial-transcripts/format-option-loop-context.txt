@@ -1,0 +1,205 @@
+# Scenario: format-option-loop-context
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/format-option-loop-context.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: new-session -d -s octx
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: set-option -t octx @a A
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: set-option -t octx status-format[0] X
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: set-option -t octx status-format[1] Y
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: display-message -p -t octx [#{loop_index}|#{loop_last_flag}|#{option_name}|#{option_value}|#{option_array_count}|#{option_array_first}|#{option_array_index}|#{option_array_key}|#{option_array_last}|#{option_is_array}|#{option_is_hook}|#{option_is_user}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [|||||||||||]
+tmux stdout:
+    [|||||||||||]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: display-message -p -t octx [#{?option_is_array,arr,notarr}|#{?loop_last_flag,last,notlast}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [notarr|notlast]
+tmux stdout:
+    [notarr|notlast]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: display-message -p -t octx [#{O:<#{loop_index}#{loop_last_flag}#{option_array_count}#{option_array_first}#{option_array_index}>}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [<0000><10210><21201>]
+tmux stdout:
+    [<0000><10210><21201>]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: display-message -p -t octx [#{O:#{loop_index}|#{loop_last_flag}|#{option_array_count}|#{option_array_first}|#{option_array_index}|#{option_array_key}|#{option_array_last}|#{option_is_array}|#{option_is_hook}|#{option_is_user}|#{option_name}|#{option_value};}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [0|0|0|0|||0|0|0|1|@a|A;1|0|2|1|0|0|0|1|0|0|status-format|X;2|1|2|0|1|1|1|1|0|0|status-format|Y;]
+tmux stdout:
+    [0|0|0|0|||0|0|0|1|@a|A;1|0|2|1|0|0|0|1|0|0|status-format|X;2|1|2|0|1|1|1|1|0|0|status-format|Y;]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: display-message -p -t octx [#{O:#{?option_is_array,arr,notarr};}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [notarr;arr;arr;]
+tmux stdout:
+    [notarr;arr;arr;]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: new-session -d -s oempty
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: set-option -t oempty update-environment ""
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: display-message -p -t oempty [#{O:#{loop_index}|#{loop_last_flag}|#{option_array_count}|#{option_array_first}|#{option_array_index}|#{option_array_key}|#{option_array_last}|#{option_is_array}|#{option_is_hook}|#{option_is_user}|#{option_name}|#{option_value};}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [0|1|0|1|||1|1|0|0|update-environment|;]
+tmux stdout:
+    [0|1|0|1|||1|1|0|0|update-environment|;]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: display-message -p -t octx [#{S:#{O:<#{loop_index}:#{option_name}>}}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [<0:@a><1:status-format><2:status-format><0:update-environment>]
+tmux stdout:
+    [<0:@a><1:status-format><2:status-format><0:update-environment>]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: out: display-message -p -t octx [#{O:#{W:[#{loop_index}]}}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [[0][0][0]]
+tmux stdout:
+    [[0][0][0]]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=14 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

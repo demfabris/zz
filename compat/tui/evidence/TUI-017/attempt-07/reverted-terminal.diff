@@ -1,0 +1,26 @@
+diff --git a/crates/zz-terminal/src/session.rs b/tmp/zzcr-reverted.jKXeN6/crates/zz-terminal/src/session.rs
+index 947f5ba3..b98dda12 100644
+--- a/crates/zz-terminal/src/session.rs
++++ b/tmp/zzcr-reverted.jKXeN6/crates/zz-terminal/src/session.rs
+@@ -8553,7 +8553,7 @@ fn capture_terminal(
+     let requested_rows = usize::try_from(end.saturating_sub(start).saturating_add(1)).unwrap_or(1);
+ 
+     let columns = terminal.cols().map_err(capture_failure)?;
+-    if options.escape_sequences || capture_has_tabs(terminal, start, end, columns)? {
++    if options.escape_sequences {
+         return capture_styled_terminal(terminal, options, start, end, visible_start, columns);
+     }
+     let head = terminal
+@@ -8888,10 +8888,10 @@ fn push_capture_colour(output: &mut String, colour: StyleColor, base: u16, index
+         StyleColor::None => {
+             let _ = write!(output, "\x1b[{}m", base + 9);
+         }
+-        StyleColor::Palette(index) if !indexed && base != 50 && index.0 < 8 => {
++        StyleColor::Palette(index) if base != 50 && index.0 < 8 => {
+             let _ = write!(output, "\x1b[{}m", base + u16::from(index.0));
+         }
+-        StyleColor::Palette(index) if !indexed && base != 50 && index.0 < 16 => {
++        StyleColor::Palette(index) if base != 50 && index.0 < 16 => {
+             let _ = write!(output, "\x1b[{}m", base + 60 + u16::from(index.0) - 8);
+         }
+         StyleColor::Palette(index) => {

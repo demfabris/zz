@@ -1,0 +1,235 @@
+# Scenario: micro-flags
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/micro-flags.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: out: display-message -p
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [w] 0:main, current pane 0 - (00:43 17-Sep-26)
+tmux stdout:
+    [w] 0:main, current pane 0 - (00:43 17-Sep-26)
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: display-message -p -l #{session_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    #{session_name}
+tmux stdout:
+    #{session_name}
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: display-message -p -l -F #{pane_id}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    #{pane_id}
+tmux stdout:
+    #{pane_id}
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: display-message -p -l
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [#{session_name}] #{window_index}:#{window_name}, current pane #{pane_index} - (%H:%M %d-%b-%y)
+tmux stdout:
+    [#{session_name}] #{window_index}:#{window_name}, current pane #{pane_index} - (%H:%M %d-%b-%y)
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: display-message -p -l -t missing -d bad -F x y
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    only one of -F or argument must be given
+tmux stderr:
+    only one of -F or argument must be given
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: display-message -p -l -d bad -F x y
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    only one of -F or argument must be given
+tmux stderr:
+    only one of -F or argument must be given
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: display-message -p -l -d bad x
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    delay invalid
+tmux stderr:
+    delay invalid
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: set-buffer -t missing alpha
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: list-buffers -F #{buffer_sample}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alpha
+tmux stdout:
+    alpha
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: load-buffer -t missing /dev/null
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: new-window -d -t w -n send -- cat
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: send-keys -F -t w:send VISIBLE Enter
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: send-keys -C
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    command send-keys: unknown flag -C
+tmux stderr:
+    command send-keys: unknown flag -C
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: send-keys -P
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    command send-keys: unknown flag -P
+tmux stderr:
+    command send-keys: unknown flag -P
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: send-keys -o
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    command send-keys: unknown flag -o
+tmux stderr:
+    command send-keys: unknown flag -o
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: run-shell 'sleep 0.2'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: capture-pane -p -S 0 -E 1 -t w:send
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    VISIBLE
+    VISIBLE
+tmux stdout:
+    VISIBLE
+    VISIBLE
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=17 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

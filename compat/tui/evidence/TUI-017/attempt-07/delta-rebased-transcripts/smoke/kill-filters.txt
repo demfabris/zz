@@ -1,0 +1,256 @@
+# Scenario: smoke/kill-filters
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/smoke/kill-filters.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: new-session -d -s keep
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: new-session -d -s drop
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: kill-session -a -t keep -f '#{==:#{session_name},drop}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: list-sessions -F #{session_name} -O name
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    keep
+    w
+tmux stdout:
+    keep
+    w
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: rename-window -t keep:0 base
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: new-window -d -t keep -n stay
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: new-window -d -t keep -n drop
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: kill-window -a -t keep:0 -f '#{==:#{window_name},drop}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: list-windows -t keep -F #{window_name} -O name
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    base
+    stay
+tmux stdout:
+    base
+    stay
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: split-window -d -t keep:stay
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: kill-pane -a -t keep:stay.0 -f '#{==:#{pane_index},1}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: list-panes -t keep:stay -F #{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: kill-session -t keep -f 1
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    -f only valid with -a
+tmux stderr:
+    -f only valid with -a
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: kill-session -a -C -t keep -f 1
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    -f only valid with -a
+tmux stderr:
+    -f only valid with -a
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: kill-window -t keep:0 -f 1
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    -f only valid with -a
+tmux stderr:
+    -f only valid with -a
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: kill-window -t missing -f 1
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    can't find window: missing
+tmux stderr:
+    can't find window: missing
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: kill-pane -t keep:stay.0 -f 1
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    -f only valid with -a
+tmux stderr:
+    -f only valid with -a
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=17 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

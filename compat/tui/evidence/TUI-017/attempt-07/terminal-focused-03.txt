@@ -1,0 +1,23 @@
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-terminal)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.64s
+     Running unittests src/terminal_core.rs (target/debug/deps/zz_terminal-668b4c4ce7e784d8)
+
+running 15 tests
+test session::tests::capture_can_join_soft_wrapped_rows ... ok
+test session::tests::capture_reads_visible_rows_and_full_canonical_history ... ok
+test session::tests::numbered_capture_uses_physical_rows_for_styled_wraps ... ok
+test session::tests::last_command_capture_caps_long_output_by_rows ... ok
+test session::tests::last_command_capture_reports_missing_shell_integration ... ok
+test session::tests::last_command_capture_skips_the_fresh_prompt_and_keeps_the_previous_output ... ok
+test session::tests::last_command_capture_walks_past_prompts_the_user_only_sat_on ... ok
+test session::tests::live_styled_capture_keeps_sgr_and_uses_lf_between_rows ... ok
+test session::tests::last_command_capture_tolerates_duplicate_osc133_marks ... ok
+test session::tests::styled_numbered_capture_preserves_the_row_after_three_wrapped_rows ... ok
+test session::tests::styled_capture_trims_erased_backgrounds_to_text_extent ... ok
+test session::tests::pty_free_surface_feeds_bytes_into_capture_marks_taps_and_bell ... ok
+test session::tests::styled_capture_matches_pinned_colour_and_attribute_transitions ... ok
+test session::tests::styled_capture_preserves_default_padding_before_wide_wraps ... ok
+test session::tests::capture_preserves_tab_spans_and_discards_partial_overwrites ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 272 filtered out; finished in 0.01s
+

@@ -1,0 +1,6 @@
+info: syncing channel updates for 1.97.0-x86_64-unknown-linux-gnu
+info: latest update on 2026-07-09 for version 1.97.0 (2d8144b78 2026-07-07)
+info: downloading 5 components
+    Updating git repository `https://github.com/demfabris/zed`
+
+EXIT=143

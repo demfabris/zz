@@ -1,0 +1,20 @@
+P1000p%begin 1789614434 1 0
+%end 1789614434 1 0
+%session-changed $0 cs
+%begin 1789614435 2 1
+MATRIX-BEGIN
+%end 1789614435 2 1
+%begin 1789614438 3 1
+%end 1789614438 3 1
+%begin 1789614438 4 1
+%end 1789614438 4 1
+%begin 1789614438 5 1
+/tmp/zzcs.DUnAkm/matrix.conf:1: source-file from standard input is not supported
+%error 1789614438 5 1
+%begin 1789614438 7 1
+MATRIX-AFTER
+%end 1789614438 7 1
+%begin 1789614438 8 1
+%end 1789614438 8 1
+%exit
+\

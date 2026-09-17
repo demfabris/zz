@@ -1,0 +1,11 @@
+      case matrix-direct-attached
+      exit tmux: 1  zz: 0
+DIFF  matrix-direct-attached
+      case matrix-alias-attached
+      exit tmux: 1  zz: 0
+DIFF  matrix-alias-attached
+      case matrix-file-attached
+      exit tmux: 1  zz: 0
+DIFF  matrix-file-attached
+matrix: 3 asserted, 3 failures, 0 decided:TUI-018, 0 self-check failures
+exit_status=1

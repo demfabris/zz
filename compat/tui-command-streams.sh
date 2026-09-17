@@ -19,16 +19,6 @@
 # save-buffer - / -a -        (stdout)    the buffer's bytes, exactly, to stdout
 # ---------------------------------------------------------------------------
 #
-# NO ATTACHED CLIENT, AND WHY. window_pane_start_input returns before it reads
-# anything when the invoking client has a session (window.c), so the pin reads
-# the caller's stdin only for a CLIENTLESS client - the way a script invokes
-# it, which is the only way these forms work at all. An attached client would
-# change nothing this file measures, and the attached screen for the same
-# commands is asserted in compat/tui-client-commands.sh, which does run both
-# binaries under one outer pinned tmux. Everything else follows the usual
-# driver: isolated HOME and XDG_CONFIG_HOME per side, short /tmp sockets,
-# bounded wait_for on an observable, a trap that reaps what it started.
-#
 # FOUR CHANNELS PER CASE. exit status, stdout bytes and stderr bytes come from
 # the invocation; the state is a fixed set of list-* formats plus the option
 # values under test plus the first rows of every pane, which is where a
@@ -65,7 +55,7 @@
 set -eEuo pipefail
 
 usage() {
-  printf 'usage: compat/tui-command-streams.sh [--self-check] [--execution-check] [ZZ_BIN [TMUX_BIN]]\n' >&2
+  printf 'usage: compat/tui-command-streams.sh [--self-check] [--execution-check] [--matrix] [--matrix-list] [ZZ_BIN [TMUX_BIN]]\n' >&2
   printf '       ZZ_BIN=path TMUX_BIN=path compat/tui-command-streams.sh\n' >&2
 }
 
@@ -73,11 +63,15 @@ COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "$COMPAT_DIR/.." && pwd)"
 SELF_CHECK=0
 EXECUTION_CHECK=0
+MATRIX_CHECK=0
+MATRIX_LIST=0
 POSITIONAL=()
 for argument in "$@"; do
   case "$argument" in
   --self-check) SELF_CHECK=1 ;;
   --execution-check) EXECUTION_CHECK=1 ;;
+  --matrix) MATRIX_CHECK=1 ;;
+  --matrix-list) MATRIX_LIST=1 ;;
   -*)
     usage
     exit 2
@@ -156,6 +150,7 @@ cleanup() {
   set +e
   zz_command kill-server >/dev/null 2>&1
   tmux_command kill-server >/dev/null 2>&1
+  scrubbed "$TMUX_BIN" -L "$INNER_SOCKET_NAME-matrix" kill-server >/dev/null 2>&1
   if [ -n "$ZZ_PID" ]; then
     kill "$ZZ_PID" >/dev/null 2>&1
     wait "$ZZ_PID" >/dev/null 2>&1
@@ -326,8 +321,13 @@ compare_channels() {
   local zz_rc tmux_rc zz_state tmux_state side
   zz_rc="$(cat "$SCRATCH_DIR/zz.rc")"
   tmux_rc="$(cat "$SCRATCH_DIR/tmux.rc")"
-  zz_state="$(state_of zz)"
-  tmux_state="$(state_of tmux)"
+  if [ "${CASE_STATE_FILE:-0}" = 1 ]; then
+    zz_state="$(cat "$SCRATCH_DIR/zz.matrix-state")"
+    tmux_state="$(cat "$SCRATCH_DIR/tmux.matrix-state")"
+  else
+    zz_state="$(state_of zz)"
+    tmux_state="$(state_of tmux)"
+  fi
   if [ -n "${ZZ_STREAM_PROBES:-}" ]; then
     {
       printf 'case=%s\nzz_exit=%s\ntmux_exit=%s\n' "$name" "$zz_rc" "$tmux_rc"
@@ -885,6 +885,287 @@ review_execution_cases() {
   review_control_case control-source-read-error-continues-state state
 }
 
+stream_matrix() {
+  cat <<'MATRIX'
+direct-use direct cli used source none state same
+alias-use alias cli used source none state same
+file-use file cli used source none state same
+startup-use startup cli used source none state same
+direct-control direct control used source none stdout same
+alias-control alias control used source none stdout same
+file-control file control used source none stdout same
+direct-attached direct attached used source none exit same
+alias-attached alias attached used source none exit same
+file-attached file attached used source none stdout same
+direct-unused direct cli open-unused source none exit same
+alias-unused alias cli open-unused source none exit same
+file-unused file cli open-unused source none exit same
+startup-unused startup cli open-unused source none state same
+direct-spent direct cli spent source none state same
+alias-spent alias cli spent source none state same
+file-spent file cli spent source none state same
+direct-closed direct cli closed source none stderr same
+alias-closed alias cli closed source none stderr same
+file-closed file cli closed source none stderr same
+direct-eof direct cli eof source none state same
+direct-large-unused direct cli oversized-unused source none exit same
+alias-large-unused alias cli oversized-unused source none exit same
+file-large-unused file cli oversized-unused source none exit same
+startup-large-unused startup cli oversized-unused source none state same
+direct-large-used direct cli oversized-used source none stderr decided
+direct-display-valid direct cli used display-empty none state same
+direct-display-running direct cli open display-running none exit same
+alias-display-running alias cli open display-running none exit same
+file-display-running file cli open display-running none exit same
+direct-display-missing direct cli open display-missing none exit same
+alias-display-missing alias cli open display-missing none exit same
+file-display-missing file cli open display-missing none exit same
+direct-split-missing direct cli open split-missing none exit same
+alias-split-missing alias cli open split-missing none exit same
+file-split-missing file cli open split-missing none exit same
+direct-fail-after-read direct cli used source-missing none state same
+alias-fail-after-read alias cli used source-missing none state same
+file-fail-after-read file cli used source-missing none state same
+direct-term-before direct cli used source before exit same
+alias-term-before alias cli used source before exit same
+file-term-before file cli used source before exit same
+direct-term-during direct cli open source during exit same
+alias-term-during alias cli open source during exit same
+file-term-during file cli open source during exit same
+direct-term-after direct cli used source after exit same
+alias-term-after alias cli used source after exit same
+file-term-after file cli used source after exit same
+direct-term-after-error direct cli closed source after exit same
+alias-term-after-error alias cli closed source after exit same
+file-term-after-error file cli closed source after exit same
+MATRIX
+}
+
+matrix_body() {
+  local argument
+  for argument in "$@"; do
+    if [ "$argument" = ';' ]; then
+      printf '; '
+    else
+      printf "'%s' " "${argument//\'/\'\\\'\'}"
+    fi
+  done
+  printf '\n'
+}
+
+matrix_attached() {
+  local side="$1" body="$2" outer="$INNER_SOCKET_NAME-matrix" wrapper="$SCRATCH_DIR/attached-$side.sh"
+  local attempt pane
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf '%q ' "${MATRIX_BASE[@]}" -CC attach-session -f no-output -t "=$SESSION"
+    printf '2> %q\n' "$SCRATCH_DIR/$side.err"
+    printf 'printf "%%s\\n" "$?" > %q\n' "$SCRATCH_DIR/$side.rc"
+    printf 'touch %q\n' "$SCRATCH_DIR/$side.done"
+  } >"$wrapper"
+  rm -f "$SCRATCH_DIR/$side.done" "$SCRATCH_DIR/attached-start"
+  : >"$SCRATCH_DIR/$side.control"
+  pane="$(scrubbed "$TMUX_BIN" -L "$outer" -f /dev/null new-session -d -s matrix -x 80 -y 24 -P -F '#{pane_id}' "while [ ! -f $SCRATCH_DIR/attached-start ]; do sleep 0.02; done; bash $wrapper; sleep 1")"
+  scrubbed "$TMUX_BIN" -L "$outer" pipe-pane -O -t "$pane" "cat > $SCRATCH_DIR/$side.control"
+  touch "$SCRATCH_DIR/attached-start"
+  for ((attempt=0; attempt<100; attempt++)); do
+    if rg -q '%session-changed' "$SCRATCH_DIR/$side.control" 2>/dev/null; then break; fi
+    sleep 0.03
+  done
+  scrubbed "$TMUX_BIN" -L "$outer" send-keys -t "$pane" -l 'display-message -p MATRIX-BEGIN'
+  scrubbed "$TMUX_BIN" -L "$outer" send-keys -t "$pane" Enter
+  for ((attempt=0; attempt<100; attempt++)); do
+    if rg -q '^MATRIX-BEGIN$' "$SCRATCH_DIR/$side.control"; then break; fi
+    sleep 0.03
+  done
+  scrubbed "$TMUX_BIN" -L "$outer" send-keys -t "$pane" -l "$body"
+  scrubbed "$TMUX_BIN" -L "$outer" send-keys -t "$pane" Enter
+  for ((attempt=0; attempt<100; attempt++)); do
+    if [ "$(side_command "$side" show-options -gqv @zzcs-matrix-tail)" = yes ]; then break; fi
+    sleep 0.03
+  done
+  scrubbed "$TMUX_BIN" -L "$outer" send-keys -t "$pane" Enter
+  for ((attempt=0; attempt<100; attempt++)); do
+    [ -f "$SCRATCH_DIR/$side.done" ] && break
+    sleep 0.03
+  done
+  if [ ! -f "$SCRATCH_DIR/$side.done" ]; then printf '124\n' >"$SCRATCH_DIR/$side.rc"; fi
+  sleep 0.05
+  scrubbed "$TMUX_BIN" -L "$outer" kill-server >/dev/null 2>&1 || true
+  if [ -n "${ZZ_STREAM_PROBES:-}" ]; then
+    mkdir -p "${ZZ_STREAM_PROBES}.raw"
+    cp "$SCRATCH_DIR/$side.control" "${ZZ_STREAM_PROBES}.raw/$CASE_LABEL-$side.control"
+  fi
+  sed -n '/^MATRIX-BEGIN$/,$p' "$SCRATCH_DIR/$side.control" |
+    sed -E 's/^(%begin|%end|%error) [0-9]+ [0-9]+ /\1 TIME ID /' >"$SCRATCH_DIR/$side.out"
+}
+
+matrix_case() {
+  local name="$1" invocation="$2" caller="$3" input="$4" destination="$5" signal="$6" sabotage="$7" mode="$8"
+  local side option body rc pid guard attempt ready pane target config oracle=1
+  local -a MATRIX_BASE reader command
+  CASE_LABEL="matrix-$name"
+  CASE_STATE_FILE=1
+  for side in zz tmux; do
+    if [ "$side" = zz ]; then
+      MATRIX_BASE=(env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_HOME/config" ZZ_LOG_DIR="$ZZ_LOG_DIR" "$ZZ_BIN" --socket "$ZZ_SOCKET")
+    else
+      MATRIX_BASE=(env -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME="$TMUX_HOME" XDG_CONFIG_HOME="$TMUX_HOME/config" "$TMUX_BIN" -L "$INNER_SOCKET_NAME")
+    fi
+    for option in input before tail; do side_command "$side" set -gu "@zzcs-matrix-$option" >/dev/null; done
+    ready="$SCRATCH_DIR/$side.ready"
+    rm -f "$ready"
+    printf 'set -g @zzcs-matrix-input yes\n' >"$SCRATCH_DIR/matrix-input"
+    reader=(source-file -)
+    case "$destination" in
+    source-missing) printf 'set -g @zzcs-matrix-input yes\nsource-file /tmp/zzcs-matrix-missing\n' >"$SCRATCH_DIR/matrix-input" ;;
+    display-empty)
+      pane="$(side_command "$side" split-window -d -t "=$SESSION:$WINDOW_NAME.0" -P -F '#{pane_id}' '')"
+      reader=(display-message -I -t "$pane")
+      printf 'MATRIX-INPUT\n' >"$SCRATCH_DIR/matrix-input"
+      ;;
+    display-running) reader=(display-message -I -t "=$SESSION:$WINDOW_NAME.0") ;;
+    display-missing) reader=(display-message -I -t %99999) ;;
+    split-missing) reader=(split-window -I -d -t %99999) ;;
+    esac
+    case "$input" in
+    *unused) reader=(set -g @zzcs-matrix-input unused) ;;
+    eof) : >"$SCRATCH_DIR/matrix-input" ;;
+    oversized-used) cp "$SCRATCH_DIR/over-cap.conf" "$SCRATCH_DIR/matrix-input" ;;
+    esac
+    command=(set -g @zzcs-matrix-before yes ';')
+    if [ "$signal" = before ]; then command+=(run-shell "printf ready > $ready; sleep 1" ';'); fi
+    command+=("${reader[@]}" ';')
+    if [ "$input" = spent ]; then command+=(source-file - ';'); fi
+    if [ "$signal" = after ]; then command+=(run-shell "printf ready > $ready; sleep 1" ';'); fi
+    if [ "$invocation" != startup ]; then command+=(display-message -p MATRIX-AFTER ';'); fi
+    command+=(set -g @zzcs-matrix-tail yes)
+    body="$(matrix_body "${command[@]}")"
+    config="$SCRATCH_DIR/matrix.conf"
+    case "$invocation" in
+    alias)
+      side_command "$side" set -s 'command-alias[86]' "zzcs-matrix=$body" >/dev/null
+      command=(zzcs-matrix)
+      body=zzcs-matrix
+      ;;
+    file)
+      printf '%s\n' "$body" >"$config"
+      command=(source-file "$config")
+      body="source-file $config"
+      ;;
+    startup)
+      printf '%s\n' "$body" >"$config"
+      if [ "$side" = zz ]; then
+        MATRIX_BASE=(env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_HOME/config" "$ZZ_BIN" --socket "${ZZ_SOCKET%.sock}-matrix.sock")
+      else
+        MATRIX_BASE=(env -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME="$TMUX_HOME" XDG_CONFIG_HOME="$TMUX_HOME/config" "$TMUX_BIN" -L "$INNER_SOCKET_NAME-matrix-boot")
+      fi
+      command=(-f "$config" new-session -d -s matrix 'sleep 60')
+      ;;
+    esac
+    if [ "$caller" = attached ]; then
+      matrix_attached "$side" "$body"
+    else
+      if [ "$caller" = control ]; then command=(-C "${command[@]}"); fi
+      case "$input" in
+      open*)
+        mkfifo "$SCRATCH_DIR/matrix-fifo"
+        exec 9<>"$SCRATCH_DIR/matrix-fifo"
+        if [ "$signal" = during ]; then printf 'set -g @zzcs-matrix-input pending' >&9; fi
+        (exec "${MATRIX_BASE[@]}" "${command[@]}" <"$SCRATCH_DIR/matrix-fifo" 9>&-) >"$SCRATCH_DIR/$side.out" 2>"$SCRATCH_DIR/$side.err" &
+        ;;
+      closed)
+        (exec "${MATRIX_BASE[@]}" "${command[@]}" 0<&-) >"$SCRATCH_DIR/$side.out" 2>"$SCRATCH_DIR/$side.err" &
+        ;;
+      oversized-unused)
+        (exec "${MATRIX_BASE[@]}" "${command[@]}" <"$SCRATCH_DIR/over-cap.bin") >"$SCRATCH_DIR/$side.out" 2>"$SCRATCH_DIR/$side.err" &
+        ;;
+      *)
+        if [ "$caller" = control ]; then : >"$SCRATCH_DIR/matrix-input"; fi
+        (exec "${MATRIX_BASE[@]}" "${command[@]}" <"$SCRATCH_DIR/matrix-input") >"$SCRATCH_DIR/$side.out" 2>"$SCRATCH_DIR/$side.err" &
+        ;;
+      esac
+      pid=$!
+      (sleep 5; kill -KILL "$pid" 2>/dev/null || true) &
+      guard=$!
+      if [ "$signal" != none ]; then
+        for ((attempt=0; attempt<100; attempt++)); do
+          if [ "$signal" = during ]; then
+            [ "$(side_command "$side" show-options -gqv @zzcs-matrix-before)" = yes ] && break
+          else
+            [ -f "$ready" ] && break
+          fi
+          sleep 0.02
+        done
+        if [ "$attempt" = 100 ]; then oracle=0; fi
+        sleep 0.05
+        kill -TERM "$pid" 2>/dev/null || oracle=0
+      fi
+      set +e
+      wait "$pid"
+      rc=$?
+      kill "$guard" 2>/dev/null
+      wait "$guard" 2>/dev/null
+      set -e
+      printf '%s\n' "$rc" >"$SCRATCH_DIR/$side.rc"
+      case "$input" in open*) exec 9>&-; rm "$SCRATCH_DIR/matrix-fifo" ;; esac
+      if [ "$signal" != none ]; then sleep 1.1; fi
+      if [ "$caller" = control ]; then
+        mv "$SCRATCH_DIR/$side.out" "$SCRATCH_DIR/$side.control"
+        sed -E 's/^(%begin|%end|%error) [0-9]+ [0-9]+ /\1 TIME ID /' "$SCRATCH_DIR/$side.control" >"$SCRATCH_DIR/$side.out"
+      fi
+    fi
+    {
+      for option in input before tail; do
+        printf '%s=%s\n' "$option" "$("${MATRIX_BASE[@]}" show-options -gqv "@zzcs-matrix-$option")"
+      done
+      if [ "$destination" = display-empty ]; then side_command "$side" capture-pane -p -t "$pane" -S 0 -E 0; fi
+    } >"$SCRATCH_DIR/$side.matrix-state"
+    if [ "$invocation" = startup ]; then "${MATRIX_BASE[@]}" kill-server >/dev/null 2>&1 || true; fi
+    if [ "$destination" = display-empty ]; then side_command "$side" kill-pane -t "$pane" >/dev/null; fi
+  done
+  compare_channels "$CASE_LABEL" || true
+  if [ "$mode" = decided ]; then
+    if [ "$SELF_CHECK" = 0 ]; then
+      DECIDED=$((DECIDED+1))
+      printf 'note  %s decided:TUI-018: %s\n' "$CASE_LABEL" "$BOUND_DECISION"
+    fi
+  elif [ "$SELF_CHECK" = 1 ]; then
+    if [ "$LAST_EXIT_DIFFERED$LAST_STDOUT_DIFFERED$LAST_STDERR_DIFFERED$LAST_STATE_DIFFERED" != 0000 ] || [ "$oracle" != 1 ]; then
+      SELF_CHECK_FAILURES=$((SELF_CHECK_FAILURES+1))
+      printf 'FAIL  self-check %s baseline differs before sabotage\n' "$CASE_LABEL"
+    fi
+    case "$sabotage" in
+    exit) printf '%s\n' "$((1-$(cat "$SCRATCH_DIR/zz.rc")))" >"$SCRATCH_DIR/zz.rc" ;;
+    stdout) printf 'SABOTAGE\n' >>"$SCRATCH_DIR/zz.out" ;;
+    stderr) printf 'SABOTAGE\n' >>"$SCRATCH_DIR/zz.err" ;;
+    state) printf 'tail=SABOTAGE\n' >>"$SCRATCH_DIR/zz.matrix-state" ;;
+    esac
+    compare_channels "$CASE_LABEL" || true
+    self_check_expect "$CASE_LABEL: $sabotage sabotage" "$sabotage=1"
+  else
+    CHECKS=$((CHECKS+1))
+    if [ "$LAST_EXIT_DIFFERED$LAST_STDOUT_DIFFERED$LAST_STDERR_DIFFERED$LAST_STATE_DIFFERED" = 0000 ] && [ "$oracle" = 1 ]; then
+      printf 'ok    %s\n' "$CASE_LABEL"
+    else
+      FAILURES=$((FAILURES+1))
+      printf 'DIFF  %s\n' "$CASE_LABEL"
+    fi
+  fi
+  CASE_STATE_FILE=0
+  for side in zz tmux; do
+    for option in input before tail; do side_command "$side" set -gu "@zzcs-matrix-$option" >/dev/null; done
+  done
+}
+
+run_stream_matrix() {
+  local name invocation caller input destination signal sabotage mode
+  while read -r name invocation caller input destination signal sabotage mode; do
+    if [[ -n "${ZZ_STREAM_MATRIX_FILTER:-}" && ! "$name" =~ $ZZ_STREAM_MATRIX_FILTER ]]; then continue; fi
+    matrix_case "$name" "$invocation" "$caller" "$input" "$destination" "$signal" "$sabotage" "$mode"
+  done < <(stream_matrix)
+}
+
 write_payloads() {
   printf 'a\303\251b\377c\000d\n' >"$SCRATCH_DIR/binary.bin"
   # The cap counts bytes, so these are built by size and never by line count.
@@ -918,6 +1199,7 @@ run_cases() {
   review_alias_cases
   startup_config_stream_case
   review_execution_cases
+  run_stream_matrix
   bound_cases
 
   if [ "$FAILURES" -ne 0 ]; then
@@ -1090,6 +1372,7 @@ run_self_check() {
   review_alias_cases
   startup_config_stream_case
   review_execution_cases
+  run_stream_matrix
 
   # The second equivalence: with every sabotage withdrawn the comparison is
   # silent again, so none of the four above was a difference the scene kept.
@@ -1108,6 +1391,18 @@ zz_command -f /dev/null daemon >"$SCRATCH_DIR/zz-daemon.out" 2>"$SCRATCH_DIR/zz-
 ZZ_PID=$!
 wait_for "zz daemon socket" test -S "$ZZ_SOCKET"
 
+if [ "$MATRIX_LIST" = 1 ]; then
+  stream_matrix
+  exit 0
+fi
+if [ "$MATRIX_CHECK" = 1 ]; then
+  build_scene
+  write_payloads
+  run_stream_matrix
+  printf 'matrix: %s asserted, %s failures, %s decided:TUI-018, %s self-check failures\n' "$CHECKS" "$FAILURES" "$DECIDED" "$SELF_CHECK_FAILURES"
+  [ "$FAILURES" = 0 ] && [ "$SELF_CHECK_FAILURES" = 0 ]
+  exit $?
+fi
 if [ "$EXECUTION_CHECK" -eq 1 ]; then
   build_scene
   write_payloads

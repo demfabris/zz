@@ -714,9 +714,19 @@ the server log still records the command the caller typed. See
   `WINDOW_SWITCH_DEFAULT_FORMAT` and sends each with its `#[...]` markup intact, beside the resolved
   `mode-style` the current row is drawn over and the `message-style` `prompt_draw` gives the
   `(search)` prompt on the pane's last row. Appending a variant to `PaneMode` is a tail append like
-  any other, and both halves ship together.
-  `PaneMode::Customize { state, presentation, offset }` appends the per-pane option tree
-  using `ChooseTreeState` and `ChooserPresentation` on that same stack.
+  any other, and both halves ship together. `Switch` also carries `prompt_cursor`, the column
+  `prompt_draw` leaves the cursor in, `matches`, the columns `fuzzy_match` marked in each row, and
+  `match_style`, the resolved `switch-mode-match-style` those cells are repainted with; `rows`
+  holds the filtered matches in rank order and `selected` and `offset` are the server's persisted
+  `current` and `offset`.
+  `PaneMode::Customize { state, presentation, offset, prompt, prompt_cursor, prompt_top }` appends
+  the per-pane option tree using `ChooseTreeState` and `ChooserPresentation` on that same stack.
+  The preview arrives as `ChooserPreview::Markup` lines laid out on the server, and the selected
+  item's `detail` names the preview box title. `prompt` is only the row `prompt_draw` shows, already
+  scrolled so the cursor stays visible, with `prompt_cursor` its column and `prompt_top` set under
+  `status-position top`; `ChooseTreeState.prompt` stays empty, so an option value longer than
+  `MAX_CHOOSE_ITEM_TEXT_BYTES` never crosses a bounded field. A client that meets a control frame it
+  cannot decode now logs it and reads the next frame instead of dropping the connection.
   `InputMessage::ClientSuspendState { suspended }` is a tail variant in v104. The raw TUI
   reports terminal suspension and resumption so client lists and attachment counts exclude
   a stopped client while its connection and pane views survive.

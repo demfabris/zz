@@ -2326,10 +2326,14 @@ impl MuxState {
         };
         if slot == TargetSlot::Session {
             if let Some((session, window)) = target.split_once(':')
-                && (session == "=" || window == "=")
+                && (session == "=" || window == "=" || window.starts_with("=."))
             {
                 let session = if session == "=" { "" } else { session };
-                let window = if window == "=" { "" } else { window };
+                let window = if window == "=" || window.starts_with("=.") {
+                    &window[1..]
+                } else {
+                    window
+                };
                 return self.resolve_named_session(
                     Some(&format!("{session}:{window}")),
                     current,
@@ -5007,6 +5011,11 @@ mod tests {
             "cli:=",
             "=:",
             "=cli:=",
+            "cli:=.0",
+            "cli:=.%0",
+            "=cli:=.0",
+            ":=.0",
+            "cli:=.",
         ] {
             assert_eq!(
                 state.resolve_session(Some(target), Some(session)),
@@ -5016,6 +5025,10 @@ mod tests {
         }
         assert_eq!(
             state.resolve_session(Some(&format!("cli:.{other_pane}")), None),
+            Ok(session)
+        );
+        assert_eq!(
+            state.resolve_session(Some(&format!("cli:=.{other_pane}")), None),
             Ok(session)
         );
         for (target, error) in [
@@ -5028,6 +5041,7 @@ mod tests {
                 ServerError::SessionNotFound("nosuch".to_owned()),
             ),
             ("cli:win.9", ServerError::PaneNotFound("9".to_owned())),
+            ("cli:=.9", ServerError::PaneNotFound("9".to_owned())),
             (
                 "cli:nosuchwin.9",
                 ServerError::WindowNotFound("nosuchwin".to_owned()),
@@ -5044,7 +5058,12 @@ mod tests {
             );
         }
         let (other_session, _, foreign_pane) = state.create_session("foreign").unwrap();
-        for target in [format!(":.{foreign_pane}"), format!("=:.{foreign_pane}")] {
+        for target in [
+            format!(":.{foreign_pane}"),
+            format!("=:.{foreign_pane}"),
+            format!(":=.{foreign_pane}"),
+            format!("=:=.{foreign_pane}"),
+        ] {
             assert_eq!(
                 state.resolve_session(Some(&target), Some(session)),
                 Ok(other_session),
@@ -5053,6 +5072,10 @@ mod tests {
         }
         assert_eq!(
             state.resolve_session(Some(&format!("cli:.{foreign_pane}")), Some(session)),
+            Err(ServerError::PaneNotFound(foreign_pane.to_string()))
+        );
+        assert_eq!(
+            state.resolve_session(Some(&format!("cli:=.{foreign_pane}")), Some(session)),
             Err(ServerError::PaneNotFound(foreign_pane.to_string()))
         );
         assert_eq!(pane, PaneId(0));

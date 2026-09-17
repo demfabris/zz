@@ -1007,6 +1007,13 @@ lock_target_cases() {
     case_run "lock-target-has-session-$name" same '' -- has-session -t "$target"
     case_run "lock-target-list-windows-$name" same '' -- list-windows -t "$target" -F '#{window_index}:#{window_name}'
   done
+  for spec in 'empty-exact-window-pane|cli:=.0' 'empty-exact-window-pane-id|cli:=.%0'; do
+    name="${spec%%|*}"
+    target="${spec#*|}"
+    for command in lock-session has-session list-windows; do
+      case_run "lock-target-$name-$command" same '' -- "$command" -t "$target"
+    done
+  done
   run_on_both new-session -d -s zzcc-foreign -n foreign "$INNER_SHELL"
   local foreign_pane
   foreign_pane="$(tmux_inner_command display-message -p -t '=zzcc-foreign:' '#{pane_id}')"
@@ -1203,7 +1210,7 @@ zz_cursor_is_not() {
 
 lock_target_sabotages() {
   local command pane target expected_stdout
-  for target in 'cli:=' '=:'; do
+  for target in 'cli:=' '=:' 'cli:=.0' 'cli:=.%0'; do
     for command in lock-session has-session list-windows; do
       self_check_run "$command-$target-equivalence" "$command" -t "$target"
       self_check_expect "$command accepts $target" exit=0 stdout=0 stderr=0

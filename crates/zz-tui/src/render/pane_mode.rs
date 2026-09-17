@@ -222,16 +222,19 @@ fn clock_surface(time: &str, colour: &str, rect: Rect, theme: &ThemeColours) -> 
     }
 }
 
-fn switch_surface(
-    rows: &[String],
+struct SwitchView<'a> {
+    rows: &'a [String],
     selected: u32,
     offset: u32,
-    selection_style: &str,
-    prompt: &str,
-    prompt_style: &str,
-    rect: Rect,
-    theme: &ThemeColours,
-) -> ModeSurface {
+    selection_style: &'a str,
+    prompt: &'a str,
+    prompt_style: &'a str,
+    prompt_cursor: u16,
+    matches: &'a [Vec<u16>],
+    match_style: &'a str,
+}
+
+fn switch_surface(view: &SwitchView<'_>, rect: Rect, theme: &ThemeColours) -> ModeSurface {
     let mut grid = Grid::new(rect.width, rect.height);
     if rect.height <= 1 {
         return ModeSurface {
@@ -241,26 +244,42 @@ fn switch_surface(
         };
     }
     let visible = rect.height - 1;
-    let selection = base_cell(&resolved_style(selection_style, theme).unwrap_or_else(plain));
+    let selection = base_cell(&resolved_style(view.selection_style, theme).unwrap_or_else(plain));
+    let highlight = resolved_style(view.match_style, theme)
+        .map(|style| TmuxStyle {
+            fg: style.fg.or(Some(TmuxColour::Default)),
+            bg: style.bg.or(Some(TmuxColour::Default)),
+            attributes: style.attributes,
+            ..TmuxStyle::default()
+        })
+        .unwrap_or_else(plain);
     let base = plain();
     for index in 0..visible {
-        let Some(row) = rows.get(usize::from(index).saturating_add(offset as usize)) else {
+        let row_index = usize::from(index).saturating_add(view.offset as usize);
+        let Some(row) = view.rows.get(row_index) else {
             break;
         };
-        if u32::from(index).saturating_add(offset) == selected {
+        if u32::from(index).saturating_add(view.offset) == view.selected {
             grid.fill(0, index, rect.width, &Paint::Style(cleared_to(&selection)));
             grid.markup(0, index, rect.width, row, &selection, false);
         } else {
-            let used = grid.markup(0, index, rect.width, row, &base, false);
-            grid.clear_before_row(used, index);
+            grid.markup(0, index, rect.width, row, &base, false);
+        }
+        for column in view.matches.get(row_index).into_iter().flatten() {
+            if *column < rect.width {
+                grid.restyle(*column, index, &Paint::Style(highlight.clone()));
+            }
         }
     }
     let prompt_row = rect.height - 1;
-    let style = base_cell(&resolved_style(prompt_style, theme).unwrap_or_else(plain));
-    let used = grid.markup(0, prompt_row, rect.width, prompt, &style, false);
+    let style = base_cell(&resolved_style(view.prompt_style, theme).unwrap_or_else(plain));
+    grid.text(0, prompt_row, view.prompt, &Paint::Style(style), rect.width);
     ModeSurface {
         grid,
-        cursor: (used.min(rect.width.saturating_sub(1)), prompt_row),
+        cursor: (
+            view.prompt_cursor.min(rect.width.saturating_sub(1)),
+            prompt_row,
+        ),
         cursor_visible: true,
     }
 }
@@ -271,9 +290,14 @@ pub(super) fn surface(mode: &PaneMode, rect: Rect, theme: &ThemeColours) -> Mode
             state,
             presentation,
             offset,
+            prompt,
+            prompt_cursor,
+            prompt_top,
         } => {
+            let prompt =
+                (!prompt.is_empty()).then_some((prompt.as_str(), *prompt_cursor, *prompt_top));
             let (grid, (x, y, cursor_visible)) =
-                super::chooser::customize_surface(state, presentation, *offset, rect);
+                super::chooser::customize_surface(state, presentation, *offset, prompt, rect);
             ModeSurface {
                 grid,
                 cursor: (x, y),
@@ -288,13 +312,21 @@ pub(super) fn surface(mode: &PaneMode, rect: Rect, theme: &ThemeColours) -> Mode
             selection_style,
             prompt,
             prompt_style,
+            prompt_cursor,
+            matches,
+            match_style,
         } => switch_surface(
-            rows,
-            *selected,
-            *offset,
-            selection_style,
-            prompt,
-            prompt_style,
+            &SwitchView {
+                rows,
+                selected: *selected,
+                offset: *offset,
+                selection_style,
+                prompt,
+                prompt_style,
+                prompt_cursor: *prompt_cursor,
+                matches,
+                match_style,
+            },
             rect,
             theme,
         ),
@@ -334,6 +366,9 @@ mod tests {
             selection_style: "noattr,bg=themeyellow,fg=themeblack".to_owned(),
             prompt: "(search) ".to_owned(),
             prompt_style: "bg=themeyellow,fg=themeblack".to_owned(),
+            prompt_cursor: 9,
+            matches: Vec::new(),
+            match_style: String::new(),
         };
         let rect = Rect {
             x: 0,

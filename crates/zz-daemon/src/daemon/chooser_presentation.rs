@@ -554,13 +554,30 @@ impl Styles<'_> {
     }
 }
 
-pub(super) fn switch_rows(inner: &ServerState, windows: bool, format: Option<&str>) -> Vec<String> {
-    let format = format.unwrap_or(WINDOW_SWITCH_DEFAULT_FORMAT);
+pub(super) struct SwitchEntry {
+    pub(super) text: String,
+    pub(super) target: String,
+    pub(super) context: ExecutionContext,
+    pub(super) columns: Vec<usize>,
+    score: u32,
+}
+
+/// `window_switch_build`: every session, or every window under `-w`, in name
+/// order, then the `fuzzy_match` survivors of the prompt's filter ranked by
+/// score and that order.
+pub(super) fn switch_matches(
+    inner: &ServerState,
+    pane: PaneId,
+    mode: &zz_mux::SwitchMode,
+) -> Vec<SwitchEntry> {
+    let format = mode
+        .format
+        .as_deref()
+        .unwrap_or(WINDOW_SWITCH_DEFAULT_FORMAT);
     let engine = &inner.engine;
     let facts = format_hook_facts(inner);
-    let attached = None;
-    if windows {
-        let mut entries = engine
+    let entries = if mode.windows {
+        let mut windows = engine
             .state
             .windows
             .iter()
@@ -570,44 +587,93 @@ pub(super) fn switch_rows(inner: &ServerState, windows: bool, format: Option<&st
                     (entry.name.clone(), session.name.clone(), entry.index),
                     *window,
                     entry.session,
+                    entry.active_pane,
                 ))
             })
             .collect::<Vec<_>>();
-        entries.sort_by(|left, right| left.0.cmp(&right.0));
-        return entries
+        windows.sort_by(|left, right| left.0.cmp(&right.0));
+        windows
             .into_iter()
-            .map(|(_, window, session)| {
-                expand_row(
+            .map(|((_, name, index), window, session, active)| {
+                let text = expand_row(
                     engine,
                     format,
                     &ExecutionContext::new(Some(session), Some(window), None),
                     &scope_variables(false, true, false),
-                    attached,
+                    None,
                     &facts,
+                );
+                (
+                    text,
+                    format!("={name}:{index}."),
+                    ExecutionContext::new(Some(session), Some(window), Some(active)),
                 )
             })
-            .collect();
-    }
-    let mut entries = engine
-        .state
-        .sessions
-        .iter()
-        .map(|(session, entry)| (entry.name.clone(), *session))
-        .collect::<Vec<_>>();
-    entries.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.0.cmp(&right.1.0)));
-    entries
+            .collect::<Vec<_>>()
+    } else {
+        let mut sessions = engine
+            .state
+            .sessions
+            .iter()
+            .map(|(session, entry)| (entry.name.clone(), *session, entry.active_window))
+            .collect::<Vec<_>>();
+        sessions.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.0.cmp(&right.1.0)));
+        sessions
+            .into_iter()
+            .map(|(name, session, window)| {
+                let text = expand_row(
+                    engine,
+                    format,
+                    &ExecutionContext::new(Some(session), None, None),
+                    &scope_variables(true, false, false),
+                    None,
+                    &facts,
+                );
+                (
+                    text,
+                    format!("={name}:"),
+                    ExecutionContext::new(
+                        Some(session),
+                        Some(window),
+                        engine
+                            .state
+                            .windows
+                            .get(&window)
+                            .map(|entry| entry.active_pane),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let width = engine
+        .pane_geometry(pane)
+        .map_or(80, |(columns, _)| usize::from(columns));
+    let mut matches = entries
         .into_iter()
-        .map(|(_, session)| {
-            expand_row(
-                engine,
-                format,
-                &ExecutionContext::new(Some(session), None, None),
-                &scope_variables(true, false, false),
-                attached,
-                &facts,
-            )
+        .filter_map(|(text, target, context)| {
+            let (score, columns) = if mode.filter.is_empty() {
+                (0, Vec::new())
+            } else {
+                zz_mux::fuzzy_match_columns(&mode.filter, &text, width)?
+            };
+            Some(SwitchEntry {
+                text,
+                target,
+                context,
+                columns,
+                score,
+            })
         })
-        .collect()
+        .collect::<Vec<_>>();
+    matches.sort_by(|left, right| right.score.cmp(&left.score));
+    matches
+}
+
+pub(super) fn switch_match_style(inner: &ServerState, pane: PaneId) -> String {
+    let state = &inner.engine.state;
+    let window = state.window_for_pane(pane);
+    let session = window.and_then(|window| state.windows.get(&window).map(|entry| entry.session));
+    Styles { inner }.expand("#{E:switch-mode-match-style}", session, window, Some(pane))
 }
 
 pub(super) fn mode_style_for_pane(inner: &ServerState, pane: PaneId) -> String {

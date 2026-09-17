@@ -695,6 +695,11 @@ the server log still records the command the caller typed. See
   Both parse variants retain the same diagnostic text and parse-error classification.
   `NativeInvalidCommand` preserves the runtime phase when bind-key or untyped confirm-before
   constructs an invalid native callback, while retaining native usage exit 2.
+  Terminal cells use previously reserved `PackedCell.flags` bits 2..9 for tab provenance:
+  1..32 marks the tab head's width; 129..159 marks a continuation's offset plus 128.
+  Captures emit HT only for an intact span. Packed style class code 0 with an index 1..16
+  preserves explicit indexed colours 0..15; code 0 with index 0 still means resolved RGB.
+  These encodings retain the existing cell and style sizes and field order.
   v103 shipped in zz 0.10.0, so these builds require v104 on both sides of the connection.
 - v103 carries the pin's pane prompt and the terminal name a client learned after the hello.
   `CommandPromptState` appends `pane: Option<PaneId>` after `no_freeze`: `command-prompt -P` is

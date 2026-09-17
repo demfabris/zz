@@ -208,7 +208,8 @@ impl ModeRevision {
                         dictionary.encode_glyph(&grapheme_scratch),
                         dictionary.intern_style(style),
                         width,
-                    );
+                    )
+                    .with_tab(raw_cell.tab()?);
                     semantics[index] = match raw_cell.semantic_content()? {
                         CellSemanticContent::Output => SEMANTIC_OUTPUT,
                         CellSemanticContent::Input => SEMANTIC_INPUT,
@@ -558,13 +559,25 @@ impl ModeRevision {
         let mut output = String::new();
         for row in start..=end {
             let mut line = String::new();
-            for column in 0..self.columns {
-                self.push_cell_text(self.cell(PointCoordinate { x: column, y: row }), &mut line);
+            let cells: Vec<_> = (0..self.columns)
+                .map(|x| self.cell(PointCoordinate { x, y: row }))
+                .collect();
+            let tags: Vec<_> = cells.iter().map(|cell| cell.tab()).collect();
+            let mut column = 0;
+            while column < cells.len() {
+                let width = super::capture_tab_width(&tags, column);
+                if width > 0 {
+                    line.push('\t');
+                    column += width;
+                } else {
+                    self.push_cell_text(cells[column], &mut line);
+                    column += 1;
+                }
             }
             if preserve_trailing {
                 output.push_str(&line);
             } else {
-                output.push_str(line.trim_end());
+                output.push_str(line.trim_end_matches(' '));
             }
             if row < end && !(join_wrapped && self.row(row).wrapped()) {
                 output.push('\n');

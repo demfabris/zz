@@ -7,7 +7,7 @@ if [ -n "${ZZ_SMOKE_ZZ_BIN:-}" ]; then
     side=zz
     binary="$ZZ_SMOKE_ZZ_BIN"
     set -- --socket "$ZZ_SMOKE_ZZ_SOCKET"
-    bare_prefix="--bootstrap-launcher-client --socket $ZZ_SMOKE_ZZ_SOCKET"
+    bare_prefix="--socket $ZZ_SMOKE_ZZ_SOCKET"
 else
     side=tmux
     binary="$ZZ_SMOKE_TMUX_BIN"

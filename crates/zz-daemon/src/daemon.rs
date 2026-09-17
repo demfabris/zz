@@ -12779,13 +12779,20 @@ impl Shared {
             && !mode.queue_execution().detached
             && !self.is_capturing_control_command_events(target.0);
         let deferred_shutdown_before = mode.queue_execution().deferred_shutdown.get();
-        let capture = self.begin_control_command_event_capture(target.0);
         let reported_failure_before = mode.queue_execution().reported_failures.get();
         let routed = if prepared {
             Ok(command.clone())
         } else {
             prepare_config_command(&self.inner.lock().engine, command).map(|(command, _)| command)
         };
+        let early_shell_guard = routed.as_ref().is_ok_and(|command| {
+            canonical_command(&command.name) == "run-shell"
+                && parse_run_shell_args(&command.args).is_ok_and(|args| !args.command_mode)
+        });
+        if early_shell_guard {
+            self.publish_control_command_guard(Some(target), RawText::default(), false, false);
+        }
+        let capture = self.begin_control_command_event_capture(target.0);
         let direct_command_prepare_error = !prepared && routed.is_err();
         let source_command = routed
             .as_ref()
@@ -12881,7 +12888,7 @@ impl Shared {
                 )
             })
             .flatten();
-        if forced_shutdown_transition {
+        if forced_shutdown_transition || early_shell_guard {
             self.publish_captured_control_command_events(target.0, captured_events);
         } else if !direct_command_prepare_error && callback_parse_depth > 1 {
             self.publish_control_command_guard_tree(

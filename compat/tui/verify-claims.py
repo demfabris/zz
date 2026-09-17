@@ -154,7 +154,7 @@ def structural(items, problems):
                             f"so its claim cannot be re-measured; add it to FIXTURES")
 
 
-def run_fixtures(ids, items, problems, zz=None, output_dir=None):
+def run_fixtures(ids, items, problems, zz=None, output_dir=None, timeout=1800):
     by_id = {i["id"]: i for i in items}
     gaps = accepted_gaps(ROOT)
     env = dict(os.environ)
@@ -182,8 +182,18 @@ def run_fixtures(ids, items, problems, zz=None, output_dir=None):
                 problems.append(f"{pid}: fixture {rel} does not exist")
                 continue
             print(f"  running {rel} for {pid} ...", flush=True)
-            r = subprocess.run(["bash", str(path)], capture_output=True, text=True,
-                               cwd=str(ROOT), env=env, timeout=1800)
+            try:
+                r = subprocess.run(["bash", str(path)], capture_output=True, text=True,
+                                   cwd=str(ROOT), env=env, timeout=timeout)
+            except subprocess.TimeoutExpired as error:
+                stdout = error.stdout or b""
+                stderr = error.stderr or b""
+                if isinstance(stdout, bytes):
+                    stdout = stdout.decode("utf-8", errors="replace")
+                if isinstance(stderr, bytes):
+                    stderr = stderr.decode("utf-8", errors="replace")
+                r = subprocess.CompletedProcess(error.cmd, 124, stdout, stderr)
+                problems.append(f"{pid}: {rel} exceeded its {timeout}-second timeout")
             if output_dir is not None:
                 prefix = output_dir / f"{pid}-{path.stem}"
                 prefix.with_suffix(".stdout.txt").write_text(r.stdout or "", encoding="utf-8")
@@ -222,7 +232,11 @@ def main(argv):
                          "directory must pass this)")
     ap.add_argument("--output-dir", type=Path,
                     help="retain each live fixture's stdout, stderr, command and exit status")
+    ap.add_argument("--timeout", type=int, default=1800, metavar="SECONDS",
+                    help="maximum duration of each fixture (default: 1800 seconds)")
     args = ap.parse_args(argv[1:])
+    if args.timeout <= 0:
+        ap.error("--timeout must be positive")
     data = json.loads(LEDGER.read_text(encoding="utf-8"))
     items = data["items"]
     problems = []
@@ -233,7 +247,7 @@ def main(argv):
     if args.run is not None:
         targets = args.run or verified
         print(f"re-measuring: {', '.join(targets)}")
-        run_fixtures(targets, items, problems, args.zz, args.output_dir)
+        run_fixtures(targets, items, problems, args.zz, args.output_dir, args.timeout)
     print()
     if problems:
         print(f"{len(problems)} problem(s):")

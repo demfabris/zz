@@ -4,7 +4,7 @@ title: Per-pane TUI customize mode
 description: Reuse the pane mode stack and chooser grid for tmux option editing, with a separate entry point for future zz controls.
 status: Implemented for opening and scoped option editing on 2026-09-16; gate review pending.
 resource: crates/zz-mux/src/command/customize.rs
-timestamp: 2026-09-16T00:00:00Z
+timestamp: 2026-09-17T00:00:00Z
 tags: [tui, tmux, options]
 ---
 

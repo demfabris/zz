@@ -309,6 +309,11 @@ styled_screen_of() {
   capture_screen "$1" 2>/dev/null || true
 }
 
+grid_cells_of() {
+  tmux_outer_command capture-pane -p -R -t "=$OUTER_SESSION:$1" |
+    sed -n -e 's/^\(G [0-9]*x[0-9]*\).*/\1/p' -e '/^[[:space:]]*C /{s/ flags=[^ ]*//;p;}'
+}
+
 # The session state a command may move, read the same way from both servers.
 # The client's own name is its tty and is never in here; see the header.
 state_of() {
@@ -459,6 +464,7 @@ settle_screen() {
 CASE_NEEDLE_MODE=0
 CASE_CLOCK_FACE=0
 CASE_STDIN=''
+CASE_GRID_CELLS=0
 
 # Two spellings a command prints belong to the process that printed them and no
 # two servers can share them: the pts number the kernel gave a client, and the
@@ -569,6 +575,10 @@ compare_channels() {
     tmux_screen="$(styled_screen_of tmux)"
     zz_cursor="$(cursor_tuple zz)"
     tmux_cursor="$(cursor_tuple tmux)"
+  fi
+  if [ "$CASE_GRID_CELLS" -eq 1 ]; then
+    zz_screen="$(grid_cells_of zz)"
+    tmux_screen="$(grid_cells_of tmux)"
   fi
   LAST_EXIT_DIFFERED=0
   LAST_STDOUT_DIFFERED=0
@@ -929,6 +939,7 @@ customize_fix_self_checks() {
 }
 
 switch_tail_style_cases() {
+  attach_both_at 80 24
   local style
   for style in dim fg=red bg=red underscore; do
     case_run "switch-tail-short-$style" same '' -- switch-mode -w -F "#[$style]#{window_name}#[default]" -t PANE
@@ -951,7 +962,15 @@ switch_tail_self_checks() {
     zz_command copy-mode -q -t "$(active_pane zz)" >/dev/null
     zz_command switch-mode -w -F '#{window_name} #[dim]#{session_name}:#{window_index}#{window_flags}#[default] #[dim]#{pane_current_command}#[default] #[dim]#{?#{!=:#{pane_title},#{host_short}},#{pane_title},}#[default]#{?#{==:#{window_name},two},, }' -t "$(active_pane zz)" >/dev/null
     self_check_run "switch-tail-$duplicate-sabotage" display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
-    self_check_expect "default cell after final dim run $duplicate changes decoded styles" exit=0 stdout=0 stderr=0 screen=1 state=0
+    self_check_expect "default cell after final dim run $duplicate changes the capture style tail" exit=0 stdout=0 stderr=0 screen=1 state=0
+    CASE_GRID_CELLS=1
+    self_check_run "switch-tail-$duplicate-cells-control" display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+    self_check_expect 'allocated default cells preserve the same glyphs and styles' exit=0 stdout=0 stderr=0 screen=0 state=0
+    zz_command copy-mode -q -t "$(active_pane zz)" >/dev/null
+    zz_command switch-mode -w -F '#{window_name} #[dim]#{session_name}:#{window_index}#{window_flags}#[default] #[dim]#{pane_current_command}#[default] #[dim]#{?#{!=:#{pane_title},#{host_short}},#{pane_title},}#[default]#{?#{==:#{window_name},two},,#[bg=red] }' -t "$(active_pane zz)" >/dev/null
+    self_check_run "switch-tail-$duplicate-cells-sabotage" display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+    self_check_expect 'a changed blank-cell background survives cell decoding' exit=0 stdout=0 stderr=0 screen=1 state=0
+    CASE_GRID_CELLS=0
     run_both copy-mode -q -t PANE
     if [ "$duplicate" = yes ]; then
       run_on_both kill-session -t '=alpha'
@@ -1444,9 +1463,15 @@ client_tool_cases() {
   case_run switch-mode-template-result same '' -- show-options -gv @review-command
   run_on_both set-option -gu @review-command
   switch_lifetime_cases
+  CASE_GRID_CELLS=1
+  case_run switch-mode-history-cells same '' -- switch-mode -w -t PANE
+  CASE_GRID_CELLS=0
+  restore_case switch-mode-history-closed
+  attach_both_at 80 24
   CASE_NEEDLE_MODE=1
   case_run switch-mode-windows same '' -- switch-mode -w -t PANE
   restore_case switch-mode-windows-closed
+  attach_both_at 80 24
   run_on_both new-session -d -s alpha -n "$WINDOW_NAME" -x 80 -y 24 "$INNER_SHELL"
   run_on_both new-session -d -s zulu -n "$WINDOW_NAME" -x 80 -y 24 "$INNER_SHELL"
   case_run switch-mode-duplicate-windows same '' -- switch-mode -w -t PANE

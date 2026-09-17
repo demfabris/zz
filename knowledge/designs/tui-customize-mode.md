@@ -57,8 +57,14 @@ the client's attachment accounting after SIGCONT. The evidence under
 comparisons, a numeric option edit, terminal stop/resume, and regression results.
 The two newly asserted cases have one-sided sabotages in the fixture self-check.
 
+The 2026-09-17 fix pass covers all eight editable array options. Root edits insert
+at the first unused index when submitted; child edits replace that index. Both
+preserve other entries and the existing owner scope. Hook arrays stay out of the
+customize tree, matching the pin. C-c and the measured unbound mode-tree keys
+leave the mode open; q, Escape and C-g close it.
+
 The opening-screen proof does not cover every customize interaction. Key binding
-editing, reset/unset and tagged bulk mutations, array insertion, help, mouse,
+editing, reset/unset and tagged bulk mutations, help, mouse,
 kill-on-exit (`-k`) and zoom restoration (`-Z`) remain unimplemented; the two flags
 are explicitly refused. Search, filtering, navigation and arbitrary option edits
 have not all received pin screen comparisons. The zz section belongs to the

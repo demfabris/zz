@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use super::mode_prompt::{ModeKey, ModePrompt, PromptOutcome};
 use super::*;
 use crate::tmux_option_metadata::TmuxOptionKind;
@@ -88,7 +90,8 @@ pub struct CustomizeMode {
     format: Option<String>,
     hide_global: bool,
     accept: bool,
-    rebuild: Option<Option<String>>,
+    rebuild: bool,
+    rebuild_tag: Option<String>,
     pub kill_source: bool,
     pub zoom: bool,
 }
@@ -297,7 +300,8 @@ impl MuxEngine {
         mode: &mut CustomizeMode,
         expand: &mut CustomizeExpand<'_>,
     ) {
-        if let Some(tag) = mode.rebuild.take() {
+        if std::mem::take(&mut mode.rebuild) {
+            let tag = mode.rebuild_tag.take();
             self.customize_build(pane, mode, tag, expand);
         }
     }
@@ -1382,7 +1386,8 @@ impl MuxEngine {
         if commands.is_empty() {
             self.customize_build(pane, mode, tag, expand);
         } else {
-            mode.rebuild = Some(tag);
+            mode.rebuild = true;
+            mode.rebuild_tag = tag;
         }
         CustomizeResult {
             close: false,
@@ -1575,15 +1580,14 @@ impl MuxEngine {
                     return CustomizeResult::stay();
                 };
                 let full = if tmux_options().any(|option| option.name == name && option.is_array) {
-                    let key = match array_key {
-                        Some(key) => key,
-                        None => {
-                            let values = self.customize_array_values(target, &name);
-                            match first_free_array_index(values.keys()) {
-                                Ok(index) => index.to_string(),
-                                Err(_) => return CustomizeResult::stay(),
-                            }
-                        }
+                    let key = if let Some(key) = array_key {
+                        key
+                    } else {
+                        let values = self.customize_array_values(target, &name);
+                        let Ok(index) = first_free_array_index(values.keys()) else {
+                            return CustomizeResult::stay();
+                        };
+                        index.to_string()
                     };
                     format!("{name}[{key}]")
                 } else {
@@ -1926,7 +1930,7 @@ impl PreviewWriter {
         if style.is_empty() {
             line.push_str(&escaped);
         } else {
-            line.push_str(&format!("#[{style}]{escaped}#[default]"));
+            let _ = write!(line, "#[{style}]{escaped}#[default]");
         }
     }
 

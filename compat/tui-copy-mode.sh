@@ -868,7 +868,7 @@ run_movement() {
   type_both "$KEY_UP"
   copy_case "$table-scroll-start" none ''
   type_both "$KEY_HALFUP"
-  copy_case "$table-halfpage-up" none ''
+  copy_case "$table-halfpage-up" screen 'line-27 filler-27'
   type_both "$KEY_HALFDOWN"
   copy_case "$table-halfpage-down" none ''
   reenter_copy_mode "$table paging"

@@ -1,0 +1,198 @@
+{
+  "production_revision": "5e601c02",
+  "checks": [
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/tests-closing.txt",
+      "exit_status": 101,
+      "result_lines": [
+        "test result: FAILED. 555 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 17.05s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 106 filtered out; finished in 0.01s",
+        "test result: ok. 107 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.64s",
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.58s",
+        "test result: FAILED. 133 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 900.70s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 981 filtered out; finished in 1.76s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 981 filtered out; finished in 1.39s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 981 filtered out; finished in 1.27s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 981 filtered out; finished in 0.63s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 981 filtered out; finished in 0.81s",
+        "test result: ok. 982 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1143.52s",
+        "test result: FAILED. 1 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 15.17s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.53s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.41s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.43s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.53s",
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.72s",
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.54s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 20.69s",
+        "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.25s",
+        "test result: ok. 537 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.66s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s",
+        "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.01s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s",
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s",
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s",
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s",
+        "test result: ok. 60 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.14s",
+        "test result: ok. 231 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.70s",
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/clippy-closing.txt",
+      "exit_status": 0,
+      "result_lines": []
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/fmt-closing.txt",
+      "exit_status": 0,
+      "result_lines": []
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/compat-check.txt",
+      "exit_status": 0,
+      "result_lines": [
+        "test result: ok. 537 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.78s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 981 filtered out; finished in 0.05s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 981 filtered out; finished in 0.03s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 981 filtered out; finished in 0.01s"
+      ]
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/test-control-mode-2.txt",
+      "exit_status": 0,
+      "result_lines": [
+        "test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 63 filtered out; finished in 0.00s"
+      ]
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/test-split-window-2.txt",
+      "exit_status": 0,
+      "result_lines": [
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 532 filtered out; finished in 0.03s"
+      ]
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/test-refresh-size-retry.txt",
+      "exit_status": 0,
+      "result_lines": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 135 filtered out; finished in 3.68s"
+      ]
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/test-control-return-retry.txt",
+      "exit_status": 101,
+      "result_lines": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 135 filtered out; finished in 95.81s"
+      ]
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/test-wait-exit-retry.txt",
+      "exit_status": 101,
+      "result_lines": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 135 filtered out; finished in 149.12s"
+      ]
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/main-test-palette.txt",
+      "exit_status": 101,
+      "result_lines": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 556 filtered out; finished in 0.01s"
+      ]
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/main-test-agent-soak.txt",
+      "exit_status": 101,
+      "result_lines": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 11.92s"
+      ]
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/main-test-control-return.txt",
+      "exit_status": 101,
+      "result_lines": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 132 filtered out; finished in 98.92s"
+      ]
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/main-test-wait-exit.txt",
+      "exit_status": 0,
+      "result_lines": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 132 filtered out; finished in 3.01s"
+      ]
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/test-wait-exit-retry-2.txt",
+      "exit_status": 0,
+      "result_lines": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 135 filtered out; finished in 1.98s"
+      ]
+    }
+  ],
+  "full_package_result": "Failed: zz palette, zz-cli integration (three tests), zz-daemon slow-client soak. Remaining library, integration and doc targets passed.",
+  "library_totals": {
+    "zz": {
+      "passed": 555,
+      "failed": 1,
+      "ignored": 1
+    },
+    "zz-cli": {
+      "passed": 107,
+      "failed": 0
+    },
+    "zz-daemon": {
+      "passed": 982,
+      "failed": 0
+    },
+    "zz-mux": {
+      "passed": 537,
+      "failed": 0
+    },
+    "zz-protocol": {
+      "passed": 231,
+      "failed": 0
+    }
+  },
+  "residuals": [
+    {
+      "name": "tab_accepts_completion_without_leaving_the_palette",
+      "classification": "inherited",
+      "evidence": "Fresh main fails with identical new-w versus new-window assertion."
+    },
+    {
+      "name": "agent_stream_soak_slow_client",
+      "classification": "inherited",
+      "evidence": "Fresh main repeats Some(1501) versus Some(1500)."
+    },
+    {
+      "name": "control_return_and_explicit_detach_follow_the_full_retval_matrix",
+      "classification": "inherited intermittent timeout",
+      "evidence": "Closing suite times out at sourced-command-detach-queued-eof. Isolated candidate and fresh main both time out at generic-nonzero-eof."
+    },
+    {
+      "name": "refresh_client_c_sizes_a_control_target_for_menu_gating",
+      "classification": "isolated retry passed",
+      "evidence": "Closing suite failed; isolated retry passes one test, exit 0."
+    },
+    {
+      "name": "wait_exit_holds_the_control_process_until_a_second_blank_line",
+      "classification": "intermittent acknowledgement/EOF stall; second isolated candidate retry passed",
+      "evidence": "Full candidate suite and first isolated retry required targeted SIGKILL after two-minute stalls. Fresh main isolated test and second candidate retry both pass. Fixed shell probe stalls on fresh main and passes on candidate. No wait-exit fix claimed."
+    }
+  ]
+}

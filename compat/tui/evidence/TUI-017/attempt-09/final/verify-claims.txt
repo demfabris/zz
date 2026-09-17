@@ -1,0 +1,8 @@
+verified: TUI-001, TUI-002, TUI-003, TUI-004, TUI-005, TUI-006, TUI-007, TUI-008, TUI-009, TUI-010, TUI-012, TUI-016
+re-measuring: TUI-017
+  comparing /home/demfabris/dev/zz-c11-capture-residuals/target/capture-residuals-final-v5/zz
+  running compat/tui-client-commands.sh for TUI-017 ...
+    all 228 asserted comparisons identical, 25 recorded not asserted (0 for a sibling lane, owners TUI-014=6 decided:TUI-015=4 decided:TUI-016=1 decided:T
+    (25 recorded, none of them TUI-017's)
+
+every verified obligation holds up

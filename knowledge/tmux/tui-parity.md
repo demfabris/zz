@@ -824,59 +824,77 @@ Sources:
 - `compat/tui/evidence/TUI-017/attempt-08/notes.md`
 - `compat/tui/evidence/TUI-017/attempt-08/proof-summary.json`
 - `compat/tui/evidence/TUI-017/attempt-08/record-audit.json`
+- `compat/tui/evidence/TUI-017/attempt-09/notes.md`
+- `compat/tui/evidence/TUI-017/attempt-09/proof-summary.json`
+- `compat/tui/evidence/TUI-017/attempt-09/new-asserted-cases.json`
+- `compat/tui/evidence/TUI-017/attempt-09/record-audit.json`
+- `compat/tui/evidence/TUI-015/attempt-06/notes.md`
 
 Tmux gap references: `options.lock-program`.
 
-REBASED CAPTURE RESIDUALS 2026-09-17. Rebased onto origin/main 38c50df4, including the reviewed empty-exact-window fix and credential-scrubbing harnesses. Source 57160865 preserves the configured pane-index callback through empty-exact-window normalization. The 25-step scope probe matches all five channels; cli:=.1 under pane-base-index 1 succeeds for lock-session, has-session and list-windows. All six main assertions remain green. Three shared-fixture executions pass 205 assertions with 25 records and unattributed=0; TUI-015 and TUI-017 own zero ordinary records. The shared self-check passes 124 expectations. Each of the seven focused checks passes on the fixed binary and exits 1 on a fresh rebased archive with its fix disabled. Copy-mode passes 147 comparisons and 27 self-check expectations; screen-diff passes 147 assertions and 18 self-check expectations with six retained decisions. Both claim verifiers pass. The full attached retry passes after an initial alert-duration checkpoint failure, retained without a causal claim or runtime fix. Full mux and terminal packages pass 927 tests with one ignored; five-crate clippy, formatting and compat/check.sh pass. This follow-up reruns the target and capture corpora, both clean; delta-scope.json names the 203 rows not rerun from the prior 205-row selection. Earlier integration and wider capture limits remain in attempt-07. Engine and vendor sources are unchanged from the previous delivery. No environment dump was collected. Protocol 104 is inherited; no payload change. Both obligations remain at review for the gate.
+EDITED TAB REVISION 2026-09-17. Rebase onto origin/main 38c50df4 was already up to date. Source 686506a1 replaces per-column page lookups with the cursor row and a pin-matching 32-cell bound; tab head/padding facts survive ICH/DCH and vertical edits. Overwrites clear neighboring tab padding with default background. Twenty-three new asserted pin cases cover ICH/DCH, ECH, IL/DL, scroll regions, off-line removal and coloured overwrite, each with sabotage. Three shared runs pass 228 assertions with 25 records, unattributed=0 and zero ordinary TUI-015/TUI-017 records; self-check passes 170 expectations. All seven focused checks pass fixed and fail reverted. The 25-step pane-index probe and six main empty-exact-window assertions pass. Copy-mode 147/27, screen-diff 147/18 and full attached-client pass. Full mux/terminal packages pass 928 tests, one ignored; five-crate clippy, formatting and compat/check.sh pass. Three blocks of five alternating native benchmark pairs yield pooled tab medians 0.107047136s fixed versus 0.104710933s main (+2.23%); no-tab 0.098959377s versus 0.094913279s (+4.26%), with shared-host variability retained. Attached cat medians are 1.214s versus 1.510s. bench/run.sh cannot run without its fixtures and release desktop bundle. All 163 delta rows run: 157 initially clean, 158 after retries, five persistent differences reproduced on main; status-background-jobs also fails on main and varies on unchanged candidate runs. No environment dumps collected. Protocol 104 unchanged. Earlier broad capture/integration limits remain documented. Leave both obligations at review.
 
-Next action: Gate the rebased source using TUI-015/attempt-05 and TUI-017/attempt-08. Inspect the complete three-dot footprint, seven reverted failures and retained limits. Keep the registered decisions and leave verification to the gate.
+Next action: Review source 686506a1 using TUI-017/attempt-09 and TUI-015/attempt-06. Check all native benchmark blocks, especially the +4.26% no-tab control; edited-tab sabotages; retained corpus differences and timing variation; and the complete three-dot footprint. Gate decides verification.
 
-Proof revision: `571608659d0f8013ddb973d27f2171d9e1af224e`. Tmux: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
+Proof revision: `686506a12d1191bf477083918ead2ba6dac789d5`. Tmux: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Environment: compat/tui/evidence/TUI-017/attempt-08/execution-context.json
+Environment: compat/tui/evidence/TUI-017/attempt-09/execution-context.json
 
 Proof commands:
 
-- `compat/tui-client-commands.sh target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `python3 compat/tui/verify-claims.py --run TUI-015 --zz target/capture-residuals-main/zz`
-- `python3 compat/tui/verify-claims.py --run TUI-017 --zz target/capture-residuals-main/zz`
-- `compat/tui-client-commands.sh --self-check target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-copy-mode.sh --self-check target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-screen-diff.sh --self-check target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-copy-mode.sh target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-screen-diff.sh target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `compat/attached-client.sh target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-low-indexed-colour target/capture-residuals-main/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-trailing target/capture-residuals-main/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-internal target/capture-residuals-main/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-wide target/capture-residuals-main/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh lock-session target/capture-residuals-main/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh has-session target/capture-residuals-main/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh list-windows target/capture-residuals-main/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-low-indexed-colour target/capture-residuals-main-reverted/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-trailing target/capture-residuals-main-reverted/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-internal target/capture-residuals-main-reverted/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-wide target/capture-residuals-main-reverted/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh lock-session target/capture-residuals-main-reverted/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh has-session target/capture-residuals-main-reverted/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh list-windows target/capture-residuals-main-reverted/zz`
-- `compat/diff-scenario.sh --strict-geometry compat/scenarios/targets.txt target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `compat/diff-scenario.sh --strict-geometry compat/scenarios/capture-pane.txt target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `compat/diff-scenario.sh --strict-geometry compat/tui/evidence/TUI-015/attempt-05/empty-exact-pane-index.txt target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup /tmp/zz-cargo.sh test -p zz-mux -p zz-terminal`
-- `/tmp/zz-cargo.sh test -p zz-mux --lib session_targets_use_configured_pane_indices`
-- `/tmp/zz-cargo.sh fmt --all`
+- `compat/tui-client-commands.sh target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
+- `python3 compat/tui/verify-claims.py --run TUI-015 --zz target/capture-residuals-final-v5/zz`
+- `python3 compat/tui/verify-claims.py --run TUI-017 --zz target/capture-residuals-final-v5/zz`
+- `compat/tui-client-commands.sh --self-check target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
+- `compat/tui-copy-mode.sh target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
+- `compat/tui-copy-mode.sh --self-check target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
+- `compat/tui-screen-diff.sh target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
+- `compat/tui-screen-diff.sh --self-check target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
+- `compat/attached-client.sh target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
+- `compat/diff-scenario.sh --strict-geometry compat/tui/evidence/TUI-015/attempt-05/empty-exact-pane-index.txt target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-low-indexed-colour target/capture-residuals-final-v5/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-trailing target/capture-residuals-final-v5/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-internal target/capture-residuals-final-v5/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-wide target/capture-residuals-final-v5/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh lock-session target/capture-residuals-final-v5/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh has-session target/capture-residuals-final-v5/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh list-windows target/capture-residuals-final-v5/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-low-indexed-colour target/capture-residuals-final-reverted/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-trailing target/capture-residuals-final-reverted/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-internal target/capture-residuals-final-reverted/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-wide target/capture-residuals-final-reverted/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh lock-session target/capture-residuals-final-reverted/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh has-session target/capture-residuals-final-reverted/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh list-windows target/capture-residuals-final-reverted/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/edited-tab-probe.sh target/capture-residuals-final-reverted/zz self-check`
+- `HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup /tmp/zz-cargo.sh test -p zz-terminal -p zz-mux`
 - `/tmp/zz-cargo.sh clippy -p zz-terminal -p zz-mux -p zz-daemon -p zz-tui -p zz-cli --all-targets --all-features -- -D warnings`
+- `/tmp/zz-cargo.sh fmt --all`
 - `cargo() { /tmp/zz-cargo.sh "$@"; }; export -f cargo; HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup compat/check.sh`
 - `python3 compat/wire-version.py`
 - `python3 .agents/skills/okf/scripts/okf.py validate knowledge`
-- `/tmp/zz-cargo.sh fmt --all --check`
+- `/tmp/zz-cargo.sh build -p zz-cli --bin zz_cli`
+- `cmp target/debug/zz_cli target/capture-residuals-final-v5/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/native-benchmark-v5.sh`
+- `bash compat/tui/evidence/TUI-017/attempt-09/perf-mixed.sh target/capture-residuals-final-v5/zz compat/tui/evidence/TUI-017/attempt-09/final/perf-fixed`
+- `bash compat/tui/evidence/TUI-017/attempt-09/perf-mixed.sh target/capture-residuals-main-control/zz compat/tui/evidence/TUI-017/attempt-09/final/perf-main`
+- `bench/run.sh --terminals zz --skip-fixtures --timeout 1`
+- `mapfile -t rows < compat/tui/evidence/TUI-017/attempt-09/delta-shard-1.rows; ZZ_COMPAT_ZZ="$PWD/target/capture-residuals-final-v5/zz" ZZ_COMPAT_CORPUS="$PWD/compat/.cache/plugins" compat/run.sh --strict-geometry --delta origin/main...HEAD --commands capture-pane,lock-session,has-session,list-windows "${rows[@]}"`
+- `mapfile -t rows < compat/tui/evidence/TUI-017/attempt-09/delta-shard-2.rows; ZZ_COMPAT_ZZ="$PWD/target/capture-residuals-final-v5/zz" ZZ_COMPAT_CORPUS="$PWD/compat/.cache/plugins" compat/run.sh --strict-geometry --delta origin/main...HEAD --commands capture-pane,lock-session,has-session,list-windows "${rows[@]}"`
+- `mapfile -t rows < compat/tui/evidence/TUI-017/attempt-09/delta-shard-3.rows; ZZ_COMPAT_ZZ="$PWD/target/capture-residuals-final-v5/zz" ZZ_COMPAT_CORPUS="$PWD/compat/.cache/plugins" compat/run.sh --strict-geometry --delta origin/main...HEAD --commands capture-pane,lock-session,has-session,list-windows "${rows[@]}"`
+- `compat/diff-scenario.sh --strict-geometry compat/scenarios/show-options-hooks.txt target/capture-residuals-main-control/zz compat/.cache/tmux-src/tmux`
+- `compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/cli-chain-parse-abort.txt target/capture-residuals-main-control/zz compat/.cache/tmux-src/tmux`
+- `compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/default-client-command.txt target/capture-residuals-main-control/zz compat/.cache/tmux-src/tmux`
+- `compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/plugin-runtime-resurrect-restore.txt target/capture-residuals-main-control/zz compat/.cache/tmux-src/tmux`
+- `compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/source-replay-diagnostics.txt target/capture-residuals-main-control/zz compat/.cache/tmux-src/tmux`
+- `compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/status-background-jobs.txt target/capture-residuals-main-control/zz compat/.cache/tmux-src/tmux`
+- `compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/status-background-jobs.txt target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
 - `python3 compat/tui/tracker.py check`
 - `python3 compat/tmux-tracker.py check`
 
-Artifacts: `compat/tui/evidence/TUI-017/attempt-08/notes.md`, `compat/tui/evidence/TUI-017/attempt-08/execution-context.json`, `compat/tui/evidence/TUI-017/attempt-08/rebase-audit.json`, `compat/tui/evidence/TUI-017/attempt-08/source-revision.txt`, `compat/tui/evidence/TUI-017/attempt-08/base-revision.txt`, `compat/tui/evidence/TUI-017/attempt-08/binaries.txt`, `compat/tui/evidence/TUI-017/attempt-08/reverted-source-audit.json`, `compat/tui/evidence/TUI-017/attempt-08/reverted-mux.diff`, `compat/tui/evidence/TUI-017/attempt-08/reverted-terminal.diff`, `compat/tui/evidence/TUI-017/attempt-08/seven-case-summary.json`, `compat/tui/evidence/TUI-017/attempt-08/fixture-summary.json`, `compat/tui/evidence/TUI-017/attempt-08/commands.json`, `compat/tui/evidence/TUI-017/attempt-08/tests-summary.json`, `compat/tui/evidence/TUI-017/attempt-08/proof-summary.json`, `compat/tui/evidence/TUI-017/attempt-08/records.json`, `compat/tui/evidence/TUI-017/attempt-08/record-audit.json`, `compat/tui/evidence/TUI-017/attempt-08/flipped-cases.json`, `compat/tui/evidence/TUI-017/attempt-08/delta-scope.json`, `compat/tui/evidence/TUI-017/attempt-08/client-commands-01.txt`, `compat/tui/evidence/TUI-017/attempt-08/client-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-08/verify-claims.txt`, `compat/tui/evidence/TUI-017/attempt-08/copy-mode.txt`, `compat/tui/evidence/TUI-017/attempt-08/copy-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-08/screen-diff.txt`, `compat/tui/evidence/TUI-017/attempt-08/screen-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-08/attached-client.txt`, `compat/tui/evidence/TUI-017/attempt-08/attached-client-retry.txt`, `compat/tui/evidence/TUI-017/attempt-08/packages.txt`, `compat/tui/evidence/TUI-017/attempt-08/clippy.txt`, `compat/tui/evidence/TUI-017/attempt-08/compat-check-requeued-03.txt`, `compat/tui/evidence/TUI-017/attempt-08/build-slot-waits.json`, `compat/tui/evidence/TUI-015/attempt-05/notes.md`, `compat/tui/evidence/TUI-015/attempt-05/empty-exact-pane-index.txt`, `compat/tui/evidence/TUI-015/attempt-05/empty-exact-pane-index-transcript.txt`, `compat/tui/evidence/TUI-015/attempt-05/empty-exact-pane-index-initial-transcript.txt`, `compat/tui/evidence/TUI-015/attempt-05/verify-claims.txt`, `compat/tui/evidence/TUI-015/attempt-03/notes.md`, `compat/tui/evidence/TUI-017/attempt-07/notes.md`, `compat/tui/evidence/TUI-017/attempt-07/validation-residuals.json`, `compat/tui/evidence/TUI-017/attempt-07/probe-residuals.json`, `compat/tui/evidence/TUI-017/attempt-08/compat-check-final-requeued.txt`, `compat/tui/evidence/TUI-017/attempt-08/fmt-final.txt`, `compat/tui/evidence/TUI-017/attempt-08/tracker-check.txt`, `compat/tui/evidence/TUI-017/attempt-08/tmux-tracker-check.txt`, `compat/tui/evidence/TUI-017/attempt-08/footprint.json`, `compat/tui/evidence/TUI-017/attempt-08/footprint-check.txt`.
+Artifacts: `compat/tui/evidence/TUI-017/attempt-09/notes.md`, `compat/tui/evidence/TUI-017/attempt-09/execution-context.json`, `compat/tui/evidence/TUI-017/attempt-09/source-revision.txt`, `compat/tui/evidence/TUI-017/attempt-09/base-revision.txt`, `compat/tui/evidence/TUI-017/attempt-09/proof-summary.json`, `compat/tui/evidence/TUI-017/attempt-09/fixture-summary.json`, `compat/tui/evidence/TUI-017/attempt-09/tests-summary.json`, `compat/tui/evidence/TUI-017/attempt-09/seven-case-summary.json`, `compat/tui/evidence/TUI-017/attempt-09/record-audit.json`, `compat/tui/evidence/TUI-017/attempt-09/records.json`, `compat/tui/evidence/TUI-017/attempt-09/new-asserted-cases.json`, `compat/tui/evidence/TUI-017/attempt-09/flipped-cases.json`, `compat/tui/evidence/TUI-017/attempt-09/commands.json`, `compat/tui/evidence/TUI-017/attempt-09/intermediate-audit.json`, `compat/tui/evidence/TUI-017/attempt-09/main-source-audit.json`, `compat/tui/evidence/TUI-017/attempt-09/main-native-sha256.txt`, `compat/tui/evidence/TUI-017/attempt-09/native-build-commands.txt`, `compat/tui/evidence/TUI-017/attempt-09/footprint.json`, `compat/tui/evidence/TUI-017/attempt-09/credential-scan.json`, `compat/tui/evidence/TUI-017/attempt-09/final/client-commands.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/client-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/verify-claims.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/tui-copy-mode.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/tui-copy-mode-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/tui-screen-diff.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/tui-screen-diff-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/attached-client.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/packages-v5.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/clippy.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/fmt-final.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/compat-check.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/wire-version.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/native-performance-summary.json`, `compat/tui/evidence/TUI-017/attempt-09/final/attached-performance-summary.json`, `compat/tui/evidence/TUI-017/attempt-09/final/native-binaries.json`, `compat/tui/evidence/TUI-017/attempt-09/final/reverted-source-audit.json`, `compat/tui/evidence/TUI-017/attempt-09/final/reverted-terminal.diff`, `compat/tui/evidence/TUI-017/attempt-09/final/reverted-mux.diff`, `compat/tui/evidence/TUI-017/attempt-09/final/edited-tabs-reverted.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/binary-restoration.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/delta-summary.json`, `compat/tui/evidence/TUI-017/attempt-09/final/delta-baseline-comparison.json`, `compat/tui/evidence/TUI-017/attempt-09/final/delta-shard-1.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/delta-shard-2.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/delta-shard-3.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/tracker-check.txt`, `compat/tui/evidence/TUI-015/attempt-06/notes.md`, `compat/tui/evidence/TUI-015/attempt-06/verify-claims.txt`, `compat/tui/evidence/TUI-015/attempt-06/empty-exact-pane-index-run.txt`, `compat/tui/evidence/TUI-015/attempt-06/empty-exact-pane-index.log`, `compat/tui/evidence/TUI-017/attempt-07/validation-residuals.json`, `compat/tui/evidence/TUI-017/attempt-07/probe-residuals.json`, `compat/tui/evidence/TUI-017/attempt-09/final/main-smoke-status-background-jobs-isolated.log`, `compat/tui/evidence/TUI-017/attempt-09/final/fixed-smoke-status-background-jobs-isolated.log`.
 
-Review: `compat/tui/evidence/TUI-017/attempt-08/review.md`.
+Review: `compat/tui/evidence/TUI-017/attempt-09/review.md`.
 
 ### TUI-016: Server log and terminal introspection
 
@@ -979,59 +997,77 @@ Sources:
 - `compat/tui/evidence/TUI-017/attempt-08/notes.md`
 - `compat/tui/evidence/TUI-017/attempt-08/proof-summary.json`
 - `compat/tui/evidence/TUI-017/attempt-08/record-audit.json`
+- `compat/tui/evidence/TUI-017/attempt-09/notes.md`
+- `compat/tui/evidence/TUI-017/attempt-09/proof-summary.json`
+- `compat/tui/evidence/TUI-017/attempt-09/new-asserted-cases.json`
+- `compat/tui/evidence/TUI-017/attempt-09/record-audit.json`
+- `compat/tui/evidence/TUI-015/attempt-06/notes.md`
 
 Tmux gap references: `capture.rich-transports`.
 
-REBASED CAPTURE RESIDUALS 2026-09-17. Rebased onto origin/main 38c50df4, including the reviewed empty-exact-window fix and credential-scrubbing harnesses. Source 57160865 preserves the configured pane-index callback through empty-exact-window normalization. The 25-step scope probe matches all five channels; cli:=.1 under pane-base-index 1 succeeds for lock-session, has-session and list-windows. All six main assertions remain green. Three shared-fixture executions pass 205 assertions with 25 records and unattributed=0; TUI-015 and TUI-017 own zero ordinary records. The shared self-check passes 124 expectations. Each of the seven focused checks passes on the fixed binary and exits 1 on a fresh rebased archive with its fix disabled. Copy-mode passes 147 comparisons and 27 self-check expectations; screen-diff passes 147 assertions and 18 self-check expectations with six retained decisions. Both claim verifiers pass. The full attached retry passes after an initial alert-duration checkpoint failure, retained without a causal claim or runtime fix. Full mux and terminal packages pass 927 tests with one ignored; five-crate clippy, formatting and compat/check.sh pass. This follow-up reruns the target and capture corpora, both clean; delta-scope.json names the 203 rows not rerun from the prior 205-row selection. Earlier integration and wider capture limits remain in attempt-07. Engine and vendor sources are unchanged from the previous delivery. No environment dump was collected. Protocol 104 is inherited; no payload change. Both obligations remain at review for the gate.
+EDITED TAB REVISION 2026-09-17. Rebase onto origin/main 38c50df4 was already up to date. Source 686506a1 replaces per-column page lookups with the cursor row and a pin-matching 32-cell bound; tab head/padding facts survive ICH/DCH and vertical edits. Overwrites clear neighboring tab padding with default background. Twenty-three new asserted pin cases cover ICH/DCH, ECH, IL/DL, scroll regions, off-line removal and coloured overwrite, each with sabotage. Three shared runs pass 228 assertions with 25 records, unattributed=0 and zero ordinary TUI-015/TUI-017 records; self-check passes 170 expectations. All seven focused checks pass fixed and fail reverted. The 25-step pane-index probe and six main empty-exact-window assertions pass. Copy-mode 147/27, screen-diff 147/18 and full attached-client pass. Full mux/terminal packages pass 928 tests, one ignored; five-crate clippy, formatting and compat/check.sh pass. Three blocks of five alternating native benchmark pairs yield pooled tab medians 0.107047136s fixed versus 0.104710933s main (+2.23%); no-tab 0.098959377s versus 0.094913279s (+4.26%), with shared-host variability retained. Attached cat medians are 1.214s versus 1.510s. bench/run.sh cannot run without its fixtures and release desktop bundle. All 163 delta rows run: 157 initially clean, 158 after retries, five persistent differences reproduced on main; status-background-jobs also fails on main and varies on unchanged candidate runs. No environment dumps collected. Protocol 104 unchanged. Earlier broad capture/integration limits remain documented. Leave both obligations at review.
 
-Next action: Gate the rebased source using TUI-015/attempt-05 and TUI-017/attempt-08. Inspect the complete three-dot footprint, seven reverted failures and retained limits. Keep the registered decisions and leave verification to the gate.
+Next action: Review source 686506a1 using TUI-017/attempt-09 and TUI-015/attempt-06. Check all native benchmark blocks, especially the +4.26% no-tab control; edited-tab sabotages; retained corpus differences and timing variation; and the complete three-dot footprint. Gate decides verification.
 
-Proof revision: `571608659d0f8013ddb973d27f2171d9e1af224e`. Tmux: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
+Proof revision: `686506a12d1191bf477083918ead2ba6dac789d5`. Tmux: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Environment: compat/tui/evidence/TUI-017/attempt-08/execution-context.json
+Environment: compat/tui/evidence/TUI-017/attempt-09/execution-context.json
 
 Proof commands:
 
-- `compat/tui-client-commands.sh target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `python3 compat/tui/verify-claims.py --run TUI-015 --zz target/capture-residuals-main/zz`
-- `python3 compat/tui/verify-claims.py --run TUI-017 --zz target/capture-residuals-main/zz`
-- `compat/tui-client-commands.sh --self-check target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-copy-mode.sh --self-check target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-screen-diff.sh --self-check target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-copy-mode.sh target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `compat/tui-screen-diff.sh target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `compat/attached-client.sh target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-low-indexed-colour target/capture-residuals-main/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-trailing target/capture-residuals-main/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-internal target/capture-residuals-main/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-wide target/capture-residuals-main/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh lock-session target/capture-residuals-main/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh has-session target/capture-residuals-main/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh list-windows target/capture-residuals-main/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-low-indexed-colour target/capture-residuals-main-reverted/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-trailing target/capture-residuals-main-reverted/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-internal target/capture-residuals-main-reverted/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-wide target/capture-residuals-main-reverted/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh lock-session target/capture-residuals-main-reverted/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh has-session target/capture-residuals-main-reverted/zz`
-- `bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh list-windows target/capture-residuals-main-reverted/zz`
-- `compat/diff-scenario.sh --strict-geometry compat/scenarios/targets.txt target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `compat/diff-scenario.sh --strict-geometry compat/scenarios/capture-pane.txt target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `compat/diff-scenario.sh --strict-geometry compat/tui/evidence/TUI-015/attempt-05/empty-exact-pane-index.txt target/capture-residuals-main/zz compat/.cache/tmux-src/tmux`
-- `HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup /tmp/zz-cargo.sh test -p zz-mux -p zz-terminal`
-- `/tmp/zz-cargo.sh test -p zz-mux --lib session_targets_use_configured_pane_indices`
-- `/tmp/zz-cargo.sh fmt --all`
+- `compat/tui-client-commands.sh target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
+- `python3 compat/tui/verify-claims.py --run TUI-015 --zz target/capture-residuals-final-v5/zz`
+- `python3 compat/tui/verify-claims.py --run TUI-017 --zz target/capture-residuals-final-v5/zz`
+- `compat/tui-client-commands.sh --self-check target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
+- `compat/tui-copy-mode.sh target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
+- `compat/tui-copy-mode.sh --self-check target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
+- `compat/tui-screen-diff.sh target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
+- `compat/tui-screen-diff.sh --self-check target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
+- `compat/attached-client.sh target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
+- `compat/diff-scenario.sh --strict-geometry compat/tui/evidence/TUI-015/attempt-05/empty-exact-pane-index.txt target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-low-indexed-colour target/capture-residuals-final-v5/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-trailing target/capture-residuals-final-v5/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-internal target/capture-residuals-final-v5/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-wide target/capture-residuals-final-v5/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh lock-session target/capture-residuals-final-v5/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh has-session target/capture-residuals-final-v5/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh list-windows target/capture-residuals-final-v5/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-low-indexed-colour target/capture-residuals-final-reverted/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-trailing target/capture-residuals-final-reverted/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-internal target/capture-residuals-final-reverted/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-wide target/capture-residuals-final-reverted/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh lock-session target/capture-residuals-final-reverted/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh has-session target/capture-residuals-final-reverted/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh list-windows target/capture-residuals-final-reverted/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/edited-tab-probe.sh target/capture-residuals-final-reverted/zz self-check`
+- `HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup /tmp/zz-cargo.sh test -p zz-terminal -p zz-mux`
 - `/tmp/zz-cargo.sh clippy -p zz-terminal -p zz-mux -p zz-daemon -p zz-tui -p zz-cli --all-targets --all-features -- -D warnings`
+- `/tmp/zz-cargo.sh fmt --all`
 - `cargo() { /tmp/zz-cargo.sh "$@"; }; export -f cargo; HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup compat/check.sh`
 - `python3 compat/wire-version.py`
 - `python3 .agents/skills/okf/scripts/okf.py validate knowledge`
-- `/tmp/zz-cargo.sh fmt --all --check`
+- `/tmp/zz-cargo.sh build -p zz-cli --bin zz_cli`
+- `cmp target/debug/zz_cli target/capture-residuals-final-v5/zz`
+- `bash compat/tui/evidence/TUI-017/attempt-09/native-benchmark-v5.sh`
+- `bash compat/tui/evidence/TUI-017/attempt-09/perf-mixed.sh target/capture-residuals-final-v5/zz compat/tui/evidence/TUI-017/attempt-09/final/perf-fixed`
+- `bash compat/tui/evidence/TUI-017/attempt-09/perf-mixed.sh target/capture-residuals-main-control/zz compat/tui/evidence/TUI-017/attempt-09/final/perf-main`
+- `bench/run.sh --terminals zz --skip-fixtures --timeout 1`
+- `mapfile -t rows < compat/tui/evidence/TUI-017/attempt-09/delta-shard-1.rows; ZZ_COMPAT_ZZ="$PWD/target/capture-residuals-final-v5/zz" ZZ_COMPAT_CORPUS="$PWD/compat/.cache/plugins" compat/run.sh --strict-geometry --delta origin/main...HEAD --commands capture-pane,lock-session,has-session,list-windows "${rows[@]}"`
+- `mapfile -t rows < compat/tui/evidence/TUI-017/attempt-09/delta-shard-2.rows; ZZ_COMPAT_ZZ="$PWD/target/capture-residuals-final-v5/zz" ZZ_COMPAT_CORPUS="$PWD/compat/.cache/plugins" compat/run.sh --strict-geometry --delta origin/main...HEAD --commands capture-pane,lock-session,has-session,list-windows "${rows[@]}"`
+- `mapfile -t rows < compat/tui/evidence/TUI-017/attempt-09/delta-shard-3.rows; ZZ_COMPAT_ZZ="$PWD/target/capture-residuals-final-v5/zz" ZZ_COMPAT_CORPUS="$PWD/compat/.cache/plugins" compat/run.sh --strict-geometry --delta origin/main...HEAD --commands capture-pane,lock-session,has-session,list-windows "${rows[@]}"`
+- `compat/diff-scenario.sh --strict-geometry compat/scenarios/show-options-hooks.txt target/capture-residuals-main-control/zz compat/.cache/tmux-src/tmux`
+- `compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/cli-chain-parse-abort.txt target/capture-residuals-main-control/zz compat/.cache/tmux-src/tmux`
+- `compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/default-client-command.txt target/capture-residuals-main-control/zz compat/.cache/tmux-src/tmux`
+- `compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/plugin-runtime-resurrect-restore.txt target/capture-residuals-main-control/zz compat/.cache/tmux-src/tmux`
+- `compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/source-replay-diagnostics.txt target/capture-residuals-main-control/zz compat/.cache/tmux-src/tmux`
+- `compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/status-background-jobs.txt target/capture-residuals-main-control/zz compat/.cache/tmux-src/tmux`
+- `compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/status-background-jobs.txt target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux`
 - `python3 compat/tui/tracker.py check`
 - `python3 compat/tmux-tracker.py check`
 
-Artifacts: `compat/tui/evidence/TUI-017/attempt-08/notes.md`, `compat/tui/evidence/TUI-017/attempt-08/execution-context.json`, `compat/tui/evidence/TUI-017/attempt-08/rebase-audit.json`, `compat/tui/evidence/TUI-017/attempt-08/source-revision.txt`, `compat/tui/evidence/TUI-017/attempt-08/base-revision.txt`, `compat/tui/evidence/TUI-017/attempt-08/binaries.txt`, `compat/tui/evidence/TUI-017/attempt-08/reverted-source-audit.json`, `compat/tui/evidence/TUI-017/attempt-08/reverted-mux.diff`, `compat/tui/evidence/TUI-017/attempt-08/reverted-terminal.diff`, `compat/tui/evidence/TUI-017/attempt-08/seven-case-summary.json`, `compat/tui/evidence/TUI-017/attempt-08/fixture-summary.json`, `compat/tui/evidence/TUI-017/attempt-08/commands.json`, `compat/tui/evidence/TUI-017/attempt-08/tests-summary.json`, `compat/tui/evidence/TUI-017/attempt-08/proof-summary.json`, `compat/tui/evidence/TUI-017/attempt-08/records.json`, `compat/tui/evidence/TUI-017/attempt-08/record-audit.json`, `compat/tui/evidence/TUI-017/attempt-08/flipped-cases.json`, `compat/tui/evidence/TUI-017/attempt-08/delta-scope.json`, `compat/tui/evidence/TUI-017/attempt-08/client-commands-01.txt`, `compat/tui/evidence/TUI-017/attempt-08/client-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-08/verify-claims.txt`, `compat/tui/evidence/TUI-017/attempt-08/copy-mode.txt`, `compat/tui/evidence/TUI-017/attempt-08/copy-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-08/screen-diff.txt`, `compat/tui/evidence/TUI-017/attempt-08/screen-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-08/attached-client.txt`, `compat/tui/evidence/TUI-017/attempt-08/attached-client-retry.txt`, `compat/tui/evidence/TUI-017/attempt-08/packages.txt`, `compat/tui/evidence/TUI-017/attempt-08/clippy.txt`, `compat/tui/evidence/TUI-017/attempt-08/compat-check-requeued-03.txt`, `compat/tui/evidence/TUI-017/attempt-08/build-slot-waits.json`, `compat/tui/evidence/TUI-015/attempt-05/notes.md`, `compat/tui/evidence/TUI-015/attempt-05/empty-exact-pane-index.txt`, `compat/tui/evidence/TUI-015/attempt-05/empty-exact-pane-index-transcript.txt`, `compat/tui/evidence/TUI-015/attempt-05/empty-exact-pane-index-initial-transcript.txt`, `compat/tui/evidence/TUI-015/attempt-05/verify-claims.txt`, `compat/tui/evidence/TUI-015/attempt-03/notes.md`, `compat/tui/evidence/TUI-017/attempt-07/notes.md`, `compat/tui/evidence/TUI-017/attempt-07/validation-residuals.json`, `compat/tui/evidence/TUI-017/attempt-07/probe-residuals.json`, `compat/tui/evidence/TUI-017/attempt-08/compat-check-final-requeued.txt`, `compat/tui/evidence/TUI-017/attempt-08/fmt-final.txt`, `compat/tui/evidence/TUI-017/attempt-08/tracker-check.txt`, `compat/tui/evidence/TUI-017/attempt-08/tmux-tracker-check.txt`, `compat/tui/evidence/TUI-017/attempt-08/footprint.json`, `compat/tui/evidence/TUI-017/attempt-08/footprint-check.txt`.
+Artifacts: `compat/tui/evidence/TUI-017/attempt-09/notes.md`, `compat/tui/evidence/TUI-017/attempt-09/execution-context.json`, `compat/tui/evidence/TUI-017/attempt-09/source-revision.txt`, `compat/tui/evidence/TUI-017/attempt-09/base-revision.txt`, `compat/tui/evidence/TUI-017/attempt-09/proof-summary.json`, `compat/tui/evidence/TUI-017/attempt-09/fixture-summary.json`, `compat/tui/evidence/TUI-017/attempt-09/tests-summary.json`, `compat/tui/evidence/TUI-017/attempt-09/seven-case-summary.json`, `compat/tui/evidence/TUI-017/attempt-09/record-audit.json`, `compat/tui/evidence/TUI-017/attempt-09/records.json`, `compat/tui/evidence/TUI-017/attempt-09/new-asserted-cases.json`, `compat/tui/evidence/TUI-017/attempt-09/flipped-cases.json`, `compat/tui/evidence/TUI-017/attempt-09/commands.json`, `compat/tui/evidence/TUI-017/attempt-09/intermediate-audit.json`, `compat/tui/evidence/TUI-017/attempt-09/main-source-audit.json`, `compat/tui/evidence/TUI-017/attempt-09/main-native-sha256.txt`, `compat/tui/evidence/TUI-017/attempt-09/native-build-commands.txt`, `compat/tui/evidence/TUI-017/attempt-09/footprint.json`, `compat/tui/evidence/TUI-017/attempt-09/credential-scan.json`, `compat/tui/evidence/TUI-017/attempt-09/final/client-commands.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/client-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/verify-claims.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/tui-copy-mode.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/tui-copy-mode-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/tui-screen-diff.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/tui-screen-diff-self-check.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/attached-client.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/packages-v5.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/clippy.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/fmt-final.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/compat-check.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/wire-version.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/native-performance-summary.json`, `compat/tui/evidence/TUI-017/attempt-09/final/attached-performance-summary.json`, `compat/tui/evidence/TUI-017/attempt-09/final/native-binaries.json`, `compat/tui/evidence/TUI-017/attempt-09/final/reverted-source-audit.json`, `compat/tui/evidence/TUI-017/attempt-09/final/reverted-terminal.diff`, `compat/tui/evidence/TUI-017/attempt-09/final/reverted-mux.diff`, `compat/tui/evidence/TUI-017/attempt-09/final/edited-tabs-reverted.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/binary-restoration.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/delta-summary.json`, `compat/tui/evidence/TUI-017/attempt-09/final/delta-baseline-comparison.json`, `compat/tui/evidence/TUI-017/attempt-09/final/delta-shard-1.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/delta-shard-2.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/delta-shard-3.txt`, `compat/tui/evidence/TUI-017/attempt-09/final/tracker-check.txt`, `compat/tui/evidence/TUI-015/attempt-06/notes.md`, `compat/tui/evidence/TUI-015/attempt-06/verify-claims.txt`, `compat/tui/evidence/TUI-015/attempt-06/empty-exact-pane-index-run.txt`, `compat/tui/evidence/TUI-015/attempt-06/empty-exact-pane-index.log`, `compat/tui/evidence/TUI-017/attempt-07/validation-residuals.json`, `compat/tui/evidence/TUI-017/attempt-07/probe-residuals.json`, `compat/tui/evidence/TUI-017/attempt-09/final/main-smoke-status-background-jobs-isolated.log`, `compat/tui/evidence/TUI-017/attempt-09/final/fixed-smoke-status-background-jobs-isolated.log`.
 
-Review: `compat/tui/evidence/TUI-017/attempt-08/review.md`.
+Review: `compat/tui/evidence/TUI-017/attempt-09/review.md`.
 
 ### TUI-018: Caller stream forms
 

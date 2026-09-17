@@ -1,0 +1,209 @@
+# Scenario: smoke/config-discovery-explicit
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/smoke/config-discovery-explicit.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: out: show-options -g @discovery-explicit
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    @discovery-explicit present
+tmux stdout:
+    @discovery-explicit present
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-options -gqv @discovery-home
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-options -g @discovery-layer
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    @discovery-layer explicit
+tmux stdout:
+    @discovery-layer explicit
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: list-keys -T prefix
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T prefix F4 display-message explicit-binding
+tmux stdout:
+    bind-key  -T prefix F4 display-message explicit-binding
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: zz-only: run-shell 'sh ~/config-discovery-import.sh explicit'
+zz exit: 0
+tmux exit: skipped
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: side-specific setup
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: tmux-only: set-option -g @import-proof passed
+zz exit: skipped
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: side-specific setup
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: show-options -g @import-proof
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    @import-proof passed
+tmux stdout:
+    @import-proof passed
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: show-options -gqv @discovery-home
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: show-options -g @discovery-order
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    @discovery-order explicit
+tmux stdout:
+    @discovery-order explicit
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: show-options -g @discovery-layer
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    @discovery-layer explicit
+tmux stdout:
+    @discovery-layer explicit
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: zz-only: reload-config
+zz exit: 0
+tmux exit: skipped
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: side-specific setup
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: list-keys -T prefix
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T prefix F4 display-message explicit-binding
+tmux stdout:
+    bind-key  -T prefix F4 display-message explicit-binding
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: show-options -g @discovery-layer
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    @discovery-layer explicit
+tmux stdout:
+    @discovery-layer explicit
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=13 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

@@ -1,0 +1,924 @@
+# Scenario: smoke/format-trace
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/smoke/format-trace.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: new-session -d -s tv -n first
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: select-pane -t tv:0.0 -T macbook
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: set-option -g @c red
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: set-option -g @three 3
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: display-message -v -p -t tv:0.0 #{session_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #{session_name}
+    # found #{}: session_name
+    # format 'session_name' found: tv
+    # replaced 'session_name' with 'tv'
+    # result is: tv
+    tv
+tmux stdout:
+    # expanding format: #{session_name}
+    # found #{}: session_name
+    # format 'session_name' found: tv
+    # replaced 'session_name' with 'tv'
+    # result is: tv
+    tv
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: display-message -v -p -t tv:0.0 <#{nosuchname}>
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: <#{nosuchname}>
+    # found #{}: nosuchname
+    # format 'nosuchname' not found
+    # replaced 'nosuchname' with ''
+    # result is: <>
+    <>
+tmux stdout:
+    # expanding format: <#{nosuchname}>
+    # found #{}: nosuchname
+    # format 'nosuchname' not found
+    # replaced 'nosuchname' with ''
+    # result is: <>
+    <>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: display-message -v -p -t tv:0.0 #S
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #S
+    # found #S: session_name
+    # format 'session_name' found: tv
+    # replaced 'session_name' with 'tv'
+    # result is: tv
+    tv
+tmux stdout:
+    # expanding format: #S
+    # found #S: session_name
+    # format 'session_name' found: tv
+    # replaced 'session_name' with 'tv'
+    # result is: tv
+    tv
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: display-message -v -p -t tv:0.0 #{?pane_dead,dead,#{=3:pane_title}}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #{?pane_dead,dead,#{=3:pane_title}}
+    # found #{}: ?pane_dead,dead,#{=3:pane_title}
+    # condition is: pane_dead
+    # condition 'pane_dead' found: 0
+    # condition 'pane_dead' is false
+    # no condition matched in 'pane_dead,dead,#{=3:pane_title}'; using last arg
+    #  expanding format: #{=3:pane_title}
+    #  found #{}: =3:pane_title
+    #   expanding format: 3
+    #   result is: 3
+    #  modifier 0 is =
+    #  modifier 0 argument 0: 3
+    #  format 'pane_title' found: macbook
+    #  applied length limit 3: mac
+    #  replaced '=3:pane_title' with 'mac'
+    #  result is: mac
+    # replaced '?pane_dead,dead,#{=3:pane_title}' with 'mac'
+    # result is: mac
+    mac
+tmux stdout:
+    # expanding format: #{?pane_dead,dead,#{=3:pane_title}}
+    # found #{}: ?pane_dead,dead,#{=3:pane_title}
+    # condition is: pane_dead
+    # condition 'pane_dead' found: 0
+    # condition 'pane_dead' is false
+    # no condition matched in 'pane_dead,dead,#{=3:pane_title}'; using last arg
+    #  expanding format: #{=3:pane_title}
+    #  found #{}: =3:pane_title
+    #   expanding format: 3
+    #   result is: 3
+    #  modifier 0 is =
+    #  modifier 0 argument 0: 3
+    #  format 'pane_title' found: macbook
+    #  applied length limit 3: mac
+    #  replaced '=3:pane_title' with 'mac'
+    #  result is: mac
+    # replaced '?pane_dead,dead,#{=3:pane_title}' with 'mac'
+    # result is: mac
+    mac
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: display-message -v -p -t tv:0.0 #{?nosuchname,yes,no}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #{?nosuchname,yes,no}
+    # found #{}: ?nosuchname,yes,no
+    # condition is: nosuchname
+    #  expanding format: nosuchname
+    #  result is: nosuchname
+    # condition 'nosuchname' not found; assuming false
+    # condition 'nosuchname' is false
+    # no condition matched in 'nosuchname,yes,no'; using last arg
+    #  expanding format: no
+    #  result is: no
+    # replaced '?nosuchname,yes,no' with 'no'
+    # result is: no
+    no
+tmux stdout:
+    # expanding format: #{?nosuchname,yes,no}
+    # found #{}: ?nosuchname,yes,no
+    # condition is: nosuchname
+    #  expanding format: nosuchname
+    #  result is: nosuchname
+    # condition 'nosuchname' not found; assuming false
+    # condition 'nosuchname' is false
+    # no condition matched in 'nosuchname,yes,no'; using last arg
+    #  expanding format: no
+    #  result is: no
+    # replaced '?nosuchname,yes,no' with 'no'
+    # result is: no
+    no
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: display-message -v -p -t tv:0.0 <#{?pane_dead,dead}>
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: <#{?pane_dead,dead}>
+    # found #{}: ?pane_dead,dead
+    # condition is: pane_dead
+    # condition 'pane_dead' found: 0
+    # condition 'pane_dead' is false
+    # no condition matched in 'pane_dead,dead'; using empty string
+    # replaced '?pane_dead,dead' with ''
+    # result is: <>
+    <>
+tmux stdout:
+    # expanding format: <#{?pane_dead,dead}>
+    # found #{}: ?pane_dead,dead
+    # condition is: pane_dead
+    # condition 'pane_dead' found: 0
+    # condition 'pane_dead' is false
+    # no condition matched in 'pane_dead,dead'; using empty string
+    # replaced '?pane_dead,dead' with ''
+    # result is: <>
+    <>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: display-message -v -p -t tv:0.0 #{?#{==:#{pane_title},macbook},yes,no}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #{?#{==:#{pane_title},macbook},yes,no}
+    # found #{}: ?#{==:#{pane_title},macbook},yes,no
+    # condition is: #{==:#{pane_title},macbook}
+    #  expanding format: #{==:#{pane_title},macbook}
+    #  found #{}: ==:#{pane_title},macbook
+    #  modifier 0 is ==
+    #   expanding format: #{pane_title}
+    #   found #{}: pane_title
+    #   format 'pane_title' found: macbook
+    #   replaced 'pane_title' with 'macbook'
+    #   result is: macbook
+    #   expanding format: macbook
+    #   result is: macbook
+    #  compare == left is: macbook
+    #  compare == right is: macbook
+    #  replaced '==:#{pane_title},macbook' with '1'
+    #  result is: 1
+    # condition '#{==:#{pane_title},macbook}' is true
+    #  expanding format: yes
+    #  result is: yes
+    # replaced '?#{==:#{pane_title},macbook},yes,no' with 'yes'
+    # result is: yes
+    yes
+tmux stdout:
+    # expanding format: #{?#{==:#{pane_title},macbook},yes,no}
+    # found #{}: ?#{==:#{pane_title},macbook},yes,no
+    # condition is: #{==:#{pane_title},macbook}
+    #  expanding format: #{==:#{pane_title},macbook}
+    #  found #{}: ==:#{pane_title},macbook
+    #  modifier 0 is ==
+    #   expanding format: #{pane_title}
+    #   found #{}: pane_title
+    #   format 'pane_title' found: macbook
+    #   replaced 'pane_title' with 'macbook'
+    #   result is: macbook
+    #   expanding format: macbook
+    #   result is: macbook
+    #  compare == left is: macbook
+    #  compare == right is: macbook
+    #  replaced '==:#{pane_title},macbook' with '1'
+    #  result is: 1
+    # condition '#{==:#{pane_title},macbook}' is true
+    #  expanding format: yes
+    #  result is: yes
+    # replaced '?#{==:#{pane_title},macbook},yes,no' with 'yes'
+    # result is: yes
+    yes
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: display-message -v -p -t tv:0.0 #{l:hello}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #{l:hello}
+    # found #{}: l:hello
+    # modifier 0 is l
+    # literal string is 'hello'
+    # replaced 'l:hello' with 'hello'
+    # result is: hello
+    hello
+tmux stdout:
+    # expanding format: #{l:hello}
+    # found #{}: l:hello
+    # modifier 0 is l
+    # literal string is 'hello'
+    # replaced 'l:hello' with 'hello'
+    # result is: hello
+    hello
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: display-message -v -p -t tv:0.0 #{=3:pane_title}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #{=3:pane_title}
+    # found #{}: =3:pane_title
+    #  expanding format: 3
+    #  result is: 3
+    # modifier 0 is =
+    # modifier 0 argument 0: 3
+    # format 'pane_title' found: macbook
+    # applied length limit 3: mac
+    # replaced '=3:pane_title' with 'mac'
+    # result is: mac
+    mac
+tmux stdout:
+    # expanding format: #{=3:pane_title}
+    # found #{}: =3:pane_title
+    #  expanding format: 3
+    #  result is: 3
+    # modifier 0 is =
+    # modifier 0 argument 0: 3
+    # format 'pane_title' found: macbook
+    # applied length limit 3: mac
+    # replaced '=3:pane_title' with 'mac'
+    # result is: mac
+    mac
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: out: display-message -v -p -t tv:0.0 #{=-3:pane_title}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #{=-3:pane_title}
+    # found #{}: =-3:pane_title
+    #  expanding format: -3
+    #  result is: -3
+    # modifier 0 is =
+    # modifier 0 argument 0: -3
+    # format 'pane_title' found: macbook
+    # applied length limit -3: ook
+    # replaced '=-3:pane_title' with 'ook'
+    # result is: ook
+    ook
+tmux stdout:
+    # expanding format: #{=-3:pane_title}
+    # found #{}: =-3:pane_title
+    #  expanding format: -3
+    #  result is: -3
+    # modifier 0 is =
+    # modifier 0 argument 0: -3
+    # format 'pane_title' found: macbook
+    # applied length limit -3: ook
+    # replaced '=-3:pane_title' with 'ook'
+    # result is: ook
+    ook
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: display-message -v -p -t tv:0.0 #{p-10:pane_title}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #{p-10:pane_title}
+    # found #{}: p-10:pane_title
+    #  expanding format: -10
+    #  result is: -10
+    # modifier 0 is p
+    # modifier 0 argument 0: -10
+    # format 'pane_title' found: macbook
+    # applied padding width -10:    macbook
+    # replaced 'p-10:pane_title' with '   macbook'
+    # result is:    macbook
+       macbook
+tmux stdout:
+    # expanding format: #{p-10:pane_title}
+    # found #{}: p-10:pane_title
+    #  expanding format: -10
+    #  result is: -10
+    # modifier 0 is p
+    # modifier 0 argument 0: -10
+    # format 'pane_title' found: macbook
+    # applied padding width -10:    macbook
+    # replaced 'p-10:pane_title' with '   macbook'
+    # result is:    macbook
+       macbook
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: display-message -v -p -t tv:0.0 #{p10:pane_title}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #{p10:pane_title}
+    # found #{}: p10:pane_title
+    #  expanding format: 10
+    #  result is: 10
+    # modifier 0 is p
+    # modifier 0 argument 0: 10
+    # format 'pane_title' found: macbook
+    # applied padding width 10: macbook   
+    # replaced 'p10:pane_title' with 'macbook   '
+    # result is: macbook   
+    macbook   
+tmux stdout:
+    # expanding format: #{p10:pane_title}
+    # found #{}: p10:pane_title
+    #  expanding format: 10
+    #  result is: 10
+    # modifier 0 is p
+    # modifier 0 argument 0: 10
+    # format 'pane_title' found: macbook
+    # applied padding width 10: macbook   
+    # replaced 'p10:pane_title' with 'macbook   '
+    # result is: macbook   
+    macbook   
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: display-message -v -p -t tv:0.0 #{==:a,a}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #{==:a,a}
+    # found #{}: ==:a,a
+    # modifier 0 is ==
+    #  expanding format: a
+    #  result is: a
+    #  expanding format: a
+    #  result is: a
+    # compare == left is: a
+    # compare == right is: a
+    # replaced '==:a,a' with '1'
+    # result is: 1
+    1
+tmux stdout:
+    # expanding format: #{==:a,a}
+    # found #{}: ==:a,a
+    # modifier 0 is ==
+    #  expanding format: a
+    #  result is: a
+    #  expanding format: a
+    #  result is: a
+    # compare == left is: a
+    # compare == right is: a
+    # replaced '==:a,a' with '1'
+    # result is: 1
+    1
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: display-message -v -p -t tv:0.0 #{s/mac/X/:pane_title}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #{s/mac/X/:pane_title}
+    # found #{}: s/mac/X/:pane_title
+    #  expanding format: mac
+    #  result is: mac
+    #  expanding format: X
+    #  result is: X
+    # modifier 0 is s
+    # modifier 0 argument 0: mac
+    # modifier 0 argument 1: X
+    # format 'pane_title' found: macbook
+    #  expanding format: mac
+    #  result is: mac
+    #  expanding format: X
+    #  result is: X
+    # substitute 'mac' to 'X': Xbook
+    # replaced 's/mac/X/:pane_title' with 'Xbook'
+    # result is: Xbook
+    Xbook
+tmux stdout:
+    # expanding format: #{s/mac/X/:pane_title}
+    # found #{}: s/mac/X/:pane_title
+    #  expanding format: mac
+    #  result is: mac
+    #  expanding format: X
+    #  result is: X
+    # modifier 0 is s
+    # modifier 0 argument 0: mac
+    # modifier 0 argument 1: X
+    # format 'pane_title' found: macbook
+    #  expanding format: mac
+    #  result is: mac
+    #  expanding format: X
+    #  result is: X
+    # substitute 'mac' to 'X': Xbook
+    # replaced 's/mac/X/:pane_title' with 'Xbook'
+    # result is: Xbook
+    Xbook
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: display-message -v -p -t tv:0.0 #{n:pane_title}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #{n:pane_title}
+    # found #{}: n:pane_title
+    # modifier 0 is n
+    # format 'pane_title' found: macbook
+    # replacing with length: 7
+    # replaced 'n:pane_title' with '7'
+    # result is: 7
+    7
+tmux stdout:
+    # expanding format: #{n:pane_title}
+    # found #{}: n:pane_title
+    # modifier 0 is n
+    # format 'pane_title' found: macbook
+    # replacing with length: 7
+    # replaced 'n:pane_title' with '7'
+    # result is: 7
+    7
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: out: display-message -v -p -t tv:0.0 #{w:pane_title}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #{w:pane_title}
+    # found #{}: w:pane_title
+    # modifier 0 is w
+    # format 'pane_title' found: macbook
+    # replacing with width: 7
+    # replaced 'w:pane_title' with '7'
+    # result is: 7
+    7
+tmux stdout:
+    # expanding format: #{w:pane_title}
+    # found #{}: w:pane_title
+    # modifier 0 is w
+    # format 'pane_title' found: macbook
+    # replacing with width: 7
+    # replaced 'w:pane_title' with '7'
+    # result is: 7
+    7
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: display-message -v -p -t tv:0.0 <#{E:@notset}>
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: <#{E:@notset}>
+    # found #{}: E:@notset
+    # modifier 0 is E
+    # format '@notset' not found
+    # replaced 'E:@notset' with ''
+    # result is: <>
+    <>
+tmux stdout:
+    # expanding format: <#{E:@notset}>
+    # found #{}: E:@notset
+    # modifier 0 is E
+    # format '@notset' not found
+    # replaced 'E:@notset' with ''
+    # result is: <>
+    <>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: display-message -v -p -t tv:0.0 #[fg=#{@c}]x#{pane_title}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #[fg=#{@c}]x#{pane_title}
+    # found #*1[
+    # found #{}: @c
+    # format '@c' found: red
+    # replaced '@c' with 'red'
+    # found #{}: pane_title
+    # format 'pane_title' found: macbook
+    # replaced 'pane_title' with 'macbook'
+    # result is: #[fg=red]xmacbook
+    #[fg=red]xmacbook
+tmux stdout:
+    # expanding format: #[fg=#{@c}]x#{pane_title}
+    # found #*1[
+    # found #{}: @c
+    # format '@c' found: red
+    # replaced '@c' with 'red'
+    # found #{}: pane_title
+    # format 'pane_title' found: macbook
+    # replaced 'pane_title' with 'macbook'
+    # result is: #[fg=red]xmacbook
+    #[fg=red]xmacbook
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: out: display-message -v -p -t tv:0.0 ##[fg=red]x
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: ##[fg=red]x
+    # found #*2[
+    # result is: ##[fg=red]x
+    ##[fg=red]x
+tmux stdout:
+    # expanding format: ##[fg=red]x
+    # found #*2[
+    # result is: ##[fg=red]x
+    ##[fg=red]x
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: out: display-message -v -p -t tv:0.0 x#,y##z
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: x#,y##z
+    # found #,
+    # found ##
+    # result is: x,y#z
+    x,y#z
+tmux stdout:
+    # expanding format: x#,y##z
+    # found #,
+    # found ##
+    # result is: x,y#z
+    x,y#z
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: out: display-message -v -p -t tv:0.0 #{=#{@three}:pane_title}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #{=#{@three}:pane_title}
+    # found #{}: =#{@three}:pane_title
+    # expanding inner format '=#{@three}:pane_title'
+    #  expanding format: =#{@three}:pane_title
+    #  found #{}: @three
+    #  format '@three' found: 3
+    #  replaced '@three' with '3'
+    #  result is: =3:pane_title
+    # replaced '=#{@three}:pane_title' with '=3:pane_title'
+    # result is: =3:pane_title
+    =3:pane_title
+tmux stdout:
+    # expanding format: #{=#{@three}:pane_title}
+    # found #{}: =#{@three}:pane_title
+    # expanding inner format '=#{@three}:pane_title'
+    #  expanding format: =#{@three}:pane_title
+    #  found #{}: @three
+    #  format '@three' found: 3
+    #  replaced '@three' with '3'
+    #  result is: =3:pane_title
+    # replaced '=#{@three}:pane_title' with '=3:pane_title'
+    # result is: =3:pane_title
+    =3:pane_title
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: out: display-message -v -p -t tv:0.0 #{s/#{@three}/X/:pane_title}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #{s/#{@three}/X/:pane_title}
+    # found #{}: s/#{@three}/X/:pane_title
+    #  expanding format: #{@three}
+    #  found #{}: @three
+    #  format '@three' found: 3
+    #  replaced '@three' with '3'
+    #  result is: 3
+    #  expanding format: X
+    #  result is: X
+    # modifier 0 is s
+    # modifier 0 argument 0: 3
+    # modifier 0 argument 1: X
+    # format 'pane_title' found: macbook
+    #  expanding format: 3
+    #  result is: 3
+    #  expanding format: X
+    #  result is: X
+    # substitute '3' to 'X': macbook
+    # replaced 's/#{@three}/X/:pane_title' with 'macbook'
+    # result is: macbook
+    macbook
+tmux stdout:
+    # expanding format: #{s/#{@three}/X/:pane_title}
+    # found #{}: s/#{@three}/X/:pane_title
+    #  expanding format: #{@three}
+    #  found #{}: @three
+    #  format '@three' found: 3
+    #  replaced '@three' with '3'
+    #  result is: 3
+    #  expanding format: X
+    #  result is: X
+    # modifier 0 is s
+    # modifier 0 argument 0: 3
+    # modifier 0 argument 1: X
+    # format 'pane_title' found: macbook
+    #  expanding format: 3
+    #  result is: 3
+    #  expanding format: X
+    #  result is: X
+    # substitute '3' to 'X': macbook
+    # replaced 's/#{@three}/X/:pane_title' with 'macbook'
+    # result is: macbook
+    macbook
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: out: display-message -v -t tv:0.0 #{session_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    # expanding format: #{session_name}
+    # found #{}: session_name
+    # format 'session_name' found: tv
+    # replaced 'session_name' with 'tv'
+    # result is: tv
+tmux stdout:
+    # expanding format: #{session_name}
+    # found #{}: session_name
+    # format 'session_name' found: tv
+    # replaced 'session_name' with 'tv'
+    # result is: tv
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: out: display-message -v -p -l -t tv:0.0 #{session_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    #{session_name}
+tmux stdout:
+    #{session_name}
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: out: display-message -p -t tv:0.0 #{=#{@three}:pane_title}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    =3:pane_title
+tmux stdout:
+    =3:pane_title
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=29 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

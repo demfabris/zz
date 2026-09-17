@@ -1,0 +1,425 @@
+# Scenario: pane-exact-target-prefix
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/pane-exact-target-prefix.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: rename-window -t w:0 win0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: new-window -d -t w:1 -n win1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: split-window -d -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: set-option -t =w history-limit 1234
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    no such session: =w
+tmux stderr:
+    no such session: =w
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: show-options -v -t w history-limit
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: set-option -t =w: history-limit 1234
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: show-options -v -t w history-limit
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1234
+tmux stdout:
+    1234
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: set-option -t =wi history-limit 4321
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    no such session: =wi
+tmux stderr:
+    no such session: =wi
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: show-options -v -t w history-limit
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1234
+tmux stdout:
+    1234
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: set-option -w -t =win0 aggressive-resize on
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    no such window: =win0
+tmux stderr:
+    no such window: =win0
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: show-window-options -v -t w:0 aggressive-resize
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: set-window-option -t =win0 aggressive-resize on
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: show-window-options -v -t w:0 aggressive-resize
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    on
+tmux stdout:
+    on
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: set-option -p -t =w remain-on-exit on
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    no such pane: =w
+tmux stderr:
+    no such pane: =w
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: show-options -pv -t w:0.0 remain-on-exit
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: kill-pane -t =w
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    can't find pane: =w
+tmux stderr:
+    can't find pane: =w
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: list-panes -t w:0 -F #{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+    1
+tmux stdout:
+    0
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: has-session -t =w
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: has-session -t =wi
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    can't find session: wi
+tmux stderr:
+    can't find session: wi
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: kill-window -t =wi
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    can't find window: wi
+tmux stderr:
+    can't find window: wi
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: list-panes -t =win0 -F #{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+    1
+tmux stdout:
+    0
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: display-message -p -t =win0 #{session_name}:#{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    :.
+tmux stdout:
+    :.
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: out: display-message -p -t =win #{session_name}:#{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    :.
+tmux stdout:
+    :.
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: out: display-message -p -t =w: #{session_name}:#{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    w:0.0
+tmux stdout:
+    w:0.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: select-window -t =win1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: out: display-message -p -t w #{window_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: select-window -t =win0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: out: display-message -p -t w #{window_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: select-window -t =win
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    can't find window: win
+tmux stderr:
+    can't find window: win
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: select-pane -t =win0
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    can't find pane: =win0
+tmux stderr:
+    can't find pane: =win0
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 31
+COMMAND: out: display-message -p -t w:0 #{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=31 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

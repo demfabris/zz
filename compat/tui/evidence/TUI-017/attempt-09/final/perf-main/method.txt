@@ -1,0 +1,1 @@
+fixed mixed SGR/tab workload; Bash builtin time (/usr/bin/time unavailable); /bin/cat producer wall time under PTY backpressure; five runs; attached at 80x24; compare identical pane grids and build profiles; marker confirms consumer completion after timing

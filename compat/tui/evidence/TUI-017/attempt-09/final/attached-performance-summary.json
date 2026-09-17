@@ -1,0 +1,26 @@
+{
+  "fixed": {
+    "wall_seconds": [
+      1.252,
+      1.293,
+      1.199,
+      1.184,
+      1.214
+    ],
+    "median": 1.214,
+    "markers": 5
+  },
+  "main": {
+    "wall_seconds": [
+      1.655,
+      1.51,
+      1.426,
+      1.736,
+      1.435
+    ],
+    "median": 1.51,
+    "markers": 5
+  },
+  "percent": -19.60264900662252,
+  "limits": "Five fixed runs followed by five main runs; shared-host load, not interleaved. Native alternating CPU benchmark is the performance comparison."
+}

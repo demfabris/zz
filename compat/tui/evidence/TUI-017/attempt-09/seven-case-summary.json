@@ -1,0 +1,93 @@
+[
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-low-indexed-colour target/capture-residuals-final-v5/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-fixed-capture-low-indexed-colour.txt",
+    "exit": 0,
+    "result": "residual self-check capture-low-indexed-colour: 0 failures"
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-trailing target/capture-residuals-final-v5/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-fixed-capture-tab-trailing.txt",
+    "exit": 0,
+    "result": "residual self-check capture-tab-trailing: 0 failures"
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-internal target/capture-residuals-final-v5/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-fixed-capture-tab-internal.txt",
+    "exit": 0,
+    "result": "residual self-check capture-tab-internal: 0 failures"
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-wide target/capture-residuals-final-v5/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-fixed-capture-tab-wide.txt",
+    "exit": 0,
+    "result": "residual self-check capture-tab-wide: 0 failures"
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh lock-session target/capture-residuals-final-v5/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-fixed-lock-session.txt",
+    "exit": 0,
+    "result": "residual self-check lock-session: 0 failures"
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh has-session target/capture-residuals-final-v5/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-fixed-has-session.txt",
+    "exit": 0,
+    "result": "residual self-check has-session: 0 failures"
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh list-windows target/capture-residuals-final-v5/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-fixed-list-windows.txt",
+    "exit": 0,
+    "result": "residual self-check list-windows: 0 failures"
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-low-indexed-colour target/capture-residuals-final-reverted/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-reverted-capture-low-indexed-colour.txt",
+    "exit": 1,
+    "result": "residual self-check capture-low-indexed-colour: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-trailing target/capture-residuals-final-reverted/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-reverted-capture-tab-trailing.txt",
+    "exit": 1,
+    "result": "residual self-check capture-tab-trailing: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-internal target/capture-residuals-final-reverted/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-reverted-capture-tab-internal.txt",
+    "exit": 1,
+    "result": "residual self-check capture-tab-internal: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-wide target/capture-residuals-final-reverted/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-reverted-capture-tab-wide.txt",
+    "exit": 1,
+    "result": "residual self-check capture-tab-wide: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh lock-session target/capture-residuals-final-reverted/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-reverted-lock-session.txt",
+    "exit": 1,
+    "result": "residual self-check lock-session: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh has-session target/capture-residuals-final-reverted/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-reverted-has-session.txt",
+    "exit": 1,
+    "result": "residual self-check has-session: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh list-windows target/capture-residuals-final-reverted/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-reverted-list-windows.txt",
+    "exit": 1,
+    "result": "residual self-check list-windows: 1 failures",
+    "expected_exit": 1
+  }
+]

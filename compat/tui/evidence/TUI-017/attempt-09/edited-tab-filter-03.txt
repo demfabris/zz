@@ -1,0 +1,61 @@
+   Compiling libghostty-vt-sys v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt-sys)
+error: failed to run custom build command for `libghostty-vt-sys v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt-sys)`
+
+Caused by:
+  process didn't exit successfully: `/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-d9ba53b8d11f8067/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_OPTIMIZE
+  cargo:rerun-if-env-changed=GHOSTTY_SOURCE_DIR
+  cargo:rerun-if-env-changed=GHOSTTY_ZIG_SYSTEM_DIR
+  cargo:rerun-if-env-changed=TARGET
+  cargo:rerun-if-env-changed=HOST
+  cargo:rerun-if-env-changed=DEBUG
+  cargo:rerun-if-env-changed=OPT_LEVEL
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt-sys/provenance.patch
+
+  --- stderr
+  install
+  +- install ghostty-vt
+     +- compile lib ghostty-vt ReleaseSafe native-native 1 errors
+  src/terminal/Terminal.zig:2148:63: error: cannot @bitCast from 'comptime_int'
+      var mask = comptime Ignored.strip(@bitCast(std.math.maxInt(u64)));
+                                                 ~~~~~~~~~~~~~~~^~~~~
+  referenced by:
+      horizontalTab [inlined]: src/terminal/stream_terminal.zig:588:40
+      vtFallible [inlined]: src/terminal/stream_terminal.zig:243:50
+      vt__anon_100769: src/terminal/stream_terminal.zig:187:24
+      4 reference(s) hidden; use '-freference-trace=7' to see all references
+  error: 1 compilation errors
+  failed command: /usr/bin/zig build-lib /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache/o/f983b7c4a0b2d4ce198abf204b59484b/libsimdutf.a /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache/o/0085aa66ae44ec843fb8f785630f8b70/libhighway.a -cflags -DHWY_DISABLED_TARGETS=472 -std=c++17 -DHWY_NO_LIBCXX -DSIMDUTF_NO_LIBCXX -- /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/src/simd/base64.cpp /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/src/simd/codepoint_width.cpp /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/src/simd/index_of.cpp /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/src/simd/vt.cpp -fPIC -OReleaseSafe -target native-native -mcpu baseline -I /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache/o/6a496db783039837f837a2e34ed47c18 -I /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache/o/cf20c1d694a30e1a29a26b7db6a944b5 -I /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/src --dep build_options --dep terminal_options --dep unicode_tables --dep symbols_tables --dep uucode -Mroot=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/src/lib_vt.zig -Mbuild_options=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache/c/56a2fdf45ebf0b2fc1954710963c069a/options.zig -Mterminal_options=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache/c/a5556d3d727ea078f202eb3706e8b019/options.zig -Municode_tables=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache/o/15e5cd0f04fe13f0cf42518c68115892/props.zig -Msymbols_tables=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache/o/15e5cd0f04fe13f0cf42518c68115892/symbols.zig -ODebug --dep types.zig --dep config.zig --dep tables -Muucode=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/zig-pkg/uucode-0.2.0-ZZjBPlK5VADj7fdoq7G8LIHzD5o6FSkcBXXrRWr4jnrA/src/root.zig -ODebug -Mtypes.zig=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/zig-pkg/uucode-0.2.0-ZZjBPlK5VADj7fdoq7G8LIHzD5o6FSkcBXXrRWr4jnrA/src/types.zig -ODebug --dep types.zig --dep storage.zig -Mconfig.zig=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/zig-pkg/uucode-0.2.0-ZZjBPlK5VADj7fdoq7G8LIHzD5o6FSkcBXXrRWr4jnrA/src/config.zig -ODebug --dep config.zig --dep storage.zig --dep build_config -Mtables=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache/o/cb97cd257d2bb455347963ba1fa1b577/tables.zig -ODebug --dep config.zig -Mstorage.zig=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/zig-pkg/uucode-0.2.0-ZZjBPlK5VADj7fdoq7G8LIHzD5o6FSkcBXXrRWr4jnrA/src/storage.zig --dep config.zig --dep storage.zig -Mbuild_config=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/src/build/uucode_config.zig -lc++ -lc --cache-dir /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache --global-cache-dir /home/demfabris/.cache/zig --name ghostty-vt -dynamic --version 0.1.0-dev --zig-lib-dir /usr/lib/zig/ --listen=-
+
+  install
+  +- install generated to libghostty-vt.a
+     +- run exe combine_archives (libghostty-vt-fat.a)
+        +- compile lib ghostty-vt-static ReleaseSafe native-native 1 errors
+  src/terminal/Terminal.zig:2148:63: error: cannot @bitCast from 'comptime_int'
+      var mask = comptime Ignored.strip(@bitCast(std.math.maxInt(u64)));
+                                                 ~~~~~~~~~~~~~~~^~~~~
+  referenced by:
+      horizontalTab [inlined]: src/terminal/stream_terminal.zig:588:40
+      vtFallible [inlined]: src/terminal/stream_terminal.zig:243:50
+      vt__anon_108597: src/terminal/stream_terminal.zig:187:24
+      4 reference(s) hidden; use '-freference-trace=7' to see all references
+  error: 1 compilation errors
+  failed command: /usr/bin/zig build-lib -cflags -DHWY_DISABLED_TARGETS=472 -std=c++17 -DHWY_NO_LIBCXX -DSIMDUTF_NO_LIBCXX -- /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/src/simd/base64.cpp /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/src/simd/codepoint_width.cpp /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/src/simd/index_of.cpp /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/src/simd/vt.cpp -fPIC -OReleaseSafe -target native-native -mcpu baseline -I /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache/o/6a496db783039837f837a2e34ed47c18 -I /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache/o/cf20c1d694a30e1a29a26b7db6a944b5 -I /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/src --dep build_options --dep terminal_options --dep unicode_tables --dep symbols_tables --dep uucode -Mroot=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/src/lib_vt.zig -Mbuild_options=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache/c/56a2fdf45ebf0b2fc1954710963c069a/options.zig -Mterminal_options=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache/c/a5556d3d727ea078f202eb3706e8b019/options.zig -Municode_tables=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache/o/15e5cd0f04fe13f0cf42518c68115892/props.zig -Msymbols_tables=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache/o/15e5cd0f04fe13f0cf42518c68115892/symbols.zig -ODebug --dep types.zig --dep config.zig --dep tables -Muucode=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/zig-pkg/uucode-0.2.0-ZZjBPlK5VADj7fdoq7G8LIHzD5o6FSkcBXXrRWr4jnrA/src/root.zig -ODebug -Mtypes.zig=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/zig-pkg/uucode-0.2.0-ZZjBPlK5VADj7fdoq7G8LIHzD5o6FSkcBXXrRWr4jnrA/src/types.zig -ODebug --dep types.zig --dep storage.zig -Mconfig.zig=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/zig-pkg/uucode-0.2.0-ZZjBPlK5VADj7fdoq7G8LIHzD5o6FSkcBXXrRWr4jnrA/src/config.zig -ODebug --dep config.zig --dep storage.zig --dep build_config -Mtables=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache/o/cb97cd257d2bb455347963ba1fa1b577/tables.zig -ODebug --dep config.zig -Mstorage.zig=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/zig-pkg/uucode-0.2.0-ZZjBPlK5VADj7fdoq7G8LIHzD5o6FSkcBXXrRWr4jnrA/src/storage.zig --dep config.zig --dep storage.zig -Mbuild_config=/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src/src/build/uucode_config.zig -lc++ -lc --cache-dir /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache --global-cache-dir /home/demfabris/.cache/zig --name ghostty-vt-static -static -fcompiler-rt -fubsan-rt --zig-lib-dir /usr/lib/zig/ --listen=-
+
+  Build Summary: 17/23 steps succeeded (2 failed)
+  install transitive failure
+  +- install ghostty-vt transitive failure
+  |  +- compile lib ghostty-vt ReleaseSafe native-native 1 errors
+  +- install generated to libghostty-vt.a transitive failure
+     +- run exe combine_archives (libghostty-vt-fat.a) transitive failure
+        +- compile lib ghostty-vt-static ReleaseSafe native-native 1 errors
+        +- compile lib ghostty-vt-static ReleaseSafe native-native (+11 more reused dependencies)
+
+  error: the following build command failed with exit code 1:
+  /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache/o/a8ca3f3efd233e08b43173160aae3684/build /usr/bin/zig /usr/lib/zig /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/zig-cache /home/demfabris/.cache/zig --seed 0x56a5318f -Zba6465fd3934278b -Demit-lib-vt=true -Doptimize=ReleaseSafe -Dcpu=baseline -Demit-xcframework=false -Dapp-runtime=none --prefix /home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-install
+
+  thread 'main' (680635) panicked at third_party/rust/libghostty-vt-sys/build.rs:421:5:
+  zig build failed with status exit status: 1
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

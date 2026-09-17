@@ -1,0 +1,23 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.29s
+     Running unittests src/terminal_core.rs (target/debug/deps/zz_terminal-668b4c4ce7e784d8)
+
+running 1 test
+test session::tests::capture_preserves_edited_tab_cells ... FAILED
+
+failures:
+
+---- session::tests::capture_preserves_edited_tab_cells stdout ----
+
+thread 'session::tests::capture_preserves_edited_tab_cells' (651871) panicked at crates/zz-terminal/src/session.rs:18475:17:
+assertion `left == right` failed: "\u{1b}[73GABC\tZ\r\u{1b}[70G\u{1b}[6@\u{1b}[5;1HNEXT" chunks=1
+  left: "                                                                              AB\n\n\n\nNEXT"
+ right: "                                                                          C   AB\n\n\n\nNEXT"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    session::tests::capture_preserves_edited_tab_cells
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 287 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p zz-terminal --lib`

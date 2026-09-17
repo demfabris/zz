@@ -1,0 +1,261 @@
+# Scenario: smoke/source-file-diagnostics
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/smoke/source-file-diagnostics.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: conf: fixtures/source-file-diagnostics.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    %begin 1789655669 1 0
+    %end 1789655669 1 0
+    %begin 1789655670 2 0
+    %end 1789655670 2 0
+    %begin 1789655670 3 0
+    %end 1789655670 3 0
+    %begin 1789655670 4 0
+    %end 1789655670 4 0
+    %begin 1789655671 5 0
+    %end 1789655671 5 0
+    %begin 1789655671 6 0
+    %end 1789655671 6 0
+    %begin 1789655671 7 0
+    %end 1789655671 7 0
+    %begin 1789655671 8 0
+    %end 1789655671 8 0
+    %begin 1789655672 9 0
+    %end 1789655672 9 0
+    %begin 1789655672 10 0
+    %end 1789655672 10 0
+    %begin 1789655673 11 0
+    %end 1789655673 11 0
+    %begin 1789655673 12 0
+    %end 1789655673 12 0
+    %exit
+tmux stdout:
+    %begin 1789655673 317 0
+    %end 1789655673 317 0
+    %begin 1789655673 318 0
+    %end 1789655673 318 0
+    %begin 1789655673 324 0
+    %end 1789655673 324 0
+    %begin 1789655673 330 0
+    %end 1789655673 330 0
+    %begin 1789655673 336 0
+    %end 1789655673 336 0
+    %begin 1789655673 342 0
+    %end 1789655673 342 0
+    %begin 1789655673 348 0
+    %end 1789655673 348 0
+    %begin 1789655673 354 0
+    %end 1789655673 354 0
+    %begin 1789655673 362 0
+    %end 1789655673 362 0
+    %begin 1789655673 370 0
+    %end 1789655673 370 0
+    %begin 1789655673 381 0
+    %end 1789655673 381 0
+    %begin 1789655673 396 0
+    %end 1789655673 396 0
+    %exit
+COMMAND EXIT-CLASS: clean
+WARN zz: clean
+WARN tmux: clean
+WARN terminator: clean (%end / %end)
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g SOURCE_INVALID
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_INVALID=rc=1 out=bad.conf:1: unknown command: wibble~ err=
+tmux stdout:
+    SOURCE_INVALID=rc=1 out=bad.conf:1: unknown command: wibble~ err=
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g SOURCE_MISS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_MISS=rc=1 out= err=No such file or directory: missing.conf~
+tmux stdout:
+    SOURCE_MISS=rc=1 out= err=No such file or directory: missing.conf~
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: show-environment -g SOURCE_QUIET
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_QUIET=rc=0 out= err=
+tmux stdout:
+    SOURCE_QUIET=rc=0 out= err=
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: show-environment -g SOURCE_MIXED
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_MIXED=rc=1 out=bad.conf:1: unknown command: wibble~ err=No such file or directory: missing.conf~
+tmux stdout:
+    SOURCE_MIXED=rc=1 out=bad.conf:1: unknown command: wibble~ err=No such file or directory: missing.conf~
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: show-environment -g SOURCE_MALFORMED
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_MALFORMED=rc=1 out= err=No such file or directory: [.conf~
+tmux stdout:
+    SOURCE_MALFORMED=rc=1 out= err=No such file or directory: [.conf~
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: show-environment -g SOURCE_MALFORMED_QUIET
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_MALFORMED_QUIET=rc=0 out= err=
+tmux stdout:
+    SOURCE_MALFORMED_QUIET=rc=0 out= err=
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: show-environment -g SOURCE_NESTED_MISS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_NESTED_MISS=rc=1 out= err=No such file or directory: nested-missing.conf~
+tmux stdout:
+    SOURCE_NESTED_MISS=rc=1 out= err=No such file or directory: nested-missing.conf~
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: show-environment -g SOURCE_NESTED_QUIET
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_NESTED_QUIET=rc=0 out= err=
+tmux stdout:
+    SOURCE_NESTED_QUIET=rc=0 out= err=
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: show-environment -g SOURCE_RUNTIME
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_RUNTIME=rc=1 out= err=can't find session: missing-runtime~invalid option: nonexistent-option~ after=yes
+tmux stdout:
+    SOURCE_RUNTIME=rc=1 out= err=can't find session: missing-runtime~invalid option: nonexistent-option~ after=yes
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: show-environment -g SOURCE_RUNTIME_OUTER
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_RUNTIME_OUTER=rc=1 out= err=can't find session: missing-inner~ inner=yes outer=yes
+tmux stdout:
+    SOURCE_RUNTIME_OUTER=rc=1 out= err=can't find session: missing-inner~ inner=yes outer=yes
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: show-environment -g SOURCE_DEFAULT_ORDER
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_DEFAULT_ORDER=rc=1 out=DEFAULT:1: set-option -ag @default_order D~AFTER:1: set-option -ag @default_order A~DEFAULT:1: set-option -ag @default_order D~ err=No such file or directory: MISSING~ order=DAD
+tmux stdout:
+    SOURCE_DEFAULT_ORDER=rc=1 out=DEFAULT:1: set-option -ag @default_order D~AFTER:1: set-option -ag @default_order A~DEFAULT:1: set-option -ag @default_order D~ err=No such file or directory: MISSING~ order=DAD
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=12 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

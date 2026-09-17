@@ -1,0 +1,89 @@
+[
+  {
+    "command": "HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup /tmp/zz-cargo.sh test -p zz-terminal -p zz-mux",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/packages-v5.txt",
+    "exit": 0,
+    "result": [
+      "test result: ok. 536 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.42s",
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+      "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.50s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+      "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+      "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s",
+      "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+      "test result: ok. 60 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s",
+      "test result: ok. 287 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.27s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    ]
+  },
+  {
+    "command": "/tmp/zz-cargo.sh clippy -p zz-terminal -p zz-mux -p zz-daemon -p zz-tui -p zz-cli --all-targets --all-features -- -D warnings",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/clippy.txt",
+    "exit": 0,
+    "result": [
+      "    Checking zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-tui)",
+      "    Checking zz-cli v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-cli)",
+      "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 34.73s"
+    ]
+  },
+  {
+    "command": "/tmp/zz-cargo.sh fmt --all",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/fmt-final.txt",
+    "exit": 0,
+    "result": [
+      "byte-identical"
+    ]
+  },
+  {
+    "command": "cargo() { /tmp/zz-cargo.sh \"$@\"; }; export -f cargo; HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup compat/check.sh",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/compat-check.txt",
+    "exit": 0,
+    "result": [
+      "test result: ok. 536 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.66s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.01s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.01s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 978 filtered out; finished in 0.00s"
+    ]
+  },
+  {
+    "command": "python3 compat/wire-version.py",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/wire-version.txt",
+    "exit": 0,
+    "result": [
+      "wire-version: 104 is unreleased (v0.10.0 shipped 103); appends are free"
+    ]
+  },
+  {
+    "command": "python3 .agents/skills/okf/scripts/okf.py validate knowledge",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/okf.txt",
+    "exit": 0,
+    "result": [
+      "  WARN  research/: 5 concept(s) older than 7d (oldest 41d: research/2026-08-07-nvidia-cef-accelerated-osr) \u2014 drain into the owning concept or delete (knowledge/playbooks/docs-discipline.md \u00a7The one-week rule)",
+      "",
+      "CONFORMANT (OKF v0.1): 0 errors, 1 warning(s)"
+    ]
+  },
+  {
+    "command": "/tmp/zz-cargo.sh build -p zz-cli --bin zz_cli",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/build-restored-requeued.txt",
+    "exit": 0,
+    "result": [
+      "   Compiling zz-config v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-config)",
+      "   Compiling zz-cli v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-cli)",
+      "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 18s"
+    ]
+  },
+  {
+    "command": "cmp target/debug/zz_cli target/capture-residuals-final-v5/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/binary-restoration.txt",
+    "exit": 0,
+    "result": [
+      "byte-identical"
+    ]
+  }
+]

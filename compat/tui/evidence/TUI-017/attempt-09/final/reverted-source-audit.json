@@ -1,0 +1,13 @@
+{
+  "source_revision": "686506a12d1191bf477083918ead2ba6dac789d5",
+  "files_checked": 451,
+  "changed_files": [
+    "crates/zz-terminal/src/session.rs",
+    "crates/zz-mux/src/command.rs"
+  ],
+  "native_producer": "Unchanged; only mux configured-index callback and capture consumers disabled.",
+  "binary_hashes": {
+    "target/capture-residuals-final-v5/zz": "b46c0988913e740c3f57f80c32ec364cfd648ab2fef614cf3ce3e2e6e7d89153",
+    "target/capture-residuals-final-reverted/zz": "f9c56de71d5361c4be23fc880ce2d7175f10e516cd8bbda2c160db4c4e5a43d9"
+  }
+}

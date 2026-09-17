@@ -1,0 +1,9 @@
+ok    self-check capture-low-indexed-colour exact bytes before sabotage
+      case capture-low-indexed-colour-sabotage
+      stdout differs
+        1c1
+        < \033[38;5;1mRED\033[39m
+        ---
+        > \033[31mRED\033[39m
+ok    self-check capture-low-indexed-colour one-sided scene change
+residual self-check capture-low-indexed-colour: 0 failures

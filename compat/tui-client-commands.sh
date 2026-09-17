@@ -465,6 +465,7 @@ CASE_NEEDLE_MODE=0
 CASE_CLOCK_FACE=0
 CASE_STDIN=''
 CASE_GRID_CELLS=0
+CASE_EXPECT_EQUAL=0
 
 # Two spellings a command prints belong to the process that printed them and no
 # two servers can share them: the pts number the kernel gave a client, and the
@@ -579,6 +580,22 @@ compare_channels() {
   if [ "$CASE_GRID_CELLS" -eq 1 ]; then
     zz_screen="$(grid_cells_of zz)"
     tmux_screen="$(grid_cells_of tmux)"
+  fi
+  if [ "$CASE_EXPECT_EQUAL" -eq 1 ] && [ "$CASE_CLOCK_FACE" -eq 0 ]; then
+    local redraw_poll
+    for ((redraw_poll = 0; redraw_poll < 20; redraw_poll++)); do
+      { [ "$zz_screen" = "$tmux_screen" ] && [ "$zz_cursor" = "$tmux_cursor" ]; } && break
+      sleep 0.05
+      if [ "$CASE_GRID_CELLS" -eq 1 ]; then
+        zz_screen="$(grid_cells_of zz)"
+        tmux_screen="$(grid_cells_of tmux)"
+      else
+        zz_screen="$(styled_screen_of zz)"
+        tmux_screen="$(styled_screen_of tmux)"
+      fi
+      zz_cursor="$(cursor_tuple zz)"
+      tmux_cursor="$(cursor_tuple tmux)"
+    done
   fi
   LAST_EXIT_DIFFERED=0
   LAST_STDOUT_DIFFERED=0
@@ -706,6 +723,8 @@ owner_tally() {
 case_run() {
   local name="$1"
   local mode="$2"
+  local CASE_EXPECT_EQUAL=0
+  [ "$mode" != same ] || CASE_EXPECT_EQUAL=1
   local reason="$3"
   shift 3
   [ "$1" = "--" ] && shift
@@ -950,6 +969,7 @@ switch_tail_style_cases() {
 }
 
 switch_tail_self_checks() {
+  local CASE_EXPECT_EQUAL=1
   local duplicate
   for duplicate in no yes; do
     attach_both_at 80 24

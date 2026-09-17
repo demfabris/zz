@@ -665,7 +665,7 @@ pub(super) fn switch_matches(
             })
         })
         .collect::<Vec<_>>();
-    matches.sort_by(|left, right| right.score.cmp(&left.score));
+    matches.sort_by_key(|entry| std::cmp::Reverse(entry.score));
     matches
 }
 

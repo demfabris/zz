@@ -245,14 +245,12 @@ fn switch_surface(view: &SwitchView<'_>, rect: Rect, theme: &ThemeColours) -> Mo
     }
     let visible = rect.height - 1;
     let selection = base_cell(&resolved_style(view.selection_style, theme).unwrap_or_else(plain));
-    let highlight = resolved_style(view.match_style, theme)
-        .map(|style| TmuxStyle {
-            fg: style.fg.or(Some(TmuxColour::Default)),
-            bg: style.bg.or(Some(TmuxColour::Default)),
-            attributes: style.attributes,
-            ..TmuxStyle::default()
-        })
-        .unwrap_or_else(plain);
+    let highlight = resolved_style(view.match_style, theme).map_or_else(plain, |style| TmuxStyle {
+        fg: style.fg.or(Some(TmuxColour::Default)),
+        bg: style.bg.or(Some(TmuxColour::Default)),
+        attributes: style.attributes,
+        ..TmuxStyle::default()
+    });
     let base = plain();
     for index in 0..visible {
         let row_index = usize::from(index).saturating_add(view.offset as usize);

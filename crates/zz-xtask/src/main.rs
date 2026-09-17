@@ -321,6 +321,28 @@ fn parse_bundle_options(args: &[String]) -> Result<BundleOptions, String> {
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+fn cargo_command() -> Command {
+    let mut command = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+    for (key, _) in env::vars_os() {
+        let leaked = key.to_str().is_some_and(|key| {
+            key.starts_with("CARGO_PKG_")
+                || matches!(
+                    key,
+                    "CARGO_MANIFEST_DIR"
+                        | "CARGO_MANIFEST_PATH"
+                        | "CARGO_CRATE_NAME"
+                        | "CARGO_BIN_NAME"
+                        | "CARGO_PRIMARY_PACKAGE"
+                )
+        });
+        if leaked {
+            command.env_remove(key);
+        }
+    }
+    command
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn merged_features(cli: Option<&str>) -> Option<OsString> {
     let env = env::var_os("ZZ_CARGO_FEATURES").filter(|value| !value.is_empty());
     match (cli, env) {
@@ -339,7 +361,7 @@ fn merged_features(cli: Option<&str>) -> Option<OsString> {
 #[cfg(target_os = "linux")]
 fn build_linux_binaries(release: bool, features: Option<&str>) -> Result<PathBuf, Box<dyn Error>> {
     println!("Building {APP_NAME} and {CLI_NAME}...");
-    let mut command = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+    let mut command = cargo_command();
     command.args(["build", "-p", "zz", "-p", "zz-cli"]);
     if release {
         command.arg("--release");
@@ -392,7 +414,7 @@ fn build_linux_binaries(release: bool, features: Option<&str>) -> Result<PathBuf
 #[cfg(target_os = "windows")]
 fn build_windows_library(release: bool, features: Option<&str>) -> Result<PathBuf, Box<dyn Error>> {
     println!("Building {APP_NAME}.dll...");
-    let mut command = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+    let mut command = cargo_command();
     command.arg("build");
     if release {
         command.arg("--release");
@@ -649,7 +671,7 @@ fn build_macos_binaries(
     features: Option<&str>,
 ) -> Result<PathBuf, Box<dyn Error>> {
     println!("Building {APP_NAME}, {MACOS_HELPER_NAME}, and {CLI_NAME}...");
-    let mut command = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+    let mut command = cargo_command();
     command.args(["build", "-p", "zz", "-p", "zz-cli"]);
     profile.configure_cargo(&mut command);
     if let Some(features) = merged_features(features) {

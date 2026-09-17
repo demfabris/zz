@@ -2031,9 +2031,10 @@
       "closed_on": "2026-09-17",
       "evidence": [
         "file:compat/tui-client-commands.sh",
-        "file:compat/tui/evidence/TUI-014/attempt-16-customize-fix/notes.md"
+        "file:compat/tui/evidence/TUI-014/attempt-16-customize-fix/notes.md",
+        "file:compat/tui/evidence/TUI-014/attempt-17-rebased-proof/notes.md"
       ],
-      "resolution": "Measured and closed 2026-09-17: switch-mode-windows and switch-mode-duplicate-windows compare equal on exact CLI results and complete decoded attached screens, styles, cursor and state. Unselected rows clear before drawing their contents, preserving default tail cells and the last run at allocation boundaries; selected rows preserve the mode-style background fill. Short dim, foreground, background and underline rows, plus a colored 20-column boundary row, also compare equal. Each case has an equivalence control and a one-sided default-tail sabotage. Copy/clock stacking follows fabrico’s dated per-client-copy decision and is recorded separately under decided:TUI-014."
+      "resolution": "Measured and closed 2026-09-17: switch-mode-windows and switch-mode-duplicate-windows compare equal on exact CLI results and complete decoded attached screens, styles, cursor and state. Unselected rows clear before drawing their contents, preserving default tail cells and the last run at allocation boundaries; selected rows preserve the mode-style background fill. Short dim, foreground, background and underline rows, plus a colored 20-column boundary row, also compare equal. Each case has an equivalence control and a one-sided default-tail sabotage. Copy/clock stacking follows fabrico’s dated per-client-copy decision and is recorded separately under decided:TUI-014. Exact capture-tail cases use fresh scenes: capture -R after the lifetime sequence proves all 1920 visible cells equal while outer tmux allocation metadata differs (41/80 versus 20/20), which alone changes capture -e resets. A separate history case asserts decoded glyphs, widths, attributes, colours, links, geometry and cursor; its blank-cell background sabotage is caught. Failed old-fixture runs and raw grid dumps are retained in attempt-17-rebased-proof."
     },
     {
       "id": "clients.tty-basename-targeting",

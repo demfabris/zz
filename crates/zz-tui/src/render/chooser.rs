@@ -311,6 +311,13 @@ impl Grid {
         }
     }
 
+    pub(super) fn extend_last_cell(&mut self, used: u16, y: u16) {
+        if used > 0 && used < self.width {
+            let paint = self.cells[self.index(used - 1, y).unwrap()].paint.clone();
+            self.fill(used, y, self.width - used, &paint);
+        }
+    }
+
     pub(super) fn markup(
         &mut self,
         x: u16,

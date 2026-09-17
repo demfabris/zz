@@ -655,7 +655,7 @@ case_owner() {
     printf 'TUI-014'
     ;;
   switch-mode-windows | switch-mode-duplicate-windows | copy-over-clock* | clock-over-copy*)
-    printf 'gap:clients.interactive-refresh'
+    printf 'TUI-014'
     ;;
   server-access-add)
     printf 'gap:protocol.socket-acl'
@@ -868,6 +868,88 @@ lifetime_window_close() {
   restore_case "$1"
 }
 
+customize_edit_array() {
+  local name="$1" scope="$2" value="$3"
+  run_on_both set-option "$scope" "${name}[100]" "$value"
+  run_both customize-mode -N -t PANE
+  run_both send-keys -t PANE / "$name" Enter
+  run_both send-keys -t PANE Enter C-u "$value" Enter
+  run_both copy-mode -q -t PANE
+}
+
+customize_fix_cases() {
+  local name scope value key
+  for name in command-alias terminal-overrides terminal-features codepoint-widths user-keys update-environment status-format pane-colours; do
+    scope=-s
+    value=review-value
+    case "$name" in
+      command-alias) value='review=display-message review' ;;
+      terminal-overrides) value='review*:colors=256' ;;
+      terminal-features) value='review*:RGB' ;;
+      codepoint-widths) value='U+0041=1' ;;
+      update-environment | status-format) scope=-g ;;
+      pane-colours) scope=-gw; value=red ;;
+    esac
+    customize_edit_array "$name" "$scope" "$value"
+    case_run "customize-array-$name" same '' -- show-options "$scope" "$name"
+    run_both customize-mode -N -t PANE
+    run_both send-keys -t PANE / "$name" Enter Right Down Enter C-u "$value" Enter
+    run_both copy-mode -q -t PANE
+    case_run "customize-array-child-$name" same '' -- show-options "$scope" "$name"
+    run_on_both set-option "${scope}u" "$name"
+  done
+  for key in C-c C-d C-j Space M-\< M-\> x; do
+    run_both customize-mode -t PANE
+    case_run "customize-unbound-$key" same '' -- send-keys -t PANE "$key"
+    case_run "customize-retained-$key" same '' -- display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+    restore_case "customize-unbound-$key-closed"
+  done
+  for key in q Escape C-g; do
+    run_both customize-mode -t PANE
+    case_run "customize-exit-$key" same '' -- send-keys -t PANE "$key"
+  done
+}
+
+customize_fix_self_checks() {
+  customize_edit_array command-alias -s 'review=display-message review'
+  self_check_run customize-array-control show-options -g command-alias
+  self_check_expect 'array root insertion preserves every existing alias' exit=0 stdout=0 stderr=0 screen=0 state=0
+  zz_command set-option -s command-alias 'review=display-message review' >/dev/null
+  self_check_run customize-array-sabotage show-options -g command-alias
+  self_check_expect 'unindexed array replacement erases the seeded aliases' exit=0 stdout=1 stderr=0
+  run_on_both set-option -su command-alias
+  run_both customize-mode -t PANE
+  run_both send-keys -t PANE C-c
+  self_check_run customize-interrupt-control display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+  self_check_expect 'C-c leaves customize mode open' exit=0 stdout=0 stderr=0 screen=0 state=0
+  zz_command copy-mode -q -t "$(active_pane zz)" >/dev/null
+  self_check_run customize-interrupt-sabotage display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+  self_check_expect 'closing customize mode on C-c changes mode and screen' exit=0 stdout=1 stderr=0 screen=1 state=1
+  run_both copy-mode -q -t PANE
+}
+
+switch_tail_self_checks() {
+  local duplicate
+  for duplicate in no yes; do
+    attach_both_at 80 24
+    if [ "$duplicate" = yes ]; then
+      run_on_both new-session -d -s alpha -n "$WINDOW_NAME" -x 80 -y 24 "$INNER_SHELL"
+      run_on_both new-session -d -s zulu -n "$WINDOW_NAME" -x 80 -y 24 "$INNER_SHELL"
+    fi
+    self_check_run "switch-tail-$duplicate-control" switch-mode -w -t PANE
+    self_check_expect "switch window tail $duplicate control" exit=0 stdout=0 stderr=0 screen=0 state=0
+    zz_command copy-mode -q -t "$(active_pane zz)" >/dev/null
+    zz_command switch-mode -w -F '#{window_name} #[dim]#{session_name}:#{window_index}#{window_flags}#[default] #[dim]#{pane_current_command}#[default] #[dim]#{?#{!=:#{pane_title},#{host_short}},#{pane_title},}#[default]#{?#{==:#{window_name},two},, }' -t "$(active_pane zz)" >/dev/null
+    self_check_run "switch-tail-$duplicate-sabotage" display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+    self_check_expect "default cell after final dim run $duplicate changes decoded styles" exit=0 stdout=0 stderr=0 screen=1 state=0
+    run_both copy-mode -q -t PANE
+    if [ "$duplicate" = yes ]; then
+      run_on_both kill-session -t '=alpha'
+      run_on_both kill-session -t '=zulu'
+    fi
+  done
+}
+
 switch_lifetime_cases() {
   run_on_both new-session -d -s zzcc-k -n lifetime-k -x 80 -y 24 "$INNER_SHELL"
   case_run switch-mode-kill same '' -- switch-mode -k -t '=zzcc-k:'
@@ -957,7 +1039,6 @@ CAPTURE_TABS='TUI-017 ordinary residual: tmux retains a TAB cell and emits a lit
 CAPTURE_LOW_INDEX='TUI-017 divergence measured at 80x24: explicit 38;5;1 produces literal \033[38;5;1mRED\033[39m on the pin, while zz produces \033[31mRED\033[39m. Ghostty stores both named 31 and indexed 38;5;1 as Palette(1), so the capture cannot distinguish their original colour class. Indices 16 through 255 and RGB retain their class'
 LOG_IDENTITY='DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. Measured 2026-09-14 on both sides: the pin names ANY tty-bearing client by that tty, including the attached terminal client whose attach-session row reads /dev/pts/<n>, and zz named none of them - it spelled every row by the device name the client sent, which for an interactive client is the hostname. That half is closed: the server log now names a client by its tty whenever it has one. What stays is the clientless CLI, which names a process that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked'
 SERVER_ACCESS='protocol.socket-acl, accepted as a permanent exclusion: the daemon socket is the invoking user at mode 0600, so zz keeps no peer identity and every other form of the command - the list, the lookups, the owner test, the flag conflicts, the deny of an entry that is not there and the no-action form - answers exactly as the pin does, measured 2026-09-15. Only admitting a second identity diverges - semantic:multi-user-socket-acl, the permanent exclusion this gap exists for: the pin stores the entry and exits 0, zz refuses it'
-SWITCH_MODE_WINDOW_ROWS='clients.interactive-refresh, TUI-014: the window rows of switch-mode -w. The default window-row capture retains a style-tail difference; duplicate-name ordering is asserted separately with a plain format. The pin leaves the cells past a window row carrying the run that drew its last column - `#[dim]#{pane_title}#[default]` ends the row and the columns after it keep that cell - so capture-pane -e prints no reset after `ptitle` and prints `#[0m` at the head of the prompt row instead. zz leaves those columns at the default cell, so the reset lands at the end of the window row. Measured 2026-09-15 at 80x24; the session rows switch-mode opens by default are identical on all five channels and are asserted above as switch-mode'
 CLIENT_TREE_CLIENTLESS='clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer, while the pin exits 0 with no output and, alone among the three, opens no mode either: cmd_choose_tree_exec returns CMD_RETURN_NORMAL before window_pane_set_mode when server_client_how_many() == 0 (cmd-choose-tree.c), so the exit status and the error text are what diverge here, measured 2026-09-14. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open'
 
 refresh_client_cases() {
@@ -1309,15 +1390,15 @@ client_tool_cases() {
   case_run stack-terminal-shell same '' -- capture-pane -p -t PANE
   run_both copy-mode -t PANE
   CASE_CLOCK_FACE=1
-  case_run clock-over-copy record 'TUI-014: copy sessions remain per client; the pin stacks clock over copy and temporarily suspends the copy key table' -- clock-mode -t PANE
+  case_run clock-over-copy record 'DECIDED 2026-09-17 (fabrico): copy mode stays per client so two clients can scroll independently; the pin keeps one mode stack per pane. TUI-014 follows the dated copy-mode amendment in knowledge/designs/tui-parity.md.' -- clock-mode -t PANE
   for side in tmux zz; do
     tmux_outer_command send-keys -t "=$OUTER_SESSION:$side" x
   done
-  case_run clock-over-copy-key record 'TUI-014: the pin consumes x in the top clock and restores copy; zz retains the client copy key table under its clock' -- display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+  case_run clock-over-copy-key record 'DECIDED 2026-09-17 (fabrico): copy mode stays per client so two clients can scroll independently; the pin keeps one mode stack per pane. TUI-014 follows the dated copy-mode amendment in knowledge/designs/tui-parity.md.' -- display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
   run_both copy-mode -q -t PANE
   restore_case clock-over-copy-restored
   run_both clock-mode -t PANE
-  case_run copy-over-clock record 'TUI-014: the pin displays copy above the suspended clock; zz keeps its pane clock above the per-client frozen copy view' -- copy-mode -t PANE
+  case_run copy-over-clock record 'DECIDED 2026-09-17 (fabrico): copy mode stays per client so two clients can scroll independently; the pin keeps one mode stack per pane. TUI-014 follows the dated copy-mode amendment in knowledge/designs/tui-parity.md.' -- copy-mode -t PANE
   run_both copy-mode -q -t PANE
   restore_case copy-over-clock-restored
   set_window_on_both clock-mode-colour '#ff00aa'
@@ -1338,6 +1419,7 @@ client_tool_cases() {
   CASE_NEEDLE_MODE=1
   case_run customize-mode-open same '' -- customize-mode -t PANE
   restore_case customize-mode-closed
+  customize_fix_cases
   CASE_NEEDLE_MODE=1
   case_run switch-mode same '' -- switch-mode -t PANE
   restore_case switch-mode-closed
@@ -1353,11 +1435,11 @@ client_tool_cases() {
   run_on_both set-option -gu @review-command
   switch_lifetime_cases
   CASE_NEEDLE_MODE=1
-  case_run switch-mode-windows record "$SWITCH_MODE_WINDOW_ROWS" -- switch-mode -w -t PANE
+  case_run switch-mode-windows same '' -- switch-mode -w -t PANE
   restore_case switch-mode-windows-closed
   run_on_both new-session -d -s alpha -n "$WINDOW_NAME" -x 80 -y 24 "$INNER_SHELL"
   run_on_both new-session -d -s zulu -n "$WINDOW_NAME" -x 80 -y 24 "$INNER_SHELL"
-  case_run switch-mode-duplicate-windows record "$SWITCH_MODE_WINDOW_ROWS" -- switch-mode -w -t PANE
+  case_run switch-mode-duplicate-windows same '' -- switch-mode -w -t PANE
   restore_case switch-mode-duplicate-windows-closed
   case_run switch-mode-window-order same '' -- switch-mode -w -F '#{session_name}:#{window_name}' -t PANE
   restore_case switch-mode-window-order-closed
@@ -1882,6 +1964,8 @@ run_self_check() {
   SUSPENDED_ZZ_PID=""
 
   switch_lifetime_self_checks
+  customize_fix_self_checks
+  switch_tail_self_checks
 
   self_check_run equivalence-after display-message -p -t PANE '#{window_index}.#{pane_index}'
   self_check_expect 'equivalence: every sabotage withdrawn' \

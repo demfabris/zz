@@ -8144,7 +8144,7 @@ impl Shared {
                         environment,
                         empty,
                     } => {
-                        inner.pane_modes.remove(pane);
+                        clear_pane_modes(&mut inner, *pane);
                         let previous = inner.terminal_spawns.get(pane).cloned().unwrap_or_default();
                         let history_limit = inner.engine.history_limit_for_pane(*pane)?;
                         let word_separators =
@@ -8434,6 +8434,7 @@ impl Shared {
                             inner.terminal_spawns.remove(pane);
                             inner.terminal_geometries.remove(pane);
                             inner.pane_modes.remove(pane);
+                            inner.pane_mode_zooms.remove(pane);
                             inner.paste_uploads.retain(|_, upload| upload.pane != *pane);
                             removed_panes.push(*pane);
                         }
@@ -8651,7 +8652,7 @@ impl Shared {
                             continue;
                         }
                         if matches!(action, zz_terminal::TerminalViewAction::ClearHistory)
-                            && inner.pane_modes.remove(pane).is_some()
+                            && clear_pane_modes(&mut inner, *pane)
                         {
                             snapshot_changed = true;
                         }
@@ -9567,21 +9568,8 @@ impl Shared {
                     }
                     MuxEffect::PaneModeChanged { pane, mode } => {
                         let changed = match mode {
-                            Some(mode) => {
-                                let modes = inner.pane_modes.entry(*pane).or_default();
-                                let existing = modes.iter().position(|entry| {
-                                    std::mem::discriminant(entry) == std::mem::discriminant(mode)
-                                });
-                                if existing == modes.len().checked_sub(1) && existing.is_some() {
-                                    false
-                                } else {
-                                    let mode = existing
-                                        .map_or_else(|| mode.clone(), |index| modes.remove(index));
-                                    modes.push(mode);
-                                    true
-                                }
-                            }
-                            None => inner.pane_modes.remove(pane).is_some(),
+                            Some(mode) => push_pane_mode(&mut inner, *pane, mode.clone()),
+                            None => clear_pane_modes(&mut inner, *pane),
                         };
                         if changed {
                             snapshot_changed = true;
@@ -9778,6 +9766,7 @@ impl Shared {
         for (selected, pane, keys, repeat) in pane_mode_keys {
             self.inject_pane_mode_keys(selected, context, pane, &keys, repeat)?;
         }
+        self.reap_pane_mode_kill_panes(client, kind, context);
         for (target, keys, repeat) in injected_client_keys {
             self.inject_client_keys(target, &keys, repeat);
         }
@@ -19550,16 +19539,9 @@ impl Shared {
                 _ => return true,
             },
         };
-        {
-            let mut inner = self.inner.lock();
-            if let Some(modes) = inner.pane_modes.get_mut(&pane) {
-                modes.pop();
-                if modes.is_empty() {
-                    inner.pane_modes.remove(&pane);
-                }
-            }
-        }
-        self.publish_mux_snapshots();
+        pop_pane_mode(&mut self.inner.lock(), pane);
+        self.reap_pane_mode_kill_panes(client, ClientKind::Interactive, context);
+        self.publish_snapshot();
         if let Some((target, selected)) = activate {
             let template = match &mode {
                 PaneModeRequest::Switch { template, .. } => template.as_deref(),
@@ -20667,6 +20649,33 @@ impl Shared {
             )?;
         }
         Ok(())
+    }
+
+    fn reap_pane_mode_kill_panes(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+    ) {
+        let panes = std::mem::take(&mut self.inner.lock().pane_mode_kill_panes);
+        let terminal = client_terminal(&self.inner.lock(), client, kind);
+        for pane in panes {
+            let target = pane.to_string();
+            if let Err(error) = self.execute_with_mux_source_raw(
+                client,
+                kind,
+                context,
+                &CommandInvocation::new("kill-pane", ["-t", target.as_str()]),
+                MuxOptionSource::RuntimeCommand,
+                terminal,
+                None,
+            ) {
+                log::debug!(
+                    target: "zz_daemon::diagnostics::pane_mode",
+                    "failed to kill mode source pane={pane}: {error}"
+                );
+            }
+        }
     }
 
     fn reap_chooser_kill_panes(
@@ -29959,6 +29968,8 @@ struct ServerState {
     /// `window_pane_reset_mode` runs.
     copy_kill_panes: Vec<PaneId>,
     pane_modes: BTreeMap<PaneId, Vec<PaneModeRequest>>,
+    pane_mode_zooms: BTreeSet<PaneId>,
+    pane_mode_kill_panes: Vec<PaneId>,
     display_panes: BTreeMap<ClientId, DisplayPanesSession>,
     silence_deadlines: BTreeMap<WindowId, SilenceDeadline>,
     next_silence_token: u64,
@@ -38716,6 +38727,67 @@ fn switch_mode_target(inner: &ServerState, pane: PaneId) -> Option<(String, Exec
             state.windows.get(&window).map(|entry| entry.active_pane),
         ),
     ))
+}
+
+fn push_pane_mode(inner: &mut ServerState, pane: PaneId, mut mode: PaneModeRequest) -> bool {
+    let modes = inner.pane_modes.entry(pane).or_default();
+    let existing = modes
+        .iter()
+        .position(|entry| std::mem::discriminant(entry) == std::mem::discriminant(&mode));
+    if existing.is_some() && existing == modes.len().checked_sub(1) {
+        return false;
+    }
+    if let Some(index) = existing {
+        let mut previous = modes.remove(index);
+        if let (
+            PaneModeRequest::Switch { kill_source, .. },
+            PaneModeRequest::Switch {
+                kill_source: next, ..
+            },
+        ) = (&mut previous, &mode)
+        {
+            *kill_source = *next;
+        }
+        mode = previous;
+    } else if matches!(mode, PaneModeRequest::Switch { zoom: true, .. })
+        && let Some(window) = inner.engine.state.window_for_pane(pane)
+        && inner.engine.state.windows[&window].zoomed_pane.is_none()
+    {
+        inner.pane_mode_zooms.insert(pane);
+        let _ = inner.engine.state.toggle_zoom(pane);
+    }
+    inner.pane_modes.entry(pane).or_default().push(mode);
+    true
+}
+
+fn pop_pane_mode(inner: &mut ServerState, pane: PaneId) -> bool {
+    let Some(modes) = inner.pane_modes.get_mut(&pane) else {
+        return false;
+    };
+    let mode = modes.pop();
+    if modes.is_empty() {
+        inner.pane_modes.remove(&pane);
+    }
+    if let Some(PaneModeRequest::Switch { kill_source, .. }) = mode {
+        if inner.pane_mode_zooms.remove(&pane)
+            && let Some(window) = inner.engine.state.window_for_pane(pane)
+            && let Some(zoomed) = inner.engine.state.windows[&window].zoomed_pane
+        {
+            let _ = inner.engine.state.toggle_zoom(zoomed);
+        }
+        if kill_source {
+            inner.pane_mode_kill_panes.push(pane);
+        }
+    }
+    mode.is_some()
+}
+
+fn clear_pane_modes(inner: &mut ServerState, pane: PaneId) -> bool {
+    let mut changed = false;
+    while pop_pane_mode(inner, pane) {
+        changed = true;
+    }
+    changed
 }
 
 fn consume_pane_mode_mouse(
@@ -91356,6 +91428,110 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("create switch-client session")
     }
 
+    fn switch_lifetime_mode(kill_source: bool, zoom: bool) -> PaneModeRequest {
+        PaneModeRequest::Switch {
+            windows: false,
+            format: None,
+            template: None,
+            kill_source,
+            zoom,
+        }
+    }
+
+    #[test]
+    fn switch_mode_lifetime_kill_follows_the_entry_below_the_top() {
+        let shared = Shared::new(1);
+        let (_, _, pane) = switch_test_session(&shared, "lifetime");
+        let mut inner = shared.inner.lock();
+        assert!(push_pane_mode(
+            &mut inner,
+            pane,
+            switch_lifetime_mode(true, false)
+        ));
+        assert!(push_pane_mode(&mut inner, pane, PaneModeRequest::Clock));
+        assert!(pop_pane_mode(&mut inner, pane));
+        assert!(inner.pane_mode_kill_panes.is_empty());
+        assert_eq!(pane_mode_format_facts(&inner)[&pane], (1, "switch-mode"));
+        assert!(pop_pane_mode(&mut inner, pane));
+        assert_eq!(inner.pane_mode_kill_panes, [pane]);
+        assert!(!inner.pane_modes.contains_key(&pane));
+    }
+
+    #[test]
+    fn switch_mode_lifetime_promotion_updates_kill_but_reentry_does_not() {
+        let shared = Shared::new(1);
+        let (_, _, pane) = switch_test_session(&shared, "lifetime");
+        let mut inner = shared.inner.lock();
+        push_pane_mode(&mut inner, pane, switch_lifetime_mode(false, false));
+        assert!(!push_pane_mode(
+            &mut inner,
+            pane,
+            switch_lifetime_mode(true, true)
+        ));
+        assert!(matches!(
+            inner.pane_modes[&pane].last(),
+            Some(PaneModeRequest::Switch {
+                kill_source: false,
+                zoom: false,
+                ..
+            })
+        ));
+        push_pane_mode(&mut inner, pane, PaneModeRequest::Clock);
+        push_pane_mode(&mut inner, pane, switch_lifetime_mode(true, true));
+        assert!(!inner.pane_mode_zooms.contains(&pane));
+        assert!(clear_pane_modes(&mut inner, pane));
+        assert_eq!(inner.pane_mode_kill_panes, [pane]);
+        assert!(!clear_pane_modes(&mut inner, pane));
+        inner.pane_mode_kill_panes.clear();
+        push_pane_mode(&mut inner, pane, switch_lifetime_mode(true, false));
+        push_pane_mode(&mut inner, pane, PaneModeRequest::Clock);
+        push_pane_mode(&mut inner, pane, switch_lifetime_mode(false, false));
+        clear_pane_modes(&mut inner, pane);
+        assert!(inner.pane_mode_kill_panes.is_empty());
+    }
+
+    #[test]
+    fn switch_mode_lifetime_zoom_restores_only_the_mode_owned_zoom() {
+        let shared = Shared::new(1);
+        let (_, window, first) = switch_test_session(&shared, "lifetime");
+        let mut inner = shared.inner.lock();
+        let pane = inner
+            .engine
+            .state
+            .split_pane(first, zz_protocol::Axis::Horizontal, PaneKind::Terminal)
+            .unwrap();
+        push_pane_mode(&mut inner, pane, switch_lifetime_mode(false, true));
+        assert_eq!(inner.engine.state.windows[&window].zoomed_pane, Some(pane));
+        push_pane_mode(&mut inner, pane, PaneModeRequest::Clock);
+        pop_pane_mode(&mut inner, pane);
+        assert_eq!(inner.engine.state.windows[&window].zoomed_pane, Some(pane));
+        pop_pane_mode(&mut inner, pane);
+        assert_eq!(inner.engine.state.windows[&window].zoomed_pane, None);
+        inner.engine.state.toggle_zoom(first).unwrap();
+        push_pane_mode(&mut inner, pane, switch_lifetime_mode(false, true));
+        clear_pane_modes(&mut inner, pane);
+        assert_eq!(inner.engine.state.windows[&window].zoomed_pane, Some(first));
+    }
+
+    #[test]
+    fn switch_mode_lifetime_single_pane_remembers_unzoomed_entry() {
+        let shared = Shared::new(1);
+        let (_, window, pane) = switch_test_session(&shared, "lifetime");
+        let mut inner = shared.inner.lock();
+        push_pane_mode(&mut inner, pane, switch_lifetime_mode(false, true));
+        assert_eq!(inner.engine.state.windows[&window].zoomed_pane, None);
+        inner
+            .engine
+            .state
+            .split_pane(pane, zz_protocol::Axis::Horizontal, PaneKind::Terminal)
+            .unwrap();
+        inner.engine.state.toggle_zoom(pane).unwrap();
+        assert_eq!(inner.engine.state.windows[&window].zoomed_pane, Some(pane));
+        clear_pane_modes(&mut inner, pane);
+        assert_eq!(inner.engine.state.windows[&window].zoomed_pane, None);
+        assert!(inner.pane_mode_zooms.is_empty());
+    }
+
     #[test]
     fn switch_mode_window_order_skips_orphan_sessions() {
         let shared = Shared::new(1);
@@ -91372,6 +91548,8 @@ bind - split-window -v -c "#{pane_current_path}"
                 windows: true,
                 format: None,
                 template: None,
+                kill_source: false,
+                zoom: false,
             }],
         );
         assert_eq!(

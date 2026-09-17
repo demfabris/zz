@@ -887,6 +887,43 @@ review_execution_cases() {
 
 stream_matrix() {
   cat <<'MATRIX'
+direct-buffer-spent direct cli spent buffer none state same
+direct-split-no-space direct cli open split-small none exit same
+direct-split-pending direct cli open split-zoom pending state same
+direct-buffer-closed direct cli closed buffer none stderr same
+direct-closed-unused direct cli closed-unused source none state same
+alias-buffer-spent alias cli spent buffer none state same
+alias-split-no-space alias cli open split-small none exit same
+alias-split-pending alias cli open split-zoom pending state same
+alias-buffer-closed alias cli closed buffer none stderr same
+alias-closed-unused alias cli closed-unused source none state same
+file-buffer-spent file cli spent buffer none state same
+file-split-no-space file cli open split-small none exit same
+file-split-pending file cli open split-zoom pending state same
+file-buffer-closed file cli closed buffer none stderr same
+file-closed-unused file cli closed-unused source none state same
+direct-split-zoom-no-space direct cli open split-zoom-small none state same
+direct-split-keep-zoom-no-space direct cli open split-keep-zoom-small none state same
+direct-split-horizontal-no-space direct cli open split-narrow none exit same
+direct-split-bad-size direct cli open split-bad-size none exit same
+direct-split-bad-percent direct cli open split-bad-percent none exit same
+direct-split-command direct cli open split-command none exit same
+direct-split-style direct cli open split-style pending state same
+direct-split-active-style direct cli open split-active-style pending state same
+direct-split-border-style direct cli open split-border-style pending state same
+direct-display-bad-flag direct cli open display-bad-flag none exit same
+direct-display-too-many direct cli open display-too-many none exit same
+direct-split-pending-zoom direct cli open split-keep-zoom pending state same
+direct-display-closed direct cli closed display-empty none stderr same
+direct-split-closed direct cli closed split-normal none stderr same
+alias-eof alias cli eof source none state same
+file-eof file cli eof source none state same
+attached-term-idle-before direct attached used source idle-before exit same
+attached-term-before direct attached used source before exit same
+attached-term-after direct attached used source after exit same
+attached-term-after-two direct attached spent source after exit same
+attached-term-idle-after direct attached used source idle-after exit same
+attached-term-file-after file attached used source after exit same
 direct-use direct cli used source none state same
 alias-use alias cli used source none state same
 file-use file cli used source none state same
@@ -904,9 +941,9 @@ startup-unused startup cli open-unused source none state same
 direct-spent direct cli spent source none state same
 alias-spent alias cli spent source none state same
 file-spent file cli spent source none state same
-direct-closed direct cli closed source none stderr record
-alias-closed alias cli closed source none stderr record
-file-closed file cli closed source none stderr record
+direct-closed direct cli closed source none stderr same
+alias-closed alias cli closed source none stderr same
+file-closed file cli closed source none stderr same
 direct-eof direct cli eof source none state same
 direct-large-unused direct cli oversized-unused source none exit same
 alias-large-unused alias cli oversized-unused source none exit same
@@ -961,8 +998,9 @@ matrix_attached() {
   local attempt pane
   {
     printf '#!/usr/bin/env bash\n'
+    printf '(printf "%%s\\n" "$BASHPID" > %q; exec ' "$SCRATCH_DIR/$side.pid"
     printf '%q ' "${MATRIX_BASE[@]}" -CC attach-session -f no-output -t "=$SESSION"
-    printf '2> %q\n' "$SCRATCH_DIR/$side.err"
+    printf '2> %q)\n' "$SCRATCH_DIR/$side.err"
     printf 'printf "%%s\\n" "$?" > %q\n' "$SCRATCH_DIR/$side.rc"
     printf 'touch %q\n' "$SCRATCH_DIR/$side.done"
   } >"$wrapper"
@@ -983,20 +1021,35 @@ matrix_attached() {
     sleep 0.03
   done
   [ "$attempt" != 100 ] || oracle=0
-  scrubbed "$TMUX_BIN" -L "$outer" send-keys -t "$pane" -l "$body"
-  scrubbed "$TMUX_BIN" -L "$outer" send-keys -t "$pane" Enter
-  for ((attempt=0; attempt<100; attempt++)); do
-    if [ "$(side_command "$side" show-options -gqv @zzcs-matrix-tail)" = yes ]; then break; fi
-    sleep 0.03
-  done
-  [ "$attempt" != 100 ] || oracle=0
-  scrubbed "$TMUX_BIN" -L "$outer" send-keys -t "$pane" Enter
+  if [ "$signal" != idle-before ]; then
+    scrubbed "$TMUX_BIN" -L "$outer" send-keys -t "$pane" -l "$body"
+    scrubbed "$TMUX_BIN" -L "$outer" send-keys -t "$pane" Enter
+    for ((attempt=0; attempt<100; attempt++)); do
+      if [ "$signal" = before ] || [ "$signal" = after ]; then
+        [ -f "$ready" ] && break
+      elif [ "$(side_command "$side" show-options -gqv @zzcs-matrix-tail)" = yes ]; then break
+      fi
+      sleep 0.03
+    done
+    [ "$attempt" != 100 ] || oracle=0
+  fi
+  if [ "$signal" = none ]; then
+    scrubbed "$TMUX_BIN" -L "$outer" send-keys -t "$pane" Enter
+  else
+    sleep 0.05
+    if [ "$SELF_CHECK" = 1 ] && [ "${MATRIX_MUTATION:-0}" = 1 ] && [ "$side" = zz ]; then
+      kill -KILL "$(cat "$SCRATCH_DIR/$side.pid")" || oracle=0
+    else
+      kill -TERM "$(cat "$SCRATCH_DIR/$side.pid")" || oracle=0
+    fi
+  fi
   for ((attempt=0; attempt<100; attempt++)); do
     [ -f "$SCRATCH_DIR/$side.done" ] && break
     sleep 0.03
   done
   [ "$attempt" != 100 ] || oracle=0
   if [ ! -f "$SCRATCH_DIR/$side.done" ]; then printf '124\n' >"$SCRATCH_DIR/$side.rc"; fi
+  if [ "$signal" != none ]; then sleep 1.1; fi
   sleep 0.05
   scrubbed "$TMUX_BIN" -L "$outer" kill-server >/dev/null 2>&1 || true
   if [ -n "${ZZ_STREAM_PROBES:-}" ]; then
@@ -1025,6 +1078,32 @@ matrix_case() {
     printf 'set -g @zzcs-matrix-input yes\n' >"$SCRATCH_DIR/matrix-input"
     reader=(source-file -)
     case "$destination" in
+    buffer) reader=(load-buffer -b zzcs-matrix -) ;;
+    split-missing) reader=(split-window -I -d -t %99999) ;;
+    split-*)
+      side_command "$side" new-window -d -t "=$SESSION" -n matrix-split 'sleep 60' >/dev/null
+      target="=$SESSION:matrix-split"
+      reader=(split-window -I -d -t "$target.0")
+      printf 'MATRIX-INPUT\n' >"$SCRATCH_DIR/matrix-input"
+      case "$destination" in
+      split-small) side_command "$side" resize-window -t "$target" -x 80 -y 2 >/dev/null ;;
+      split-narrow) side_command "$side" resize-window -t "$target" -x 2 -y 24 >/dev/null; reader+=(-h) ;;
+      split-bad-size) reader+=(-l invalid) ;;
+      split-bad-percent) reader+=(-p invalid) ;;
+      split-command) reader+=(true) ;;
+      split-style) reader+=(-s invalid-style) ;;
+      split-active-style) reader+=(-S invalid-style) ;;
+      split-border-style) reader+=(-R invalid-style) ;;
+      split-zoom|split-keep-zoom|split-zoom-small|split-keep-zoom-small)
+        side_command "$side" split-window -d -t "$target.0" 'sleep 60' >/dev/null
+        if [[ "$destination" = *-small ]]; then side_command "$side" resize-window -t "$target" -x 80 -y 4 >/dev/null; fi
+        side_command "$side" resize-pane -Z -t "$target.0" >/dev/null
+        if [[ "$destination" = split-keep-zoom* ]]; then reader+=(-Z); fi
+        ;;
+      esac
+      ;;
+    display-bad-flag) reader=(display-message -I -Q) ;;
+    display-too-many) reader=(display-message -I one two) ;;
     source-missing) printf 'set -g @zzcs-matrix-input yes\nsource-file /tmp/zzcs-matrix-missing\n' >"$SCRATCH_DIR/matrix-input" ;;
     source-missing-newline) printf "set -g @zzcs-matrix-input yes\nsource-file '/tmp/zzcs-matrix-missing\n'\n" >"$SCRATCH_DIR/matrix-input" ;;
     display-empty)
@@ -1048,7 +1127,7 @@ matrix_case() {
     after=MATRIX-AFTER
     if [ "$SELF_CHECK" = 1 ] && [ "${MATRIX_MUTATION:-0}" = 1 ] && [ "$side" = zz ]; then
       case "$sabotage" in
-      state) before=SABOTAGE ;;
+      state) if [ "$signal" != pending ]; then before=SABOTAGE; fi ;;
       stdout) after=MATRIX-SABOTAGE ;;
       stderr) reader=(source-file /tmp/zzcs-sabotage-missing) ;;
       exit)
@@ -1063,7 +1142,7 @@ matrix_case() {
     command=(set -g @zzcs-matrix-before "$before" ';')
     if [ "$signal" = before ]; then command+=(run-shell "printf ready > $ready; sleep 1" ';'); fi
     command+=("${reader[@]}" ';')
-    if [ "$input" = spent ]; then command+=(source-file - ';'); fi
+    if [ "$input" = spent ]; then command+=("${reader[@]}" ';'); fi
     if [ "$signal" = after ]; then command+=(run-shell "printf ready > $ready; sleep 1" ';'); fi
     if [ "$invocation" != startup ]; then command+=(display-message -p "$after" ';'); fi
     command+=(set -g @zzcs-matrix-tail yes)
@@ -1101,7 +1180,7 @@ matrix_case() {
         if [ "$signal" = during ]; then printf 'set -g @zzcs-matrix-input pending' >&9; fi
         (exec "${MATRIX_BASE[@]}" "${command[@]}" <"$SCRATCH_DIR/matrix-fifo" 9>&-) >"$SCRATCH_DIR/$side.out" 2>"$SCRATCH_DIR/$side.err" &
         ;;
-      closed)
+      closed*)
         (exec "${MATRIX_BASE[@]}" "${command[@]}" 0<&-) >"$SCRATCH_DIR/$side.out" 2>"$SCRATCH_DIR/$side.err" &
         ;;
       oversized-unused)
@@ -1113,9 +1192,23 @@ matrix_case() {
         ;;
       esac
       pid=$!
-      (sleep 5; kill -KILL "$pid" 2>/dev/null || true) &
+      (exec 9>&-; sleep 5; kill -KILL "$pid" 2>/dev/null || true) &
       guard=$!
-      if [ "$signal" != none ]; then
+      if [ "$signal" = pending ]; then
+        for ((attempt=0; attempt<100; attempt++)); do
+          [ "$(side_command "$side" show-options -gqv @zzcs-matrix-before)" = yes ] && break
+          sleep 0.02
+        done
+        [ "$attempt" != 100 ] || oracle=0
+        sleep 0.1
+        side_command "$side" display-message -p -t "$target" '#{window_zoomed_flag}:#{window_panes}' >"$SCRATCH_DIR/$side.pending"
+        if [ "$SELF_CHECK" = 1 ] && [ "${MATRIX_MUTATION:-0}" = 1 ] && [ "$side" = zz ]; then
+          side_command "$side" resize-pane -Z -t "$target.0" >/dev/null
+          side_command "$side" display-message -p -t "$target" '#{window_zoomed_flag}:#{window_panes}' >"$SCRATCH_DIR/$side.pending"
+        fi
+        cat "$SCRATCH_DIR/matrix-input" >&9
+        exec 9>&-
+      elif [ "$signal" != none ]; then
         for ((attempt=0; attempt<100; attempt++)); do
           if [ "$signal" = during ]; then
             [ "$(side_command "$side" show-options -gqv @zzcs-matrix-before)" = yes ] && break
@@ -1135,6 +1228,7 @@ matrix_case() {
       set +e
       wait "$pid"
       rc=$?
+      if [ "$signal" = pending ] && [ "$rc" != 0 ]; then oracle=0; fi
       kill "$guard" 2>/dev/null
       wait "$guard" 2>/dev/null
       set -e
@@ -1150,9 +1244,14 @@ matrix_case() {
       for option in input before tail; do
         printf '%s=%s\n' "$option" "$("${MATRIX_BASE[@]}" show-options -gqv "@zzcs-matrix-$option")"
       done
+      if [ "$signal" = pending ]; then printf 'pending='; cat "$SCRATCH_DIR/$side.pending"; fi
+      if [[ "$destination" = split-* && "$destination" != split-missing ]]; then side_command "$side" display-message -p -t "$target" 'final=#{window_zoomed_flag}:#{window_panes}'; fi
+      if [ "$destination" = buffer ]; then side_command "$side" show-buffer -b zzcs-matrix 2>/dev/null || true; fi
       if [ "$destination" = display-empty ]; then side_command "$side" capture-pane -p -t "$pane" -S 0 -E 0; fi
     } >"$SCRATCH_DIR/$side.matrix-state"
     if [ "$invocation" = startup ]; then "${MATRIX_BASE[@]}" kill-server >/dev/null 2>&1 || true; fi
+    if [[ "$destination" = split-* && "$destination" != split-missing ]]; then side_command "$side" kill-window -t "$target" >/dev/null; fi
+    if [ "$destination" = buffer ]; then side_command "$side" delete-buffer -b zzcs-matrix >/dev/null 2>&1 || true; fi
     if [ "$destination" = display-empty ]; then side_command "$side" kill-pane -t "$pane" >/dev/null; fi
   done
   compare_channels "$CASE_LABEL" || true

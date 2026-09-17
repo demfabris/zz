@@ -1,0 +1,282 @@
+[
+  {
+    "command": "compat/tui-client-commands.sh target/capture-residuals-main/zz compat/.cache/tmux-src/tmux",
+    "artifact": "client-commands-01.txt",
+    "exit": 0,
+    "result": "all 205 asserted comparisons identical, 25 recorded not asserted (0 for a sibling lane, owners TUI-014=6 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0)"
+  },
+  {
+    "command": "python3 compat/tui/verify-claims.py --run TUI-015 --zz target/capture-residuals-main/zz",
+    "artifact": "../../TUI-015/attempt-05/verify-claims.txt",
+    "exit": 0,
+    "result": "all 205 asserted comparisons identical, 25 recorded; none owned by TUI-015; every verified obligation holds up",
+    "executes": "compat/tui-client-commands.sh",
+    "wrapper_limit": "The verifier prints only the first 150 characters of the child summary, then the complete owned-record result."
+  },
+  {
+    "command": "python3 compat/tui/verify-claims.py --run TUI-017 --zz target/capture-residuals-main/zz",
+    "artifact": "verify-claims.txt",
+    "exit": 0,
+    "result": "all 205 asserted comparisons identical, 25 recorded; none owned by TUI-017; every verified obligation holds up",
+    "executes": "compat/tui-client-commands.sh",
+    "wrapper_limit": "The verifier prints only the first 150 characters of the child summary, then the complete owned-record result."
+  },
+  {
+    "command": "compat/tui-client-commands.sh --self-check target/capture-residuals-main/zz compat/.cache/tmux-src/tmux",
+    "artifact": "client-self-check.txt",
+    "exit": 0,
+    "result": "self-check complete: every sabotage was caught in its own channel and both equivalences passed",
+    "expectations": 124
+  },
+  {
+    "command": "compat/tui-copy-mode.sh --self-check target/capture-residuals-main/zz compat/.cache/tmux-src/tmux",
+    "artifact": "copy-self-check.txt",
+    "exit": 0,
+    "result": "self-check complete: every sabotage was caught in its own channel and every equivalence passed",
+    "expectations": 27
+  },
+  {
+    "command": "compat/tui-screen-diff.sh --self-check target/capture-residuals-main/zz compat/.cache/tmux-src/tmux",
+    "artifact": "screen-self-check.txt",
+    "exit": 0,
+    "result": "self-check complete: every sabotage was caught in its own channel and every equivalence passed",
+    "expectations": 18
+  },
+  {
+    "command": "compat/tui-copy-mode.sh target/capture-residuals-main/zz compat/.cache/tmux-src/tmux",
+    "artifact": "copy-mode.txt",
+    "exit": 0,
+    "result": "all 147 cases agree on every channel they assert, 0 recorded a difference elsewhere"
+  },
+  {
+    "command": "compat/tui-screen-diff.sh target/capture-residuals-main/zz compat/.cache/tmux-src/tmux",
+    "artifact": "screen-diff.txt",
+    "exit": 0,
+    "result": "all 147 asserted checkpoints identical, 6 recorded not asserted"
+  },
+  {
+    "command": "compat/attached-client.sh target/capture-residuals-main/zz compat/.cache/tmux-src/tmux",
+    "artifact": "attached-client.txt",
+    "exit": 1,
+    "result": "error: zz alert expired before the 1.8 second freeze checkpoint"
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-low-indexed-colour target/capture-residuals-main/zz",
+    "artifact": "fixed-capture-low-indexed-colour.txt",
+    "exit": 0,
+    "result": "residual self-check capture-low-indexed-colour: 0 failures",
+    "expected_exit": 0
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-trailing target/capture-residuals-main/zz",
+    "artifact": "fixed-capture-tab-trailing.txt",
+    "exit": 0,
+    "result": "residual self-check capture-tab-trailing: 0 failures",
+    "expected_exit": 0
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-internal target/capture-residuals-main/zz",
+    "artifact": "fixed-capture-tab-internal.txt",
+    "exit": 0,
+    "result": "residual self-check capture-tab-internal: 0 failures",
+    "expected_exit": 0
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-wide target/capture-residuals-main/zz",
+    "artifact": "fixed-capture-tab-wide.txt",
+    "exit": 0,
+    "result": "residual self-check capture-tab-wide: 0 failures",
+    "expected_exit": 0
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh lock-session target/capture-residuals-main/zz",
+    "artifact": "fixed-lock-session.txt",
+    "exit": 0,
+    "result": "residual self-check lock-session: 0 failures",
+    "expected_exit": 0
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh has-session target/capture-residuals-main/zz",
+    "artifact": "fixed-has-session.txt",
+    "exit": 0,
+    "result": "residual self-check has-session: 0 failures",
+    "expected_exit": 0
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh list-windows target/capture-residuals-main/zz",
+    "artifact": "fixed-list-windows.txt",
+    "exit": 0,
+    "result": "residual self-check list-windows: 0 failures",
+    "expected_exit": 0
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-low-indexed-colour target/capture-residuals-main-reverted/zz",
+    "artifact": "reverted-capture-low-indexed-colour.txt",
+    "exit": 1,
+    "result": "residual self-check capture-low-indexed-colour: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-trailing target/capture-residuals-main-reverted/zz",
+    "artifact": "reverted-capture-tab-trailing.txt",
+    "exit": 1,
+    "result": "residual self-check capture-tab-trailing: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-internal target/capture-residuals-main-reverted/zz",
+    "artifact": "reverted-capture-tab-internal.txt",
+    "exit": 1,
+    "result": "residual self-check capture-tab-internal: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh capture-tab-wide target/capture-residuals-main-reverted/zz",
+    "artifact": "reverted-capture-tab-wide.txt",
+    "exit": 1,
+    "result": "residual self-check capture-tab-wide: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh lock-session target/capture-residuals-main-reverted/zz",
+    "artifact": "reverted-lock-session.txt",
+    "exit": 1,
+    "result": "residual self-check lock-session: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh has-session target/capture-residuals-main-reverted/zz",
+    "artifact": "reverted-has-session.txt",
+    "exit": 1,
+    "result": "residual self-check has-session: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-08/residual-self-check.sh list-windows target/capture-residuals-main-reverted/zz",
+    "artifact": "reverted-list-windows.txt",
+    "exit": 1,
+    "result": "residual self-check list-windows: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "compat/diff-scenario.sh --strict-geometry compat/scenarios/targets.txt target/capture-residuals-main/zz compat/.cache/tmux-src/tmux",
+    "artifact": "delta-targets.txt",
+    "exit": 0,
+    "result": "targets: 20 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)"
+  },
+  {
+    "command": "compat/diff-scenario.sh --strict-geometry compat/scenarios/capture-pane.txt target/capture-residuals-main/zz compat/.cache/tmux-src/tmux",
+    "artifact": "delta-capture-pane.txt",
+    "exit": 0,
+    "result": "capture-pane: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)"
+  },
+  {
+    "command": "compat/diff-scenario.sh --strict-geometry compat/tui/evidence/TUI-015/attempt-05/empty-exact-pane-index.txt target/capture-residuals-main/zz compat/.cache/tmux-src/tmux",
+    "artifact": "../../TUI-015/attempt-05/empty-exact-pane-index-run.txt",
+    "exit": 1,
+    "result": "empty-exact-pane-index: 26 step(s), 26 TOPO divergence(s), 26 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)",
+    "probe_source": "../../TUI-015/attempt-05/empty-exact-pane-index-initial.txt"
+  },
+  {
+    "command": "compat/diff-scenario.sh --strict-geometry compat/tui/evidence/TUI-015/attempt-05/empty-exact-pane-index.txt target/capture-residuals-main/zz compat/.cache/tmux-src/tmux",
+    "artifact": "../../TUI-015/attempt-05/empty-exact-pane-index-retry.txt",
+    "exit": 0,
+    "result": "empty-exact-pane-index: 25 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)",
+    "probe_source": "../../TUI-015/attempt-05/empty-exact-pane-index.txt"
+  },
+  {
+    "command": "HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup /tmp/zz-cargo.sh test -p zz-mux -p zz-terminal",
+    "artifact": "packages.txt",
+    "exit": 0,
+    "passed": 927,
+    "failed": 0,
+    "ignored": 1
+  },
+  {
+    "command": "/tmp/zz-cargo.sh test -p zz-mux --lib session_targets_use_configured_pane_indices",
+    "artifact": "../../TUI-015/attempt-05/mux-focused-requeued.txt",
+    "exit": 0,
+    "result": "1 passed; 535 filtered out"
+  },
+  {
+    "command": "/tmp/zz-cargo.sh fmt --all",
+    "artifact": "fmt-requeued-02.txt",
+    "exit": 0
+  },
+  {
+    "command": "/tmp/zz-cargo.sh clippy -p zz-terminal -p zz-mux -p zz-daemon -p zz-tui -p zz-cli --all-targets --all-features -- -D warnings",
+    "artifact": "clippy.txt",
+    "exit": 0
+  },
+  {
+    "command": "cargo() { /tmp/zz-cargo.sh \"$@\"; }; export -f cargo; HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup compat/check.sh",
+    "artifact": "compat-check-requeued-03.txt",
+    "exit": 0,
+    "slot_requeues": 8
+  },
+  {
+    "command": "python3 compat/wire-version.py",
+    "artifact": "wire-version.txt",
+    "exit": 0
+  },
+  {
+    "command": "python3 .agents/skills/okf/scripts/okf.py validate knowledge",
+    "artifact": "knowledge-check.txt",
+    "exit": 0,
+    "result": "0 errors, 1 existing stale-research warning"
+  },
+  {
+    "command": "/tmp/zz-cargo.sh build -p zz-cli --bin zz_cli",
+    "artifact": "build-requeued-03.txt",
+    "exit": 0,
+    "result": "Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.56s"
+  },
+  {
+    "command": "CARGO_TARGET_DIR=$PWD/target /tmp/zz-cargo.sh build --manifest-path /tmp/zzcr-main-reverted.YJe77d/Cargo.toml -p zz-cli --bin zz_cli",
+    "artifact": "reverted-build.txt",
+    "exit": 0,
+    "result": "Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 01s"
+  },
+  {
+    "command": "/tmp/zz-cargo.sh build -p zz-cli --bin zz_cli; cmp target/debug/zz_cli target/capture-residuals-main/zz",
+    "artifact": "restore-build.txt",
+    "exit": 0,
+    "result": "Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 07s"
+  },
+  {
+    "command": "compat/attached-client.sh target/capture-residuals-main/zz compat/.cache/tmux-src/tmux",
+    "artifact": "attached-client-retry.txt",
+    "exit": 0,
+    "result": "attached-client compatibility: PASS",
+    "conditions": "Same immutable binary; this lane had finished its other fixtures. No code or timeout change."
+  },
+  {
+    "command": "/tmp/zz-cargo.sh fmt --all --check",
+    "artifact": "fmt-final.txt",
+    "exit": 0
+  },
+  {
+    "command": "python3 compat/tui/tracker.py check",
+    "artifact": "tracker-check.txt",
+    "exit": 0,
+    "result": "compat/tui/campaign.json is valid and knowledge/tmux/tui-parity.md is current"
+  },
+  {
+    "command": "python3 compat/tmux-tracker.py check",
+    "artifact": "tmux-tracker-check.txt",
+    "exit": 0,
+    "result": "compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current"
+  },
+  {
+    "command": "cargo() { /tmp/zz-cargo.sh \"$@\"; }; export -f cargo; HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config CARGO_HOME=/home/demfabris/.cargo RUSTUP_HOME=/home/demfabris/.rustup compat/check.sh",
+    "artifact": "compat-check-final-requeued.txt",
+    "exit": 0,
+    "result": "Metadata gates, 536 mux tests and all three daemon manifest checks pass.",
+    "slot_requeues": 5
+  },
+  {
+    "command": "git diff --cached --check -- . ':(exclude)compat/tui/evidence/'",
+    "exit": 0,
+    "result": "Source and metadata pass. Raw fixture whitespace remains intact; the all-files check reports it."
+  }
+]

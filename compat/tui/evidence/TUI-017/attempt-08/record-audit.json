@@ -1,0 +1,31 @@
+{
+  "source": "client-commands-01.txt",
+  "asserted": 205,
+  "recorded": 25,
+  "owners": {
+    "gap:clients.interactive-refresh": 8,
+    "decided:TUI-017": 6,
+    "decided:TUI-016": 1,
+    "TUI-014": 6,
+    "decided:TUI-015": 4
+  },
+  "unattributed": 0,
+  "ordinary_owned": {
+    "TUI-015": 0,
+    "TUI-017": 0
+  },
+  "equivalent_lock_decisions_retained": [
+    "lock-client-current",
+    "lock-server",
+    "lock-session",
+    "lock-session-current"
+  ],
+  "six_main_assertions": [
+    "lock-target-empty-exact-window-pane-lock-session",
+    "lock-target-empty-exact-window-pane-has-session",
+    "lock-target-empty-exact-window-pane-list-windows",
+    "lock-target-empty-exact-window-pane-id-lock-session",
+    "lock-target-empty-exact-window-pane-id-has-session",
+    "lock-target-empty-exact-window-pane-id-list-windows"
+  ]
+}

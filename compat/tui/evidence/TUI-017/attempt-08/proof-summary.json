@@ -1,0 +1,73 @@
+{
+  "base": "38c50df4c4d51401752c49b72bb689b09e33427d",
+  "source": "571608659d0f8013ddb973d27f2171d9e1af224e",
+  "binary_audit": "reverted-source-audit.json",
+  "shared_fixture": {
+    "executions": 3,
+    "asserted_per_execution": 205,
+    "recorded_per_execution": 25,
+    "ordinary_owned": {
+      "TUI-015": 0,
+      "TUI-017": 0
+    },
+    "owners": {
+      "gap:clients.interactive-refresh": 8,
+      "decided:TUI-017": 6,
+      "decided:TUI-016": 1,
+      "TUI-014": 6,
+      "decided:TUI-015": 4
+    },
+    "unattributed": 0,
+    "execution_artifacts": [
+      "client-commands-01.txt",
+      "../../TUI-015/attempt-05/verify-claims.txt",
+      "verify-claims.txt"
+    ],
+    "self_check_expectations": 124
+  },
+  "retained_flips": 7,
+  "inherited_empty_exact_assertions": [
+    "lock-target-empty-exact-window-pane-lock-session",
+    "lock-target-empty-exact-window-pane-has-session",
+    "lock-target-empty-exact-window-pane-list-windows",
+    "lock-target-empty-exact-window-pane-id-lock-session",
+    "lock-target-empty-exact-window-pane-id-has-session",
+    "lock-target-empty-exact-window-pane-id-list-windows"
+  ],
+  "configured_empty_exact_probe": {
+    "steps": 25,
+    "divergences": 0,
+    "artifact": "../../TUI-015/attempt-05/empty-exact-pane-index-transcript.txt"
+  },
+  "fixed_and_reverted": "seven-case-summary.json",
+  "copy_mode": {
+    "asserted": 147,
+    "recorded": 0,
+    "self_check_expectations": 27
+  },
+  "screen_diff": {
+    "asserted": 147,
+    "recorded": 6,
+    "self_check_expectations": 18
+  },
+  "tests": "tests-summary.json",
+  "unrerun_delta_rows": "delta-scope.json",
+  "wire": "104 unchanged; no payload changes",
+  "status": "review",
+  "attached_runs": [
+    {
+      "artifact": "attached-client.txt",
+      "exit": 1,
+      "result": "zz alert expired before the 1.8 second freeze checkpoint"
+    },
+    {
+      "command": "compat/attached-client.sh target/capture-residuals-main/zz compat/.cache/tmux-src/tmux",
+      "artifact": "attached-client-retry.txt",
+      "exit": 0,
+      "result": "attached-client compatibility: PASS",
+      "conditions": "Same immutable binary; this lane had finished its other fixtures. No code or timeout change."
+    }
+  ],
+  "footprint": "footprint.json",
+  "footprint_file_count": 1000
+}

@@ -1,0 +1,2 @@
+targets 0
+capture-pane 0

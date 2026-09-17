@@ -1,0 +1,14 @@
+--- crates/zz-mux/src/command.rs	2026-09-17 07:26:42.246712877 -0300
++++ /tmp/zzcr-main-reverted.YJe77d/crates/zz-mux/src/command.rs	2026-09-17 07:32:06.562680476 -0300
+@@ -4039,10 +4039,7 @@
+         target: Option<&str>,
+         current: Option<SessionId>,
+     ) -> Result<SessionId, ServerError> {
+-        self.state
+-            .resolve_session_with_pane_index(target, current, &|window, index| {
+-                self.pane_at_index(window, index)
+-            })
++        self.state.resolve_session(target, current)
+     }
+ 
+     pub fn resolve_window(

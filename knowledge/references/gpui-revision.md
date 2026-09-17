@@ -4,7 +4,7 @@ title: GPUI revision pin
 description: Where the patched Zed revision zz builds against is defined, how to read it, and what the carried GPUI patches do. gpui-component is not a dependency.
 resource: Cargo.toml
 tags: [gpui, zed, pin, reference, git-dependency]
-timestamp: 2026-09-14T00:00:00Z
+timestamp: 2026-09-17T00:00:00Z
 ---
 
 # Overview
@@ -63,6 +63,13 @@ layers, and an opaque foreground. This prevents translucent layers from adding u
 opaque window alpha.
 
 # Carried patches
+
+Fork commit `7bdd43258b` gives the native macOS Window menu first chance to handle
+`performKeyEquivalent:` in `gpui_macos/src/window.rs` `handle_key_equivalent`.
+Users can tile the app with their macOS keyboard shortcuts while a terminal has focus.
+Unmatched keys continue through GPUI's existing input path. The menu call precedes
+the window-state lock and GPUI event callback because menu validation can call back
+into GPUI.
 
 Each is upstream-able as a small Zed PR; if Zed merges an equivalent, drop it. In branch order:
 

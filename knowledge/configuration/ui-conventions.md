@@ -99,8 +99,9 @@ The browser client in `clients/web` (`just web`) uses the shared GPUI components
    Settings > Panes > Selected pane glow scales its strength from 0–200%; 0 turns it off.
    `pane-glow-strength` stores the factor from 0–2, defaulting to 1.
    `PaneChrome::active` shares this top-left emphasis across desktop, browser, and preview callers.
-   The glow fades in over 300ms when a pane becomes selected; reduced motion or disabled
-   animations show the final strength immediately. The local Metal,
+   The glow fades in over 300ms when a pane becomes selected, paced at 30fps through
+   `Animation::with_max_fps` because every animation frame redraws the whole window; reduced
+   motion or disabled animations show the final strength immediately. The local Metal,
    WGPU, and DirectX renderers dither the fade to reduce banding. Pane content roots paint their own backgrounds using the configured pane opacity.
 
 Settings > Panes scrolls its three-pane preview with the controls, like the Terminal preview. The shared

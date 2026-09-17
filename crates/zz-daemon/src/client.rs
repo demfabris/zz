@@ -17,8 +17,8 @@ use zz_protocol::{
     CommandResponse, ConfigOverrideEntry, GuiResponse, InputMessage, MAX_CLIENT_ENVIRONMENT_BYTES,
     MAX_CLIENT_ENVIRONMENT_ENTRIES, MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES, MAX_CLIENT_FILE_BYTES,
     MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES, PROTOCOL_VERSION, PaneId,
-    PasteUploadPurpose, PreparedCommand, ProtocolMessage, RawText, ServerError, ServerHello,
-    StdoutClaim, encode_protocol_message_into, read_protocol_message_into,
+    PasteUploadPurpose, PreparedCommand, ProtocolError, ProtocolMessage, RawText, ServerError,
+    ServerHello, StdoutClaim, encode_protocol_message_into, read_protocol_message_into,
 };
 
 /// `EIO`, the error the pin's client reports for anything that fails after the
@@ -1001,7 +1001,7 @@ impl InteractiveClient {
         let lock_started = diagnostic_timer();
         let mut reader = self.reader.lock();
         let lock_wait_us = diagnostic_elapsed_us(lock_started);
-        let result = reader.recv();
+        let result = reader.recv_decodable();
         drop(reader);
         log::trace!(
             target: "zz_daemon::diagnostics::client",
@@ -1047,6 +1047,20 @@ impl<S: TransportStream> ProtocolReceiver<S> {
         Self {
             stream,
             frame: Vec::new(),
+        }
+    }
+
+    fn recv_decodable(&mut self) -> Result<ProtocolMessage, DaemonError> {
+        loop {
+            match self.recv() {
+                Err(DaemonError::Protocol(ProtocolError::Decode(error))) => {
+                    log::warn!(
+                        target: "zz_daemon::diagnostics::client",
+                        "skipping an undecodable daemon message: {error}"
+                    );
+                }
+                result => return result,
+            }
         }
     }
 
@@ -1682,6 +1696,38 @@ mod tests {
         client_working_directory, startup_config_owner_capability, terminal_facts_capabilities,
         terminal_facts_capabilities_with,
     };
+
+    #[cfg(unix)]
+    #[test]
+    fn an_undecodable_frame_is_skipped_without_losing_the_next_one() {
+        use std::io::Write as _;
+
+        let (mut daemon, client) = std::os::unix::net::UnixStream::pair().unwrap();
+        let oversized = zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+            sequence: 1,
+            payload: zz_protocol::EventPayload::ChooseTree {
+                state: Some(zz_protocol::ChooseTreeState {
+                    items: Vec::new(),
+                    search: None,
+                    selected: 0,
+                    kind: zz_protocol::ChooseTreeKind::Panes,
+                    filter_no_matches: false,
+                    prompt: "x".repeat(zz_protocol::MAX_CHOOSE_ITEM_TEXT_BYTES + 1),
+                    help: false,
+                }),
+            },
+        });
+        let next = zz_protocol::ProtocolMessage::Attach {
+            session: "next".to_owned(),
+        };
+        for message in [&oversized, &next] {
+            daemon
+                .write_all(&zz_protocol::encode_protocol_message(message).unwrap())
+                .unwrap();
+        }
+        let mut receiver = super::ProtocolReceiver::new(client);
+        assert_eq!(receiver.recv_decodable().unwrap(), next);
+    }
 
     #[test]
     fn attach_session_command_preserves_the_exact_requested_flag_mutation() {

@@ -1284,6 +1284,8 @@ pub enum PaneModeRequest {
         windows: bool,
         format: Option<String>,
         template: Option<String>,
+        kill_source: bool,
+        zoom: bool,
     },
 }
 
@@ -8513,17 +8515,14 @@ impl MuxEngine {
         let (options, positional) = parse_command_options("switch-mode", args)?;
         spec.validate_positional_maximum(positional.len())?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
-        if options.has("-k") || options.has("-Z") {
-            return Err(ServerError::InvalidCommand(
-                "switch-mode -k and -Z are not implemented (TUI-014)".to_owned(),
-            ));
-        }
         Ok(Execution::effect(MuxEffect::PaneModeChanged {
             pane,
             mode: Some(PaneModeRequest::Switch {
                 windows: options.has("-w"),
                 format: options.value("-F").map(str::to_owned),
                 template: chooser_command_template(invocation, positional_start, &positional),
+                kill_source: options.has("-k"),
+                zoom: options.has("-Z"),
             }),
         }))
     }

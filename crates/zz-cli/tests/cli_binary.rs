@@ -619,7 +619,7 @@ mod daemon_autostart {
             (&["kill-pane", "-Q"][..], 1),
             (&["rename-window"][..], 1),
             (&["bogus-verb"][..], 1),
-            (&["clock-mode"][..], 1),
+            (&["clock-mode", "-Q"][..], 1),
             (&["list-panes", "--json", "-Z"][..], 1),
             (&["list-panes", "--json", "-F"][..], 1),
             (&["list-panes", "--json", "-F", "x"][..], 2),

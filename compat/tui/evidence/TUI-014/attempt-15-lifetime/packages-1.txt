@@ -1,0 +1,157 @@
+   Compiling hybrid-array v0.4.15
+   Compiling libghostty-vt v0.2.1 (https://github.com/uzaaft/libghostty-rs?rev=46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0#46a9d2ac)
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-terminal)
+   Compiling uuid v1.26.1
+   Compiling digest v0.11.3
+   Compiling nix v0.31.3
+   Compiling block-padding v0.4.2
+   Compiling inout v0.2.2
+   Compiling cipher v0.5.2
+   Compiling tempfile v3.27.0
+   Compiling sha2 v0.11.0
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-protocol)
+   Compiling hmac v0.13.0
+   Compiling agent-client-protocol v2.1.0
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-mux)
+   Compiling pbkdf2 v0.13.0
+   Compiling aes v0.9.3
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-daemon)
+   Compiling cbc v0.2.1
+   Compiling universal-hash v0.6.1
+   Compiling polyval v0.7.3
+   Compiling der v0.8.2
+   Compiling crypto-bigint v0.7.5
+   Compiling ghash v0.6.0
+   Compiling ctr v0.10.1
+   Compiling aead v0.6.1
+   Compiling aes-gcm v0.11.1
+   Compiling spki v0.8.0
+   Compiling zz-client v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-client)
+   Compiling salsa20 v0.11.0
+   Compiling scrypt v0.12.0
+   Compiling mio v1.2.3
+   Compiling pkcs5 v0.8.1
+   Compiling pkcs8 v0.11.0
+   Compiling sha1 v0.11.0
+   Compiling signature v3.0.0
+   Compiling fnv v1.0.7
+   Compiling sec1 v0.8.1
+   Compiling zbus v5.19.0
+   Compiling hkdf v0.13.0
+   Compiling elliptic-curve v0.14.1
+   Compiling primefield v0.14.0
+   Compiling wnaf v0.14.1
+   Compiling rustls v0.23.44
+   Compiling rfc6979 v0.6.0
+   Compiling digest v0.10.7
+   Compiling ecdsa v0.17.0
+   Compiling ureq v3.4.1
+   Compiling primeorder v0.14.0
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-tui)
+   Compiling chacha20 v0.10.2
+   Compiling accesskit v0.24.1
+   Compiling collections v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling zz-config v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-config)
+   Compiling ssh-encoding v0.3.0
+   Compiling curve25519-dalek-derive v0.1.1
+   Compiling curve25519-dalek v5.0.0
+   Compiling zlog v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling ed25519 v3.0.0
+   Compiling pkcs1 v0.8.0-rc.4
+   Compiling crypto-primes v0.7.2
+   Compiling poly1305 v0.9.1
+   Compiling blowfish v0.10.0
+   Compiling blake2 v0.11.0
+   Compiling convert_case v0.11.0
+   Compiling wait-timeout v0.2.1
+   Compiling tokio-macros v2.7.2
+   Compiling quick-error v1.2.3
+   Compiling bit-vec v0.8.0
+   Compiling logos-codegen v0.14.4
+   Compiling tokio v1.53.1
+   Compiling ztracing v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling bit-set v0.8.0
+   Compiling rusty-fork v0.3.1
+   Compiling proptest-macro v0.5.0 (https://github.com/proptest-rs/proptest?rev=3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b#3dca198a)
+   Compiling argon2 v0.6.0
+   Compiling bcrypt-pbkdf v0.11.0
+   Compiling rsa v0.10.0-rc.18
+   Compiling ssh-cipher v0.3.0
+   Compiling ed25519-dalek v3.0.0
+   Compiling gpui v0.2.2 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling download-cef v3.0.0
+   Compiling atspi-common v0.13.0
+   Compiling perf v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling sha3 v0.11.0
+   Compiling zz-cli v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-cli)
+   Compiling rand v0.10.2
+   Compiling p256 v0.14.0
+   Compiling p521 v0.14.0
+   Compiling p384 v0.14.0
+   Compiling hmac v0.12.1
+   Compiling rand_xorshift v0.4.0
+   Compiling const-random-macro v0.1.16
+   Compiling kem v0.3.0
+   Compiling module-lattice v0.2.3
+   Compiling unarray v0.1.4
+   Compiling sha3 v0.12.0
+   Compiling proptest v1.10.0 (https://github.com/proptest-rs/proptest?rev=3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b#3dca198a)
+   Compiling cef-dll-sys v152.2.0+152.0.6
+   Compiling ml-kem v0.3.2
+   Compiling http_client v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling const-random v0.1.18
+   Compiling ssh-key v0.7.0-rc.11
+   Compiling num-bigint v0.5.1
+   Compiling util_macros v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling sum_tree v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling logos-derive v0.14.4
+   Compiling russh-util v0.52.0
+   Compiling russh-cryptovec v0.62.0
+   Compiling generic-array v1.4.5
+   Compiling enum_dispatch v0.3.13
+   Compiling delegate v0.13.5
+   Compiling russh v0.63.3
+   Compiling logos v0.14.4
+   Compiling ahash v0.8.12
+   Compiling sha2 v0.10.9
+   Compiling hkdf v0.12.4
+   Compiling pbkdf2 v0.12.2
+   Compiling atspi-proxies v0.13.0
+   Compiling ashpd v0.13.13
+   Compiling accesskit_consumer v0.38.0
+   Compiling md-5 v0.10.6
+   Compiling merman-core v0.6.2
+   Compiling rust-embed-utils v8.12.0
+   Compiling oo7 v0.6.0
+   Compiling accesskit_atspi_common v0.19.1
+   Compiling atspi v0.29.0
+   Compiling zed-xim v0.4.0-zed (https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#16f35a2c)
+   Compiling notify v9.0.0-rc.5
+   Compiling rust-embed-impl v8.12.0
+   Compiling merman-render v0.6.2
+   Compiling cef v152.2.0+152.0.6
+   Compiling accesskit_unix v0.22.1
+   Compiling gpui_wgpu v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling notify-rust v4.18.0
+   Compiling zz-browser v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-browser)
+   Compiling fff-notify-debouncer-full v0.9.4
+   Compiling gpui_linux v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling rust-embed v8.12.0
+   Compiling merman v0.6.2
+   Compiling zz v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz)
+   Compiling fff-search v0.10.6
+   Compiling ksni v0.3.6
+   Compiling zz-ui v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-ui)
+   Compiling gpui_platform v0.1.0 (https://github.com/demfabris/zed?rev=3729683bd83b95c78825bd499c035974ff3d3159#3729683b)
+   Compiling zz-chrome-import v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-chrome-import)
+error[E0063]: missing field `mode` in initializer of `PaneSnapshot`
+   --> crates/zz/src/tray/facts.rs:183:44
+    |
+183 |         let pane = |id, title: &str, kind| PaneSnapshot {
+    |                                            ^^^^^^^^^^^^ missing `mode`
+
+For more information about this error, try `rustc --explain E0063`.
+error: could not compile `zz` (lib test) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...

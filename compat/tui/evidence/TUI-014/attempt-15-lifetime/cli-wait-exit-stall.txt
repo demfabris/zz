@@ -1,0 +1,6 @@
+    PID    PPID ELAPSED STAT WCHAN  COMMAND
+2101919 2095882     563 S<l  futex_ /home/demfabris/dev/zz-c11-modes-final/target/debug/deps/cli_binary-8b5c06dbd1308a7d
+2213571 2101919     225 S<l  futex_ /home/demfabris/dev/zz-c11-modes-final/target/debug/zz_cli -f /tmp/zz-cli-rTNWwX/empty.conf -S /tmp/zz-cli-rTNWwX/daemon.sock -C new-session -s wait-exit exec /bin/cat
+2213573 2213571     225 S<sl futex_ /home/demfabris/dev/zz-c11-modes-final/target/debug/zz_cli --socket /tmp/zz-cli-rTNWwX/daemon.sock -f /tmp/zz-cli-rTNWwX/empty.conf daemon --bootstrap-server-id 1798128340070838726 --bootstrap-client-cwd /home/demfabris/dev/zz-c11-modes-final/crates/zz-cli
+
+The test reached an unbounded child.wait_with_output after writing the second blank line. The lane terminated only child 2213571 after more than three minutes so the package could finish; the resulting test failure is not a natural exit-status measurement. This test passed in packages-2.txt.

@@ -1,0 +1,150 @@
+      case switch-mode-kill
+      state differs
+        5c5
+        < W zzcc-k:0 ENV= * 1
+        ---
+        > W zzcc-k:0 0 * 1
+DIFF  switch-mode-kill
+ok    switch-mode-kill-exit
+ok    switch-mode-kill-restored
+ok    switch-mode-zoom
+ok    switch-mode-zoom-single
+ok    switch-mode-zoom-restored
+ok    switch-mode-kill-visible
+ok    switch-mode-kill-covered
+ok    switch-mode-kill-uncovered
+ok    switch-mode-kill-survives-cover
+ok    switch-mode-kill-visible-exit
+ok    switch-mode-kill-visible-panes
+ok    switch-mode-kill-no-command-hook
+ok    switch-mode-kill-drain-stack
+ok    switch-mode-kill-drain-panes
+ok    switch-mode-kill-visible-restored
+ok    switch-mode-zoom-before-split
+ok    switch-mode-zoom-during-mode
+ok    switch-mode-zoom-during-mode-flag
+ok    switch-mode-zoom-exit
+ok    switch-mode-zoom-restored-flag
+ok    switch-mode-already-zoomed
+ok    switch-mode-already-zoomed-exit
+ok    switch-mode-already-zoomed-flag
+ok    switch-mode-zoom-lifetime-restored
+ok    self-check switch -k accepts the flag and opens the same mode
+      case switch-mode-kill-sabotage
+      stdout differs
+        1a2
+        > 1
+      screen differs
+        1,23c1,23
+        < $
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        ---
+        > $                                       ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+      state differs
+        4c4
+        < W cli:2 lifetime * 1
+        ---
+        > W cli:2 lifetime * 2
+        7c7,8
+        < P cli:2.0 mode=0/ 80x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 40x23 ptitle
+        > P cli:2.1 mode=0/ 39x23 ptitle
+ok    self-check omitting -k preserves the source pane on one side
+ok    switch-mode-kill-sabotage-restored
+ok    self-check switch -Z accepts the flag and opens the same mode
+ok    self-check both modes show the zoom before exit
+      case switch-mode-zoom-sabotage
+      stdout differs
+        1c1
+        < 0
+        ---
+        > 1
+      screen differs
+        1,24c1,24
+        < $                                       ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL0:win- 1:two  ^[[4m2:lifetime*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        ---
+        > $
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+      state differs
+        4c4
+        < W cli:2 lifetime * 2
+        ---
+        > W cli:2 lifetime *Z 2
+        7c7
+        < P cli:2.0 mode=0/ 40x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 80x23 ptitle
+ok    self-check omitting -Z keeps a zoom the mode should restore
+ok    switch-mode-zoom-sabotage-restored
+lifetime checks=27 failures=1 sabotage_failures=0

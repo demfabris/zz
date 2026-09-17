@@ -1,0 +1,10 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.45s
+     Running unittests src/lib.rs (target/debug/deps/zz_daemon-4c877db284f3160c)
+
+running 2 tests
+test daemon::tests::control_background_callbacks_cancel_after_disconnect ... ok
+test daemon::tests::positive_delay_shell_job_retains_destroyed_target_and_keeps_missing_target_sessionless ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 984 filtered out; finished in 2.66s
+
+DONE 0

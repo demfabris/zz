@@ -92,6 +92,8 @@ SIGTERM disposition with `sigaction`, including read errors and cap refusals. Di
 the daemon's file waiter and prevents pending payloads and following group members from running.
 State from completed members remains. Source diagnostics reach CLI stderr as they occur through
 `ClientMessage` error events; the client removes delivered text from the final accumulated response.
+Each delivered chunk includes the daemon's line delimiter, including when the diagnostic itself
+ends in a newline.
 
 Destination validation precedes stdin acquisition. A missing `display-message -I` target returns
 without consuming the stream, a running pane rejects it, and `split-window -I` resolves its target

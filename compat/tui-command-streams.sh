@@ -926,6 +926,9 @@ file-split-missing file cli open split-missing none exit same
 direct-fail-after-read direct cli used source-missing none state same
 alias-fail-after-read alias cli used source-missing none state same
 file-fail-after-read file cli used source-missing none state same
+direct-error-newline direct cli used source-missing-newline none stderr same
+alias-error-newline alias cli used source-missing-newline none stderr same
+file-error-newline file cli used source-missing-newline none stderr same
 direct-term-before direct cli used source before exit same
 alias-term-before alias cli used source before exit same
 file-term-before file cli used source before exit same
@@ -1023,6 +1026,7 @@ matrix_case() {
     reader=(source-file -)
     case "$destination" in
     source-missing) printf 'set -g @zzcs-matrix-input yes\nsource-file /tmp/zzcs-matrix-missing\n' >"$SCRATCH_DIR/matrix-input" ;;
+    source-missing-newline) printf "set -g @zzcs-matrix-input yes\nsource-file '/tmp/zzcs-matrix-missing\n'\n" >"$SCRATCH_DIR/matrix-input" ;;
     display-empty)
       pane="$(side_command "$side" split-window -d -t "=$SESSION:$WINDOW_NAME.0" -P -F '#{pane_id}' '')"
       reader=(display-message -I -t "$pane")

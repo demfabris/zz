@@ -252,7 +252,7 @@ fn switch_surface(
             grid.markup(0, index, rect.width, row, &selection, false);
         } else {
             let used = grid.markup(0, index, rect.width, row, &base, false);
-            grid.extend_last_cell(used, index);
+            grid.clear_before_row(used, index);
         }
     }
     let prompt_row = rect.height - 1;

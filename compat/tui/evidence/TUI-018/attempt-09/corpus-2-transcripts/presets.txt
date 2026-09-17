@@ -1,0 +1,89 @@
+# Scenario: presets
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/presets.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: split-window -h -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: split-window -h -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: select-layout -t w:0 even-horizontal
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: select-layout -t w:0 even-vertical
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: select-layout -t w:0 main-horizontal
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: select-layout -t w:0 main-vertical
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: select-layout -t w:0 tiled
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=7 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

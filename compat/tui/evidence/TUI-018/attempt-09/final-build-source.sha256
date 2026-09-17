@@ -1,0 +1,6 @@
+d58d5d4cbda301354be5bdc449c7b499344f9b1f6b3a50903cf3857131a49ed7  crates/zz-daemon/src/client.rs
+03c1bf8b6661233e7f9ab9f8a9a85eb61251c85d45d6d33c50b29d545efc09cb  crates/zz-daemon/src/daemon.rs
+911b6fa6b2cb50cc41dbbc017ef4ca91fdccc51ede3fb632b9736e22340b24c9  crates/zz-cli/src/lib.rs
+922dac2d6ee05877ce4599cc1ee6f3cabbe7e48a13a6651ca3a3cb3676c126a3  crates/zz-cli/src/control_mode.rs
+1595749bf40da360e5ef22dc8801e92a7fb6d0501f73e4ab9469a71d398db16c  crates/zz-mux/src/command.rs
+24954a7d6f0ec42c7017d9c5cd70dc7813004ff83a6dcbe748d6d8643a3565ef  compat/tui-command-streams.sh

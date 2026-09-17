@@ -1,0 +1,8 @@
+ok    matrix-direct-control
+ok    matrix-alias-control
+ok    matrix-file-control
+ok    matrix-direct-attached
+ok    matrix-alias-attached
+ok    matrix-file-attached
+matrix: 6 asserted, 0 failures, 0 recorded:TUI-018, 0 decided:TUI-018, 0 self-check failures
+exit_status=0

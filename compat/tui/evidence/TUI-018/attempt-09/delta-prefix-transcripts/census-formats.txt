@@ -1,0 +1,629 @@
+# Scenario: census-formats
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/census-formats.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: new-window -n second
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: split-window -h -t w:0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: set-window-option -t w:0 synchronize-panes on
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: new-session -d -s other
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: fmt: #{active_window_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: fmt: #{host}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alienware
+tmux stdout:
+    alienware
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: fmt: #{host_short}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alienware
+tmux stdout:
+    alienware
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: fmt: #{last_window_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: fmt: #{pane_flags}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    *
+tmux stdout:
+    *
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: fmt: #{pane_floating_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: fmt: #{pane_last}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: fmt: #{pane_search_string}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    
+tmux stdout:
+    
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: fmt: #{pane_start_command_list}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    
+tmux stdout:
+    
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: fmt: #{pane_start_path}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    /home/demfabris/dev/zz-c11-alias-fix
+tmux stdout:
+    /home/demfabris/dev/zz-c11-alias-fix
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: fmt: #{pane_synchronized}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: fmt: #{pane_z}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: fmt: #{pane_zoomed_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: fmt: #{next_session_id}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    $2
+tmux stdout:
+    $2
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: fmt: #{server_sessions}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    2
+tmux stdout:
+    2
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: fmt: #{session_bell_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: fmt: #{session_many_attached}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: fmt: #{session_stack}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: fmt: #{session_windows}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: fmt: #{window_active_clients}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: fmt: #{window_active_sessions}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: fmt: #{window_active_sessions_list}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    other
+tmux stdout:
+    other
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: fmt: #{window_end_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: fmt: #{window_linked}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: fmt: #{window_linked_sessions}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: fmt: #{window_linked_sessions_list}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    other
+tmux stdout:
+    other
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 31
+COMMAND: fmt: #{window_raw_flags}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    *
+tmux stdout:
+    *
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 32
+COMMAND: fmt: #{window_stack_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 33
+COMMAND: fmt: #{window_start_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 34
+COMMAND: fmt: #H
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alienware
+tmux stdout:
+    alienware
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 35
+COMMAND: fmt: #h
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alienware
+tmux stdout:
+    alienware
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 36
+COMMAND: fmt: #P
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 37
+COMMAND: fmt: #{e|+:2,3}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    5
+tmux stdout:
+    5
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 38
+COMMAND: fmt: #{e|*|f|2:1.5,2}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    3.00
+tmux stdout:
+    3.00
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 39
+COMMAND: fmt: #{p12:zz}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+                
+tmux stdout:
+                
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 40
+COMMAND: fmt: #{p-12:zz}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+                
+tmux stdout:
+                
+FMT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=40 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

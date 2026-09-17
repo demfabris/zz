@@ -1,0 +1,329 @@
+# Scenario: honest-knobs-c1-readback
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/honest-knobs-c1-readback.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: source-file compat/scenarios/honest-knobs-c1-readback.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-options -sv focus-events
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    on
+tmux stdout:
+    on
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-options -sv history-file
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    /tmp/zz-c1-history
+tmux stdout:
+    /tmp/zz-c1-history
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: show-options -sv prefix-timeout
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    250
+tmux stdout:
+    250
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: show-options -sv prompt-history-limit
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    3
+tmux stdout:
+    3
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: show-options -gv bell-action
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    other
+tmux stdout:
+    other
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: show-options -gv default-size
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    132x43
+tmux stdout:
+    132x43
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: show-options -gv display-panes-time
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1400
+tmux stdout:
+    1400
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: show-options -gv key-table
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    custom-c1
+tmux stdout:
+    custom-c1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: show-options -gv visual-bell
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    both
+tmux stdout:
+    both
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: show-window-options -gv main-pane-height
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    40%
+tmux stdout:
+    40%
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: show-window-options -gv main-pane-width
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    120
+tmux stdout:
+    120
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: show-window-options -gv other-pane-height
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    8
+tmux stdout:
+    8
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: out: show-window-options -gv other-pane-width
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    12%
+tmux stdout:
+    12%
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: show-window-options -gv tiled-layout-max-columns
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    2
+tmux stdout:
+    2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: show-window-options -gv window-size
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    largest
+tmux stdout:
+    largest
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: show-window-options -gv allow-rename
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    on
+tmux stdout:
+    on
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: show-window-options -gv allow-set-title
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    off
+tmux stdout:
+    off
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: list-keys -T custom-c1
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    table custom-c1 doesn't exist
+tmux stderr:
+    table custom-c1 doesn't exist
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: bind-key -T custom-c1 x kill-pane
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: list-keys -T custom-c1 -F #{key_table}=#{key_string}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    custom-c1=x
+tmux stdout:
+    custom-c1=x
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=21 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

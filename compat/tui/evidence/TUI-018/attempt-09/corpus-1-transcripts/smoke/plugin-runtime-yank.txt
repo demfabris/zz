@@ -1,0 +1,54 @@
+# Scenario: smoke/plugin-runtime-yank
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/smoke/plugin-runtime-yank.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: run-shell 'python3 ~/yank-runtime.py'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    YANK_PANE_ROW=alpha beta gamma
+    YANK_COPY_LINE_EXIT=0
+    YANK_COPY_LINE_STDERR=
+    YANK_CLIPBOARD_HEX=616c70686120626574612067616d6d61
+    YANK_CLIPBOARD_TEXT=alpha beta gamma
+    YANK_BUFFERS=alpha beta gamma
+    YANK_PANE_MODE=0,
+    YANK_DISPLAY_TIME=750
+tmux stdout:
+    YANK_PANE_ROW=alpha beta gamma
+    YANK_COPY_LINE_EXIT=0
+    YANK_COPY_LINE_STDERR=
+    YANK_CLIPBOARD_HEX=616c70686120626574612067616d6d61
+    YANK_CLIPBOARD_TEXT=alpha beta gamma
+    YANK_BUFFERS=alpha beta gamma
+    YANK_PANE_MODE=0,
+    YANK_DISPLAY_TIME=750
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g ZZ_YANK_RUNTIME
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    ZZ_YANK_RUNTIME=clean:copy-pipe-and-cancel
+tmux stdout:
+    ZZ_YANK_RUNTIME=clean:copy-pipe-and-cancel
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

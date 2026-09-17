@@ -1,0 +1,88 @@
+{
+  "total_cells": 54,
+  "asserted_cells": [
+    "matrix-direct-use",
+    "matrix-alias-use",
+    "matrix-file-use",
+    "matrix-startup-use",
+    "matrix-direct-control",
+    "matrix-alias-control",
+    "matrix-file-control",
+    "matrix-direct-attached",
+    "matrix-alias-attached",
+    "matrix-file-attached",
+    "matrix-direct-unused",
+    "matrix-alias-unused",
+    "matrix-file-unused",
+    "matrix-startup-unused",
+    "matrix-direct-spent",
+    "matrix-alias-spent",
+    "matrix-file-spent",
+    "matrix-direct-eof",
+    "matrix-direct-large-unused",
+    "matrix-alias-large-unused",
+    "matrix-file-large-unused",
+    "matrix-startup-large-unused",
+    "matrix-direct-display-valid",
+    "matrix-direct-display-running",
+    "matrix-alias-display-running",
+    "matrix-file-display-running",
+    "matrix-direct-display-missing",
+    "matrix-alias-display-missing",
+    "matrix-file-display-missing",
+    "matrix-direct-split-missing",
+    "matrix-alias-split-missing",
+    "matrix-file-split-missing",
+    "matrix-direct-fail-after-read",
+    "matrix-alias-fail-after-read",
+    "matrix-file-fail-after-read",
+    "matrix-direct-error-newline",
+    "matrix-alias-error-newline",
+    "matrix-file-error-newline",
+    "matrix-direct-term-before",
+    "matrix-alias-term-before",
+    "matrix-file-term-before",
+    "matrix-direct-term-during",
+    "matrix-alias-term-during",
+    "matrix-file-term-during",
+    "matrix-direct-term-after",
+    "matrix-alias-term-after",
+    "matrix-file-term-after",
+    "matrix-direct-term-after-error",
+    "matrix-alias-term-after-error",
+    "matrix-file-term-after-error"
+  ],
+  "recorded_cells": [
+    {
+      "name": "matrix-direct-closed",
+      "owner": "TUI-018",
+      "reason": "Closed fd 0 is sanitized to /dev/null by Rust before application entry. The pin emits its libevent EBADF error and exits 1; zz treats EOF and continues. No pre-main descriptor capture was implemented."
+    },
+    {
+      "name": "matrix-alias-closed",
+      "owner": "TUI-018",
+      "reason": "Closed fd 0 is sanitized to /dev/null by Rust before application entry. The pin emits its libevent EBADF error and exits 1; zz treats EOF and continues. No pre-main descriptor capture was implemented."
+    },
+    {
+      "name": "matrix-file-closed",
+      "owner": "TUI-018",
+      "reason": "Closed fd 0 is sanitized to /dev/null by Rust before application entry. The pin emits its libevent EBADF error and exits 1; zz treats EOF and continues. No pre-main descriptor capture was implemented."
+    }
+  ],
+  "decided_cells": [
+    {
+      "name": "matrix-direct-large-used",
+      "owner": "decided:TUI-018",
+      "reason": "Existing 1 MiB consumed-input cap; unused oversized input remains asserted."
+    }
+  ],
+  "axes": [
+    "invocation",
+    "caller",
+    "stdin state",
+    "destination",
+    "signal",
+    "continuation"
+  ],
+  "full_cross_product": false
+}

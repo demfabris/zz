@@ -1,0 +1,1089 @@
+# Scenario: pane-target-grammar
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/pane-target-grammar.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: split-window -d -h -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: split-window -d -v -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: new-window -d -t w:1 -n second
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: new-window -d -t w:2 -n third
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: select-window -t w:0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: select-pane -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: select-pane -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: display-message -p -t w:0 #{window_width}x#{window_height}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    80x24
+tmux stdout:
+    80x24
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: list-panes -t w:0 -F #{pane_index}:#{pane_left},#{pane_top},#{pane_right},#{pane_bottom}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:0,0,39,11
+    1:0,13,39,23
+    2:41,0,79,23
+tmux stdout:
+    0:0,0,39,11
+    1:0,13,39,23
+    2:41,0,79,23
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: display-message -p -t ! #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.1
+tmux stdout:
+    0.1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: display-message -p -t {last} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.1
+tmux stdout:
+    0.1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: display-message -p -t + #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.1
+tmux stdout:
+    0.1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: display-message -p -t - #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.2
+tmux stdout:
+    0.2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: out: display-message -p -t +2 #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.2
+tmux stdout:
+    0.2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: display-message -p -t -2 #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.1
+tmux stdout:
+    0.1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: display-message -p -t {next} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.1
+tmux stdout:
+    0.1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: display-message -p -t {previous} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.2
+tmux stdout:
+    0.2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: display-message -p -t top #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.0
+tmux stdout:
+    0.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: display-message -p -t bottom #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.1
+tmux stdout:
+    0.1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: out: display-message -p -t left #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.0
+tmux stdout:
+    0.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: display-message -p -t right #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.2
+tmux stdout:
+    0.2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: display-message -p -t top-left #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.0
+tmux stdout:
+    0.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: out: display-message -p -t top-right #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.2
+tmux stdout:
+    0.2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: out: display-message -p -t bottom-left #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.1
+tmux stdout:
+    0.1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: out: display-message -p -t bottom-right #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.2
+tmux stdout:
+    0.2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: out: display-message -p -t TOP-RIGHT #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.2
+tmux stdout:
+    0.2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: out: display-message -p -t {top} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.0
+tmux stdout:
+    0.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: out: display-message -p -t {bottom} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.1
+tmux stdout:
+    0.1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: out: display-message -p -t {left} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.0
+tmux stdout:
+    0.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: out: display-message -p -t {right} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.2
+tmux stdout:
+    0.2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 31
+COMMAND: out: display-message -p -t {top-left} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.0
+tmux stdout:
+    0.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 32
+COMMAND: out: display-message -p -t {top-right} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.2
+tmux stdout:
+    0.2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 33
+COMMAND: out: display-message -p -t {bottom-left} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.1
+tmux stdout:
+    0.1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 34
+COMMAND: out: display-message -p -t {bottom-right} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.2
+tmux stdout:
+    0.2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 35
+COMMAND: out: display-message -p -t {up-of} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.1
+tmux stdout:
+    0.1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 36
+COMMAND: out: display-message -p -t {down-of} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.1
+tmux stdout:
+    0.1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 37
+COMMAND: out: display-message -p -t {left-of} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.2
+tmux stdout:
+    0.2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 38
+COMMAND: out: display-message -p -t {right-of} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.2
+tmux stdout:
+    0.2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 39
+COMMAND: out: display-message -p -t :+ #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1.0
+tmux stdout:
+    1.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 40
+COMMAND: out: display-message -p -t :- #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    2.0
+tmux stdout:
+    2.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 41
+COMMAND: out: display-message -p -t :+2 #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    2.0
+tmux stdout:
+    2.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 42
+COMMAND: out: display-message -p -t :{next} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1.0
+tmux stdout:
+    1.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 43
+COMMAND: out: display-message -p -t :{previous} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    2.0
+tmux stdout:
+    2.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 44
+COMMAND: out: display-message -p -t :{start} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.0
+tmux stdout:
+    0.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 45
+COMMAND: out: display-message -p -t :{end} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    2.0
+tmux stdout:
+    2.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 46
+COMMAND: out: display-message -p -t :{last} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.0
+tmux stdout:
+    0.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 47
+COMMAND: out: display-message -p -t :^ #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.0
+tmux stdout:
+    0.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 48
+COMMAND: out: display-message -p -t :! #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.0
+tmux stdout:
+    0.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 49
+COMMAND: out: display-message -p -t +.0 #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1.0
+tmux stdout:
+    1.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 50
+COMMAND: out: display-message -p -t -.0 #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    2.0
+tmux stdout:
+    2.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 51
+COMMAND: out: display-message -p -t {next}.0 #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1.0
+tmux stdout:
+    1.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 52
+COMMAND: out: display-message -p -t w:+ #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1.0
+tmux stdout:
+    1.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 53
+COMMAND: out: display-message -p -t w:{next} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1.0
+tmux stdout:
+    1.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 54
+COMMAND: out: display-message -p -t w:0.{last} #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.1
+tmux stdout:
+    0.1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 55
+COMMAND: out: display-message -p -t w:0.+ #{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0.1
+tmux stdout:
+    0.1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 56
+COMMAND: out: display-message -p -t nope #{session_name}:#{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    :.
+tmux stdout:
+    :.
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 57
+COMMAND: out: display-message -p -t :nope #{session_name}:#{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    w:0.0
+tmux stdout:
+    w:0.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 58
+COMMAND: out: display-message -p -t %999 #{session_name}:#{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    :.
+tmux stdout:
+    :.
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 59
+COMMAND: out: display-message -p -t 9.9 #{session_name}:#{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    :.
+tmux stdout:
+    :.
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 60
+COMMAND: out: display-message -p -t +99 #{session_name}:#{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    w:0.0
+tmux stdout:
+    w:0.0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 61
+COMMAND: out: display-message -p -t {marked} #{session_name}:#{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    :.
+tmux stdout:
+    :.
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 62
+COMMAND: out: display-message -p -t ~ #{session_name}:#{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    :.
+tmux stdout:
+    :.
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 63
+COMMAND: kill-pane -t {marked}
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    no marked target
+tmux stderr:
+    no marked target
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 64
+COMMAND: select-window -t {marked}
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    no marked target
+tmux stderr:
+    no marked target
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 65
+COMMAND: select-pane -m -t w:0.2
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 66
+COMMAND: out: display-message -p -t {marked} #{session_name}:#{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    w:0.2
+tmux stdout:
+    w:0.2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 67
+COMMAND: out: display-message -p -t ~ #{session_name}:#{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    w:0.2
+tmux stdout:
+    w:0.2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 68
+COMMAND: out: list-panes -t {marked} -F #{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+    1
+    2
+tmux stdout:
+    0
+    1
+    2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 69
+COMMAND: out: display-message -p -t {marked}.0 #{session_name}:#{window_index}.#{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    :.
+tmux stdout:
+    :.
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 70
+COMMAND: select-pane -M -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=70 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

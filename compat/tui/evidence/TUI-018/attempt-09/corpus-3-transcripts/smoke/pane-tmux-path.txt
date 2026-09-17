@@ -1,0 +1,70 @@
+# Scenario: smoke/pane-tmux-path
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/smoke/pane-tmux-path.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: run-shell 'sh ~/pane-tmux-path.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    pane-route=%0
+    nested-status=1
+    sessions should be nested with care, unset $TMUX to force
+    bind-key  -T root C-l if-shell false "send-keys 'C-l'" "select-pane -R"
+    navigator-vim=right-pane
+    respawn-route=%0
+    respawn-nested-status=1
+tmux stdout:
+    pane-route=%0
+    nested-status=1
+    sessions should be nested with care, unset $TMUX to force
+    bind-key  -T root C-l if-shell false "send-keys 'C-l'" "select-pane -R"
+    navigator-vim=right-pane
+    respawn-route=%0
+    respawn-nested-status=1
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g PANE_TMUX_PATH
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    PANE_TMUX_PATH=clean
+tmux stdout:
+    PANE_TMUX_PATH=clean
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: keys: root C-l
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    root|C-l|0|if-shell false "send-keys 'C-l'" "select-pane -R"
+tmux stdout:
+    root|C-l|0|if-shell false "send-keys 'C-l'" "select-pane -R"
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

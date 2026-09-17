@@ -1,0 +1,206 @@
+# Scenario: smoke/source-file-control
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/smoke/source-file-control.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: run-shell 'sh ~/source-file-control.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g SOURCE_FILE_CONTROL
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_FILE_CONTROL=%begin-1~No such file or directory: direct-one-missing.conf~No such file or directory: direct-two-missing.conf~%error-1~%begin-1~No such file or directory: partial-missing.conf~%end-1~%begin-1~PARTIAL_CONT~%end-1~%begin-1~%end-1~%begin-1~No such file or directory: zz-control-nested-one-missing.conf~No such file or directory: zz-control-nested-two-missing.conf~%error-1~%begin-1~NESTED_CONT~%end-1~%begin-1~%end-1~%config-error invalid.conf:1: unknown command: wibble~%begin-1~INVALID_CONT~%end-1~%begin-1~%end-1~'exit 3' returned 3~%begin-1~RUN_CONT~%end-1~%begin-1~%end-1~%begin-1~BACKGROUND_RUN_CONT~%end-1~%begin-1~%end-1~%begin-1~%end-1~%begin-1~TARGETED_RUN_CONT~%end-1~%begin-1~%end-1~%begin-1~%end-1~SOURCED_RUN_RAW~'printf SOURCED_RUN_RAW; exit 6' returned 6~%begin-1~SOURCED_RUN_CONT~%end-1~%begin-1~CONTROL_DONE~%end-1~%begin-1~%end-1~
+tmux stdout:
+    SOURCE_FILE_CONTROL=%begin-1~No such file or directory: direct-one-missing.conf~No such file or directory: direct-two-missing.conf~%error-1~%begin-1~No such file or directory: partial-missing.conf~%end-1~%begin-1~PARTIAL_CONT~%end-1~%begin-1~%end-1~%begin-1~No such file or directory: zz-control-nested-one-missing.conf~No such file or directory: zz-control-nested-two-missing.conf~%error-1~%begin-1~NESTED_CONT~%end-1~%begin-1~%end-1~%config-error invalid.conf:1: unknown command: wibble~%begin-1~INVALID_CONT~%end-1~%begin-1~%end-1~'exit 3' returned 3~%begin-1~RUN_CONT~%end-1~%begin-1~%end-1~%begin-1~BACKGROUND_RUN_CONT~%end-1~%begin-1~%end-1~%begin-1~%end-1~%begin-1~TARGETED_RUN_CONT~%end-1~%begin-1~%end-1~%begin-1~%end-1~SOURCED_RUN_RAW~'printf SOURCED_RUN_RAW; exit 6' returned 6~%begin-1~SOURCED_RUN_CONT~%end-1~%begin-1~CONTROL_DONE~%end-1~%begin-1~%end-1~
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g SOURCE_FILE_CONTROL_VERBOSE
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_FILE_CONTROL_VERBOSE=suppressed
+tmux stdout:
+    SOURCE_FILE_CONTROL_VERBOSE=suppressed
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: show-environment -g SOURCE_FILE_CONTROL_RUNTIME
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_FILE_CONTROL_RUNTIME=rc=1 stderr=0 kill=1 option=1 done=1 after=yes
+tmux stdout:
+    SOURCE_FILE_CONTROL_RUNTIME=rc=1 stderr=0 kill=1 option=1 done=1 after=yes
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: show-environment -g SOURCE_FILE_CONTROL_NESTED_QUEUE
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_FILE_CONTROL_NESTED_QUEUE=%begin~%end~%begin~No such file or directory: root-before-missing.conf~No such file or directory: root-after-missing.conf~%end~%begin~No such file or directory: middle-before-missing.conf~No such file or directory: middle-after-missing.conf~%end~%begin~CONTROL_QUEUE_LEAF~%end~%begin~%end~
+tmux stdout:
+    SOURCE_FILE_CONTROL_NESTED_QUEUE=%begin~%end~%begin~No such file or directory: root-before-missing.conf~No such file or directory: root-after-missing.conf~%end~%begin~No such file or directory: middle-before-missing.conf~No such file or directory: middle-after-missing.conf~%end~%begin~CONTROL_QUEUE_LEAF~%end~%begin~%end~
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: show-environment -g SOURCE_FILE_CONTROL_IF_SHELL
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_FILE_CONTROL_IF_SHELL=rc=0 transcript=%begin~%end~%begin~%end~%begin~IF_DIRECT~%end~%begin~%end~%begin~can't find session: missing-if-shell-direct~%error~%begin~%end~%begin~RUN_DIRECT~%end~%begin~%end~%begin~can't find session: missing-run-shell-direct~%error~%begin~%end~%begin~%end~%begin~IF_CHILD~%end~%begin~%end~%begin~%end~%begin~IF_CHILD~%end~%begin~%end~%begin~%end~%begin~IF_CHILD~%end~%begin~%end~%begin~%end~%begin~IF_CHILD~%end~%begin~%end~%begin~%end~%begin~%end~%begin~%end~%begin~IF_LEAF~%end~%begin~%end~%begin~%end~%begin~can't find session: missing-if-shell-child~%error~%begin~IF_CHILD_AFTER_ERROR~%end~%begin~%end~%begin~No such file or directory: missing.conf~%error~%begin~IF_ROOT_LATER~%end~%begin~%end~
+tmux stdout:
+    SOURCE_FILE_CONTROL_IF_SHELL=rc=0 transcript=%begin~%end~%begin~%end~%begin~IF_DIRECT~%end~%begin~%end~%begin~can't find session: missing-if-shell-direct~%error~%begin~%end~%begin~RUN_DIRECT~%end~%begin~%end~%begin~can't find session: missing-run-shell-direct~%error~%begin~%end~%begin~%end~%begin~IF_CHILD~%end~%begin~%end~%begin~%end~%begin~IF_CHILD~%end~%begin~%end~%begin~%end~%begin~IF_CHILD~%end~%begin~%end~%begin~%end~%begin~IF_CHILD~%end~%begin~%end~%begin~%end~%begin~%end~%begin~%end~%begin~IF_LEAF~%end~%begin~%end~%begin~%end~%begin~can't find session: missing-if-shell-child~%error~%begin~IF_CHILD_AFTER_ERROR~%end~%begin~%end~%begin~No such file or directory: missing.conf~%error~%begin~IF_ROOT_LATER~%end~%begin~%end~
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: show-environment -g SOURCE_FILE_CONTROL_DEPTH
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_FILE_CONTROL_DEPTH=rc=0 hits=2 cont=1 depth=50 last=yes leaf=
+tmux stdout:
+    SOURCE_FILE_CONTROL_DEPTH=rc=0 hits=2 cont=1 depth=50 last=yes leaf=
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: show-environment -g SOURCE_FILE_CONTROL_STATUS_MATRIX
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_FILE_CONTROL_STATUS_MATRIX=direct-runtime/eof:rc=1,hit=1,marker=1,release=0,exit=1;sourced-runtime/eof:rc=1,hit=1,marker=1,release=0,exit=1;sourced-command/eof:rc=1,hit=1,marker=1,release=0,exit=1;generic-nonzero/eof:rc=0,hit=1,marker=1,release=0,exit=1;direct-runtime/blank:rc=1,hit=1,marker=1,release=0,exit=1;sourced-runtime/blank:rc=1,hit=1,marker=1,release=0,exit=1;sourced-command/blank:rc=1,hit=1,marker=1,release=0,exit=1;generic-nonzero/blank:rc=0,hit=1,marker=1,release=0,exit=1;direct-runtime/detach-completed:rc=0,hit=1,marker=1,release=0,exit=1;sourced-runtime/detach-completed:rc=0,hit=1,marker=1,release=0,exit=1;sourced-command/detach-completed:rc=0,hit=1,marker=1,release=0,exit=1;generic-nonzero/detach-completed:rc=0,hit=1,marker=1,release=0,exit=1;direct-runtime/detach-queued-open:rc=0,hit=1,marker=1,release=1,exit=1;sourced-runtime/detach-queued-open:rc=0,hit=1,marker=1,release=1,exit=1;sourced-command/detach-queued-open:rc=0,hit=1,marker=1,release=1,exit=1;generic-nonzero/detach-queued-open:rc=0,hit=1,marker=1,release=1,exit=1;direct-runtime/detach-queued-eof:rc=1,hit=1,marker=1,release=1,exit=1;sourced-runtime/detach-queued-eof:rc=1,hit=1,marker=1,release=1,exit=1;sourced-command/detach-queued-eof:rc=1,hit=1,marker=1,release=1,exit=1;generic-nonzero/detach-queued-eof:rc=0,hit=1,marker=1,release=1,exit=1
+tmux stdout:
+    SOURCE_FILE_CONTROL_STATUS_MATRIX=direct-runtime/eof:rc=1,hit=1,marker=1,release=0,exit=1;sourced-runtime/eof:rc=1,hit=1,marker=1,release=0,exit=1;sourced-command/eof:rc=1,hit=1,marker=1,release=0,exit=1;generic-nonzero/eof:rc=0,hit=1,marker=1,release=0,exit=1;direct-runtime/blank:rc=1,hit=1,marker=1,release=0,exit=1;sourced-runtime/blank:rc=1,hit=1,marker=1,release=0,exit=1;sourced-command/blank:rc=1,hit=1,marker=1,release=0,exit=1;generic-nonzero/blank:rc=0,hit=1,marker=1,release=0,exit=1;direct-runtime/detach-completed:rc=0,hit=1,marker=1,release=0,exit=1;sourced-runtime/detach-completed:rc=0,hit=1,marker=1,release=0,exit=1;sourced-command/detach-completed:rc=0,hit=1,marker=1,release=0,exit=1;generic-nonzero/detach-completed:rc=0,hit=1,marker=1,release=0,exit=1;direct-runtime/detach-queued-open:rc=0,hit=1,marker=1,release=1,exit=1;sourced-runtime/detach-queued-open:rc=0,hit=1,marker=1,release=1,exit=1;sourced-command/detach-queued-open:rc=0,hit=1,marker=1,release=1,exit=1;generic-nonzero/detach-queued-open:rc=0,hit=1,marker=1,release=1,exit=1;direct-runtime/detach-queued-eof:rc=1,hit=1,marker=1,release=1,exit=1;sourced-runtime/detach-queued-eof:rc=1,hit=1,marker=1,release=1,exit=1;sourced-command/detach-queued-eof:rc=1,hit=1,marker=1,release=1,exit=1;generic-nonzero/detach-queued-eof:rc=0,hit=1,marker=1,release=1,exit=1
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: show-environment -g SOURCE_FILE_CONTROL_RETURN_PRECEDENCE
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_FILE_CONTROL_RETURN_PRECEDENCE=pre:rc=0,ready=1,release=1,exit=1;post:sourced-runtime-post/detach-completed-eof:rc=0,hit=1,marker=1,release=0,exit=1
+tmux stdout:
+    SOURCE_FILE_CONTROL_RETURN_PRECEDENCE=pre:rc=0,ready=1,release=1,exit=1;post:sourced-runtime-post/detach-completed-eof:rc=0,hit=1,marker=1,release=0,exit=1
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: show-environment -g SOURCE_FILE_CONTROL_HOOKS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_FILE_CONTROL_HOOKS=rc=1 unknown=1 skipped=0 seq=0:end:_|1:end:HOOK_TRIGGER|0:end:HOOK_ARRAY_ZERO|0:error:can't find session: hook-direct-runtime|0:end:_|0:end:HOOK_SOURCE_BEFORE|0:end:_|0:end:HOOK_LEAF|0:end:_|0:error:can't find session: hook-source-runtime|0:end:HOOK_SOURCE_AFTER|0:error:No such file or directory: missing.conf|0:end:HOOK_ARRAY_THREE|1:error:can't find session: hook-outer-runtime|0:end:COMMAND_ERROR_HOOK|1:end:_|1:end:_|1:end:HOOK_FINAL_FLAGS_ONE|1:end:HOOKS_DONE
+tmux stdout:
+    SOURCE_FILE_CONTROL_HOOKS=rc=1 unknown=1 skipped=0 seq=0:end:_|1:end:HOOK_TRIGGER|0:end:HOOK_ARRAY_ZERO|0:error:can't find session: hook-direct-runtime|0:end:_|0:end:HOOK_SOURCE_BEFORE|0:end:_|0:end:HOOK_LEAF|0:end:_|0:error:can't find session: hook-source-runtime|0:end:HOOK_SOURCE_AFTER|0:error:No such file or directory: missing.conf|0:end:HOOK_ARRAY_THREE|1:error:can't find session: hook-outer-runtime|0:end:COMMAND_ERROR_HOOK|1:end:_|1:end:_|1:end:HOOK_FINAL_FLAGS_ONE|1:end:HOOKS_DONE
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: show-environment -g SOURCE_FILE_CONTROL_READ_PLACEMENT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_FILE_CONTROL_READ_PLACEMENT=direct:rc=1,seq=1:1:end:_|2:1:end:DIRECT_READ_BEFORE|3:1:end:_|raw:Is a directory: <DIR>/read-placement/direct-one|raw:Is a directory: <DIR>/read-placement/direct-two|4:1:end:DIRECT_READ_CHILD|6:1:end:DIRECT_READ_AFTER|8:1:end:DIRECT_READ_LATER;hook:rc=1,seq=1:1:end:HOOK_READ_TRIGGER|2:0:end:_|3:0:end:HOOK_READ_ROOT_BEFORE|4:0:end:_|5:0:end:HOOK_READ_NESTED_BEFORE|6:0:end:_|raw:Is a directory: <DIR>/read-placement/hook-bad|8:0:end:HOOK_READ_NESTED_AFTER|10:0:end:HOOK_READ_ROOT_AFTER|12:0:end:HOOK_READ_ARRAY_LATER|13:1:end:_|14:1:end:HOOK_READ_INPUT_LATER
+tmux stdout:
+    SOURCE_FILE_CONTROL_READ_PLACEMENT=direct:rc=1,seq=1:1:end:_|2:1:end:DIRECT_READ_BEFORE|3:1:end:_|raw:Is a directory: <DIR>/read-placement/direct-one|raw:Is a directory: <DIR>/read-placement/direct-two|4:1:end:DIRECT_READ_CHILD|6:1:end:DIRECT_READ_AFTER|8:1:end:DIRECT_READ_LATER;hook:rc=1,seq=1:1:end:HOOK_READ_TRIGGER|2:0:end:_|3:0:end:HOOK_READ_ROOT_BEFORE|4:0:end:_|5:0:end:HOOK_READ_NESTED_BEFORE|6:0:end:_|raw:Is a directory: <DIR>/read-placement/hook-bad|8:0:end:HOOK_READ_NESTED_AFTER|10:0:end:HOOK_READ_ROOT_AFTER|12:0:end:HOOK_READ_ARRAY_LATER|13:1:end:_|14:1:end:HOOK_READ_INPUT_LATER
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: show-environment -g SOURCE_FILE_CONTROL_BACKGROUND
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_FILE_CONTROL_BACKGROUND=success:rc=1,seq=0:end:_|1:end:_|1:end:_|1:end:_|1:end:_|1:end:_|1:end:BACKGROUND_LATER|0:end:_|0:end:BACKGROUND_CHILD|0:error:No such file or directory: missing.conf|0:error:can't find session: background-runtime-missing|0:end:BACKGROUND_RUN|0:end:BACKGROUND_ELSE|1:end:BACKGROUND_STICKY_LATER;malformed:rc=0,stderr=0,loud=0,ordinary=0,seq=0:end:_|1:end:_|1:end:_|1:end:_|1:end:MALFORMED_LATER|1:end:MALFORMED_DONE;disconnect:rc=0,stderr=0,run=_,if=_,seq=0:end:_|1:end:_|1:end:_|1:end:DISCONNECT_READY
+tmux stdout:
+    SOURCE_FILE_CONTROL_BACKGROUND=success:rc=1,seq=0:end:_|1:end:_|1:end:_|1:end:_|1:end:_|1:end:_|1:end:BACKGROUND_LATER|0:end:_|0:end:BACKGROUND_CHILD|0:error:No such file or directory: missing.conf|0:error:can't find session: background-runtime-missing|0:end:BACKGROUND_RUN|0:end:BACKGROUND_ELSE|1:end:BACKGROUND_STICKY_LATER;malformed:rc=0,stderr=0,loud=0,ordinary=0,seq=0:end:_|1:end:_|1:end:_|1:end:_|1:end:MALFORMED_LATER|1:end:MALFORMED_DONE;disconnect:rc=0,stderr=0,run=_,if=_,seq=0:end:_|1:end:_|1:end:_|1:end:DISCONNECT_READY
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=12 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

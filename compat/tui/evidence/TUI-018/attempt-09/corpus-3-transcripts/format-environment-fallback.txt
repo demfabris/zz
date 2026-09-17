@@ -1,0 +1,385 @@
+# Scenario: format-environment-fallback
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/format-environment-fallback.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: new-session -d -s envs
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: set-environment -g PLAIN hello
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: display-message -p -t envs [#{PLAIN}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [hello]
+tmux stdout:
+    [hello]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: set-environment -t envs SESSPLAIN sv
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: display-message -p -t envs [#{SESSPLAIN}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [sv]
+tmux stdout:
+    [sv]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: display-message -p -t envs [#{t:PLAIN}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    []
+tmux stdout:
+    []
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: set-environment -g OVER gval
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: set-environment -t envs OVER sval
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: display-message -p -t envs [#{OVER}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [sval]
+tmux stdout:
+    [sval]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: set-environment -g MASKED gmask
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: set-environment -t envs -r MASKED
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: display-message -p -t envs [#{MASKED}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    []
+tmux stdout:
+    []
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: set-environment -g -r GONE
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: out: display-message -p -t envs [#{GONE}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    []
+tmux stdout:
+    []
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: set-environment -g -h HID hv
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: display-message -p -t envs [#{HID}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [hv]
+tmux stdout:
+    [hv]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: set-environment -g session_name ENVLOSES
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: display-message -p -t envs [#{session_name}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [envs]
+tmux stdout:
+    [envs]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: set-environment -g status-left ENVLOSES
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: out: display-message -p -t envs [#{status-left}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [[#{session_name}] ]
+tmux stdout:
+    [[#{session_name}] ]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: display-message -p -t envs [#{?OVER,yes,no}|#{?NOSUCHVAR,yes,no}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [yes|no]
+tmux stdout:
+    [yes|no]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: display-message -p -t envs [#{=2:OVER}|#{b:PLAIN}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [sv|hello]
+tmux stdout:
+    [sv|hello]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: out: display-message -p -t envs [#{NOSUCHVAR}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    []
+tmux stdout:
+    []
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: new-session -d -s other
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: out: display-message -p -t other [#{OVER}|#{PLAIN}|#{SESSPLAIN}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [gval|hello|]
+tmux stdout:
+    [gval|hello|]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: set-environment -t envs -u OVER
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: out: display-message -p -t envs [#{OVER}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [gval]
+tmux stdout:
+    [gval]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=27 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

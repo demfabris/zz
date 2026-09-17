@@ -1,0 +1,365 @@
+# Scenario: display-message
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/display-message.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: display-message hello
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: display-message -C hello
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: display-message -N -d 500 hello
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: display-message -d 500 hello
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: display-message -d 0 hello
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: display-message -C -d 500 hello
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: display-message -d 4294967295 hello
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: display-message -d +5 hello
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: display-message -d abc hello
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    delay invalid
+tmux stderr:
+    delay invalid
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: display-message -d 5.5 hello
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    delay invalid
+tmux stderr:
+    delay invalid
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: display-message -d 0x10 hello
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    delay invalid
+tmux stderr:
+    delay invalid
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: display-message -d -5 hello
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    delay too small
+tmux stderr:
+    delay too small
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: display-message -d 4294967296 hello
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    delay too large
+tmux stderr:
+    delay too large
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: display-message -d 99999999999999999999999999 hello
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    delay too large
+tmux stderr:
+    delay too large
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: display-message -p -d abc hello
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    delay invalid
+tmux stderr:
+    delay invalid
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: display-message -p -C hello
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    hello
+tmux stdout:
+    hello
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: display-message -p -N hello
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    hello
+tmux stdout:
+    hello
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: display-message -p -d 500 hello
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    hello
+tmux stdout:
+    hello
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: display-message -p -d 0 hello
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    hello
+tmux stdout:
+    hello
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: display-message -t =missing: quiet
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: display-message -c missing-client -t =missing: quiet
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: display-message -p -t =missing: #{session_name}:#{window_name}:#{pane_id}:#{client_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    :::
+tmux stdout:
+    :::
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: out: display-message -p -c missing-client -t =missing: #{session_name}:#{window_name}:#{pane_id}:#{client_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    :::
+tmux stdout:
+    :::
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: new-window -d -n canfail-window
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: out: display-message -p -t =w:missing #{session_name}:#{window_name}:#{pane_index}:#{client_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    w:main:0:
+tmux stdout:
+    w:main:0:
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: out: display-message -p -t =w:canfail-window.999 #{session_name}:#{window_name}:#{pane_index}:#{client_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    w:canfail-window:0:
+tmux stdout:
+    w:canfail-window:0:
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: out: display-message -p -c missing-client -t =w:missing #{session_name}:#{window_name}:#{pane_index}:#{client_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    w:main:0:
+tmux stdout:
+    w:main:0:
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=27 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

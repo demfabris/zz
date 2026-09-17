@@ -1,0 +1,251 @@
+# Scenario: new-session-environment
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/new-session-environment.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: set-option -g remain-on-exit on
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: set-option -g update-environment ZZ_NEW_SESSION_ABSENT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: new-session -d -s seeded-environment -e ZZ_NEW_SESSION_ABSENT=first -e MALFORMED -e =ignored -e ZZ_NEW_SESSION_ABSENT=last /usr/bin/printenv ZZ_NEW_SESSION_ABSENT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: run-shell "sleep 0.2"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: show-environment -t seeded-environment
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    =ignored
+    ZZ_NEW_SESSION_ABSENT=last
+tmux stdout:
+    =ignored
+    ZZ_NEW_SESSION_ABSENT=last
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: capture-pane -p -S -1 -E -1 -t seeded-environment:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    last
+tmux stdout:
+    last
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: new-session -d -E -s unseeded-environment
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: show-environment -t unseeded-environment
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: new-session -d -E -s explicit-environment -e ZZ_EXPLICIT_ENV=first -e MALFORMED -e ZZ_EXPLICIT_ENV=last /usr/bin/printenv ZZ_EXPLICIT_ENV
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: run-shell "sleep 0.2"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: show-environment -t explicit-environment
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    ZZ_EXPLICIT_ENV=last
+tmux stdout:
+    ZZ_EXPLICIT_ENV=last
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: capture-pane -p -S -1 -E -1 -t explicit-environment:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    last
+tmux stdout:
+    last
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: new-session -d -s empty-name-environment -e =ignored /usr/bin/printenv ""
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: run-shell "sleep 0.2"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: display-message -p -t empty-name-environment:0.0 #{pane_dead_status}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: set-environment -t seeded-environment STAYS original
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: new-session -A -d -s seeded-environment -e STAYS=replaced -e NEW=value
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    open terminal failed: not a terminal
+tmux stderr:
+    open terminal failed: not a terminal
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: show-environment -t seeded-environment
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    =ignored
+    STAYS=original
+    ZZ_NEW_SESSION_ABSENT=last
+tmux stdout:
+    =ignored
+    STAYS=original
+    ZZ_NEW_SESSION_ABSENT=last
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=18 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

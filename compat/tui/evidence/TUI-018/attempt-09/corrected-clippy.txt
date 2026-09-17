@@ -1,0 +1,7 @@
+    Checking zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-daemon)
+    Checking zz-config v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-config)
+    Checking zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-tui)
+    Checking zz-cli v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-cli)
+    Checking zz v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 15.72s
+exit_status=0

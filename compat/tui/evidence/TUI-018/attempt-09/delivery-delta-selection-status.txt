@@ -1,0 +1,2 @@
+exit_status=0
+selection_cmp_status=0

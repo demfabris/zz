@@ -1,0 +1,139 @@
+# Scenario: new-session-cwd
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/new-session-cwd.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: new-session -d -s cwd-target -n target-window -c /
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: select-pane -t =cwd-target:0.0 -T target-pane
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: new-session -d -s cwd-source -n source-window -c /tmp
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: select-pane -t =cwd-source:0.0 -T source-pane
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: new-session -A -s cwd-target -c '/tmp/##{session_name}-#{window_name}-#{pane_title}'
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    open terminal failed: not a terminal
+tmux stderr:
+    open terminal failed: not a terminal
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: list-sessions -O name -f #{m:cwd-*,#{session_name}} -F [#{session_name}]|[#{session_path}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [cwd-source]|[/tmp]
+    [cwd-target]|[/tmp/#{session_name}-target-window-target-pane]
+tmux stdout:
+    [cwd-source]|[/tmp]
+    [cwd-target]|[/tmp/#{session_name}-target-window-target-pane]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: new-session -d -s cwd-fresh-empty -c ''
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: display-message -p -t =cwd-fresh-empty:0 [#{session_path}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    []
+tmux stdout:
+    []
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: new-session -Ad -s cwd-miss-empty -c ''
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: display-message -p -t =cwd-miss-empty:0 [#{session_path}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    []
+tmux stdout:
+    []
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=10 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

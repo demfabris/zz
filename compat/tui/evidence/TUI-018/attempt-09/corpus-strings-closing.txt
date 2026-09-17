@@ -1,0 +1,3 @@
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:57:        if (observed.stdout, observed.stderr, observed.returncode) != (expected, b"Bad file descriptor: -\n", 1):
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:75:        if (observed.stdout, observed.stderr, observed.returncode) != (expected, b"Bad file descriptor: -\n", 1):
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:87:        if (observed.stdout, observed.stderr, observed.returncode) != (expected, b"Bad file descriptor: -\n", 1):

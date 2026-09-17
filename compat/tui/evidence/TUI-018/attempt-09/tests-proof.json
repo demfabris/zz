@@ -1,0 +1,136 @@
+{
+  "library_results": {
+    "zz": {
+      "passed": 555,
+      "failed": 1,
+      "ignored": 1
+    },
+    "zz_cli": {
+      "passed": 106,
+      "failed": 0,
+      "ignored": 0
+    },
+    "zz_daemon": {
+      "passed": 982,
+      "failed": 0,
+      "ignored": 0
+    },
+    "zz_mux": {
+      "passed": 536,
+      "failed": 0,
+      "ignored": 0
+    },
+    "zz_protocol": {
+      "passed": 231,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "checks": {
+    "tests-final": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/tests-final.txt",
+      "exit_status": 101
+    },
+    "clippy-delivery": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/clippy-delivery.txt",
+      "exit_status": 0
+    },
+    "clippy-diagnostic": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/clippy-diagnostic.txt",
+      "exit_status": 0
+    },
+    "fmt-diagnostic": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/fmt-diagnostic.txt",
+      "exit_status": 0
+    },
+    "compat-check-retry": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/compat-check-retry.txt",
+      "exit_status": 0
+    },
+    "tracker-paths": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/tracker-paths.txt",
+      "exit_status": 0
+    },
+    "wire-final": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/wire-final.txt",
+      "exit_status": 0
+    },
+    "okf-final": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/okf-final.txt",
+      "exit_status": 0
+    },
+    "retest-control-sourced-run-shell": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/retest-control-sourced-run-shell.txt",
+      "exit_status": 0
+    },
+    "retest-control-return-transcript": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/retest-control-return-transcript.txt",
+      "exit_status": 0
+    },
+    "retest-agent-soak": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/retest-agent-soak.txt",
+      "exit_status": 101
+    },
+    "retest-palette": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/retest-palette.txt",
+      "exit_status": 101
+    },
+    "main-test-control-return": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/main-test-control-return.txt",
+      "exit_status": 0
+    },
+    "main-test-agent-soak": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/main-test-agent-soak.txt",
+      "exit_status": 101
+    },
+    "corrected-tests": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/corrected-tests.txt",
+      "exit_status": 101
+    },
+    "corrected-clippy": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/corrected-clippy.txt",
+      "exit_status": 0
+    },
+    "corrected-fmt": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/corrected-fmt.txt",
+      "exit_status": 0
+    },
+    "corrected-compat-check": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/corrected-compat-check.txt",
+      "exit_status": 0
+    },
+    "delivery-okf": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/delivery-okf.txt",
+      "exit_status": 0
+    },
+    "delivery-wire": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/delivery-wire.txt",
+      "exit_status": 0
+    },
+    "delivery-compat-check": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/delivery-compat-check.txt",
+      "exit_status": 0
+    },
+    "delivery-tracker": {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/delivery-tracker.txt",
+      "exit_status": 0
+    }
+  },
+  "residuals": {
+    "palette": "Unchanged source blob; isolated failure persists and was already recorded in attempt-07. No new main GUI run is claimed.",
+    "wait_exit": "Historical main and lane acknowledgement/EOF probe stalls; corrected serial full CLI integration passes without intervention. Earlier cleanup statuses are not natural exits.",
+    "agent_soak": "Main and lane both fail sequence comparison 1501 versus 1500.",
+    "control_return": "Historical intermittent failures; isolated retry and corrected serial full CLI integration pass. Cause not isolated.",
+    "control_sourced_run_shell": "Historical broad-run failure; isolated retry and corrected serial full CLI integration pass."
+  },
+  "closing_cli_integration": {
+    "passed": 136,
+    "failed": 0,
+    "manual_termination": false
+  },
+  "closing_failed_targets": [
+    "zz --lib: palette completion",
+    "zz-daemon --test agent_soak: slow-client sequence 1501 versus 1500"
+  ],
+  "production_revision": "c3104379cc1887cf962565fe45c629c518a85eca"
+}

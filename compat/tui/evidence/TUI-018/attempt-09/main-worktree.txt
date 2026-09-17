@@ -1,0 +1,2 @@
+Preparing worktree (detached HEAD f9c52359)
+HEAD is now at f9c52359 Record sidebar controls and final validation

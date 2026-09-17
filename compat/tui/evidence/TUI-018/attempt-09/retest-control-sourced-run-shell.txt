@@ -1,0 +1,11 @@
+    Blocking waiting for file lock on build directory
+   Compiling zz-cli v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.85s
+     Running tests/cli_binary.rs (target/debug/deps/cli_binary-8b5c06dbd1308a7d)
+
+running 1 test
+test daemon_autostart::control_mode::control_sourced_run_shell_closes_before_raw_output_and_same_line_continues ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 135 filtered out; finished in 2.10s
+
+exit_status=0

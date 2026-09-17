@@ -1,0 +1,65 @@
+# Scenario: zoom
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/zoom.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: split-window -h -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: resize-pane -Z -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: resize-pane -Z -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: resize-pane -Z -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: select-layout -t w:0 bogus
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    invalid layout: bogus
+tmux stderr:
+    invalid layout: bogus
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=5 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

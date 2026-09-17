@@ -1,0 +1,137 @@
+# Scenario: join-pane-size
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/join-pane-size.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: new-window -d -t w -n cells
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: join-pane -h -p 25% -s w:cells.0 -t w:main.0
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    size or position invalid tiled geometry invalid
+tmux stderr:
+    size or position invalid tiled geometry invalid
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: move-pane -h -p 25 -s w:cells.0 -t w:main.0
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    command move-pane: unknown flag -p
+tmux stderr:
+    command move-pane: unknown flag -p
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: join-pane -h -l 10 -s w:cells.0 -t w:main.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: new-window -d -t w -n percent
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: join-pane -h -l 25% -s w:percent.0 -t w:main.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: new-window -d -t w -n format
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: join-pane -h -l '#{pane_height}' -s w:format.0 -t w:main.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: split-window -d -v -p 50 -t w:main.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: new-window -d -t w -n full
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: join-pane -d -v -f -l 25% -s w:full.0 -t w:main.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=11 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

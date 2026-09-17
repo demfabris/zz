@@ -1,0 +1,152 @@
+# Scenario: smoke/vim-tmux-navigator
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/smoke/vim-tmux-navigator.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: conf: fixtures/vim-tmux-navigator.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    %begin 1789624327 1 0
+    %end 1789624327 1 0
+    %begin 1789624327 2 0
+    %end 1789624327 2 0
+    %begin 1789624330 3 0
+    %end 1789624330 3 0
+    %exit
+tmux stdout:
+    %begin 1789624330 317 0
+    %end 1789624330 317 0
+    %begin 1789624330 318 0
+    %end 1789624330 318 0
+    %begin 1789624330 319 0
+    %end 1789624330 319 0
+    %exit
+COMMAND EXIT-CLASS: clean
+WARN zz: clean
+WARN tmux: clean
+WARN terminator: clean (%end / %end)
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: keys: root C-h
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    root|C-h|0|if-shell false "send-keys 'C-h'" "select-pane -L"
+tmux stdout:
+    root|C-h|0|if-shell false "send-keys 'C-h'" "select-pane -L"
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: keys: root C-j
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    root|C-j|0|if-shell false "send-keys 'C-j'" "select-pane -D"
+tmux stdout:
+    root|C-j|0|if-shell false "send-keys 'C-j'" "select-pane -D"
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: keys: root C-k
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    root|C-k|0|if-shell false "send-keys 'C-k'" "select-pane -U"
+tmux stdout:
+    root|C-k|0|if-shell false "send-keys 'C-k'" "select-pane -U"
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: keys: root C-l
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    root|C-l|0|if-shell false "send-keys 'C-l'" "select-pane -R"
+tmux stdout:
+    root|C-l|0|if-shell false "send-keys 'C-l'" "select-pane -R"
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: split-window -h -t w:0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: select-pane -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: if-shell false 'send-keys C-h' 'select-pane -L'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=8 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

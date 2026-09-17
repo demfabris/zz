@@ -1,0 +1,10 @@
+command-alias.txt
+copy-mode-cursor-view.txt
+copy-mode-goto-line.txt
+copy-mode-previous-bracket.txt
+copy-mode-recentre.txt
+copy-mode-scroll-exit.txt
+copy-mode-selection-lifecycle.txt
+copy-mode-stock-action-keys.txt
+native-prefix-isolation.txt
+send-keys-repeat.txt

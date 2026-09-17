@@ -1,0 +1,2 @@
+wrote knowledge/tmux/gaps.md
+exit_status=0

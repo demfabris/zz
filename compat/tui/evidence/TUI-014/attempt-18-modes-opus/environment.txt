@@ -1,0 +1,12 @@
+zz binary: target/debug/zz_cli built at 926b01b0b81a78f58a23784a73dcd55c3a8a9406, copied before any run
+zz sha256: b784e87eb110d2ed59b242c3cb57c11df6a4639f979bba75accb1c321bd9ce22
+zz revision: 926b01b0b81a78f58a23784a73dcd55c3a8a9406 (worktree clean except evidence)
+base: origin/main 066b862a0fc7ee1e5a18f8e5e7ea186195982841 (release: zz 0.11.0)
+pin: tmux next-3.8 d77c9dc6aa021e4bc61f0da128c591af695e6466
+pin sha256: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+os: Linux 7.2.3-1-cachyos-deckify x86_64 GNU/Linux
+cpus: 16
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+fixture environment: env -i with PATH=/usr/local/bin:/usr/bin:/bin HOME=/tmp/zz-emptyhome SHELL=/bin/sh TERM=xterm-256color LANG=C.UTF-8 LC_ALL=C.UTF-8 USER LOGNAME, ZZ_BIN and TMUX_BIN only
+outer terminal: fixtures drive their own outer pinned tmux at 80x24
+cargo: /tmp/zz-cargo.sh (4G cap, --jobs 2, shared flock slots)

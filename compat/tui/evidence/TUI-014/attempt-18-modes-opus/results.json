@@ -1,0 +1,81 @@
+{
+  "revision": "926b01b0b81a78f58a23784a73dcd55c3a8a9406",
+  "fixtures": {
+    "laneA/client-1": {
+      "exit": 0,
+      "result": "all 495 asserted comparisons identical, 30 recorded not asserted (0 for a sibling lane, owners TUI-015=3 TUI-017=4 decided:TUI-014=3 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8"
+    },
+    "laneA/client-2": {
+      "exit": 0,
+      "result": "all 495 asserted comparisons identical, 30 recorded not asserted (0 for a sibling lane, owners TUI-015=3 TUI-017=4 decided:TUI-014=3 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8"
+    },
+    "laneA/client-3": {
+      "exit": 0,
+      "result": "all 495 asserted comparisons identical, 30 recorded not asserted (0 for a sibling lane, owners TUI-015=3 TUI-017=4 decided:TUI-014=3 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8"
+    },
+    "laneB/client-4": {
+      "exit": 0,
+      "result": "all 495 asserted comparisons identical, 30 recorded not asserted (0 for a sibling lane, owners TUI-015=3 TUI-017=4 decided:TUI-014=3 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8"
+    },
+    "laneB/client-5": {
+      "exit": 0,
+      "result": "all 495 asserted comparisons identical, 30 recorded not asserted (0 for a sibling lane, owners TUI-015=3 TUI-017=4 decided:TUI-014=3 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8"
+    },
+    "laneB/client-self": {
+      "exit": 0,
+      "result": "self-check complete: every sabotage was caught in its own channel and both equivalences passed"
+    },
+    "laneC/attached-client": {
+      "exit": 0,
+      "result": "attached-client compatibility: PASS"
+    },
+    "laneC/tui-choosers-self": {
+      "exit": 0,
+      "result": "self-check complete: every sabotage was caught and all equivalences passed"
+    },
+    "laneC/tui-choosers": {
+      "exit": 0,
+      "result": "all 78 asserted comparisons identical, 0 recorded not asserted (0 for a sibling lane)"
+    },
+    "laneC/tui-copy-mode-self": {
+      "exit": 0,
+      "result": "self-check complete: every sabotage was caught in its own channel and every equivalence passed"
+    },
+    "laneC/tui-copy-mode": {
+      "exit": 1,
+      "result": "2 of 147 cases differ in a channel they assert, 0 recorded elsewhere"
+    },
+    "laneC/tui-overlays-self": {
+      "exit": 0,
+      "result": "self-check complete: every sabotage was caught and the equivalence passed"
+    },
+    "laneC/tui-overlays": {
+      "exit": 0,
+      "result": "all 48 asserted comparisons identical, 0 recorded not asserted"
+    },
+    "laneC/tui-screen-diff-self": {
+      "exit": 0,
+      "result": "self-check complete: every sabotage was caught in its own channel and every equivalence passed"
+    },
+    "laneC/tui-screen-diff": {
+      "exit": 0,
+      "result": "all 147 asserted checkpoints identical, 6 recorded not asserted"
+    },
+    "copy-retry/tui-copy-mode-retry": {
+      "exit": 0,
+      "result": "147 of those cases assert at least one channel; 0 assert none and are recorded in full"
+    }
+  },
+  "verify_claims": {
+    "exit": 0,
+    "result": "TUI-014 re-measured live: 495 asserted / 30 recorded with none of them TUI-014 ordinary, and tui-choosers 78 asserted / 0 recorded"
+  },
+  "tests": {
+    "zz-protocol zz-mux zz-tui --all-features": "1119 passed, 0 failed (tests-protocol-mux-tui.txt)",
+    "zz-daemon --lib --all-features": "984 passed, 2 failed under three parallel fixture lanes; both pass solo (tests-daemon.txt, tests-daemon-solo.txt)"
+  },
+  "clippy": "zz-protocol zz-mux zz-daemon zz-tui zz-cli --all-targets --all-features -D warnings: exit 0 (clippy.txt)",
+  "fmt": "cargo fmt --all -- --check: exit 0 (fmt.txt)",
+  "compat_check": "compat/check.sh with every nested cargo routed through /tmp/zz-cargo.sh: exit 0 (compat-check.txt)",
+  "corpus": "see corpus-results.json and delta-corpus.txt"
+}

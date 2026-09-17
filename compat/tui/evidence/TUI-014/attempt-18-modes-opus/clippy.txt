@@ -1,0 +1,6 @@
+    Checking zz-tui v0.11.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-tui)
+    Checking zz-cli v0.11.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-cli)
+    Checking zz-mux v0.11.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-mux)
+    Checking zz-protocol v0.11.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-protocol)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 15.33s
+DONE 0

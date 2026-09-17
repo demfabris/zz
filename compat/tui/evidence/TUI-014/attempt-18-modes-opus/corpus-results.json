@@ -1,0 +1,119 @@
+{
+  "selection": {
+    "range": "origin/main...HEAD",
+    "commands": "customize-mode,switch-mode,send-keys,set-option,show-options,bind-key,unbind-key,switch-mode-match-style,ignore",
+    "rows": 204
+  },
+  "binary": "926b01b0b81a78f58a23784a73dcd55c3a8a9406",
+  "counts": {
+    "rows": 204,
+    "clean": 193,
+    "documented known rows": 2,
+    "inherited baseline divergences": 6,
+    "harness-name rows recovered with a zz_cli-named binary": 3,
+    "first-pass reds recovered on retry": 0,
+    "unrun": 0
+  },
+  "known rows": {
+    "known/known-pane-scrollbar-columns": {
+      "steps": 4,
+      "topo": 0,
+      "geo": 2,
+      "fmt": 0,
+      "out": 1,
+      "warn": 0
+    },
+    "known/known-terminal-runtime": {
+      "steps": 28,
+      "topo": 0,
+      "geo": 0,
+      "fmt": 6,
+      "out": 0,
+      "warn": 0
+    }
+  },
+  "inherited baseline divergences": {
+    "lane2-store": {
+      "steps": 193,
+      "topo": 0,
+      "geo": 0,
+      "fmt": 0,
+      "out": 2,
+      "warn": 0
+    },
+    "show-options-hooks": {
+      "steps": 34,
+      "topo": 0,
+      "geo": 0,
+      "fmt": 0,
+      "out": 7,
+      "warn": 0
+    },
+    "smoke/cli-chain-parse-abort": {
+      "steps": 3,
+      "topo": 0,
+      "geo": 0,
+      "fmt": 0,
+      "out": 1,
+      "warn": 0
+    },
+    "smoke/default-client-command": {
+      "steps": 3,
+      "topo": 0,
+      "geo": 0,
+      "fmt": 0,
+      "out": 1,
+      "warn": 2
+    },
+    "smoke/source-replay-diagnostics": {
+      "steps": 60,
+      "topo": 0,
+      "geo": 0,
+      "fmt": 0,
+      "out": 1,
+      "warn": 0
+    },
+    "smoke/status-background-jobs": {
+      "steps": 2,
+      "topo": 0,
+      "geo": 0,
+      "fmt": 0,
+      "out": 1,
+      "warn": 1
+    }
+  },
+  "harness-name rows": {
+    "first pass": {
+      "smoke/config-discovery-launcher": null,
+      "smoke/launcher-installed-layout": null,
+      "smoke/pane-tmux-path": null
+    },
+    "rerun with compat/run.sh and a zz_cli-named binary": {
+      "smoke/config-discovery-launcher": {
+        "steps": 12,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      },
+      "smoke/launcher-installed-layout": {
+        "steps": 7,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      },
+      "smoke/pane-tmux-path": {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    }
+  },
+  "note": "The six inherited rows carry the same divergence counts as the attempt-17 baseline selection, which used the same 204 rows on main before this branch. The three harness-name rows fail only because compat/run.sh was given a binary copied as zz_cli-final; the same rows pass with the identical binary copied as zz_cli."
+}

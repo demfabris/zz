@@ -2186,8 +2186,8 @@ impl TerminalView {
             && !modifiers.control()
             && !modifiers.alt()
             && !modifiers.platform();
-        self.text_input_key = (text_key && self.retained.read().viewport.kitty_keyboard)
-            .then(|| event.clone());
+        self.text_input_key =
+            (text_key && self.retained.read().viewport.kitty_keyboard).then(|| event.clone());
         if self.popup {
             if !text_key {
                 self.forwarded_keys.insert(event.keystroke.key.clone());

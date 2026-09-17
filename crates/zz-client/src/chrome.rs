@@ -26,6 +26,18 @@ const SELECT_TAB_NAMES: [&str; 8] = [
     "browser-select-tab-8",
 ];
 
+const SELECT_WINDOW_NAMES: [&str; 9] = [
+    "select-window-1",
+    "select-window-2",
+    "select-window-3",
+    "select-window-4",
+    "select-window-5",
+    "select-window-6",
+    "select-window-7",
+    "select-window-8",
+    "select-window-9",
+];
+
 /// A chrome action resolved client-side before the skin applies its local or
 /// protocol-backed effect. Skins switch on the action instead of inspecting
 /// chords themselves.
@@ -33,6 +45,7 @@ const SELECT_TAB_NAMES: [&str; 8] = [
 pub enum ChromeAction {
     NewSession,
     NewWindow,
+    SelectWindow(u8),
     SplitRight,
     SplitDown,
     Detach,
@@ -91,6 +104,8 @@ impl ChromeAction {
         match self {
             Self::NewSession => "new-session",
             Self::NewWindow => "new-window",
+            Self::SelectWindow(index) if index < 9 => SELECT_WINDOW_NAMES[index as usize],
+            Self::SelectWindow(_) => "select-window",
             Self::SplitRight => "split-right",
             Self::SplitDown => "split-down",
             Self::Detach => "detach",
@@ -145,6 +160,12 @@ impl ChromeAction {
 
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
+        if let Some(position) = name.strip_prefix("select-window-") {
+            let position = position.parse::<u8>().ok()?;
+            return (1..=9)
+                .contains(&position)
+                .then(|| Self::SelectWindow(position - 1));
+        }
         if let Some(position) = name.strip_prefix(SELECT_TAB_PREFIX) {
             let position = position.parse::<u8>().ok()?;
             return (1..=8)
@@ -390,6 +411,15 @@ const DESKTOP_DEFAULTS: &[ChromeDefault] = &[
 /// Desktop chrome on Apple platforms, where the browser conventions are
 /// Safari's.
 const DESKTOP_COMMAND_DEFAULTS: &[ChromeDefault] = &[
+    (UI_TABLE, "D-1", ChromeAction::SelectWindow(0)),
+    (UI_TABLE, "D-2", ChromeAction::SelectWindow(1)),
+    (UI_TABLE, "D-3", ChromeAction::SelectWindow(2)),
+    (UI_TABLE, "D-4", ChromeAction::SelectWindow(3)),
+    (UI_TABLE, "D-5", ChromeAction::SelectWindow(4)),
+    (UI_TABLE, "D-6", ChromeAction::SelectWindow(5)),
+    (UI_TABLE, "D-7", ChromeAction::SelectWindow(6)),
+    (UI_TABLE, "D-8", ChromeAction::SelectWindow(7)),
+    (UI_TABLE, "D-9", ChromeAction::SelectWindow(8)),
     (UI_TABLE, "D-k", ChromeAction::OpenCommandPalette),
     (UI_TABLE, "D-p", ChromeAction::OpenCommandPalette),
     (UI_TABLE, "D-n", ChromeAction::NewSession),
@@ -440,6 +470,15 @@ const DESKTOP_COMMAND_DEFAULTS: &[ChromeDefault] = &[
 
 /// Desktop chrome everywhere else, where the browser conventions are Chrome's.
 const DESKTOP_CONTROL_DEFAULTS: &[ChromeDefault] = &[
+    (UI_TABLE, "C-1", ChromeAction::SelectWindow(0)),
+    (UI_TABLE, "C-2", ChromeAction::SelectWindow(1)),
+    (UI_TABLE, "C-3", ChromeAction::SelectWindow(2)),
+    (UI_TABLE, "C-4", ChromeAction::SelectWindow(3)),
+    (UI_TABLE, "C-5", ChromeAction::SelectWindow(4)),
+    (UI_TABLE, "C-6", ChromeAction::SelectWindow(5)),
+    (UI_TABLE, "C-7", ChromeAction::SelectWindow(6)),
+    (UI_TABLE, "C-8", ChromeAction::SelectWindow(7)),
+    (UI_TABLE, "C-9", ChromeAction::SelectWindow(8)),
     (UI_TABLE, "C-S-k", ChromeAction::OpenCommandPalette),
     (UI_TABLE, "C-S-p", ChromeAction::OpenCommandPalette),
     (UI_TABLE, "C-=", ChromeAction::UiZoomIn),
@@ -676,6 +715,49 @@ mod tests {
             modifiers,
             text: character.map(|character| character.to_string().into_boxed_str()),
             unshifted_codepoint: character,
+        }
+    }
+
+    #[test]
+    fn desktop_window_shortcuts_use_platform_modifiers_and_allow_overrides() {
+        for (profile, modifier, modifiers, other_modifiers) in [
+            (
+                ChromeProfile::DesktopApple,
+                "D",
+                Modifiers::new(false, false, false, true),
+                Modifiers::new(false, true, false, false),
+            ),
+            (
+                ChromeProfile::Desktop,
+                "C",
+                Modifiers::new(false, true, false, false),
+                Modifiers::new(false, false, false, true),
+            ),
+        ] {
+            let mut keymap = ChromeKeymap::for_profile(profile);
+            for index in 0..9 {
+                let key = KeyCode::Character(char::from(b'1' + index));
+                assert_eq!(
+                    keymap.resolve(UI_TABLE, &press(key, modifiers)),
+                    Some(ChromeAction::SelectWindow(index))
+                );
+                assert_eq!(keymap.resolve(UI_TABLE, &press(key, other_modifiers)), None);
+                assert_eq!(
+                    ChromeKeymap::new().resolve(UI_TABLE, &press(key, modifiers)),
+                    None
+                );
+            }
+            let chord = format!("{modifier}-1");
+            assert!(keymap.unbind(UI_TABLE, &chord));
+            assert_eq!(keymap.action_for(UI_TABLE, &chord), None);
+            keymap.bind(UI_TABLE, &chord, "select-window-4").unwrap();
+            assert_eq!(
+                keymap.action_for(UI_TABLE, &chord),
+                Some(ChromeAction::SelectWindow(3))
+            );
+        }
+        for name in ["select-window-0", "select-window-10", "select-window-256"] {
+            assert_eq!(ChromeAction::from_name(name), None);
         }
     }
 

@@ -783,13 +783,14 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn stale_socket_cleanup_removes_an_unowned_stale_endpoint() {
-        use std::os::unix::net::UnixListener;
+        use rustix::net::{AddressFamily, SocketAddrUnix, SocketType};
 
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("daemon.sock");
-        let listener = UnixListener::bind(&path).unwrap();
+        let socket = rustix::net::socket(AddressFamily::UNIX, SocketType::STREAM, None).unwrap();
+        rustix::net::bind(&socket, &SocketAddrUnix::new(&path).unwrap()).unwrap();
         let identity = SocketFileIdentity::capture(&path).unwrap();
-        drop(listener);
+        drop(socket);
 
         cleanup_socket_if_unchanged(&path, identity, 42).unwrap();
         assert!(!path.exists());

@@ -149,6 +149,13 @@ behaviour is reconsidered rather than imitated:
   `split-window -I` beside the `load-buffer -` pipe zz already supports. It is milestone 5 of the
   superset roadmap and the last obligation between this campaign and its twelfth item.
 
+Amendment 2026-09-17 (fabrico), following the 2026-09-14 lock-surface decision:
+
+Copy mode stays per client so two clients can scroll independently; the pin keeps one mode stack
+per pane. TUI-014 records `clock-over-copy`, `clock-over-copy-key` and `copy-over-clock` as
+`DECIDED` under `decided:TUI-014`. This decision covers their stacking and key-table differences.
+TUI-014 retains its other acceptance clauses.
+
 Amendment 2026-09-18 (fabrico), under the same principle: **capture returns the spaces a tab left
 on screen.** Since tmux 3.4 the pin marks every cell a tab produced (`GRID_FLAG_TAB`) and
 `capture-pane` prints a literal tab there whatever its flags (`grid.c:1202`); once an edit removes

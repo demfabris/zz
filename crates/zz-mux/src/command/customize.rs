@@ -83,6 +83,12 @@ impl MuxEngine {
         }))
     }
 
+    fn customize_array_values(&self, target: TmuxOptionTarget, name: &str) -> StringArray {
+        self.array_option_readback(target, name, true)
+            .map(|(values, _)| values.clone())
+            .unwrap_or_default()
+    }
+
     fn customize_rows(&self, pane: PaneId, mode: &CustomizeMode) -> Vec<Row> {
         let all = self.customize_all_rows(pane, mode);
         let mut hidden_below = None;
@@ -133,6 +139,7 @@ impl MuxEngine {
             let id = format!("options:{index}");
             rows.push(Row::section(name.to_owned(), id.clone(), 0));
             let mut options = tmux_options()
+                .filter(|option| !tmux_option_is_hook(option.name))
                 .filter(|option| match option.scope {
                     TmuxOptionScope::Server => index == 0,
                     TmuxOptionScope::Session => index == 1,
@@ -150,10 +157,20 @@ impl MuxEngine {
                 let mut value = String::new();
                 for target in &targets {
                     let found = if let Some(option) = metadata {
-                        self.tmux_option_readback(option, *target, false)
-                            .ok()
-                            .flatten()
-                            .map(|(v, _)| v)
+                        if option.is_array {
+                            let present = self.array_option(*target, &name).is_some();
+                            present.then(|| {
+                                self.customize_array_values(*target, &name)
+                                    .into_values()
+                                    .collect::<Vec<_>>()
+                                    .join(" ")
+                            })
+                        } else {
+                            self.tmux_option_readback(option, *target, false)
+                                .ok()
+                                .flatten()
+                                .map(|(v, _)| v)
+                        }
                     } else {
                         self.user_option_at_target(*target, &name)
                             .map(str::to_owned)
@@ -228,15 +245,12 @@ impl MuxEngine {
                     name: name.clone(),
                     text,
                     depth: 1,
-                    children: array
-                        && self
-                            .array_option_readback(owner, &name, true)
-                            .is_some_and(|(values, _)| !values.is_empty()),
+                    children: array && !self.customize_array_values(owner, &name).is_empty(),
                     option: Some((name.clone(), owner, metadata)),
                     value,
                 });
-                if array && let Some((values, _)) = self.array_option_readback(owner, &name, true) {
-                    for (key, value) in values {
+                if array {
+                    for (key, value) in self.customize_array_values(owner, &name) {
                         let key = key.display();
                         let full_name = format!("{name}[{key}]");
                         rows.push(Row {
@@ -526,6 +540,17 @@ impl MuxEngine {
                         value,
                         ..
                     } => {
+                        let name = if tmux_options()
+                            .any(|option| option.name == name && option.is_array)
+                        {
+                            let values = self.customize_array_values(target, &name);
+                            let Ok(index) = first_free_array_index(values.keys()) else {
+                                return (false, None);
+                            };
+                            format!("{name}[{index}]")
+                        } else {
+                            name
+                        };
                         return (
                             false,
                             (!value.is_empty())
@@ -563,7 +588,7 @@ impl MuxEngine {
         mode.selected = mode.selected.min(rows.len() - 1);
         let row = &rows[mode.selected];
         match key {
-            "q" | "Escape" | "C-c" | "C-g" | "\u{1b}" | "\u{3}" | "\u{7}" => return (true, None),
+            "q" | "Escape" | "C-[" | "C-g" | "\u{1b}" | "\u{7}" => return (true, None),
             "Up" | "k" | "C-p" => {
                 mode.selected = if mode.selected == 0 {
                     rows.len() - 1
@@ -572,8 +597,8 @@ impl MuxEngine {
                 }
             }
             "Down" | "j" | "C-n" => mode.selected = (mode.selected + 1) % rows.len(),
-            "Home" | "g" | "M-<" => mode.selected = 0,
-            "End" | "G" | "M->" => mode.selected = rows.len() - 1,
+            "Home" | "g" => mode.selected = 0,
+            "End" | "G" => mode.selected = rows.len() - 1,
             "NPage" | "C-f" => mode.selected = (mode.selected + 10).min(rows.len() - 1),
             "PPage" | "C-b" => mode.selected = mode.selected.saturating_sub(10),
             "Right" | "+" | "l" => {
@@ -612,7 +637,7 @@ impl MuxEngine {
                 mode.hide_global = !mode.hide_global;
                 mode.selected = 0;
             }
-            "/" | "C-s" => {
+            "?" | "/" | "C-s" => {
                 mode.query.clear();
                 mode.prompt = Some(CustomizePrompt::Search);
             }
@@ -624,7 +649,10 @@ impl MuxEngine {
             "Enter" | "C-m" | "\r" | "s" | "S" | "w" | "W" => {
                 if let Some((name, owner, metadata)) = &row.option {
                     let window = &self.state.windows[&self.state.window_for_pane(pane).unwrap()];
-                    let target = if matches!(key, "S" | "W") {
+                    let array = metadata.is_some_and(|option| option.is_array);
+                    let target = if array {
+                        *owner
+                    } else if matches!(key, "S" | "W") {
                         match owner {
                             TmuxOptionTarget::Session(_) => TmuxOptionTarget::GlobalSession,
                             TmuxOptionTarget::Window(_) | TmuxOptionTarget::Pane(_) => {
@@ -632,8 +660,6 @@ impl MuxEngine {
                             }
                             _ => *owner,
                         }
-                    } else if metadata.is_some_and(|option| option.is_array) {
-                        *owner
                     } else {
                         match owner {
                             TmuxOptionTarget::GlobalSession => {
@@ -695,7 +721,10 @@ impl MuxEngine {
                     mode.prompt = Some(CustomizePrompt::Edit {
                         name: name.clone(),
                         target,
-                        prefix: format!("({name}{suffix}) "),
+                        prefix: format!(
+                            "({name}{}{suffix}) ",
+                            if array && row.depth == 1 { "[+]" } else { "" }
+                        ),
                         value: row.value.clone(),
                     });
                 }
@@ -768,6 +797,218 @@ fn customize_expand(format: &str, variables: &BTreeMap<String, String>) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn customize_array_edits_preserve_entries_and_fill_the_first_hole() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "customize"]),
+            )
+            .unwrap();
+        let pane = context.pane.unwrap();
+        for option in
+            tmux_options().filter(|option| option.is_array && !tmux_option_is_hook(option.name))
+        {
+            let target = match option.scope {
+                TmuxOptionScope::Server => TmuxOptionTarget::Server,
+                TmuxOptionScope::Session => TmuxOptionTarget::GlobalSession,
+                TmuxOptionScope::Window | TmuxOptionScope::WindowPane => {
+                    TmuxOptionTarget::GlobalWindow
+                }
+            };
+            let value = match option.name {
+                "pane-colours" => "red",
+                "command-alias" => "review=display-message review",
+                "codepoint-widths" => "U+0041=1",
+                name if tmux_option_is_hook(name) => "display-message review",
+                _ => "review-value",
+            };
+            let indexed = format!("{}[100]", option.name);
+            engine
+                .execute(
+                    &mut context,
+                    &customize_set_command(&indexed, target, value),
+                )
+                .unwrap();
+            let mut expected = engine.customize_array_values(target, option.name);
+            let hole = first_free_array_index(expected.keys()).unwrap();
+            let mut mode = CustomizeMode::default();
+            mode.expanded
+                .extend((0..3).map(|index| format!("options:{index}")));
+            mode.selected = engine
+                .customize_rows(pane, &mode)
+                .iter()
+                .position(|row| row.name == option.name)
+                .unwrap();
+            engine.customize_key(pane, &mut mode, "W");
+            assert!(
+                matches!(&mode.prompt, Some(CustomizePrompt::Edit { prefix, .. }) if prefix.contains("[+]")),
+                "{}",
+                option.name
+            );
+            engine.customize_key(pane, &mut mode, "C-u");
+            for character in value.chars() {
+                engine.customize_key(pane, &mut mode, &character.to_string());
+            }
+            let (_, command) = engine.customize_key(pane, &mut mode, "Enter");
+            engine.execute(&mut context, &command.unwrap()).unwrap();
+            expected.insert(ArrayIndex::Numeric(hole), value.to_owned());
+            assert_eq!(
+                engine.customize_array_values(target, option.name),
+                expected,
+                "{} root",
+                option.name
+            );
+            let row = engine.customize_rows(pane, &mode)[mode.selected].id.clone();
+            mode.expanded.insert(row);
+            mode.selected = engine
+                .customize_rows(pane, &mode)
+                .iter()
+                .position(|row| {
+                    row.option
+                        .as_ref()
+                        .is_some_and(|(name, _, _)| name == &indexed)
+                })
+                .unwrap();
+            engine.customize_key(pane, &mut mode, "Enter");
+            let replacement = match option.name {
+                "pane-colours" => "blue",
+                "codepoint-widths" => "U+0042=2",
+                "command-alias" => "changed=display-message changed",
+                name if tmux_option_is_hook(name) => "display-message changed",
+                _ => "changed-value",
+            };
+            engine.customize_key(pane, &mut mode, "C-u");
+            for character in replacement.chars() {
+                engine.customize_key(pane, &mut mode, &character.to_string());
+            }
+            let (_, command) = engine.customize_key(pane, &mut mode, "Enter");
+            engine.execute(&mut context, &command.unwrap()).unwrap();
+            expected.insert(ArrayIndex::Numeric(100), replacement.to_owned());
+            assert_eq!(
+                engine.customize_array_values(target, option.name),
+                expected,
+                "{} child",
+                option.name
+            );
+        }
+    }
+
+    #[test]
+    fn customize_hides_hook_arrays_like_the_pin() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "customize"]),
+            )
+            .unwrap();
+        let rows = engine.customize_all_rows(context.pane.unwrap(), &CustomizeMode::default());
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row
+                    .option
+                    .as_ref()
+                    .is_some_and(|(_, _, option)| option.is_some_and(|option| option.is_array)))
+                .filter(|row| row.depth == 1)
+                .count(),
+            8
+        );
+        assert!(!rows.iter().any(|row| tmux_option_is_hook(&row.name)));
+    }
+
+    #[test]
+    fn customize_only_the_mode_tree_exit_keys_close_the_mode() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "customize"]),
+            )
+            .unwrap();
+        let pane = context.pane.unwrap();
+        for key in [
+            "C-c", "\u{3}", "C-d", "C-z", "C-j", "Space", "M-<", "M->", "x",
+        ] {
+            let mut mode = CustomizeMode::default();
+            let original = mode.clone();
+            assert_eq!(
+                engine.customize_key(pane, &mut mode, key),
+                (false, None),
+                "{key}"
+            );
+            assert_eq!(mode, original, "{key}");
+        }
+        for key in ["q", "Escape", "C-[", "C-g", "\u{1b}", "\u{7}"] {
+            assert!(
+                engine
+                    .customize_key(pane, &mut CustomizeMode::default(), key)
+                    .0,
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
+    fn customize_global_edit_keys_keep_an_arrays_existing_scope() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "customize"]),
+            )
+            .unwrap();
+        let pane = context.pane.unwrap();
+        for (name, target, value) in [
+            (
+                "update-environment",
+                TmuxOptionTarget::Session(context.session.unwrap()),
+                "LOCAL",
+            ),
+            ("pane-colours", TmuxOptionTarget::Pane(pane), "red"),
+            (
+                "pane-colours",
+                TmuxOptionTarget::Window(context.window.unwrap()),
+                "blue",
+            ),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &customize_set_command(&format!("{name}[100]"), target, value),
+                )
+                .unwrap();
+            if matches!(target, TmuxOptionTarget::Window(_)) {
+                engine
+                    .execute(
+                        &mut context,
+                        &CommandInvocation::new("set-option", ["-pu", "pane-colours"]),
+                    )
+                    .unwrap();
+            }
+            for key in ["S", "W"] {
+                let mut mode = CustomizeMode::default();
+                mode.expanded
+                    .extend((0..3).map(|index| format!("options:{index}")));
+                mode.selected = engine
+                    .customize_rows(pane, &mode)
+                    .iter()
+                    .position(|row| row.name == name)
+                    .unwrap();
+                engine.customize_key(pane, &mut mode, key);
+                assert!(
+                    matches!(mode.prompt, Some(CustomizePrompt::Edit { target: actual, .. }) if actual == target),
+                    "{name}: {key}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn customize_edits_a_number_and_preserves_the_selected_option() {

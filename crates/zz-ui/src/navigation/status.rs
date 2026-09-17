@@ -16,8 +16,8 @@ use crate::{
 };
 
 use super::{
-    WorkspaceStatusWindowState, workspace_row_highlight, workspace_status_window,
-    workspace_tree_action_button,
+    WORKSPACE_STATUS_PILL_HEIGHT, WorkspaceStatusWindowState, workspace_row_highlight,
+    workspace_status_window, workspace_tree_action_button,
 };
 
 pub const MAX_VISIBLE_WINDOWS: usize = 5;
@@ -63,7 +63,7 @@ fn status_menu_button(id: impl Into<ElementId>, cx: &App) -> Button {
         .flat()
         .xsmall()
         .compact()
-        .h(px(30.0))
+        .h(WORKSPACE_STATUS_PILL_HEIGHT)
         .bg(workspace_row_highlight(cx))
         .hover_bg(workspace_row_highlight(cx))
         .when(cx.theme().shadow, |button| {

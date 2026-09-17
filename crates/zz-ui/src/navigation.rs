@@ -5,7 +5,7 @@ pub mod tree;
 use crate::{
     ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, MACOS_TRAFFIC_LIGHT_INSET,
     MACOS_TRAFFIC_LIGHT_SPAN, StyledExt as _, TITLE_BAR_HEIGHT, UiZoom,
-    button::{Button, ButtonVariants as _, COMPACT_ICON_BUTTON_SIZE},
+    button::{Button, ButtonVariants as _},
     rems_from_px,
     tooltip::Tooltip,
 };
@@ -28,6 +28,7 @@ pub const WORKSPACE_CONTROL_TRAFFIC_LIGHT_INSET: f32 =
     2.0 * MACOS_TRAFFIC_LIGHT_INSET + MACOS_TRAFFIC_LIGHT_SPAN;
 const WORKSPACE_CHROME_CONTROL_GAP: f32 = 4.0;
 pub const WORKSPACE_STATUS_CONTENT_HEIGHT: Pixels = px(24.0);
+pub const WORKSPACE_STATUS_PILL_HEIGHT: Pixels = px(26.0);
 const WORKSPACE_STATUS_LINE_HEIGHT: Pixels = px(16.0);
 const WORKSPACE_STATUS_ITEM_MAX_WIDTH: Pixels = px(180.0);
 const WORKSPACE_STATUS_WINDOW_DEFAULT_WIDTH: Pixels = px(240.0);
@@ -67,7 +68,9 @@ fn workspace_chrome_button(
     icon: IconName,
     tooltip: &'static str,
 ) -> Button {
-    Button::compact_icon(id, icon).tooltip(tooltip)
+    Button::compact_icon(id, icon)
+        .size(WORKSPACE_STATUS_PILL_HEIGHT)
+        .tooltip(tooltip)
 }
 
 #[must_use]
@@ -85,12 +88,12 @@ pub fn workspace_chrome_controls(
 
 #[must_use]
 pub fn workspace_chrome_controls_width(has_layout: bool, window: &Window) -> Pixels {
-    let width = if has_layout {
-        2.0 * COMPACT_ICON_BUTTON_SIZE + WORKSPACE_CHROME_CONTROL_GAP
+    if has_layout {
+        WORKSPACE_STATUS_PILL_HEIGHT * 2.0
+            + rems_from_px(WORKSPACE_CHROME_CONTROL_GAP).to_pixels(window.rem_size())
     } else {
-        COMPACT_ICON_BUTTON_SIZE
-    };
-    rems_from_px(width).to_pixels(window.rem_size())
+        WORKSPACE_STATUS_PILL_HEIGHT
+    }
 }
 
 #[must_use]
@@ -156,7 +159,7 @@ pub fn workspace_status_window(
         .w(WORKSPACE_STATUS_WINDOW_DEFAULT_WIDTH)
         .min_w(WORKSPACE_STATUS_WINDOW_MIN_WIDTH)
         .max_w(WORKSPACE_STATUS_WINDOW_DEFAULT_WIDTH)
-        .h(px(30.0))
+        .h(WORKSPACE_STATUS_PILL_HEIGHT)
         .items_center()
         .gap(px(5.0))
         .px(px(9.0))

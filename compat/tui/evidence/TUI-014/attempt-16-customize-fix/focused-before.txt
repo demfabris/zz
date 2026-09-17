@@ -1,0 +1,2 @@
+can't find pane: PANE
+error: zz refused send-keys

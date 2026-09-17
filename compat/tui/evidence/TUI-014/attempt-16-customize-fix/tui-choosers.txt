@@ -1,0 +1,62 @@
+chooser and command-output differential at 80x24 (pin tmux)
+ok    baseline
+wait that ran out: session-tree: ┌ cho (sort: index) on the tmux screen (case session-tree)
+--- zz screen ---
+(0) + cho: 2 windows (attached)
+(1) + many: 12 windows
+(2) + other: 1 windows
+
+
+
+
+
+
+
+
+M-bM-^TM-^L cho (sort: index) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+M-bM-^TM-^B MARK-baseline                        M-bM-^TM-^B$ printf 'SCENE-%s\n' %1               M-bM-^TM-^B
+M-bM-^TM-^B $ printf 'MARK-%s\n' sessions        M-bM-^TM-^BSCENE-%1                               M-bM-^TM-^B
+M-bM-^TM-^B MARK-sessions                        M-bM-^TM-^B$                                      M-bM-^TM-^B
+M-bM-^TM-^B $                                    M-bM-^TM-^B                                       M-bM-^TM-^B
+M-bM-^TM-^B               M-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P              M-bM-^TM-^B               M-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P               M-bM-^TM-^B
+M-bM-^TM-^B               M-bM-^TM-^B 0:win M-bM-^TM-^B              M-bM-^TM-^B               M-bM-^TM-^B 1:two M-bM-^TM-^B               M-bM-^TM-^B
+M-bM-^TM-^B               M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X              M-bM-^TM-^B               M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X               M-bM-^TM-^B
+M-bM-^TM-^B                                      M-bM-^TM-^B                                       M-bM-^TM-^B
+M-bM-^TM-^B                                      M-bM-^TM-^B                                       M-bM-^TM-^B
+M-bM-^TM-^B                                      M-bM-^TM-^B                                       M-bM-^TM-^B
+M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+L0:win* 1:two
+--- zz clients ---
+/dev/pts/97 0 80x24
+--- zz panes ---
+%0 in_mode=0 mode=
+--- tmux screen ---
+(0) + cho: 2 windows (attached)
+(1) + many: 12 windows
+(2) + other: 1 windows
+
+
+
+
+
+
+
+
+l cho (sort: index) (view: preview) qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqk
+x MARK-baseline                        x$ printf 'SCENE-%s\n' %1               x
+x $ printf 'MARK-%s\n' sessions        xSCENE-%1                               x
+x MARK-sessions                        x$                                      x
+x $                                    x                                       x
+x               lqqqqqqqk              x               lqqqqqqqk               x
+x               x 0:win x              x               x 1:two x               x
+x               mqqqqqqqj              x               mqqqqqqqj               x
+x                                      x                                       x
+x                                      x                                       x
+x                                      x                                       x
+mqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqj
+L0:win* 1:two
+--- tmux clients ---
+/dev/pts/105 0 80x24
+--- tmux panes ---
+%0 in_mode=1 mode=tree-mode
+error: session-tree: ┌ cho (sort: index) on the tmux screen did not settle within 10 seconds

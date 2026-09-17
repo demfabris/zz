@@ -1,0 +1,29 @@
+      case switch-tail-background
+      screen differs
+        2c2
+        < ^[[41mwin^[[49m
+        ---
+        > ^[[41mwin
+DIFF  switch-tail-background
+ok    switch-tail-background-closed
+      case switch-tail-foreground
+      screen differs
+        2c2
+        < ^[[31m^[[49mwin^[[39m
+        ---
+        > ^[[31m^[[49mwin
+DIFF  switch-tail-foreground
+ok    switch-tail-foreground-closed
+      case switch-tail-underline
+      screen differs
+        2c2
+        < ^[[4m^[[49mwin^[[0m
+        ---
+        > ^[[4m^[[49mwin
+        23c23
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+        ---
+        > ^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+DIFF  switch-tail-underline
+ok    switch-tail-underline-closed
+checks=6 failures=3

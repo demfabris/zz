@@ -1,0 +1,174 @@
+{
+  "delta-before": {
+    "exit": 1,
+    "rows": [
+      {
+        "scenario": "lane2-store",
+        "steps": "193",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "no",
+        "warnings_clean": "yes"
+      },
+      {
+        "scenario": "show-options-hooks",
+        "steps": "34",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "no",
+        "warnings_clean": "yes"
+      },
+      {
+        "scenario": "smoke/cli-chain-parse-abort",
+        "steps": "3",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "no",
+        "warnings_clean": "yes"
+      },
+      {
+        "scenario": "smoke/command-prompt-chain",
+        "steps": "2",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "no",
+        "warnings_clean": "yes"
+      },
+      {
+        "scenario": "smoke/control-hard-loss",
+        "steps": "2",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "yes",
+        "warnings_clean": "no"
+      },
+      {
+        "scenario": "smoke/default-client-command",
+        "steps": "3",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "no",
+        "warnings_clean": "no"
+      },
+      {
+        "scenario": "smoke/jobs-command-environment",
+        "steps": "3",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "no",
+        "warnings_clean": "no"
+      },
+      {
+        "scenario": "smoke/source-replay-diagnostics",
+        "steps": "60",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "no",
+        "warnings_clean": "yes"
+      },
+      {
+        "scenario": "smoke/status-background-jobs",
+        "steps": "2",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "no",
+        "warnings_clean": "no"
+      }
+    ]
+  },
+  "delta-main": {
+    "exit": 1,
+    "rows": [
+      {
+        "scenario": "lane2-store",
+        "steps": "193",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "no",
+        "warnings_clean": "yes"
+      },
+      {
+        "scenario": "show-options-hooks",
+        "steps": "34",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "no",
+        "warnings_clean": "yes"
+      },
+      {
+        "scenario": "smoke/cli-chain-parse-abort",
+        "steps": "3",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "no",
+        "warnings_clean": "yes"
+      },
+      {
+        "scenario": "smoke/command-prompt-chain",
+        "steps": "2",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "yes",
+        "warnings_clean": "yes"
+      },
+      {
+        "scenario": "smoke/control-hard-loss",
+        "steps": "2",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "yes",
+        "warnings_clean": "yes"
+      },
+      {
+        "scenario": "smoke/default-client-command",
+        "steps": "3",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "no",
+        "warnings_clean": "no"
+      },
+      {
+        "scenario": "smoke/jobs-command-environment",
+        "steps": "3",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "yes",
+        "warnings_clean": "yes"
+      },
+      {
+        "scenario": "smoke/source-replay-diagnostics",
+        "steps": "60",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "yes",
+        "warnings_clean": "yes"
+      },
+      {
+        "scenario": "smoke/status-background-jobs",
+        "steps": "2",
+        "topology_clean": "yes",
+        "geometry_divergences": "0",
+        "formats_clean": "yes",
+        "output_clean": "no",
+        "warnings_clean": "no"
+      }
+    ]
+  }
+}

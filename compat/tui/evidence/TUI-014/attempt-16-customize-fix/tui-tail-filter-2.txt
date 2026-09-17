@@ -1,0 +1,13 @@
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-terminal)
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-protocol)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-daemon)
+   Compiling zz-client v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-client)
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-tui)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.40s
+     Running unittests src/lib.rs (target/debug/deps/zz_tui-17d6e9433ab965b6)
+
+running 1 test
+test render::pane_mode::tests::a_switch_row_keeps_its_dim_runs_over_the_selection_style ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 210 filtered out; finished in 0.00s
+

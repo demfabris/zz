@@ -1,0 +1,8 @@
+command-alias[0] split-pane=split-window
+command-alias[1] splitp=split-window
+command-alias[2] "server-info=show-messages -JT"
+command-alias[3] "info=show-messages -JT"
+command-alias[4] "choose-window=choose-tree -w"
+command-alias[5] "choose-session=choose-tree -s"
+command-alias[6] "review=display-message review"
+command-alias[100] "seeded=display-message seeded"

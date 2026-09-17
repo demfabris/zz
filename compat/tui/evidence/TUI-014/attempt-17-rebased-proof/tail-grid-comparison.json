@@ -1,0 +1,16 @@
+{
+  "tail-history": {
+    "cells_per_side": {
+      "tmux": 1920,
+      "zz": 1920
+    },
+    "differing_visible_cells": 0
+  },
+  "tail-fresh": {
+    "cells_per_side": {
+      "tmux": 1920,
+      "zz": 1920
+    },
+    "differing_visible_cells": 0
+  }
+}

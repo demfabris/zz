@@ -1,0 +1,15 @@
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-mux)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.82s
+     Running unittests src/lib.rs (target/debug/deps/zz_mux-eed3ba838a6892ab)
+
+running 7 tests
+test command::tests::explicit_status_writes_flip_and_clear_customized ... ok
+test command::customize::tests::customize_hides_hook_arrays_like_the_pin ... ok
+test command::customize::tests::customize_edits_a_number_and_preserves_the_selected_option ... ok
+test command::customize::tests::customize_cycles_flags_and_choices_in_the_local_scope ... ok
+test command::customize::tests::customize_global_edit_keys_keep_an_arrays_existing_scope ... ok
+test command::customize::tests::customize_only_the_mode_tree_exit_keys_close_the_mode ... ok
+test command::customize::tests::customize_array_edits_preserve_entries_and_fill_the_first_hole ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 535 filtered out; finished in 0.55s
+

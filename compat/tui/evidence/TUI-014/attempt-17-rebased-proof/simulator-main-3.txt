@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.34s
+     Running tests/simulator.rs (/home/demfabris/dev/zz-c11-modes-final/target/debug/deps/simulator-b0e404ea95b836e1)
+
+running 1 test
+test seeded_convergence_seed_5eed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 6.50s
+

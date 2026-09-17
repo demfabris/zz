@@ -1,0 +1,68 @@
+    Checking serde_core v1.0.229
+   Compiling phf_shared v0.13.1
+    Checking hashbrown v0.17.1
+    Checking indexmap v2.14.2
+   Compiling phf_generator v0.13.1
+    Checking serde v1.0.229
+    Checking bitflags v2.13.2
+    Checking serde_json v1.0.151
+    Checking smallvec v1.16.1
+    Checking thiserror v2.0.20
+    Checking num-traits v0.2.19
+   Compiling phf_macros v0.13.1
+    Checking cobs v0.3.0
+    Checking postcard v1.1.3
+    Checking aho-corasick v1.1.5
+    Checking regex-automata v0.4.18
+    Checking parking_lot_core v0.9.12
+    Checking zerofrom v0.1.8
+    Checking parking_lot v0.12.5
+    Checking regex v1.13.1
+    Checking stable_deref_trait v1.2.1
+    Checking yoke v0.8.3
+    Checking chrono v0.4.45
+    Checking zerovec v0.11.8
+    Checking nix v0.31.3
+    Checking tinystr v0.8.4
+    Checking icu_locale_core v2.3.0
+    Checking zerotrie v0.2.5
+    Checking potential_utf v0.1.6
+    Checking icu_collections v2.3.0
+    Checking phf v0.13.1
+    Checking csscolorparser v0.8.4
+    Checking icu_provider v2.3.1
+    Checking zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-terminal)
+    Checking linux-raw-sys v0.12.1
+    Checking rustix v1.1.4
+    Checking zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-protocol)
+    Checking fastrand v2.5.0
+    Checking ref-cast v1.0.27
+    Checking icu_normalizer v2.3.0
+    Checking icu_properties v2.3.0
+    Checking schemars v1.2.2
+    Checking idna_adapter v1.2.2
+    Checking crossbeam-utils v0.8.23
+    Checking percent-encoding v2.3.2
+    Checking futures-lite v2.6.1
+    Checking form_urlencoded v1.2.2
+    Checking concurrent-queue v2.5.0
+    Checking serde_with v3.23.0
+    Checking idna v1.1.0
+    Checking derive_more v2.1.1
+    Checking strum v0.28.0
+    Checking getrandom v0.4.3
+    Checking polling v3.11.0
+    Checking once_cell v1.21.4
+    Checking tempfile v3.27.0
+    Checking async-io v2.6.0
+    Checking agent-client-protocol-schema v1.7.0
+    Checking zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-mux)
+    Checking url v2.5.8
+    Checking zeroize v1.9.0
+    Checking log v0.4.34
+    Checking zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-daemon)
+    Checking miniz_oxide v0.9.1
+    Checking zz-client v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-client)
+    Checking async-signal v0.2.14
+    Checking zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-tui)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 55.51s

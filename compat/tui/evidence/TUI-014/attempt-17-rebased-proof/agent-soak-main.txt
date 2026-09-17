@@ -1,0 +1,28 @@
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-modes-main-baseline/crates/zz-terminal)
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-modes-main-baseline/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-modes-main-baseline/crates/zz-mux)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-modes-main-baseline/crates/zz-daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 35.92s
+     Running tests/agent_soak.rs (/home/demfabris/dev/zz-c11-modes-final/target/debug/deps/agent_soak-9c60ef249afbed08)
+
+running 1 test
+test agent_stream_soak_slow_client ... FAILED
+
+failures:
+
+---- agent_stream_soak_slow_client stdout ----
+slow client: applied=1506 frames=20 lag markers=[70] terminal frames=6
+
+thread 'agent_stream_soak_slow_client' (2688661) panicked at crates/zz-daemon/tests/agent_soak.rs:594:5:
+assertion `left == right` failed: the replay converges the client on the whole transcript
+  left: Some(1501)
+ right: Some(1500)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    agent_stream_soak_slow_client
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 5.35s
+
+error: test failed, to rerun pass `-p zz-daemon --test agent_soak`

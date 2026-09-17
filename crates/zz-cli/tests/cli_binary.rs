@@ -4772,7 +4772,10 @@ mod daemon_autostart {
                 }
                 if Instant::now() >= deadline {
                     child.kill().expect("kill stalled control block process");
-                    panic!("control process did not reach {label}");
+                    panic!(
+                        "control process did not reach {label}: {}",
+                        String::from_utf8_lossy(&output)
+                    );
                 }
                 thread::sleep(Duration::from_millis(10));
             }

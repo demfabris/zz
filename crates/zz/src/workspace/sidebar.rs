@@ -1616,10 +1616,17 @@ mod tests {
         cx.update(|window, cx| {
             first.update(cx, |settings, cx| {
                 settings.set_section(zz_ui::settings::SettingsSection::Terminal, window, cx);
-                let _ = settings.render(window, cx);
-                assert!(settings.has_terminal_preview());
             });
         });
+        cx.draw(
+            gpui::Point::default(),
+            gpui::size(
+                gpui::AvailableSpace::Definite(px(800.0)),
+                gpui::AvailableSpace::Definite(px(600.0)),
+            ),
+            |_, _| first.clone().into_any_element(),
+        );
+        assert!(first.read_with(cx, |settings, _| settings.has_terminal_preview()));
 
         cx.update(|window, cx| {
             sidebar.update(cx, |sidebar, cx| sidebar.close_settings(window, cx));
@@ -1639,12 +1646,15 @@ mod tests {
             })
         });
         assert_eq!(first.entity_id(), reopened.entity_id());
-        cx.update(|window, cx| {
-            reopened.update(cx, |settings, cx| {
-                let _ = settings.render(window, cx);
-                assert!(settings.has_terminal_preview());
-            });
-        });
+        cx.draw(
+            gpui::Point::default(),
+            gpui::size(
+                gpui::AvailableSpace::Definite(px(800.0)),
+                gpui::AvailableSpace::Definite(px(600.0)),
+            ),
+            |_, _| reopened.clone().into_any_element(),
+        );
+        assert!(reopened.read_with(cx, |settings, _| settings.has_terminal_preview()));
     }
 
     struct ShellProbe {

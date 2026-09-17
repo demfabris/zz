@@ -1,0 +1,65 @@
+      case switch-tail-no-control
+      screen differs
+        2c2
+        < ^[[49mwin ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle
+        ---
+        > ^[[49mwin ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle^[[0m
+        23c23
+        < ^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+FAIL  self-check switch window tail no control: screen reported 1, expected 0
+      case switch-tail-no-sabotage
+      screen differs
+        2c2
+        < ^[[49mwin ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle
+        ---
+        > ^[[49mwin ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle^[[0m
+        23c23
+        < ^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+ok    self-check default cell after final dim run no changes the capture style tail
+ok    self-check allocated default cells preserve the same glyphs and styles
+      case switch-tail-no-cells-sabotage
+      screen differs
+        102c102
+        < 		C 1,20 data=(1,1, ) attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        ---
+        > 		C 1,20 data=(1,1, ) attr=NONE[0] fg=default[8] bg=red[1] us=default[8] link=NONE linkid=NONE
+ok    self-check a changed blank-cell background survives cell decoding
+      case switch-tail-yes-control
+      screen differs
+        3,4c3,4
+        < win ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle
+        < ^[[0mwin ^[[2mzulu:0*^[[0m ^[[2msh^[[0m
+        ---
+        > win ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle^[[0m
+        > win ^[[2mzulu:0*^[[0m ^[[2msh^[[0m
+FAIL  self-check switch window tail yes control: screen reported 1, expected 0
+      case switch-tail-yes-sabotage
+      screen differs
+        3,4c3,4
+        < win ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle
+        < ^[[0mwin ^[[2mzulu:0*^[[0m ^[[2msh^[[0m
+        ---
+        > win ^[[2mcli:0*^[[0m ^[[2msh^[[0m ^[[2mptitle^[[0m
+        > win ^[[2mzulu:0*^[[0m ^[[2msh^[[0m
+ok    self-check default cell after final dim run yes changes the capture style tail
+ok    self-check allocated default cells preserve the same glyphs and styles
+      case switch-tail-yes-cells-sabotage
+      screen differs
+        98c98
+        < 		C 1,16 data=(1,1, ) attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        ---
+        > 		C 1,16 data=(1,1, ) attr=NONE[0] fg=default[8] bg=red[1] us=default[8] link=NONE linkid=NONE
+        182c182
+        < 		C 2,20 data=(1,1, ) attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        ---
+        > 		C 2,20 data=(1,1, ) attr=NONE[0] fg=default[8] bg=red[1] us=default[8] link=NONE linkid=NONE
+        257c257
+        < 		C 3,15 data=(1,1, ) attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        ---
+        > 		C 3,15 data=(1,1, ) attr=NONE[0] fg=default[8] bg=red[1] us=default[8] link=NONE linkid=NONE
+ok    self-check a changed blank-cell background survives cell decoding
+checks=0 failures=0 self-check-failures=2

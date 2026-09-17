@@ -1,0 +1,375 @@
+diff --git a/crates/zz-protocol/src/key.rs b/crates/zz-protocol/src/key.rs
+index e3df58c1..2e7f6baf 100644
+--- a/crates/zz-protocol/src/key.rs
++++ b/crates/zz-protocol/src/key.rs
+@@ -111,6 +111,260 @@ impl Default for KeyTables {
+                 },
+             );
+         }
++        tables.bind("move", ",", Binding { commands: vec![CommandInvocation::new("if-shell", ["-F", "#{pane_floating_flag}", "{ display-menu -T \"#[align=centre]Move\" -x P -y P Centre c { move-pane -P centre } '' \"Top Left\" 1 { move-pane -P top-left } \"Top Right\" 2 { move-pane -P top-right } \"Bottom Left\" 3 { move-pane -P bottom-left } \"Bottom Right\" 4 { move-pane -P bottom-right } '' Top t { move-pane -P top-centre } Bottom b { move-pane -P bottom-centre } Left l { move-pane -P centre-left } Right r { move-pane -P centre-right } }"]).with_command_blocks([2])], repeat: false, note: None });
++        tables.bind("move", ".", Binding { commands: vec![CommandInvocation::new("if-shell", ["-F", "#{pane_floating_flag}", "{ display-menu -T \"#[align=centre]Move & Resize\" -x P -y P Fill 0 { resize-pane -x \"100%\" -y \"100%\" ; move-pane -P top-left } '' \"Top Left\" 1 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-left } \"Top Right\" 2 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-right } \"Bottom Left\" 3 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-left } \"Bottom Right\" 4 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-right } '' Top t { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P top-centre } Bottom b { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P bottom-centre } Left l { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-left } Right r { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-right } }"]).with_command_blocks([2])], repeat: false, note: None });
++        tables.bind(
++            "move",
++            "0",
++            Binding {
++                commands: vec![CommandInvocation::new(
++                    "resize-pane",
++                    [
++                        "-x",
++                        "100%",
++                        "-y",
++                        "100%",
++                        ";",
++                        "move-pane",
++                        "-P",
++                        "top-left",
++                    ],
++                )],
++                repeat: false,
++                note: None,
++            },
++        );
++        tables.bind(
++            "move",
++            "1",
++            Binding {
++                commands: vec![CommandInvocation::new("move-pane", ["-P", "top-left"])],
++                repeat: false,
++                note: None,
++            },
++        );
++        tables.bind(
++            "move",
++            "2",
++            Binding {
++                commands: vec![CommandInvocation::new("move-pane", ["-P", "top-right"])],
++                repeat: false,
++                note: None,
++            },
++        );
++        tables.bind(
++            "move",
++            "3",
++            Binding {
++                commands: vec![CommandInvocation::new("move-pane", ["-P", "bottom-left"])],
++                repeat: false,
++                note: None,
++            },
++        );
++        tables.bind(
++            "move",
++            "4",
++            Binding {
++                commands: vec![CommandInvocation::new("move-pane", ["-P", "bottom-right"])],
++                repeat: false,
++                note: None,
++            },
++        );
++        tables.bind(
++            "move",
++            "Down",
++            Binding {
++                commands: vec![CommandInvocation::new("move-pane", ["-P", "bottom-centre"])],
++                repeat: false,
++                note: None,
++            },
++        );
++        tables.bind(
++            "move",
++            "Left",
++            Binding {
++                commands: vec![CommandInvocation::new("move-pane", ["-P", "centre-left"])],
++                repeat: false,
++                note: None,
++            },
++        );
++        tables.bind(
++            "move",
++            "M-1",
++            Binding {
++                commands: vec![CommandInvocation::new(
++                    "resize-pane",
++                    ["-x", "50%", "-y", "50%", ";", "move-pane", "-P", "top-left"],
++                )],
++                repeat: false,
++                note: None,
++            },
++        );
++        tables.bind(
++            "move",
++            "M-2",
++            Binding {
++                commands: vec![CommandInvocation::new(
++                    "resize-pane",
++                    [
++                        "-x",
++                        "50%",
++                        "-y",
++                        "50%",
++                        ";",
++                        "move-pane",
++                        "-P",
++                        "top-right",
++                    ],
++                )],
++                repeat: false,
++                note: None,
++            },
++        );
++        tables.bind(
++            "move",
++            "M-3",
++            Binding {
++                commands: vec![CommandInvocation::new(
++                    "resize-pane",
++                    [
++                        "-x",
++                        "50%",
++                        "-y",
++                        "50%",
++                        ";",
++                        "move-pane",
++                        "-P",
++                        "bottom-left",
++                    ],
++                )],
++                repeat: false,
++                note: None,
++            },
++        );
++        tables.bind(
++            "move",
++            "M-4",
++            Binding {
++                commands: vec![CommandInvocation::new(
++                    "resize-pane",
++                    [
++                        "-x",
++                        "50%",
++                        "-y",
++                        "50%",
++                        ";",
++                        "move-pane",
++                        "-P",
++                        "bottom-right",
++                    ],
++                )],
++                repeat: false,
++                note: None,
++            },
++        );
++        tables.bind(
++            "move",
++            "M-Down",
++            Binding {
++                commands: vec![CommandInvocation::new(
++                    "resize-pane",
++                    [
++                        "-x",
++                        "100%",
++                        "-y",
++                        "50%",
++                        ";",
++                        "move-pane",
++                        "-P",
++                        "bottom-centre",
++                    ],
++                )],
++                repeat: false,
++                note: None,
++            },
++        );
++        tables.bind(
++            "move",
++            "M-Left",
++            Binding {
++                commands: vec![CommandInvocation::new(
++                    "resize-pane",
++                    [
++                        "-x",
++                        "50%",
++                        "-y",
++                        "100%",
++                        ";",
++                        "move-pane",
++                        "-P",
++                        "centre-left",
++                    ],
++                )],
++                repeat: false,
++                note: None,
++            },
++        );
++        tables.bind(
++            "move",
++            "M-Right",
++            Binding {
++                commands: vec![CommandInvocation::new(
++                    "resize-pane",
++                    [
++                        "-x",
++                        "50%",
++                        "-y",
++                        "100%",
++                        ";",
++                        "move-pane",
++                        "-P",
++                        "centre-right",
++                    ],
++                )],
++                repeat: false,
++                note: None,
++            },
++        );
++        tables.bind(
++            "move",
++            "M-Up",
++            Binding {
++                commands: vec![CommandInvocation::new(
++                    "resize-pane",
++                    [
++                        "-x",
++                        "100%",
++                        "-y",
++                        "50%",
++                        ";",
++                        "move-pane",
++                        "-P",
++                        "top-centre",
++                    ],
++                )],
++                repeat: false,
++                note: None,
++            },
++        );
++        tables.bind(
++            "move",
++            "Right",
++            Binding {
++                commands: vec![CommandInvocation::new("move-pane", ["-P", "centre-right"])],
++                repeat: false,
++                note: None,
++            },
++        );
++        tables.bind(
++            "move",
++            "Up",
++            Binding {
++                commands: vec![CommandInvocation::new("move-pane", ["-P", "top-centre"])],
++                repeat: false,
++                note: None,
++            },
++        );
+         for (key, prompt, command) in [
+             ("x", "kill-pane #P? (y/n)", "kill-pane"),
+             ("&", "kill-window #W? (y/n)", "kill-window"),
+diff --git a/crates/zz-protocol/src/message.rs b/crates/zz-protocol/src/message.rs
+index b0afbfbf..4d977165 100644
+--- a/crates/zz-protocol/src/message.rs
++++ b/crates/zz-protocol/src/message.rs
+@@ -2152,6 +2152,9 @@ pub enum InputMessage {
+         #[serde(default)]
+         status_range_start: Option<u16>,
+     },
++    ClientSuspendState {
++        suspended: bool,
++    },
+ }
+ 
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+diff --git a/crates/zz-protocol/src/snapshot.rs b/crates/zz-protocol/src/snapshot.rs
+index c03ac0fb..8af39e93 100644
+--- a/crates/zz-protocol/src/snapshot.rs
++++ b/crates/zz-protocol/src/snapshot.rs
+@@ -444,7 +444,7 @@ impl PaneBorderIndicators {
+     }
+ }
+ 
+-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
++#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+ pub struct PaneSnapshot {
+     pub id: PaneId,
+     pub title: String,
+@@ -462,6 +462,40 @@ pub struct PaneSnapshot {
+     /// `pane-border-status` is off.
+     #[serde(default)]
+     pub border_status_text: String,
++    #[serde(default)]
++    pub mode: Option<PaneMode>,
++}
++
++#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
++pub enum PaneMode {
++    Clock {
++        time: String,
++        colour: String,
++    },
++    Switch {
++        rows: Vec<String>,
++        selected: u32,
++        offset: u32,
++        selection_style: String,
++        prompt: String,
++        prompt_style: String,
++    },
++    Customize {
++        state: crate::ChooseTreeState,
++        presentation: Box<crate::ChooserPresentation>,
++        offset: u32,
++    },
++}
++
++impl PaneMode {
++    #[must_use]
++    pub const fn name(&self) -> &'static str {
++        match self {
++            Self::Clock { .. } => "clock-mode",
++            Self::Customize { .. } => "options-mode",
++            Self::Switch { .. } => "switch-mode",
++        }
++    }
+ }
+ 
+ #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+diff --git a/knowledge/protocol/wire-protocol.md b/knowledge/protocol/wire-protocol.md
+index c92f10ca..3cf3c2e1 100644
+--- a/knowledge/protocol/wire-protocol.md
++++ b/knowledge/protocol/wire-protocol.md
+@@ -162,6 +162,7 @@ introduced in v17): `Info | Success | Warning | Error`.
+ | `Confirm` | `action: ConfirmAction::Reply(bool)`; answers the client's open `confirm-before` prompt |
+ | `ClientTerminalSize` | `columns: u16`, `rows: u16`; current producer is the TUI terminal surface, which reports later outer-terminal resizes |
+ | `ClientFocus` | `focused: bool`; reports client-window focus independently from pane/application focus |
++| `ClientSuspendState` | `suspended: bool`; reports terminal suspension and resumption |
+ 
+ Every `Key`/`Text` resolves the per-client `KeyEngine` against the live key tables first; `Pass`
+ reaches the synchronized Terminal/Browser sinks (Picker and Agent source panes have no sink and
+@@ -696,6 +697,29 @@ the server log still records the command the caller typed. See
+   `NativeInvalidCommand` preserves the runtime phase when bind-key or untyped confirm-before
+   constructs an invalid native callback, while retaining native usage exit 2.
+   v103 shipped in zz 0.10.0, so these builds require v104 on both sides of the connection.
++  This unreleased version also appends `mode: Option<PaneMode>` after `PaneSnapshot.border_status_text` with
++  `#[serde(default)]`; no existing field moves. The field carries the server-owned pane mode
++  `wp->modes` holds. `None` is a pane in no such mode; `PaneMode::Clock {
++  time, colour }` is `window_clock_mode`, carrying the `tim` string `window_clock_draw_screen`
++  formatted from `clock-mode-style` and the `clock-mode-colour` option value the client resolves the
++  way `style_parse_colour` resolves it into `gc.fg`. It rides the pane snapshot rather than a client
++  event because the mode belongs to the pane: every client attached to the window draws the same
++  face, one that attaches later gets it with its first snapshot, and a clientless `list-panes` reads
++  `#{pane_in_mode}` and `#{pane_mode}` from the daemon's own map. The daemon republishes the snapshot
++  on the whole second, the way `window_clock_timer_callback` redraws. The raw TUI is the consumer
++  half and ships with the daemon; the GPUI, iOS and web clients ignore the field and
++  keep the pane's own presentation. Copy mode is not here - it stays on each client's terminal view.
++  `PaneMode::Switch { rows, selected, offset, selection_style, prompt, prompt_style }` is
++  `window_switch_mode`: the server expands one row per session, or per window under `-w`, through
++  `WINDOW_SWITCH_DEFAULT_FORMAT` and sends each with its `#[...]` markup intact, beside the resolved
++  `mode-style` the current row is drawn over and the `message-style` `prompt_draw` gives the
++  `(search)` prompt on the pane's last row. Appending a variant to `PaneMode` is a tail append like
++  any other, and both halves ship together.
++  `PaneMode::Customize { state, presentation, offset }` appends the per-pane option tree
++  using `ChooseTreeState` and `ChooserPresentation` on that same stack.
++  `InputMessage::ClientSuspendState { suspended }` is a tail variant in v104. The raw TUI
++  reports terminal suspension and resumption so client lists and attachment counts exclude
++  a stopped client while its connection and pane views survive.
+ - v103 carries the pin's pane prompt and the terminal name a client learned after the hello.
+   `CommandPromptState` appends `pane: Option<PaneId>` after `no_freeze`: `command-prompt -P` is
+   `window_pane_set_prompt`, so the prompt hangs on the pane the command targeted rather than on the

@@ -1,0 +1,51 @@
+      case tail-dim
+      screen differs
+        2c2
+        < ^[[2m^[[49mwin^[[0m
+        ---
+        > ^[[2m^[[49mwin
+        23c23
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+        ---
+        > ^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+DIFF  tail-dim
+ok    tail-dim-closed
+      case tail-bold
+      screen differs
+        2c2
+        < ^[[1m^[[49mwin^[[0m
+        ---
+        > ^[[1m^[[49mwin
+        23c23
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+        ---
+        > ^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+DIFF  tail-bold
+ok    tail-bold-closed
+      case tail-italics
+      screen differs
+        2c2
+        < ^[[3m^[[49mwin^[[0m
+        ---
+        > ^[[3m^[[49mwin
+        23c23
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+        ---
+        > ^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+DIFF  tail-italics
+ok    tail-italics-closed
+      case tail-blink
+      screen differs
+        2c2
+        < ^[[5m^[[49mwin^[[0m
+        ---
+        > ^[[5m^[[49mwin
+        23c23
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+        ---
+        > ^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+DIFF  tail-blink
+ok    tail-blink-closed
+ok    tail-long-underline
+ok    tail-long-underline-closed
+checks=10 failures=4

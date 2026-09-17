@@ -1,0 +1,240 @@
+self-check: one deliberate difference per channel, plus equivalences and info-mask checks
+ok    self-check info mask, styled counter widths
+ok    self-check info mask, plain counter widths
+ok    self-check info mask, colour
+ok    self-check info mask, label alignment
+ok    self-check info mask, label text
+ok    self-check info mask, border
+ok    self-check info mask, extra reset
+ok    self-check equivalence: the same window tree on both sides
+      case self-check-tag
+      11 of 24 rows differ, first differing row 1
+         1 tmux: ^[[38;2;179;179;179m(1)   M-bM-^TM-^\M-bM-^TM-^@> ^[[38;2;154;205;50m+^[[38;2;95;158;160m  0*^[[38;2;179;179;179m: ^[[38;2;95;158;160mwin^[[38;2;179;179;179m*: "ptitle"^[[39m
+         1 zz:   ^[[38;2;13;13;13m^[[48;2;184;134;11m(1)   M-bM-^TM-^\M-bM-^TM-^@> +  0: win*: "ptitle"^[[39m
+         2 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(2)   M-bM-^TM-^TM-bM-^TM-^@> +  1: two^[[39m
+         2 zz:   ^[[38;2;179;179;179m^[[49m(2)   M-bM-^TM-^TM-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  1^[[38;2;179;179;179m: ^[[39mtwo
+         3 tmux: ^[[38;2;179;179;179m^[[49m(3)   ^[[38;2;205;92;92m-^[[38;2;179;179;179m ^[[39mmany^[[38;2;179;179;179m: 12 windows^[[39m
+         3 zz:   ^[[38;2;179;179;179m(3)   ^[[38;2;205;92;92m-^[[38;2;179;179;179m ^[[39mmany^[[38;2;179;179;179m: 12 windows^[[39m
+        14 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L 1 (sort: index) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        14 zz:   ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L 0 (sort: index) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        15 tmux: M-bM-^TM-^B^[[39m^[[49m $ printf 'SCENE-%s\n' %1             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m$ printf 'SCENE-%s\n' %2               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        15 zz:   M-bM-^TM-^B^[[39m^[[49m $ printf 'MARK-%s\n' equal                                                   ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        16 tmux: M-bM-^TM-^B^[[39m^[[49m SCENE-%1                             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49mSCENE-%2                               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        16 zz:   M-bM-^TM-^B^[[39m^[[49m MARK-equal                                                                   ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        17 tmux: M-bM-^TM-^B^[[39m^[[49m $ ^[[7m ^[[0m                                  ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m$ ^[[7m ^[[0m                                    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        17 zz:   M-bM-^TM-^B^[[39m^[[49m $ ^[[7m ^[[0m                                                                          ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        18 tmux: M-bM-^TM-^B^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        18 zz:   M-bM-^TM-^B^[[39m^[[49m                                 ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m                                 ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        19 tmux: M-bM-^TM-^B^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m ^[[38;2;205;92;92m0:ptitle^[[39m ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m ^[[38;2;108;166;205m1:ptitle^[[39m ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        19 zz:   M-bM-^TM-^B^[[39m^[[49m                                 ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m ^[[38;2;205;92;92m0:ptitle^[[39m ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m                                 ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        20 tmux: M-bM-^TM-^B^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        20 zz:   M-bM-^TM-^B^[[39m^[[49m                                 ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m                                 ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        21 tmux: M-bM-^TM-^B^[[39m^[[49m                                      ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        21 zz:   M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+      cursor tmux: 0,2 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,1 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check tag, a mark on one side only
+      case self-check-preview
+      2 of 24 rows differ, first differing row 15
+        15 tmux: M-bM-^TM-^B^[[39m^[[49m $ printf 'SCENE-%s\n' %1             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m$ printf 'SCENE-%s\n' %2               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        15 zz:   M-bM-^TM-^B^[[39m^[[49m $ printf 'SCENE-%s\n' %1             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m$ printf 'PLANTED\n'                   ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        16 tmux: M-bM-^TM-^B^[[39m^[[49m SCENE-%1                             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49mSCENE-%2                               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        16 zz:   M-bM-^TM-^B^[[39m^[[49m SCENE-%1                             ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49mPLANTED                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+      cursor tmux: 0,2 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,2 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check preview, one cell of one previewed pane differs
+      case self-check-row
+      2 of 24 rows differ, first differing row 2
+         2 tmux: ^[[38;2;179;179;179m^[[49m(2)   M-bM-^TM-^TM-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  1^[[38;2;179;179;179m: ^[[39mtwo
+         2 zz:   ^[[38;2;179;179;179m^[[49m(2)   M-bM-^TM-^TM-bM-^TM-^@> ^[[38;2;154;205;50m+^[[39m  1^[[38;2;179;179;179m: ^[[39mtwx
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        23 zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:twx
+      cursor tmux: 0,1 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,1 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check row, one tree row differs on one side
+      case self-check-cursor
+      all 24 rows identical
+      cursor tmux: 2,4 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   3,4 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check cursor, one column at one prompt
+ok    self-check equivalence: the pane restored after a chooser
+      case self-check-client-info
+      11 of 24 rows differ, first differing row 11
+        11 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L /dev/CLIENT (sort: name) (view: info) M-bM-^TM-^@M-bM-^TM-^P
+        11 zz:   ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L /dev/CLIENT (sort: name) (view: preview) M-bM-^TM-^@M-bM-^TM-^P
+        12 tmux: M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mClient Name   ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m /dev/CLIENT ^[[38;2;179;179;179m(PID 2566374)^[[39m                                   ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        12 zz:   M-bM-^TM-^B^[[39m^[[49m $ printf 'MARK-%s\n' clientinfo                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        13 tmux: M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mSession       ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m cho                                                          ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        13 zz:   M-bM-^TM-^B^[[39m^[[49m MARK-clientinfo                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        14 tmux: M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mAttach Time   ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m Thu Sep 17 08:09:38 2026 ^[[38;2;179;179;179m(31s)^[[39m                               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        14 zz:   M-bM-^TM-^B^[[39m^[[49m $ ^[[7m ^[[0m                                                                          ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        15 tmux: M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mActivity Time ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m Thu Sep 17 08:10:09 2026 ^[[38;2;179;179;179m(0s)^[[39m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        15 zz:   M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        16 tmux: M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mTerminal Type ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m tmux next-3.8                                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        16 zz:   M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        17 tmux: M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mTERM          ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m tmux-256color                                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        17 zz:   M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        18 tmux: M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mSize          ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m 80x24 ^[[38;2;179;179;179m(cell 16x32)^[[39m                                           ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        18 zz:   M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        19 tmux: M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mBytes Written ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m 8376 ^[[38;2;179;179;179m(0 discarded)^[[39m                                           ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        19 zz:   M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        20 tmux: M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mFeatures      ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m ^[[38;2;154;205;50m256^[[39m             ^[[38;2;154;205;50mRGB^[[39m             ^[[38;2;154;205;50mbpaste^[[39m          ^[[38;2;154;205;50mccolour^[[39m      ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        20 zz:   M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@^[[39m^[[49m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        21 tmux: M-bM-^TM-^B^[[39m^[[49m               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m ^[[38;2;154;205;50mclipboard^[[39m       ^[[38;2;154;205;50mcstyle^[[39m          ^[[38;2;154;205;50mextkeys^[[39m         ^[[38;2;154;205;50mfocus^[[39m        ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        21 zz:   M-bM-^TM-^B^[[39m^[[49m ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two                                                               ^[[39m^[[49m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+      cursor tmux: 0,0 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,0 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check client info, the pin client tree on its info view alone
+      case self-check-client-info-zz
+      11 of 24 rows differ, first differing row 11
+        11 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L /dev/CLIENT (sort: name) (view: preview) M-bM-^TM-^@M-bM-^TM-^P
+        11 zz:   ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L /dev/CLIENT (sort: name) (view: info) M-bM-^TM-^@M-bM-^TM-^P
+        12 tmux: M-bM-^TM-^B^[[39m^[[49m $ printf 'MARK-%s\n' clientinfo                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        12 zz:   M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mClient Name   ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m /dev/CLIENT ^[[38;2;179;179;179m(PID NNNN)^[[39m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        13 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-clientinfo                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        13 zz:   M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mSession       ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m cho                                                          ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        14 tmux: M-bM-^TM-^B^[[39m^[[49m $ ^[[7m ^[[0m                                                                          ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        14 zz:   M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mAttach Time   ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m TIMESTAMP ^[[38;2;179;179;179m(REL)^[[39m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        15 tmux: M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        15 zz:   M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mActivity Time ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m TIMESTAMP ^[[38;2;179;179;179m(REL)^[[39m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        16 tmux: M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        16 zz:   M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mTerminal Type ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m tmux next-3.8                                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        17 tmux: M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        17 zz:   M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mTERM          ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m tmux-256color                                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        18 tmux: M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        18 zz:   M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mSize          ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m 80x24 ^[[38;2;179;179;179m(cell 16x32)^[[39m                                           ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        19 tmux: M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        19 zz:   M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mBytes Written ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m NNNN ^[[38;2;179;179;179m(NN discarded)^[[39m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        20 tmux: M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@^[[39m^[[49m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        20 zz:   M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179mFeatures      ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m ^[[38;2;154;205;50m256^[[39m             ^[[38;2;154;205;50mRGB^[[39m             ^[[38;2;154;205;50mbpaste^[[39m          ^[[38;2;154;205;50mccolour^[[39m      ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        21 tmux: M-bM-^TM-^B^[[39m^[[49m ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two                                                               ^[[39m^[[49m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        21 zz:   M-bM-^TM-^B^[[39m^[[49m               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m ^[[38;2;154;205;50mclipboard^[[39m       ^[[38;2;154;205;50mcstyle^[[39m          ^[[38;2;154;205;50mextkeys^[[39m         ^[[38;2;154;205;50mfocus^[[39m        ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+      cursor tmux: 0,0 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,0 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check client info, the zz client tree on its info view alone
+      case self-check-zoom
+      24 of 24 rows differ, first differing row 0
+         0 tmux: $ printf 'SCENE-%s\n' %0
+         0 zz:   $ printf 'SCENE-%s\n' %0                ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$ printf 'ZOOM-SCENE\n'
+         1 tmux: SCENE-%0
+         1 zz:   SCENE-%0                                ^[[38;2;154;205;50mM-bM-^TM-^B^[[39mZOOM-SCENE
+         2 tmux: $ printf 'MARK-%s\n' cursor
+         2 zz:   $ printf 'MARK-%s\n' cursor             ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$
+         3 tmux: MARK-cursor
+         3 zz:   MARK-cursor                             ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+         4 tmux: $ printf 'MARK-%s\n' clientinfo
+         4 zz:   $ printf 'MARK-%s\n' clientinfo         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+         5 tmux: MARK-clientinfo
+         5 zz:   MARK-clientinfo                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+         6 tmux: $ printf 'MARK-%s\n' zoomed
+         6 zz:   $ printf 'MARK-%s\n' zoomed             ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+         7 tmux: MARK-zoomed
+         7 zz:   MARK-zoomed                             ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+         8 tmux: $
+         8 zz:   $                                       ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+         9 tmux: 
+         9 zz:                                           ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        10 tmux: 
+        10 zz:                                           ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        11 tmux: 
+        11 zz:                                           ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        12 tmux: 
+        12 zz:                                           ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        13 tmux: 
+        13 zz:                                           ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        14 tmux: 
+        14 zz:                                           ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        15 tmux: 
+        15 zz:                                           ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        16 tmux: 
+        16 zz:                                           ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        17 tmux: 
+        17 zz:                                           ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        18 tmux: 
+        18 zz:                                           ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        19 tmux: 
+        19 zz:                                           ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        20 tmux: 
+        20 zz:                                           ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        21 tmux: 
+        21 zz:                                           ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        22 tmux: 
+        22 zz:                                           ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*Z^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        23 zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+      cursor tmux: 2,8 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,8 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check zoom, the attached window zoomed on one side only
+      case self-check-pane-prompt
+      1 of 24 rows differ, first differing row 22
+        22 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(search down) ^[[39m^[[49m
+        22 zz:   23
+      cursor tmux: 14,22 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,0 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check pane prompt, the stock search prompt over one pane only
+      case self-check-search-marks
+      23 of 24 rows differ, first differing row 0
+         0 tmux: 59                                                                     ^[[38;2;13;13;13m^[[48;2;184;134;11m[119/177]
+         0 zz:   1                                                                      ^[[38;2;13;13;13m^[[48;2;184;134;11m[177/177]
+         1 tmux: ^[[39m^[[49m60
+         1 zz:   ^[[39m^[[49m2
+         2 tmux: 61
+         2 zz:   3
+         3 tmux: 62
+         3 zz:   4
+         4 tmux: 63
+         4 zz:   5
+         5 tmux: 64
+         5 zz:   6
+         6 tmux: 65
+         6 zz:   7
+         7 tmux: 66
+         7 zz:   8
+         8 tmux: 67
+         8 zz:   9
+         9 tmux: 68
+         9 zz:   10
+        10 tmux: 69
+        10 zz:   11
+        11 tmux: 70
+        11 zz:   12
+        12 tmux: 71
+        12 zz:   13
+        13 tmux: 72
+        13 zz:   14
+        14 tmux: 73
+        14 zz:   15
+        15 tmux: 74
+        15 zz:   16
+        16 tmux: 75
+        16 zz:   17
+        17 tmux: 76
+        17 zz:   18
+        18 tmux: ^[[38;2;13;13;13m^[[48;2;147;112;219m77^[[39m^[[49m
+        18 zz:   19
+        19 tmux: 78
+        19 zz:   20
+        20 tmux: 79
+        20 zz:   21
+        21 tmux: 80
+        21 zz:   22
+        22 tmux: 81
+        22 zz:   23
+      cursor tmux: 2,18 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,0 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check search marks, the current match painted on one side only
+      case self-check-buffer-filter-prompt
+      1 of 24 rows differ, first differing row 22
+        22 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(filter) ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        22 zz:   M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+      cursor tmux: 9,22 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,0 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check prompt, the buffer tree filter prompt on one side only
+      case self-check-title-cut
+      1 of 40 rows differ, first differing row 19
+        19 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L /dev/CLIENT (sort: name)M-bM-^TM-^B^[[49m          N ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m Repeat search backward   ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^BM-bM-^TM-^@M-bM-^TM-^P
+        19 zz:   ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L /dev/CLIENT (sort: size)M-bM-^TM-^B^[[49m          N ^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m Repeat search backward   ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^BM-bM-^TM-^@M-bM-^TM-^P
+      cursor tmux: 0,0 flag=0 pane=100x40 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,0 flag=0 pane=100x40 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check title cut, the sort label inside the span a box cuts
+self-check complete: every sabotage was caught and all equivalences passed

@@ -1,0 +1,717 @@
+[
+  {
+    "path": "corpus-before/lane2-store-final.txt",
+    "bytes": 80456,
+    "sha256": "f5c736f05b03ea0cc644b1f39c0d8469583a8f726e0b11db5a3ee3557a95b890"
+  },
+  {
+    "path": "corpus-before/lane2-store-first.txt",
+    "bytes": 80456,
+    "sha256": "f5c736f05b03ea0cc644b1f39c0d8469583a8f726e0b11db5a3ee3557a95b890"
+  },
+  {
+    "path": "corpus-before/show-options-hooks-final.txt",
+    "bytes": 102960,
+    "sha256": "ae49d5ae4fb398f5aa778bcb74ee8438b6d930af18578b2b5173299c08128562"
+  },
+  {
+    "path": "corpus-before/show-options-hooks-first.txt",
+    "bytes": 102960,
+    "sha256": "ae49d5ae4fb398f5aa778bcb74ee8438b6d930af18578b2b5173299c08128562"
+  },
+  {
+    "path": "corpus-before/smoke-cli-chain-parse-abort-final.txt",
+    "bytes": 1131,
+    "sha256": "d94ffe1900592b30bd79ad52a1b98a9cadff03932873951134bb29925b74d2d2"
+  },
+  {
+    "path": "corpus-before/smoke-cli-chain-parse-abort-first.txt",
+    "bytes": 1131,
+    "sha256": "d94ffe1900592b30bd79ad52a1b98a9cadff03932873951134bb29925b74d2d2"
+  },
+  {
+    "path": "corpus-before/smoke-command-prompt-chain-final.txt",
+    "bytes": 2128,
+    "sha256": "3017806210d2ed592559fedbe640837e10b3b53e6581b778113c362058df339c"
+  },
+  {
+    "path": "corpus-before/smoke-command-prompt-chain-first.txt",
+    "bytes": 2088,
+    "sha256": "d78b7bee7a1c81fe34fc3eede99aeae8d9ab9f5a47acba8e3d16779d2c8df528"
+  },
+  {
+    "path": "corpus-before/smoke-control-hard-loss-final.txt",
+    "bytes": 1465,
+    "sha256": "6b98311b04d4891fc8d803c016d5423c70ac0ef8741a2bb56efbd447318733c2"
+  },
+  {
+    "path": "corpus-before/smoke-control-hard-loss-first.txt",
+    "bytes": 1423,
+    "sha256": "6ddc33c9e834f4ef214b0cfbcb72ecebf5c9d364a07b6df34872c6798c41248e"
+  },
+  {
+    "path": "corpus-before/smoke-default-client-command-final.txt",
+    "bytes": 1387,
+    "sha256": "898b94dbc873b9aff9db86f8d36afba6845dd5c27b1f5eaad52cf3b6941195d4"
+  },
+  {
+    "path": "corpus-before/smoke-default-client-command-first.txt",
+    "bytes": 1387,
+    "sha256": "898b94dbc873b9aff9db86f8d36afba6845dd5c27b1f5eaad52cf3b6941195d4"
+  },
+  {
+    "path": "corpus-before/smoke-jobs-command-environment-final.txt",
+    "bytes": 1392,
+    "sha256": "afcb0dea32466898d293808b8009153b116226722c6d213843367e5c67283a0f"
+  },
+  {
+    "path": "corpus-before/smoke-jobs-command-environment-first.txt",
+    "bytes": 1392,
+    "sha256": "afcb0dea32466898d293808b8009153b116226722c6d213843367e5c67283a0f"
+  },
+  {
+    "path": "corpus-before/smoke-source-replay-diagnostics-final.txt",
+    "bytes": 32493,
+    "sha256": "62b1946e06d0735a70b7755b357947a9873b10c2beff9a26b092baa00328345f"
+  },
+  {
+    "path": "corpus-before/smoke-source-replay-diagnostics-first.txt",
+    "bytes": 32493,
+    "sha256": "62b1946e06d0735a70b7755b357947a9873b10c2beff9a26b092baa00328345f"
+  },
+  {
+    "path": "corpus-before/smoke-status-background-jobs-final.txt",
+    "bytes": 1882,
+    "sha256": "b74104a9f0b37bc00fa1a8a04106fea25162588c0005cb5493651f0ae938eac5"
+  },
+  {
+    "path": "corpus-before/smoke-status-background-jobs-first.txt",
+    "bytes": 1882,
+    "sha256": "b74104a9f0b37bc00fa1a8a04106fea25162588c0005cb5493651f0ae938eac5"
+  },
+  {
+    "path": "corpus-first/alerts.txt",
+    "bytes": 12776,
+    "sha256": "c622ede0f87c9731744e04c23e709a7384583fef1b5464cf94ab8fc97650fa46"
+  },
+  {
+    "path": "corpus-first/behavior-options.txt",
+    "bytes": 2764,
+    "sha256": "ba6473b83f84a9fa6ea5f2ad7819b634cc734e711e8cf88ba511fcc93fb536e2"
+  },
+  {
+    "path": "corpus-first/buffer-path-format.txt",
+    "bytes": 8728,
+    "sha256": "c763f76d8f24be16633baf5836f87d4bb3f9ec7fc62892fce6b49919c83ac3e7"
+  },
+  {
+    "path": "corpus-first/capture-pane.txt",
+    "bytes": 5857,
+    "sha256": "27421c5d8b486472e463b6872c3ea49500ef46551da0a3beb391ba29c00d976b"
+  },
+  {
+    "path": "corpus-first/census-hooks.txt",
+    "bytes": 194157,
+    "sha256": "3234ef5cd035a559049fad036f9814abe8b40d9b61e89a753eaf5e07c7311ab9"
+  },
+  {
+    "path": "corpus-first/census-options.txt",
+    "bytes": 11078,
+    "sha256": "a976da733bc69c26e05732946f7c83e8ca9121993758cf11d4c4aadbc80c4650"
+  },
+  {
+    "path": "corpus-first/command-alias.txt",
+    "bytes": 3598,
+    "sha256": "d7dcc1b9053a8eb0848014efb3a891bae96c216310d89f1fcb7dda6155a91ba2"
+  },
+  {
+    "path": "corpus-first/copy-mode-goto-line.txt",
+    "bytes": 4039,
+    "sha256": "62b26ea8acb3c010dff58b50db7ed18c0460e7518ce9b8a34675d6af2f4921ba"
+  },
+  {
+    "path": "corpus-first/copy-mode-previous-bracket.txt",
+    "bytes": 5238,
+    "sha256": "ccbb70fd2899ee9379346297162d68da0d423bfcd9029d4ef3132f3dc9cec9d5"
+  },
+  {
+    "path": "corpus-first/copy-mode-recentre.txt",
+    "bytes": 2090,
+    "sha256": "8db96a2b7640264d07bc7257d6c80c855818b9b8120df5f0d0e607415c83085d"
+  },
+  {
+    "path": "corpus-first/copy-mode-selection-lifecycle.txt",
+    "bytes": 4069,
+    "sha256": "b6ead8cfc0d2acb840ce45b6692d64b180c36918196a1d0c5a339729bc1b3051"
+  },
+  {
+    "path": "corpus-first/display-panes-format.txt",
+    "bytes": 2582,
+    "sha256": "f4860c7e83591f8d32518e89734e818a3af6c70e9ec10e71c919465a04408862"
+  },
+  {
+    "path": "corpus-first/format-modifier-option-loop.txt",
+    "bytes": 5219,
+    "sha256": "57f5eefc1c89dd547554922dd43fc66b34da0f6dda6466010525f1fa2de0e4bf"
+  },
+  {
+    "path": "corpus-first/format-modifier-width.txt",
+    "bytes": 2299,
+    "sha256": "d10e5da8405aae29bcb83b68db43e18befa49ad095f48f52fecfe64c1a8679fb"
+  },
+  {
+    "path": "corpus-first/format-option-loop-context.txt",
+    "bytes": 4379,
+    "sha256": "050e669abb781667f859e85f8b7f3f2807f02a4913a2bc2628b99fe339a5d7f8"
+  },
+  {
+    "path": "corpus-first/formats-values.txt",
+    "bytes": 10404,
+    "sha256": "2afda6cf447fe284ec5a73fc563fd20a318899bdb5ad6c5f939cd9035045b612"
+  },
+  {
+    "path": "corpus-first/honest-knobs-c1-defaults.txt",
+    "bytes": 3997,
+    "sha256": "bab86dbbe2a6dfb5e97f392727d525cb6665cce91259e5540ffb90c2a8f7c765"
+  },
+  {
+    "path": "corpus-first/honest-knobs-c1-errors.txt",
+    "bytes": 3733,
+    "sha256": "7b1664ba6e1299dcb5cc136c6cab2b7868080a76172e9c9fd303b09a06d78316"
+  },
+  {
+    "path": "corpus-first/honest-knobs-c1-readback.txt",
+    "bytes": 4668,
+    "sha256": "287b6c62c283660fb1a744e980c9e37355683f80277c1017e05668feb2ad9dde"
+  },
+  {
+    "path": "corpus-first/known/known-terminal-runtime.txt",
+    "bytes": 7265,
+    "sha256": "ecef0a83e6f48e85f1857628d5537b76621a626a2dda592d04ed67edd88e8a36"
+  },
+  {
+    "path": "corpus-first/manual-window-size-transition.txt",
+    "bytes": 6043,
+    "sha256": "53e52889f5fe5f5b99ed7f4dddcaa762e8e677c9a60be894707c5efd20781471"
+  },
+  {
+    "path": "corpus-first/micro-flags.txt",
+    "bytes": 4006,
+    "sha256": "d4c073440d773a041431cc94bd83cf5bef30fb7f3e403c5f7386a1672db80828"
+  },
+  {
+    "path": "corpus-first/mru-activity.txt",
+    "bytes": 2603,
+    "sha256": "cdb8f0ad2bd1e70941c391a6238f39dcd30454e0ea805ebf50f17ae59a2999ba"
+  },
+  {
+    "path": "corpus-first/native-prefix-isolation.txt",
+    "bytes": 7013,
+    "sha256": "60130b585c6bd60e00bff7f0df2cb27a974d04f5d6ebf50d3044b50540c6d8d0"
+  },
+  {
+    "path": "corpus-first/new-session-environment.txt",
+    "bytes": 4293,
+    "sha256": "fa90e9453f23226b4a28495d6d5e30d05e70f8aaa46fed2a9fe9e40185eae337"
+  },
+  {
+    "path": "corpus-first/option-name-formats.txt",
+    "bytes": 13069,
+    "sha256": "2c99fd19cd7ace6897209ddbbdeb8cabe76e6088c61379ecd8904812bf3bc693"
+  },
+  {
+    "path": "corpus-first/pane-exact-target-prefix.txt",
+    "bytes": 6388,
+    "sha256": "9137355ffc7470b69d59e18c3388beca1e59ae695827c37f7739d48a69406fce"
+  },
+  {
+    "path": "corpus-first/pane-spawn-options.txt",
+    "bytes": 5626,
+    "sha256": "196ca65d23e5cb29e3ad48c0c3a7354d4a08f1fa5856bf31195200ceda0a7e23"
+  },
+  {
+    "path": "corpus-first/pane-spawn-retain.txt",
+    "bytes": 5591,
+    "sha256": "ce12a0a2c5d69f394057a134ec786f4d9aa3c89f014d2b9711c17735b87eff1b"
+  },
+  {
+    "path": "corpus-first/send-keys-repeat.txt",
+    "bytes": 3431,
+    "sha256": "fd3dd497dd058be95216838ee9035916015fad6c67e5c1c031a426a2e1270880"
+  },
+  {
+    "path": "corpus-first/send-keys-reset.txt",
+    "bytes": 3430,
+    "sha256": "f689183337e28a0f4729d60fe55383a72daa04a1f04549b056750851dbe9ff7e"
+  },
+  {
+    "path": "corpus-first/smoke/alias-group-forgery.txt",
+    "bytes": 2528,
+    "sha256": "7227ab344e6445f734b35ef0333b3c383900a1af9943e3ba47abe48df9e83e96"
+  },
+  {
+    "path": "corpus-first/smoke/cheap-flags.txt",
+    "bytes": 5037,
+    "sha256": "7c34f662ddc5a78f62b23bf959a52f1075c04ddfbc78cec6f863875e68983b17"
+  },
+  {
+    "path": "corpus-first/smoke/client-resized-context.txt",
+    "bytes": 979,
+    "sha256": "63fa6a6b55d7863b868524e35824405c9eb8769dae2a1f4cca46d319ae5427d1"
+  },
+  {
+    "path": "corpus-first/smoke/config-discovery-explicit.txt",
+    "bytes": 3618,
+    "sha256": "968de55f3edf8fb4e20ee4cb95d3f3517c9507c37932c089f4f6f3aec3731229"
+  },
+  {
+    "path": "corpus-first/smoke/config-discovery-launcher.txt",
+    "bytes": 3434,
+    "sha256": "901b474fb699ec7394300f781b655815e3f884586105a5899ed169075b1b44eb"
+  },
+  {
+    "path": "corpus-first/smoke/config-non-utf8-file-bytes.txt",
+    "bytes": 4776,
+    "sha256": "5f6d5c1207be075fb6f8dcc246d68968ccf1f047c6720814c107aa3e042e1407"
+  },
+  {
+    "path": "corpus-first/smoke/format-trace.txt",
+    "bytes": 22002,
+    "sha256": "d137562f5abf2d4cd7f9a4fbfeb874520238a5cb2d1580d6ccdf15ced612394d"
+  },
+  {
+    "path": "corpus-first/smoke/keys-prefix-stock.txt",
+    "bytes": 11741,
+    "sha256": "b6056eba58d6206f14f48e9a90323b0882d5f838efe2203b0dc7929599d8de51"
+  },
+  {
+    "path": "corpus-first/smoke/kill-filters.txt",
+    "bytes": 4185,
+    "sha256": "7d3e40a6680974cde0a814ac7a237aba9157988ae9c96792950524ae7566127b"
+  },
+  {
+    "path": "corpus-first/smoke/pane-border-status.txt",
+    "bytes": 9419,
+    "sha256": "c4950c0ce7b20c961083104c97a7353515269b5f0a07e4de9da763da8ca9178d"
+  },
+  {
+    "path": "corpus-first/smoke/pane-tmux-path.txt",
+    "bytes": 1613,
+    "sha256": "9539200014c0b753417b3ccd7fa0cdc9214b928e9004171699498c83bdd820f6"
+  },
+  {
+    "path": "corpus-first/smoke/send-keys-client-selection.txt",
+    "bytes": 1007,
+    "sha256": "5b046b47c14bf49d3e2dae8b9559910f78da78ce1091840ed496e645f06430b1"
+  },
+  {
+    "path": "corpus-first/smoke/source-file-control.txt",
+    "bytes": 14660,
+    "sha256": "75901c4879d6040e1ec2d771c2c77b0bbf2c7346e9504837355ab01f12847b5a"
+  },
+  {
+    "path": "corpus-first/smoke/vim-tmux-navigator.txt",
+    "bytes": 2943,
+    "sha256": "c14299f53a26335e61537d4fb3a66763eaa5e0eacd1399305ea974fff1bdce66"
+  },
+  {
+    "path": "corpus-first/source-file-current-file.txt",
+    "bytes": 5772,
+    "sha256": "b91ecb2b04870b49be3d83689e9e063950d77e2e5a96de8e9b8573586c7be93c"
+  },
+  {
+    "path": "corpus-first/source-file-format.txt",
+    "bytes": 10525,
+    "sha256": "056b0dd866f702952b31960b1e43fbbdae766a5c5d5bd68bd9f0e778d54c290e"
+  },
+  {
+    "path": "corpus-first/source-file-output.txt",
+    "bytes": 11253,
+    "sha256": "708aa582519111a647ae7c149c932bf8b1c7b813222150e52d06c2b230bfe84a"
+  },
+  {
+    "path": "corpus-first/status-options.txt",
+    "bytes": 19030,
+    "sha256": "82f67aac0aa0122ffc8ddb2a4eb0611fd0b7c1e715e6d4c8ddde14aea185f066"
+  },
+  {
+    "path": "corpus-first/stderr-parity.txt",
+    "bytes": 3435,
+    "sha256": "c76739b77282a1efd7ea7af4039ecc5f72f19deca79acb51085f16805840b5a3"
+  },
+  {
+    "path": "corpus-first/update-environment.txt",
+    "bytes": 1439,
+    "sha256": "a85a01eae252a704338fe786035b9b14ef4f3e66f928bd17ab91cfdcfeb9d224"
+  },
+  {
+    "path": "corpus-main/lane2-store-first.txt",
+    "bytes": 80464,
+    "sha256": "6e83f320e7facbc716c5b03a609f0910e7c2d1151e52964f4a911f471777fd41"
+  },
+  {
+    "path": "corpus-main/show-options-hooks-first.txt",
+    "bytes": 102968,
+    "sha256": "ea567ff69adca964347b6aaa1cf5e7c600d1b534101a5570fa07931506fbcc71"
+  },
+  {
+    "path": "corpus-main/smoke-cli-chain-parse-abort-first.txt",
+    "bytes": 1139,
+    "sha256": "ea1df5fc0223ad3bb9ea3a66d793763741f8f33dcc3f68653bb84067915d3680"
+  },
+  {
+    "path": "corpus-main/smoke-command-prompt-chain-first.txt",
+    "bytes": 1369,
+    "sha256": "8ca1cc6610f4eb3ae6ec984c47e3756a5b4036be6d13dcac9ff6180847636af6"
+  },
+  {
+    "path": "corpus-main/smoke-control-hard-loss-first.txt",
+    "bytes": 1147,
+    "sha256": "20e4bae9a13f4bf9bff308bea04c3f3a13d5f01a8a5965bb88c2e1443d6903c3"
+  },
+  {
+    "path": "corpus-main/smoke-default-client-command-first.txt",
+    "bytes": 1395,
+    "sha256": "118a7d8220f386dcf3c6e2055c033ecad00f476aba3ad1227622b8d40a7b3fab"
+  },
+  {
+    "path": "corpus-main-final/lane2-store.txt",
+    "bytes": 80464,
+    "sha256": "6e83f320e7facbc716c5b03a609f0910e7c2d1151e52964f4a911f471777fd41"
+  },
+  {
+    "path": "corpus-main-final/show-options-hooks.txt",
+    "bytes": 102968,
+    "sha256": "ea567ff69adca964347b6aaa1cf5e7c600d1b534101a5570fa07931506fbcc71"
+  },
+  {
+    "path": "corpus-main-final/smoke/cli-chain-parse-abort.txt",
+    "bytes": 1139,
+    "sha256": "ea1df5fc0223ad3bb9ea3a66d793763741f8f33dcc3f68653bb84067915d3680"
+  },
+  {
+    "path": "corpus-main-final/smoke/command-prompt-chain.txt",
+    "bytes": 1369,
+    "sha256": "8ca1cc6610f4eb3ae6ec984c47e3756a5b4036be6d13dcac9ff6180847636af6"
+  },
+  {
+    "path": "corpus-main-final/smoke/control-hard-loss.txt",
+    "bytes": 1147,
+    "sha256": "20e4bae9a13f4bf9bff308bea04c3f3a13d5f01a8a5965bb88c2e1443d6903c3"
+  },
+  {
+    "path": "corpus-main-final/smoke/default-client-command.txt",
+    "bytes": 1395,
+    "sha256": "118a7d8220f386dcf3c6e2055c033ecad00f476aba3ad1227622b8d40a7b3fab"
+  },
+  {
+    "path": "corpus-main-final/smoke/jobs-command-environment.txt",
+    "bytes": 1001,
+    "sha256": "9571a09726899f4dfc3c819bf3defdfb2f6c4d292db8a38971bcd1d7e60a7e38"
+  },
+  {
+    "path": "corpus-main-final/smoke/source-replay-diagnostics.txt",
+    "bytes": 32254,
+    "sha256": "5fa678eb6eac08ea62e0cdaf3310f2de432733ab11e217eb24ed72f35dc081f2"
+  },
+  {
+    "path": "corpus-main-final/smoke/status-background-jobs.txt",
+    "bytes": 2399,
+    "sha256": "0cf310ea04c0984cab529ed0084c7d39c8bd93b1728ce2105f99b3efc7ab6457"
+  },
+  {
+    "path": "corpus-v1-interrupted/alerts.txt",
+    "bytes": 6876,
+    "sha256": "02cae64b58daf2ec8b16e615ffb82ef62363debf13540389cfc50a79d6f84b20"
+  },
+  {
+    "path": "corpus-v1-interrupted/census-hooks.txt",
+    "bytes": 23475,
+    "sha256": "8fde980323387548da3639c1780fc815c437c9f2a09612cc20d6b3ff2ee3c399"
+  },
+  {
+    "path": "corpus-v1-interrupted/command-item-format.txt",
+    "bytes": 7690,
+    "sha256": "2a3321997cb7788a1e22f2e6b9df0cde8213c7074b0dd38fe746974ca8cbdbe7"
+  },
+  {
+    "path": "corpus-v1-interrupted/status-options.txt",
+    "bytes": 8524,
+    "sha256": "b23e38740933c962a2510fdd6b1bac5a1a799b42e0bdea32f27d4f18fb0653d7"
+  },
+  {
+    "path": "corpus-v2-interrupted/alerts.txt",
+    "bytes": 12776,
+    "sha256": "c622ede0f87c9731744e04c23e709a7384583fef1b5464cf94ab8fc97650fa46"
+  },
+  {
+    "path": "corpus-v2-interrupted/behavior-options.txt",
+    "bytes": 2764,
+    "sha256": "ba6473b83f84a9fa6ea5f2ad7819b634cc734e711e8cf88ba511fcc93fb536e2"
+  },
+  {
+    "path": "corpus-v2-interrupted/buffer-path-format.txt",
+    "bytes": 8728,
+    "sha256": "c763f76d8f24be16633baf5836f87d4bb3f9ec7fc62892fce6b49919c83ac3e7"
+  },
+  {
+    "path": "corpus-v2-interrupted/capture-pane.txt",
+    "bytes": 5857,
+    "sha256": "27421c5d8b486472e463b6872c3ea49500ef46551da0a3beb391ba29c00d976b"
+  },
+  {
+    "path": "corpus-v2-interrupted/census-hooks.txt",
+    "bytes": 194157,
+    "sha256": "3234ef5cd035a559049fad036f9814abe8b40d9b61e89a753eaf5e07c7311ab9"
+  },
+  {
+    "path": "corpus-v2-interrupted/census-options.txt",
+    "bytes": 11078,
+    "sha256": "a976da733bc69c26e05732946f7c83e8ca9121993758cf11d4c4aadbc80c4650"
+  },
+  {
+    "path": "corpus-v2-interrupted/command-alias.txt",
+    "bytes": 3598,
+    "sha256": "d7dcc1b9053a8eb0848014efb3a891bae96c216310d89f1fcb7dda6155a91ba2"
+  },
+  {
+    "path": "corpus-v2-interrupted/command-item-format.txt",
+    "bytes": 27738,
+    "sha256": "f736e4e8c2de747761f4daa1137502216b057f64d658ee992508b91ccc21b4c9"
+  },
+  {
+    "path": "corpus-v2-interrupted/copy-mode-goto-line.txt",
+    "bytes": 4039,
+    "sha256": "62b26ea8acb3c010dff58b50db7ed18c0460e7518ce9b8a34675d6af2f4921ba"
+  },
+  {
+    "path": "corpus-v2-interrupted/copy-mode-previous-bracket.txt",
+    "bytes": 5238,
+    "sha256": "ccbb70fd2899ee9379346297162d68da0d423bfcd9029d4ef3132f3dc9cec9d5"
+  },
+  {
+    "path": "corpus-v2-interrupted/copy-mode-recentre.txt",
+    "bytes": 2090,
+    "sha256": "8db96a2b7640264d07bc7257d6c80c855818b9b8120df5f0d0e607415c83085d"
+  },
+  {
+    "path": "corpus-v2-interrupted/copy-mode-selection-lifecycle.txt",
+    "bytes": 4069,
+    "sha256": "b6ead8cfc0d2acb840ce45b6692d64b180c36918196a1d0c5a339729bc1b3051"
+  },
+  {
+    "path": "corpus-v2-interrupted/display-panes-format.txt",
+    "bytes": 2582,
+    "sha256": "f4860c7e83591f8d32518e89734e818a3af6c70e9ec10e71c919465a04408862"
+  },
+  {
+    "path": "corpus-v2-interrupted/format-modifier-option-loop.txt",
+    "bytes": 5219,
+    "sha256": "57f5eefc1c89dd547554922dd43fc66b34da0f6dda6466010525f1fa2de0e4bf"
+  },
+  {
+    "path": "corpus-v2-interrupted/format-modifier-width.txt",
+    "bytes": 2299,
+    "sha256": "d10e5da8405aae29bcb83b68db43e18befa49ad095f48f52fecfe64c1a8679fb"
+  },
+  {
+    "path": "corpus-v2-interrupted/format-option-loop-context.txt",
+    "bytes": 4379,
+    "sha256": "050e669abb781667f859e85f8b7f3f2807f02a4913a2bc2628b99fe339a5d7f8"
+  },
+  {
+    "path": "corpus-v2-interrupted/formats-values.txt",
+    "bytes": 10404,
+    "sha256": "2afda6cf447fe284ec5a73fc563fd20a318899bdb5ad6c5f939cd9035045b612"
+  },
+  {
+    "path": "corpus-v2-interrupted/honest-knobs-c1-defaults.txt",
+    "bytes": 3997,
+    "sha256": "bab86dbbe2a6dfb5e97f392727d525cb6665cce91259e5540ffb90c2a8f7c765"
+  },
+  {
+    "path": "corpus-v2-interrupted/honest-knobs-c1-errors.txt",
+    "bytes": 3733,
+    "sha256": "7b1664ba6e1299dcb5cc136c6cab2b7868080a76172e9c9fd303b09a06d78316"
+  },
+  {
+    "path": "corpus-v2-interrupted/honest-knobs-c1-readback.txt",
+    "bytes": 4668,
+    "sha256": "287b6c62c283660fb1a744e980c9e37355683f80277c1017e05668feb2ad9dde"
+  },
+  {
+    "path": "corpus-v2-interrupted/known/known-terminal-runtime.txt",
+    "bytes": 7265,
+    "sha256": "ecef0a83e6f48e85f1857628d5537b76621a626a2dda592d04ed67edd88e8a36"
+  },
+  {
+    "path": "corpus-v2-interrupted/manual-window-size-transition.txt",
+    "bytes": 6043,
+    "sha256": "53e52889f5fe5f5b99ed7f4dddcaa762e8e677c9a60be894707c5efd20781471"
+  },
+  {
+    "path": "corpus-v2-interrupted/micro-flags.txt",
+    "bytes": 4006,
+    "sha256": "d4c073440d773a041431cc94bd83cf5bef30fb7f3e403c5f7386a1672db80828"
+  },
+  {
+    "path": "corpus-v2-interrupted/mru-activity.txt",
+    "bytes": 2603,
+    "sha256": "cdb8f0ad2bd1e70941c391a6238f39dcd30454e0ea805ebf50f17ae59a2999ba"
+  },
+  {
+    "path": "corpus-v2-interrupted/native-prefix-isolation.txt",
+    "bytes": 7013,
+    "sha256": "60130b585c6bd60e00bff7f0df2cb27a974d04f5d6ebf50d3044b50540c6d8d0"
+  },
+  {
+    "path": "corpus-v2-interrupted/new-session-environment.txt",
+    "bytes": 4293,
+    "sha256": "fa90e9453f23226b4a28495d6d5e30d05e70f8aaa46fed2a9fe9e40185eae337"
+  },
+  {
+    "path": "corpus-v2-interrupted/option-name-formats.txt",
+    "bytes": 13069,
+    "sha256": "2c99fd19cd7ace6897209ddbbdeb8cabe76e6088c61379ecd8904812bf3bc693"
+  },
+  {
+    "path": "corpus-v2-interrupted/pane-exact-target-prefix.txt",
+    "bytes": 6388,
+    "sha256": "9137355ffc7470b69d59e18c3388beca1e59ae695827c37f7739d48a69406fce"
+  },
+  {
+    "path": "corpus-v2-interrupted/pane-spawn-options.txt",
+    "bytes": 5626,
+    "sha256": "196ca65d23e5cb29e3ad48c0c3a7354d4a08f1fa5856bf31195200ceda0a7e23"
+  },
+  {
+    "path": "corpus-v2-interrupted/pane-spawn-retain.txt",
+    "bytes": 5591,
+    "sha256": "ce12a0a2c5d69f394057a134ec786f4d9aa3c89f014d2b9711c17735b87eff1b"
+  },
+  {
+    "path": "corpus-v2-interrupted/prefix2.txt",
+    "bytes": 2399,
+    "sha256": "53524b652b1d049b1c34faa77ba5e26e862cb68ea6430c7a2e9da9897e3ace49"
+  },
+  {
+    "path": "corpus-v2-interrupted/send-keys-repeat.txt",
+    "bytes": 3431,
+    "sha256": "fd3dd497dd058be95216838ee9035916015fad6c67e5c1c031a426a2e1270880"
+  },
+  {
+    "path": "corpus-v2-interrupted/send-keys-reset.txt",
+    "bytes": 3430,
+    "sha256": "f689183337e28a0f4729d60fe55383a72daa04a1f04549b056750851dbe9ff7e"
+  },
+  {
+    "path": "corpus-v2-interrupted/smoke/alias-group-forgery.txt",
+    "bytes": 2528,
+    "sha256": "7227ab344e6445f734b35ef0333b3c383900a1af9943e3ba47abe48df9e83e96"
+  },
+  {
+    "path": "corpus-v2-interrupted/smoke/cheap-flags.txt",
+    "bytes": 5037,
+    "sha256": "7c34f662ddc5a78f62b23bf959a52f1075c04ddfbc78cec6f863875e68983b17"
+  },
+  {
+    "path": "corpus-v2-interrupted/smoke/client-resized-context.txt",
+    "bytes": 979,
+    "sha256": "63fa6a6b55d7863b868524e35824405c9eb8769dae2a1f4cca46d319ae5427d1"
+  },
+  {
+    "path": "corpus-v2-interrupted/smoke/config-discovery-explicit.txt",
+    "bytes": 3618,
+    "sha256": "968de55f3edf8fb4e20ee4cb95d3f3517c9507c37932c089f4f6f3aec3731229"
+  },
+  {
+    "path": "corpus-v2-interrupted/smoke/config-discovery-launcher.txt",
+    "bytes": 3434,
+    "sha256": "901b474fb699ec7394300f781b655815e3f884586105a5899ed169075b1b44eb"
+  },
+  {
+    "path": "corpus-v2-interrupted/smoke/config-non-utf8-file-bytes.txt",
+    "bytes": 4776,
+    "sha256": "5f6d5c1207be075fb6f8dcc246d68968ccf1f047c6720814c107aa3e042e1407"
+  },
+  {
+    "path": "corpus-v2-interrupted/smoke/format-trace.txt",
+    "bytes": 22002,
+    "sha256": "d137562f5abf2d4cd7f9a4fbfeb874520238a5cb2d1580d6ccdf15ced612394d"
+  },
+  {
+    "path": "corpus-v2-interrupted/smoke/keys-prefix-stock.txt",
+    "bytes": 11741,
+    "sha256": "b6056eba58d6206f14f48e9a90323b0882d5f838efe2203b0dc7929599d8de51"
+  },
+  {
+    "path": "corpus-v2-interrupted/smoke/kill-filters.txt",
+    "bytes": 4185,
+    "sha256": "7d3e40a6680974cde0a814ac7a237aba9157988ae9c96792950524ae7566127b"
+  },
+  {
+    "path": "corpus-v2-interrupted/smoke/pane-border-status.txt",
+    "bytes": 9419,
+    "sha256": "c4950c0ce7b20c961083104c97a7353515269b5f0a07e4de9da763da8ca9178d"
+  },
+  {
+    "path": "corpus-v2-interrupted/smoke/pane-engine-knobs-input.txt",
+    "bytes": 359,
+    "sha256": "63cd56ec5f8a2f046b74f5dbf3d93b4398de91072d49964cf396cdb61f3ab4ee"
+  },
+  {
+    "path": "corpus-v2-interrupted/smoke/pane-tmux-path.txt",
+    "bytes": 1613,
+    "sha256": "9539200014c0b753417b3ccd7fa0cdc9214b928e9004171699498c83bdd820f6"
+  },
+  {
+    "path": "corpus-v2-interrupted/smoke/send-keys-client-selection.txt",
+    "bytes": 1007,
+    "sha256": "5b046b47c14bf49d3e2dae8b9559910f78da78ce1091840ed496e645f06430b1"
+  },
+  {
+    "path": "corpus-v2-interrupted/smoke/source-file-control.txt",
+    "bytes": 14660,
+    "sha256": "75901c4879d6040e1ec2d771c2c77b0bbf2c7346e9504837355ab01f12847b5a"
+  },
+  {
+    "path": "corpus-v2-interrupted/smoke/source-file-depth.txt",
+    "bytes": 152,
+    "sha256": "a6afbb305abca5d8f7caf5c25d31f6814f18bf9cbd1543384a11f0014ef4e234"
+  },
+  {
+    "path": "corpus-v2-interrupted/smoke/vim-tmux-navigator.txt",
+    "bytes": 2943,
+    "sha256": "c14299f53a26335e61537d4fb3a66763eaa5e0eacd1399305ea974fff1bdce66"
+  },
+  {
+    "path": "corpus-v2-interrupted/source-file-current-file.txt",
+    "bytes": 5772,
+    "sha256": "b91ecb2b04870b49be3d83689e9e063950d77e2e5a96de8e9b8573586c7be93c"
+  },
+  {
+    "path": "corpus-v2-interrupted/source-file-format.txt",
+    "bytes": 10525,
+    "sha256": "056b0dd866f702952b31960b1e43fbbdae766a5c5d5bd68bd9f0e778d54c290e"
+  },
+  {
+    "path": "corpus-v2-interrupted/source-file-output.txt",
+    "bytes": 11253,
+    "sha256": "708aa582519111a647ae7c149c932bf8b1c7b813222150e52d06c2b230bfe84a"
+  },
+  {
+    "path": "corpus-v2-interrupted/status-options.txt",
+    "bytes": 19030,
+    "sha256": "82f67aac0aa0122ffc8ddb2a4eb0611fd0b7c1e715e6d4c8ddde14aea185f066"
+  },
+  {
+    "path": "corpus-v2-interrupted/stderr-parity.txt",
+    "bytes": 3435,
+    "sha256": "c76739b77282a1efd7ea7af4039ecc5f72f19deca79acb51085f16805840b5a3"
+  },
+  {
+    "path": "corpus-v2-interrupted/update-environment.txt",
+    "bytes": 1439,
+    "sha256": "a85a01eae252a704338fe786035b9b14ef4f3e66f928bd17ab91cfdcfeb9d224"
+  }
+]

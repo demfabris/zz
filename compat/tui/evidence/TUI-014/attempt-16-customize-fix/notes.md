@@ -39,3 +39,5 @@ The broad tail fill passes the two requested default cases but regresses short d
 Stopped the v2 candidate corpus batches and attached proof pipelines (143), keeping their partial and first-pass logs. The rejected-tip nine-row baseline completed with exit 1 and raw first/final logs retained. A fresh proof pass will follow integration of the main changes that arrived during this run.
 
 The v4 renderer also flushes text at grid allocation boundaries. All ten extra style comparisons and both requested window controls/sabotages pass. Full mux and TUI package tests pass. The remaining development logs are retained; final proofs restart after the second rebase.
+
+The 143 raw development and baseline corpus logs are preserved in corpus-logs.tar.gz. corpus-log-manifest.json lists every member, size and SHA-256; each archive member was verified before removing its unpacked duplicate.

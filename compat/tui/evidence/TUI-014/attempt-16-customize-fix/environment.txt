@@ -1,0 +1,6 @@
+Alienware Linux; 2026-09-17; outer pinned tmux at 80x24; TERM=xterm-256color; SHELL=/bin/sh.
+Fixture and corpus processes use env -i with explicit PATH, HOME, SHELL, TERM and binary paths.
+Each fixture creates isolated homes and short sockets. Binary hashes are in binaries.txt.
+Cargo uses /tmp/zz-cargo.sh, two jobs, 4G cap and one of two shared flock slots.
+Daemon tests use HOME=/tmp/zz-emptyhome and XDG_CONFIG_HOME=/tmp/zz-emptyhome/config.
+Final attached proofs additionally set LANG=C.UTF-8 and LC_ALL=C.UTF-8. The corpus uses the explicit C locale inherited from env -i on both sides.

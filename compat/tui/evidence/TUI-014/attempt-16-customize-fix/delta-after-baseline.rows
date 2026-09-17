@@ -1,0 +1,9 @@
+lane2-store.txt
+show-options-hooks.txt
+smoke/cli-chain-parse-abort.txt
+smoke/command-prompt-chain.txt
+smoke/control-hard-loss.txt
+smoke/default-client-command.txt
+smoke/jobs-command-environment.txt
+smoke/source-replay-diagnostics.txt
+smoke/status-background-jobs.txt

@@ -1,8 +1,8 @@
 ---
 type: Design Plan
 title: Per-pane TUI customize mode
-description: Reuse the pane mode stack and chooser grid for tmux option editing, with a separate entry point for future zz controls.
-status: Implemented for opening and scoped option editing on 2026-09-16; gate review pending.
+description: Port mode-tree.c and window-customize.c onto the server pane mode stack, and share one prompt editor between customize-mode and switch-mode.
+status: Implemented for the tree keys, prompts, array items and previews on 2026-09-17; gate review pending.
 resource: crates/zz-mux/src/command/customize.rs
 timestamp: 2026-09-17T00:00:00Z
 tags: [tui, tmux, options]
@@ -10,70 +10,88 @@ tags: [tui, tmux, options]
 
 # Ownership
 
-Customize-mode belongs to the pane. The daemon stores `CustomizeMode` in the existing
+Customize-mode belongs to the pane. The daemon stores `CustomizeMode` in the
 `PaneModeRequest` stack, alongside clock and switch. Each snapshot carries the same
-selection, expansion state and prompt to every viewer of that pane. A later attach sees
-the current tree. Escape pops the mode and restores the previous mode.
+tree, selection and prompt to every viewer of that pane, and a later attach sees the
+current tree. Escape pops the mode and restores the previous one. `-k` kills the pane
+and `-Z` zooms it for the life of the entry, through the same stack code switch-mode uses.
 
-The implementation reuses `ChooseTreeState`, `ChooseTreeItem`, `ChooserPresentation`
-and the TUI chooser grid. It does not enter a per-client `ChooseTreeSession`.
-The renderer reads item depth and flags; the mux owns option identities, scopes and
-edits. Tree items carry the source pane as their wire target. The mux resolves the
-selected row through its stable option identity before constructing a normal
-`set-option` command, so the daemon runs the existing option effects.
+The mux owns the tree and the key handling; the raw TUI only draws. `CustomizeMode`
+keeps what `mode_tree_data` keeps: `current`, `offset` and `height`, the expanded and
+tagged item ids, the preview size, filter, search string, help flag and the open prompt.
+Rows are rebuilt from live option and key state on every call, the way
+`window_customize_build` rebuilds them, and each place the pin calls `mode_tree_build`
+runs `customize_build`: it finds the old current item by id, falls back to the last
+line, recomputes `height` and normalises `offset`, and drops tags whose parent is
+collapsed. Edits become ordinary `set-option`, `bind-key` and `unbind-key` invocations
+the daemon executes, and the build that follows them runs after they land.
 
-The pin calls this mode `options-mode` in formats. It opens collapsed Server Options,
-Session Options, Window & Pane Options and key table sections. Its description box
-uses the bottom twelve rows. The option metadata comes from the pinned
-`compat/.cache/tmux-src/options-table.c`: type, description, units and choices.
-`window-customize.c` and `mode-tree.c` define the presentation and edit behavior.
+# Rows
+
+The tree follows `window_customize_build`: Server Options, Session Options and Window &
+Pane Options, then one Key Table root per non-empty table. Options sort by name with user
+options first. Array options have no text, and each index is a child named
+`name[key]` whose text is the same format expansion, so a pane-scope entry carries the
+`(pane N)` marker. A key row has Command, Note and Repeat children that draw their parent's
+preview. Text passes through `#[ignore]`, which `parse_styled_segments` now honours the way
+`format_draw` does, so values like `pane-border-format` show their markup literally.
+
+Previews are laid out on the daemon through a port of `screen_write_text`, including the
+description, scope, `This is an array option, key N.`, the value, `This expands to:`,
+choices, the `EXAMPLE` swatch for colour and style options, the default, and the window
+and global values. They reach the client as `ChooserPreview::Markup` lines, with the
+drawn-as-parent title in the selected item's `detail`.
+
+# Keys
+
+`customize_key` ports `mode_tree_key` and `window_customize_key`: movement with and
+without wrap, page keys, `g`/`G`, row shortcuts, Right expanding a collapsed row and
+descending an expanded one, Left collapsing or moving to the parent or up a row, `M--`
+and `M-+` keeping the current line, the three-state `v` cycle, `t`/`T`/`C-t` tagging
+(keyboard `t` does not move), search with `n`/`N` over the whole tree, filter and `c`,
+`H`, help on `C-h`/`F1`, `s`/`w`/`S`/`W`/Enter scope selection with flag and choice
+cycling, `a` for array keys, and the `d`, `u`, `D`, `U` single-key confirmations
+(`-y` answers them at once).
+
+# Prompts
+
+`ModePrompt` in `crates/zz-mux/src/command/mode_prompt.rs` ports `prompt_key` and
+`prompt_draw` for mode prompts: emacs editing, incremental notifications, single-key
+prompts, and the draw that scrolls a long value so the cursor stays on the row. The
+daemon sends only the drawn row and the cursor column (`PaneMode::Customize.prompt`,
+`prompt_cursor`, `prompt_top`), never the whole value, so no prompt text reaches a
+bounded wire field. Switch-mode uses the same editor for its `(search)` prompt.
+
+# Switch mode
+
+`SwitchMode` keeps `current`, `offset`, the prompt and the filter across snapshots.
+`window_switch_key`'s map sends `C-p`/`C-k` up and `C-n`/`C-j` down, Enter runs the
+template on the current match and does nothing when nothing matches, and every other key
+edits the prompt, whose changes reset the selection to the top. The daemon ranks rows with
+`fuzzy_match_columns`, which skips `#[...]` styles and returns the matched columns the
+client repaints with `switch-mode-match-style`.
 
 # zz controls extension
 
-The sibling zz-knobs lane can add an explicit `z` action that reveals a collapsed
-`zz TUI Options` root after the pin's sections. `MuxEngine::customize_rows` is the
-row assembly point; `CustomizeMode` owns the visibility flag and `customize_key`
-owns the action. The pin assigns row shortcuts to digits and Meta-letters; plain `z` is not a
-customize or mode-tree action. The default tree has only the pin's roots. This keeps the decoded
-pin comparison exact at every default checkpoint, even when the sibling adds its
-rows. The sibling must make the entry discoverable in help and test the revealed
-tree as a zz extension. It must not mask extra rows in the pin comparison.
+The mode tree is a superset surface: zz's own TUI options belong in it beside the pin's
+rows (fabrico, 2026-09-16). `MuxEngine::customize_rows` is the row assembly point, so a
+`zz TUI Options` root appends there after the pin's sections. It must stay out of the
+default tree the pin comparison reads, reached through an explicit action that is not a
+mode-tree key, and it needs its own tests as a zz extension. It is not built yet.
+
+# Limits
+
+Not built: the mouse inside either mode, the key-binding reset for keys whose default
+command changed in place, prompt history (`Up`/`Down` in an edit prompt), `Tab`
+completion in a command prompt, `C-y` pasting the top buffer, and vi `status-keys` in
+mode prompts. Rows are rebuilt live, so an option changed from outside shows at once
+where the pin shows it after its next build.
 
 # Suspend
 
 The daemon resolves suspend-client through the detach-client target resolver and
 signals a terminal client using the PID from its handshake. The raw client pauses
 its output writer, restores terminal modes, then sends itself SIGSTOP. SIGCONT
-re-enters the terminal, restarts painting and checks its geometry. The guard keeps
-its original termios throughout. Control and clients without a tty receive no
-process signal; the pin measurement for these classes belongs in the evidence.
-
-# Wire and proof
-
-The pane tree extends the same unreleased v104 as the base pane mode field.
-Suspend uses process signals plus the tail `ClientSuspendState` input variant to restore
-the client's attachment accounting after SIGCONT. The evidence under
-`compat/tui/evidence/TUI-014/attempt-07-customize/` records exact opening-screen
-comparisons, a numeric option edit, terminal stop/resume, and regression results.
-The two newly asserted cases have one-sided sabotages in the fixture self-check.
-
-The 2026-09-17 fix pass covers all eight editable array options. Root edits insert
-at the first unused index when submitted; child edits replace that index. Both
-preserve other entries and the existing owner scope. Hook arrays stay out of the
-customize tree, matching the pin. C-c and the measured unbound mode-tree keys
-leave the mode open; q, Escape and C-g close it.
-
-The opening-screen proof does not cover every customize interaction. Key binding
-editing, reset/unset and tagged bulk mutations, help, mouse,
-kill-on-exit (`-k`) and zoom restoration (`-Z`) remain unimplemented; the two flags
-are explicitly refused. Search, filtering, navigation and arbitrary option edits
-have not all received pin screen comparisons. The zz section belongs to the
-sibling lane. Actual GUI, web and remote SSH suspend behavior was not exercised;
-the no-tty policy was tested in the daemon and compared with a pin control client.
-
-Source inspection also identifies a remote limitation. The built-in SSH endpoint
-uses `EndpointFactsScope::PortableTerminalSize` in
-`crates/zz-daemon/src/client.rs`, which omits the client tty. It therefore takes
-the suspend handler's no-tty no-op path. The process-signal implementation covers
-a TUI connected to a local daemon; it does not suspend a local TUI through the
-built-in SSH transport. No live SSH suspension proof was run.
+re-enters the terminal, restarts painting and checks its geometry. Control and clients
+without a tty receive no process signal. The built-in SSH endpoint omits the client tty,
+so a TUI connected through it takes the no-tty path; no live SSH suspension was run.

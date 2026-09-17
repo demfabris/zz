@@ -1,6 +1,8 @@
 # Update Log
 
 ## 2026-09-16
+* **Update**: Fixed BH-001 prompt replay for both providers, BH-002 inline-code fragment fills, and BH-004 synchronized terminal publication with a one-second timeout. Added regression coverage; BH-003 resize history corruption remains under investigation.
+* **Creation**: Recorded the interactive bughunt: both-provider Agent message loss, inline-code wrapping, resize corruption in Claude terminals, partial recovery after pane movement, and isolated synchronized-output reproduction. Corrected Agent transcript retention documentation; no product fixes.
 * **Update**: Added Linux and macOS headless tarballs and `install.sh --headless` for the zz-cli split, retargeted the compat harness and attached-client CI fixture to `zz_cli`, added the GUI dependency guard, and documented the shared CLI and daemon executable layout. Separate headless distro packages remain follow-up work.
 * **Update**: Moved the tray icon into each GUI process and built its menu from the local mux snapshot. Removed the daemon tray helper and its IPC. Closing or quitting hides zz while local sessions run when the tray is enabled and available and `quit-daemon-on-exit` is false; macOS hides the Dock icon too. Quit and Stop Sessions sends `kill-server`, and the tray setting applies live.
 

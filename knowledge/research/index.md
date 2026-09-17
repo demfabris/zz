@@ -7,4 +7,5 @@
 * [Codebase Audit for Code Smells, Rust Antipatterns, and Performance Issues](2026-08-17-codebase-audit.md) - Revalidation at 758dac0 found nine confirmed issues, four qualified or latent findings, one intentional ABI contract, and one overstated impact claim.
 * [tmux CLI compatibility and alias boundary](2026-08-22-tmux-cli-compatibility-audit.md) - A commit-pinned inventory of the tmux command, flag, option, format, hook, key, packaging, and native zz command surfaces, with the exact boundary around alias tmux=zz.
 * [Agent-to-agent messaging survey](2026-09-10-agent-messaging-survey.md) - How Claude Code, Codex, Gemini CLI, herdr, A2A, and ACP let one coding agent message another, with Claude Code's peer bus verified live on this machine, the delivery-timing taxonomy every tool converged on, and what it means for a zz message backbone.
+* [Interactive bughunt: Agent transcripts, Markdown, and terminal resizing](2026-09-16-interactive-bughunt.md) - Running investigation of disappearing Agent user messages in both providers, inline-code wrapping, and terminal corruption after pane or GUI resizing.
 <!-- okf:listing:end -->

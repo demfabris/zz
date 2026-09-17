@@ -490,6 +490,18 @@ pane_geometry() {
 window_size() {
   side_command "$1" display-message -p -t "=$INNER_SESSION:0" '#{window_width}x#{window_height}'
 }
+window_size_is() {
+  [ "$(window_size "$1")" = "$2" ]
+}
+window_has_size() {
+  local name="$1" side="$2" want="$3"
+  if wait_for_quietly window_size_is "$side" "$want"; then
+    pass "$name"
+  else
+    fail "$name" "want: $want"
+    printf '      got:  %s\n' "$(window_size "$side")"
+  fi
+}
 send_to_pane() {
   local side="$1"
   local pane
@@ -807,6 +819,21 @@ sidebar_up() {
 sidebar_down() {
   ! capture_plain "${CLIENT_WINDOW:-zz}" | grep -Fq "$SIDEBAR_MARKER"
 }
+sidebar_cursor_is() {
+  sidebar_up &&
+    [ "$(tmux_outer_command display-message -p -t "=$OUTER_SESSION:${CLIENT_WINDOW:-zz}" '#{cursor_flag}')" = "$1" ]
+}
+sidebar_focused() {
+  sidebar_cursor_is 0
+}
+sidebar_has_focus() {
+  if wait_for_quietly sidebar_focused; then
+    pass "$1"
+  else
+    fail "$1" 'the drawn sidebar never took keyboard focus'
+    return 1
+  fi
+}
 
 run_sidebar_verbs() {
   fresh_group sidebar 0
@@ -836,13 +863,6 @@ run_sidebar_verbs() {
   # SHOWN BUT NOT FOCUSED. Escape is SidebarCancel: the tree stays drawn and the
   # pane owns the keyboard again, which is the contract's rule that local chrome
   # consumes ordinary keys only inside the input context that owns them.
-  # MEASURED 2026-09-13: unfocusing changes no cell at all, decoded screen for
-  # decoded screen, so the only observable for it is the next key reaching the
-  # pane, and the first character after an Escape merges with it into one Alt-
-  # key at the terminal parser. press_until_pane therefore re-sends the key,
-  # bounded, until the pane's own grid has it; while the sidebar is focused it
-  # swallows every key and the wait runs out, which is the failure this case is
-  # for.
   press F8
   wait_for 'the sidebar shown again' sidebar_up
   if press_until_pane "$pane" ZKEY Escape; then
@@ -852,7 +872,10 @@ run_sidebar_verbs() {
   fi
   screen_has still-drawn-while-unfocused zz "$SIDEBAR_MARKER"
   press F8
-  wait_for 'the sidebar focused again' sidebar_up
+  sidebar_has_focus refocused || {
+    dump_diagnostics 'the sidebar focused again'
+    die 'the sidebar did not regain focus within 12 seconds'
+  }
   press q
   wait_for 'the sidebar withdrawn' sidebar_down
   pass withdrawn
@@ -1271,8 +1294,8 @@ run_terminal_around_the_sidebar() {
   wait_for 'the sidebar up again' sidebar_up
   detach_and_reattach
   screen_lacks reattached-without-the-sidebar zz "$SIDEBAR_MARKER"
-  equals reattached-window-columns \
-    "${COLUMNS_UNDER_TEST}x$((ROWS_UNDER_TEST - 1))" "$(window_size zz)"
+  window_has_size reattached-window-columns zz \
+    "${COLUMNS_UNDER_TEST}x$((ROWS_UNDER_TEST - 1))"
   canvas_is_the_pin reattached
   drop_extra_panes
   canvas_is_the_pin one-pane-again
@@ -1481,6 +1504,21 @@ run_self_check() {
   wait_for 'the sabotage key in the pane' pane_grid_has zz "$pane" ZSABOTAGE
   expect_report 'a key the pane really did take' \
     pane_grid_lacks sabotage "$pane" ZSABOTAGE
+
+  expect_report 'an absent sidebar cannot own keyboard focus' \
+    sidebar_has_focus sabotage
+  bind_and_press F8 focus-sidebar
+  sidebar_has_focus focus-control
+  press Escape
+  wait_for 'the pane cursor after sidebar Escape' sidebar_cursor_is 1
+  expect_report 'a drawn sidebar that never regained focus' \
+    sidebar_has_focus sabotage
+  press F8
+  sidebar_has_focus refocus-control
+  press q
+  wait_for 'the refocused sidebar withdrawn by q' sidebar_down
+  expect_report 'a window that never reaches its required size' \
+    window_has_size sabotage zz '1x1'
 
   # The canvas channel: one side's status row is painted red and nothing else
   # changes, so the whole-screen comparison has to report it.

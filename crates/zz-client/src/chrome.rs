@@ -710,6 +710,26 @@ mod tests {
     }
 
     #[test]
+    fn sidebar_withdrawal_stays_specific_to_the_tui_profile() {
+        let quit = chord(KeyCode::Character('q'), false, false, Some("q"));
+        let escape = chord(KeyCode::Escape, false, false, None);
+        for (profile, expected) in [
+            (ChromeProfile::Tui, ChromeAction::ToggleSidebar),
+            (ChromeProfile::Desktop, ChromeAction::SidebarCancel),
+            (ChromeProfile::DesktopApple, ChromeAction::SidebarCancel),
+        ] {
+            let keymap = ChromeKeymap::for_profile(profile);
+            assert_eq!(keymap.resolve(SIDEBAR_TABLE, &quit), Some(expected));
+            assert_eq!(
+                keymap.resolve(SIDEBAR_TABLE, &escape),
+                Some(ChromeAction::SidebarCancel)
+            );
+            assert_eq!(keymap.resolve(UI_TABLE, &quit), None);
+            assert_eq!(keymap.resolve(TERMINAL_TABLE, &quit), None);
+        }
+    }
+
+    #[test]
     fn overrides_rebind_and_unbind() {
         let mut keymap = ChromeKeymap::new();
         keymap.bind("ui", "C-d", "detach").expect("known action");

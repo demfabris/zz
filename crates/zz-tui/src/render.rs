@@ -4001,6 +4001,52 @@ mod tests {
     }
 
     #[test]
+    fn sidebar_refocus_hides_the_cursor_without_changing_visibility_or_geometry() {
+        let mut model = block_model(120, 30);
+        let pane = PaneId(1);
+        attach_one_pane(&mut model, pane);
+        let mut viewport = TerminalViewport::blank(120, 29, SessionStatus::Running);
+        viewport.cursor = Some(Cursor::new(
+            0,
+            0,
+            true,
+            false,
+            false,
+            CursorStyle::Bar,
+            viewport.foreground,
+        ));
+        model.viewports.insert(pane, viewport);
+        let mut renderer = Renderer::new();
+
+        assert!(model.focus_sidebar());
+        assert_eq!(model.status_area(), (29, 91));
+        renderer.place_active_cursor(&model);
+        assert_eq!(renderer.output, b"\x1b[?25l");
+
+        model.sidebar.focused = false;
+        assert!(model.sidebar_visible());
+        renderer.output.clear();
+        renderer.place_active_cursor(&model);
+        assert!(renderer.output.ends_with(b"\x1b[?25h"));
+
+        assert!(!model.focus_sidebar());
+        assert!(model.sidebar.focused);
+        assert!(model.sidebar_visible());
+        assert_eq!(model.status_area(), (29, 91));
+        renderer.output.clear();
+        renderer.place_active_cursor(&model);
+        assert_eq!(renderer.output, b"\x1b[?25l");
+
+        assert!(model.hide_sidebar());
+        assert!(!model.sidebar.focused);
+        assert!(!model.sidebar_visible());
+        assert_eq!(model.status_area(), (0, 120));
+        renderer.output.clear();
+        renderer.place_active_cursor(&model);
+        assert!(renderer.output.ends_with(b"\x1b[?25h"));
+    }
+
+    #[test]
     fn menu_hides_the_workspace_cursor() {
         let mut model = block_model(40, 12);
         model.menu = Some(menu_state());

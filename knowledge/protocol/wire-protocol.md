@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v104)
+title: zz wire protocol (v105)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 104`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 105`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (104) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (105) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -682,7 +682,7 @@ invocation rather than in `args` for the commands whose payload is not an argume
 the server log still records the command the caller typed. See
 [the command stream channel](/designs/command-stream-channel.md) for the sinks and the bound.
 
-v104 is unreleased. The cycle-11 alias correction appends
+v105 is unreleased. The cycle-11 caller-stream correction appends
 `CommandInvocation.stdin_available: bool` with `#[serde(default)]` and
 `ClientFileOperation::ReadStdin { binary: bool }` after `Write`, then `ReadStdinChunk` after
 `ReadStdin`. A command client opts in to stdin requests. The daemon requests bytes when the reader
@@ -692,12 +692,13 @@ an empty payload at end of file, and the daemon requests the next chunk only aft
 the previous one. Unused stdin stays unread.
 `CommandInvocation::stdin_spent` uses `#[serde(skip)]` and stays inside the daemon;
 `caller_stream_spent_marker_stays_in_process` checks that absent and spent streams encode
-identically. The protocol version remains 104, including main's three `ServerError::Native*`
-variants. The v103 entries above describe the released layout and remain intact.
+identically. These appends were written against an unreleased 104; zz 0.11.0 shipped 104 with
+main's three `ServerError::Native*` variants and without them, so they moved to 105. The v103 and
+v104 entries describe released layouts and remain intact.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 104`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 105`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
 - v104 appends `ServerError::NativeCommandParse(String)`, `NativeUnsupportedCommand(String)`,
@@ -708,7 +709,10 @@ variants. The v103 entries above describe the released layout and remain intact.
   Both parse variants retain the same diagnostic text and parse-error classification.
   `NativeInvalidCommand` preserves the runtime phase when bind-key or untyped confirm-before
   constructs an invalid native callback, while retaining native usage exit 2.
-  v103 shipped in zz 0.10.0, so these builds require v104 on both sides of the connection.
+  v103 shipped in zz 0.10.0, so v104 builds require v104 on both sides of the connection.
+- v105 appends `CommandInvocation.stdin_available` and `ClientFileOperation::ReadStdin` and
+  `ReadStdinChunk`, the caller stream requests described above. v104 shipped in zz 0.11.0, so these
+  builds require v105 on both sides of the connection.
 - v103 carries the pin's pane prompt and the terminal name a client learned after the hello.
   `CommandPromptState` appends `pane: Option<PaneId>` after `no_freeze`: `command-prompt -P` is
   `window_pane_set_prompt`, so the prompt hangs on the pane the command targeted rather than on the

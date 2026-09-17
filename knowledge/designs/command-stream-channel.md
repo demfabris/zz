@@ -2,7 +2,7 @@
 type: Design Plan
 title: Command stream channel
 description: "One bounded channel for the caller's standard input and output on a command client: a capped whole read for the sinks that hold their payload, a chunked stream with backpressure for pane input, one byte-preserving carrier on the invocation, and three named sinks, so `source-file -`, `display-message -I`, `split-window -I`, `load-buffer -` and `save-buffer -` share a transport instead of owning five."
-status: "Built for TUI-018; streamed pane input, unreadable descriptors and alias shell guards corrected on protocol 104; awaiting independent campaign review"
+status: "Built for TUI-018; streamed pane input, unreadable descriptors and alias shell guards corrected on protocol 105; awaiting independent campaign review"
 resource: crates/zz-protocol/src/message.rs
 tags:
 - tmux
@@ -50,7 +50,7 @@ it: a stream is not an argument, and the server log records the command the call
 
 An expanded command alias keeps this carrier on its group invocation. Each member shares one
 caller stream: the first reader consumes the bytes and a later reader receives the in-process
-`CommandInvocation.stdin_spent` marker. Serde skips that marker. Protocol 104 adds the availability flag and deferred read operation. The mux group executor accounts for emitted stream effects, and the daemon's
+`CommandInvocation.stdin_spent` marker. Serde skips that marker. Protocol 105 adds the availability flag and the two deferred read operations. The mux group executor accounts for emitted stream effects, and the daemon's
 prepared group queue routes the carrier after parsing the members. A nonreader leaves it available.
 The daemon keeps the stream in the invoking client's `CommandStreams` request record, which it
 removes when producing the response. Replayed files and alias members use that same record through

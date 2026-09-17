@@ -25,6 +25,36 @@ use zz_protocol::{
 /// file opened.
 const CLIENT_FILE_READ_ERRNO: i32 = 5;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+static STDIN_WAS_CLOSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[used]
+#[cfg_attr(target_os = "linux", unsafe(link_section = ".init_array"))]
+#[cfg_attr(target_os = "macos", unsafe(link_section = "__DATA,__mod_init_func"))]
+#[allow(
+    unsafe_code,
+    reason = "capture descriptor validity before Rust sanitizes standard input"
+)]
+static CAPTURE_STDIN: extern "C" fn() = capture_stdin;
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[allow(
+    unsafe_code,
+    reason = "fcntl and errno inspect fd 0 without allocating or changing it"
+)]
+extern "C" fn capture_stdin() {
+    unsafe {
+        if libc::fcntl(0, libc::F_GETFD) == -1 {
+            #[cfg(target_os = "linux")]
+            let error = *libc::__errno_location();
+            #[cfg(target_os = "macos")]
+            let error = *libc::__error();
+            STDIN_WAS_CLOSED.store(error == libc::EBADF, Ordering::Relaxed);
+        }
+    }
+}
+
 static CLIENT_INSTANCE_ID: OnceLock<ClientInstanceId> = OnceLock::new();
 
 fn client_instance_id() -> ClientInstanceId {
@@ -1669,6 +1699,14 @@ pub fn short_device_name() -> Option<String> {
 }
 
 fn read_command_stdin(binary: bool) -> Result<Vec<u8>, String> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if STDIN_WAS_CLOSED.load(Ordering::Relaxed) {
+        eprintln!(
+            "[err] evsig_cb: recv: {}",
+            crate::strerror_text(&io::Error::from_raw_os_error(libc::EBADF))
+        );
+        std::process::exit(1);
+    }
     read_command_stdin_from(io::stdin().lock(), binary)
 }
 

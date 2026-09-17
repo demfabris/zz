@@ -811,12 +811,40 @@ Sources:
 - `crates/zz-client/src/core.rs`
 - `crates/zz/src/tray/facts.rs`
 - `knowledge/designs/tui-parity.md`
+- `compat/scenarios/census-hooks.txt`
 
 Tmux gap references: `commands.native-client-tools`, `clients.interactive-refresh`.
 
-Fix pass 2026-09-17 in progress after the c0e9bd83 rejection: array edit preservation, customize key handling and switch-row style tails. Fabrico’s dated per-client copy-mode decision assigns three stacking cases to decided:TUI-014. Fresh proof is pending.
+Fix pass measured 2026-09-17 on campaign/tui-customize-3 after rebasing onto origin/main 38c50df4. Customize root and indexed edits preserve entries, select the first free insertion index and retain the owning scope for all eight editable array options; full show-options listings and array-erasure sabotage assert this. C-c remains in options-mode, and the pin exit/unbound-key audit and attached comparisons are retained. Both switch window-style cases are asserted, with exact fresh-scene capture-tail controls and sabotages plus a decoded-cell history case. Fabrico’s dated per-client-copy amendment owns clock-over-copy, clock-over-copy-key and copy-over-clock as decided:TUI-014. None of these five mode residuals remains parked in a gap.
 
-Next action: Finish and review the campaign/tui-customize-3 fix pass with fresh proofs; retain review status for the gate.
+Three standalone final-fixture runs (client-3, client-7, client-8) each pass 332 asserted comparisons with 30 recorded, ordinary TUI-014=0, decided:TUI-014=3 and unattributed=0. The full self-check catches every sabotage. Chooser, copy-mode, screen-diff and overlay fixtures and self-checks pass; attached-client passes with explicit USER/LOGNAME; the live TUI-014 verifier exits 0. All 204 delta rows ran: 183 initially clean, 13 recovered, six inherited baseline divergences and two documented known rows, with no unrun rows or persistent fix-caused corpus divergence identified. Failed runs remain retained. Client-6 has two ticking-clock capture differences. Full tests have a recovered CLI failure, an unresolved intermittent simulator failure that passes unchanged, and a slow-client soak failure reproduced on main; clippy, formatting and compatibility checks pass. Complete measurements and limitations are in attempt-17-rebased-proof. The lane leaves this at review for the gate.
+
+Next action: Gate-review the rebased fix pass and its retained failures, array/key/style sabotages and dated copy-mode decision. TUI-014 owns zero ordinary records; the three stacking records are decided:TUI-014. Do not infer verification from the lane’s passing tally.
+
+Proof revision: `7adc5e261c92b76e4c90a277629c26972b68258a`. Tmux: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
+
+Environment: Alienware box, Linux 7.2.3-1-cachyos-deckify x86_64, 16 CPUs, rustc 1.97.0. Base 38c50df4. Runtime built at 0b72e3b2; Rust and Cargo configuration unchanged through proof revision 7adc5e26. Frozen zz SHA-256 a01a889d28982bfe8e7022ea7dea961262e8dce7167906ef0cef6056daa09106; pinned tmux next-3.8 d77c9dc6 SHA-256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5. RUN_ENV is an explicit minimal environment with empty HOME, SHELL=/bin/sh, TERM=xterm-256color and C.UTF-8; IDENTITY_ENV adds USER/LOGNAME for attached-client identity facts. Fixtures isolate sockets/configuration. Cargo uses /tmp/zz-cargo.sh, its 4G cap, two jobs and shared flock slots. No credential environment dumps. Failed and interrupted attempts retained; corpus first/final logs archived with per-file hashes.
+
+Proof commands:
+
+- `RUN_ENV compat/tui-client-commands.sh: client-3, client-7 and client-8 each exit 0; all 332 asserted comparisons identical, 30 recorded, ordinary TUI-014=0, decided:TUI-014=3, unattributed=0`
+- `RUN_ENV compat/tui-client-commands.sh --self-check: exit 0; every sabotage caught in its own channel and both equivalences passed`
+- `RUN_ENV compat/tui-choosers.sh and --self-check: both exit 0; 78 asserted, zero recorded`
+- `RUN_ENV compat/tui-copy-mode.sh and --self-check: both exit 0; 147 cases agree on every asserted channel, zero recorded differences elsewhere`
+- `RUN_ENV compat/tui-screen-diff.sh and --self-check: both exit 0; 147 asserted checkpoints identical, six existing records`
+- `RUN_ENV compat/tui-overlays.sh and --self-check: both exit 0; 48 asserted, zero recorded`
+- `IDENTITY_ENV compat/attached-client.sh: exit 0, attached-client compatibility: PASS`
+- `RUN_ENV python3 compat/tui/verify-claims.py --run TUI-014 --timeout 7200 --zz target/debug/zz-customize-rebased --output-dir compat/tui/evidence/TUI-014/attempt-17-rebased-proof/verifier-bounded: exit 0; client roster and chooser fixture pass, no ordinary records for TUI-014`
+- `ZZ_COMPAT_ZZ=target/debug/zz-customize-rebased compat/run.sh --delta origin/main...HEAD --commands customize-mode,switch-mode,set-option,show-options,send-keys,clock-mode,suspend-client,server-access,choose-client,copy-mode --list: 204 rows; four disjoint execution batches exit 1/0/0/1, two extra rows exit 0; six inherited divergences and two known rows, zero unrun; see corpus-results.json`
+- `HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config /tmp/zz-cargo.sh test -p zz-protocol -p zz-mux -p zz-daemon -p zz-tui -p zz-client -p zz-client-ffi -p zz-cli -p zz --all-features --no-fail-fast: exit 101 on three integration targets; CLI passes alone, simulator passes unchanged after failures, agent soak fails identically on main; see tests.txt and comparison logs`
+- `/tmp/zz-cargo.sh clippy -p zz-protocol -p zz-mux -p zz-daemon -p zz-tui -p zz-client -p zz-client-ffi -p zz-cli -p zz --all-targets --all-features -- -D warnings: exit 0`
+- `/tmp/zz-cargo.sh fmt --all: exit 0; compat/check.sh with every nested cargo routed through /tmp/zz-cargo.sh: exit 0; python3 compat/wire-version.py: exit 0, version 104 unreleased`
+- `Focused verifier timeout-retention test: exit 0; both mocked fixture timeouts retain partial stdout/stderr and exit 124`
+- `Rejected c0e9bd83 switch-tail controls: exit 1 with both required window controls failing; fixed style controls and persistent tail/blank-background sabotages exit 0`
+
+Artifacts: `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/review.md`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/notes.md`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/results.json`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/completed-results.json`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/binary.txt`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/binary-source-match.exit`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/platform.txt`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/footprint.txt`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/source-footprint.txt`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/client-3.txt`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/client-7.txt`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/client-8.txt`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/client-self.txt`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/client-6.txt`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/key-audit.md`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/tail-grid-comparison.json`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/tail-rejected-controls.txt`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/tail-bounded-redraw.txt`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/attached-identity.txt`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/verify-claims-bounded.txt`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/corpus-results.json`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/corpus-logs.tar.gz`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/corpus-manifest.json`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/tests.txt`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/clippy.txt`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/compat-check-verifier.txt`, `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/security-scan.txt`.
+
+Review: `compat/tui/evidence/TUI-014/attempt-17-rebased-proof/review.md`.
 
 ### TUI-015: A lock surface a client can draw
 

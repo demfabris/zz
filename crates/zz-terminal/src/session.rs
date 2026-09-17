@@ -8654,18 +8654,6 @@ fn capture_has_tabs(
     Ok(false)
 }
 
-fn capture_tab_width(tags: &[u8], x: usize) -> usize {
-    let width = usize::from(tags[x]);
-    if !(1..=32).contains(&width) || x + width > tags.len() {
-        return 0;
-    }
-    if (1..width).all(|offset| tags[x + offset] == 128 + u8::try_from(offset).unwrap_or(0)) {
-        width
-    } else {
-        0
-    }
-}
-
 fn capture_styled_terminal(
     terminal: &Terminal<'_, '_>,
     options: CaptureOptions,
@@ -8705,27 +8693,16 @@ fn capture_styled_terminal(
             u16::try_from(allocated_row_width(usize::from(used), usize::from(columns)))
                 .unwrap_or(columns)
         };
-        let tags = (0..columns)
-            .map(|x| {
-                terminal
-                    .grid_ref(Point::Screen(PointCoordinate { x, y }))
-                    .and_then(|grid| grid.cell())
-                    .and_then(libghostty_vt::screen::Cell::tab)
-                    .map_err(capture_failure)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut skip_until = 0;
         let mut line = String::new();
         for x in 0..width {
-            if x < skip_until {
-                continue;
-            }
             let grid = terminal
                 .grid_ref(Point::Screen(PointCoordinate { x, y }))
                 .map_err(capture_failure)?;
             let cell = grid.cell().map_err(capture_failure)?;
+            let tab = cell.tab().map_err(capture_failure)?;
             let wide = cell.wide().map_err(capture_failure)?;
-            if wide == CellWide::SpacerTail
+            if tab >= 128
+                || wide == CellWide::SpacerTail
                 || (wide == CellWide::SpacerHead && options.join_wrapped)
             {
                 continue;
@@ -8750,10 +8727,8 @@ fn capture_styled_terminal(
                 push_capture_sgr(&mut line, previous, style);
             }
             previous = style;
-            let tab_width = capture_tab_width(&tags, usize::from(x));
-            if tab_width > 0 {
+            if tab != 0 {
                 line.push('\t');
-                skip_until = x + u16::try_from(tab_width).unwrap_or(0);
                 continue;
             }
             let count = match grid.graphemes(&mut graphemes) {
@@ -18456,6 +18431,119 @@ mod tests {
                     capture_terminal(&terminal, None, options).unwrap(),
                     expected,
                     "resized {input:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn capture_preserves_edited_tab_cells() {
+        for (input, expected) in [
+            (
+                "ABC\tDEF\r\x1b[5G\x1b[@X\x1b[5;1HNEXT",
+                "ABC\tX    DEF\n\n\n\nNEXT",
+            ),
+            (
+                "ABC\tDEF\r\x1b[2G\x1b[2@\x1b[5;1HNEXT",
+                "A  BC\tDEF\n\n\n\nNEXT",
+            ),
+            (
+                "ABC\tDEF\r\x1b[4G\x1b[@\x1b[5;1HNEXT",
+                "ABC \tDEF\n\n\n\nNEXT",
+            ),
+            (
+                "\x1b[73GABC\tZ\r\x1b[70G\x1b[6@\x1b[5;1HNEXT",
+                "                                                                          C   AB\n\n\n\nNEXT",
+            ),
+            (
+                "\x1b[73GABC\tZ\r\x1b[70G\x1b[2@\x1b[5;1HNEXT",
+                "                                                                          ABC\t\n\n\n\nNEXT",
+            ),
+            (
+                "ABC\tDEF\r\x1b[5G\x1b[@X\x1b[7GY\x1b[5;1HNEXT",
+                "ABC\tX Y  DEF\n\n\n\nNEXT",
+            ),
+            (
+                "ABC\tDEF\r\x1b[5G\x1b[P\x1b[5;1HNEXT",
+                "ABC\tDEF\n\n\n\nNEXT",
+            ),
+            (
+                "ABC\tDEF\r\x1b[2G\x1b[2P\x1b[5;1HNEXT",
+                "A\tDEF\n\n\n\nNEXT",
+            ),
+            ("ABC\tDEF\r\x1b[4G\x1b[P\x1b[5;1HNEXT", "ABCDEF\n\n\n\nNEXT"),
+            (
+                "ABC\tDEF\r\x1b[4G\x1b[5P\x1b[5;1HNEXT",
+                "ABCDEF\n\n\n\nNEXT",
+            ),
+            ("ABC\tDEF\r\x1b[80P\x1b[5;1HNEXT", "\n\n\n\nNEXT"),
+            (
+                "ABC\tDEF\r\x1b[5G\x1b[P\x1b[6GX\x1b[5;1HNEXT",
+                "ABC  X DEF\n\n\n\nNEXT",
+            ),
+            (
+                "ABC\tDEF\r\x1b[5G\x1b[2X\x1b[5;1HNEXT",
+                "ABC\t  DEF\n\n\n\nNEXT",
+            ),
+            (
+                "ABC\tDEF\r\x1b[4G\x1b[X\x1b[5;1HNEXT",
+                "ABC DEF\n\n\n\nNEXT",
+            ),
+            (
+                "ABC\tDEF\r\x1b[4G\x1b[5X\x1b[5;1HNEXT",
+                "ABC     DEF\n\n\n\nNEXT",
+            ),
+            (
+                "TOP\r\nABC\tDEF\r\nBOTTOM\x1b[2;1H\x1b[L\x1b[5;1HNEXT",
+                "TOP\n\nABC\tDEF\nBOTTOM\nNEXT",
+            ),
+            (
+                "\x1b[2;3r\x1b[3;1HABC\tDEF\x1b[2;1H\x1b[L\x1b[r\x1b[5;1HNEXT",
+                "\n\n\n\nNEXT",
+            ),
+            (
+                "TOP\r\nABC\tDEF\r\nBOTTOM\x1b[1;1H\x1b[M\x1b[5;1HNEXT",
+                "ABC\tDEF\nBOTTOM\n\n\nNEXT",
+            ),
+            (
+                "TOP\r\nABC\tDEF\r\nBOTTOM\x1b[2;1H\x1b[M\x1b[5;1HNEXT",
+                "TOP\nBOTTOM\n\n\nNEXT",
+            ),
+            (
+                "\x1b[2;4r\x1b[3;1HABC\tDEF\x1b[4;1H\n\x1b[r\x1b[5;1HNEXT",
+                "\nABC\tDEF\n\n\nNEXT",
+            ),
+            (
+                "\x1b[2;4r\x1b[2;1HABC\tDEF\x1b[2;1H\x1bM\x1b[r\x1b[5;1HNEXT",
+                "\n\nABC\tDEF\n\nNEXT",
+            ),
+            (
+                "\x1b[2;4r\x1b[2;1HABC\tDEF\x1b[4;1H\n\x1b[r\x1b[5;1HNEXT",
+                "\n\n\n\nNEXT",
+            ),
+        ] {
+            for chunk_size in [1, input.len()] {
+                let mut terminal = Terminal::new(TerminalOptions {
+                    cols: 80,
+                    rows: 24,
+                    max_scrollback: 64,
+                })
+                .unwrap();
+                for chunk in input.as_bytes().chunks(chunk_size) {
+                    terminal.vt_write(chunk);
+                }
+                assert_eq!(
+                    capture_terminal(
+                        &terminal,
+                        None,
+                        CaptureOptions {
+                            end: CaptureBoundary::Relative(4),
+                            ..CaptureOptions::default()
+                        },
+                    )
+                    .unwrap(),
+                    expected,
+                    "{input:?} chunks={chunk_size}"
                 );
             }
         }

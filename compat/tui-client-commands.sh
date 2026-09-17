@@ -855,6 +855,23 @@ rich_capture_case() {
     self_check_expect "$name exact bytes before sabotage" exit=0 stdout=0 stderr=0
     if [ "$name" = capture-low-indexed-colour ]; then
       changed="${payload/38;5;1/31}"
+    elif [[ "$name" == capture-edited-tab-ich-* ]]; then
+      changed="${payload/@/m}"
+    elif [[ "$name" == capture-edited-tab-dch-* ]]; then
+      changed="${payload/\\033\[P/\\033[m}"
+      changed="${changed/2P/2m}"
+      changed="${changed/5P/5m}"
+      changed="${changed/80P/80m}"
+    elif [[ "$name" == capture-edited-tab-ech-* ]]; then
+      changed="${payload/X/m}"
+    elif [[ "$name" == capture-edited-tab-il-* ]]; then
+      changed="${payload/\\033\[L/\\033[m}"
+    elif [[ "$name" == capture-edited-tab-dl-* ]]; then
+      changed="${payload/\\033\[M/\\033[m}"
+    elif [ "$name" = capture-edited-tab-scroll-down ]; then
+      changed="${payload/\\033M/\\033m}"
+    elif [[ "$name" == capture-edited-tab-scroll-* ]]; then
+      changed="${payload/\\n/}"
     elif [ "$name" = capture-tab-wide ]; then
       changed="${payload/\\t/      }"
     elif [[ "$name" == capture-tab-* ]]; then
@@ -878,6 +895,31 @@ rich_capture_case() {
     case_run "$name" "$disposition" "$reason" -- capture-pane -p -t '=zzcap-rich:win' "$@"
   fi
   run_on_both kill-session -t '=zzcap-rich'
+}
+
+edited_tab_capture_cases() {
+  rich_capture_case capture-edited-tab-ich-middle 'ABC\tDEF\r\033[5G\033[@X\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-ich-before 'ABC\tDEF\r\033[2G\033[2@\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-ich-head 'ABC\tDEF\r\033[4G\033[@\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-ich-off-line '\033[73GABC\tZ\r\033[70G\033[6@\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-ich-truncate '\033[73GABC\tZ\r\033[70G\033[2@\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-ich-overwrite 'ABC\tDEF\r\033[5G\033[@X\033[7GY\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-dch-middle 'ABC\tDEF\r\033[5G\033[P\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-dch-before 'ABC\tDEF\r\033[2G\033[2P\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-dch-head 'ABC\tDEF\r\033[4G\033[P\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-dch-entire 'ABC\tDEF\r\033[4G\033[5P\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-dch-off-line 'ABC\tDEF\r\033[80P\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-dch-overwrite 'ABC\tDEF\r\033[5G\033[P\033[6GX\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-ech-middle 'ABC\tDEF\r\033[5G\033[2X\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-ech-head 'ABC\tDEF\r\033[4G\033[X\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-ech-entire 'ABC\tDEF\r\033[4G\033[5X\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-il-shift 'TOP\r\nABC\tDEF\r\nBOTTOM\033[2;1H\033[L\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-il-off-region '\033[2;3r\033[3;1HABC\tDEF\033[2;1H\033[L\033[r\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-dl-shift 'TOP\r\nABC\tDEF\r\nBOTTOM\033[1;1H\033[M\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-dl-tab 'TOP\r\nABC\tDEF\r\nBOTTOM\033[2;1H\033[M\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-scroll-up '\033[2;4r\033[3;1HABC\tDEF\033[4;1H\n\033[r\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-scroll-down '\033[2;4r\033[2;1HABC\tDEF\033[2;1H\033M\033[r\033[5;1HNEXT' same '' -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-scroll-off-region '\033[2;4r\033[2;1HABC\tDEF\033[4;1H\n\033[r\033[5;1HNEXT' same '' -C -S 0 -E 4
 }
 
 rich_capture_cases() {
@@ -911,6 +953,7 @@ rich_capture_cases() {
   rich_capture_case capture-tab-trailing 'ABC\t\r\nNEXT' same '' -C -S 0 -E 4
   rich_capture_case capture-tab-internal 'ABC\tDEF\r\nNEXT' same '' -C -S 0 -E 4
   rich_capture_case capture-tab-wide '界\t\r\nNEXT' same '' -C -S 0 -E 4
+  edited_tab_capture_cases
   rich_capture_case capture-low-indexed-colour '\033[38;5;1mRED\033[0m\r\nNEXT' same '' -C -e -S 0 -E 0
   if [ "$SELF_CHECK" -eq 0 ]; then
     rich_capture_case capture-charset-text '\033(0qqq\033(B\r\nNEXT' record "$CAPTURE_CHARSET" -C -S 0 -E 0

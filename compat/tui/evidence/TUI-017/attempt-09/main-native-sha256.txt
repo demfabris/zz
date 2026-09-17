@@ -1,0 +1,3 @@
+3e4b3a54944c9977390f36f86f52e62e413a770033eceba69f5c0be65b7b0fa4  /home/demfabris/dev/zz-c11-residuals-review-baseline/target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-install/lib/libghostty-vt.a
+d89b4cb30e308c2a63f67b7856ec661019f5f53657eb17b0ea220740765cd739  target/capture-residuals-perf/native-main
+301cc712ac5a4f2926b30bec3b472d5eb019084b55123ed70e8a8e5f28d1a84d  target/capture-residuals-perf/native-main-spaces

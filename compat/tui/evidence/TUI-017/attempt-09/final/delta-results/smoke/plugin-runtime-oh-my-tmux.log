@@ -1,0 +1,394 @@
+# Scenario: smoke/plugin-runtime-oh-my-tmux
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/smoke/plugin-runtime-oh-my-tmux.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: conf: ~/.tmux/plugins/oh-my-tmux/.tmux.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    %begin 1789655596 1 0
+    %end 1789655596 1 0
+    %begin 1789655596 2 0
+    %end 1789655596 2 0
+    %begin 1789655596 3 0
+    %end 1789655596 3 0
+    %begin 1789655596 4 0
+    %end 1789655596 4 0
+    %begin 1789655596 5 0
+    %end 1789655596 5 0
+    %begin 1789655596 6 0
+    %end 1789655596 6 0
+    %begin 1789655596 7 0
+    %end 1789655596 7 0
+    %begin 1789655596 8 0
+    %end 1789655596 8 0
+    %begin 1789655596 9 0
+    %end 1789655596 9 0
+    %begin 1789655596 10 0
+    %end 1789655596 10 0
+    %begin 1789655596 11 0
+    %end 1789655596 11 0
+    %begin 1789655596 12 0
+    %end 1789655596 12 0
+    %begin 1789655596 13 0
+    %end 1789655596 13 0
+    %begin 1789655596 14 0
+    %end 1789655596 14 0
+    %begin 1789655596 15 0
+    %end 1789655596 15 0
+    %begin 1789655596 16 0
+    %end 1789655596 16 0
+    %begin 1789655596 17 0
+    %end 1789655596 17 0
+    %begin 1789655596 18 0
+    %end 1789655596 18 0
+    %begin 1789655596 19 0
+    %end 1789655596 19 0
+    %begin 1789655596 20 0
+    %end 1789655596 20 0
+    %begin 1789655596 21 0
+    %end 1789655596 21 0
+    %begin 1789655596 22 0
+    %end 1789655596 22 0
+    %begin 1789655596 23 0
+    %end 1789655596 23 0
+    %begin 1789655596 24 0
+    %end 1789655596 24 0
+    %begin 1789655596 25 0
+    %end 1789655596 25 0
+    %begin 1789655596 26 0
+    %end 1789655596 26 0
+    %begin 1789655596 27 0
+    %end 1789655596 27 0
+    %begin 1789655596 28 0
+    %end 1789655596 28 0
+    %begin 1789655596 29 0
+    %end 1789655596 29 0
+    %begin 1789655596 30 0
+    %end 1789655596 30 0
+    %begin 1789655596 31 0
+    %end 1789655596 31 0
+    %begin 1789655596 32 0
+    %end 1789655596 32 0
+    %begin 1789655597 33 0
+    %end 1789655597 33 0
+    %begin 1789655597 34 0
+    %end 1789655597 34 0
+    %begin 1789655597 35 0
+    %end 1789655597 35 0
+    %begin 1789655597 36 0
+    %end 1789655597 36 0
+    %begin 1789655597 37 0
+    %end 1789655597 37 0
+    %begin 1789655597 38 0
+    %end 1789655597 38 0
+    %begin 1789655597 39 0
+    %end 1789655597 39 0
+    %begin 1789655597 40 0
+    %end 1789655597 40 0
+    %begin 1789655597 41 0
+    %end 1789655597 41 0
+    %begin 1789655597 42 0
+    %end 1789655597 42 0
+    %begin 1789655597 43 0
+    %end 1789655597 43 0
+    %begin 1789655597 44 0
+    %end 1789655597 44 0
+    %begin 1789655597 45 0
+    %end 1789655597 45 0
+    %begin 1789655597 46 0
+    %end 1789655597 46 0
+    %begin 1789655597 47 0
+    %end 1789655597 47 0
+    %begin 1789655597 48 0
+    %end 1789655597 48 0
+    %begin 1789655597 49 0
+    %end 1789655597 49 0
+    %begin 1789655597 50 0
+    %end 1789655597 50 0
+    %begin 1789655597 51 0
+    %end 1789655597 51 0
+    %begin 1789655597 52 0
+    %end 1789655597 52 0
+    %begin 1789655597 53 0
+    %end 1789655597 53 0
+    %begin 1789655597 54 0
+    %end 1789655597 54 0
+    %begin 1789655597 55 0
+    %end 1789655597 55 0
+    %begin 1789655597 56 0
+    %end 1789655597 56 0
+    %begin 1789655597 57 0
+    %end 1789655597 57 0
+    %begin 1789655597 58 0
+    %end 1789655597 58 0
+    %begin 1789655597 59 0
+    %end 1789655597 59 0
+    %begin 1789655597 60 0
+    %end 1789655597 60 0
+    %begin 1789655597 61 0
+    %end 1789655597 61 0
+    %begin 1789655597 62 0
+    %end 1789655597 62 0
+    %begin 1789655597 63 0
+    %end 1789655597 63 0
+    %begin 1789655597 64 0
+    %end 1789655597 64 0
+    %begin 1789655597 65 0
+    %end 1789655597 65 0
+    %begin 1789655597 66 0
+    %end 1789655597 66 0
+    %begin 1789655597 67 0
+    %end 1789655597 67 0
+    %begin 1789655597 68 0
+    %end 1789655597 68 0
+    %begin 1789655597 69 0
+    %end 1789655597 69 0
+    %begin 1789655598 70 0
+    %end 1789655598 70 0
+    %begin 1789655598 71 0
+    %end 1789655598 71 0
+    %begin 1789655605 72 0
+    %end 1789655605 72 0
+    %exit
+tmux stdout:
+    %begin 1789655605 317 0
+    %end 1789655605 317 0
+    %begin 1789655605 318 0
+    %end 1789655605 318 0
+    %begin 1789655605 319 0
+    %end 1789655605 319 0
+    %begin 1789655605 320 0
+    %end 1789655605 320 0
+    %begin 1789655605 321 0
+    %end 1789655605 321 0
+    %begin 1789655605 322 0
+    %end 1789655605 322 0
+    %begin 1789655605 323 0
+    %end 1789655605 323 0
+    %begin 1789655605 324 0
+    %end 1789655605 324 0
+    %begin 1789655605 325 0
+    %end 1789655605 325 0
+    %begin 1789655605 326 0
+    %end 1789655605 326 0
+    %begin 1789655605 327 0
+    %end 1789655605 327 0
+    %begin 1789655605 328 0
+    %end 1789655605 328 0
+    %begin 1789655605 329 0
+    %end 1789655605 329 0
+    %begin 1789655605 330 0
+    %end 1789655605 330 0
+    %begin 1789655605 331 0
+    %end 1789655605 331 0
+    %begin 1789655605 332 0
+    %end 1789655605 332 0
+    %begin 1789655605 333 0
+    %end 1789655605 333 0
+    %begin 1789655605 334 0
+    %end 1789655605 334 0
+    %begin 1789655605 335 0
+    %end 1789655605 335 0
+    %begin 1789655605 336 0
+    %end 1789655605 336 0
+    %begin 1789655605 337 0
+    %end 1789655605 337 0
+    %begin 1789655605 338 0
+    %end 1789655605 338 0
+    %begin 1789655605 339 0
+    %end 1789655605 339 0
+    %begin 1789655605 340 0
+    %end 1789655605 340 0
+    %begin 1789655605 341 0
+    %end 1789655605 341 0
+    %begin 1789655605 342 0
+    %end 1789655605 342 0
+    %begin 1789655605 343 0
+    %end 1789655605 343 0
+    %begin 1789655605 344 0
+    %end 1789655605 344 0
+    %begin 1789655605 345 0
+    %end 1789655605 345 0
+    %begin 1789655605 346 0
+    %end 1789655605 346 0
+    %begin 1789655605 347 0
+    %end 1789655605 347 0
+    %begin 1789655605 348 0
+    %end 1789655605 348 0
+    %begin 1789655605 349 0
+    %end 1789655605 349 0
+    %begin 1789655605 350 0
+    %end 1789655605 350 0
+    %begin 1789655605 351 0
+    %end 1789655605 351 0
+    %begin 1789655605 352 0
+    %end 1789655605 352 0
+    %begin 1789655605 353 0
+    %end 1789655605 353 0
+    %begin 1789655605 354 0
+    %end 1789655605 354 0
+    %begin 1789655605 355 0
+    %end 1789655605 355 0
+    %begin 1789655605 356 0
+    %end 1789655605 356 0
+    %begin 1789655605 357 0
+    %end 1789655605 357 0
+    %begin 1789655605 358 0
+    %end 1789655605 358 0
+    %begin 1789655605 359 0
+    %end 1789655605 359 0
+    %begin 1789655605 360 0
+    %end 1789655605 360 0
+    %begin 1789655605 361 0
+    %end 1789655605 361 0
+    %begin 1789655605 362 0
+    %end 1789655605 362 0
+    %begin 1789655605 363 0
+    %end 1789655605 363 0
+    %begin 1789655605 364 0
+    %end 1789655605 364 0
+    %begin 1789655605 365 0
+    %end 1789655605 365 0
+    %begin 1789655605 366 0
+    %end 1789655605 366 0
+    %begin 1789655605 367 0
+    %end 1789655605 367 0
+    %begin 1789655605 368 0
+    %end 1789655605 368 0
+    %begin 1789655605 369 0
+    %end 1789655605 369 0
+    %begin 1789655605 370 0
+    %end 1789655605 370 0
+    %begin 1789655605 371 0
+    %end 1789655605 371 0
+    %begin 1789655605 372 0
+    %end 1789655605 372 0
+    %begin 1789655605 373 0
+    %end 1789655605 373 0
+    %begin 1789655605 374 0
+    %end 1789655605 374 0
+    %begin 1789655605 375 0
+    %end 1789655605 375 0
+    %begin 1789655605 376 0
+    %end 1789655605 376 0
+    %begin 1789655605 377 0
+    %end 1789655605 377 0
+    %begin 1789655605 378 0
+    %end 1789655605 378 0
+    %begin 1789655605 379 0
+    %end 1789655605 379 0
+    %begin 1789655605 380 0
+    %end 1789655605 380 0
+    %begin 1789655605 381 0
+    %end 1789655605 381 0
+    %begin 1789655605 382 0
+    %end 1789655605 382 0
+    %begin 1789655605 383 0
+    %end 1789655605 383 0
+    %begin 1789655605 388 0
+    %end 1789655605 388 0
+    %begin 1789655605 391 0
+    %end 1789655605 391 0
+    %begin 1789655605 394 0
+    %end 1789655605 394 0
+    %begin 1789655605 397 0
+    %end 1789655605 397 0
+    %begin 1789655605 402 0
+    %end 1789655605 402 0
+    %exit
+COMMAND EXIT-CLASS: clean
+WARN zz: clean
+WARN tmux: clean
+WARN terminator: clean (%end / %end)
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: set-environment -gu ZZ_OH_MY_TMUX_RUNTIME
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: run-shell 'python3 ~/oh-my-tmux-runtime.py'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    OMT_TMUX_PROGRAM_EXECUTABLE=True
+    OMT_TMUX_PROGRAM_ANSWERS_SERVER_PID=True
+    OMT_TMUX_PROGRAM_IS_SERVER_EXE=True
+    OMT_TMUX_SOCKET_IS_SOCKET_PATH=True
+    OMT_TMUX_CONF=<HOME>/.tmux.conf
+    OMT_PREFIX_Y_BINDING=run-shell -b "\"\$TMUX_PROGRAM\" \${TMUX_SOCKET:+-S \"\$TMUX_SOCKET\"} save-buffer - | xsel -i -b"
+    OMT_BUFFER_BEFORE=OH-MY-TMUX-PREFIX-Y
+    OMT_CLIPBOARD_HEX=4f482d4d592d544d55582d5052454649582d59
+    OMT_CLIPBOARD_TEXT=OH-MY-TMUX-PREFIX-Y
+    OMT_CLIPBOARD_TOOL=xsel
+    OMT_CLIPBOARD_ARGV=-i -b
+    OMT_BUFFER_AFTER=OH-MY-TMUX-PREFIX-Y
+    OMT_PANE_MODE=0,
+    OMT_STATUS_LEFT=#[fg=#080808,bg=#ffff00,bold] ❐ #S #[fg=#ffff00,bg=#ff00af,none]#[fg=#e4e4e4,bg=#ff00af,none] ↑#{?@uptime_y, #{@uptime_y}y,}#{?@uptime_dy, #{@uptime_dy}d,}#{?@uptime_h, #{@uptime_h}h,}#{?@uptime_m, #{@uptime_m}m,} #[fg=#ff00af,bg=#080808,none]
+    OMT_STATUS_RIGHT=#(echo; nice cut -c3- '<HOME>/.tmux.conf' | sh -s _battery_status '↑' '↓')#[fg=#080808,bg=#080808,none]#[fg=#8a8a8a,bg=#080808,none] #[fg=none]#[bg=none]#[none]#{?client_prefix,⌨ ,  }#[default]#[fg=#8a8a8a,bg=#080808,none]#[fg=none]#[bg=none]#[none]#{?mouse,↗ ,  }#[default]#[fg=#8a8a8a,bg=#080808,none]#[fg=none]#[bg=none]#[none]#{?session_many_attached,⚇ ,}#[default]#[fg=#8a8a8a,bg=#080808,none]#[fg=none]#[bg=none]#[none]#{?pane_synchronized,⚏ ,}#[default]#[fg=#8a8a8a,bg=#080808,none]#{?@battery_status, #{@battery_status},}#{?@battery_percentage, #(nice cut -c3- '<HOME>/.tmux.conf' | sh -s _bar 'gradient' '◻' '◼' 'auto' '#{@battery_charge}' '#{client_width}'),}#{?@battery_percentage, #{@battery_percentage},} #[fg=#8a8a8a,bg=#080808,none]| %R #[fg=#8a8a8a,bg=#080808,none]| %d %b #[fg=#d70000,bg=#080808,none]#[fg=#e4e4e4,bg=#d70000,none] #(cut -c3- '<HOME>/.tmux.conf' | sh -s _username '#{pane_pid}' '#{b:pane_tty}' false '#D')#[fg=none]#[bg=none]#[bold,blink]#{?#{==:#(cut -c3- '<HOME>/.tmux.conf' | sh -s _username '#{pane_pid}' '#{b:pane_tty}' false '#D'),root},!,}#[default]#[fg=#e4e4e4,bg=#d70000,none] #[fg=#e4e4e4,bg=#d70000,none]#[fg=#080808,bg=#e4e4e4,bold] #(cut -c3- '<HOME>/.tmux.conf' | sh -s _hostname '#{pane_pid}' '#{b:pane_tty}' false false '#h' '#D')
+    OMT_STATUS_HELPER_USERNAME=demfabris
+    OMT_RUN_SHELL_USERNAME=demfabris
+tmux stdout:
+    OMT_TMUX_PROGRAM_EXECUTABLE=True
+    OMT_TMUX_PROGRAM_ANSWERS_SERVER_PID=True
+    OMT_TMUX_PROGRAM_IS_SERVER_EXE=True
+    OMT_TMUX_SOCKET_IS_SOCKET_PATH=True
+    OMT_TMUX_CONF=<HOME>/.tmux.conf
+    OMT_PREFIX_Y_BINDING=run-shell -b "\"\$TMUX_PROGRAM\" \${TMUX_SOCKET:+-S \"\$TMUX_SOCKET\"} save-buffer - | xsel -i -b"
+    OMT_BUFFER_BEFORE=OH-MY-TMUX-PREFIX-Y
+    OMT_CLIPBOARD_HEX=4f482d4d592d544d55582d5052454649582d59
+    OMT_CLIPBOARD_TEXT=OH-MY-TMUX-PREFIX-Y
+    OMT_CLIPBOARD_TOOL=xsel
+    OMT_CLIPBOARD_ARGV=-i -b
+    OMT_BUFFER_AFTER=OH-MY-TMUX-PREFIX-Y
+    OMT_PANE_MODE=0,
+    OMT_STATUS_LEFT=#[fg=#080808,bg=#ffff00,bold] ❐ #S #[fg=#ffff00,bg=#ff00af,none]#[fg=#e4e4e4,bg=#ff00af,none] ↑#{?@uptime_y, #{@uptime_y}y,}#{?@uptime_dy, #{@uptime_dy}d,}#{?@uptime_h, #{@uptime_h}h,}#{?@uptime_m, #{@uptime_m}m,} #[fg=#ff00af,bg=#080808,none]
+    OMT_STATUS_RIGHT=#(echo; nice cut -c3- '<HOME>/.tmux.conf' | sh -s _battery_status '↑' '↓')#[fg=#080808,bg=#080808,none]#[fg=#8a8a8a,bg=#080808,none] #[fg=none]#[bg=none]#[none]#{?client_prefix,⌨ ,  }#[default]#[fg=#8a8a8a,bg=#080808,none]#[fg=none]#[bg=none]#[none]#{?mouse,↗ ,  }#[default]#[fg=#8a8a8a,bg=#080808,none]#[fg=none]#[bg=none]#[none]#{?session_many_attached,⚇ ,}#[default]#[fg=#8a8a8a,bg=#080808,none]#[fg=none]#[bg=none]#[none]#{?pane_synchronized,⚏ ,}#[default]#[fg=#8a8a8a,bg=#080808,none]#{?@battery_status, #{@battery_status},}#{?@battery_percentage, #(nice cut -c3- '<HOME>/.tmux.conf' | sh -s _bar 'gradient' '◻' '◼' 'auto' '#{@battery_charge}' '#{client_width}'),}#{?@battery_percentage, #{@battery_percentage},} #[fg=#8a8a8a,bg=#080808,none]| %R #[fg=#8a8a8a,bg=#080808,none]| %d %b #[fg=#d70000,bg=#080808,none]#[fg=#e4e4e4,bg=#d70000,none] #(cut -c3- '<HOME>/.tmux.conf' | sh -s _username '#{pane_pid}' '#{b:pane_tty}' false '#D')#[fg=none]#[bg=none]#[bold,blink]#{?#{==:#(cut -c3- '<HOME>/.tmux.conf' | sh -s _username '#{pane_pid}' '#{b:pane_tty}' false '#D'),root},!,}#[default]#[fg=#e4e4e4,bg=#d70000,none] #[fg=#e4e4e4,bg=#d70000,none]#[fg=#080808,bg=#e4e4e4,bold] #(cut -c3- '<HOME>/.tmux.conf' | sh -s _hostname '#{pane_pid}' '#{b:pane_tty}' false false '#h' '#D')
+    OMT_STATUS_HELPER_USERNAME=demfabris
+    OMT_RUN_SHELL_USERNAME=demfabris
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: show-environment -g ZZ_OH_MY_TMUX_RUNTIME
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    ZZ_OH_MY_TMUX_RUNTIME=clean:prefix-y-clipboard
+tmux stdout:
+    ZZ_OH_MY_TMUX_RUNTIME=clean:prefix-y-clipboard
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=4 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

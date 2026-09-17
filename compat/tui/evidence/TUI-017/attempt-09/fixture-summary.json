@@ -1,0 +1,167 @@
+[
+  {
+    "command": "compat/tui-client-commands.sh target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/client-commands.txt",
+    "exit": 0,
+    "result": "note  messages-log recorded, not asserted: DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. Measured 2026-09-14 on both sides: the pin names ANY tty-bearing client by that tty, including the attached terminal client whose attach-session row reads /dev/pts/<n>, and zz named none of them - it spelled every row by the device name the client sent, which for an interactive client is the hostname. That half is closed: the server log now names a client by its tty whenever it has one. What stays is the clientless CLI, which names a process that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked; all 228 asserted comparisons identical, 25 recorded not asserted (0 for a sibling lane, owners TUI-014=6 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=6 gap:clients.interactive-refresh=8 unattributed=0)"
+  },
+  {
+    "command": "python3 compat/tui/verify-claims.py --run TUI-015 --zz target/capture-residuals-final-v5/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/../../TUI-015/attempt-06/verify-claims.txt",
+    "exit": 0,
+    "result": "all 228 asserted comparisons identical, 25 recorded not asserted (0 for a sibling lane, owners TUI-014=6 decided:TUI-015=4 decided:TUI-016=1 decided:T; (25 recorded, none of them TUI-015's)",
+    "executes": "compat/tui-client-commands.sh",
+    "wrapper_limit": "Verifier prints only the first 150 characters of the shared summary, then its full owned-record result."
+  },
+  {
+    "command": "python3 compat/tui/verify-claims.py --run TUI-017 --zz target/capture-residuals-final-v5/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/verify-claims.txt",
+    "exit": 0,
+    "result": "all 228 asserted comparisons identical, 25 recorded not asserted (0 for a sibling lane, owners TUI-014=6 decided:TUI-015=4 decided:TUI-016=1 decided:T; (25 recorded, none of them TUI-017's)",
+    "executes": "compat/tui-client-commands.sh",
+    "wrapper_limit": "Verifier prints only the first 150 characters of the shared summary, then its full owned-record result."
+  },
+  {
+    "command": "compat/tui-client-commands.sh --self-check target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/client-self-check.txt",
+    "exit": 0,
+    "result": "self-check complete: every sabotage was caught in its own channel and both equivalences passed",
+    "expectations": 170
+  },
+  {
+    "command": "compat/tui-copy-mode.sh target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/tui-copy-mode.txt",
+    "exit": 0,
+    "result": "all 147 cases agree on every channel they assert, 0 recorded a difference elsewhere"
+  },
+  {
+    "command": "compat/tui-copy-mode.sh --self-check target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/tui-copy-mode-self-check.txt",
+    "exit": 0,
+    "result": "self-check complete: every sabotage was caught in its own channel and every equivalence passed",
+    "expectations": 27
+  },
+  {
+    "command": "compat/tui-screen-diff.sh target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/tui-screen-diff.txt",
+    "exit": 0,
+    "result": "all 24 rows identical; all 24 rows identical; all 10 rows identical; all 6 rows identical; all 24 rows identical; all 24 rows identical; all 147 asserted checkpoints identical, 6 recorded not asserted"
+  },
+  {
+    "command": "compat/tui-screen-diff.sh --self-check target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/tui-screen-diff-self-check.txt",
+    "exit": 0,
+    "result": "all 24 rows identical; self-check complete: every sabotage was caught in its own channel and every equivalence passed",
+    "expectations": 18
+  },
+  {
+    "command": "compat/attached-client.sh target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/attached-client.txt",
+    "exit": 0,
+    "result": "attached-client compatibility: PASS"
+  },
+  {
+    "command": "compat/diff-scenario.sh --strict-geometry compat/tui/evidence/TUI-015/attempt-05/empty-exact-pane-index.txt target/capture-residuals-final-v5/zz compat/.cache/tmux-src/tmux",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/../../TUI-015/attempt-06/empty-exact-pane-index-run.txt",
+    "exit": 0,
+    "result": "empty-exact-pane-index: 25 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)"
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-low-indexed-colour target/capture-residuals-final-v5/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-fixed-capture-low-indexed-colour.txt",
+    "exit": 0,
+    "result": "residual self-check capture-low-indexed-colour: 0 failures"
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-trailing target/capture-residuals-final-v5/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-fixed-capture-tab-trailing.txt",
+    "exit": 0,
+    "result": "residual self-check capture-tab-trailing: 0 failures"
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-internal target/capture-residuals-final-v5/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-fixed-capture-tab-internal.txt",
+    "exit": 0,
+    "result": "residual self-check capture-tab-internal: 0 failures"
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-wide target/capture-residuals-final-v5/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-fixed-capture-tab-wide.txt",
+    "exit": 0,
+    "result": "residual self-check capture-tab-wide: 0 failures"
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh lock-session target/capture-residuals-final-v5/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-fixed-lock-session.txt",
+    "exit": 0,
+    "result": "residual self-check lock-session: 0 failures"
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh has-session target/capture-residuals-final-v5/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-fixed-has-session.txt",
+    "exit": 0,
+    "result": "residual self-check has-session: 0 failures"
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh list-windows target/capture-residuals-final-v5/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-fixed-list-windows.txt",
+    "exit": 0,
+    "result": "residual self-check list-windows: 0 failures"
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-low-indexed-colour target/capture-residuals-final-reverted/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-reverted-capture-low-indexed-colour.txt",
+    "exit": 1,
+    "result": "residual self-check capture-low-indexed-colour: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-trailing target/capture-residuals-final-reverted/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-reverted-capture-tab-trailing.txt",
+    "exit": 1,
+    "result": "residual self-check capture-tab-trailing: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-internal target/capture-residuals-final-reverted/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-reverted-capture-tab-internal.txt",
+    "exit": 1,
+    "result": "residual self-check capture-tab-internal: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh capture-tab-wide target/capture-residuals-final-reverted/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-reverted-capture-tab-wide.txt",
+    "exit": 1,
+    "result": "residual self-check capture-tab-wide: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh lock-session target/capture-residuals-final-reverted/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-reverted-lock-session.txt",
+    "exit": 1,
+    "result": "residual self-check lock-session: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh has-session target/capture-residuals-final-reverted/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-reverted-has-session.txt",
+    "exit": 1,
+    "result": "residual self-check has-session: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/residual-self-check.sh list-windows target/capture-residuals-final-reverted/zz",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/seven-reverted-list-windows.txt",
+    "exit": 1,
+    "result": "residual self-check list-windows: 1 failures",
+    "expected_exit": 1
+  },
+  {
+    "command": "bash compat/tui/evidence/TUI-017/attempt-09/edited-tab-probe.sh target/capture-residuals-final-reverted/zz self-check",
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/edited-tabs-reverted.txt",
+    "exit": 1,
+    "result": "edited tabs: assertions=0 failures=0 self_check_failures=15",
+    "expected_exit": 1
+  }
+]

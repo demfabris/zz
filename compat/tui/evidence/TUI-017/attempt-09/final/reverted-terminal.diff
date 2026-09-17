@@ -1,0 +1,24 @@
+--- crates/zz-terminal/src/session.rs
++++ reverted/crates/zz-terminal/src/session.rs
+@@ -8553,7 +8553,7 @@
+     let requested_rows = usize::try_from(end.saturating_sub(start).saturating_add(1)).unwrap_or(1);
+ 
+     let columns = terminal.cols().map_err(capture_failure)?;
+-    if options.escape_sequences || capture_has_tabs(terminal, start, end, columns)? {
++    if options.escape_sequences {
+         return capture_styled_terminal(terminal, options, start, end, visible_start, columns);
+     }
+     let head = terminal
+@@ -8863,10 +8863,10 @@
+         StyleColor::None => {
+             let _ = write!(output, "\x1b[{}m", base + 9);
+         }
+-        StyleColor::Palette(index) if !indexed && base != 50 && index.0 < 8 => {
++        StyleColor::Palette(index) if base != 50 && index.0 < 8 => {
+             let _ = write!(output, "\x1b[{}m", base + u16::from(index.0));
+         }
+-        StyleColor::Palette(index) if !indexed && base != 50 && index.0 < 16 => {
++        StyleColor::Palette(index) if base != 50 && index.0 < 16 => {
+             let _ = write!(output, "\x1b[{}m", base + 60 + u16::from(index.0) - 8);
+         }
+         StyleColor::Palette(index) => {

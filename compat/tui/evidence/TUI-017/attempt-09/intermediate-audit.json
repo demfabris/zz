@@ -1,0 +1,16 @@
+{
+  "original_tip": "eab95dec7dd6f9f623d22f5fb3ef05071c11e888",
+  "base": "38c50df4c4d51401752c49b72bb689b09e33427d",
+  "rebase": "git rebase origin/main: already up to date",
+  "intermediate_source": "623b1326",
+  "complete_tests": "Final packages-v5.txt: 928 passed, 1 ignored.",
+  "intermediate_shared": "client-commands-01.txt has 227 matching assertions and 25 owned records, followed by a collector EOF; not counted as a successful final run. The script was edited in place while this old invocation was active.",
+  "copy_failure": "Intermediate copy-mode.txt: 1/147 mismatch at emacs-begin-selection. Final source passes all 147 comparisons and 27 self-check expectations; no causal claim for the earlier mismatch.",
+  "focused_self_check": "edited-tabs-self-check-retry.txt: 44 expectations pass for 22 cases. The first run timed out because omitting DCH inside padding leaves identical capture bytes. The replacement sabotage substitutes spaces for HT.",
+  "collector_policy": "compat/diff-scenario.sh omits the unasserted global environment listing from logged stdout without changing exit/hook comparisons. Editing this script while alerts ran caused its retained EOF. No initial delta-corpus claim.",
+  "benchmark_iterations": "native-performance-summary.json retains initial, direct-row, packed and warmed batches. The final source is remeasured after background cleanup.",
+  "slot_interrupts": "Retained exit 143 attempts are wrapper requeues. One clippy requeue coincided with Cargo starting; its orphaned child completed under its original scope, and a fresh complete clippy pass is clippy-requeued-03.txt. No foreign process was signalled.",
+  "final_source": "686506a12d1191bf477083918ead2ba6dac789d5",
+  "final_restoration_wait": "Final build-restored.exit=137 terminates an inspected, stopped, childless flock wait. build-restored-requeued.exit=0; byte equality=0.",
+  "status_job_log_collision": "The first main-control status-background-jobs probe overlapped the automatic corpus retry on the shared per-row transcript. Both result lines remain; delta-retries/smoke/status-background-jobs.log contains two step groups. A fresh isolated main probe follows the finished corpus. Both subsequent isolated probes fail with matching diffs; those separate transcripts are retained."
+}

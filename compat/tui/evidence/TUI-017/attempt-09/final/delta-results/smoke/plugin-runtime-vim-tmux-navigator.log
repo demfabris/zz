@@ -1,0 +1,52 @@
+# Scenario: smoke/plugin-runtime-vim-tmux-navigator
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/smoke/plugin-runtime-vim-tmux-navigator.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: run-shell 'python3 ~/nav-runtime.py'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    NAV_BINDING=if-shell "ps -o state= -o comm= -t '#{pane_tty}'       | grep -iqE '^[^TXZ ]+ +(\\S+/)?g?\\.?(view|l?n?vim?x?|fzf)(diff)?(-wrapped)?$'" "send-keys 'C-h'" "select-pane -L"
+    NAV_PANE0_PROCESSES=vim
+    NAV_PANE1_PROCESSES=pager
+    NAV_NON_VIM_ACTIVE=0
+    NAV_NON_VIM_PANE_BYTES=
+    NAV_VIM_PANE_BYTES=08
+    NAV_VIM_ACTIVE=0
+tmux stdout:
+    NAV_BINDING=if-shell "ps -o state= -o comm= -t '#{pane_tty}'       | grep -iqE '^[^TXZ ]+ +(\\S+/)?g?\\.?(view|l?n?vim?x?|fzf)(diff)?(-wrapped)?$'" "send-keys 'C-h'" "select-pane -L"
+    NAV_PANE0_PROCESSES=vim
+    NAV_PANE1_PROCESSES=pager
+    NAV_NON_VIM_ACTIVE=0
+    NAV_NON_VIM_PANE_BYTES=
+    NAV_VIM_PANE_BYTES=08
+    NAV_VIM_ACTIVE=0
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g ZZ_NAV_RUNTIME
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    ZZ_NAV_RUNTIME=clean:is-vim-branches-split
+tmux stdout:
+    ZZ_NAV_RUNTIME=clean:is-vim-branches-split
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

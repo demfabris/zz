@@ -1,0 +1,7 @@
+{
+  "target/capture-residuals-perf/native-fixed-v5": "f7276934581f03e24a9e2ac46f11dbad706d2aa3463187fd08074a25cc29b85b",
+  "target/capture-residuals-perf/native-fixed-v5-spaces": "3fb71a6c28cfbaec75a5ef87bd834f5570edb92dabc0f2f8e5dd71e939c927f4",
+  "target/capture-residuals-perf/native-main": "d89b4cb30e308c2a63f67b7856ec661019f5f53657eb17b0ea220740765cd739",
+  "target/capture-residuals-perf/native-main-spaces": "301cc712ac5a4f2926b30bec3b472d5eb019084b55123ed70e8a8e5f28d1a84d",
+  "target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-install/lib/libghostty-vt.a": "8b3a2a36be229c52436fac5b7353f4b1dcd1c04f39f7c72a965f964bb055124a"
+}

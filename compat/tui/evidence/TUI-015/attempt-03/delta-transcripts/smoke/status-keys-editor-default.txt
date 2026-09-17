@@ -1,0 +1,36 @@
+# Scenario: smoke/status-keys-editor-default
+# Source: /home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/status-keys-editor-default.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: run-shell 'sh ~/status-keys-editor-default.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g STATUS_KEYS_MATRIX
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    STATUS_KEYS_MATRIX=scrubbed=emacs/emacs//usr/bin/vi editor-vi=vi/vi/vi editor-path-nvim=vi/vi//usr/local/bin/nvim visual-wins=vi/vi/vim editor-emacs=emacs/emacs/emacs visual-empty=emacs/emacs/ directory-only-vi=emacs/emacs//opt/vi/bin/ed substring-vi=vi/vi/nano-vi-x
+tmux stdout:
+    STATUS_KEYS_MATRIX=scrubbed=emacs/emacs//usr/bin/vi editor-vi=vi/vi/vi editor-path-nvim=vi/vi//usr/local/bin/nvim visual-wins=vi/vi/vim editor-emacs=emacs/emacs/emacs visual-empty=emacs/emacs/ directory-only-vi=emacs/emacs//opt/vi/bin/ed substring-vi=vi/vi/nano-vi-x
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

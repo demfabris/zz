@@ -1,0 +1,1633 @@
+{
+  "exit": 1,
+  "selected_rows": 155,
+  "rows_passing_after_retries": 151,
+  "failed_rows": [
+    "smoke/cli-chain-parse-abort",
+    "smoke/default-client-command",
+    "smoke/plugin-runtime-resurrect-restore",
+    "smoke/status-background-jobs"
+  ],
+  "first_pass_failures": 8,
+  "supplemental_capture_pane": {
+    "exit": 0,
+    "steps": 34
+  },
+  "full_branch_selection_covered": 156,
+  "rows": {
+    "alerts": [
+      {
+        "steps": 62,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "break-pane": [
+      {
+        "steps": 30,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "census-hooks": [
+      {
+        "steps": 152,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "command-alias": [
+      {
+        "steps": 16,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "command-item-format": [
+      {
+        "steps": 125,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "format-window-cell-metrics": [
+      {
+        "steps": 8,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "formats-values": [
+      {
+        "steps": 45,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "list-sort-filter": [
+      {
+        "steps": 12,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "mru-activity": [
+      {
+        "steps": 11,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "pane-exact-target-prefix": [
+      {
+        "steps": 31,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/alias-group-forgery": [
+      {
+        "steps": 7,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/args-parse-bind-key": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/args-parse-choosers": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/args-parse-command-prompt": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/args-parse-confirm-before": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/args-parse-display-menu": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/args-parse-display-panes": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/args-parse-if-shell": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/args-parse-run-shell": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/args-parse-set-hook": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/args-parse-set-option": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/buffer-clipboard-write": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/buffer-standard-streams": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/cheap-flags": [
+      {
+        "steps": 22,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/chooser-buffer-confirm-flag": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/chooser-buffer-vocabulary": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/chooser-kill-keys": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/chooser-kill-on-exit": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/chooser-row-flags": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/chooser-tree-vocabulary": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/clear-history-hyperlinks": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/cli-chain-parse-abort": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 1,
+        "warn": 0
+      },
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 1,
+        "warn": 0
+      }
+    ],
+    "smoke/cli-output-bytes": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/client-exit-actions": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/client-non-utf8-cwd": [
+      {
+        "steps": 4,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/client-resized-context": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/client-utf8-sanitizer": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/command-flag-errors": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/command-prompt-chain": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/command-prompt-editing": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/command-prompt-target": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/config-alias-parse-unit": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/config-chain-parse-abort": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/config-discovery-explicit": [
+      {
+        "steps": 13,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/config-discovery-launcher": [
+      {
+        "steps": 12,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/config-discovery": [
+      {
+        "steps": 12,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/config-grammar": [
+      {
+        "steps": 17,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/config-non-utf8-byte-matrix": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/config-non-utf8-file-bytes": [
+      {
+        "steps": 8,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/continuum-init": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/control-alias-prepare": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/control-eof-drain": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/control-hard-loss": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 1
+      },
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/control-notify": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/control-tilde-environment": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/copy-mode-command-errors": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/copy-mode-copy-line": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/copy-mode-formats": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/copy-mode-kill-on-exit": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/copy-mode-mode-keys-tail": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/copy-mode-mode-keys": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/copy-mode-prompt-bindings": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/copy-mode-refresh": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/copy-mode-search": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/copy-mode-source-pane": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/copy-selection-clipboard-bytes": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/daemon-invalid-flags": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/default-client-command": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 1,
+        "warn": 2
+      },
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 1,
+        "warn": 2
+      }
+    ],
+    "smoke/display-menu-action-queue": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/display-menu-cell-layout": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/display-menu-mouse": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/display-menu-paste": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/display-menu-resize-lifecycle": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 1,
+        "warn": 2
+      },
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/display-menu-shortcut-grammar": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/display-menu-style-refresh": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/display-message-client-aliases": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/display-panes-template": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/display-popup-drag": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/display-popup-kitty-noresize": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/display-popup-kitty": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/display-popup-menu-policy": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/display-popup-menu": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/display-popup-resize-lifecycle": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/display-popup-style-refresh": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/display-popup-to-pane": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/environment-bytes": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/fixture-conf": [
+      {
+        "steps": 5,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/focus-follows-mouse": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/format-client-loop-context": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/format-environment-loop-context": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/format-listing": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/format-modifier-client-loop": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/format-modifier-environment-loop": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/format-modifier-interrogate": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/format-monitor-hooks": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/format-pane-process": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/format-pane-progress": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/format-trace": [
+      {
+        "steps": 29,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/format-window-bigger": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/fpp-init": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/hooks-pane-focus-clients": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/hooks-pane-focus": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/jobs-command-environment": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 1,
+        "warn": 2
+      },
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/jobs-display-popup-environment": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/jobs-shell-job-cwd": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/keys-prefix-attached": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/keys-prefix-remainder": [
+      {
+        "steps": 6,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/keys-prefix-stock": [
+      {
+        "steps": 40,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/keys-shift-attached": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/keys-table-lifecycle": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/kill-filters": [
+      {
+        "steps": 17,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/launcher-installed-layout": [
+      {
+        "steps": 7,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/oh-my-tmux": [
+      {
+        "steps": 15,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/own-conf": [
+      {
+        "steps": 6,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/pane-border-indicators": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/pane-border-lines": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/pane-border-status": [
+      {
+        "steps": 34,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/pane-border-zorder": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/pane-colours-palette": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/pane-engine-knobs-input": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/pane-engine-knobs": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/pane-runtime-facts": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/pane-tmux-path": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/plugin-runtime-continuum": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/plugin-runtime-fpp": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/plugin-runtime-oh-my-tmux": [
+      {
+        "steps": 4,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/plugin-runtime-resurrect-restore": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 1,
+        "warn": 1
+      },
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 1,
+        "warn": 1
+      }
+    ],
+    "smoke/plugin-runtime-tpm-install": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/plugin-runtime-vim-tmux-navigator": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/plugin-runtime-yank": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/positional-maximums": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/positional-minimums": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/refresh-status": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/remain-on-exit-format": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/resurrect-init": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/resurrect-save": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/send-keys-client-selection": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/send-keys-control": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/send-keys-inject": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/sensible": [
+      {
+        "steps": 6,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/source-file-byte-name": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/source-file-control": [
+      {
+        "steps": 12,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/source-file-depth": [
+      {
+        "steps": 4,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/source-file-diagnostics": [
+      {
+        "steps": 12,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/source-file-tilde": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/source-replay-diagnostics": [
+      {
+        "steps": 60,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 1,
+        "warn": 0
+      },
+      {
+        "steps": 60,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/split-window-wait": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/status-background-jobs": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 1,
+        "warn": 1
+      },
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 1,
+        "warn": 1
+      }
+    ],
+    "smoke/status-keys-editor-default": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/terminal-facts": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/tpm-init": [
+      {
+        "steps": 5,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/tui-client-input-backpressure": [
+      {
+        "steps": 2,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/vim-tmux-navigator": [
+      {
+        "steps": 8,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "smoke/yank": [
+      {
+        "steps": 3,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ],
+    "targets": [
+      {
+        "steps": 20,
+        "topo": 0,
+        "geo": 0,
+        "fmt": 0,
+        "out": 0,
+        "warn": 0
+      }
+    ]
+  }
+}

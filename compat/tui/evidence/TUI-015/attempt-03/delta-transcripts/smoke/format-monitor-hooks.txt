@@ -1,0 +1,61 @@
+# Scenario: smoke/format-monitor-hooks
+# Source: /home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/format-monitor-hooks.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: out: set-environment -gu FORMAT_MONITOR_HOOKS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: run-shell 'sh ~/format-monitor-hooks.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    format-monitor-hooks: missing-colons status=1 output=[invalid subscription: nocolons]
+    format-monitor-hooks: one-colon status=1 output=[invalid subscription: one:colon]
+    format-monitor-hooks: bad-name status=1 output=[monitor hook name must start with @]
+    format-monitor-hooks: show-unknown status=1 output=[invalid option: @nomonitor]
+    format-monitor-hooks: swallowed-u status=1 output=[invalid subscription: u]
+tmux stdout:
+    format-monitor-hooks: missing-colons status=1 output=[invalid subscription: nocolons]
+    format-monitor-hooks: one-colon status=1 output=[invalid subscription: one:colon]
+    format-monitor-hooks: bad-name status=1 output=[monitor hook name must start with @]
+    format-monitor-hooks: show-unknown status=1 output=[invalid option: @nomonitor]
+    format-monitor-hooks: swallowed-u status=1 output=[invalid subscription: u]
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g FORMAT_MONITOR_HOOKS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    FORMAT_MONITOR_HOOKS=clean:13
+tmux stdout:
+    FORMAT_MONITOR_HOOKS=clean:13
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

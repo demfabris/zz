@@ -1,0 +1,166 @@
+# Scenario: smoke/fixture-conf
+# Source: /home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/fixture-conf.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: conf: fixtures/in-tree.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    %begin 1789619737 1 0
+    %end 1789619737 1 0
+    %begin 1789619737 2 0
+    %end 1789619737 2 0
+    %begin 1789619737 3 0
+    %end 1789619737 3 0
+    %begin 1789619737 4 0
+    %end 1789619737 4 0
+    %begin 1789619738 5 0
+    %end 1789619738 5 0
+    %begin 1789619738 6 0
+    %end 1789619738 6 0
+    %begin 1789619738 7 0
+    %end 1789619738 7 0
+    %begin 1789619738 8 0
+    %end 1789619738 8 0
+    %begin 1789619738 9 0
+    %end 1789619738 9 0
+    %begin 1789619739 10 0
+    %end 1789619739 10 0
+    %begin 1789619739 11 0
+    %end 1789619739 11 0
+    %begin 1789619739 12 0
+    %end 1789619739 12 0
+    %begin 1789619739 13 0
+    %end 1789619739 13 0
+    %begin 1789619739 14 0
+    %end 1789619739 14 0
+    %begin 1789619739 15 0
+    %end 1789619739 15 0
+    %begin 1789619741 16 0
+    %end 1789619741 16 0
+    %begin 1789619741 17 0
+    %end 1789619741 17 0
+    %exit
+tmux stdout:
+    %begin 1789619741 317 0
+    %end 1789619741 317 0
+    %begin 1789619741 318 0
+    %end 1789619741 318 0
+    %begin 1789619741 319 0
+    %end 1789619741 319 0
+    %begin 1789619741 320 0
+    %end 1789619741 320 0
+    %begin 1789619741 321 0
+    %end 1789619741 321 0
+    %begin 1789619741 322 0
+    %end 1789619741 322 0
+    %begin 1789619741 323 0
+    %end 1789619741 323 0
+    %begin 1789619741 324 0
+    %end 1789619741 324 0
+    %begin 1789619741 325 0
+    %end 1789619741 325 0
+    %begin 1789619741 326 0
+    %end 1789619741 326 0
+    %begin 1789619741 327 0
+    %end 1789619741 327 0
+    %begin 1789619741 328 0
+    %end 1789619741 328 0
+    %begin 1789619741 329 0
+    %end 1789619741 329 0
+    %begin 1789619741 330 0
+    %end 1789619741 330 0
+    %begin 1789619741 331 0
+    %end 1789619741 331 0
+    %begin 1789619741 332 0
+    %end 1789619741 332 0
+    %begin 1789619741 333 0
+    %end 1789619741 333 0
+    %exit
+COMMAND EXIT-CLASS: clean
+WARN zz: clean
+WARN tmux: clean
+WARN terminator: clean (%end / %end)
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: keys: root F2
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    root|F2|0|split-window -h
+tmux stdout:
+    root|F2|0|split-window -h
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: keys: prefix c
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|c|0|new-window -n scratch
+tmux stdout:
+    prefix|c|0|new-window -n scratch
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: keys: prefix R
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|R|0|command-prompt -I "#S" "rename-session -- '%%'"
+tmux stdout:
+    prefix|R|0|command-prompt -I "#S" "rename-session -- '%%'"
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: keys: prefix W
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|W|0|command-prompt -I "#W" "rename-window -- '%%'"
+tmux stdout:
+    prefix|W|0|command-prompt -I "#W" "rename-window -- '%%'"
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=5 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

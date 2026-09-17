@@ -1,0 +1,5 @@
+{
+  "pid": 2493783,
+  "reason": "Own childless build waiter chose busy slot 0 while slot 1 was free; requeue through unchanged wrapper on slot 1.",
+  "children": ""
+}

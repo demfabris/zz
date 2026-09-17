@@ -1,0 +1,91 @@
+# Scenario: smoke/keys-prefix-attached
+# Source: /home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/keys-prefix-attached.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: out: set-environment -gu KEYS_CONTRACT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: run-shell 'sh ~/keys-contract.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    & prompt=kill-window #W? (y/n) n=alive
+    ? output-mode=1 note=KEYS_NOTE_SENTINEL
+    # output-mode=1 buffer=KEYS_BUFFER
+    - buffers=2->1 named=kept
+    m pane_marked=1
+    M pane_marked=0
+    i show-messages=KEYS_INFO_SENTINEL
+    ~ output-mode=1 message=KEYS_MESSAGE_SENTINEL
+    PPage pane_in_mode=1 scroll_position=positive
+    f prompt=find-window cancelled
+    ' prompt=index selected=1
+    . prompt=move-window moved=7
+    ) session=next
+    ( session=original
+    L session=next
+    confirm prompt=kill-pane #P? (y/n)
+    confirm n=alive
+    confirm y=killed
+    paste=1b5b3230307e4b4559535f50415354451b5b3230317e
+    detach clients=0 exit=0
+tmux stdout:
+    & prompt=kill-window #W? (y/n) n=alive
+    ? output-mode=1 note=KEYS_NOTE_SENTINEL
+    # output-mode=1 buffer=KEYS_BUFFER
+    - buffers=2->1 named=kept
+    m pane_marked=1
+    M pane_marked=0
+    i show-messages=KEYS_INFO_SENTINEL
+    ~ output-mode=1 message=KEYS_MESSAGE_SENTINEL
+    PPage pane_in_mode=1 scroll_position=positive
+    f prompt=find-window cancelled
+    ' prompt=index selected=1
+    . prompt=move-window moved=7
+    ) session=next
+    ( session=original
+    L session=next
+    confirm prompt=kill-pane #P? (y/n)
+    confirm n=alive
+    confirm y=killed
+    paste=1b5b3230307e4b4559535f50415354451b5b3230317e
+    detach clients=0 exit=0
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g KEYS_CONTRACT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    KEYS_CONTRACT=clean:prefix
+tmux stdout:
+    KEYS_CONTRACT=clean:prefix
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

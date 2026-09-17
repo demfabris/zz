@@ -1,0 +1,647 @@
+# Scenario: formats-values
+# Source: /home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/formats-values.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: fmt: #{wrap_flag}|#{cursor_flag}|#{pane_format}|#{window_format}|#{session_format}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1|1|1|0|0
+tmux stdout:
+    1|1|1|0|0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: fmt: #{config_files}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    /dev/null
+tmux stdout:
+    /dev/null
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: fmt: #{!!:#{pane_current_path}}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: fmt: #{pane_current_path}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    /home/demfabris/dev/zz-c11-capture-fix
+tmux stdout:
+    /home/demfabris/dev/zz-c11-capture-fix
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: fmt: #{p6:#{l:xy}}|#{e|+|:2,3}|#{e|m|:7,3}|#{e|%|:7,3}|#{a:65}|#{c:red}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    xy    |5|1|1|A|800000
+tmux stdout:
+    xy    |5|1|1|A|800000
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: fmt: #{N/w:main}|#{N/s:w}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1|1
+tmux stdout:
+    1|1
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: fmt: #{S:#{session_name}}|#{W:#{window_name}}|#{P:#{pane_index}}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    w|main|0
+tmux stdout:
+    w|main|0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: fmt: #{C:__zz_phase4c_no_visible_match_7e91__}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: set-buffer -b named alpha
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: set-buffer bravo
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: fmt: #{buffer_name}|#{buffer_size}|#{buffer_sample}|#{!!:#{buffer_created}}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    buffer0|5|bravo|1
+tmux stdout:
+    buffer0|5|bravo|1
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: new-window -d -t w -c /tmp -n cw
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: fmt: #{W:#{window_name}=#{pane_current_path};,}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    cw=/tmp;
+tmux stdout:
+    cw=/tmp;
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: new-session -d -s path-tmp -c /tmp
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: new-session -d -s path-parent -c /tmp/..
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: fmt: session-active-default=[#{session_active}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    session-active-default=[]
+tmux stdout:
+    session-active-default=[]
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: display-message -p -t =path-tmp:0 #{session_name}:#{session_path}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    path-tmp:/tmp
+tmux stdout:
+    path-tmp:/tmp
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: display-message -p -t =path-parent:0 #{session_name}:#{session_path}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    path-parent:/tmp/..
+tmux stdout:
+    path-parent:/tmp/..
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: display-message -p -t =path-tmp:0 session-active-target=[#{session_active}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    session-active-target=[]
+tmux stdout:
+    session-active-target=[]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: out: list-commands -F #{command_list_name}=[#{session_active}]:#{S:normal,active} display-message
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    display-message=[]:normalnormalnormal
+tmux stdout:
+    display-message=[]:normalnormalnormal
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: list-keys -1 -T prefix -F #{key_string}=[#{session_active}] c
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    c=[]
+tmux stdout:
+    c=[]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: list-sessions -O name -f #{m:path-*,#{session_name}} -F #{session_name}:#{session_path}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    path-parent:/tmp/..
+    path-tmp:/tmp
+tmux stdout:
+    path-parent:/tmp/..
+    path-tmp:/tmp
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: out: list-sessions -O name -f #{==:#{session_active},} -F #{session_name}=[#{session_active}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    path-parent=[]
+    path-tmp=[]
+    w=[]
+tmux stdout:
+    path-parent=[]
+    path-tmp=[]
+    w=[]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: out: list-sessions -O name -f #{session_active} -F #{session_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: out: list-windows -t =path-tmp -O index -f #{==:#{session_active},} -F #{window_index}=[#{session_active}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0=[]
+tmux stdout:
+    0=[]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: out: list-windows -t =path-tmp -O index -f #{session_active} -F #{window_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: out: list-panes -t =path-tmp:0 -O index -f #{==:#{session_active},} -F #{pane_index}=[#{session_active}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0=[]
+tmux stdout:
+    0=[]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: out: list-panes -t =path-tmp:0 -O index -f #{session_active} -F #{pane_index}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: new-window -d -t w: -n activity-quiet -- sleep 300
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: out: display-message -p -t w:activity-quiet activity-created=#{?window_activity,set,unset}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    activity-created=set
+tmux stdout:
+    activity-created=set
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 31
+COMMAND: out: set-window-option -F -t w:activity-quiet @activity-captured #{window_activity}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 32
+COMMAND: run-shell "sleep 1.1"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 33
+COMMAND: select-window -t w:activity-quiet
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 34
+COMMAND: out: display-message -p -t w:activity-quiet selected=#{!=:#{window_activity},#{@activity-captured}}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    selected=1
+tmux stdout:
+    selected=1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 35
+COMMAND: out: set-window-option -F -t w:activity-quiet @activity-captured #{window_activity}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 36
+COMMAND: run-shell "sleep 1.1"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 37
+COMMAND: select-window -t w:activity-quiet
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 38
+COMMAND: split-window -d -t w:activity-quiet cat
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 39
+COMMAND: select-pane -t w:activity-quiet.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 40
+COMMAND: select-layout -t w:activity-quiet even-horizontal
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 41
+COMMAND: out: display-message -p -t w:activity-quiet structural-noop=#{==:#{window_activity},#{@activity-captured}}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    structural-noop=1
+tmux stdout:
+    structural-noop=1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 42
+COMMAND: run-shell "sleep 1.1"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 43
+COMMAND: send-keys -t w:activity-quiet.1 -l ping
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 44
+COMMAND: run-shell "sleep 0.2"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 45
+COMMAND: out: display-message -p -t w:activity-quiet output=#{!=:#{window_activity},#{@activity-captured}}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    output=1
+tmux stdout:
+    output=1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=45 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

@@ -1,0 +1,371 @@
+{
+  "layout": "other-window",
+  "comparisons": 36,
+  "different": [],
+  "results": {
+    "tmux": {
+      "lock-session cli:=.0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session cli:=.0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows cli:=.0": {
+        "exit": 0,
+        "stdout": "0:win\n1:other\n",
+        "stderr": ""
+      },
+      "lock-session cli:=.%0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session cli:=.%0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows cli:=.%0": {
+        "exit": 0,
+        "stdout": "0:win\n1:other\n",
+        "stderr": ""
+      },
+      "lock-session =cli:=.0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session =cli:=.0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows =cli:=.0": {
+        "exit": 0,
+        "stdout": "0:win\n1:other\n",
+        "stderr": ""
+      },
+      "lock-session cli:=.%1": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session cli:=.%1": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows cli:=.%1": {
+        "exit": 0,
+        "stdout": "0:win\n1:other\n",
+        "stderr": ""
+      },
+      "lock-session cli:=.%2": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "can't find pane: %2\n"
+      },
+      "has-session cli:=.%2": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "can't find pane: %2\n"
+      },
+      "list-windows cli:=.%2": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "can't find pane: %2\n"
+      },
+      "lock-session :=.0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session :=.0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows :=.0": {
+        "exit": 0,
+        "stdout": "0:foreign\n",
+        "stderr": ""
+      },
+      "lock-session cli:=.9": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "can't find pane: 9\n"
+      },
+      "has-session cli:=.9": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "can't find pane: 9\n"
+      },
+      "list-windows cli:=.9": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "can't find pane: 9\n"
+      },
+      "lock-session cli:=.": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session cli:=.": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows cli:=.": {
+        "exit": 0,
+        "stdout": "0:win\n1:other\n",
+        "stderr": ""
+      },
+      "lock-session cli:=": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session cli:=": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows cli:=": {
+        "exit": 0,
+        "stdout": "0:win\n1:other\n",
+        "stderr": ""
+      },
+      "lock-session cli:win.0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session cli:win.0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows cli:win.0": {
+        "exit": 0,
+        "stdout": "0:win\n1:other\n",
+        "stderr": ""
+      },
+      "lock-session :=.%2": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session :=.%2": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows :=.%2": {
+        "exit": 0,
+        "stdout": "0:foreign\n",
+        "stderr": ""
+      },
+      "lock-session =:=.%2": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session =:=.%2": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows =:=.%2": {
+        "exit": 0,
+        "stdout": "0:foreign\n",
+        "stderr": ""
+      }
+    },
+    "zz": {
+      "lock-session cli:=.0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session cli:=.0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows cli:=.0": {
+        "exit": 0,
+        "stdout": "0:win\n1:other\n",
+        "stderr": ""
+      },
+      "lock-session cli:=.%0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session cli:=.%0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows cli:=.%0": {
+        "exit": 0,
+        "stdout": "0:win\n1:other\n",
+        "stderr": ""
+      },
+      "lock-session =cli:=.0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session =cli:=.0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows =cli:=.0": {
+        "exit": 0,
+        "stdout": "0:win\n1:other\n",
+        "stderr": ""
+      },
+      "lock-session cli:=.%1": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session cli:=.%1": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows cli:=.%1": {
+        "exit": 0,
+        "stdout": "0:win\n1:other\n",
+        "stderr": ""
+      },
+      "lock-session cli:=.%2": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "can't find pane: %2\n"
+      },
+      "has-session cli:=.%2": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "can't find pane: %2\n"
+      },
+      "list-windows cli:=.%2": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "can't find pane: %2\n"
+      },
+      "lock-session :=.0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session :=.0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows :=.0": {
+        "exit": 0,
+        "stdout": "0:foreign\n",
+        "stderr": ""
+      },
+      "lock-session cli:=.9": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "can't find pane: 9\n"
+      },
+      "has-session cli:=.9": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "can't find pane: 9\n"
+      },
+      "list-windows cli:=.9": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "can't find pane: 9\n"
+      },
+      "lock-session cli:=.": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session cli:=.": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows cli:=.": {
+        "exit": 0,
+        "stdout": "0:win\n1:other\n",
+        "stderr": ""
+      },
+      "lock-session cli:=": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session cli:=": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows cli:=": {
+        "exit": 0,
+        "stdout": "0:win\n1:other\n",
+        "stderr": ""
+      },
+      "lock-session cli:win.0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session cli:win.0": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows cli:win.0": {
+        "exit": 0,
+        "stdout": "0:win\n1:other\n",
+        "stderr": ""
+      },
+      "lock-session :=.%2": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session :=.%2": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows :=.%2": {
+        "exit": 0,
+        "stdout": "0:foreign\n",
+        "stderr": ""
+      },
+      "lock-session =:=.%2": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "has-session =:=.%2": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "list-windows =:=.%2": {
+        "exit": 0,
+        "stdout": "0:foreign\n",
+        "stderr": ""
+      }
+    }
+  }
+}

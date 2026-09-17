@@ -1,0 +1,59 @@
+# Scenario: smoke/jobs-command-environment
+# Source: /home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/jobs-command-environment.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: out: set-environment -gu JOBS_COMMAND_ENVIRONMENT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: run-shell 'sh ~/jobs-command-environment.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    jobs-command-environment-zz: positive-destroyed
+    jobs-command-environment-zz: positive-missing
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: divergence
+--- zz SMOKE STDOUT step 2
++++ tmux SMOKE STDOUT step 2
+@@ -1,2 +0,0 @@
+-jobs-command-environment-zz: positive-destroyed
+-jobs-command-environment-zz: positive-missing
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g JOBS_COMMAND_ENVIRONMENT
+zz exit: 1
+tmux exit: 0
+zz stderr:
+    unknown variable: JOBS_COMMAND_ENVIRONMENT
+tmux stderr:
+    <empty>
+tmux stdout:
+    JOBS_COMMAND_ENVIRONMENT=clean:12
+OUT QUERY: failure
+SMOKE STDERR: divergence
+--- zz SMOKE STDERR step 3
++++ tmux SMOKE STDERR step 3
+@@ -1 +0,0 @@
+-unknown variable: JOBS_COMMAND_ENVIRONMENT
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=2

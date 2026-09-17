@@ -1,0 +1,18 @@
+{
+  "main_bare_id_test_unchanged": true,
+  "targets_corpus_unchanged": true,
+  "added_code_comment_lines": [],
+  "merge_base": "f9c52359e3da88cbde735076b38e22cdf3e003c6",
+  "merge_tree_exit": 0,
+  "source_commit": "cf8e0b8bf7a6755d58685c68bac86443f29aae48",
+  "only_follow_up_runtime_file": "crates/zz-mux/src/model.rs",
+  "evidence_redaction": {
+    "redacted_occurrences_by_file": {
+      "compat/tui/evidence/TUI-015/attempt-03/delta-transcripts/census-hooks.txt": 2
+    },
+    "reason": "GitHub push protection rejected an OAuth credential in captured show-environment output. Redacted both observations, retaining the result and diff. Original unpushed evidence commit amended; no protection bypass.",
+    "additional_credential_redactions": {
+      "compat/tui/evidence/TUI-015/attempt-03/delta-transcripts/census-hooks.txt": 1
+    }
+  }
+}

@@ -1,0 +1,554 @@
+# Scenario: smoke/pane-border-status
+# Source: /home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/pane-border-status.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: set -g status off
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: display-message -p #{window_width}x#{window_height}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    80x24
+tmux stdout:
+    80x24
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: split-window -v
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}:t#{pane_at_top}b#{pane_at_bottom}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:80x12@0,0:t1b0
+    1:80x11@0,13:t0b1
+tmux stdout:
+    0:80x12@0,0:t1b0
+    1:80x11@0,13:t0b1
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: set -w pane-border-status top
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}:t#{pane_at_top}b#{pane_at_bottom}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:80x11@0,1:t1b0
+    1:80x11@0,13:t0b1
+tmux stdout:
+    0:80x11@0,1:t1b0
+    1:80x11@0,13:t0b1
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: display-message -p #{window_layout}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    c195,80x24,0,0[80x12,0,0,0,80x11,0,13,1]
+tmux stdout:
+    c195,80x24,0,0[80x12,0,0,0,80x11,0,13,1]
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: set -w pane-border-status bottom
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}:t#{pane_at_top}b#{pane_at_bottom}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:80x12@0,0:t1b0
+    1:80x10@0,13:t0b1
+tmux stdout:
+    0:80x12@0,0:t1b0
+    1:80x10@0,13:t0b1
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: display-message -p #{window_layout}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    c195,80x24,0,0[80x12,0,0,0,80x11,0,13,1]
+tmux stdout:
+    c195,80x24,0,0[80x12,0,0,0,80x11,0,13,1]
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: set -w pane-border-status top-floating
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}:t#{pane_at_top}b#{pane_at_bottom}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:80x12@0,0:t1b0
+    1:80x11@0,13:t0b1
+tmux stdout:
+    0:80x12@0,0:t1b0
+    1:80x11@0,13:t0b1
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: set -w pane-border-status bottom-floating
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}:t#{pane_at_top}b#{pane_at_bottom}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:80x12@0,0:t1b0
+    1:80x11@0,13:t0b1
+tmux stdout:
+    0:80x12@0,0:t1b0
+    1:80x11@0,13:t0b1
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: set -w pane-border-status bottom
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: split-window -h -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:80x12@0,0
+    1:40x10@0,13
+    2:39x10@41,13
+tmux stdout:
+    0:80x12@0,0
+    1:40x10@0,13
+    2:39x10@41,13
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: set -w pane-border-status top
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:80x11@0,1
+    1:40x11@0,13
+    2:39x11@41,13
+tmux stdout:
+    0:80x11@0,1
+    1:40x11@0,13
+    2:39x11@41,13
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: kill-pane -t w:0.2
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: resize-pane -Z -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:80x23@0,1
+    1:80x11@0,13
+tmux stdout:
+    0:80x23@0,1
+    1:80x11@0,13
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: resize-pane -Z -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: kill-pane -t w:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:80x23@0,1
+tmux stdout:
+    0:80x23@0,1
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: split-window -h
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:40x23@0,1
+    1:39x23@41,1
+tmux stdout:
+    0:40x23@0,1
+    1:39x23@41,1
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: set -w pane-border-status bottom
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:40x23@0,0
+    1:39x23@41,0
+tmux stdout:
+    0:40x23@0,0
+    1:39x23@41,0
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: set -w pane-border-status off
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 31
+COMMAND: out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:40x24@0,0
+    1:39x24@41,0
+tmux stdout:
+    0:40x24@0,0
+    1:39x24@41,0
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 32
+COMMAND: out: set-environment -gu PANE_BORDER_STATUS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 33
+COMMAND: run-shell 'sh ~/pane-border-status.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 34
+COMMAND: out: show-environment -g PANE_BORDER_STATUS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    PANE_BORDER_STATUS=clean:9
+tmux stdout:
+    PANE_BORDER_STATUS=clean:9
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=34 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

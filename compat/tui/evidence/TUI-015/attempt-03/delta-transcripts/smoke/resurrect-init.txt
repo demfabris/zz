@@ -1,0 +1,70 @@
+# Scenario: smoke/resurrect-init
+# Source: /home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/resurrect-init.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: conf: fixtures/resurrect-init.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    %begin 1789621313 1 0
+    %end 1789621313 1 0
+    %begin 1789621314 2 0
+    %end 1789621314 2 0
+    %exit
+tmux stdout:
+    %begin 1789621314 317 0
+    %end 1789621314 317 0
+    %begin 1789621314 318 0
+    %end 1789621314 318 0
+    %exit
+COMMAND EXIT-CLASS: clean
+WARN zz: clean
+WARN tmux: clean
+WARN terminator: clean (%end / %end)
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: keys: prefix C-s
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|C-s|0|run-shell /home/demfabris/dev/zz-c11-capture-fix/compat/results/.smoke-resurrect-init.e9wRuX/home/.tmux/plugins/tmux-resurrect/scripts/save.sh
+tmux stdout:
+    prefix|C-s|0|run-shell /home/demfabris/dev/zz-c11-capture-fix/compat/results/.smoke-resurrect-init.e9wRuX/home/.tmux/plugins/tmux-resurrect/scripts/save.sh
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: keys: prefix C-r
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|C-r|0|run-shell /home/demfabris/dev/zz-c11-capture-fix/compat/results/.smoke-resurrect-init.e9wRuX/home/.tmux/plugins/tmux-resurrect/scripts/restore.sh
+tmux stdout:
+    prefix|C-r|0|run-shell /home/demfabris/dev/zz-c11-capture-fix/compat/results/.smoke-resurrect-init.e9wRuX/home/.tmux/plugins/tmux-resurrect/scripts/restore.sh
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

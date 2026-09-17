@@ -1,0 +1,59 @@
+# Scenario: smoke/default-client-command
+# Source: /home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/default-client-command.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: out: set-environment -gu DEFAULT_CLIENT_COMMAND
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: run-shell 'sh ~/default-client-command.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    default-client-command-zz: single-command-output
+    default-client-command-zz: multiple-command-output
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: divergence
+--- zz SMOKE STDOUT step 2
++++ tmux SMOKE STDOUT step 2
+@@ -1,2 +0,0 @@
+-default-client-command-zz: single-command-output
+-default-client-command-zz: multiple-command-output
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g DEFAULT_CLIENT_COMMAND
+zz exit: 1
+tmux exit: 0
+zz stderr:
+    unknown variable: DEFAULT_CLIENT_COMMAND
+tmux stderr:
+    <empty>
+tmux stdout:
+    DEFAULT_CLIENT_COMMAND=clean:9
+OUT QUERY: failure
+SMOKE STDERR: divergence
+--- zz SMOKE STDERR step 3
++++ tmux SMOKE STDERR step 3
+@@ -1 +0,0 @@
+-unknown variable: DEFAULT_CLIENT_COMMAND
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=2

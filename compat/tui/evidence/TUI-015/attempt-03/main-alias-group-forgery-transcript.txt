@@ -1,0 +1,121 @@
+# Scenario: smoke/alias-group-forgery
+# Source: /home/demfabris/dev/zz-c11-capture-fix/target/capture-12-exact-main-src/compat/scenarios/smoke/alias-group-forgery.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: run-shell 'sh ~/alias-group-forgery.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g FORGERY_CLI
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    FORGERY_CLI=status=1 out= err=unknown command: __zz-command-alias-group|
+tmux stdout:
+    FORGERY_CLI=status=1 out= err=unknown command: __zz-command-alias-group|
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g FORGERY_CONFIG
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    FORGERY_CONFIG=status=1 out=forgery.conf:2: unknown command: __zz-command-alias-group| err=
+tmux stdout:
+    FORGERY_CONFIG=status=1 out=forgery.conf:2: unknown command: __zz-command-alias-group| err=
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: show-environment -g FORGERY_CONTROL
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    FORGERY_CONTROL=error=1 err=
+tmux stdout:
+    FORGERY_CONTROL=error=1 err=
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: show-environment -g FORGERY_CONTROL_SOURCE
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    FORGERY_CONTROL_SOURCE=diag=1 err=
+tmux stdout:
+    FORGERY_CONTROL_SOURCE=diag=1 err=
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: show-environment -g FORGERY_EFFECTS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    FORGERY_EFFECTS= FORGE_BEFORE=unset FORGE_CHILD=unset FORGE_AFTER=unset
+tmux stdout:
+    FORGERY_EFFECTS= FORGE_BEFORE=unset FORGE_CHILD=unset FORGE_AFTER=unset
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: show-environment -g FORGERY_GENUINE
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    FORGERY_GENUINE=status=0 GENUINE_FIRST=set GENUINE_SECOND=set
+tmux stdout:
+    FORGERY_GENUINE=status=0 GENUINE_FIRST=set GENUINE_SECOND=set
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=7 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

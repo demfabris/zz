@@ -1,0 +1,231 @@
+{
+  "smoke/cli-chain-parse-abort": {
+    "classification": "inherited",
+    "main": "f9c52359e3da88cbde735076b38e22cdf3e003c6",
+    "candidate_exit": 1,
+    "main_exit": 1,
+    "divergence": "Step 2: CLI_PARSE_ABORT=broken versus CLI_PARSE_ABORT=clean:6; runtime order remains clean.",
+    "transcripts_identical_except_source_path": true,
+    "fixture_identical_to_main": true,
+    "corpus_final_retry": {
+      "steps": 3,
+      "topo": 0,
+      "geo": 0,
+      "fmt": 0,
+      "out": 1,
+      "warn": 0
+    },
+    "corpus_final_exit": 1
+  },
+  "smoke/control-hard-loss": {
+    "classification": "variable first-run failure; both candidate standalone repeats and final corpus retry pass",
+    "candidate_runs": [
+      {
+        "run": "corpus first",
+        "exit": 1,
+        "difference": "hard-direct and hard-source ran=[] versus pin [m1]"
+      },
+      {
+        "run": "paired 1",
+        "exit": 0
+      },
+      {
+        "run": "paired 2",
+        "exit": 0
+      }
+    ],
+    "main_runs": [
+      {
+        "run": "initial",
+        "exit": 1,
+        "difference": "hard-source ran=[] versus pin [m1]; hard-direct agrees"
+      },
+      {
+        "run": "paired 1",
+        "exit": 0
+      },
+      {
+        "run": "paired 2",
+        "exit": 1,
+        "difference": "replacement extra-lines=1 versus pin 0; both hard markers agree"
+      }
+    ],
+    "limits": "Initial candidate and main transcripts are not identical. Source-level cause is unestablished; the fixture kills clients after fixed 0.8/0.9 second delays without a started-job acknowledgement. No fixture assertion or timing was changed.",
+    "corpus_final_retry": {
+      "steps": 2,
+      "topo": 0,
+      "geo": 0,
+      "fmt": 0,
+      "out": 0,
+      "warn": 0
+    },
+    "corpus_final_exit": 0
+  },
+  "smoke/default-client-command": {
+    "classification": "inherited",
+    "main": "f9c52359e3da88cbde735076b38e22cdf3e003c6",
+    "candidate_exit": 1,
+    "main_exit": 1,
+    "divergence": "single-command-output and multiple-command-output fail; DEFAULT_CLIENT_COMMAND is absent. One OUT and two WARN divergences.",
+    "transcripts_identical_except_source_path": true,
+    "fixture_identical_to_main": true,
+    "corpus_final_retry": {
+      "steps": 3,
+      "topo": 0,
+      "geo": 0,
+      "fmt": 0,
+      "out": 1,
+      "warn": 2
+    },
+    "corpus_final_exit": 1
+  },
+  "smoke/display-menu-resize-lifecycle": {
+    "classification": "initial candidate failure not reproduced in two standalone repeats or final corpus retry",
+    "candidate_runs": [
+      {
+        "run": "corpus first",
+        "exit": 1,
+        "difference": "shrink-inside failed; missing success marker"
+      },
+      {
+        "run": "standalone 1",
+        "exit": 0
+      },
+      {
+        "run": "standalone 2",
+        "exit": 0
+      }
+    ],
+    "main_runs": [
+      {
+        "run": "initial",
+        "exit": 0
+      }
+    ],
+    "limits": "Source-level cause is unestablished. The unchanged fixture sleeps 0.8 seconds after launching the menu and 0.5 seconds after resize before sending the key. No timing or assertion was changed.",
+    "corpus_final_retry": {
+      "steps": 3,
+      "topo": 0,
+      "geo": 0,
+      "fmt": 0,
+      "out": 0,
+      "warn": 0
+    },
+    "corpus_final_exit": 0
+  },
+  "smoke/jobs-command-environment": {
+    "classification": "inherited",
+    "main": "f9c52359e3da88cbde735076b38e22cdf3e003c6",
+    "candidate_exit": 1,
+    "main_exit": 1,
+    "divergence": "positive-destroyed and positive-missing fail; JOBS_COMMAND_ENVIRONMENT is absent. One OUT and two WARN divergences.",
+    "transcripts_identical_except_source_path": true,
+    "fixture_identical_to_main": true,
+    "corpus_final_retry": {
+      "steps": 3,
+      "topo": 0,
+      "geo": 0,
+      "fmt": 0,
+      "out": 0,
+      "warn": 0
+    },
+    "corpus_final_exit": 0
+  },
+  "smoke/plugin-runtime-resurrect-restore": {
+    "classification": "shared baseline failure on the pin side",
+    "main": "f9c52359e3da88cbde735076b38e22cdf3e003c6",
+    "candidate_exit": 1,
+    "main_exit": 1,
+    "divergence": "zz restores both ALPHA/BETA panes with their cwd; tmux-side title assertion sees shell-generated titles and sets failed:tmux-side-only.",
+    "transcripts_identical_except_source_path": true,
+    "plugin_corpus": "same pinned compat/.cache/plugins for both runs",
+    "corpus_final_retry": {
+      "steps": 2,
+      "topo": 0,
+      "geo": 0,
+      "fmt": 0,
+      "out": 1,
+      "warn": 1
+    },
+    "corpus_final_exit": 1
+  },
+  "smoke/source-replay-diagnostics": {
+    "classification": "inherited",
+    "main": "f9c52359e3da88cbde735076b38e22cdf3e003c6",
+    "candidate_exit": 1,
+    "main_exit": 1,
+    "divergence": "Step 60 control confirm acceptance times out (request-rc:124, no events) on zz; the pin returns request-rc:1 and source replay diagnostic events.",
+    "transcripts_identical_except_source_path": true,
+    "corpus_final_retry": {
+      "steps": 60,
+      "topo": 0,
+      "geo": 0,
+      "fmt": 0,
+      "out": 0,
+      "warn": 0
+    },
+    "corpus_final_exit": 0
+  },
+  "smoke/status-background-jobs": {
+    "classification": "failure also present on clean main; candidate corpus retry and main repeat 3 have identical transcripts except source path",
+    "candidate_runs": [
+      {
+        "run": "corpus first",
+        "exit": 1,
+        "difference": "DATE empty at second 1; complete printed diff retained, original raw transcript overwritten by runner retry"
+      },
+      {
+        "run": "corpus retry",
+        "exit": 1,
+        "difference": "DATE[] empty at second 1"
+      },
+      {
+        "log": "candidate-status-background-jobs-1.txt",
+        "exit": 1,
+        "errors": [
+          "    AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 3, 1789622145066496200, b'\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n0:date*                                                                                                           DATE[]\\n'))"
+        ]
+      },
+      {
+        "log": "candidate-status-background-jobs-2.txt",
+        "exit": 1,
+        "errors": [
+          "    AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 3, 1789622378740988202, b'\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n0:date*                                                                                                           DATE[]\\n'))"
+        ]
+      },
+      {
+        "log": "candidate-status-background-jobs-3.txt",
+        "exit": 1,
+        "errors": [
+          "    AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 3, 1789622486054085315, b'\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n0:date*                                                                                                           DATE[]\\n'))"
+        ]
+      }
+    ],
+    "main_runs": [
+      {
+        "log": "main-status-background-jobs.txt",
+        "exit": 0,
+        "errors": []
+      },
+      {
+        "log": "main-status-background-jobs-1.txt",
+        "exit": 0,
+        "errors": []
+      },
+      {
+        "log": "main-status-background-jobs-2.txt",
+        "exit": 0,
+        "errors": []
+      },
+      {
+        "log": "main-status-background-jobs-3.txt",
+        "exit": 1,
+        "errors": [
+          "    AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 1, 0, b'\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n0:date*                                                                                                           DATE[]\\n'))"
+        ]
+      }
+    ],
+    "main": "f9c52359e3da88cbde735076b38e22cdf3e003c6",
+    "limits": "Candidate fails 5/5, main fails 1/4. The same failure exists on main, but the small unequal samples do not establish equal failure rates or exclude differing timing sensitivity. No scheduling source cause established, no assertion or timing altered. Executable-placement copies were prepared but no placement probe was run once main reproduced the failure."
+  }
+}

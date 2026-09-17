@@ -1,0 +1,380 @@
+# Scenario: smoke/own-conf
+# Source: /home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/own-conf.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: conf: fixtures/own.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    %begin 1789620736 1 0
+    %end 1789620736 1 0
+    %begin 1789620736 2 0
+    %end 1789620736 2 0
+    %begin 1789620736 3 0
+    %end 1789620736 3 0
+    %begin 1789620736 4 0
+    %end 1789620736 4 0
+    %begin 1789620736 5 0
+    %end 1789620736 5 0
+    %begin 1789620736 6 0
+    %end 1789620736 6 0
+    %begin 1789620736 7 0
+    %end 1789620736 7 0
+    %begin 1789620736 8 0
+    %end 1789620736 8 0
+    %begin 1789620736 9 0
+    %end 1789620736 9 0
+    %begin 1789620736 10 0
+    %end 1789620736 10 0
+    %begin 1789620736 11 0
+    %end 1789620736 11 0
+    %begin 1789620736 12 0
+    %end 1789620736 12 0
+    %begin 1789620736 13 0
+    %end 1789620736 13 0
+    %begin 1789620736 14 0
+    %end 1789620736 14 0
+    %begin 1789620736 15 0
+    %end 1789620736 15 0
+    %begin 1789620736 16 0
+    %end 1789620736 16 0
+    %begin 1789620736 17 0
+    %end 1789620736 17 0
+    %begin 1789620736 18 0
+    %end 1789620736 18 0
+    %begin 1789620736 19 0
+    %end 1789620736 19 0
+    %begin 1789620736 20 0
+    %end 1789620736 20 0
+    %begin 1789620736 21 0
+    %end 1789620736 21 0
+    %begin 1789620736 22 0
+    %end 1789620736 22 0
+    %begin 1789620736 23 0
+    %end 1789620736 23 0
+    %begin 1789620736 24 0
+    %end 1789620736 24 0
+    %begin 1789620737 25 0
+    %end 1789620737 25 0
+    %begin 1789620737 26 0
+    %end 1789620737 26 0
+    %begin 1789620737 27 0
+    %end 1789620737 27 0
+    %begin 1789620737 28 0
+    %end 1789620737 28 0
+    %begin 1789620737 29 0
+    %end 1789620737 29 0
+    %begin 1789620737 30 0
+    %end 1789620737 30 0
+    %begin 1789620737 31 0
+    %end 1789620737 31 0
+    %begin 1789620737 32 0
+    %end 1789620737 32 0
+    %begin 1789620737 33 0
+    %end 1789620737 33 0
+    %begin 1789620737 34 0
+    %end 1789620737 34 0
+    %begin 1789620737 35 0
+    %end 1789620737 35 0
+    %begin 1789620737 36 0
+    %end 1789620737 36 0
+    %begin 1789620737 37 0
+    %end 1789620737 37 0
+    %begin 1789620737 38 0
+    %end 1789620737 38 0
+    %begin 1789620737 39 0
+    %end 1789620737 39 0
+    %begin 1789620737 40 0
+    %end 1789620737 40 0
+    %begin 1789620737 41 0
+    %end 1789620737 41 0
+    %begin 1789620737 42 0
+    %end 1789620737 42 0
+    %begin 1789620737 43 0
+    %end 1789620737 43 0
+    %begin 1789620737 44 0
+    %end 1789620737 44 0
+    %begin 1789620737 45 0
+    %end 1789620737 45 0
+    %begin 1789620737 46 0
+    %end 1789620737 46 0
+    %begin 1789620737 47 0
+    %end 1789620737 47 0
+    %begin 1789620737 48 0
+    %end 1789620737 48 0
+    %begin 1789620737 49 0
+    %end 1789620737 49 0
+    %begin 1789620737 50 0
+    %end 1789620737 50 0
+    %begin 1789620737 51 0
+    %end 1789620737 51 0
+    %begin 1789620737 52 0
+    %end 1789620737 52 0
+    %begin 1789620737 53 0
+    %end 1789620737 53 0
+    %begin 1789620737 54 0
+    %end 1789620737 54 0
+    %begin 1789620737 55 0
+    %end 1789620737 55 0
+    %begin 1789620737 56 0
+    %end 1789620737 56 0
+    %begin 1789620737 57 0
+    %end 1789620737 57 0
+    %begin 1789620737 58 0
+    %end 1789620737 58 0
+    %begin 1789620737 59 0
+    %end 1789620737 59 0
+    %begin 1789620737 60 0
+    %end 1789620737 60 0
+    %begin 1789620737 61 0
+    %end 1789620737 61 0
+    %begin 1789620737 62 0
+    %end 1789620737 62 0
+    %begin 1789620737 63 0
+    %end 1789620737 63 0
+    %begin 1789620737 64 0
+    %end 1789620737 64 0
+    %begin 1789620737 65 0
+    %end 1789620737 65 0
+    %begin 1789620738 66 0
+    %end 1789620738 66 0
+    %exit
+tmux stdout:
+    %begin 1789620738 316 0
+    %end 1789620738 316 0
+    %begin 1789620738 317 0
+    %end 1789620738 317 0
+    %begin 1789620738 318 0
+    %end 1789620738 318 0
+    %begin 1789620738 319 0
+    %end 1789620738 319 0
+    %begin 1789620738 320 0
+    %end 1789620738 320 0
+    %begin 1789620738 321 0
+    %end 1789620738 321 0
+    %begin 1789620738 322 0
+    %end 1789620738 322 0
+    %begin 1789620738 323 0
+    %end 1789620738 323 0
+    %begin 1789620738 324 0
+    %end 1789620738 324 0
+    %begin 1789620738 325 0
+    %end 1789620738 325 0
+    %begin 1789620738 326 0
+    %end 1789620738 326 0
+    %begin 1789620738 327 0
+    %end 1789620738 327 0
+    %begin 1789620738 328 0
+    %end 1789620738 328 0
+    %begin 1789620738 329 0
+    %end 1789620738 329 0
+    %begin 1789620738 330 0
+    %end 1789620738 330 0
+    %begin 1789620738 331 0
+    %end 1789620738 331 0
+    %begin 1789620738 332 0
+    %end 1789620738 332 0
+    %begin 1789620738 333 0
+    %end 1789620738 333 0
+    %begin 1789620738 334 0
+    %end 1789620738 334 0
+    %begin 1789620738 335 0
+    %end 1789620738 335 0
+    %begin 1789620738 336 0
+    %end 1789620738 336 0
+    %begin 1789620738 337 0
+    %end 1789620738 337 0
+    %begin 1789620738 338 0
+    %end 1789620738 338 0
+    %begin 1789620738 339 0
+    %end 1789620738 339 0
+    %begin 1789620738 340 0
+    %end 1789620738 340 0
+    %begin 1789620738 341 0
+    %end 1789620738 341 0
+    %begin 1789620738 342 0
+    %end 1789620738 342 0
+    %begin 1789620738 343 0
+    %end 1789620738 343 0
+    %begin 1789620738 344 0
+    %end 1789620738 344 0
+    %begin 1789620738 345 0
+    %end 1789620738 345 0
+    %begin 1789620738 346 0
+    %end 1789620738 346 0
+    %begin 1789620738 347 0
+    %end 1789620738 347 0
+    %begin 1789620738 348 0
+    %end 1789620738 348 0
+    %begin 1789620738 349 0
+    %end 1789620738 349 0
+    %begin 1789620738 350 0
+    %end 1789620738 350 0
+    %begin 1789620738 351 0
+    %end 1789620738 351 0
+    %begin 1789620738 352 0
+    %end 1789620738 352 0
+    %begin 1789620738 353 0
+    %end 1789620738 353 0
+    %begin 1789620738 354 0
+    %end 1789620738 354 0
+    %begin 1789620738 355 0
+    %end 1789620738 355 0
+    %begin 1789620738 356 0
+    %end 1789620738 356 0
+    %begin 1789620738 357 0
+    %end 1789620738 357 0
+    %begin 1789620738 358 0
+    %end 1789620738 358 0
+    %begin 1789620738 359 0
+    %end 1789620738 359 0
+    %begin 1789620738 360 0
+    %end 1789620738 360 0
+    %begin 1789620738 361 0
+    %end 1789620738 361 0
+    %begin 1789620738 362 0
+    %end 1789620738 362 0
+    %begin 1789620738 363 0
+    %end 1789620738 363 0
+    %begin 1789620738 364 0
+    %end 1789620738 364 0
+    %begin 1789620738 365 0
+    %end 1789620738 365 0
+    %begin 1789620738 366 0
+    %end 1789620738 366 0
+    %begin 1789620738 367 0
+    %end 1789620738 367 0
+    %begin 1789620738 368 0
+    %end 1789620738 368 0
+    %begin 1789620738 369 0
+    %end 1789620738 369 0
+    %begin 1789620738 370 0
+    %end 1789620738 370 0
+    %begin 1789620738 371 0
+    %end 1789620738 371 0
+    %begin 1789620738 372 0
+    %end 1789620738 372 0
+    %begin 1789620738 373 0
+    %end 1789620738 373 0
+    %begin 1789620738 374 0
+    %end 1789620738 374 0
+    %begin 1789620738 375 0
+    %end 1789620738 375 0
+    %begin 1789620738 376 0
+    %end 1789620738 376 0
+    %begin 1789620738 377 0
+    %end 1789620738 377 0
+    %begin 1789620738 378 0
+    %end 1789620738 378 0
+    %begin 1789620738 379 0
+    %end 1789620738 379 0
+    %begin 1789620738 380 0
+    %end 1789620738 380 0
+    %begin 1789620738 381 0
+    %end 1789620738 381 0
+    %exit
+COMMAND EXIT-CLASS: clean
+WARN zz: clean
+WARN tmux: clean
+WARN terminator: clean (%end / %end)
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: keys: root M-Tab
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    root|M-Tab|0|choose-tree -Zs
+tmux stdout:
+    root|M-Tab|0|choose-tree -Zs
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: keys: prefix b
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|b|0|set-option -g status \; display-message "status: #{?status,on,off}"
+tmux stdout:
+    prefix|b|0|set-option -g status \; display-message "status: #{?status,on,off}"
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: keys: prefix T
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|T|0|run-shell /home/demfabris/dev/zz-c11-capture-fix/compat/results/.smoke-own-conf.9SMZv4/home/.tmux/bin/apply-theme
+tmux stdout:
+    prefix|T|0|run-shell /home/demfabris/dev/zz-c11-capture-fix/compat/results/.smoke-own-conf.9SMZv4/home/.tmux/bin/apply-theme
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: keys: prefix r
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|r|0|source-file /home/demfabris/dev/zz-c11-capture-fix/compat/results/.smoke-own-conf.9SMZv4/home/.tmux.conf \; display-message Reloaded!
+tmux stdout:
+    prefix|r|0|source-file /home/demfabris/dev/zz-c11-capture-fix/compat/results/.smoke-own-conf.9SMZv4/home/.tmux.conf \; display-message Reloaded!
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: keys: prefix f
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|f|0|run-shell "/home/demfabris/dev/zz-c11-capture-fix/compat/results/.smoke-own-conf.9SMZv4/home/.tmux/plugins/tmux-fpp/fpp.tmux start edit"
+tmux stdout:
+    prefix|f|0|run-shell "/home/demfabris/dev/zz-c11-capture-fix/compat/results/.smoke-own-conf.9SMZv4/home/.tmux/plugins/tmux-fpp/fpp.tmux start edit"
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=6 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

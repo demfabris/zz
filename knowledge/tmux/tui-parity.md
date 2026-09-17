@@ -4,7 +4,7 @@ title: "TUI parity campaign"
 description: "TUI parity obligations, their proof status, and progress against the fixed baseline."
 resource: compat/tui/campaign.json
 tags: [tmux, tui, compatibility, campaign]
-timestamp: 2026-09-16T00:00:00Z
+timestamp: 2026-09-17T00:00:00Z
 ---
 
 # TUI parity campaign
@@ -804,30 +804,34 @@ Sources:
 - `compat/tui/evidence/TUI-017/attempt-06/environment.json`
 - `compat/tui/evidence/TUI-017/attempt-06/startup-summary.json`
 - `compat/tui/evidence/TUI-017/attempt-06/fixture-summary.json`
+- `compat/tui/evidence/TUI-015/attempt-03/notes.md`
+- `compat/tui/evidence/TUI-015/attempt-03/environment.json`
+- `compat/tui/evidence/TUI-015/attempt-03/fixture-summary.json`
+- `compat/tui/evidence/TUI-015/attempt-03/self-check-summary.json`
 
 Tmux gap references: `options.lock-program`.
 
-CAPTURE-12 RESUMED 2026-09-16. Rebased 23 carried commits without conflicts onto origin/main eef2df94, including the headless CLI split and landed exit-code predecessor. REVIEW, not verified. Attempt-06 measures immutable debug zz-cli binaries from candidate source 3209ffb7 and an independently compiled exact main archive (524 crate files byte-identical). Forty alternating measured pairs plus two warmup pairs per binary find no consistent candidate startup slowdown: candidate/main median 384.147/383.765 ms, p95 638.012/717.456 ms, maximum 987.666/784.641 ms; the candidate is slower in 20 of 40 pairs. Shared-load measurements are not an isolated microbenchmark. Every child remains parked in splitwait:0 with the other session untouched. Median pane queries take 964.688/1024.474 ms, making the former fixed 0.4-second observation of a one-second child unreliable. The target stays on TargetSlot::Classified, outside the session-only compound parser; capture formatting and wait-pane tail counting are outside this spawn path. Retain the readiness/release fixture: three candidate and three clean-main differential runs pass, and early-return and wrong-window sabotages are caught. Main's bare-ID unit test and targets.txt are unchanged, and the fallback-containment regression passes. Three shared-fixture runs each pass all 192 asserted comparisons with 32 records and unattributed=0; all eight former exit-code failures pass unchanged in every run. The 98-check self-check passes. Both executable claim checks pass and keep review with 3/4 owned records. The attached fixture fails once at a popup marker, while main fails an earlier alert timer; those different failures are not called the same inherited bug. Both isolated popup checks and the full candidate retry pass. The focused delta covers capture-pane, targets and split-window-wait, all passing; it does not rerun all 193 selected rows. Old failed runs and interrupted classification work remain in attempts 04 and 05. Protocol 104 is inherited; no further payload change. Commit 7c807b92 only refreshes inherited native-command registry and test expectations, with no runtime change. Current check outputs and limits are retained in attempt-06. lock-client remains the sole carried recorded-to-asserted flip. The three pane-base-index records stay owned by TUI-015 for the later residuals lane; OS-session locking decisions remain registered. Final compat/check.sh exits 0, including all 535 mux tests and the three daemon manifest checks. Four-crate clippy with -D warnings, formatting, wire and tracker checks pass. The full daemon run has four failures, each passing its filtered rerun; no full-daemon-green claim is made. Clean main reproduces the two stale native-command test failures repaired by 7c807b92. Cancelled childless Cargo-slot waits and successful capped requeues are retained separately.
+EMPTY EXACT WINDOW FOLLOW-UP 2026-09-17. Rebased onto main f9c52359. Source cf8e0b8b normalizes an empty exact window component before its pane suffix, only under TargetSlot::Session. All 108 detached command/target/layout comparisons match the pin, including literal %0 in another window or session and the exact missing-pane diagnostics. Three shared-fixture runs each pass all 198 asserted comparisons with 32 records and unattributed=0. The self-check passes 110 expectations and catches all six new rejection sabotages. These are six new assertions, not six recorded-to-asserted flips; lock-client remains the carried flip. Main's bare-ID test and all 21 targets.txt lines are unchanged; its 20 executable steps and the fallback-containment regression pass. The full mux package passes 535 library and 105 integration tests. Mux clippy, formatting, compat/check.sh and wire validation pass. The 155-row command delta exits 1: 151 pass after retries; the four final failures each reproduce on fresh clean main, including the pin-side resurrect title failure. The additional capture-pane row passes, covering the full 156-row selection. Initial failures and variable reruns are retained in attempt-03; corpus-classification.json states the limits. Earlier accepted capture and startup measurements remain in TUI-017/attempt-06. Preserve the three pane-base-index records for the residuals lane. TUI-017 still owns four records on this branch; this follow-up does not edit them or promote either obligation.
 
-Next action: Keep at review. Gate the reconciled resolver and synchronized split observation using attempt-06. Preserve the three pane-base-index records for the later residuals lane and retain the OS-session locking decisions.
+Next action: Keep at review. Gate the empty-exact-window follow-up using TUI-015/attempt-03, then preserve the three pane-base-index records for the residuals lane and retain the OS-session locking decisions.
 
-Proof revision: `3209ffb704182b170471c3eac8707f6474d96de9`. Tmux: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
+Proof revision: `cf8e0b8bf7a6755d58685c68bac86443f29aae48`. Tmux: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Environment: Alienware Linux after reboot; base eef2df94; same debug-profile headless package on candidate and independent clean-main archive; isolated homes and sockets. Shared campaign load is recorded per latency sample. Later commit 7c807b92 changes only registry/test expectations. Binary hashes and source identity are in attempt-06.
+Environment: Alienware Linux, main f9c52359, immutable debug zz-cli binary from source cf8e0b8b; isolated homes and sockets; pinned tmux. Hashes, wrapper and clean-main build identity are in attempt-03/environment.json. This follow-up measures the exact-window correction; earlier accepted startup and capture details remain in attempt-06.
 
 Proof commands:
 
-- `compat/tui-client-commands.sh target/capture-12-resumed-proof/zz compat/.cache/tmux-src/tmux (three runs)`
-- `compat/tui-client-commands.sh --self-check target/capture-12-resumed-proof/zz compat/.cache/tmux-src/tmux`
-- `python3 compat/tui/evidence/TUI-017/attempt-06/startup-latency.py target/capture-12-resumed-proof/zz target/capture-12-resumed-proof/main`
-- `compat/diff-scenario.sh --strict-geometry compat/scenarios/smoke/split-window-wait.txt <candidate or clean-main binary> compat/.cache/tmux-src/tmux (three pairs)`
-- `compat/attached-client.sh target/capture-12-resumed-proof/zz compat/.cache/tmux-src/tmux (initial failure, full retry passes)`
-- `ZZ_COMPAT_ZZ=$PWD/target/capture-12-resumed-proof/zz compat/run.sh --strict-geometry --delta origin/main...HEAD --commands capture-pane,lock-session,lock-client,lock-server,has-session,list-windows,split-window capture-pane targets smoke/split-window-wait`
-- `python3 compat/tui/verify-claims.py --run TUI-015 --zz target/capture-12-resumed-proof/zz`
+- `compat/tui-client-commands.sh target/capture-12-exact-proof/zz compat/.cache/tmux-src/tmux (three runs)`
+- `compat/tui-client-commands.sh --self-check target/capture-12-exact-proof/zz compat/.cache/tmux-src/tmux`
+- `ZZ_COMPAT_ZZ=$PWD/target/capture-12-exact-proof/zz python3 compat/tui/evidence/TUI-015/attempt-03/exact-window-probe.py (three layouts; commands.json)`
+- `/tmp/zz-cargo.sh test -p zz-mux`
+- `compat/diff-scenario.sh --strict-geometry compat/scenarios/targets.txt target/capture-12-exact-proof/zz compat/.cache/tmux-src/tmux`
+- `ZZ_COMPAT_ZZ=$PWD/target/capture-12-exact-proof/zz compat/run.sh --strict-geometry --delta HEAD..HEAD --commands lock-session,has-session,list-windows`
+- `compat/check.sh (exported cargo function routes every Cargo invocation through /tmp/zz-cargo.sh)`
 
-Artifacts: `compat/tui/evidence/TUI-017/attempt-06/notes.md`, `compat/tui/evidence/TUI-017/attempt-06/environment.json`, `compat/tui/evidence/TUI-017/attempt-06/commands.json`, `compat/tui/evidence/TUI-017/attempt-06/main-source-audit.json`, `compat/tui/evidence/TUI-017/attempt-06/main-pin-audit.json`, `compat/tui/evidence/TUI-017/attempt-06/startup-samples.json`, `compat/tui/evidence/TUI-017/attempt-06/startup-summary.json`, `compat/tui/evidence/TUI-017/attempt-06/startup-analysis.json`, `compat/tui/evidence/TUI-017/attempt-06/fixture-summary.json`, `compat/tui/evidence/TUI-017/attempt-06/exitcode-assertions.json`, `compat/tui/evidence/TUI-017/attempt-06/capture-summary.json`, `compat/tui/evidence/TUI-017/attempt-06/records.json`, `compat/tui/evidence/TUI-017/attempt-06/source-audit.json`, `compat/tui/evidence/TUI-017/attempt-06/runs.json`, `compat/tui/evidence/TUI-017/attempt-06/tests-summary.json`, `compat/tui/evidence/TUI-017/attempt-06/compat-check-requeued.txt`.
+Artifacts: `compat/tui/evidence/TUI-015/attempt-03/notes.md`, `compat/tui/evidence/TUI-015/attempt-03/environment.json`, `compat/tui/evidence/TUI-015/attempt-03/commands.json`, `compat/tui/evidence/TUI-015/attempt-03/before.json`, `compat/tui/evidence/TUI-015/attempt-03/after.json`, `compat/tui/evidence/TUI-015/attempt-03/pane-zero-other-window.json`, `compat/tui/evidence/TUI-015/attempt-03/pane-zero-foreign-session.json`, `compat/tui/evidence/TUI-015/attempt-03/fixture-summary.json`, `compat/tui/evidence/TUI-015/attempt-03/self-check-summary.json`, `compat/tui/evidence/TUI-015/attempt-03/records.json`, `compat/tui/evidence/TUI-015/attempt-03/tests-summary.json`, `compat/tui/evidence/TUI-015/attempt-03/source-audit.json`, `compat/tui/evidence/TUI-015/attempt-03/delta.txt`, `compat/tui/evidence/TUI-015/attempt-03/targets.txt`, `compat/tui/evidence/TUI-015/attempt-03/compat-check.txt`, `compat/tui/evidence/TUI-015/attempt-03/delta-summary.json`, `compat/tui/evidence/TUI-015/attempt-03/corpus-classification.json`, `compat/tui/evidence/TUI-015/attempt-03/capture-pane.txt`.
 
-Review: `compat/tui/evidence/TUI-017/attempt-06/review.md`.
+Review: `compat/tui/evidence/TUI-015/attempt-03/review.md`.
 
 ### TUI-016: Server log and terminal introspection
 

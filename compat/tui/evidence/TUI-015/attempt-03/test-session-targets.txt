@@ -1,0 +1,15 @@
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-capture-fix/crates/zz-mux)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.31s
+     Running unittests src/lib.rs (target/debug/deps/zz_mux-eed3ba838a6892ab)
+
+running 4 tests
+test model::tests::session_targets_accept_pane_and_window_ids ... ok
+test model::tests::session_targets_follow_id_exact_prefix_and_fnmatch_passes ... ok
+test model::tests::session_targets_validate_window_and_pane_components ... ok
+test command::tests::select_layout_resolves_window_typed_session_targets ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 531 filtered out; finished in 0.02s
+
+
+EXIT=0

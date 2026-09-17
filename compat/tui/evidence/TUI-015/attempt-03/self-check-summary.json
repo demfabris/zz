@@ -1,0 +1,12 @@
+{
+  "passed_expectations": 110,
+  "new_sabotages_caught": [
+    "ok    self-check lock-session rejects cli:=.0 on zz only",
+    "ok    self-check has-session rejects cli:=.0 on zz only",
+    "ok    self-check list-windows rejects cli:=.0 on zz only",
+    "ok    self-check lock-session rejects cli:=.%0 on zz only",
+    "ok    self-check has-session rejects cli:=.%0 on zz only",
+    "ok    self-check list-windows rejects cli:=.%0 on zz only"
+  ],
+  "exit": 0
+}

@@ -1,0 +1,70 @@
+# Scenario: smoke/source-file-depth
+# Source: /home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/source-file-depth.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: run-shell 'sh ~/source-file-depth.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g SOURCE_DEPTH_ALLOWED
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_DEPTH_ALLOWED=rc=0 out= err= depth=49 last=yes leaf=yes
+tmux stdout:
+    SOURCE_DEPTH_ALLOWED=rc=0 out= err= depth=49 last=yes leaf=yes
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g SOURCE_DEPTH_REFUSED
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_DEPTH_REFUSED=rc=1 out= err=too many nested files~too many nested files~ depth=50 last=yes leaf=
+tmux stdout:
+    SOURCE_DEPTH_REFUSED=rc=1 out= err=too many nested files~too many nested files~ depth=50 last=yes leaf=
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: show-environment -g SOURCE_LINE_GROUPS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_LINE_GROUPS=depth_same=no depth_next=yes loud_same=no loud_next=yes quiet_same=yes quiet_next=yes runtime_same=no runtime_next=yes read_same=yes read_next=yes
+tmux stdout:
+    SOURCE_LINE_GROUPS=depth_same=no depth_next=yes loud_same=no loud_next=yes quiet_same=yes quiet_next=yes runtime_same=no runtime_next=yes read_same=yes read_next=yes
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=4 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

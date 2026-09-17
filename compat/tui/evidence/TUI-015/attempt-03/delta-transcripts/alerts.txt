@@ -1,0 +1,895 @@
+# Scenario: alerts
+# Source: /home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/alerts.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: out: show-window-options -gv monitor-activity
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    off
+tmux stdout:
+    off
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-window-options -gv monitor-bell
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    on
+tmux stdout:
+    on
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-window-options -gv monitor-silence
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: show-options -gv activity-action
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    other
+tmux stdout:
+    other
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: show-options -gv silence-action
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    other
+tmux stdout:
+    other
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: show-options -gv visual-activity
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    off
+tmux stdout:
+    off
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: show-options -gv visual-silence
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    off
+tmux stdout:
+    off
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: show-window-options -gv window-status-activity-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    reverse
+tmux stdout:
+    reverse
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: set-option -g activity-action current
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: show-options -gv activity-action
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    current
+tmux stdout:
+    current
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: set-option -g silence-action none
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: show-options -gv silence-action
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    none
+tmux stdout:
+    none
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: set-option -g visual-activity both
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: out: show-options -gv visual-activity
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    both
+tmux stdout:
+    both
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: set-option -g visual-silence on
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: show-options -gv visual-silence
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    on
+tmux stdout:
+    on
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: set-window-option -g monitor-silence 60
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: set-window-option -g monitor-silence 60
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: show-window-options -gv monitor-silence
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    60
+tmux stdout:
+    60
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: set-window-option -g -u monitor-silence
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: show-window-options -gv monitor-silence
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: set-window-option -g window-status-activity-style fg=yellow,bold
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: out: show-window-options -gv window-status-activity-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    fg=yellow,bold
+tmux stdout:
+    fg=yellow,bold
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: set-window-option -g -u window-status-activity-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: set-option -g -u activity-action
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: set-option -g -u silence-action
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: set-option -g -u visual-activity
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: set-option -g -u visual-silence
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: new-window -d -t w: -n quiet cat
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: set-window-option -t w:1 monitor-activity on
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 31
+COMMAND: out: display-message -p -t w:1 #{window_activity_flag}#{window_bell_flag}#{window_silence_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    000
+tmux stdout:
+    000
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 32
+COMMAND: send-keys -t w:1 -l ping
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 33
+COMMAND: out: display-message -p -t w:1 #{window_activity_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 34
+COMMAND: out: display-message -p -t w:0 #{session_activity_flag}|#{window_activity_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0|0
+tmux stdout:
+    0|0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 35
+COMMAND: out: display-message -p -t w:1 #{session_activity_flag}|#{window_activity_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1|1
+tmux stdout:
+    1|1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 36
+COMMAND: out: list-sessions -F #{session_activity_flag}|#{session_silence_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0|0
+tmux stdout:
+    0|0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 37
+COMMAND: out: list-windows -t w -F #{window_index}|#{session_activity_flag}|#{session_silence_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0|0|0
+    1|1|0
+tmux stdout:
+    0|0|0
+    1|1|0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 38
+COMMAND: out: display-message -p -t w:0 #{session_alerts}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1#
+tmux stdout:
+    1#
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 39
+COMMAND: out: display-message -p -t w:0 #{session_alert}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    #
+tmux stdout:
+    #
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 40
+COMMAND: out: list-windows -t w -F #{window_index}|#{window_flags}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0|*
+    1|##
+tmux stdout:
+    0|*
+    1|##
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 41
+COMMAND: select-window -t w:1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 42
+COMMAND: out: display-message -p -t w:1 #{window_activity_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 43
+COMMAND: set-window-option -t w:1 monitor-activity off
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 44
+COMMAND: out: display-message -p -t w:1 #{window_activity_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 45
+COMMAND: select-window -t w:0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 46
+COMMAND: select-window -t w:1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 47
+COMMAND: out: display-message -p -t w:1 #{window_activity_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 48
+COMMAND: out: display-message -p -t w:0 [#{session_alerts}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    []
+tmux stdout:
+    []
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 49
+COMMAND: send-keys -t w:1 -H 07
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 50
+COMMAND: send-keys -t w:1 Enter
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 51
+COMMAND: out: display-message -p -t w:1 #{window_bell_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 52
+COMMAND: set-window-option -t w:1 monitor-activity on
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 53
+COMMAND: send-keys -t w:1 -l pong
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 54
+COMMAND: out: display-message -p -t w:1 #{window_activity_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 55
+COMMAND: out: display-message -p -t w:0 #{session_alerts}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1#!
+tmux stdout:
+    1#!
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 56
+COMMAND: out: display-message -p -t w:0 #{session_alert}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    #!
+tmux stdout:
+    #!
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 57
+COMMAND: out: list-windows -t w -F #{window_index}|#{window_flags}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0|-
+    1|##!*
+tmux stdout:
+    0|-
+    1|##!*
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 58
+COMMAND: set-window-option -t w:1 monitor-activity off
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 59
+COMMAND: select-window -t w:0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 60
+COMMAND: select-window -t w:1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 61
+COMMAND: out: display-message -p -t w:1 #{window_activity_flag}#{window_bell_flag}#{window_silence_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    000
+tmux stdout:
+    000
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 62
+COMMAND: out: display-message -p -t w:0 [#{session_alerts}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    []
+tmux stdout:
+    []
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=62 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

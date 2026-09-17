@@ -1,0 +1,36 @@
+{
+  "base": "f9c52359e3da88cbde735076b38e22cdf3e003c6",
+  "rebased_pre_fix": "e97969194bb2df34e60a7c0d853c53d106c2c65d",
+  "remote_before": "c550a39632ca97dc0e7c6793791b44263d3d81eb",
+  "kernel": "Linux-7.2.3-1-cachyos-deckify-x86_64-with-glibc2.44",
+  "pin_commit": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
+  "toolchain": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+  "cargo_wrapper": "#!/usr/bin/env bash\nset -uo pipefail\nCAP=\"${ZZ_CARGO_CAP:-4G}\"\nSWAP=\"${ZZ_CARGO_SWAP:-2G}\"\nJOBS=\"${ZZ_CARGO_JOBS:-2}\"\nS=$((RANDOM % 2))\nARGS=()\nif [ \"${1:-}\" = fmt ]; then\n  ARGS=(\"$@\")\nelse\n  for ARG in \"$@\"; do\n    if [ \"$ARG\" = -- ]; then\n      ARGS+=(--jobs \"$JOBS\")\n      JOBS=\"\"\n    fi\n    ARGS+=(\"$ARG\")\n  done\n  [ -z \"$JOBS\" ] || ARGS+=(--jobs \"$JOBS\")\nfi\nexec systemd-run --user --scope -q \\\n  -p MemoryMax=\"$CAP\" -p MemorySwapMax=\"$SWAP\" \\\n  flock -w 3600 /tmp/zz-cargo-slot-$S.lock \\\n  cargo \"${ARGS[@]}\"\n",
+  "baseline_binary": {
+    "path": "target/capture-12-resumed-proof/zz",
+    "source": "3209ffb704182b170471c3eac8707f6474d96de9",
+    "sha256": "9147964c76a752452bfdb3798ceef0c043102271b70487a25ba95489d1f275e1"
+  },
+  "rebase": "Regenerated conflicting knowledge/tmux/gaps.md; native-command expectation commit already upstream.",
+  "candidate_source": "cf8e0b8bf7a6755d58685c68bac86443f29aae48",
+  "candidate_binary": {
+    "path": "target/capture-12-exact-proof/zz",
+    "sha256": "78cd8b640235cd21d49b49c72e4b069398bd5960fe5922455de18dff74890b3a"
+  },
+  "build_slot_selection": "Cancelled only own childless slot-0 build waiter; used existing task-local RANDOM=1 initializer through unchanged /tmp/zz-cargo.sh to select slot 1. Memory caps and shared lock unchanged.",
+  "main_binary": {
+    "path": "target/capture-12-exact-proof/main",
+    "source": "f9c52359e3da88cbde735076b38e22cdf3e003c6",
+    "sha256": "1d92d78e60c5c026b157f9da227225488732f08b030908f683e9c0d3ebd038e3",
+    "source_archive": "git archive origin/main at f9c52359e3da88cbde735076b38e22cdf3e003c6"
+  },
+  "build_git_head": "e97969194bb2df34e60a7c0d853c53d106c2c65d",
+  "build_source_note": "Built with the resolver and fixture edits uncommitted; those exact source edits were then committed as candidate_source. No runtime source changes followed the build.",
+  "pin_binary": {
+    "path": "compat/.cache/tmux-src/tmux",
+    "sha256": "df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5"
+  },
+  "fixture_geometry": "Initial 80x24, with the fixture-defined geometry changes; same outer pinned tmux on both sides.",
+  "shell": "bash for fixture orchestration; fixture selects and isolates the inner shell.",
+  "daemon_launcher_audit": "daemon_executable_from selects sibling cli (not zz_cli). No cli file exists in either proof directory; both binaries use themselves. Main daemon processes were observed running target/capture-12-exact-proof/main during the jobs baseline."
+}

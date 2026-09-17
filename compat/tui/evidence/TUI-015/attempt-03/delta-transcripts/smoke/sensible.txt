@@ -1,0 +1,124 @@
+# Scenario: smoke/sensible
+# Source: /home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/sensible.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: tmux-only: set-option -g history-limit 10000
+zz exit: skipped
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: side-specific setup
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: conf: fixtures/sensible.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    %begin 1789621374 1 0
+    %end 1789621374 1 0
+    %begin 1789621382 2 0
+    %end 1789621382 2 0
+    %begin 1789621382 3 0
+    %end 1789621382 3 0
+    %begin 1789621382 4 0
+    %end 1789621382 4 0
+    %exit
+tmux stdout:
+    %begin 1789621382 329 0
+    %end 1789621382 329 0
+    %begin 1789621382 330 0
+    %end 1789621382 330 0
+    %begin 1789621382 373 0
+    %end 1789621382 373 0
+    %begin 1789621382 374 0
+    %end 1789621382 374 0
+    %exit
+COMMAND EXIT-CLASS: clean
+WARN zz: clean
+WARN tmux: clean
+WARN terminator: clean (%end / %end)
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-options -sv escape-time
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    10
+tmux stdout:
+    10
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: show-options -gv display-time
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    4000
+tmux stdout:
+    4000
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: show-options -gv status-interval
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    5
+tmux stdout:
+    5
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: show-options -gv history-limit
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    10000
+tmux stdout:
+    10000
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=6 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

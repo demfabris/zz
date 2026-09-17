@@ -1,0 +1,36 @@
+# Scenario: smoke/environment-bytes
+# Source: /home/demfabris/dev/zz-c11-capture-fix/compat/scenarios/smoke/environment-bytes.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: run-shell 'sh ~/environment-bytes.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g ZZ_ENVBYTES_RESULT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    ZZ_ENVBYTES_RESULT=clean:18
+tmux stdout:
+    ZZ_ENVBYTES_RESULT=clean:18
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

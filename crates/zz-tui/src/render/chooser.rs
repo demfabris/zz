@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use unicode_width::UnicodeWidthChar as _;
 use zz_protocol::{
     ChooseBufferState, ChooseTreeState, ChooserPresentation, ChooserPreview, ChooserPreviewSize,
-    ChooserPreviewTile, ThemeColours, TmuxAttributeState, TmuxColour, TmuxStyle, apply_style,
-    parse_style, parse_styled_segments,
+    ChooserPreviewTile, ThemeColours, TmuxAttributeState, TmuxAttributes, TmuxColour, TmuxStyle,
+    apply_style, parse_style, parse_styled_segments,
 };
 use zz_terminal::{
     CellWidth, Color, Glyph, PackedCell, PackedStyle, TerminalAppearance, TerminalViewport,
@@ -73,6 +73,19 @@ const HELP_CLIENT: &[(&str, &str)] = &[
     ("          f", "Enter a filter"),
 ];
 const HELP_CLIENT_WIDTH: u16 = 39;
+const HELP_CUSTOMIZE: &[(&str, &str)] = &[
+    ("   Enter, s", "Set %1 value"),
+    ("          S", "Set global %1 value"),
+    ("          w", "Set window %1 value"),
+    ("          d", "Set to default value"),
+    ("          D", "Set tagged %1s to default value"),
+    ("          u", "Unset an %1"),
+    ("          U", "Unset tagged %1s"),
+    ("          a", "Change array key"),
+    ("          f", "Enter a filter"),
+    ("          v", "Toggle information"),
+];
+const HELP_CUSTOMIZE_WIDTH: u16 = 52;
 const HELP_END: &[(&str, &str)] = &[("  q, Escape", "Exit mode")];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -80,6 +93,7 @@ enum HelpKind {
     Tree,
     Client,
     Buffer,
+    Customize,
 }
 const HELP_DEFAULT_WIDTH: u16 = 39;
 const HELP_TREE_WIDTH: u16 = 51;
@@ -119,7 +133,6 @@ pub(super) struct Grid {
     width: u16,
     height: u16,
     cells: Vec<Cell>,
-    clear_before_rows: Vec<Option<u16>>,
 }
 
 pub(super) fn plain() -> TmuxStyle {
@@ -231,7 +244,6 @@ impl Grid {
             width,
             height,
             cells: vec![blank; usize::from(width) * usize::from(height)],
-            clear_before_rows: vec![None; usize::from(height)],
         }
     }
 
@@ -307,14 +319,16 @@ impl Grid {
         used
     }
 
+    pub(super) fn restyle(&mut self, x: u16, y: u16, paint: &Paint) {
+        if let Some(index) = self.index(x, y) {
+            self.cells[index].paint = paint.clone();
+        }
+    }
+
     pub(super) fn fill(&mut self, x: u16, y: u16, count: u16, paint: &Paint) {
         for offset in 0..count {
             self.set(x.saturating_add(offset), y, " ", 1, paint);
         }
-    }
-
-    pub(super) fn clear_before_row(&mut self, used: u16, y: u16) {
-        self.clear_before_rows[usize::from(y)] = Some(used.min(self.width));
     }
 
     pub(super) fn markup(
@@ -496,29 +510,15 @@ impl Grid {
         for row in 0..self.height {
             write_cursor_position(output, x, y + row);
             let line = &self.cells[usize::from(row) * width..(usize::from(row) + 1) * width];
-            let clear_before = self.clear_before_rows[usize::from(row)]
-                .filter(|_| matches!(trailing, Trailing::Pane { .. }));
-            if clear_before.is_some() {
-                output.extend_from_slice(b"\x1b[0m");
-                if matches!(trailing, Trailing::Pane { reaches_edge: true }) {
-                    output.extend_from_slice(b"\x1b[K");
-                } else {
-                    output.extend_from_slice(format!("\x1b[{}X", self.width).as_bytes());
-                }
-            }
-            let used = if let Some(used) = clear_before {
-                usize::from(used)
-            } else {
-                match trailing {
-                    Trailing::Client => line
-                        .iter()
-                        .rposition(|cell| !erasable(cell))
-                        .map_or(0, |index| index + 1),
-                    Trailing::Pane { .. } => clearable_from(line),
-                }
+            let used = match trailing {
+                Trailing::Client => line
+                    .iter()
+                    .rposition(|cell| !erasable(cell))
+                    .map_or(0, |index| index + 1),
+                Trailing::Pane { .. } => clearable_from(line),
             };
             let mut current: Option<&Paint> = None;
-            for (column, cell) in line[..used].iter().enumerate() {
+            for cell in &line[..used] {
                 if cell.width == 0 {
                     continue;
                 }
@@ -548,17 +548,8 @@ impl Grid {
                     current = Some(&cell.paint);
                 }
                 output.extend_from_slice(cell.glyph.as_bytes());
-                let end = column + usize::from(cell.width);
-                if clear_before.is_some()
-                    && end < used
-                    && (column == 0
-                        || column <= width / 4 && end > width / 4
-                        || column <= width / 2 && end > width / 2)
-                {
-                    write_cursor_position(output, x.saturating_add(narrow(end)), y + row);
-                }
             }
-            if used == width || clear_before.is_some() {
+            if used == width {
                 output.extend_from_slice(b"\x1b[0m");
                 continue;
             }
@@ -957,6 +948,7 @@ fn help(grid: &mut Grid, kind: HelpKind, border: &TmuxStyle, colours: &Colours) 
         HelpKind::Tree => (HELP_TREE_WIDTH, "item", HELP_TREE),
         HelpKind::Client => (HELP_CLIENT_WIDTH, "client", HELP_CLIENT),
         HelpKind::Buffer => (HELP_DEFAULT_WIDTH, "buffer", HELP_BUFFER),
+        HelpKind::Customize => (HELP_CUSTOMIZE_WIDTH, "option", HELP_CUSTOMIZE),
     };
     let count = narrow(HELP_START.len() + lines.len() + HELP_END.len());
     let (box_width, box_height) = (width + 2, count + 2);
@@ -1110,6 +1102,7 @@ impl Renderer {
             height: None,
             prompt_top: model.status_top(),
             customize: false,
+            title: None,
         });
         self.mode_tree.offset = offset;
         cursor.1 += top;
@@ -1145,6 +1138,7 @@ struct TreeDrawing<'a> {
     height: Option<usize>,
     prompt_top: bool,
     customize: bool,
+    title: Option<&'a str>,
 }
 
 fn draw_tree_grid(drawing: TreeDrawing<'_>) -> (Grid, (u16, u16, bool), usize) {
@@ -1162,6 +1156,7 @@ fn draw_tree_grid(drawing: TreeDrawing<'_>) -> (Grid, (u16, u16, bool), usize) {
         height,
         prompt_top,
         customize,
+        title,
     } = drawing;
     link_lines(&mut lines);
     let count = lines.len();
@@ -1182,7 +1177,10 @@ fn draw_tree_grid(drawing: TreeDrawing<'_>) -> (Grid, (u16, u16, bool), usize) {
         green: theme("themegreen"),
         cyan: theme("themecyan"),
     };
-    let selection = layered(&presentation.selection_style, &plain());
+    let mut selection = layered(&presentation.selection_style, &plain());
+    if selection.attributes.noattr == TmuxAttributeState::On {
+        selection.attributes = TmuxAttributes::default();
+    }
     let border = layered(&presentation.border_style, &plain());
     let key_width = lines
         .iter()
@@ -1255,7 +1253,7 @@ fn draw_tree_grid(drawing: TreeDrawing<'_>) -> (Grid, (u16, u16, bool), usize) {
         let box_top = narrow(height);
         let box_paint = Paint::Style(border.clone());
         grid.frame(0, box_top, sx, sy - box_top, &box_paint);
-        let name = lines[current].name;
+        let name = title.unwrap_or(lines[current].name);
         let view = if presentation.view.is_empty() {
             String::new()
         } else {
@@ -1336,16 +1334,6 @@ fn draw_tree_grid(drawing: TreeDrawing<'_>) -> (Grid, (u16, u16, bool), usize) {
                     }
                 }
                 Some(ChooserPreview::Text { lines }) => {
-                    let wrapped;
-                    let lines = if customize {
-                        wrapped = lines
-                            .iter()
-                            .flat_map(|line| wrap_customization_text(line, usize::from(box_x)))
-                            .collect::<Vec<_>>();
-                        &wrapped
-                    } else {
-                        lines
-                    };
                     for (index, line) in lines.iter().take(usize::from(box_y)).enumerate() {
                         if !line.is_empty() {
                             grid.text(
@@ -1381,6 +1369,7 @@ pub(super) fn customize_surface(
     state: &ChooseTreeState,
     presentation: &ChooserPresentation,
     offset: u32,
+    prompt: Option<(&str, u16, bool)>,
     rect: crate::layout::Rect,
 ) -> (Grid, (u16, u16, bool)) {
     let lines = tree_lines(state, presentation).unwrap_or_default();
@@ -1392,36 +1381,28 @@ pub(super) fn customize_surface(
     } else {
         rect.height
     };
-    let (grid, cursor, _) = draw_tree_grid(TreeDrawing {
+    let (grid, mut cursor, _) = draw_tree_grid(TreeDrawing {
         lines,
         presentation,
         selected: state.selected,
-        show_help: false,
-        prompt: (!state.prompt.is_empty()).then(|| state.prompt.clone()),
+        show_help: state.help,
+        prompt: prompt.map(|(text, _, _)| text.to_owned()),
         no_matches: state.filter_no_matches,
-        help_kind: HelpKind::Tree,
+        help_kind: HelpKind::Customize,
         sx: rect.width,
         sy: rect.height,
         offset: offset as usize,
         height: Some(usize::from(height)),
-        prompt_top: false,
+        prompt_top: prompt.is_some_and(|(_, _, top)| top),
         customize: true,
+        title: state
+            .items
+            .get(state.selected as usize)
+            .map(|item| item.detail.as_str())
+            .filter(|detail| !detail.is_empty()),
     });
-    (grid, cursor)
-}
-
-fn wrap_customization_text(text: &str, width: usize) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut line = String::new();
-    for word in text.split_whitespace() {
-        if !line.is_empty() && text_width(&line) + 1 + text_width(word) > width {
-            lines.push(std::mem::take(&mut line));
-        }
-        if !line.is_empty() {
-            line.push(' ');
-        }
-        line.push_str(word);
+    if let Some((_, column, _)) = prompt {
+        cursor.0 = column.min(rect.width - 1);
     }
-    lines.push(line);
-    lines
+    (grid, cursor)
 }

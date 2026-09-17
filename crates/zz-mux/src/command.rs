@@ -1,5 +1,9 @@
 mod customize;
+mod mode_prompt;
+mod switch_mode;
 pub use customize::CustomizeMode;
+pub use mode_prompt::{ModeKey, ModePrompt, PromptOutcome};
+pub use switch_mode::{SwitchAction, SwitchMode};
 
 use std::{
     cmp::Ordering,
@@ -193,6 +197,7 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "copy-mode-position-format",
     "copy-mode-position-style",
     "copy-mode-selection-style",
+    "switch-mode-match-style",
     "theme",
     "dark-theme-black",
     "dark-theme-white",
@@ -1280,13 +1285,7 @@ pub enum MuxEffect {
 pub enum PaneModeRequest {
     Clock,
     Customize(Box<CustomizeMode>),
-    Switch {
-        windows: bool,
-        format: Option<String>,
-        template: Option<String>,
-        kill_source: bool,
-        zoom: bool,
-    },
+    Switch(Box<SwitchMode>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -8511,13 +8510,14 @@ impl MuxEngine {
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         Ok(Execution::effect(MuxEffect::PaneModeChanged {
             pane,
-            mode: Some(PaneModeRequest::Switch {
-                windows: options.has("-w"),
-                format: options.value("-F").map(str::to_owned),
-                template: chooser_command_template(invocation, positional_start, &positional),
-                kill_source: options.has("-k"),
-                zoom: options.has("-Z"),
-            }),
+            mode: Some(PaneModeRequest::Switch(Box::new(SwitchMode::new(
+                options.has("-w"),
+                options.value("-F").map(str::to_owned),
+                chooser_command_template(invocation, positional_start, &positional),
+                options.has("-k"),
+                options.has("-Z"),
+                self.word_separators_for_pane(pane)?,
+            )))),
         }))
     }
 
@@ -35369,7 +35369,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 148);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 149);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)

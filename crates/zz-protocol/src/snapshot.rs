@@ -479,11 +479,23 @@ pub enum PaneMode {
         selection_style: String,
         prompt: String,
         prompt_style: String,
+        #[serde(default)]
+        prompt_cursor: u16,
+        #[serde(default)]
+        matches: Vec<Vec<u16>>,
+        #[serde(default)]
+        match_style: String,
     },
     Customize {
         state: crate::ChooseTreeState,
         presentation: Box<crate::ChooserPresentation>,
         offset: u32,
+        #[serde(default)]
+        prompt: String,
+        #[serde(default)]
+        prompt_cursor: u16,
+        #[serde(default)]
+        prompt_top: bool,
     },
 }
 

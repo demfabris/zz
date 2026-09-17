@@ -1,3 +1,4 @@
+use super::mode_prompt::{ModeKey, ModePrompt, PromptOutcome};
 use super::*;
 use crate::tmux_option_metadata::TmuxOptionKind;
 use zz_protocol::{
@@ -5,55 +6,202 @@ use zz_protocol::{
     ChooserPreviewSize, ChooserRow,
 };
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct CustomizeMode {
-    pub selected: usize,
-    pub offset: usize,
-    expanded: BTreeSet<String>,
-    tagged: BTreeSet<String>,
-    query: String,
-    prompt: Option<CustomizePrompt>,
-    format: Option<String>,
-    filter: Option<String>,
-    preview_off: bool,
-    hide_global: bool,
-    accept: bool,
+const CUSTOMIZE_COLOUR_FLAG_OPTIONS: &[&str] = &[
+    "clock-mode-colour",
+    "cursor-colour",
+    "dark-theme-black",
+    "dark-theme-blue",
+    "dark-theme-cyan",
+    "dark-theme-dark-grey",
+    "dark-theme-green",
+    "dark-theme-light-grey",
+    "dark-theme-magenta",
+    "dark-theme-red",
+    "dark-theme-white",
+    "dark-theme-yellow",
+    "display-panes-active-colour",
+    "display-panes-colour",
+    "light-theme-black",
+    "light-theme-blue",
+    "light-theme-cyan",
+    "light-theme-dark-grey",
+    "light-theme-green",
+    "light-theme-light-grey",
+    "light-theme-magenta",
+    "light-theme-red",
+    "light-theme-white",
+    "light-theme-yellow",
+    "prompt-command-cursor-colour",
+    "prompt-cursor-colour",
+];
+
+pub type CustomizeExpand<'a> = dyn FnMut(&str, &BTreeMap<String, String>) -> String + 'a;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Preview {
+    #[default]
+    Normal,
+    Off,
+    Big,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum CustomizePrompt {
+enum PromptPurpose {
     Search,
     Filter,
-    Edit {
+    Option {
         name: String,
+        array_key: Option<String>,
         target: TmuxOptionTarget,
-        prefix: String,
+    },
+    ArrayKey {
+        name: String,
+        array_key: String,
+        target: TmuxOptionTarget,
+    },
+    Command {
+        table: String,
+        key: String,
+    },
+    Note {
+        table: String,
+        key: String,
+    },
+    Reset,
+    Unset,
+    ResetTagged,
+    UnsetTagged,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CustomizeMode {
+    current: usize,
+    offset: usize,
+    height: usize,
+    expanded: BTreeSet<String>,
+    tagged: BTreeSet<String>,
+    preview: Preview,
+    filter: Option<String>,
+    search: Option<String>,
+    prompt: Option<(ModePrompt, PromptPurpose)>,
+    help: bool,
+    format: Option<String>,
+    hide_global: bool,
+    accept: bool,
+    rebuild: Option<Option<String>>,
+    pub kill_source: bool,
+    pub zoom: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Item {
+    Section,
+    Option {
+        name: String,
+        array_key: Option<String>,
+        target: TmuxOptionTarget,
+        metadata: Option<TmuxOption>,
         value: String,
+        global: bool,
+    },
+    Key {
+        table: String,
+        key: String,
+    },
+    KeyField {
+        table: String,
+        key: String,
     },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Row {
     id: String,
     name: String,
-    text: String,
+    text: Option<String>,
     depth: u8,
+    parent: Option<usize>,
     children: bool,
-    option: Option<(String, TmuxOptionTarget, Option<TmuxOption>)>,
-    value: String,
+    no_tag: bool,
+    item: Item,
 }
 
-impl Row {
-    fn section(name: String, id: String, depth: u8) -> Self {
+pub struct CustomizeResult {
+    pub close: bool,
+    pub commands: Vec<CommandInvocation>,
+}
+
+impl CustomizeResult {
+    const fn stay() -> Self {
         Self {
-            id,
-            name,
-            text: String::new(),
-            depth,
-            children: true,
-            option: None,
-            value: String::new(),
+            close: false,
+            commands: Vec::new(),
         }
+    }
+}
+
+fn customize_lines(rows: &[Row], mode: &CustomizeMode) -> Vec<usize> {
+    let mut hidden_below: Option<u8> = None;
+    let mut lines = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        if hidden_below.is_some_and(|depth| row.depth > depth) {
+            continue;
+        }
+        hidden_below = (!mode.expanded.contains(&row.id)).then_some(row.depth);
+        lines.push(index);
+    }
+    lines
+}
+
+fn below(height: usize, current: usize) -> bool {
+    height.checked_sub(1).is_some_and(|last| current > last)
+}
+
+impl CustomizeMode {
+    fn up(&mut self, size: usize, wrap: bool) {
+        if size == 0 {
+            return;
+        }
+        if self.current == 0 {
+            if wrap {
+                self.current = size - 1;
+                if size >= self.height {
+                    self.offset = size - self.height;
+                }
+            }
+        } else {
+            self.current -= 1;
+            if self.current < self.offset {
+                self.offset -= 1;
+            }
+        }
+    }
+
+    fn down(&mut self, size: usize, wrap: bool) -> bool {
+        if size == 0 {
+            return false;
+        }
+        if self.current == size - 1 {
+            if !wrap {
+                return false;
+            }
+            self.current = 0;
+            self.offset = 0;
+        } else {
+            self.current += 1;
+            if self.current + 1 > self.offset + self.height {
+                self.offset += 1;
+            }
+        }
+        true
+    }
+
+    fn offset_for_current(&mut self) {
+        self.offset = if below(self.height, self.current) {
+            self.current + 1 - self.height
+        } else {
+            0
+        };
     }
 }
 
@@ -66,21 +214,46 @@ impl MuxEngine {
         let (options, positional) = parse_command_options("customize-mode", args)?;
         reject_positionals("customize-mode", &positional)?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
-        if options.has("-k") || options.has("-Z") {
-            return Err(ServerError::InvalidCommand(
-                "customize-mode -k and -Z are not implemented (TUI-014)".to_owned(),
-            ));
-        }
+        let mut mode = CustomizeMode {
+            format: options.value("-F").map(str::to_owned),
+            filter: options.value("-f").map(str::to_owned),
+            preview: if options.has("-N") {
+                Preview::Off
+            } else {
+                Preview::Normal
+            },
+            accept: options.has("-y"),
+            kill_source: options.has("-k"),
+            zoom: options.has("-Z"),
+            ..CustomizeMode::default()
+        };
+        self.customize_height(pane, &mut mode);
         Ok(Execution::effect(MuxEffect::PaneModeChanged {
             pane,
-            mode: Some(PaneModeRequest::Customize(Box::new(CustomizeMode {
-                format: options.value("-F").map(str::to_owned),
-                filter: options.value("-f").map(str::to_owned),
-                preview_off: options.has("-N"),
-                accept: options.has("-y"),
-                ..CustomizeMode::default()
-            }))),
+            mode: Some(PaneModeRequest::Customize(Box::new(mode))),
         }))
+    }
+
+    fn customize_screen_rows(&self, pane: PaneId) -> usize {
+        self.pane_geometry(pane)
+            .map_or(24, |(_, rows)| usize::from(rows))
+    }
+
+    fn customize_screen_columns(&self, pane: PaneId) -> usize {
+        self.pane_geometry(pane)
+            .map_or(80, |(columns, _)| usize::from(columns))
+    }
+
+    fn customize_height(&self, pane: PaneId, mode: &mut CustomizeMode) {
+        let sy = self.customize_screen_rows(pane);
+        if mode.preview == Preview::Off {
+            mode.height = sy;
+        } else if 12 < sy {
+            mode.height = sy - 12;
+        }
+        if sy.checked_sub(mode.height).is_some_and(|rest| rest < 2) {
+            mode.height = sy;
+        }
     }
 
     fn customize_array_values(&self, target: TmuxOptionTarget, name: &str) -> StringArray {
@@ -89,25 +262,52 @@ impl MuxEngine {
             .unwrap_or_default()
     }
 
-    fn customize_rows(&self, pane: PaneId, mode: &CustomizeMode) -> Vec<Row> {
-        let all = self.customize_all_rows(pane, mode);
-        let mut hidden_below = None;
-        all.into_iter()
-            .filter(|row| {
-                if hidden_below.is_some_and(|depth| row.depth > depth) {
-                    return false;
-                }
-                hidden_below = if row.children && !mode.expanded.contains(&row.id) {
-                    Some(row.depth)
-                } else {
-                    None
-                };
-                true
+    fn customize_build(
+        &self,
+        pane: PaneId,
+        mode: &mut CustomizeMode,
+        tag: Option<String>,
+        expand: &mut CustomizeExpand<'_>,
+    ) {
+        let rows = self.customize_rows(pane, mode, expand);
+        mode.tagged.retain(|id| {
+            rows.iter().find(|row| row.id == *id).is_some_and(|row| {
+                row.parent
+                    .is_none_or(|parent| mode.expanded.contains(&rows[parent].id))
             })
-            .collect()
+        });
+        let lines = customize_lines(&rows, mode);
+        if let Some(found) = tag.and_then(|tag| lines.iter().position(|line| rows[*line].id == tag))
+        {
+            mode.current = found;
+            mode.offset_for_current();
+        } else if mode.current >= lines.len() && !lines.is_empty() {
+            mode.current = lines.len() - 1;
+            mode.offset_for_current();
+        }
+        self.customize_height(pane, mode);
+        if below(mode.height, mode.current) {
+            mode.offset = mode.current + 1 - mode.height;
+        }
     }
 
-    fn customize_all_rows(&self, pane: PaneId, mode: &CustomizeMode) -> Vec<Row> {
+    pub fn customize_finish(
+        &self,
+        pane: PaneId,
+        mode: &mut CustomizeMode,
+        expand: &mut CustomizeExpand<'_>,
+    ) {
+        if let Some(tag) = mode.rebuild.take() {
+            self.customize_build(pane, mode, tag, expand);
+        }
+    }
+
+    fn customize_rows(
+        &self,
+        pane: PaneId,
+        mode: &CustomizeMode,
+        expand: &mut CustomizeExpand<'_>,
+    ) -> Vec<Row> {
         let Some(window) = self
             .state
             .window_for_pane(pane)
@@ -115,8 +315,9 @@ impl MuxEngine {
         else {
             return Vec::new();
         };
+        let format = mode.format.clone();
         let mut rows = Vec::new();
-        for (index, name, targets) in [
+        for (index, title, targets) in [
             (0, "Server Options", vec![TmuxOptionTarget::Server]),
             (
                 1,
@@ -136,40 +337,55 @@ impl MuxEngine {
                 ],
             ),
         ] {
-            let id = format!("options:{index}");
-            rows.push(Row::section(name.to_owned(), id.clone(), 0));
-            let mut options = tmux_options()
+            let section = rows.len();
+            let section_id = format!("options:{index}");
+            rows.push(Row {
+                id: section_id.clone(),
+                name: title.to_owned(),
+                text: None,
+                depth: 0,
+                parent: None,
+                children: false,
+                no_tag: true,
+                item: Item::Section,
+            });
+            let mut user = Vec::<String>::new();
+            for target in targets.iter().rev() {
+                if let Some(options) = self.user_options_at_target(*target) {
+                    for name in options.keys() {
+                        if !user.contains(name) {
+                            user.push(name.clone());
+                        }
+                    }
+                }
+            }
+            let table = tmux_options()
                 .filter(|option| !tmux_option_is_hook(option.name))
                 .filter(|option| match option.scope {
                     TmuxOptionScope::Server => index == 0,
                     TmuxOptionScope::Session => index == 1,
                     TmuxOptionScope::Window | TmuxOptionScope::WindowPane => index == 2,
                 })
-                .map(|option| (option.name.to_owned(), Some(option)))
+                .map(|option| (option.name.to_owned(), option))
                 .collect::<BTreeMap<_, _>>();
-            for target in &targets {
-                if let Some(user) = self.user_options_at_target(*target) {
-                    options.extend(user.keys().map(|name| (name.clone(), None)));
-                }
-            }
-            for (name, metadata) in options {
-                let mut owner = *targets.last().unwrap();
-                let mut value = String::new();
+            let names = user
+                .into_iter()
+                .map(|name| (name, None))
+                .chain(table.into_iter().map(|(name, option)| (name, Some(option))));
+            for (name, metadata) in names {
+                let mut owner = *targets.last().expect("a section has a target");
+                let mut value = None;
                 for target in &targets {
                     let found = if let Some(option) = metadata {
                         if option.is_array {
-                            let present = self.array_option(*target, &name).is_some();
-                            present.then(|| {
-                                self.customize_array_values(*target, &name)
-                                    .into_values()
-                                    .collect::<Vec<_>>()
-                                    .join(" ")
+                            self.array_option(*target, &name).map(|values| {
+                                values.values().cloned().collect::<Vec<_>>().join(" ")
                             })
                         } else {
                             self.tmux_option_readback(option, *target, false)
                                 .ok()
                                 .flatten()
-                                .map(|(v, _)| v)
+                                .map(|(value, _)| value)
                         }
                     } else {
                         self.user_option_at_target(*target, &name)
@@ -177,20 +393,29 @@ impl MuxEngine {
                     };
                     if let Some(found) = found {
                         owner = *target;
-                        value = found;
+                        value = Some(found);
                         break;
                     }
                 }
-                if value.is_empty()
-                    && let Some(option) = metadata
-                {
-                    value = self
-                        .tmux_option_readback(option, owner, true)
-                        .ok()
-                        .flatten()
-                        .map(|(v, _)| v)
-                        .unwrap_or_default();
-                }
+                let value = value.unwrap_or_else(|| {
+                    metadata
+                        .and_then(|option| {
+                            if option.is_array {
+                                Some(
+                                    self.customize_array_values(owner, &name)
+                                        .into_values()
+                                        .collect::<Vec<_>>()
+                                        .join(" "),
+                                )
+                            } else {
+                                self.tmux_option_readback(option, owner, true)
+                                    .ok()
+                                    .flatten()
+                                    .map(|(value, _)| value)
+                            }
+                        })
+                        .unwrap_or_default()
+                });
                 let global = matches!(
                     owner,
                     TmuxOptionTarget::Server
@@ -200,113 +425,177 @@ impl MuxEngine {
                 if mode.hide_global && global {
                     continue;
                 }
-                let scope = self.customize_scope(owner);
                 let array = metadata.is_some_and(|option| option.is_array);
+                let scope = self.customize_scope(owner);
                 let unit = metadata.map_or("", |option| option.metadata.unit);
-                let vars = BTreeMap::from([
+                let mut vars = BTreeMap::from([
                     ("is_option".to_owned(), "1".to_owned()),
                     ("is_key".to_owned(), "0".to_owned()),
                     ("option_name".to_owned(), name.clone()),
-                    ("option_value".to_owned(), value.clone()),
                     ("option_is_global".to_owned(), u8::from(global).to_string()),
                     ("option_is_array".to_owned(), u8::from(array).to_string()),
                     ("option_scope".to_owned(), scope.clone()),
                     ("option_unit".to_owned(), unit.to_owned()),
                 ]);
-                if mode
-                    .filter
-                    .as_ref()
-                    .is_some_and(|filter| !format_true(&customize_expand(filter, &vars)))
+                if !array {
+                    vars.insert("option_value".to_owned(), value.clone());
+                }
+                if let Some(filter) = &mode.filter
+                    && !format_true(&expand(filter, &vars))
                 {
                     continue;
                 }
-                let text = if array {
-                    String::new()
-                } else if let Some(format) = &mode.format {
-                    customize_expand(format, &vars)
-                } else {
-                    format!(
-                        "{}#[fg=themelightgrey]#[ignore]{value}{}",
-                        if global {
-                            String::new()
-                        } else {
-                            format!("#[reverse]({scope})#[default] ")
+                let text = |vars: &BTreeMap<String, String>, expand: &mut CustomizeExpand<'_>| {
+                    format.as_ref().map_or_else(
+                        || {
+                            format!(
+                                "{}#[fg=themelightgrey]#[ignore]{}{}",
+                                if global {
+                                    String::new()
+                                } else {
+                                    format!("#[reverse]({scope})#[default] ")
+                                },
+                                vars.get("option_value").map_or("", String::as_str),
+                                if unit.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(" {unit}")
+                                }
+                            )
                         },
-                        if unit.is_empty() {
-                            String::new()
-                        } else {
-                            format!(" {unit}")
-                        }
+                        |format| expand(format, vars),
                     )
                 };
-                let row_id = format!("{id}/{name}");
+                let option_row = rows.len();
+                let row_id = format!("{section_id}/{name}");
                 rows.push(Row {
                     id: row_id.clone(),
                     name: name.clone(),
-                    text,
+                    text: (!array).then(|| text(&vars, expand)),
                     depth: 1,
-                    children: array && !self.customize_array_values(owner, &name).is_empty(),
-                    option: Some((name.clone(), owner, metadata)),
-                    value,
+                    parent: Some(section),
+                    children: false,
+                    no_tag: false,
+                    item: Item::Option {
+                        name: name.clone(),
+                        array_key: None,
+                        target: owner,
+                        metadata,
+                        value: value.clone(),
+                        global,
+                    },
                 });
                 if array {
-                    for (key, value) in self.customize_array_values(owner, &name) {
+                    for (key, entry) in self.customize_array_values(owner, &name) {
                         let key = key.display();
                         let full_name = format!("{name}[{key}]");
+                        vars.insert("option_name".to_owned(), full_name.clone());
+                        vars.insert("option_value".to_owned(), entry.clone());
                         rows.push(Row {
                             id: format!("{row_id}/{key}"),
-                            name: key,
-                            text: format!("#[fg=themelightgrey]#[ignore]{value}"),
+                            name: full_name,
+                            text: Some(text(&vars, expand)),
                             depth: 2,
+                            parent: Some(option_row),
                             children: false,
-                            option: Some((full_name, owner, metadata)),
-                            value: value.clone(),
+                            no_tag: false,
+                            item: Item::Option {
+                                name: name.clone(),
+                                array_key: Some(key),
+                                target: owner,
+                                metadata,
+                                value: entry,
+                                global,
+                            },
                         });
                     }
                 }
             }
         }
-        for table in self
+        let tables = self
             .keys
             .table_names()
             .filter(|table| !matches!(*table, "choose-tree" | "choose-buffer" | "choose-client"))
-        {
-            let bindings = self.keys.list(Some(table)).collect::<Vec<_>>();
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        for table in tables {
+            let bindings = listed_keys(self.keys.list(Some(&table)));
             if bindings.is_empty() {
                 continue;
             }
+            let section = rows.len();
             let id = format!("keys:{table}");
-            rows.push(Row::section(format!("Key Table - {table}"), id.clone(), 0));
-            for (_, key, binding) in bindings {
-                let key_id = format!("{id}/{key}");
-                rows.push(Row::section(key.to_owned(), key_id.clone(), 1));
+            rows.push(Row {
+                id: id.clone(),
+                name: format!("Key Table - {table}"),
+                text: None,
+                depth: 0,
+                parent: None,
+                children: false,
+                no_tag: true,
+                item: Item::Section,
+            });
+            for listed in bindings {
+                let key = listed.key.clone();
+                let mut vars = BTreeMap::from([
+                    ("is_option".to_owned(), "0".to_owned()),
+                    ("is_key".to_owned(), "1".to_owned()),
+                    ("key".to_owned(), key.clone()),
+                ]);
+                if let Some(note) = &listed.binding.note {
+                    vars.insert("key_note".to_owned(), note.clone());
+                }
+                if let Some(filter) = &mode.filter
+                    && !format_true(&expand(filter, &vars))
                 {
-                    for (name, value) in [
-                        (
-                            "Command",
-                            binding
-                                .commands
-                                .iter()
-                                .map(format_command)
-                                .collect::<Vec<_>>()
-                                .join(" ; "),
-                        ),
-                        ("Note", binding.note.clone().unwrap_or_default()),
-                        (
-                            "Repeat",
-                            if binding.repeat { "on" } else { "off" }.to_owned(),
-                        ),
-                    ] {
-                        rows.push(Row {
-                            id: format!("{key_id}/{name}"),
-                            name: name.to_owned(),
-                            text: format!("#[ignore]{value}"),
-                            depth: 2,
-                            children: false,
-                            option: None,
-                            value,
-                        });
-                    }
+                    continue;
+                }
+                let key_row = rows.len();
+                let key_id = format!("{id}\u{0}{key}");
+                rows.push(Row {
+                    id: key_id.clone(),
+                    name: format
+                        .as_ref()
+                        .map_or_else(|| key.clone(), |format| expand(format, &vars)),
+                    text: None,
+                    depth: 1,
+                    parent: Some(section),
+                    children: false,
+                    no_tag: false,
+                    item: Item::Key {
+                        table: table.clone(),
+                        key: key.clone(),
+                    },
+                });
+                let command = customize_command_print(listed.binding);
+                for (field, text) in [
+                    ("Command", format!("#[ignore]{command}")),
+                    (
+                        "Note",
+                        listed
+                            .binding
+                            .note
+                            .as_ref()
+                            .map_or_else(String::new, |note| format!("#[ignore]{note}")),
+                    ),
+                    (
+                        "Repeat",
+                        if listed.binding.repeat { "on" } else { "off" }.to_owned(),
+                    ),
+                ] {
+                    rows.push(Row {
+                        id: format!("{key_id}\u{0}{field}"),
+                        name: field.to_owned(),
+                        text: Some(text),
+                        depth: 2,
+                        parent: Some(key_row),
+                        children: false,
+                        no_tag: true,
+                        item: Item::KeyField {
+                            table: table.clone(),
+                            key: key.clone(),
+                        },
+                    });
                 }
             }
         }
@@ -316,39 +605,6 @@ impl MuxEngine {
                 .is_some_and(|next| next.depth > rows[index].depth);
         }
         rows
-    }
-
-    fn customize_search(&self, pane: PaneId, mode: &mut CustomizeMode, reverse: bool) {
-        let rows = self.customize_all_rows(pane, mode);
-        let selected = self
-            .customize_rows(pane, mode)
-            .get(mode.selected)
-            .map(|row| row.id.clone());
-        let start = rows
-            .iter()
-            .position(|row| Some(&row.id) == selected.as_ref())
-            .unwrap_or(0);
-        for step in 1..=rows.len() {
-            let index = if reverse {
-                (start + rows.len() - step) % rows.len()
-            } else {
-                (start + step) % rows.len()
-            };
-            let row = &rows[index];
-            if row.name.to_lowercase().contains(&mode.query.to_lowercase()) {
-                let mut parent = row.id.as_str();
-                while let Some((id, _)) = parent.rsplit_once('/') {
-                    mode.expanded.insert(id.to_owned());
-                    parent = id;
-                }
-                mode.selected = self
-                    .customize_rows(pane, mode)
-                    .iter()
-                    .position(|found| found.id == row.id)
-                    .unwrap_or(0);
-                break;
-            }
-        }
     }
 
     fn customize_scope(&self, target: TmuxOptionTarget) -> String {
@@ -375,409 +631,1390 @@ impl MuxEngine {
         }
     }
 
+    fn customize_search_set(
+        &self,
+        pane: PaneId,
+        mode: &mut CustomizeMode,
+        backward: bool,
+        expand: &mut CustomizeExpand<'_>,
+    ) {
+        let Some(search) = mode.search.clone() else {
+            return;
+        };
+        let rows = self.customize_rows(pane, mode, expand);
+        let lines = customize_lines(&rows, mode);
+        let Some(&start) = lines.get(mode.current) else {
+            return;
+        };
+        let icase = search.chars().all(|character| !character.is_uppercase());
+        let needle = search.to_lowercase();
+        let count = rows.len();
+        let found = (1..count)
+            .map(|step| {
+                if backward {
+                    (start + count - step) % count
+                } else {
+                    (start + step) % count
+                }
+            })
+            .find(|index| {
+                if icase {
+                    rows[*index].name.to_lowercase().contains(&needle)
+                } else {
+                    rows[*index].name.contains(&search)
+                }
+            });
+        let Some(found) = found else {
+            return;
+        };
+        let mut parent = rows[found].parent;
+        while let Some(index) = parent {
+            mode.expanded.insert(rows[index].id.clone());
+            parent = rows[index].parent;
+        }
+        let tag = rows[lines[mode.current]].id.clone();
+        let found = rows[found].id.clone();
+        self.customize_build(pane, mode, Some(tag), expand);
+        let rows = self.customize_rows(pane, mode, expand);
+        if let Some(position) = customize_lines(&rows, mode)
+            .iter()
+            .position(|line| rows[*line].id == found)
+        {
+            mode.current = position;
+            mode.offset_for_current();
+        }
+    }
+
     pub fn customize_presentation(
         &self,
         pane: PaneId,
         mode: &CustomizeMode,
-    ) -> (ChooseTreeState, ChooserPresentation) {
-        let rows = self.customize_rows(pane, mode);
-        let selected = mode.selected.min(rows.len().saturating_sub(1));
-        let preview = rows
-            .get(selected)
-            .filter(|row| row.option.is_some())
-            .map(|row| {
-                let (_, owner, metadata) = row.option.as_ref().unwrap();
-                let scope = metadata.map_or("user", |option| match option.scope {
-                    TmuxOptionScope::Server => "server",
-                    TmuxOptionScope::Session => "session",
-                    TmuxOptionScope::Window => "window",
-                    TmuxOptionScope::WindowPane => "window and pane",
-                });
-                let description = metadata
-                    .map_or("This option doesn't have a description.", |option| {
-                        option.metadata.description
-                    });
-                let mut lines = vec![
-                    description.to_owned(),
-                    String::new(),
-                    format!("This is a {scope} option."),
-                ];
-                if metadata.is_some_and(|option| option.is_array) {
-                    lines.push("This is an array option.".to_owned());
-                    if row.children {
-                        return ChooserPreview::Text { lines };
-                    }
+        expand: &mut CustomizeExpand<'_>,
+    ) -> (
+        ChooseTreeState,
+        ChooserPresentation,
+        Option<(String, u16, bool)>,
+    ) {
+        let rows = self.customize_rows(pane, mode, expand);
+        let lines = customize_lines(&rows, mode);
+        let selected = mode.current.min(lines.len().saturating_sub(1));
+        let columns = self.customize_screen_columns(pane);
+        let screen_rows = self.customize_screen_rows(pane);
+        let preview = lines.get(selected).map(|line| {
+            let row = &rows[*line];
+            let row = if matches!(row.item, Item::KeyField { .. }) {
+                row.parent.map_or(row, |parent| &rows[parent])
+            } else {
+                row
+            };
+            let width = columns.saturating_sub(4);
+            let height = screen_rows.saturating_sub(mode.height).saturating_sub(2);
+            let mut writer = PreviewWriter::new(width, height);
+            match &row.item {
+                Item::Option { .. } => self.customize_draw_option(pane, row, &mut writer, expand),
+                Item::Key { table, key } | Item::KeyField { table, key } => {
+                    self.customize_draw_key(table, key, &mut writer);
                 }
-                let unit = metadata.map_or("", |option| option.metadata.unit);
-                let unit = if unit.is_empty() {
-                    String::new()
-                } else {
-                    format!(" {unit}")
-                };
-                lines.extend([String::new(), format!("Option value: {}{unit}", row.value)]);
-                if let Some(option) = metadata {
-                    if !option.metadata.choices.is_empty() {
-                        lines.push(format!(
-                            "Available values are: {}",
-                            option.metadata.choices.join(", ")
-                        ));
-                    }
-                    if let Some(default) = option.default
-                        && default.value() != row.value
-                    {
-                        lines.push(format!("The default is: {}{unit}", default.value()));
-                    }
-                    if matches!(
-                        owner,
-                        TmuxOptionTarget::Session(_)
-                            | TmuxOptionTarget::Window(_)
-                            | TmuxOptionTarget::Pane(_)
-                    ) {
-                        let global = if option.scope == TmuxOptionScope::Session {
-                            TmuxOptionTarget::GlobalSession
-                        } else {
-                            TmuxOptionTarget::GlobalWindow
-                        };
-                        if let Ok(Some((value, _))) =
-                            self.tmux_option_readback(*option, global, true)
-                        {
-                            lines.extend([String::new(), format!("Global value: {value}{unit}")]);
-                        }
-                    }
+                Item::Section => {}
+            }
+            ChooserPreview::Markup {
+                lines: writer.finish(),
+            }
+        });
+        let prompt = mode.prompt.as_ref().map(|(prompt, _)| {
+            let (text, cursor) = prompt.draw(u16::try_from(columns).unwrap_or(u16::MAX));
+            (text, cursor, self.customize_prompt_top(pane))
+        });
+        let presentation_rows = lines
+            .iter()
+            .map(|line| {
+                let row = &rows[*line];
+                ChooserRow {
+                    name: row.name.clone(),
+                    text: match &row.text {
+                        None => String::new(),
+                        Some(text) if text.is_empty() => "#[default]".to_owned(),
+                        Some(text) => text.clone(),
+                    },
+                    align: false,
                 }
-                ChooserPreview::Text { lines }
-            });
-        let prompt = match &mode.prompt {
-            Some(CustomizePrompt::Search) => format!("(search) {}", mode.query),
-            Some(CustomizePrompt::Filter) => format!("(filter) {}", mode.query),
-            Some(CustomizePrompt::Edit { prefix, value, .. }) => format!("{prefix}{value}"),
-            None => String::new(),
-        };
+            })
+            .collect::<Vec<_>>();
         (
             ChooseTreeState {
-                items: rows
+                items: lines
                     .iter()
                     .enumerate()
-                    .map(|(index, row)| ChooseTreeItem {
-                        label: row.name.clone(),
-                        detail: row.text.clone(),
-                        target: ChooseTreeTarget::Pane(pane),
-                        depth: row.depth,
-                        flags: if row.children {
-                            ChooseTreeItem::HAS_CHILDREN
+                    .map(|(index, line)| {
+                        let row = &rows[*line];
+                        let title = if matches!(row.item, Item::KeyField { .. }) {
+                            row.parent.map_or(&row.name, |parent| &rows[parent].name)
                         } else {
-                            0
-                        } | if mode.expanded.contains(&row.id) {
-                            ChooseTreeItem::EXPANDED
-                        } else {
-                            0
-                        } | if mode.tagged.contains(&row.id) {
-                            ChooseTreeItem::TAGGED
-                        } else {
-                            0
-                        },
-                        pane_kind: None,
-                        key: if index < 10 {
-                            index.to_string()
-                        } else if index < 36 {
-                            format!("M-{}", char::from(b'a' + (index - 10) as u8))
-                        } else {
-                            String::new()
-                        },
-                        text: String::new(),
+                            &row.name
+                        };
+                        ChooseTreeItem {
+                            label: row.name.clone(),
+                            detail: title.clone(),
+                            target: ChooseTreeTarget::Pane(pane),
+                            depth: row.depth,
+                            flags: if row.children {
+                                ChooseTreeItem::HAS_CHILDREN
+                            } else {
+                                0
+                            } | if mode.expanded.contains(&row.id) {
+                                ChooseTreeItem::EXPANDED
+                            } else {
+                                0
+                            } | if mode.tagged.contains(&row.id) {
+                                ChooseTreeItem::TAGGED
+                            } else {
+                                0
+                            },
+                            pane_kind: None,
+                            key: if index < 10 {
+                                index.to_string()
+                            } else if index < 36 {
+                                format!("M-{}", char::from(b'a' + (index - 10) as u8))
+                            } else {
+                                String::new()
+                            },
+                            text: String::new(),
+                        }
                     })
                     .collect(),
                 search: None,
                 selected: selected as u32,
                 kind: ChooseTreeKind::Panes,
                 filter_no_matches: false,
-                prompt,
-                help: false,
+                prompt: String::new(),
+                help: mode.help,
             },
             ChooserPresentation {
                 selected: selected as u32,
-                rows: rows
-                    .iter()
-                    .map(|row| ChooserRow {
-                        name: row.name.clone(),
-                        text: row.text.clone(),
-                        align: false,
-                    })
-                    .collect(),
+                rows: presentation_rows,
                 sort: String::new(),
                 view: String::new(),
                 filter: mode.filter.is_some(),
                 selection_style: String::new(),
                 border_style: String::new(),
                 prompt_style: String::new(),
-                preview_size: if mode.preview_off {
-                    ChooserPreviewSize::Off
-                } else {
-                    ChooserPreviewSize::Normal
+                preview_size: match mode.preview {
+                    Preview::Normal => ChooserPreviewSize::Normal,
+                    Preview::Off => ChooserPreviewSize::Off,
+                    Preview::Big => ChooserPreviewSize::Big,
                 },
                 preview,
             },
+            prompt,
         )
+    }
+
+    #[must_use]
+    pub fn customize_offset(mode: &CustomizeMode) -> u32 {
+        u32::try_from(mode.offset).unwrap_or(u32::MAX)
+    }
+
+    fn customize_prompt_top(&self, pane: PaneId) -> bool {
+        self.state
+            .window_for_pane(pane)
+            .and_then(|window| self.state.windows.get(&window))
+            .is_some_and(|window| {
+                self.status_formats_for_session(Some(window.session))
+                    .position
+                    == crate::StatusPosition::Top
+            })
+    }
+
+    fn customize_draw_key(&self, table: &str, key: &str, writer: &mut PreviewWriter) {
+        let Some(binding) = self.keys.get(table, key) else {
+            return;
+        };
+        let note = binding
+            .note
+            .as_deref()
+            .unwrap_or("There is no note for this key.");
+        let period = if !note.is_empty() && !note.ends_with('.') {
+            "."
+        } else {
+            ""
+        };
+        if !writer.text(false, "", &format!("{note}{period}")) || !writer.skip_line() {
+            return;
+        }
+        if !writer.text(false, "", &format!("This key is in the {table} table."))
+            || !writer.text(
+                false,
+                "",
+                &format!(
+                    "This key {} repeat.",
+                    if binding.repeat { "does" } else { "does not" }
+                ),
+            )
+            || !writer.skip_line()
+        {
+            return;
+        }
+        let command = customize_command_print(binding);
+        if !writer.text(false, "", &format!("Command: {command}")) {
+            return;
+        }
+        if let Some(default) = KeyTables::default().get(table, key) {
+            let default_command = customize_command_print(default);
+            if default_command != command {
+                writer.text(false, "", &format!("The default is: {default_command}"));
+            }
+        }
+    }
+
+    fn customize_draw_option(
+        &self,
+        pane: PaneId,
+        row: &Row,
+        writer: &mut PreviewWriter,
+        expand: &mut CustomizeExpand<'_>,
+    ) {
+        let Item::Option {
+            name,
+            array_key,
+            target,
+            metadata,
+            value,
+            ..
+        } = &row.item
+        else {
+            return;
+        };
+        let (space, unit) = match metadata.map(|option| option.metadata.unit) {
+            Some(unit) if !unit.is_empty() => (" ", unit),
+            _ => ("", ""),
+        };
+        let description = metadata.map_or("This option doesn't have a description.", |option| {
+            option.metadata.description
+        });
+        if !writer.text(false, "", description) || !writer.skip_line() {
+            return;
+        }
+        let scope = metadata.map_or("user", |option| match option.scope {
+            TmuxOptionScope::Server => "server",
+            TmuxOptionScope::Session => "session",
+            TmuxOptionScope::Window => "window",
+            TmuxOptionScope::WindowPane => "window and pane",
+        });
+        if !writer.text(false, "", &format!("This is a {scope} option.")) {
+            return;
+        }
+        if metadata.is_some_and(|option| option.is_array) {
+            let line = array_key.as_ref().map_or_else(
+                || "This is an array option.".to_owned(),
+                |key| format!("This is an array option, key {key}."),
+            );
+            if !writer.text(false, "", &line) || array_key.is_none() {
+                return;
+            }
+        }
+        if !writer.skip_line() {
+            return;
+        }
+        let default_value = metadata
+            .filter(|_| array_key.is_none())
+            .and_then(customize_default_value)
+            .filter(|default| default != value);
+        if !writer.text(false, "", &format!("Option value: {value}{space}{unit}")) {
+            return;
+        }
+        let kind = metadata.map(|option| option.metadata.kind);
+        let expanded = expand(value, &BTreeMap::new());
+        if matches!(kind, None | Some(TmuxOptionKind::String))
+            && expanded != *value
+            && !writer.text(false, "", &format!("This expands to: {expanded}"))
+        {
+            return;
+        }
+        if let Some(option) = metadata
+            && option.metadata.kind == TmuxOptionKind::Choice
+            && !writer.text(
+                false,
+                "",
+                &format!(
+                    "Available values are: {}",
+                    option.metadata.choices.join(", ")
+                ),
+            )
+        {
+            return;
+        }
+        if matches!(kind, Some(TmuxOptionKind::Colour))
+            || CUSTOMIZE_COLOUR_FLAG_OPTIONS.contains(&name.as_str())
+        {
+            let style = if matches!(kind, Some(TmuxOptionKind::Colour)) {
+                format!("fg={value}")
+            } else {
+                format!("fg={expanded}")
+            };
+            if !writer.text(true, "", "This is a colour option: ")
+                || !writer.text(false, &customize_example_style(&style), "EXAMPLE")
+            {
+                return;
+            }
+        }
+        if matches!(kind, Some(TmuxOptionKind::Style))
+            && (!writer.text(true, "", "This is a style option: ")
+                || !writer.text(false, &customize_example_style(&expanded), "EXAMPLE"))
+        {
+            return;
+        }
+        if let Some(default) = default_value
+            && !writer.text(
+                false,
+                "",
+                &format!("The default is: {default}{space}{unit}"),
+            )
+        {
+            return;
+        }
+        if !writer.skip_line_strict() || metadata.is_some_and(|option| option.is_array) {
+            return;
+        }
+        let option = match metadata {
+            Some(option) => *option,
+            None => return,
+        };
+        let window = self.state.window_for_pane(pane);
+        if let TmuxOptionTarget::Pane(_) = target
+            && let Some(window) = window
+            && let Ok(Some((parent, _))) =
+                self.tmux_option_readback(option, TmuxOptionTarget::Window(window), false)
+        {
+            let index = self
+                .state
+                .windows
+                .get(&window)
+                .map_or(0, |entry| entry.index);
+            if !writer.text(
+                false,
+                "",
+                &format!("Window value (from window {index}): {parent}{space}{unit}"),
+            ) {
+                return;
+            }
+        }
+        let global = match target {
+            TmuxOptionTarget::Pane(_) | TmuxOptionTarget::Window(_) => {
+                Some(TmuxOptionTarget::GlobalWindow)
+            }
+            TmuxOptionTarget::Session(_) => Some(TmuxOptionTarget::GlobalSession),
+            _ => None,
+        };
+        if let Some(global) = global
+            && let Ok(Some((parent, _))) = self.tmux_option_readback(option, global, false)
+        {
+            writer.text(false, "", &format!("Global value: {parent}{space}{unit}"));
+        }
     }
 
     pub fn customize_key(
         &self,
         pane: PaneId,
         mode: &mut CustomizeMode,
-        key: &str,
-    ) -> (bool, Option<CommandInvocation>) {
-        if let Some(prompt) = &mut mode.prompt {
-            if matches!(key, "Escape" | "C-c" | "C-g" | "\u{1b}" | "\u{3}" | "\u{7}") {
-                mode.prompt = None;
-                return (false, None);
-            }
-            if matches!(key, "Enter" | "C-m" | "\r") {
-                let prompt = mode.prompt.take().unwrap();
-                match prompt {
-                    CustomizePrompt::Edit {
-                        name,
-                        target,
-                        value,
-                        ..
-                    } => {
-                        let name = if tmux_options()
-                            .any(|option| option.name == name && option.is_array)
-                        {
-                            let values = self.customize_array_values(target, &name);
-                            let Ok(index) = first_free_array_index(values.keys()) else {
-                                return (false, None);
-                            };
-                            format!("{name}[{index}]")
-                        } else {
-                            name
-                        };
-                        return (
-                            false,
-                            (!value.is_empty())
-                                .then(|| customize_set_command(&name, target, &value)),
-                        );
-                    }
-                    CustomizePrompt::Filter => {
-                        mode.filter = (!mode.query.is_empty()).then(|| mode.query.clone());
-                        mode.selected = 0;
-                    }
-                    CustomizePrompt::Search => self.customize_search(pane, mode, false),
-                }
-                return (false, None);
-            }
-            let value = if let CustomizePrompt::Edit { value, .. } = prompt {
-                value
-            } else {
-                &mut mode.query
+        name: &str,
+        expand: &mut CustomizeExpand<'_>,
+    ) -> CustomizeResult {
+        let key = ModeKey::parse(name);
+        let rows = self.customize_rows(pane, mode, expand);
+        let lines = customize_lines(&rows, mode);
+        if lines.is_empty() {
+            return CustomizeResult {
+                close: true,
+                commands: Vec::new(),
             };
-            if matches!(key, "BSpace" | "C-h" | "\u{7f}") {
-                value.pop();
-            } else if key == "C-u" {
-                value.clear();
-            } else if key == "Space" {
-                value.push(' ');
-            } else if key.chars().count() == 1 {
-                value.push_str(key);
+        }
+        mode.current = mode.current.min(lines.len() - 1);
+        if let Some((prompt, _)) = &mut mode.prompt {
+            let outcome = prompt.key(key);
+            let (value, purpose) = match outcome {
+                PromptOutcome::Done => {
+                    let value = prompt.input();
+                    (Some(value), mode.prompt.take().map(|(_, purpose)| purpose))
+                }
+                PromptOutcome::Cancelled => (None, mode.prompt.take().map(|(_, purpose)| purpose)),
+                PromptOutcome::Closed => {
+                    mode.prompt = None;
+                    return CustomizeResult::stay();
+                }
+                _ => return CustomizeResult::stay(),
+            };
+            let Some(purpose) = purpose else {
+                return CustomizeResult::stay();
+            };
+            return self.customize_answer(pane, mode, purpose, value, expand);
+        }
+        if mode.help {
+            mode.help = false;
+            return CustomizeResult::stay();
+        }
+        let size = lines.len();
+        let mut key = key;
+        if let Some(choice) = (0..size.min(36)).find(|index| {
+            key == if *index < 10 {
+                ModeKey::Char(char::from(b'0' + *index as u8))
+            } else {
+                ModeKey::Meta(char::from(b'a' + (*index - 10) as u8))
             }
-            return (false, None);
+        }) {
+            mode.current = choice;
+            key = ModeKey::Char('\r');
         }
-        let rows = self.customize_rows(pane, mode);
-        if rows.is_empty() {
-            return (true, None);
-        }
-        mode.selected = mode.selected.min(rows.len() - 1);
-        let row = &rows[mode.selected];
+        let row_at = |mode: &CustomizeMode| &rows[lines[mode.current]];
         match key {
-            "q" | "Escape" | "C-[" | "C-g" | "\u{1b}" | "\u{7}" => return (true, None),
-            "Up" | "k" | "C-p" => {
-                mode.selected = if mode.selected == 0 {
-                    rows.len() - 1
-                } else {
-                    mode.selected - 1
+            ModeKey::Char('q' | '\u{1b}') | ModeKey::Ctrl('[' | 'g') => {
+                return CustomizeResult {
+                    close: true,
+                    commands: Vec::new(),
+                };
+            }
+            ModeKey::F1 | ModeKey::Ctrl('h') => mode.help = true,
+            ModeKey::Up | ModeKey::Char('k') | ModeKey::Ctrl('p') => mode.up(size, true),
+            ModeKey::Down | ModeKey::Char('j') | ModeKey::Ctrl('n') => {
+                mode.down(size, true);
+            }
+            ModeKey::PageUp | ModeKey::Ctrl('b') => {
+                for _ in 0..mode.height {
+                    if mode.current == 0 {
+                        break;
+                    }
+                    mode.up(size, true);
                 }
             }
-            "Down" | "j" | "C-n" => mode.selected = (mode.selected + 1) % rows.len(),
-            "Home" | "g" => mode.selected = 0,
-            "End" | "G" => mode.selected = rows.len() - 1,
-            "NPage" | "C-f" => mode.selected = (mode.selected + 10).min(rows.len() - 1),
-            "PPage" | "C-b" => mode.selected = mode.selected.saturating_sub(10),
-            "Right" | "+" | "l" => {
-                if row.children {
+            ModeKey::PageDown | ModeKey::Ctrl('f') => {
+                for _ in 0..mode.height {
+                    if mode.current == size - 1 {
+                        break;
+                    }
+                    mode.down(size, true);
+                }
+            }
+            ModeKey::Char('g') | ModeKey::Home => {
+                mode.current = 0;
+                mode.offset = 0;
+            }
+            ModeKey::Char('G') | ModeKey::End => {
+                mode.current = size - 1;
+                mode.offset_for_current();
+            }
+            ModeKey::Char('t') => {
+                let row = row_at(mode);
+                if !row.no_tag {
+                    if mode.tagged.contains(&row.id) {
+                        mode.tagged.remove(&row.id);
+                    } else {
+                        let mut parent = row.parent;
+                        while let Some(index) = parent {
+                            mode.tagged.remove(&rows[index].id);
+                            parent = rows[index].parent;
+                        }
+                        let id = row.id.clone();
+                        mode.tagged
+                            .retain(|tagged| !customize_is_descendant(&rows, &id, tagged));
+                        mode.tagged.insert(id);
+                    }
+                }
+            }
+            ModeKey::Char('T') => {
+                for line in &lines {
+                    mode.tagged.remove(&rows[*line].id);
+                }
+            }
+            ModeKey::Ctrl('t') => {
+                for line in &lines {
+                    let row = &rows[*line];
+                    let tag = match row.parent {
+                        None => !row.no_tag,
+                        Some(parent) => rows[parent].no_tag,
+                    };
+                    if tag {
+                        mode.tagged.insert(row.id.clone());
+                    } else {
+                        mode.tagged.remove(&row.id);
+                    }
+                }
+            }
+            ModeKey::Char('O' | 'r') => {
+                let tag = row_at(mode).id.clone();
+                self.customize_build(pane, mode, Some(tag), expand);
+            }
+            ModeKey::Left | ModeKey::Char('h' | '-') => {
+                let line = lines[mode.current];
+                let flat = customize_flat(&rows, line);
+                let mut target = Some(line);
+                if flat || !mode.expanded.contains(&rows[line].id) {
+                    target = rows[line].parent;
+                }
+                match target {
+                    None => mode.up(size, false),
+                    Some(target) => {
+                        mode.expanded.remove(&rows[target].id);
+                        if let Some(position) = lines.iter().position(|line| *line == target) {
+                            mode.current = position;
+                        }
+                        let tag = row_at(mode).id.clone();
+                        self.customize_build(pane, mode, Some(tag), expand);
+                    }
+                }
+            }
+            ModeKey::Right | ModeKey::Char('l' | '+') => {
+                let line = lines[mode.current];
+                if customize_flat(&rows, line) || mode.expanded.contains(&rows[line].id) {
+                    mode.down(size, false);
+                } else {
+                    mode.expanded.insert(rows[line].id.clone());
+                    let tag = rows[line].id.clone();
+                    self.customize_build(pane, mode, Some(tag), expand);
+                }
+            }
+            ModeKey::Meta('-') => {
+                let tag = row_at(mode).id.clone();
+                for row in rows.iter().filter(|row| row.parent.is_none()) {
+                    mode.expanded.remove(&row.id);
+                }
+                self.customize_build(pane, mode, Some(tag), expand);
+            }
+            ModeKey::Meta('+') => {
+                let tag = row_at(mode).id.clone();
+                for row in rows.iter().filter(|row| row.parent.is_none()) {
                     mode.expanded.insert(row.id.clone());
                 }
+                self.customize_build(pane, mode, Some(tag), expand);
             }
-            "Left" | "-" | "h" => {
-                if !mode.expanded.remove(&row.id) && row.depth > 0 {
-                    mode.selected = rows[..mode.selected]
-                        .iter()
-                        .rposition(|parent| parent.depth < row.depth)
-                        .unwrap_or(0);
+            ModeKey::Char('?' | '/') | ModeKey::Ctrl('s') => {
+                mode.prompt = Some((
+                    ModePrompt::new("(search) ", "", &self.customize_separators(pane)),
+                    PromptPurpose::Search,
+                ));
+            }
+            ModeKey::Char(direction @ ('n' | 'N')) => {
+                self.customize_search_set(pane, mode, direction == 'N', expand);
+            }
+            ModeKey::Char('f') => {
+                let input = mode.filter.clone().unwrap_or_default();
+                mode.prompt = Some((
+                    ModePrompt::new("(filter) ", &input, &self.customize_separators(pane)),
+                    PromptPurpose::Filter,
+                ));
+            }
+            ModeKey::Char('c') => {
+                mode.prompt = None;
+                mode.filter = None;
+                let tag = row_at(mode).id.clone();
+                self.customize_build(pane, mode, Some(tag), expand);
+            }
+            ModeKey::Char('v') => {
+                mode.preview = match mode.preview {
+                    Preview::Off => Preview::Big,
+                    Preview::Normal => Preview::Off,
+                    Preview::Big => Preview::Normal,
+                };
+                let tag = row_at(mode).id.clone();
+                self.customize_build(pane, mode, Some(tag), expand);
+            }
+            _ => {}
+        }
+        let rows = self.customize_rows(pane, mode, expand);
+        let lines = customize_lines(&rows, mode);
+        let Some(row) = lines.get(mode.current).map(|line| rows[*line].clone()) else {
+            return CustomizeResult::stay();
+        };
+        let tag = Some(row.id.clone());
+        let separators = self.customize_separators(pane);
+        match key {
+            ModeKey::Char('a') => {
+                if let Item::Option {
+                    name,
+                    array_key: Some(array_key),
+                    target,
+                    ..
+                } = &row.item
+                {
+                    mode.prompt = Some((
+                        ModePrompt::new(format!("({name}[{array_key}]) "), array_key, &separators),
+                        PromptPurpose::ArrayKey {
+                            name: name.clone(),
+                            array_key: array_key.clone(),
+                            target: *target,
+                        },
+                    ));
                 }
             }
-            "M--" => {
-                mode.expanded.clear();
-                mode.selected = 0;
+            ModeKey::Char('\r' | 's' | 'w' | 'S' | 'W') => {
+                let global = matches!(key, ModeKey::Char('S' | 'W'));
+                let pane_scope = matches!(key, ModeKey::Char('\r' | 's'));
+                let mut commands = Vec::new();
+                match &row.item {
+                    Item::Section => {
+                        if matches!(key, ModeKey::Char('\r' | 's')) {
+                            return CustomizeResult::stay();
+                        }
+                    }
+                    Item::Key {
+                        table,
+                        key: binding,
+                    }
+                    | Item::KeyField {
+                        table,
+                        key: binding,
+                    } => {
+                        if !matches!(key, ModeKey::Char('\r' | 's')) {
+                            return CustomizeResult::stay();
+                        }
+                        if let Some(command) =
+                            self.customize_set_key(mode, &row, table, binding, &separators)
+                        {
+                            commands.push(command);
+                        }
+                    }
+                    Item::Option { .. } => {
+                        if let Some(command) = self.customize_set_option(
+                            pane,
+                            mode,
+                            &row,
+                            global,
+                            pane_scope,
+                            &separators,
+                        ) {
+                            commands.push(command);
+                        }
+                    }
+                }
+                return self.customize_commands(pane, mode, commands, tag, expand);
             }
-            "M-+" => {
-                mode.expanded.extend(
-                    rows.iter()
-                        .filter(|row| row.depth == 0)
-                        .map(|row| row.id.clone()),
+            ModeKey::Char('d') => {
+                if matches!(row.item, Item::Section)
+                    || matches!(
+                        row.item,
+                        Item::Option {
+                            array_key: Some(_),
+                            ..
+                        }
+                    )
+                {
+                    return CustomizeResult::stay();
+                }
+                let name = customize_item_name(&row);
+                return self.customize_confirm(
+                    pane,
+                    mode,
+                    format!("Reset {name} to default? "),
+                    PromptPurpose::Reset,
+                    expand,
                 );
             }
-            "t" => {
-                if row.depth > 0 && !mode.tagged.remove(&row.id) {
-                    mode.tagged.insert(row.id.clone());
+            ModeKey::Char('u') => {
+                if matches!(row.item, Item::Section) {
+                    return CustomizeResult::stay();
                 }
-                mode.selected = (mode.selected + 1) % rows.len();
+                let label = match &row.item {
+                    Item::Option {
+                        name,
+                        array_key: Some(array_key),
+                        ..
+                    } => format!("Unset {name}[{array_key}]? "),
+                    _ => format!("Unset {}? ", customize_item_name(&row)),
+                };
+                return self.customize_confirm(pane, mode, label, PromptPurpose::Unset, expand);
             }
-            "T" => mode.tagged.clear(),
-            "v" => mode.preview_off = !mode.preview_off,
-            "H" => {
+            ModeKey::Char(change @ ('D' | 'U')) => {
+                let count = lines
+                    .iter()
+                    .filter(|line| mode.tagged.contains(&rows[**line].id))
+                    .count();
+                if count == 0 {
+                    return CustomizeResult::stay();
+                }
+                let (label, purpose) = if change == 'D' {
+                    (
+                        format!("Reset {count} tagged to default? "),
+                        PromptPurpose::ResetTagged,
+                    )
+                } else {
+                    (
+                        format!("Unset {count} tagged? "),
+                        PromptPurpose::UnsetTagged,
+                    )
+                };
+                return self.customize_confirm(pane, mode, label, purpose, expand);
+            }
+            ModeKey::Char('H') => {
                 mode.hide_global = !mode.hide_global;
-                mode.selected = 0;
+                self.customize_build(pane, mode, tag, expand);
             }
-            "?" | "/" | "C-s" => {
-                mode.query.clear();
-                mode.prompt = Some(CustomizePrompt::Search);
+            _ => {}
+        }
+        CustomizeResult::stay()
+    }
+
+    fn customize_separators(&self, pane: PaneId) -> String {
+        self.word_separators_for_pane(pane)
+            .map_or_else(|_| DEFAULT_WORD_SEPARATORS.to_owned(), str::to_owned)
+    }
+
+    fn customize_confirm(
+        &self,
+        pane: PaneId,
+        mode: &mut CustomizeMode,
+        label: String,
+        purpose: PromptPurpose,
+        expand: &mut CustomizeExpand<'_>,
+    ) -> CustomizeResult {
+        if mode.accept {
+            return self.customize_answer(pane, mode, purpose, Some("y".to_owned()), expand);
+        }
+        mode.prompt = Some((ModePrompt::single(label), purpose));
+        CustomizeResult::stay()
+    }
+
+    fn customize_commands(
+        &self,
+        pane: PaneId,
+        mode: &mut CustomizeMode,
+        commands: Vec<CommandInvocation>,
+        tag: Option<String>,
+        expand: &mut CustomizeExpand<'_>,
+    ) -> CustomizeResult {
+        if commands.is_empty() {
+            self.customize_build(pane, mode, tag, expand);
+        } else {
+            mode.rebuild = Some(tag);
+        }
+        CustomizeResult {
+            close: false,
+            commands,
+        }
+    }
+
+    fn customize_set_key(
+        &self,
+        mode: &mut CustomizeMode,
+        row: &Row,
+        table: &str,
+        key: &str,
+        separators: &str,
+    ) -> Option<CommandInvocation> {
+        let binding = self.keys.get(table, key)?;
+        match row.name.as_str() {
+            "Repeat" if matches!(row.item, Item::KeyField { .. }) => Some(customize_bind(
+                table,
+                key,
+                !binding.repeat,
+                binding.note.as_deref(),
+                &customize_command_print(binding),
+            )),
+            "Command" if matches!(row.item, Item::KeyField { .. }) => {
+                mode.prompt = Some((
+                    ModePrompt::new(
+                        format!("({key}) "),
+                        &customize_command_print(binding),
+                        separators,
+                    ),
+                    PromptPurpose::Command {
+                        table: table.to_owned(),
+                        key: key.to_owned(),
+                    },
+                ));
+                None
             }
-            "n" | "N" => self.customize_search(pane, mode, key == "N"),
-            "f" => {
-                mode.query = mode.filter.clone().unwrap_or_default();
-                mode.prompt = Some(CustomizePrompt::Filter);
+            "Note" if matches!(row.item, Item::KeyField { .. }) => {
+                mode.prompt = Some((
+                    ModePrompt::new(
+                        format!("({key}) "),
+                        binding.note.as_deref().unwrap_or_default(),
+                        separators,
+                    ),
+                    PromptPurpose::Note {
+                        table: table.to_owned(),
+                        key: key.to_owned(),
+                    },
+                ));
+                None
             }
-            "Enter" | "C-m" | "\r" | "s" | "S" | "w" | "W" => {
-                if let Some((name, owner, metadata)) = &row.option {
-                    let window = &self.state.windows[&self.state.window_for_pane(pane).unwrap()];
-                    let array = metadata.is_some_and(|option| option.is_array);
-                    let target = if array {
-                        *owner
-                    } else if matches!(key, "S" | "W") {
-                        match owner {
-                            TmuxOptionTarget::Session(_) => TmuxOptionTarget::GlobalSession,
-                            TmuxOptionTarget::Window(_) | TmuxOptionTarget::Pane(_) => {
-                                TmuxOptionTarget::GlobalWindow
-                            }
-                            _ => *owner,
-                        }
-                    } else {
-                        match owner {
-                            TmuxOptionTarget::GlobalSession => {
-                                TmuxOptionTarget::Session(window.session)
-                            }
-                            TmuxOptionTarget::GlobalWindow
-                            | TmuxOptionTarget::Window(_)
-                            | TmuxOptionTarget::Pane(_) => {
-                                if metadata.is_some_and(|option| {
-                                    option.scope == TmuxOptionScope::WindowPane
-                                }) && key != "w"
-                                {
-                                    TmuxOptionTarget::Pane(pane)
-                                } else {
-                                    TmuxOptionTarget::Window(window.id)
-                                }
-                            }
-                            _ => *owner,
-                        }
-                    };
-                    match metadata.map(|option| option.metadata.kind) {
-                        Some(TmuxOptionKind::Flag) => {
-                            return (
-                                false,
-                                Some(customize_set_command(
-                                    name,
-                                    target,
-                                    if row.value == "on" { "off" } else { "on" },
-                                )),
-                            );
-                        }
-                        Some(TmuxOptionKind::Choice) => {
-                            let choices = metadata.unwrap().metadata.choices;
-                            if !choices.is_empty() {
-                                let index = choices
-                                    .iter()
-                                    .position(|value| *value == row.value)
-                                    .unwrap_or(0);
-                                return (
-                                    false,
-                                    Some(customize_set_command(
-                                        name,
-                                        target,
-                                        choices[(index + 1) % choices.len()],
-                                    )),
-                                );
-                            }
-                        }
-                        _ => {}
-                    }
-                    let scope = self.customize_scope(target);
-                    let suffix = if !scope.is_empty() {
-                        format!(", for {scope}")
-                    } else if target != TmuxOptionTarget::Server {
-                        ", global".to_owned()
-                    } else {
-                        String::new()
-                    };
-                    mode.prompt = Some(CustomizePrompt::Edit {
-                        name: name.clone(),
-                        target,
-                        prefix: format!(
-                            "({name}{}{suffix}) ",
-                            if array && row.depth == 1 { "[+]" } else { "" }
-                        ),
-                        value: row.value.clone(),
-                    });
+            _ => None,
+        }
+    }
+
+    fn customize_set_option(
+        &self,
+        pane: PaneId,
+        mode: &mut CustomizeMode,
+        row: &Row,
+        global: bool,
+        pane_scope: bool,
+        separators: &str,
+    ) -> Option<CommandInvocation> {
+        let Item::Option {
+            name,
+            array_key,
+            target: owner,
+            metadata,
+            ..
+        } = &row.item
+        else {
+            return None;
+        };
+        let window = self.state.window_for_pane(pane)?;
+        let session = self.state.windows.get(&window)?.session;
+        let pane_scope =
+            pane_scope && metadata.is_none_or(|option| option.scope == TmuxOptionScope::WindowPane);
+        let array = metadata.is_some_and(|option| option.is_array);
+        let local_window = if pane_scope {
+            TmuxOptionTarget::Pane(pane)
+        } else {
+            TmuxOptionTarget::Window(window)
+        };
+        let target = if array {
+            *owner
+        } else if global {
+            match owner {
+                TmuxOptionTarget::Session(_) => TmuxOptionTarget::GlobalSession,
+                TmuxOptionTarget::Window(_) | TmuxOptionTarget::Pane(_) => {
+                    TmuxOptionTarget::GlobalWindow
                 }
+                other => *other,
             }
-            _ => {
-                let index = key
-                    .parse::<usize>()
+        } else {
+            match owner {
+                TmuxOptionTarget::GlobalSession => TmuxOptionTarget::Session(session),
+                TmuxOptionTarget::Window(_)
+                | TmuxOptionTarget::Pane(_)
+                | TmuxOptionTarget::GlobalWindow => local_window,
+                other => *other,
+            }
+        };
+        if let Some(option) = metadata {
+            let current = || {
+                self.tmux_option_readback(*option, target, true)
                     .ok()
-                    .filter(|index| *index < 10)
-                    .or_else(|| {
-                        key.strip_prefix("M-")
-                            .and_then(|value| value.bytes().next())
-                            .filter(u8::is_ascii_lowercase)
-                            .map(|value| usize::from(value - b'a') + 10)
-                    });
-                if let Some(index) = index.filter(|index| *index < rows.len()) {
-                    mode.selected = index;
-                    return self.customize_key(pane, mode, "Enter");
+                    .flatten()
+                    .map(|(value, _)| value)
+                    .unwrap_or_default()
+            };
+            match option.metadata.kind {
+                TmuxOptionKind::Flag => {
+                    return Some(customize_set_command(
+                        name,
+                        target,
+                        if current() == "on" { "off" } else { "on" },
+                    ));
                 }
+                TmuxOptionKind::Choice if !option.metadata.choices.is_empty() => {
+                    let choices = option.metadata.choices;
+                    let value = current();
+                    let index = choices.iter().position(|choice| *choice == value);
+                    let next = index.map_or(0, |index| (index + 1) % choices.len());
+                    return Some(customize_set_command(name, target, choices[next]));
+                }
+                _ => {}
             }
         }
-        let height = self
-            .state
-            .window_for_pane(pane)
-            .and_then(|id| self.state.windows.get(&id))
-            .map_or(11, |window| {
-                usize::from(window.layout.extent().1)
-                    .saturating_sub(if mode.preview_off { 0 } else { 12 })
-                    .max(1)
-            });
-        if mode.selected < mode.offset {
-            mode.offset = mode.selected;
+        let scope = self.customize_scope(target);
+        let space = if !scope.is_empty() {
+            ", for "
+        } else if target == TmuxOptionTarget::Server {
+            ""
+        } else {
+            ", global"
+        };
+        let label = match (array, array_key) {
+            (true, None) => format!("({name}[+]{space}{scope}) "),
+            (true, Some(key)) => format!("({name}[{key}]{space}{scope}) "),
+            (false, _) => format!("({name}{space}{scope}) "),
+        };
+        let value = match &row.item {
+            Item::Option { value, .. } => value.clone(),
+            _ => String::new(),
+        };
+        mode.prompt = Some((
+            ModePrompt::new(label, &value, separators),
+            PromptPurpose::Option {
+                name: name.clone(),
+                array_key: array_key.clone(),
+                target,
+            },
+        ));
+        None
+    }
+
+    fn customize_answer(
+        &self,
+        pane: PaneId,
+        mode: &mut CustomizeMode,
+        purpose: PromptPurpose,
+        value: Option<String>,
+        expand: &mut CustomizeExpand<'_>,
+    ) -> CustomizeResult {
+        let rows = self.customize_rows(pane, mode, expand);
+        let lines = customize_lines(&rows, mode);
+        let current = lines.get(mode.current).map(|line| &rows[*line]);
+        let tag = current.map(|row| row.id.clone());
+        match purpose {
+            PromptPurpose::Search => {
+                mode.search = value.filter(|value| !value.is_empty());
+                if mode.search.is_some() {
+                    self.customize_search_set(pane, mode, false, expand);
+                }
+                CustomizeResult::stay()
+            }
+            PromptPurpose::Filter => {
+                mode.filter = value.filter(|value| !value.is_empty());
+                self.customize_build(pane, mode, tag, expand);
+                CustomizeResult::stay()
+            }
+            PromptPurpose::Option {
+                name,
+                array_key,
+                target,
+            } => {
+                let Some(value) = value.filter(|value| !value.is_empty()) else {
+                    return CustomizeResult::stay();
+                };
+                let full = if tmux_options().any(|option| option.name == name && option.is_array) {
+                    let key = match array_key {
+                        Some(key) => key,
+                        None => {
+                            let values = self.customize_array_values(target, &name);
+                            match first_free_array_index(values.keys()) {
+                                Ok(index) => index.to_string(),
+                                Err(_) => return CustomizeResult::stay(),
+                            }
+                        }
+                    };
+                    format!("{name}[{key}]")
+                } else {
+                    name
+                };
+                self.customize_commands(
+                    pane,
+                    mode,
+                    vec![customize_set_command(&full, target, &value)],
+                    tag,
+                    expand,
+                )
+            }
+            PromptPurpose::ArrayKey {
+                name,
+                array_key,
+                target,
+            } => {
+                let Some(new_key) = value.filter(|value| !value.is_empty()) else {
+                    return CustomizeResult::stay();
+                };
+                let values = self.customize_array_values(target, &name);
+                if values.keys().any(|key| key.display() == new_key) {
+                    return CustomizeResult::stay();
+                }
+                let Some(entry) = values
+                    .iter()
+                    .find(|(key, _)| key.display() == array_key)
+                    .map(|(_, entry)| entry.clone())
+                else {
+                    return CustomizeResult::stay();
+                };
+                self.customize_commands(
+                    pane,
+                    mode,
+                    vec![
+                        customize_set_command(&format!("{name}[{new_key}]"), target, &entry),
+                        customize_unset_command(&format!("{name}[{array_key}]"), target),
+                    ],
+                    tag,
+                    expand,
+                )
+            }
+            PromptPurpose::Command { table, key } => {
+                let Some(command) = value.filter(|value| !value.is_empty()) else {
+                    return CustomizeResult::stay();
+                };
+                let Some(binding) = self.keys.get(&table, &key) else {
+                    return CustomizeResult::stay();
+                };
+                let bind = customize_bind(
+                    &table,
+                    &key,
+                    binding.repeat,
+                    binding.note.as_deref(),
+                    &command,
+                );
+                self.customize_commands(pane, mode, vec![bind], tag, expand)
+            }
+            PromptPurpose::Note { table, key } => {
+                let Some(note) = value.filter(|value| !value.is_empty()) else {
+                    return CustomizeResult::stay();
+                };
+                let Some(binding) = self.keys.get(&table, &key) else {
+                    return CustomizeResult::stay();
+                };
+                let bind = customize_bind(
+                    &table,
+                    &key,
+                    binding.repeat,
+                    Some(&note),
+                    &customize_command_print(binding),
+                );
+                self.customize_commands(pane, mode, vec![bind], tag, expand)
+            }
+            PromptPurpose::Reset
+            | PromptPurpose::Unset
+            | PromptPurpose::ResetTagged
+            | PromptPurpose::UnsetTagged => {
+                if !value.is_some_and(|value| value.eq_ignore_ascii_case("y")) {
+                    return CustomizeResult::stay();
+                }
+                let reset = matches!(purpose, PromptPurpose::Reset | PromptPurpose::ResetTagged);
+                let targets = if matches!(purpose, PromptPurpose::Reset | PromptPurpose::Unset) {
+                    current.map(|row| vec![row.clone()]).unwrap_or_default()
+                } else {
+                    lines
+                        .iter()
+                        .map(|line| &rows[*line])
+                        .filter(|row| mode.tagged.contains(&row.id))
+                        .cloned()
+                        .collect()
+                };
+                let current_id = current.map(|row| row.id.clone());
+                let mut commands = Vec::new();
+                for row in targets {
+                    let is_current = current_id.as_ref() == Some(&row.id)
+                        || current.is_some_and(|current| customize_same_key(current, &row));
+                    commands.extend(
+                        self.customize_change(mode, &rows, &lines, &row, reset, is_current),
+                    );
+                }
+                let tag = lines.get(mode.current).map(|line| rows[*line].id.clone());
+                self.customize_commands(pane, mode, commands, tag, expand)
+            }
         }
-        if mode.selected >= mode.offset + height {
-            mode.offset = mode.selected + 1 - height;
+    }
+
+    fn customize_change(
+        &self,
+        mode: &mut CustomizeMode,
+        rows: &[Row],
+        lines: &[usize],
+        row: &Row,
+        reset: bool,
+        is_current: bool,
+    ) -> Vec<CommandInvocation> {
+        match &row.item {
+            Item::Section => Vec::new(),
+            Item::Option {
+                name,
+                array_key,
+                target,
+                ..
+            } => {
+                if reset && array_key.is_some() {
+                    return Vec::new();
+                }
+                if !reset && array_key.is_some() && is_current {
+                    mode.up(lines.len(), false);
+                }
+                let full = array_key
+                    .as_ref()
+                    .map_or_else(|| name.clone(), |key| format!("{name}[{key}]"));
+                vec![customize_unset_command(&full, *target)]
+            }
+            Item::Key { table, key } | Item::KeyField { table, key } => {
+                let Some(binding) = self.keys.get(table, key) else {
+                    return Vec::new();
+                };
+                let default = KeyTables::default().get(table, key).cloned();
+                if reset && let Some(default) = &default {
+                    if default.commands == binding.commands {
+                        return Vec::new();
+                    }
+                    return vec![customize_bind(
+                        table,
+                        key,
+                        default.repeat,
+                        default.note.as_deref(),
+                        &customize_command_print(default),
+                    )];
+                }
+                if is_current {
+                    if let Some(line) = lines.get(mode.current) {
+                        mode.expanded.remove(&rows[*line].id);
+                    }
+                    mode.up(lines.len(), false);
+                }
+                vec![CommandInvocation::new(
+                    "unbind-key",
+                    ["-T".to_owned(), table.clone(), key.clone()],
+                )]
+            }
         }
-        (false, None)
     }
 }
 
-fn customize_set_command(name: &str, target: TmuxOptionTarget, value: &str) -> CommandInvocation {
-    let mut args: Vec<String> = match target {
+fn customize_default_value(option: TmuxOption) -> Option<String> {
+    thread_local! {
+        static DEFAULTS: MuxEngine = MuxEngine::default();
+    }
+    let target = match option.scope {
+        TmuxOptionScope::Server => TmuxOptionTarget::Server,
+        TmuxOptionScope::Session => TmuxOptionTarget::GlobalSession,
+        TmuxOptionScope::Window | TmuxOptionScope::WindowPane => TmuxOptionTarget::GlobalWindow,
+    };
+    DEFAULTS.with(|engine| {
+        engine
+            .tmux_option_readback(option, target, false)
+            .ok()
+            .flatten()
+            .map(|(value, _)| value)
+    })
+}
+
+fn customize_is_descendant(rows: &[Row], ancestor: &str, id: &str) -> bool {
+    let Some(mut row) = rows.iter().find(|row| row.id == id) else {
+        return false;
+    };
+    while let Some(parent) = row.parent {
+        if rows[parent].id == ancestor {
+            return true;
+        }
+        row = &rows[parent];
+    }
+    false
+}
+
+fn customize_same_key(left: &Row, right: &Row) -> bool {
+    match (&left.item, &right.item) {
+        (
+            Item::Key { table, key } | Item::KeyField { table, key },
+            Item::Key {
+                table: other_table,
+                key: other_key,
+            }
+            | Item::KeyField {
+                table: other_table,
+                key: other_key,
+            },
+        ) => table == other_table && key == other_key,
+        _ => false,
+    }
+}
+
+fn customize_flat(rows: &[Row], line: usize) -> bool {
+    let parent = rows[line].parent;
+    let depth = rows[line].depth;
+    !rows
+        .iter()
+        .any(|row| row.parent == parent && row.depth == depth && row.children)
+}
+
+fn customize_item_name(row: &Row) -> String {
+    match &row.item {
+        Item::Option { name, .. } => name.clone(),
+        Item::Key { key, .. } | Item::KeyField { key, .. } => key.clone(),
+        Item::Section => row.name.clone(),
+    }
+}
+
+fn customize_command_print(binding: &Binding) -> String {
+    binding
+        .commands
+        .iter()
+        .flat_map(|command| match parse_command_alias_group(command) {
+            Ok(Some(commands)) => commands.iter().map(tmux_command_print).collect::<Vec<_>>(),
+            _ => vec![tmux_command_print(command)],
+        })
+        .collect::<Vec<_>>()
+        .join(" ; ")
+}
+
+fn customize_example_style(value: &str) -> String {
+    value
+        .split([' ', ','])
+        .filter(|token| {
+            zz_protocol::parse_style(token).is_some_and(|style| {
+                style.align.is_none()
+                    && style.fill.is_none()
+                    && style.list.is_none()
+                    && style.range.is_none()
+                    && style.width.is_none()
+                    && style.pad.is_none()
+                    && style.default_type.is_none()
+                    && style.ignore.is_none()
+                    && style.link.is_none()
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn customize_bind(
+    table: &str,
+    key: &str,
+    repeat: bool,
+    note: Option<&str>,
+    command: &str,
+) -> CommandInvocation {
+    let mut args = Vec::new();
+    if repeat {
+        args.push("-r".to_owned());
+    }
+    if let Some(note) = note {
+        args.extend(["-N".to_owned(), note.to_owned()]);
+    }
+    args.extend([
+        "-T".to_owned(),
+        table.to_owned(),
+        key.to_owned(),
+        command.to_owned(),
+    ]);
+    CommandInvocation::new("bind-key", args)
+}
+
+fn customize_target_args(target: TmuxOptionTarget) -> Vec<String> {
+    match target {
         TmuxOptionTarget::Server => vec!["-s".to_owned()],
         TmuxOptionTarget::GlobalSession => vec!["-g".to_owned()],
         TmuxOptionTarget::GlobalWindow => vec!["-gw".to_owned()],
         TmuxOptionTarget::Session(id) => vec!["-t".to_owned(), id.to_string()],
         TmuxOptionTarget::Window(id) => vec!["-w".to_owned(), "-t".to_owned(), id.to_string()],
         TmuxOptionTarget::Pane(id) => vec!["-p".to_owned(), "-t".to_owned(), id.to_string()],
-    };
+    }
+}
+
+fn customize_set_command(name: &str, target: TmuxOptionTarget, value: &str) -> CommandInvocation {
+    let mut args = customize_target_args(target);
     args.extend([name.to_owned(), value.to_owned()]);
     CommandInvocation::new("set-option", args)
 }
 
+fn customize_unset_command(name: &str, target: TmuxOptionTarget) -> CommandInvocation {
+    let mut args = vec!["-u".to_owned()];
+    args.extend(customize_target_args(target));
+    args.push(name.to_owned());
+    CommandInvocation::new("set-option", args)
+}
+
+struct PreviewWriter {
+    width: usize,
+    height: usize,
+    lines: Vec<String>,
+    x: usize,
+    y: usize,
+}
+
+impl PreviewWriter {
+    fn new(width: usize, height: usize) -> Self {
+        Self {
+            width,
+            height,
+            lines: Vec::new(),
+            x: 0,
+            y: 0,
+        }
+    }
+
+    fn put(&mut self, style: &str, text: &str) {
+        if text.is_empty() || self.y >= self.height {
+            return;
+        }
+        while self.lines.len() <= self.y {
+            self.lines.push(String::new());
+        }
+        let line = &mut self.lines[self.y];
+        let escaped = text.replace('#', "##");
+        if style.is_empty() {
+            line.push_str(&escaped);
+        } else {
+            line.push_str(&format!("#[{style}]{escaped}#[default]"));
+        }
+    }
+
+    fn text(&mut self, more: bool, style: &str, text: &str) -> bool {
+        use unicode_width::UnicodeWidthChar as _;
+        if self.height == 0 || self.width == 0 {
+            return false;
+        }
+        let characters = text.chars().collect::<Vec<_>>();
+        let start_row = self.y;
+        let lines = self.height.saturating_sub(start_row);
+        let mut index = 0;
+        let mut left = self.width.saturating_sub(self.x);
+        loop {
+            let mut at = 0;
+            let mut end = index;
+            while end < characters.len() {
+                if characters[end] == '\n' {
+                    break;
+                }
+                let width = characters[end].width().unwrap_or(0);
+                if at + width > left {
+                    break;
+                }
+                at += width;
+                end += 1;
+            }
+            let next = if end == characters.len() {
+                end
+            } else if characters[end] == '\n' || characters[end] == ' ' {
+                end + 1
+            } else {
+                match (index + 1..=end)
+                    .rev()
+                    .find(|position| characters[*position] == ' ')
+                {
+                    Some(space) => {
+                        end = space;
+                        space + 1
+                    }
+                    None => end,
+                }
+            };
+            let piece = characters[index..end].iter().collect::<String>();
+            let width = piece
+                .chars()
+                .map(|character| character.width().unwrap_or(0))
+                .sum::<usize>();
+            self.put(style, &piece);
+            self.x += width;
+            index = next;
+            if self.y + 1 == start_row + lines || index == characters.len() {
+                break;
+            }
+            self.y += 1;
+            self.x = 0;
+            left = self.width;
+        }
+        if (self.y + 1 == start_row + lines && (!more || self.x == self.width))
+            || index != characters.len()
+        {
+            return false;
+        }
+        if !more || self.x == self.width {
+            self.y += 1;
+            self.x = 0;
+        }
+        true
+    }
+
+    fn skip_line(&mut self) -> bool {
+        self.y += 1;
+        self.x = 0;
+        self.y + 1 < self.height
+    }
+
+    fn skip_line_strict(&mut self) -> bool {
+        self.y += 1;
+        self.x = 0;
+        self.y < self.height
+    }
+
+    fn finish(self) -> Vec<String> {
+        self.lines
+    }
+}
+
+#[cfg(test)]
 fn customize_expand(format: &str, variables: &BTreeMap<String, String>) -> String {
     struct Hooks<'a>(&'a BTreeMap<String, String>);
     impl StatusHooks for Hooks<'_> {
@@ -798,8 +2035,7 @@ fn customize_expand(format: &str, variables: &BTreeMap<String, String>) -> Strin
 mod tests {
     use super::*;
 
-    #[test]
-    fn customize_array_edits_preserve_entries_and_fill_the_first_hole() {
+    fn engine_with_session() -> (MuxEngine, ExecutionContext, PaneId) {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
@@ -809,6 +2045,56 @@ mod tests {
             )
             .unwrap();
         let pane = context.pane.unwrap();
+        (engine, context, pane)
+    }
+
+    fn press(
+        engine: &mut MuxEngine,
+        context: &mut ExecutionContext,
+        pane: PaneId,
+        mode: &mut CustomizeMode,
+        key: &str,
+    ) -> bool {
+        let mut expand = customize_expand;
+        let result = engine.customize_key(pane, mode, key, &mut expand);
+        for command in &result.commands {
+            engine.execute(context, command).unwrap();
+        }
+        engine.customize_finish(pane, mode, &mut expand);
+        result.close
+    }
+
+    fn current_row(engine: &MuxEngine, pane: PaneId, mode: &CustomizeMode) -> Row {
+        let mut expand = customize_expand;
+        let rows = engine.customize_rows(pane, mode, &mut expand);
+        let lines = customize_lines(&rows, mode);
+        rows[lines[mode.current]].clone()
+    }
+
+    fn select(engine: &MuxEngine, pane: PaneId, mode: &mut CustomizeMode, name: &str) {
+        let mut expand = customize_expand;
+        let rows = engine.customize_rows(pane, mode, &mut expand);
+        mode.current = customize_lines(&rows, mode)
+            .iter()
+            .position(|line| rows[*line].name == name)
+            .unwrap();
+    }
+
+    fn type_text(
+        engine: &mut MuxEngine,
+        context: &mut ExecutionContext,
+        pane: PaneId,
+        mode: &mut CustomizeMode,
+        text: &str,
+    ) {
+        for character in text.chars() {
+            press(engine, context, pane, mode, &character.to_string());
+        }
+    }
+
+    #[test]
+    fn customize_array_edits_preserve_entries_and_fill_the_first_hole() {
+        let (mut engine, mut context, pane) = engine_with_session();
         for option in
             tmux_options().filter(|option| option.is_array && !tmux_option_is_hook(option.name))
         {
@@ -823,7 +2109,6 @@ mod tests {
                 "pane-colours" => "red",
                 "command-alias" => "review=display-message review",
                 "codepoint-widths" => "U+0041=1",
-                name if tmux_option_is_hook(name) => "display-message review",
                 _ => "review-value",
             };
             let indexed = format!("{}[100]", option.name);
@@ -838,23 +2123,16 @@ mod tests {
             let mut mode = CustomizeMode::default();
             mode.expanded
                 .extend((0..3).map(|index| format!("options:{index}")));
-            mode.selected = engine
-                .customize_rows(pane, &mode)
-                .iter()
-                .position(|row| row.name == option.name)
-                .unwrap();
-            engine.customize_key(pane, &mut mode, "W");
+            select(&engine, pane, &mut mode, option.name);
+            press(&mut engine, &mut context, pane, &mut mode, "W");
             assert!(
-                matches!(&mode.prompt, Some(CustomizePrompt::Edit { prefix, .. }) if prefix.contains("[+]")),
+                matches!(&mode.prompt, Some((prompt, _)) if prompt.label.contains("[+]")),
                 "{}",
                 option.name
             );
-            engine.customize_key(pane, &mut mode, "C-u");
-            for character in value.chars() {
-                engine.customize_key(pane, &mut mode, &character.to_string());
-            }
-            let (_, command) = engine.customize_key(pane, &mut mode, "Enter");
-            engine.execute(&mut context, &command.unwrap()).unwrap();
+            press(&mut engine, &mut context, pane, &mut mode, "C-u");
+            type_text(&mut engine, &mut context, pane, &mut mode, value);
+            press(&mut engine, &mut context, pane, &mut mode, "Enter");
             expected.insert(ArrayIndex::Numeric(hole), value.to_owned());
             assert_eq!(
                 engine.customize_array_values(target, option.name),
@@ -862,31 +2140,18 @@ mod tests {
                 "{} root",
                 option.name
             );
-            let row = engine.customize_rows(pane, &mode)[mode.selected].id.clone();
-            mode.expanded.insert(row);
-            mode.selected = engine
-                .customize_rows(pane, &mode)
-                .iter()
-                .position(|row| {
-                    row.option
-                        .as_ref()
-                        .is_some_and(|(name, _, _)| name == &indexed)
-                })
-                .unwrap();
-            engine.customize_key(pane, &mut mode, "Enter");
+            mode.expanded.insert(current_row(&engine, pane, &mode).id);
+            select(&engine, pane, &mut mode, &indexed);
+            press(&mut engine, &mut context, pane, &mut mode, "Enter");
             let replacement = match option.name {
                 "pane-colours" => "blue",
                 "codepoint-widths" => "U+0042=2",
                 "command-alias" => "changed=display-message changed",
-                name if tmux_option_is_hook(name) => "display-message changed",
                 _ => "changed-value",
             };
-            engine.customize_key(pane, &mut mode, "C-u");
-            for character in replacement.chars() {
-                engine.customize_key(pane, &mut mode, &character.to_string());
-            }
-            let (_, command) = engine.customize_key(pane, &mut mode, "Enter");
-            engine.execute(&mut context, &command.unwrap()).unwrap();
+            press(&mut engine, &mut context, pane, &mut mode, "C-u");
+            type_text(&mut engine, &mut context, pane, &mut mode, replacement);
+            press(&mut engine, &mut context, pane, &mut mode, "Enter");
             expected.insert(ArrayIndex::Numeric(100), replacement.to_owned());
             assert_eq!(
                 engine.customize_array_values(target, option.name),
@@ -899,22 +2164,19 @@ mod tests {
 
     #[test]
     fn customize_hides_hook_arrays_like_the_pin() {
-        let mut engine = MuxEngine::default();
-        let mut context = ExecutionContext::default();
-        engine
-            .execute(
-                &mut context,
-                &CommandInvocation::new("new-session", ["-s", "customize"]),
-            )
-            .unwrap();
-        let rows = engine.customize_all_rows(context.pane.unwrap(), &CustomizeMode::default());
+        let (engine, _, pane) = engine_with_session();
+        let mut expand = customize_expand;
+        let rows = engine.customize_rows(pane, &CustomizeMode::default(), &mut expand);
         assert_eq!(
             rows.iter()
-                .filter(|row| row
-                    .option
-                    .as_ref()
-                    .is_some_and(|(_, _, option)| option.is_some_and(|option| option.is_array)))
-                .filter(|row| row.depth == 1)
+                .filter(|row| matches!(
+                    &row.item,
+                    Item::Option {
+                        metadata: Some(option),
+                        array_key: None,
+                        ..
+                    } if option.is_array
+                ))
                 .count(),
             8
         );
@@ -923,32 +2185,25 @@ mod tests {
 
     #[test]
     fn customize_only_the_mode_tree_exit_keys_close_the_mode() {
-        let mut engine = MuxEngine::default();
-        let mut context = ExecutionContext::default();
-        engine
-            .execute(
-                &mut context,
-                &CommandInvocation::new("new-session", ["-s", "customize"]),
-            )
-            .unwrap();
-        let pane = context.pane.unwrap();
-        for key in [
-            "C-c", "\u{3}", "C-d", "C-z", "C-j", "Space", "M-<", "M->", "x",
-        ] {
+        let (mut engine, mut context, pane) = engine_with_session();
+        for key in ["C-c", "C-d", "C-z", "C-j", "Space", "M-<", "M->", "x"] {
             let mut mode = CustomizeMode::default();
             let original = mode.clone();
-            assert_eq!(
-                engine.customize_key(pane, &mut mode, key),
-                (false, None),
+            assert!(
+                !press(&mut engine, &mut context, pane, &mut mode, key),
                 "{key}"
             );
             assert_eq!(mode, original, "{key}");
         }
-        for key in ["q", "Escape", "C-[", "C-g", "\u{1b}", "\u{7}"] {
+        for key in ["q", "Escape", "C-[", "C-g", "\u{1b}"] {
             assert!(
-                engine
-                    .customize_key(pane, &mut CustomizeMode::default(), key)
-                    .0,
+                press(
+                    &mut engine,
+                    &mut context,
+                    pane,
+                    &mut CustomizeMode::default(),
+                    key
+                ),
                 "{key}"
             );
         }
@@ -956,15 +2211,7 @@ mod tests {
 
     #[test]
     fn customize_global_edit_keys_keep_an_arrays_existing_scope() {
-        let mut engine = MuxEngine::default();
-        let mut context = ExecutionContext::default();
-        engine
-            .execute(
-                &mut context,
-                &CommandInvocation::new("new-session", ["-s", "customize"]),
-            )
-            .unwrap();
-        let pane = context.pane.unwrap();
+        let (mut engine, mut context, pane) = engine_with_session();
         for (name, target, value) in [
             (
                 "update-environment",
@@ -996,14 +2243,10 @@ mod tests {
                 let mut mode = CustomizeMode::default();
                 mode.expanded
                     .extend((0..3).map(|index| format!("options:{index}")));
-                mode.selected = engine
-                    .customize_rows(pane, &mode)
-                    .iter()
-                    .position(|row| row.name == name)
-                    .unwrap();
-                engine.customize_key(pane, &mut mode, key);
+                select(&engine, pane, &mut mode, name);
+                press(&mut engine, &mut context, pane, &mut mode, key);
                 assert!(
-                    matches!(mode.prompt, Some(CustomizePrompt::Edit { target: actual, .. }) if actual == target),
+                    matches!(&mode.prompt, Some((_, PromptPurpose::Option { target: actual, .. })) if *actual == target),
                     "{name}: {key}"
                 );
             }
@@ -1012,49 +2255,24 @@ mod tests {
 
     #[test]
     fn customize_edits_a_number_and_preserves_the_selected_option() {
-        let mut engine = MuxEngine::default();
-        let mut context = ExecutionContext::default();
-        engine
-            .execute(
-                &mut context,
-                &CommandInvocation::new("new-session", ["-s", "customize"]),
-            )
-            .unwrap();
-        let pane = context.pane.unwrap();
+        let (mut engine, mut context, pane) = engine_with_session();
         let mut mode = CustomizeMode::default();
-        assert_eq!(
-            engine.customize_presentation(pane, &mode).0.items[0].label,
-            "Server Options"
-        );
-        engine.customize_key(pane, &mut mode, "Right");
-        let rows = engine.customize_rows(pane, &mode);
-        mode.selected = rows
-            .iter()
-            .position(|row| row.name == "buffer-limit")
-            .unwrap();
-        engine.customize_key(pane, &mut mode, "Enter");
-        engine.customize_key(pane, &mut mode, "C-u");
-        engine.customize_key(pane, &mut mode, "7");
-        let (close, command) = engine.customize_key(pane, &mut mode, "Enter");
-        assert!(!close);
-        engine.execute(&mut context, &command.unwrap()).unwrap();
-        let rows = engine.customize_rows(pane, &mode);
-        assert_eq!(rows[mode.selected].name, "buffer-limit");
-        assert_eq!(rows[mode.selected].value, "7");
-        assert!(engine.customize_key(pane, &mut mode, "q").0);
+        engine.customize_height(pane, &mut mode);
+        press(&mut engine, &mut context, pane, &mut mode, "Right");
+        select(&engine, pane, &mut mode, "buffer-limit");
+        press(&mut engine, &mut context, pane, &mut mode, "Enter");
+        press(&mut engine, &mut context, pane, &mut mode, "C-u");
+        press(&mut engine, &mut context, pane, &mut mode, "7");
+        assert!(!press(&mut engine, &mut context, pane, &mut mode, "Enter"));
+        let row = current_row(&engine, pane, &mode);
+        assert_eq!(row.name, "buffer-limit");
+        assert!(matches!(row.item, Item::Option { ref value, .. } if value == "7"));
+        assert!(press(&mut engine, &mut context, pane, &mut mode, "q"));
     }
 
     #[test]
     fn customize_cycles_flags_and_choices_in_the_local_scope() {
-        let mut engine = MuxEngine::default();
-        let mut context = ExecutionContext::default();
-        engine
-            .execute(
-                &mut context,
-                &CommandInvocation::new("new-session", ["-s", "customize"]),
-            )
-            .unwrap();
-        let pane = context.pane.unwrap();
+        let (mut engine, mut context, pane) = engine_with_session();
         let mut mode = CustomizeMode::default();
         mode.expanded.insert("options:1".to_owned());
         engine
@@ -1064,19 +2282,82 @@ mod tests {
             )
             .unwrap();
         for (name, expected) in [("mouse", "on"), ("status-position", "top")] {
-            mode.selected = engine
-                .customize_rows(pane, &mode)
-                .iter()
-                .position(|row| row.name == name)
-                .unwrap();
-            let (_, command) = engine.customize_key(pane, &mut mode, "Enter");
-            engine.execute(&mut context, &command.unwrap()).unwrap();
-            let rows = engine.customize_rows(pane, &mode);
-            assert_eq!(rows[mode.selected].value, expected);
-            assert_eq!(
-                rows[mode.selected].option.as_ref().unwrap().1,
-                TmuxOptionTarget::Session(context.session.unwrap())
+            select(&engine, pane, &mut mode, name);
+            press(&mut engine, &mut context, pane, &mut mode, "Enter");
+            let row = current_row(&engine, pane, &mode);
+            assert!(
+                matches!(&row.item, Item::Option { value, target, .. }
+                    if value == expected && *target == TmuxOptionTarget::Session(context.session.unwrap())),
+                "{name}"
             );
         }
+    }
+
+    #[test]
+    fn customize_tree_keys_follow_mode_tree_key() {
+        let (mut engine, mut context, pane) = engine_with_session();
+        let mut mode = CustomizeMode::default();
+        engine.customize_height(pane, &mut mode);
+        press(&mut engine, &mut context, pane, &mut mode, "Right");
+        assert!(mode.expanded.contains("options:0"));
+        assert_eq!(mode.current, 0);
+        press(&mut engine, &mut context, pane, &mut mode, "Right");
+        assert_eq!(mode.current, 1);
+        press(&mut engine, &mut context, pane, &mut mode, "Left");
+        assert_eq!(mode.current, 0);
+        assert!(!mode.expanded.contains("options:0"));
+        press(&mut engine, &mut context, pane, &mut mode, "Down");
+        press(&mut engine, &mut context, pane, &mut mode, "Left");
+        assert_eq!(mode.current, 0);
+        press(&mut engine, &mut context, pane, &mut mode, "M-+");
+        press(&mut engine, &mut context, pane, &mut mode, "Down");
+        press(&mut engine, &mut context, pane, &mut mode, "Down");
+        press(&mut engine, &mut context, pane, &mut mode, "M--");
+        assert_eq!(mode.current, 2);
+        press(&mut engine, &mut context, pane, &mut mode, "t");
+        assert_eq!(mode.current, 2);
+        assert!(mode.tagged.is_empty());
+        for expected in [Preview::Off, Preview::Big, Preview::Normal] {
+            press(&mut engine, &mut context, pane, &mut mode, "v");
+            assert_eq!(mode.preview, expected);
+        }
+    }
+
+    #[test]
+    fn customize_search_wraps_backward_into_key_tables() {
+        let (mut engine, mut context, pane) = engine_with_session();
+        let mut mode = CustomizeMode::default();
+        engine.customize_height(pane, &mut mode);
+        for key in ["/", "m", "o", "u", "s", "e", "Enter", "n", "N", "N", "N"] {
+            press(&mut engine, &mut context, pane, &mut mode, key);
+            let mut expand = customize_expand;
+            let _ = engine.customize_presentation(pane, &mode, &mut expand);
+        }
+        assert!(
+            current_row(&engine, pane, &mode)
+                .name
+                .to_lowercase()
+                .contains("mouse")
+        );
+    }
+
+    #[test]
+    fn customize_unset_removes_one_array_index_and_moves_up() {
+        let (mut engine, mut context, pane) = engine_with_session();
+        let mut mode = CustomizeMode::default();
+        engine.customize_height(pane, &mut mode);
+        mode.expanded.insert("options:0".to_owned());
+        mode.expanded.insert("options:0/command-alias".to_owned());
+        select(&engine, pane, &mut mode, "command-alias[0]");
+        let before = engine.customize_array_values(TmuxOptionTarget::Server, "command-alias");
+        press(&mut engine, &mut context, pane, &mut mode, "u");
+        assert!(
+            matches!(&mode.prompt, Some((prompt, _)) if prompt.label == "Unset command-alias[0]? ")
+        );
+        press(&mut engine, &mut context, pane, &mut mode, "y");
+        let after = engine.customize_array_values(TmuxOptionTarget::Server, "command-alias");
+        assert_eq!(after.len() + 1, before.len());
+        assert!(!after.contains_key(&ArrayIndex::Numeric(0)));
+        assert_eq!(current_row(&engine, pane, &mode).name, "command-alias");
     }
 }

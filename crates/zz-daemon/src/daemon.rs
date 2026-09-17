@@ -27,12 +27,12 @@ use zz_mux::{
     CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
     FormatClient, FormatMonitorScope, FormatMonitorTarget, KeyDecision, KeyEngine, KeyTables,
     MouseEventTarget, MuxEffect, MuxEngine, PaneKind, PaneModeRequest, PaneRuntimeFacts,
-    ParsedConfig, ParsedConfigBytes, RetainedJobEnvironment, SourceStream, StatusHooks, TmuxColour,
-    TmuxSort, TmuxSortOrder, WindowSize, canonical_command, command_block_body,
-    copy_mode_action_is_read_only_safe, expand_format_bytes, expand_format_values, expand_status,
-    format_command, format_true, hook_format_variables, if_shell_truthy, parse_tmux_colour,
-    sanitize_client_output, send_keys_is_read_only_safe, send_keys_target_client,
-    validate_static_command_chain,
+    ParsedConfig, ParsedConfigBytes, RetainedJobEnvironment, SourceStream, StatusHooks,
+    SwitchAction, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize, canonical_command,
+    command_block_body, copy_mode_action_is_read_only_safe, expand_format_bytes,
+    expand_format_values, expand_status, format_command, format_true, hook_format_variables,
+    if_shell_truthy, parse_tmux_colour, sanitize_client_output, send_keys_is_read_only_safe,
+    send_keys_target_client, validate_static_command_chain,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
@@ -19507,56 +19507,108 @@ impl Shared {
         else {
             return false;
         };
-        if let PaneModeRequest::Customize(mut mode) = mode {
-            let (close, command) = self.inner.lock().engine.customize_key(pane, &mut mode, key);
-            {
-                let mut inner = self.inner.lock();
-                if let Some(modes) = inner.pane_modes.get_mut(&pane) {
-                    modes.pop();
-                    if !close {
+        match mode {
+            PaneModeRequest::Customize(mut mode) => {
+                let result = {
+                    let inner = self.inner.lock();
+                    let facts = format_hook_facts(&inner);
+                    let mut expand = customize_expander(&inner, pane, &facts);
+                    inner
+                        .engine
+                        .customize_key(pane, &mut mode, key, &mut expand)
+                };
+                {
+                    let mut inner = self.inner.lock();
+                    if let Some(modes) = inner.pane_modes.get_mut(&pane) {
+                        modes.pop();
                         modes.push(PaneModeRequest::Customize(mode));
                     }
-                    if modes.is_empty() {
-                        inner.pane_modes.remove(&pane);
+                }
+                for command in &result.commands {
+                    let _ = self.execute(client, ClientKind::Interactive, context, command);
+                }
+                {
+                    let mut inner = self.inner.lock();
+                    let mut current =
+                        match inner.pane_modes.get(&pane).and_then(|modes| modes.last()) {
+                            Some(PaneModeRequest::Customize(mode)) => Some(mode.clone()),
+                            _ => None,
+                        };
+                    if let Some(mode) = current.as_mut() {
+                        let facts = format_hook_facts(&inner);
+                        let mut expand = customize_expander(&inner, pane, &facts);
+                        inner.engine.customize_finish(pane, mode, &mut expand);
+                    }
+                    if let (Some(mode), Some(modes)) = (current, inner.pane_modes.get_mut(&pane))
+                        && matches!(modes.last(), Some(PaneModeRequest::Customize(_)))
+                    {
+                        modes.pop();
+                        modes.push(PaneModeRequest::Customize(mode));
                     }
                 }
+                if result.close {
+                    pop_pane_mode(&mut self.inner.lock(), pane);
+                    self.reap_pane_mode_kill_panes(client, ClientKind::Interactive, context);
+                    self.publish_snapshot();
+                }
+                self.publish_mux_snapshots();
+                true
             }
-            if let Some(command) = command {
-                let _ = self.execute(client, ClientKind::Interactive, context, &command);
+            PaneModeRequest::Switch(mut mode) => {
+                let (action, entry) = {
+                    let inner = self.inner.lock();
+                    let entries = chooser_presentation::switch_matches(&inner, pane, &mode);
+                    let visible = inner
+                        .engine
+                        .pane_geometry(pane)
+                        .map_or(0, |(_, rows)| usize::from(rows).saturating_sub(1));
+                    let action = mode.key(key, entries.len(), visible);
+                    let entry = (action == SwitchAction::Run)
+                        .then(|| entries.into_iter().nth(mode.current))
+                        .flatten();
+                    (action, entry)
+                };
+                if action == SwitchAction::Run && entry.is_none() {
+                    return true;
+                }
+                if action == SwitchAction::Redraw {
+                    let mut inner = self.inner.lock();
+                    if let Some(modes) = inner.pane_modes.get_mut(&pane)
+                        && matches!(modes.last(), Some(PaneModeRequest::Switch(_)))
+                    {
+                        modes.pop();
+                        modes.push(PaneModeRequest::Switch(mode));
+                    }
+                    drop(inner);
+                    self.publish_mux_snapshots();
+                    return true;
+                }
+                pop_pane_mode(&mut self.inner.lock(), pane);
+                self.reap_pane_mode_kill_panes(client, ClientKind::Interactive, context);
+                self.publish_snapshot();
+                if let Some(entry) = entry {
+                    let template = mode.template.as_deref().unwrap_or("switch-client -Zt '%%'");
+                    let target_client =
+                        current_format_client(&self.inner.lock(), client).unwrap_or(client);
+                    let mut selected_context = context.clone();
+                    selected_context.retarget(&entry.context);
+                    self.execute_chooser_command(
+                        target_client,
+                        &mut selected_context,
+                        template,
+                        &entry.target,
+                        "switch-mode",
+                    );
+                }
+                true
             }
-            self.publish_mux_snapshots();
-            return true;
+            PaneModeRequest::Clock => {
+                pop_pane_mode(&mut self.inner.lock(), pane);
+                self.reap_pane_mode_kill_panes(client, ClientKind::Interactive, context);
+                self.publish_snapshot();
+                true
+            }
         }
-        let activate = match &mode {
-            PaneModeRequest::Clock | PaneModeRequest::Customize(_) => None,
-            PaneModeRequest::Switch { .. } => match key {
-                "Escape" | "C-[" | "C-c" | "C-g" | "[ETX]" | "[BEL]" | "\u{1b}" | "\u{3}"
-                | "\u{7}" => None,
-                "Enter" | "C-m" | "\r" => switch_mode_target(&self.inner.lock(), pane),
-                _ => return true,
-            },
-        };
-        pop_pane_mode(&mut self.inner.lock(), pane);
-        self.reap_pane_mode_kill_panes(client, ClientKind::Interactive, context);
-        self.publish_snapshot();
-        if let Some((target, selected)) = activate {
-            let template = match &mode {
-                PaneModeRequest::Switch { template, .. } => template.as_deref(),
-                PaneModeRequest::Clock | PaneModeRequest::Customize(_) => None,
-            }
-            .unwrap_or("switch-client -Zt '%%'");
-            let target_client = current_format_client(&self.inner.lock(), client).unwrap_or(client);
-            let mut selected_context = context.clone();
-            selected_context.retarget(&selected);
-            self.execute_chooser_command(
-                target_client,
-                &mut selected_context,
-                template,
-                &target,
-                "switch-mode",
-            );
-        }
-        true
     }
 
     /// `server_client_key_callback`'s mouse half. A decoded pointer event the
@@ -36038,38 +36090,87 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                             }
                         }
                         PaneModeRequest::Customize(mode) => {
-                            let (state, mut presentation) =
-                                engine.customize_presentation(*pane, mode);
+                            let mut expand = customize_expander(inner, *pane, facts);
+                            let (state, mut presentation, prompt) =
+                                engine.customize_presentation(*pane, mode, &mut expand);
                             presentation.selection_style =
                                 chooser_presentation::mode_style_for_pane(inner, *pane);
                             presentation.border_style =
                                 chooser_presentation::border_style_for_pane(inner, *pane);
                             presentation.prompt_style = chooser_presentation::prompt_style();
+                            let (prompt, prompt_cursor, prompt_top) = prompt.unwrap_or_default();
                             PaneMode::Customize {
                                 state,
                                 presentation: Box::new(presentation),
-                                offset: mode.offset as u32,
+                                offset: MuxEngine::customize_offset(mode),
+                                prompt,
+                                prompt_cursor,
+                                prompt_top,
                             }
                         }
-                        PaneModeRequest::Switch {
-                            windows, format, ..
-                        } => PaneMode::Switch {
-                            rows: chooser_presentation::switch_rows(
-                                inner,
-                                *windows,
-                                format.as_deref(),
-                            ),
-                            selected: 0,
-                            offset: 0,
-                            selection_style: chooser_presentation::mode_style_for_pane(
-                                inner, *pane,
-                            ),
-                            prompt: "(search) ".to_owned(),
-                            prompt_style: chooser_presentation::prompt_style(),
-                        },
+                        PaneModeRequest::Switch(mode) => {
+                            let entries = chooser_presentation::switch_matches(inner, *pane, mode);
+                            let (columns, rows) = engine.pane_geometry(*pane).unwrap_or((80, 24));
+                            let visible = usize::from(rows).saturating_sub(1);
+                            let mut current = mode.current;
+                            let mut offset = mode.offset;
+                            if entries.is_empty() {
+                                current = 0;
+                                offset = 0;
+                            } else {
+                                current = current.min(entries.len() - 1);
+                                if current < offset {
+                                    offset = current;
+                                } else if visible != 0 && current >= offset + visible {
+                                    offset = current + 1 - visible;
+                                }
+                            }
+                            let (prompt, prompt_cursor) = mode.prompt.draw(columns);
+                            let matches = entries
+                                .iter()
+                                .map(|entry| {
+                                    entry
+                                        .columns
+                                        .iter()
+                                        .filter_map(|column| u16::try_from(*column).ok())
+                                        .collect()
+                                })
+                                .collect();
+                            PaneMode::Switch {
+                                rows: entries.into_iter().map(|entry| entry.text).collect(),
+                                selected: u32::try_from(current).unwrap_or(u32::MAX),
+                                offset: u32::try_from(offset).unwrap_or(u32::MAX),
+                                selection_style: chooser_presentation::mode_style_for_pane(
+                                    inner, *pane,
+                                ),
+                                prompt,
+                                prompt_style: chooser_presentation::prompt_style(),
+                                prompt_cursor,
+                                matches,
+                                match_style: chooser_presentation::switch_match_style(inner, *pane),
+                            }
+                        }
                     });
             }
         }
+    }
+}
+
+fn customize_expander<'a>(
+    inner: &'a ServerState,
+    pane: PaneId,
+    facts: &'a FormatHookFacts,
+) -> impl FnMut(&str, &BTreeMap<String, String>) -> String + 'a {
+    let engine = &inner.engine;
+    let window = engine.state.window_for_pane(pane);
+    let session = window
+        .and_then(|window| engine.state.windows.get(&window))
+        .map(|window| window.session);
+    let context = ExecutionContext::new(session, window, Some(pane));
+    move |format, variables| {
+        let mut hooks =
+            DaemonFormatHooks::command_with_variables(facts, variables).with_option_engine(engine);
+        engine.expand_pane_format(format, &context, None, FormatClient::NoClient, &mut hooks)
     }
 }
 
@@ -38679,53 +38780,6 @@ fn buffer_format_facts(buffer: &PasteBuffer) -> BufferFormatFacts {
     }
 }
 
-fn switch_mode_target(inner: &ServerState, pane: PaneId) -> Option<(String, ExecutionContext)> {
-    let windows = matches!(
-        inner.pane_modes.get(&pane).and_then(|modes| modes.last()),
-        Some(PaneModeRequest::Switch { windows: true, .. })
-    );
-    let state = &inner.engine.state;
-    if windows {
-        let mut entries = state
-            .windows
-            .iter()
-            .filter_map(|(window, entry)| {
-                let session = state.sessions.get(&entry.session)?;
-                Some((
-                    (entry.name.clone(), session.name.clone(), entry.index),
-                    *window,
-                    entry.session,
-                    entry.active_pane,
-                ))
-            })
-            .collect::<Vec<_>>();
-        entries.sort_by(|left, right| left.0.cmp(&right.0));
-        let ((_, name, index), window, session, active_pane) = entries.into_iter().next()?;
-        return Some((
-            format!("={name}:{index}."),
-            ExecutionContext::new(Some(session), Some(window), Some(active_pane)),
-        ));
-    }
-
-    let mut names = state
-        .sessions
-        .values()
-        .map(|entry| entry.name.clone())
-        .collect::<Vec<_>>();
-    names.sort();
-    let name = names.into_iter().next()?;
-    let session = state.sessions.values().find(|entry| entry.name == name)?;
-    let window = session.active_window;
-    Some((
-        format!("={name}:"),
-        ExecutionContext::new(
-            Some(session.id),
-            Some(window),
-            state.windows.get(&window).map(|entry| entry.active_pane),
-        ),
-    ))
-}
-
 fn push_pane_mode(inner: &mut ServerState, pane: PaneId, mut mode: PaneModeRequest) -> bool {
     let modes = inner.pane_modes.entry(pane).or_default();
     let existing = modes
@@ -38736,17 +38790,17 @@ fn push_pane_mode(inner: &mut ServerState, pane: PaneId, mut mode: PaneModeReque
     }
     if let Some(index) = existing {
         let mut previous = modes.remove(index);
-        if let (
-            PaneModeRequest::Switch { kill_source, .. },
-            PaneModeRequest::Switch {
-                kill_source: next, ..
-            },
-        ) = (&mut previous, &mode)
-        {
-            *kill_source = *next;
+        match (&mut previous, &mode) {
+            (PaneModeRequest::Switch(previous), PaneModeRequest::Switch(next)) => {
+                previous.kill_source = next.kill_source;
+            }
+            (PaneModeRequest::Customize(previous), PaneModeRequest::Customize(next)) => {
+                previous.kill_source = next.kill_source;
+            }
+            _ => {}
         }
         mode = previous;
-    } else if matches!(mode, PaneModeRequest::Switch { zoom: true, .. })
+    } else if pane_mode_lifetime(&mode).1
         && let Some(window) = inner.engine.state.window_for_pane(pane)
         && inner.engine.state.windows[&window].zoomed_pane.is_none()
     {
@@ -38757,6 +38811,14 @@ fn push_pane_mode(inner: &mut ServerState, pane: PaneId, mut mode: PaneModeReque
     true
 }
 
+fn pane_mode_lifetime(mode: &PaneModeRequest) -> (bool, bool) {
+    match mode {
+        PaneModeRequest::Clock => (false, false),
+        PaneModeRequest::Customize(mode) => (mode.kill_source, mode.zoom),
+        PaneModeRequest::Switch(mode) => (mode.kill_source, mode.zoom),
+    }
+}
+
 fn pop_pane_mode(inner: &mut ServerState, pane: PaneId) -> bool {
     let Some(modes) = inner.pane_modes.get_mut(&pane) else {
         return false;
@@ -38765,7 +38827,11 @@ fn pop_pane_mode(inner: &mut ServerState, pane: PaneId) -> bool {
     if modes.is_empty() {
         inner.pane_modes.remove(&pane);
     }
-    if let Some(PaneModeRequest::Switch { kill_source, .. }) = mode {
+    if let Some((kill_source, _)) = mode
+        .as_ref()
+        .filter(|mode| !matches!(mode, PaneModeRequest::Clock))
+        .map(pane_mode_lifetime)
+    {
         if inner.pane_mode_zooms.remove(&pane)
             && let Some(window) = inner.engine.state.window_for_pane(pane)
             && let Some(zoomed) = inner.engine.state.windows[&window].zoomed_pane
@@ -38836,7 +38902,7 @@ fn pane_mode_format_facts(inner: &ServerState) -> BTreeMap<PaneId, (usize, &'sta
                     match modes.last()? {
                         PaneModeRequest::Clock => "clock-mode",
                         PaneModeRequest::Customize(_) => "options-mode",
-                        PaneModeRequest::Switch { .. } => "switch-mode",
+                        PaneModeRequest::Switch(_) => "switch-mode",
                     },
                 ),
             ))
@@ -91463,13 +91529,14 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     fn switch_lifetime_mode(kill_source: bool, zoom: bool) -> PaneModeRequest {
-        PaneModeRequest::Switch {
-            windows: false,
-            format: None,
-            template: None,
+        PaneModeRequest::Switch(Box::new(zz_mux::SwitchMode::new(
+            false,
+            None,
+            None,
             kill_source,
             zoom,
-        }
+            " ",
+        )))
     }
 
     #[test]
@@ -91504,11 +91571,7 @@ bind - split-window -v -c "#{pane_current_path}"
         ));
         assert!(matches!(
             inner.pane_modes[&pane].last(),
-            Some(PaneModeRequest::Switch {
-                kill_source: false,
-                zoom: false,
-                ..
-            })
+            Some(PaneModeRequest::Switch(mode)) if !mode.kill_source && !mode.zoom
         ));
         push_pane_mode(&mut inner, pane, PaneModeRequest::Clock);
         push_pane_mode(&mut inner, pane, switch_lifetime_mode(true, true));
@@ -91576,32 +91639,43 @@ bind - split-window -v -c "#{pane_current_path}"
         for window in [cli_window, alpha_window, zulu_window] {
             inner.engine.state.windows.get_mut(&window).unwrap().name = "win".into();
         }
-        inner.pane_modes.insert(
-            pane,
-            vec![PaneModeRequest::Switch {
-                windows: true,
-                format: None,
-                template: None,
-                kill_source: false,
-                zoom: false,
-            }],
+        let mut mode = zz_mux::SwitchMode::new(
+            true,
+            Some("#{session_name}".to_owned()),
+            None,
+            false,
+            false,
+            " ",
         );
+        let texts = |inner: &ServerState, mode: &zz_mux::SwitchMode| {
+            chooser_presentation::switch_matches(inner, pane, mode)
+                .into_iter()
+                .map(|entry| (entry.text, entry.target))
+                .collect::<Vec<_>>()
+        };
         assert_eq!(
-            chooser_presentation::switch_rows(&inner, true, Some("#{session_name}")),
-            ["alpha", "cli", "zulu"]
+            texts(&inner, &mode),
+            [
+                ("alpha".to_owned(), "=alpha:0.".to_owned()),
+                ("cli".to_owned(), "=cli:0.".to_owned()),
+                ("zulu".to_owned(), "=zulu:0.".to_owned())
+            ]
         );
-        assert_eq!(switch_mode_target(&inner, pane).unwrap().0, "=alpha:0.");
+        mode.key("z", 3, 23);
+        assert_eq!(
+            chooser_presentation::switch_matches(&inner, pane, &mode)
+                .into_iter()
+                .map(|entry| (entry.text, entry.columns))
+                .collect::<Vec<_>>(),
+            [("zulu".to_owned(), vec![0])]
+        );
+        mode.key("BSpace", 1, 23);
         inner.engine.state.sessions.remove(&alpha);
-        assert_eq!(
-            chooser_presentation::switch_rows(&inner, true, Some("#{session_name}")),
-            ["cli", "zulu"]
-        );
-        assert_eq!(switch_mode_target(&inner, pane).unwrap().0, "=cli:0.");
+        assert_eq!(texts(&inner, &mode)[0].1, "=cli:0.");
         inner.engine.state.sessions.remove(&cli);
-        assert_eq!(switch_mode_target(&inner, pane).unwrap().0, "=zulu:0.");
+        assert_eq!(texts(&inner, &mode)[0].1, "=zulu:0.");
         inner.engine.state.sessions.clear();
-        assert!(chooser_presentation::switch_rows(&inner, true, None).is_empty());
-        assert!(switch_mode_target(&inner, pane).is_none());
+        assert!(texts(&inner, &mode).is_empty());
     }
 
     #[test]

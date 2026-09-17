@@ -114,10 +114,7 @@ impl ModeKey {
 
     #[must_use]
     pub const fn is_cancel(self) -> bool {
-        matches!(
-            self,
-            Self::Char('\u{1b}') | Self::Ctrl('[') | Self::Ctrl('c') | Self::Ctrl('g')
-        )
+        matches!(self, Self::Char('\u{1b}') | Self::Ctrl('[' | 'c' | 'g'))
     }
 }
 
@@ -220,11 +217,7 @@ impl ModePrompt {
             ModeKey::Right | ModeKey::Ctrl('f') => self.index = (self.index + 1).min(size),
             ModeKey::Home | ModeKey::Ctrl('a') => self.index = 0,
             ModeKey::End | ModeKey::Ctrl('e') => self.index = size,
-            ModeKey::Char('\t')
-            | ModeKey::Up
-            | ModeKey::Ctrl('p')
-            | ModeKey::Down
-            | ModeKey::Ctrl('n') => {}
+            ModeKey::Char('\t') | ModeKey::Up | ModeKey::Down | ModeKey::Ctrl('p' | 'n') => {}
             ModeKey::Backspace | ModeKey::Ctrl('h') => {
                 if self.index == 0 {
                     return PromptOutcome::Handled;

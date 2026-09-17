@@ -1,0 +1,113 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-c11-modes-final/target/debug/zz-customize-rebased
+[1;36m==>[0m running smoke/format-modifier-environment-loop
+smoke/format-modifier-environment-loop: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 2 WARN divergence(s)
+[1;33mwarn:[0m smoke/format-modifier-environment-loop failed; it is retried alone after the corpus
+    SMOKE STDOUT: divergence
+    --- zz SMOKE STDOUT step 2
+    +++ tmux SMOKE STDOUT step 2
+    @@ -1 +0,0 @@
+    -format-modifier-environment-loop-zz: global-count-matches-session
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 3
+    COMMAND: out: show-environment -g FORMAT_MODIFIER_ENVIRONMENT_LOOP
+    zz exit: 1
+    tmux exit: 0
+    zz stderr:
+        unknown variable: FORMAT_MODIFIER_ENVIRONMENT_LOOP
+    tmux stderr:
+        <empty>
+    tmux stdout:
+        FORMAT_MODIFIER_ENVIRONMENT_LOOP=clean:30
+    OUT QUERY: failure
+    SMOKE STDERR: divergence
+    --- zz SMOKE STDERR step 3
+    +++ tmux SMOKE STDERR step 3
+    @@ -1 +0,0 @@
+    -unknown variable: FORMAT_MODIFIER_ENVIRONMENT_LOOP
+    TOPO: clean
+    GEO: clean
+    
+    SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=2
+[1;36m==>[0m running smoke/source-replay-diagnostics
+smoke/source-replay-diagnostics: 60 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 0 WARN divergence(s)
+[1;33mwarn:[0m smoke/source-replay-diagnostics failed; it is retried alone after the corpus
+    OUT: divergence
+    --- zz OUT step 60
+    +++ tmux OUT step 60
+    @@ -1 +1 @@
+    -SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:0,stderr:_,events:0:end:_
+    +SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:1,stderr:_,events:0:end:_;0:end:_;0:end:_;0:end:_;raw:<CONFIRM_CHILD>:1: syntax error;0:end:CONFIRM_CHILD_LATER;0:end:CONFIRM_INNER_AFTER;0:end:CONFIRM_OUTER_AFTER
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    SUMMARY steps=60 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=0
+[1;36m==>[0m retrying smoke/format-modifier-environment-loop alone
+smoke/format-modifier-environment-loop: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 2 WARN divergence(s)
+[1;33mwarn:[0m smoke/format-modifier-environment-loop failed again alone; see /home/demfabris/dev/zz-c11-modes-final/compat/results/smoke/format-modifier-environment-loop.log
+    SMOKE STDOUT: divergence
+    --- zz SMOKE STDOUT step 2
+    +++ tmux SMOKE STDOUT step 2
+    @@ -1 +0,0 @@
+    -format-modifier-environment-loop-zz: global-count-matches-session
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    ## Step 3
+    COMMAND: out: show-environment -g FORMAT_MODIFIER_ENVIRONMENT_LOOP
+    zz exit: 1
+    tmux exit: 0
+    zz stderr:
+        unknown variable: FORMAT_MODIFIER_ENVIRONMENT_LOOP
+    tmux stderr:
+        <empty>
+    tmux stdout:
+        FORMAT_MODIFIER_ENVIRONMENT_LOOP=clean:30
+    OUT QUERY: failure
+    SMOKE STDERR: divergence
+    --- zz SMOKE STDERR step 3
+    +++ tmux SMOKE STDERR step 3
+    @@ -1 +0,0 @@
+    -unknown variable: FORMAT_MODIFIER_ENVIRONMENT_LOOP
+    TOPO: clean
+    GEO: clean
+    
+    SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=2
+[1;36m==>[0m retrying smoke/source-replay-diagnostics alone
+smoke/source-replay-diagnostics: 60 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 0 WARN divergence(s)
+[1;33mwarn:[0m smoke/source-replay-diagnostics failed again alone; see /home/demfabris/dev/zz-c11-modes-final/compat/results/smoke/source-replay-diagnostics.log
+    OUT: divergence
+    --- zz OUT step 60
+    +++ tmux OUT step 60
+    @@ -1 +1 @@
+    -SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:0,stderr:_,events:0:end:_
+    +SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:1,stderr:_,events:0:end:_;0:end:_;0:end:_;0:end:_;raw:<CONFIRM_CHILD>:1: syntax error;0:end:CONFIRM_CHILD_LATER;0:end:CONFIRM_INNER_AFTER;0:end:CONFIRM_OUTER_AFTER
+    SMOKE STDERR: clean
+    TOPO: clean
+    GEO: clean
+    
+    SUMMARY steps=60 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=0
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| smoke/format-modifier-environment-loop | 3 | yes | 0 | yes | no | no |
+| smoke/source-replay-diagnostics | 60 | yes | 0 | yes | no | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+

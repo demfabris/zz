@@ -1,0 +1,3 @@
+command: bash /home/demfabris/dev/zz-c11-modes-final/compat/tui-client-commands.sh
+ZZ_BIN=/home/demfabris/dev/zz-c11-modes-final/target/debug/zz-customize-rebased
+exit: 143

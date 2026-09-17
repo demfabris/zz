@@ -1,0 +1,461 @@
+# Scenario: native-prefix-isolation
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/native-prefix-isolation.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: out: list-commands -F #{command_list_name} a
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    attach-session
+tmux stdout:
+    attach-session
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: list-commands -F #{command_list_name} ca
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    capture-pane
+tmux stdout:
+    capture-pane
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: list-commands -F #{command_list_name} cap
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    capture-pane
+tmux stdout:
+    capture-pane
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: list-commands -F #{command_list_name} capt
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    capture-pane
+tmux stdout:
+    capture-pane
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: list-commands -F #{command_list_name} captu
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    capture-pane
+tmux stdout:
+    capture-pane
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: list-commands -F #{command_list_name} captur
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    capture-pane
+tmux stdout:
+    capture-pane
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: list-commands -F #{command_list_name} capture
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    capture-pane
+tmux stdout:
+    capture-pane
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: list-commands -F #{command_list_name} capture-
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    capture-pane
+tmux stdout:
+    capture-pane
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: list-commands -F #{command_list_name} cop
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    copy-mode
+tmux stdout:
+    copy-mode
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: list-commands -F #{command_list_name} copy
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    copy-mode
+tmux stdout:
+    copy-mode
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: list-commands -F #{command_list_name} copy-
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    copy-mode
+tmux stdout:
+    copy-mode
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: list-commands -F #{command_list_name} copy-m
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    copy-mode
+tmux stdout:
+    copy-mode
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: list-commands -F #{command_list_name} copy-mo
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    copy-mode
+tmux stdout:
+    copy-mode
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: out: list-commands -F #{command_list_name} copy-mod
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    copy-mode
+tmux stdout:
+    copy-mode
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: list-commands -F #{command_list_name} f
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    find-window
+tmux stdout:
+    find-window
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: list-commands -F #{command_list_name} select-p
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    select-pane
+tmux stdout:
+    select-pane
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: list-commands -F #{command_list_name} select-pa
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    select-pane
+tmux stdout:
+    select-pane
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: list-commands -F #{command_list_name} select-pan
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    select-pane
+tmux stdout:
+    select-pane
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: list-commands -F #{command_list_name} set-b
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    set-buffer
+tmux stdout:
+    set-buffer
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: out: list-commands -F #{command_list_name} set-e
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    set-environment
+tmux stdout:
+    set-environment
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: list-commands -F #{command_list_name} sp
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    split-window
+tmux stdout:
+    split-window
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: list-commands -F #{command_list_name} spl
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    split-window
+tmux stdout:
+    split-window
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: out: list-commands -F #{command_list_name} spli
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    split-window
+tmux stdout:
+    split-window
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: out: list-commands -F #{command_list_name} split
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    split-window
+tmux stdout:
+    split-window
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: out: list-commands -F #{command_list_name} split-
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    split-window
+tmux stdout:
+    split-window
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: set-option -s command-alias[40] 'split=list-commands -F "#{command_list_name}" capture-pane'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: out: split
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    capture-pane
+tmux stdout:
+    capture-pane
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: out: list-commands -F #{command_list_name} splitw
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    split-window
+tmux stdout:
+    split-window
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: list-commands kill-s
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    ambiguous command: kill-s, could be: kill-server, kill-session
+tmux stderr:
+    ambiguous command: kill-s, could be: kill-server, kill-session
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=29 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

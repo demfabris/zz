@@ -1,0 +1,8 @@
+      case capture-edited-tab-overwrite-background
+      stdout differs
+        1c1
+        < \033[44mABC\033[49m  \033[41mX\033[49m  \033[44mDEF\033[49m
+        ---
+        > \033[44mABC\033[41m  X  \033[44mDEF\033[49m
+DIFF  capture-edited-tab-overwrite-background
+edited tabs: assertions=1 failures=1 self_check_failures=0

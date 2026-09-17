@@ -1,0 +1,1 @@
+Complete staged footprint: 1716 paths; 44 outside evidence. Main base 38c50df4. Includes this manifest and audit, and explicitly staged raw .log transcripts.

@@ -1,0 +1,53 @@
+third_party/rust/libghostty-vt-sys/provenance.patch:11: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:21: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:27: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:35: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:43: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:48: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:53: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:66: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:71: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:76: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:81: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:86: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:95: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:121: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:133: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:137: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:153: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:195: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:199: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:204: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:215: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:245: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:258: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:263: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:276: trailing whitespace.
++ 
+third_party/rust/libghostty-vt-sys/provenance.patch:293: trailing whitespace.
++ 
+third_party/rust/libghostty-vt/LICENSE:22: new blank line at EOF.

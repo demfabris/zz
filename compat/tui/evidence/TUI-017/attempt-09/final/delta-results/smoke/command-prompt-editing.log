@@ -1,0 +1,36 @@
+# Scenario: smoke/command-prompt-editing
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/smoke/command-prompt-editing.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: run-shell 'sh ~/command-prompt-editing.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g COMMAND_PROMPT_EDITING
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    COMMAND_PROMPT_EDITING=space=[Space] control-a=[C-a] control-h=[C-h] meta-x=[M-x] f1=[F1] up=[Up] bspace=[BSpace] letter=[a] enter=[Enter] escape=[Escape] tab=[Tab] btab=[BTab] delete=[DC] tilde=[~] semicolon=[;] vi-command-mode-home=[Xaaa bbb-ccc ddd] vi-backward-word=[aaa bbb-] vi-backward-big-word=[aaa ] vi-custom-separator=[foo_] vi-default-separators=[] vi-end-word=[aa] vi-end-big-word=[aaa-bb] vi-forward-word=[aaa] vi-forward-big-word=[aaa-bbb ] vi-end-of-line=[ab] vi-start-of-line=[abc] vi-substitute-line=[Z] vi-append=[abcZ] vi-insert-drops-unlisted=[abX] emacs-backward-character=[aXb] emacs-meta-b=[foo_bar ] emacs-delete-word=[foo_bar ] emacs-meta-f=[foo_bar] emacs-control-right=[foo_bar] control-c=[untouched] control-g=[untouched] message-delay=[got-abcd] message-ignore-keys=[got-abcd] prompt-never-closed message-wait-for-key=[pending] 
+tmux stdout:
+    COMMAND_PROMPT_EDITING=space=[Space] control-a=[C-a] control-h=[C-h] meta-x=[M-x] f1=[F1] up=[Up] bspace=[BSpace] letter=[a] enter=[Enter] escape=[Escape] tab=[Tab] btab=[BTab] delete=[DC] tilde=[~] semicolon=[;] vi-command-mode-home=[Xaaa bbb-ccc ddd] vi-backward-word=[aaa bbb-] vi-backward-big-word=[aaa ] vi-custom-separator=[foo_] vi-default-separators=[] vi-end-word=[aa] vi-end-big-word=[aaa-bb] vi-forward-word=[aaa] vi-forward-big-word=[aaa-bbb ] vi-end-of-line=[ab] vi-start-of-line=[abc] vi-substitute-line=[Z] vi-append=[abcZ] vi-insert-drops-unlisted=[abX] emacs-backward-character=[aXb] emacs-meta-b=[foo_bar ] emacs-delete-word=[foo_bar ] emacs-meta-f=[foo_bar] emacs-control-right=[foo_bar] control-c=[untouched] control-g=[untouched] message-delay=[got-abcd] message-ignore-keys=[got-abcd] prompt-never-closed message-wait-for-key=[pending] 
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

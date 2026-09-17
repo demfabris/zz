@@ -1,0 +1,99 @@
+{
+  "source_revision": "686506a12d1191bf477083918ead2ba6dac789d5",
+  "base": "38c50df4c4d51401752c49b72bb689b09e33427d",
+  "status": "review",
+  "original_cases_flipped": 7,
+  "new_edited_tab_assertions": 23,
+  "shared_runs": 3,
+  "shared_asserted_per_run": 228,
+  "shared_records": 25,
+  "ordinary_owned": {
+    "TUI-015": 0,
+    "TUI-017": 0
+  },
+  "owners": {
+    "gap:clients.interactive-refresh": 8,
+    "decided:TUI-017": 6,
+    "decided:TUI-016": 1,
+    "TUI-014": 6,
+    "decided:TUI-015": 4
+  },
+  "unattributed": 0,
+  "self_check_expectations": 170,
+  "copy_mode": {
+    "asserted": 147,
+    "records": 0,
+    "self_check": 27
+  },
+  "screen_diff": {
+    "asserted": 147,
+    "records": 6,
+    "self_check": 18
+  },
+  "attached_client": "PASS",
+  "seven_fixed_exits": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "seven_reverted_exits": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+  ],
+  "edited_consumer_reverted_failures": 15,
+  "tests": {
+    "passed": 928,
+    "ignored": 1,
+    "clippy": "five crates, all targets/features, warnings denied; PASS",
+    "compat_check": "PASS"
+  },
+  "performance": {
+    "native_tabs": {
+      "main_median_seconds": 0.104710933,
+      "fixed_median_seconds": 0.107047136,
+      "percent": 2.2311
+    },
+    "native_no_tabs": {
+      "main_median_seconds": 0.094913279,
+      "fixed_median_seconds": 0.098959377,
+      "percent": 4.26294
+    },
+    "attached_cat": {
+      "main_median_seconds": 1.51,
+      "fixed_median_seconds": 1.214
+    },
+    "method": "Three blocks of five alternating native pairs per workload; all samples retained; shared host."
+  },
+  "delta": {
+    "selected": 163,
+    "first_clean": 157,
+    "first_differences": 6,
+    "after_retry_clean": 158,
+    "after_retry_differences": 5,
+    "unrun": [],
+    "shard_exits": [
+      1,
+      0,
+      1
+    ],
+    "baseline": "Five persistent rows reproduced on main; status-background-jobs first failure also reproduces, with an unchanged candidate retry passing.",
+    "isolated_status_job": "Both fixed and main fail with matching diff lines after the unchanged candidate automatic retry passed."
+  },
+  "wire": "104 unchanged; no payload edits",
+  "limits": [
+    "No exclusive host performance claim; pooled no-tab CPU is +4.26%.",
+    "bench/run.sh did not run workloads: fixtures and release desktop bundle absent.",
+    "Status-background-jobs varies between runs; retain failures and retries.",
+    "Attempt-07 integration and broader capture limits remain; no universal engine-parity claim.",
+    "Both obligations remain at review; gate decides verification."
+  ]
+}

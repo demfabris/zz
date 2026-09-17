@@ -1,0 +1,36 @@
+# Scenario: smoke/control-notify
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/smoke/control-notify.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: run-shell 'python3 ~/control-notify.py'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g ZZ_CONTROL_NOTIFY
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    ZZ_CONTROL_NOTIFY=clean
+tmux stdout:
+    ZZ_CONTROL_NOTIFY=clean
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

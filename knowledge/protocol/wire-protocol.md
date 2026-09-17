@@ -4,7 +4,7 @@ title: zz wire protocol (v104)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-09-16T00:00:00-03:00
+timestamp: 2026-09-17T00:00:00-03:00
 ---
 
 # Overview
@@ -684,9 +684,12 @@ the server log still records the command the caller typed. See
 
 v104 is unreleased. The cycle-11 alias correction appends
 `CommandInvocation.stdin_available: bool` with `#[serde(default)]` and
-`ClientFileOperation::ReadStdin { binary: bool }` after `Write`. A command client opts in to
-stdin requests. The daemon requests bytes when the reader executes, through the existing
-`ClientFileRequest` and bounded `ClientFileResponse` exchange. Unused stdin stays unread.
+`ClientFileOperation::ReadStdin { binary: bool }` after `Write`, then `ReadStdinChunk` after
+`ReadStdin`. A command client opts in to stdin requests. The daemon requests bytes when the reader
+executes, through the existing `ClientFileRequest` and bounded `ClientFileResponse` exchange.
+`ReadStdin` answers the whole bounded payload; `ReadStdinChunk` answers one read of at most 16 KiB,
+an empty payload at end of file, and the daemon requests the next chunk only after the pane took
+the previous one. Unused stdin stays unread.
 `CommandInvocation::stdin_spent` uses `#[serde(skip)]` and stays inside the daemon;
 `caller_stream_spent_marker_stays_in_process` checks that absent and spent streams encode
 identically. The protocol version remains 104, including main's three `ServerError::Native*`

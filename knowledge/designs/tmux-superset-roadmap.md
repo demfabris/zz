@@ -1245,7 +1245,9 @@ from the pin is the bound: pinned tmux streams a caller payload in acknowledged 
 no total limit, and zz refuses one larger than 1 MiB at the reader before the daemon sees a byte,
 because bulk file transfer through a command client is a workload zz does not serve and an unbounded
 stream lets one caller grow daemon memory without limit. Payloads at and below the cap are
-differentially identical; the bound is reversible.
+differentially identical; the bound is reversible. Since 2026-09-17 the bound covers only
+`source-file -` and `load-buffer -`, which hold their payload: `display-message -I` and
+`split-window -I` stream chunks into the pane with backpressure and no total cap, as the pin does.
 
 # Native GUI command direction
 

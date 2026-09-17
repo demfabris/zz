@@ -2,7 +2,7 @@
 type: Design Plan
 title: Command stream channel
 description: "One bounded channel for the caller's standard input and output on a command client: a single reader with a single cap, one byte-preserving carrier on the invocation, and three named sinks, so `source-file -`, `display-message -I`, `split-window -I`, `load-buffer -` and `save-buffer -` share a transport instead of owning five."
-status: "Built for TUI-018; caller matrix corrections on protocol 104; closed-fd cells remain recorded; awaiting independent campaign review"
+status: "Built for TUI-018; caller matrix and closed-descriptor corrections on protocol 104; awaiting independent campaign review"
 resource: crates/zz-protocol/src/message.rs
 tags:
 - tmux
@@ -97,13 +97,22 @@ ends in a newline.
 
 Destination validation precedes stdin acquisition. A missing `display-message -I` target returns
 without consuming the stream, a running pane rejects it, and `split-window -I` resolves its target
-and validates spawn options before requesting bytes. Control source read failures use the same
+and validates spawn options and layout feasibility before requesting bytes. It also creates the
+empty pane and applies the zoom transition before waiting for input; other clients can observe
+both changes while the caller's pipe remains open. Control source read failures use the same
 unframed `ControlSourceFile::ReadError` event for direct commands, aliases and file replay, preserving
 both continuation and the attached control client's exit status.
 
-The matrix records a remaining closed-descriptor difference under TUI-018. Rust replaces a closed
-fd 0 with `/dev/null` before application entry; the pin instead reports a libevent EBADF error when
-its source reader runs. This is distinct from EOF on an open descriptor and remains unasserted.
+A pre-main constructor records whether fd 0 was closed before Rust replaces invalid standard
+descriptors with `/dev/null`. A reached reader uses that fact to reproduce the pin's libevent EBADF
+diagnostic and exit status, leaving later queue members unapplied. Earlier members still run, and
+commands that never read stdin ignore a closed descriptor. The constructor uses `.init_array` on
+Linux and `__DATA,__mod_init_func` on macOS. The matrix measures Linux; macOS remains unmeasured.
+
+SIGTERM on an attached control client closes its pending command guard, flushes deferred control
+output, emits `%exit` and the terminal string terminator, and exits 0. File replay publishes an
+admitted shell command's guard before waiting for its completion. Disconnecting cancels the
+remaining queue, so signal handling does not apply the tail.
 
 **Process lifetime** is the daemon's, never the caller's. The `PaneInput` sink writes into a pane
 that has no child process at all: pinned tmux's `-I` forms require `PANE_EMPTY` and answer

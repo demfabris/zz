@@ -18552,6 +18552,10 @@ mod tests {
     #[test]
     fn styled_capture_matches_pinned_colour_and_attribute_transitions() {
         for (input, expected) in [
+            (
+                "\x1b[44mABC\tDEF\x1b[0m\r\x1b[6G\x1b[41mX\x1b[0m",
+                "\x1b[44mABC\x1b[49m  \x1b[41mX\x1b[49m  \x1b[44mDEF\x1b[49m",
+            ),
             ("\x1b[31mRED\x1b[0m", "\x1b[31mRED\x1b[39m"),
             ("\x1b[38;5;1mRED\x1b[0m", "\x1b[38;5;1mRED\x1b[39m"),
             (

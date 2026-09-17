@@ -104,19 +104,35 @@
              }
              for (0..general_count) |offset| {
                  const cell = &cells[k + offset];
-@@ -1044,6 +1046,11 @@
+@@ -1055,9 +1057,11 @@
+             // wrap flag set, matching print().
+             if (cursor.x + k >= right_limit) {
+                 assert(cursor.x + k == right_limit);
++                if (right_limit < self.cols) self.clearTabPadding(cells, k, self.cols - cursor.x);
+                 screen.cursorRight(@intCast(k - 1));
+                 cursor.pending_wrap = true;
+             } else {
++                self.clearTabPadding(cells, k, self.cols - cursor.x);
+                 screen.cursorRight(@intCast(k));
+             }
          }
+@@ -1069,6 +1073,15 @@
+     }
  
-         if (k > 0) {
-+            if (cursor.x + k < self.cols and cells[k].tab >= 128) {
-+                var end = k + 1;
-+                while (cursor.x + end < self.cols and cells[end].tab >= 128) end += 1;
-+                screen.clearCells(page, cursor.page_row, cells[k..end]);
-+            }
-             assert(k % cells_per_cp == 0);
-             cursor.page_row.dirty = true;
-             if (style_id != style.default_id) cursor.page_row.styled = true;
-@@ -1476,6 +1483,19 @@
+     return printed;
++}
++
++inline fn clearTabPadding(self: *Terminal, cells: [*]Cell, start: usize, limit: usize) void {
++    if (cells[start].tab < 128) return;
++    var end = start + 1;
++    while (end < limit and cells[end].tab >= 128) end += 1;
++    const screen = self.screens.active;
++    screen.clearCells(screen.cursor.page_pin.node.page(), screen.cursor.page_row, cells[start..end]);
++    @memset(cells[start..end], .{});
+ }
+ 
+ /// The expected value of a simple cell (per SimpleMask in
+@@ -1476,6 +1489,20 @@
      };
  
      const cell = self.screens.active.cursor.page_cell;
@@ -132,11 +148,12 @@
 +        }
 +        while (right < cells.len and cells[right].tab >= 128) right += 1;
 +        screen.clearCells(screen.cursor.page_pin.node.page(), screen.cursor.page_row, cells[left..right]);
++        @memset(cells[left..right], .{});
 +    }
  
      // If the wide property of this cell is the same, then we don't
      // need to do the special handling here because the structure will
-@@ -2109,15 +2129,31 @@
+@@ -2109,15 +2136,31 @@
  /// Horizontal tab moves the cursor to the next tabstop, clearing
  /// the screen to the left the tabstop.
  pub fn horizontalTab(self: *Terminal) void {
@@ -177,7 +194,7 @@
  }
  
  // Same as horizontalTab but moves to the previous tabstop instead of the next.
-@@ -3072,7 +3108,8 @@
+@@ -3072,7 +3115,8 @@
      }
  
      // Insert blanks. The blanks preserve the background color.

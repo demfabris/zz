@@ -6542,7 +6542,16 @@ impl Shared {
         client_terminal: ClientTerminal,
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
-        let streamed_command = self.command_with_caller_stdin(client, context, command)?;
+        let split_input = canonical_command(&command.name) == "split-window"
+            && command_stdin_sink("split-window", &command.args)
+                == Some(CommandStdinSink::PaneInput);
+        let streamed_command = if split_input {
+            let mut command = command.clone();
+            command.set_stdin_spent();
+            Some(command)
+        } else {
+            self.command_with_caller_stdin(client, context, command)?
+        };
         let command = streamed_command.as_ref().unwrap_or(command);
         if MuxEngine::is_command_alias_group(command) {
             let detached = queue_execution.is_some_and(|execution| execution.detached);
@@ -6634,6 +6643,23 @@ impl Shared {
             client_terminal,
             queue_execution,
         );
+        let result = result.and_then(|execution| {
+            if split_input
+                && let Some(pane) = execution.effects.iter().find_map(|effect| match effect {
+                    MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                    _ => None,
+                })
+            {
+                let input =
+                    CommandInvocation::new("display-message", ["-I", "-t", &pane.to_string()]);
+                if let Some(input) = self.command_with_caller_stdin(client, context, &input)?
+                    && let Some(bytes) = input.stdin()
+                {
+                    self.feed_pane_stream_input(pane, bytes.as_bytes());
+                }
+            }
+            Ok(execution)
+        });
         let (result, pane_exit_code) = self.wait_for_pane_command(client, kind, result);
         set_context_client_terminal(context, previous_client_terminal);
         context.copy_client_attachment(&original_context);
@@ -6820,10 +6846,30 @@ impl Shared {
         let argument_sink =
             command_stdin_sink(canonical, &command.args).is_some_and(CommandStdinSink::is_argument);
         if argument_sink && command.stdin_was_spent() {
-            self.route_source_error(client, kind, context.pane, &spent_source_stream_error());
-            return Err(DaemonError::CommandExit {
-                output: RawText::default(),
-                exit_code: 1,
+            let source_client = context.replay_client().unwrap_or(client);
+            let source_kind = self
+                .inner
+                .lock()
+                .client_kinds
+                .get(&source_client)
+                .copied()
+                .unwrap_or(kind);
+            self.route_source_error(
+                source_client,
+                source_kind,
+                context.pane,
+                &spent_source_stream_error(),
+            );
+            return Err(if canonical == "load-buffer" {
+                DaemonError::ReportedCommandExit {
+                    output: RawText::default(),
+                    exit_code: 1,
+                }
+            } else {
+                DaemonError::CommandExit {
+                    output: RawText::default(),
+                    exit_code: 1,
+                }
             });
         }
         let streamed_command = command.stdin().filter(|_| argument_sink).map(|stdin| {
@@ -24923,7 +24969,8 @@ impl Shared {
             Some(match bytes {
                 Ok(bytes) => SourceStream::Bytes(RawText::from_bytes(bytes)),
                 Err(error)
-                    if sink == CommandStdinSink::Config
+                    if (sink == CommandStdinSink::Config
+                        || canonical_command(&command.name) == "load-buffer")
                         && error.tmux_message() == spent_source_stream_error() =>
                 {
                     SourceStream::Spent

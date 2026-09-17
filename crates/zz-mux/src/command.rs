@@ -6737,10 +6737,52 @@ impl MuxEngine {
         } else {
             Axis::Vertical
         };
-        let placement = self.split_placement(options, size)?;
+        let placement = if apply_tmux_zoom {
+            let size = match size {
+                None => LayoutSplitSize::Default,
+                Some(SplitSize::Percentage(value)) => LayoutSplitSize::Percent(
+                    u8::try_from(parse_strtonum(value, 0, 100, "invalid tiled geometry")?)
+                        .expect("bounded percentage"),
+                ),
+                Some(SplitSize::Cells(value)) => {
+                    if let Some(value) = value.strip_suffix('%') {
+                        LayoutSplitSize::Percent(
+                            u8::try_from(parse_strtonum(value, 0, 100, "invalid tiled geometry")?)
+                                .expect("bounded percentage"),
+                        )
+                    } else {
+                        LayoutSplitSize::Cells(
+                            u16::try_from(parse_strtonum(
+                                value,
+                                0,
+                                i64::from(i32::MAX),
+                                "invalid tiled geometry",
+                            )?)
+                            .unwrap_or(u16::MAX),
+                        )
+                    }
+                }
+            };
+            SplitPlacement {
+                size,
+                before: options.has("-b"),
+                full_size: options.has("-f"),
+                detached: options.has("-d"),
+            }
+        } else {
+            self.split_placement(options, size)?
+        };
         let snapshot_kind = pane_kind_snapshot(&kind);
         let (inherit_cwd_from, cwd) =
             spawn_cwd_source(self, options, Some(target), &kind, format_client, hooks);
+        if apply_tmux_zoom
+            && self
+                .state
+                .window_for_pane(target)
+                .is_some_and(|window| self.state.windows[&window].zoomed_pane.is_some())
+        {
+            self.state.toggle_zoom(target)?;
+        }
         let pane = self.state.split_pane_with(target, axis, kind, placement)?;
         if empty {
             self.state.mark_pane_empty(pane)?;

@@ -24,6 +24,60 @@ const CONTROL_PARSE_SOURCE: &str = "<control>";
 const DCS: &[u8] = b"\x1bP1000p";
 const ST: &[u8] = b"\x1b\\";
 
+static TERMINATION_REQUESTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(unix)]
+struct ControlSignal(libc::sigaction);
+
+#[cfg(unix)]
+#[allow(
+    unsafe_code,
+    reason = "install and restore the control client's SIGTERM disposition"
+)]
+impl ControlSignal {
+    fn install() -> io::Result<Self> {
+        extern "C" fn terminate(_: libc::c_int) {
+            TERMINATION_REQUESTED.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        TERMINATION_REQUESTED.store(false, std::sync::atomic::Ordering::Relaxed);
+        unsafe {
+            let mut previous = std::mem::zeroed();
+            let mut action: libc::sigaction = std::mem::zeroed();
+            action.sa_sigaction = terminate as *const () as usize;
+            libc::sigemptyset(&raw mut action.sa_mask);
+            if libc::sigaction(libc::SIGTERM, &raw const action, &raw mut previous) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Self(previous))
+        }
+    }
+}
+
+#[cfg(unix)]
+#[allow(
+    unsafe_code,
+    reason = "restore the disposition saved by the control signal scope"
+)]
+impl Drop for ControlSignal {
+    fn drop(&mut self) {
+        unsafe { libc::sigaction(libc::SIGTERM, &raw const self.0, std::ptr::null_mut()) };
+    }
+}
+
+fn receive_control_event(receiver: &mpsc::Receiver<MainEvent>) -> io::Result<MainEvent> {
+    loop {
+        if TERMINATION_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(io::Error::from(io::ErrorKind::Interrupted));
+        }
+        match receiver.recv_timeout(std::time::Duration::from_millis(20)) {
+            Ok(event) => return Ok(event),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(MainEvent::Disconnected),
+        }
+    }
+}
+
 pub(crate) fn run(
     socket_path: &Path,
     socket_source: SocketSelectionSource,
@@ -32,6 +86,14 @@ pub(crate) fn run(
     level: u8,
     arguments: &[zz_protocol::RawText],
 ) -> ExitCode {
+    #[cfg(unix)]
+    let _signal = match ControlSignal::install() {
+        Ok(signal) => signal,
+        Err(error) => {
+            eprintln!("zz: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let commands = if arguments.is_empty() {
         vec![CommandInvocation::new("new-session", [] as [&str; 0])]
     } else {
@@ -80,6 +142,13 @@ pub(crate) fn run(
     let result = output
         .start()
         .and_then(|()| drive(&client, commands, &mut output));
+    let result = if TERMINATION_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+        #[cfg(unix)]
+        let _ = client.shutdown();
+        output.terminate().map(|()| 0)
+    } else {
+        result
+    };
     drop(terminal);
     match result {
         Ok(code) => ExitCode::from(code),
@@ -206,14 +275,14 @@ fn drive<W: Write>(
     }
     loop {
         let event = pending_stdin.pop_front().map_or_else(
-            || receiver.recv().unwrap_or(MainEvent::Disconnected),
+            || receive_control_event(&receiver),
             |stdin| {
                 if let Some(pending_return) = state.pending_return.as_mut() {
                     pending_return.consume_preceding_input();
                 }
-                MainEvent::Stdin(stdin)
+                Ok(MainEvent::Stdin(stdin))
             },
-        );
+        )?;
         match event {
             MainEvent::Stdin(StdinEvent::Line(line)) => {
                 let mut resolved = resolve_line_expansions(
@@ -493,7 +562,7 @@ fn prepare_command_unit<W: Write>(
         .map_err(io::Error::other)?;
     let mut exit = ExitSignal::None;
     loop {
-        match receiver.recv().unwrap_or(MainEvent::Disconnected) {
+        match receive_control_event(receiver)? {
             MainEvent::Protocol(message) => match match_prepared_response(*message, request_id) {
                 Ok(commands) => {
                     if commands.len() != expected {
@@ -611,7 +680,7 @@ fn resolve_line_expansions<W: Write>(
         });
     }
     while !pending.is_empty() {
-        match receiver.recv().unwrap_or(MainEvent::Disconnected) {
+        match receive_control_event(receiver)? {
             MainEvent::Protocol(message) => {
                 let Some(index) = pending.iter().position(|entry| entry.answers(&message)) else {
                     let signal = handle_protocol(*message, state, output)?;
@@ -751,7 +820,7 @@ fn execute_command<W: Write>(
     let mut exit = ExitSignal::None;
     let mut parked = false;
     loop {
-        match receiver.recv().unwrap_or(MainEvent::Disconnected) {
+        match receive_control_event(receiver)? {
             MainEvent::Protocol(message) => match *message {
                 ProtocolMessage::CommandQueueParked {
                     request_id: parked_request,
@@ -1557,14 +1626,17 @@ fn drain_before_exit<W: Write>(
         let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) else {
             return Ok(());
         };
-        match receiver.recv_timeout(remaining) {
+        if TERMINATION_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(io::Error::from(io::ErrorKind::Interrupted));
+        }
+        match receiver.recv_timeout(remaining.min(std::time::Duration::from_millis(20))) {
             Ok(MainEvent::Protocol(message)) => {
                 if handle_protocol(*message, state, output)?.is_some() {
                     return Ok(());
                 }
             }
-            Ok(_) => {}
-            Err(_) => return Ok(()),
+            Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
         }
     }
 }
@@ -1660,7 +1732,7 @@ fn wait_for_exit_input(
         let event = pending_stdin
             .pop_front()
             .map(MainEvent::Stdin)
-            .or_else(|| receiver.recv().ok());
+            .or_else(|| receive_control_event(receiver).ok());
         match event {
             Some(MainEvent::Stdin(StdinEvent::Line(line))) if line.is_empty() => return,
             Some(MainEvent::Stdin(StdinEvent::Eof | StdinEvent::Error(_))) | None => return,
@@ -1723,6 +1795,7 @@ struct ControlWriter<W: Write> {
     next_number: u64,
     command_guard_frames: u64,
     block_open: bool,
+    open_frame: Option<Frame>,
     deferred: VecDeque<DeferredOutput>,
     exit_draining: bool,
     exit_requested: bool,
@@ -1738,6 +1811,7 @@ impl<W: Write> ControlWriter<W> {
             next_number: 1,
             command_guard_frames: 0,
             block_open: false,
+            open_frame: None,
             deferred: VecDeque::new(),
             exit_draining: false,
             exit_requested: false,
@@ -1949,6 +2023,7 @@ impl<W: Write> ControlWriter<W> {
     fn begin_at(&mut self, time: u64, flags: u8) -> io::Result<Frame> {
         let frame = self.allocate_frame(time, flags);
         self.block_open = true;
+        self.open_frame = Some(frame);
         self.write_frame_begin(&frame)?;
         self.output.flush()?;
         Ok(frame)
@@ -2028,6 +2103,7 @@ impl<W: Write> ControlWriter<W> {
     fn end(&mut self, frame: &Frame, error: bool) -> io::Result<()> {
         self.write_frame_end(frame, error)?;
         self.block_open = false;
+        self.open_frame = None;
         self.flush_deferred()?;
         self.output.flush()
     }
@@ -2053,6 +2129,19 @@ impl<W: Write> ControlWriter<W> {
             None => self.output.write_all(b"%exit\n")?,
         }
         Ok(())
+    }
+
+    fn terminate(&mut self) -> io::Result<()> {
+        self.exit_held = false;
+        if let Some(frame) = self.open_frame {
+            self.end(&frame, false)?;
+        }
+        self.emit_exit(None)?;
+        if self.st_sent {
+            self.output.flush()
+        } else {
+            self.finish()
+        }
     }
 
     fn finish(&mut self) -> io::Result<()> {
@@ -2327,6 +2416,28 @@ impl Drop for ControlTerminal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn termination_closes_pending_frame_and_releases_deferred_exit() {
+        let mut writer = ControlWriter::new(Vec::new(), true);
+        writer.start().unwrap();
+        writer.hold_exit();
+        writer.begin_at(17, 1).unwrap();
+        writer
+            .control_source_file(ControlSourceFileEvent::ReadError(
+                "Bad file descriptor: -".to_owned(),
+            ))
+            .unwrap();
+        writer.emit_exit(None).unwrap();
+        writer.terminate().unwrap();
+        assert_eq!(
+            writer.output,
+            b"\x1bP1000p%begin 17 1 1\n%end 17 1 1\nBad file descriptor: -\n%exit\n\x1b\\"
+        );
+        let completed = writer.output.clone();
+        writer.terminate().unwrap();
+        assert_eq!(writer.output, completed);
+    }
 
     #[test]
     fn serializer_keeps_frame_identity_payload_and_error_shapes() {

@@ -27391,6 +27391,16 @@ impl Shared {
             context.set_replay_client(execution_replay_client);
             let previous_control_target = context.control_command_target();
             context.set_control_command_target(options.control_target);
+            let early_shell_guard = routed_name == "run-shell"
+                && parse_run_shell_args(&routed.args).is_ok_and(|args| !args.command_mode);
+            if early_shell_guard {
+                self.publish_control_command_guard(
+                    options.control_target,
+                    RawText::default(),
+                    false,
+                    false,
+                );
+            }
             let guard_capture = options
                 .control_target
                 .map(|(client, _)| client)
@@ -27497,7 +27507,10 @@ impl Shared {
             }
             let publish_guard =
                 |output: RawText, error: bool, sticky_failure: bool, captured_events| {
-                    if alias_group || caller_source_stream && routed_name == "source-file" {
+                    if alias_group
+                        || early_shell_guard
+                        || caller_source_stream && routed_name == "source-file"
+                    {
                         if let Some((client, _)) = options.control_target {
                             self.publish_captured_control_command_events(client, captured_events);
                         }

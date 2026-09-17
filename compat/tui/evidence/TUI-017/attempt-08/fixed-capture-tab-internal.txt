@@ -1,0 +1,9 @@
+ok    self-check capture-tab-internal exact bytes before sabotage
+      case capture-tab-internal-sabotage
+      stdout differs
+        1c1
+        < ABC	DEF
+        ---
+        > ABC     DEF
+ok    self-check capture-tab-internal one-sided scene change
+residual self-check capture-tab-internal: 0 failures

@@ -532,7 +532,6 @@ mod daemon_autostart {
         }
     }
 
-
     #[test]
     fn inspect_json_contains_pane_facts_verbs_and_events() {
         let fixture = Fixture::new();

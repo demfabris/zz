@@ -9428,15 +9428,13 @@ impl Shared {
                         let scope = match &request.scope {
                             DetachScope::Client => Some(ResolvedDetach::Client(target_client)),
                             DetachScope::Others => Some(ResolvedDetach::Others(target_client)),
-                            DetachScope::Session(target) => match inner
-                                .engine
-                                .state
-                                .resolve_session(Some(target), context.session)
-                            {
-                                Ok(session) => Some(ResolvedDetach::Session(session)),
-                                Err(ServerError::SessionNotFound(_)) => None,
-                                Err(error) => return Err(error.into()),
-                            },
+                            DetachScope::Session(target) => {
+                                match inner.engine.resolve_session(Some(target), context.session) {
+                                    Ok(session) => Some(ResolvedDetach::Session(session)),
+                                    Err(ServerError::SessionNotFound(_)) => None,
+                                    Err(error) => return Err(error.into()),
+                                }
+                            }
                         };
                         detach = scope.map(|scope| {
                             (
@@ -14605,12 +14603,7 @@ impl Shared {
         let mut inner = self.inner.lock();
         let target = parsed
             .value('t')
-            .map(|target| {
-                inner
-                    .engine
-                    .state
-                    .resolve_session(Some(target), context.session)
-            })
+            .map(|target| inner.engine.resolve_session(Some(target), context.session))
             .transpose()?;
         let sort = TmuxSort::parse(parsed.value('O'), parsed.has('r'), None)?;
         inner.engine.set_format_now(unix_timestamp());
@@ -14762,7 +14755,6 @@ impl Shared {
                 Some(target) => {
                     let session = inner
                         .engine
-                        .state
                         .resolve_session(Some(target), Some(current_session))?;
                     (current_session, session, None, None)
                 }
@@ -16376,7 +16368,6 @@ impl Shared {
             "lock-session" => {
                 inner
                     .engine
-                    .state
                     .resolve_session(target.as_deref(), context.session)?;
             }
             "lock-client" => {
@@ -17109,7 +17100,7 @@ impl Shared {
             if let Some(refusal) = nested_attach_refusal(&inner, client) {
                 return Err(refusal);
             }
-            inner.engine.state.resolve_session(
+            inner.engine.resolve_session(
                 (!target.is_empty()).then_some(target),
                 inner
                     .engine
@@ -54950,7 +54941,6 @@ mod tests {
             );
             let session = inner
                 .engine
-                .state
                 .resolve_session(Some("=attached-source"), None)
                 .expect("attached source session id");
             assert_eq!(

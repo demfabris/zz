@@ -1,0 +1,611 @@
+# Scenario: strict-key-validation
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/strict-key-validation.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: bind-key -T zzstrict F1 display-message baseline
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: bind-key -T zzstrict F01 display-message forbidden-leading-zero
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    unknown key: F01
+tmux stderr:
+    unknown key: F01
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: bind-key -T zzstrict F0012 display-message forbidden-leading-zeros
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    unknown key: F0012
+tmux stderr:
+    unknown key: F0012
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: bind-key -T zzstrict F+1 display-message forbidden-sign
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    unknown key: F+1
+tmux stderr:
+    unknown key: F+1
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: bind-key -T zzstrict Ctrl-a display-message forbidden-control-alias
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    unknown key: Ctrl-a
+tmux stderr:
+    unknown key: Ctrl-a
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: bind-key -T zzstrict Alt-a display-message forbidden-meta-alias
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    unknown key: Alt-a
+tmux stderr:
+    unknown key: Alt-a
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: list-keys -T zzstrict -F #{key_string}|#{key_command}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    F1|display-message baseline
+tmux stdout:
+    F1|display-message baseline
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: bind-key -T zzstrict ^A display-message caret
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: list-keys -T zzstrict -F #{key_string}|#{key_command} C-a
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-a|display-message caret
+tmux stdout:
+    C-a|display-message caret
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: bind-key -T zzstrict btab display-message back-tab
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: list-keys -T zzstrict -F #{key_string}|#{key_command} BTab
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    BTab|display-message back-tab
+tmux stdout:
+    BTab|display-message back-tab
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: bind-key -T zzstrict kpenter display-message keypad
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: list-keys -T zzstrict -F #{key_string}|#{key_command} KPEnter
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    KPEnter|display-message keypad
+tmux stdout:
+    KPEnter|display-message keypad
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: bind-key -T zzstrict 'User+1junk' display-message user-plus-suffix
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: list-keys -T zzstrict -F #{key_string}|#{key_command} User1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    User1|display-message user-plus-suffix
+tmux stdout:
+    User1|display-message user-plus-suffix
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: unbind-key -T zzstrict User1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: bind-key -T zzstrict 'User 1' display-message user-whitespace
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: list-keys -T zzstrict -F #{key_string}|#{key_command} User1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    User1|display-message user-whitespace
+tmux stdout:
+    User1|display-message user-whitespace
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: bind-key -T zzstrict User4294967296 display-message user-wrap
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: out: list-keys -T zzstrict -F #{key_string}|#{key_command} User0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    User0|display-message user-wrap
+tmux stdout:
+    User0|display-message user-wrap
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: bind-key -T zzstrict 0x41junk display-message hex-suffix
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: list-keys -T zzstrict -F #{key_string}|#{key_command} 0x41junk
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    A|display-message hex-suffix
+tmux stdout:
+    A|display-message hex-suffix
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: bind-key -T zzstrict 0x1g display-message hex-partial
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: out: list-keys -T zzstrict -F #{key_string}|#{key_command} 0x1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [SOH]|display-message hex-partial
+tmux stdout:
+    [SOH]|display-message hex-partial
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: bind-key -T zzstrict 0x100000041 display-message hex-wrap
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: out: list-keys -T zzstrict -F #{key_string}|#{key_command} 0x100000041
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    A|display-message hex-wrap
+tmux stdout:
+    A|display-message hex-wrap
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: bind-key -T zzstrict User1001 display-message forbidden-user-bound
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    unknown key: User1001
+tmux stderr:
+    unknown key: User1001
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: bind-key -T zzstrict User18446744073709551616 display-message forbidden-user-overflow
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    unknown key: User18446744073709551616
+tmux stderr:
+    unknown key: User18446744073709551616
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: bind-key -T zzstrict 0X41 display-message forbidden-hex-case
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    unknown key: 0X41
+tmux stderr:
+    unknown key: 0X41
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: bind-key -T zzstrict 0x10000000000000000 display-message forbidden-hex-overflow
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    unknown key: 0x10000000000000000
+tmux stderr:
+    unknown key: 0x10000000000000000
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 31
+COMMAND: set-option -g prefix C-b
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 32
+COMMAND: set-option -g prefix F01
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    bad key: F01
+tmux stderr:
+    bad key: F01
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 33
+COMMAND: out: show-options -gv prefix
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b
+tmux stdout:
+    C-b
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 34
+COMMAND: set-option -g prefix Ctrl-a
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    bad key: Ctrl-a
+tmux stderr:
+    bad key: Ctrl-a
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 35
+COMMAND: out: show-options -gv prefix
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b
+tmux stdout:
+    C-b
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 36
+COMMAND: set-option -g prefix 'User+1junk'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 37
+COMMAND: out: show-options -gv prefix
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    User1
+tmux stdout:
+    User1
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 38
+COMMAND: set-option -g prefix 0x41junk
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 39
+COMMAND: run-shell 'sh ~/strict-key-literal-controls.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    strict-key-literal-controls:clean
+tmux stdout:
+    strict-key-literal-controls:clean
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 40
+COMMAND: out: show-options -gv prefix
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    A
+tmux stdout:
+    A
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=40 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

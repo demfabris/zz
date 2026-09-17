@@ -1,0 +1,179 @@
+# Scenario: list-sort-filter
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/list-sort-filter.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: new-session -d -s z
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: list-sessions -O name -r -F #{session_name}:#{line}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    z:0
+    w:1
+tmux stdout:
+    z:0
+    w:1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: list-sessions -O name -f #{==:#{session_name},z} -F #{session_name}:#{line}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    z:1
+tmux stdout:
+    z:1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: new-window -d -t w: -n zed
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: new-window -d -t w: -n alpha
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: list-windows -t w -O name -r -F #{window_name}:#{line}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    zed:3
+    main:3
+    alpha:3
+tmux stdout:
+    zed:3
+    main:3
+    alpha:3
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: split-window -d -h -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: list-panes -t w:0 -O index -r -f #{>=:#{pane_index},0} -F #{pane_index}:#{line}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1:2
+    0:2
+tmux stdout:
+    1:2
+    0:2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: set-buffer aa
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: set-buffer bbbbb
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: list-buffers -O name -r -f #{m:buffer*,#{buffer_name}} -F #{buffer_name}:#{buffer_size}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    buffer1:5
+    buffer0:2
+tmux stdout:
+    buffer1:5
+    buffer0:2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: list-sessions -O bogus
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    invalid sort order
+tmux stderr:
+    invalid sort order
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=12 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

@@ -1,0 +1,894 @@
+case=matrix-direct-use
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=yes
+before=yes
+tail=yes
+tmux state
+input=yes
+before=yes
+tail=yes
+case=matrix-alias-use
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=yes
+before=yes
+tail=yes
+tmux state
+input=yes
+before=yes
+tail=yes
+case=matrix-file-use
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=yes
+before=yes
+tail=yes
+tmux state
+input=yes
+before=yes
+tail=yes
+case=matrix-startup-use
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=yes
+tmux state
+input=
+before=yes
+tail=yes
+case=matrix-direct-control
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+25626567696e2054494d4520494420300a25656e642054494d4520494420
+300a25626567696e2054494d4520494420300a25656e642054494d452049
+4420300a4261642066696c652064657363726970746f723a202d0a256265
+67696e2054494d4520494420300a4d41545249582d41465445520a25656e
+642054494d4520494420300a25626567696e2054494d4520494420300a25
+656e642054494d4520494420300a25657869740a
+zz stderr hex
+tmux stdout hex
+25626567696e2054494d4520494420300a25656e642054494d4520494420
+300a25626567696e2054494d4520494420300a25656e642054494d452049
+4420300a4261642066696c652064657363726970746f723a202d0a256265
+67696e2054494d4520494420300a4d41545249582d41465445520a25656e
+642054494d4520494420300a25626567696e2054494d4520494420300a25
+656e642054494d4520494420300a25657869740a
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=yes
+tmux state
+input=
+before=yes
+tail=yes
+case=matrix-alias-control
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+25626567696e2054494d4520494420300a25656e642054494d4520494420
+300a25626567696e2054494d4520494420300a25656e642054494d452049
+4420300a4261642066696c652064657363726970746f723a202d0a256265
+67696e2054494d4520494420300a4d41545249582d41465445520a25656e
+642054494d4520494420300a25626567696e2054494d4520494420300a25
+656e642054494d4520494420300a25657869740a
+zz stderr hex
+tmux stdout hex
+25626567696e2054494d4520494420300a25656e642054494d4520494420
+300a25626567696e2054494d4520494420300a25656e642054494d452049
+4420300a4261642066696c652064657363726970746f723a202d0a256265
+67696e2054494d4520494420300a4d41545249582d41465445520a25656e
+642054494d4520494420300a25626567696e2054494d4520494420300a25
+656e642054494d4520494420300a25657869740a
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=yes
+tmux state
+input=
+before=yes
+tail=yes
+case=matrix-file-control
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+25626567696e2054494d4520494420300a25656e642054494d4520494420
+300a25626567696e2054494d4520494420300a25656e642054494d452049
+4420300a25626567696e2054494d4520494420300a636f6d6d616e642065
+786974656420776974682073746174757320310a256572726f722054494d
+4520494420300a25626567696e2054494d4520494420300a736f75726365
+2d66696c652066726f6d207374616e6461726420696e707574206973206e
+6f7420737570706f727465640a256572726f722054494d4520494420300a
+25657869740a
+zz stderr hex
+tmux stdout hex
+25626567696e2054494d4520494420300a25656e642054494d4520494420
+300a25626567696e2054494d4520494420300a25656e642054494d452049
+4420300a25626567696e2054494d4520494420300a25656e642054494d45
+20494420300a4261642066696c652064657363726970746f723a202d0a25
+626567696e2054494d4520494420300a4d41545249582d41465445520a25
+656e642054494d4520494420300a25626567696e2054494d452049442030
+0a25656e642054494d4520494420300a25657869740a
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=yes
+case=matrix-direct-attached
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=yes
+tmux state
+input=
+before=yes
+tail=yes
+case=matrix-alias-attached
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=yes
+tmux state
+input=
+before=yes
+tail=yes
+case=matrix-file-attached
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=yes
+case=matrix-direct-unused
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=unused
+before=yes
+tail=yes
+tmux state
+input=unused
+before=yes
+tail=yes
+case=matrix-alias-unused
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=unused
+before=yes
+tail=yes
+tmux state
+input=unused
+before=yes
+tail=yes
+case=matrix-file-unused
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=unused
+before=yes
+tail=yes
+tmux state
+input=unused
+before=yes
+tail=yes
+case=matrix-startup-unused
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=unused
+before=yes
+tail=yes
+tmux state
+input=unused
+before=yes
+tail=yes
+case=matrix-direct-spent
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+4261642066696c652064657363726970746f723a202d0a
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+4261642066696c652064657363726970746f723a202d0a
+zz state
+input=yes
+before=yes
+tail=yes
+tmux state
+input=yes
+before=yes
+tail=yes
+case=matrix-alias-spent
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+4261642066696c652064657363726970746f723a202d0a
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+4261642066696c652064657363726970746f723a202d0a
+zz state
+input=yes
+before=yes
+tail=yes
+tmux state
+input=yes
+before=yes
+tail=yes
+case=matrix-file-spent
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+4261642066696c652064657363726970746f723a202d0a
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+4261642066696c652064657363726970746f723a202d0a
+zz state
+input=yes
+before=yes
+tail=yes
+tmux state
+input=yes
+before=yes
+tail=yes
+case=matrix-direct-closed
+zz_exit=0
+tmux_exit=1
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+5b6572725d2065767369675f63623a20726563763a204261642066696c65
+2064657363726970746f720a
+zz state
+input=
+before=yes
+tail=yes
+tmux state
+input=
+before=yes
+tail=
+case=matrix-alias-closed
+zz_exit=0
+tmux_exit=1
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+5b6572725d2065767369675f63623a20726563763a204261642066696c65
+2064657363726970746f720a
+zz state
+input=
+before=yes
+tail=yes
+tmux state
+input=
+before=yes
+tail=
+case=matrix-file-closed
+zz_exit=0
+tmux_exit=1
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+5b6572725d2065767369675f63623a20726563763a204261642066696c65
+2064657363726970746f720a
+zz state
+input=
+before=yes
+tail=yes
+tmux state
+input=
+before=yes
+tail=
+case=matrix-direct-eof
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=yes
+tmux state
+input=
+before=yes
+tail=yes
+case=matrix-direct-large-unused
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=unused
+before=yes
+tail=yes
+tmux state
+input=unused
+before=yes
+tail=yes
+case=matrix-alias-large-unused
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=unused
+before=yes
+tail=yes
+tmux state
+input=unused
+before=yes
+tail=yes
+case=matrix-file-large-unused
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=unused
+before=yes
+tail=yes
+tmux state
+input=unused
+before=yes
+tail=yes
+case=matrix-startup-large-unused
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=unused
+before=yes
+tail=yes
+tmux state
+input=unused
+before=yes
+tail=yes
+case=matrix-direct-large-used
+zz_exit=1
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+7374616e6461726420696e70757420657863656564732031303438353736
+2062797465733a202d0a
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=yes
+case=matrix-direct-display-valid
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=yes
+MATRIX-INPUT
+tmux state
+input=
+before=yes
+tail=yes
+MATRIX-INPUT
+case=matrix-direct-display-running
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+70616e65206973206e6f7420656d7074790a
+tmux stdout hex
+tmux stderr hex
+70616e65206973206e6f7420656d7074790a
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=
+case=matrix-alias-display-running
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+70616e65206973206e6f7420656d7074790a
+tmux stdout hex
+tmux stderr hex
+70616e65206973206e6f7420656d7074790a
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=
+case=matrix-file-display-running
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+70616e65206973206e6f7420656d7074790a
+tmux stdout hex
+tmux stderr hex
+70616e65206973206e6f7420656d7074790a
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=
+case=matrix-direct-display-missing
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=yes
+tmux state
+input=
+before=yes
+tail=yes
+case=matrix-alias-display-missing
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=yes
+tmux state
+input=
+before=yes
+tail=yes
+case=matrix-file-display-missing
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=yes
+tmux state
+input=
+before=yes
+tail=yes
+case=matrix-direct-split-missing
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+63616e27742066696e642070616e653a202539393939390a
+tmux stdout hex
+tmux stderr hex
+63616e27742066696e642070616e653a202539393939390a
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=
+case=matrix-alias-split-missing
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+63616e27742066696e642070616e653a202539393939390a
+tmux stdout hex
+tmux stderr hex
+63616e27742066696e642070616e653a202539393939390a
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=
+case=matrix-file-split-missing
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+63616e27742066696e642070616e653a202539393939390a
+tmux stdout hex
+tmux stderr hex
+63616e27742066696e642070616e653a202539393939390a
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=
+case=matrix-direct-fail-after-read
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+4e6f20737563682066696c65206f72206469726563746f72793a202f746d
+702f7a7a63732d6d61747269782d6d697373696e670a
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+4e6f20737563682066696c65206f72206469726563746f72793a202f746d
+702f7a7a63732d6d61747269782d6d697373696e670a
+zz state
+input=yes
+before=yes
+tail=yes
+tmux state
+input=yes
+before=yes
+tail=yes
+case=matrix-alias-fail-after-read
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+4e6f20737563682066696c65206f72206469726563746f72793a202f746d
+702f7a7a63732d6d61747269782d6d697373696e670a
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+4e6f20737563682066696c65206f72206469726563746f72793a202f746d
+702f7a7a63732d6d61747269782d6d697373696e670a
+zz state
+input=yes
+before=yes
+tail=yes
+tmux state
+input=yes
+before=yes
+tail=yes
+case=matrix-file-fail-after-read
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+4e6f20737563682066696c65206f72206469726563746f72793a202f746d
+702f7a7a63732d6d61747269782d6d697373696e670a
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+4e6f20737563682066696c65206f72206469726563746f72793a202f746d
+702f7a7a63732d6d61747269782d6d697373696e670a
+zz state
+input=yes
+before=yes
+tail=yes
+tmux state
+input=yes
+before=yes
+tail=yes
+case=matrix-direct-term-before
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=
+case=matrix-alias-term-before
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=
+case=matrix-file-term-before
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=
+case=matrix-direct-term-during
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=
+case=matrix-alias-term-during
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=
+case=matrix-file-term-during
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=
+case=matrix-direct-term-after
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=yes
+before=yes
+tail=
+tmux state
+input=yes
+before=yes
+tail=
+case=matrix-alias-term-after
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=yes
+before=yes
+tail=
+tmux state
+input=yes
+before=yes
+tail=
+case=matrix-file-term-after
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+input=yes
+before=yes
+tail=
+tmux state
+input=yes
+before=yes
+tail=
+case=matrix-direct-term-after-error
+zz_exit=0
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+5b6572725d2065767369675f63623a20726563763a204261642066696c65
+2064657363726970746f720a
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=
+case=matrix-alias-term-after-error
+zz_exit=0
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+5b6572725d2065767369675f63623a20726563763a204261642066696c65
+2064657363726970746f720a
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=
+case=matrix-file-term-after-error
+zz_exit=0
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+5b6572725d2065767369675f63623a20726563763a204261642066696c65
+2064657363726970746f720a
+zz state
+input=
+before=yes
+tail=
+tmux state
+input=
+before=yes
+tail=

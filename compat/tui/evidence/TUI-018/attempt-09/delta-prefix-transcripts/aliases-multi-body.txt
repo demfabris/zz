@@ -1,0 +1,130 @@
+# Scenario: aliases-multi-body
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/aliases-multi-body.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: run-shell "python3 -c '__import__(\"subprocess\").run([\"tmux\",\"set-option\",\"-s\",\"command-alias[90]\",\"zzaliasmulti=display-message -p first\"+chr(10)+\"display-message -p\"],check=True)'"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: zzaliasmulti tail
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    first
+    tail
+tmux stdout:
+    first
+    tail
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: bind-key -T zzalias F1 zzaliasmulti bound
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: keys: zzalias F1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    zzalias|F1|0|display-message -p first \; display-message -p bound
+tmux stdout:
+    zzalias|F1|0|display-message -p first \; display-message -p bound
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: set-option -s command-alias[91] zzaliasempty=
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: zzaliasempty discarded
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: run-shell "python3 -c '__import__(\"subprocess\").run([\"tmux\",\"set-option\",\"-s\",\"command-alias[92]\",\"zzaliasdash=display-message -p -- -literal\"+chr(10)+\"display-message -p ok\"],check=True)'"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: zzaliasdash
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    -literal
+    ok
+tmux stdout:
+    -literal
+    ok
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=8 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

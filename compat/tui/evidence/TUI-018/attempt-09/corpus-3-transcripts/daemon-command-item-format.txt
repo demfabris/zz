@@ -1,0 +1,345 @@
+# Scenario: daemon-command-item-format
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/daemon-command-item-format.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: run-shell "tmux set-option -g @daemon-shell '#{command}'"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-options -gv @daemon-shell
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    run-shell
+tmux stdout:
+    run-shell
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: run-shell -C "set-option -g @daemon-c '#{command}'"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: show-options -gv @daemon-c
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    run-shell
+tmux stdout:
+    run-shell
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: run -C "set-option -g @daemon-alias '#{command}'"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: show-options -gv @daemon-alias
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    run-shell
+tmux stdout:
+    run-shell
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: run-s -C "set-option -g @daemon-prefix '#{command}'"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: show-options -gv @daemon-prefix
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    run-shell
+tmux stdout:
+    run-shell
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: set-option -s command-alias[31] zzrun=run-shell
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: zzrun -C "set-option -g @daemon-user-alias '#{command}'"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: show-options -gv @daemon-user-alias
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    run-shell
+tmux stdout:
+    run-shell
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: source-file compat/scenarios/daemon-command-item-format.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: show-options -gv @daemon-block
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    set-option
+tmux stdout:
+    set-option
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: if-shell "test '#{command}' = if-shell" "set-option -g @daemon-if-shell true" "set-option -g @daemon-if-shell false"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: show-options -gv @daemon-if-shell
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    true
+tmux stdout:
+    true
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: if -F "#{==:#{command},if-shell}" "set-option -g @daemon-if-format true" "set-option -g @daemon-if-format false"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: show-options -gv @daemon-if-format
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    true
+tmux stdout:
+    true
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: if-shell -F 1 "set-option -gF @daemon-if-child '#{command}'"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: show-options -gv @daemon-if-child
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    set-option
+tmux stdout:
+    set-option
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: set-hook -g after-set-buffer "list-buffers -F '#{hook}:#{command}'"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: set-buffer -b daemon-command-item buffer
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    after-set-buffer:list-buffers
+tmux stdout:
+    after-set-buffer:list-buffers
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: list-buffers -f #{==:#{command},list-buffers} -F #{command}:#{buffer_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    list-buffers:daemon-command-item
+tmux stdout:
+    list-buffers:daemon-command-item
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: out: new-window -dP -n daemon-item -F #{command}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    new-window
+tmux stdout:
+    new-window
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: out: split-window -dP -F #{command}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    split-window
+tmux stdout:
+    split-window
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=24 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

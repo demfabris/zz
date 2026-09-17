@@ -1,0 +1,403 @@
+# Scenario: break-pane
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/break-pane.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: split-window -d -h -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: new-window -d -t w:1 -n anchor
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: new-window -d -t w:2 -n tail
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: select-window -t w:1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: break-pane -d -a -s w:0.1 -t w:1 -n moved
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: list-windows -t w -F #{window_index}:#{window_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:main
+    1:anchor
+    2:moved
+    3:tail
+tmux stdout:
+    0:main
+    1:anchor
+    2:moved
+    3:tail
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: new-session -d -s before -n source
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: split-window -d -h -t before:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: new-window -d -t before:1 -n anchor
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: new-window -d -t before:2 -n tail
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: select-window -t before:1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: break-pane -d -a -b -s before:0.1 -t before:1 -n moved
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: list-windows -t before -F #{window_index}:#{window_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:source
+    1:moved
+    2:anchor
+    3:tail
+tmux stdout:
+    0:source
+    1:moved
+    2:anchor
+    3:tail
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: new-session -d -s fallback -n source
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: split-window -d -h -t fallback:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: new-window -d -t fallback:1 -n anchor
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: new-window -d -t fallback:2 -n tail
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: select-window -t fallback:1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: break-pane -d -a -s fallback:0.1 -t fallback:8 -n moved
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: out: list-windows -t fallback -F #{window_index}:#{window_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:source
+    1:anchor
+    2:moved
+    3:tail
+tmux stdout:
+    0:source
+    1:anchor
+    2:moved
+    3:tail
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: new-session -d -s named-relink -n source
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: set-window-option -t =named-relink:0 automatic-rename on
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: new-window -d -t =named-relink:1 -n anchor
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: break-pane -d -s =named-relink:0.0 -t =named-relink:5 -n relinked
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: out: show-window-options -v -t =named-relink:5 automatic-rename
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    off
+tmux stdout:
+    off
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: new-session -d -s named-create -n source
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: set-window-option -t =named-create:0 automatic-rename on
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: split-window -d -h -t =named-create:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: break-pane -d -s =named-create:0.1 -t =named-create:5 -n created
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: out: show-window-options -v -t =named-create:5 automatic-rename
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    off
+tmux stdout:
+    off
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=30 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

@@ -1,0 +1,2 @@
+client lifecycle compatibility: PASS
+exit_status=0

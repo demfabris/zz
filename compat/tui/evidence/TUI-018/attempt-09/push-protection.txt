@@ -1,0 +1,5 @@
+command: git push -u origin campaign/tui-stream-alias-4
+exit_status=1
+GitHub GH013 push protection rejected the unpushed evidence commit 8d30f9f6793abfdc52ab96cba618c59d42184295.
+Detected GitHub OAuth token in two census-hooks transcripts, at lines 1658 and 1886 in each.
+Credential values were removed from the unpushed commit; no protection bypass was requested.

@@ -1,0 +1,2 @@
+error: corpus metadata is only valid for smoke scenarios: cli-chain-parse-abort.txt
+exit_status=2

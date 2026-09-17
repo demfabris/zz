@@ -1,0 +1,209 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m checking pinned plugin corpus
+[1;36m==>[0m checking out tpm at e261deb1b47614eed3400089ce7197dc68acc4eb
+[1;36m==>[0m checking out tmux-sensible at 25cb91f42d020f675bb0a2ce3fbd3a5d96119efa
+[1;36m==>[0m checking out vim-tmux-navigator at e41c431a0c7b7388ae7ba341f01a0d217eb3a432
+[1;36m==>[0m checking out tmux-yank at acfd36e4fcba99f8310a7dfb432111c242fe7392
+[1;36m==>[0m checking out tmux-resurrect at cff343cf9e81983d3da0c8562b01616f12e8d548
+[1;36m==>[0m checking out tmux-continuum at 0698e8f4b17d6454c71bf5212895ec055c578da0
+[1;36m==>[0m checking out tmux-fpp at 878302f228ee14f0fa59717f63743d396b327a21
+[1;36m==>[0m checking out oh-my-tmux at 58a3dcc0d718ec0fa1c0d5a2fddd640a1ad7a5b7
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-c11-alias-fix/target/debug/zz-alias4-corrected
+[1;36m==>[0m running alerts
+alerts: 62 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running buffer-path-format
+buffer-path-format: 36 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running census-hooks
+census-hooks: 152 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running copy-mode-scroll-exit
+copy-mode-scroll-exit: 11 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running format-option-loop-context
+format-option-loop-context: 14 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running hooks-pane-clipboard
+hooks-pane-clipboard: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running if-shell-background-order
+if-shell-background-order: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running join-pane-size
+join-pane-size: 11 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running known/known-pane-scrollbar-columns
+known/known-pane-scrollbar-columns: 4 step(s), 0 TOPO divergence(s), 2 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 0 WARN divergence(s)
+[1;33mwarn:[0m known/known-pane-scrollbar-columns has its exact documented divergence (0 2 0 1 0)
+[1;36m==>[0m running known/known-spread-mixed
+known/known-spread-mixed: 6 step(s), 0 TOPO divergence(s), 1 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;33mwarn:[0m known/known-spread-mixed has its exact documented divergence (0 1 0 0 0)
+[1;36m==>[0m running last-pane-input-off
+last-pane-input-off: 15 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running list-keys-padding
+list-keys-padding: 46 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running manual-window-size-transition
+manual-window-size-transition: 24 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running micro-flags
+micro-flags: 17 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running pane-spawn-options
+pane-spawn-options: 25 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running pane-spawn-retain
+pane-spawn-retain: 27 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running presets-mirrored
+presets-mirrored: 6 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running presets
+presets: 7 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/args-parse-command-prompt
+smoke/args-parse-command-prompt: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/args-parse-if-shell
+smoke/args-parse-if-shell: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/buffer-clipboard-write
+smoke/buffer-clipboard-write: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/cheap-flags
+smoke/cheap-flags: 22 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/chooser-kill-keys
+smoke/chooser-kill-keys: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/clear-history-hyperlinks
+smoke/clear-history-hyperlinks: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/client-non-utf8-cwd
+smoke/client-non-utf8-cwd: 4 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/command-prompt-chain
+smoke/command-prompt-chain: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/config-chain-parse-abort
+smoke/config-chain-parse-abort: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/config-grammar
+smoke/config-grammar: 17 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/control-alias-prepare
+smoke/control-alias-prepare: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/control-tilde-environment
+smoke/control-tilde-environment: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/copy-mode-kill-on-exit
+smoke/copy-mode-kill-on-exit: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/copy-mode-refresh
+smoke/copy-mode-refresh: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/daemon-invalid-flags
+smoke/daemon-invalid-flags: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/display-menu-mouse
+smoke/display-menu-mouse: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/display-menu-style-refresh
+smoke/display-menu-style-refresh: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/display-popup-kitty-noresize
+smoke/display-popup-kitty-noresize: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/display-popup-resize-lifecycle
+smoke/display-popup-resize-lifecycle: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/fixture-conf
+smoke/fixture-conf: 5 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/format-listing
+smoke/format-listing: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/format-monitor-hooks
+smoke/format-monitor-hooks: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/format-trace
+smoke/format-trace: 29 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/fpp-init
+smoke/fpp-init: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/jobs-display-popup-environment
+smoke/jobs-display-popup-environment: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/keys-shift-attached
+smoke/keys-shift-attached: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/pane-border-indicators
+smoke/pane-border-indicators: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/pane-engine-knobs-input
+smoke/pane-engine-knobs-input: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/plugin-runtime-continuum
+smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/plugin-runtime-tpm-install
+smoke/plugin-runtime-tpm-install: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/positional-minimums
+smoke/positional-minimums: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/resurrect-save
+smoke/resurrect-save: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/sensible
+smoke/sensible: 6 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/source-file-diagnostics
+smoke/source-file-diagnostics: 12 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/terminal-facts
+smoke/terminal-facts: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/vim-tmux-navigator
+smoke/vim-tmux-navigator: 8 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/yank
+smoke/yank: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running source-file-current-file
+source-file-current-file: 24 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running source-file-output
+source-file-output: 12 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running stderr-parity
+stderr-parity: 14 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running strict-key-validation
+strict-key-validation: 40 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| alerts | 62 | yes | 0 | yes | yes | yes |
+| buffer-path-format | 36 | yes | 0 | yes | yes | yes |
+| census-hooks | 152 | yes | 0 | yes | yes | yes |
+| copy-mode-scroll-exit | 11 | yes | 0 | yes | yes | yes |
+| format-option-loop-context | 14 | yes | 0 | yes | yes | yes |
+| hooks-pane-clipboard | 3 | yes | 0 | yes | yes | yes |
+| if-shell-background-order | 2 | yes | 0 | yes | yes | yes |
+| join-pane-size | 11 | yes | 0 | yes | yes | yes |
+| known/known-pane-scrollbar-columns | 4 | yes | 2 | yes | no | yes |
+| known/known-spread-mixed | 6 | yes | 1 | yes | yes | yes |
+| last-pane-input-off | 15 | yes | 0 | yes | yes | yes |
+| list-keys-padding | 46 | yes | 0 | yes | yes | yes |
+| manual-window-size-transition | 24 | yes | 0 | yes | yes | yes |
+| micro-flags | 17 | yes | 0 | yes | yes | yes |
+| pane-spawn-options | 25 | yes | 0 | yes | yes | yes |
+| pane-spawn-retain | 27 | yes | 0 | yes | yes | yes |
+| presets-mirrored | 6 | yes | 0 | yes | yes | yes |
+| presets | 7 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-command-prompt | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-if-shell | 3 | yes | 0 | yes | yes | yes |
+| smoke/buffer-clipboard-write | 3 | yes | 0 | yes | yes | yes |
+| smoke/cheap-flags | 22 | yes | 0 | yes | yes | yes |
+| smoke/chooser-kill-keys | 3 | yes | 0 | yes | yes | yes |
+| smoke/clear-history-hyperlinks | 3 | yes | 0 | yes | yes | yes |
+| smoke/client-non-utf8-cwd | 4 | yes | 0 | yes | yes | yes |
+| smoke/command-prompt-chain | 2 | yes | 0 | yes | yes | yes |
+| smoke/config-chain-parse-abort | 2 | yes | 0 | yes | yes | yes |
+| smoke/config-grammar | 17 | yes | 0 | yes | yes | yes |
+| smoke/control-alias-prepare | 3 | yes | 0 | yes | yes | yes |
+| smoke/control-tilde-environment | 2 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-kill-on-exit | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-refresh | 3 | yes | 0 | yes | yes | yes |
+| smoke/daemon-invalid-flags | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-mouse | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-style-refresh | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-kitty-noresize | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-resize-lifecycle | 3 | yes | 0 | yes | yes | yes |
+| smoke/fixture-conf | 5 | yes | 0 | yes | yes | yes |
+| smoke/format-listing | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-monitor-hooks | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-trace | 29 | yes | 0 | yes | yes | yes |
+| smoke/fpp-init | 2 | yes | 0 | yes | yes | yes |
+| smoke/jobs-display-popup-environment | 3 | yes | 0 | yes | yes | yes |
+| smoke/keys-shift-attached | 3 | yes | 0 | yes | yes | yes |
+| smoke/pane-border-indicators | 3 | yes | 0 | yes | yes | yes |
+| smoke/pane-engine-knobs-input | 3 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-continuum | 2 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-tpm-install | 2 | yes | 0 | yes | yes | yes |
+| smoke/positional-minimums | 3 | yes | 0 | yes | yes | yes |
+| smoke/resurrect-save | 2 | yes | 0 | yes | yes | yes |
+| smoke/sensible | 6 | yes | 0 | yes | yes | yes |
+| smoke/source-file-diagnostics | 12 | yes | 0 | yes | yes | yes |
+| smoke/terminal-facts | 2 | yes | 0 | yes | yes | yes |
+| smoke/vim-tmux-navigator | 8 | yes | 0 | yes | yes | yes |
+| smoke/yank | 3 | yes | 0 | yes | yes | yes |
+| source-file-current-file | 24 | yes | 0 | yes | yes | yes |
+| source-file-output | 12 | yes | 0 | yes | yes | yes |
+| stderr-parity | 14 | yes | 0 | yes | yes | yes |
+| strict-key-validation | 40 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+[1;36m==>[0m partial run complete; full summary left unchanged
+exit_status=0

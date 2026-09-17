@@ -1,0 +1,18 @@
+P1000p%begin 1789614677 1 0
+%end 1789614677 1 0
+%session-changed $0 cs
+%begin 1789614677 2 1
+MATRIX-BEGIN
+%end 1789614677 2 1
+%begin 1789614681 3 1
+%end 1789614681 3 1
+%begin 1789614681 4 1
+%end 1789614681 4 1
+%begin 1789614681 5 1
+command exited with status 1
+%error 1789614681 5 1
+%begin 1789614681 6 1
+source-file from standard input is not supported
+%error 1789614681 6 1
+%exit
+\

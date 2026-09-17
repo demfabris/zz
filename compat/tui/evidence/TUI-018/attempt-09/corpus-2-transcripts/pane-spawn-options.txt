@@ -1,0 +1,337 @@
+# Scenario: pane-spawn-options
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/pane-spawn-options.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: set-option -g remain-on-exit on
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: new-window -d -t w -n env-window -e ZZ_PANE_ENV=first -e MALFORMED -e =ignored -e ZZ_PANE_ENV=last /usr/bin/printenv ZZ_PANE_ENV
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: run-shell "sleep 0.2"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: capture-pane -p -S -1 -E -1 -t w:env-window.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    last
+tmux stdout:
+    last
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: split-window -d -t w:main.0 -e ZZ_SPLIT_ENV=first -e ZZ_SPLIT_ENV=last /usr/bin/printenv ZZ_SPLIT_ENV
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: run-shell "sleep 0.2"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: capture-pane -p -S -1 -E -1 -t w:main.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    last
+tmux stdout:
+    last
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: new-window -d -t w -n empty-name-env-window -e =ignored /usr/bin/printenv ""
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: run-shell "sleep 0.2"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: display-message -p -t w:empty-name-env-window.0 #{pane_dead_status}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: split-window -d -t w:empty-name-env-window.0 -e =ignored /usr/bin/printenv ""
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: run-shell "sleep 0.2"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: display-message -p -t w:empty-name-env-window.1 #{pane_dead_status}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: new-window -d -t w -n empty-window -E
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: list-panes -t w:empty-window -F #{pane_dead}:#{pane_pid}:#{pane_start_command}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0::
+tmux stdout:
+    0::
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: new-window -d -t w -n empty-window-argument -E ""
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: list-panes -t w:empty-window-argument -F #{pane_dead}:#{pane_pid}:#{pane_start_command}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0::''
+tmux stdout:
+    0::''
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: split-window -d -t w:main.0 -E
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: display-message -p -t w:main.1 #{pane_dead}:#{pane_pid}:#{pane_start_command}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0::
+tmux stdout:
+    0::
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: split-window -d -t w:main.0 -E ""
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: display-message -p -t w:main.1 #{pane_dead}:#{pane_pid}:#{pane_start_command}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0::''
+tmux stdout:
+    0::''
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: new-window -d -t w -E echo nope
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    command cannot be given for empty pane
+tmux stderr:
+    command cannot be given for empty pane
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: split-window -d -t w:main.0 -E echo nope
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    command cannot be given for empty pane
+tmux stderr:
+    command cannot be given for empty pane
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: new-window -d -t missing: -E echo nope
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    can't find session: missing
+tmux stderr:
+    can't find session: missing
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: split-window -d -t missing: -E echo nope
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    can't find session: missing
+tmux stderr:
+    can't find session: missing
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=25 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

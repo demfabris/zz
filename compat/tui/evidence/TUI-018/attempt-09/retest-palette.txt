@@ -1,0 +1,36 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-mux)
+   Compiling zz-browser v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-browser)
+   Compiling zz-ui v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-ui)
+   Compiling zz-chrome-import v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-chrome-import)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-daemon)
+   Compiling zz-config v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-config)
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-tui)
+   Compiling zz-cli v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-cli)
+   Compiling zz v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 08s
+     Running unittests src/lib.rs (target/debug/deps/zz-7a42bf36c4116941)
+
+running 1 test
+test command::palette::tests::tab_accepts_completion_without_leaving_the_palette ... FAILED
+
+failures:
+
+---- command::palette::tests::tab_accepts_completion_without_leaving_the_palette stdout ----
+
+thread 'command::palette::tests::tab_accepts_completion_without_leaving_the_palette' (150536) panicked at crates/zz/src/command/palette.rs:2269:9:
+assertion `left == right` failed
+  left: "new-w"
+ right: "new-window "
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    command::palette::tests::tab_accepts_completion_without_leaving_the_palette
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 556 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p zz --lib`
+exit_status=101

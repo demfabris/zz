@@ -1,0 +1,9 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.56s
+     Running tests/cli_binary.rs (target/debug/deps/cli_binary-8b5c06dbd1308a7d)
+
+running 1 test
+test daemon_autostart::attaching_new_session_inside_a_later_alias_enters_the_alternate_screen ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 135 filtered out; finished in 8.95s
+
+exit_status=0

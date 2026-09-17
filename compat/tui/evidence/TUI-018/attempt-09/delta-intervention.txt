@@ -1,0 +1,2 @@
+Stopped candidate-3 corpus after stderr timing needed another production change. It is not final proof.
+The interrupted runner copied existing compat/results files; that unvalidated copy is retained under target/alias-candidate-3-unvalidated-transcripts and is not submitted as this attempt evidence.

@@ -1,0 +1,17 @@
+{
+  "selected_primary": 220,
+  "completed_prefix": 64,
+  "prefix_rows_repeated_for_divergences": [
+    "if-shell-background-order.txt",
+    "known/known-main-preset-two-panes.txt",
+    "known/known-pane-scrollbar-columns.txt",
+    "known/known-spread-mixed.txt",
+    "lane2-store.txt"
+  ],
+  "remaining_or_repeated": 161,
+  "shard_sizes": [
+    81,
+    80
+  ],
+  "extra_rows_already_completed": 10
+}

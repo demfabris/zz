@@ -1,0 +1,12 @@
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-mux)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.76s
+     Running unittests src/lib.rs (target/debug/deps/zz_mux-eed3ba838a6892ab)
+
+running 2 tests
+test command::tests::caller_stream_destination_is_checked_without_mutating_panes ... ok
+test command::tests::caller_stream_survives_alias_expansion_and_is_spent_by_the_first_reader ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 534 filtered out; finished in 0.02s
+
+exit_status=0

@@ -1,0 +1,5 @@
+f5e6bbed17d2490f2a92ce6ea442ca6998a7d0fd73f4b4a9a7be88230c050163  crates/zz-cli/src/lib.rs
+831280dfc32b841357ff7446b86c4aaa9e643a08fa4ca9af9553a6d539c79b18  crates/zz-cli/src/control_mode.rs
+7397b3305c41693f82563855fb6d5c08412806bcd4af83a6767803a4da04b439  crates/zz-daemon/src/client.rs
+12528c44b64558e46653720bb0ed943b8a0ef5bd53ae6ef697e055d6d0335f84  crates/zz-daemon/src/daemon.rs
+1595749bf40da360e5ef22dc8801e92a7fb6d0501f73e4ab9469a71d398db16c  crates/zz-mux/src/command.rs

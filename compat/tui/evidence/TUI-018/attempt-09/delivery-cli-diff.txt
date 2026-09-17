@@ -1,0 +1,121 @@
+diff --git a/crates/zz-cli/src/control_mode.rs b/crates/zz-cli/src/control_mode.rs
+index f428a673..82eb84f2 100644
+--- a/crates/zz-cli/src/control_mode.rs
++++ b/crates/zz-cli/src/control_mode.rs
+@@ -30,14 +30,17 @@ pub(crate) fn run(
+     mux_config_files: &[PathBuf],
+     no_start_server: bool,
+     level: u8,
+-    arguments: Vec<zz_protocol::RawText>,
++    arguments: &[zz_protocol::RawText],
+ ) -> ExitCode {
+-    let mut arguments = arguments.into_iter();
+-    let name = arguments
+-        .next()
+-        .map_or_else(|| "new-session".to_owned(), |name| name.to_string());
+-    let command = CommandInvocation::new(name, arguments);
+-    let start_server = !no_start_server && tmux_command_starts_server(&command.name);
++    let commands = if arguments.is_empty() {
++        vec![CommandInvocation::new("new-session", [] as [&str; 0])]
++    } else {
++        super::split_command_chain(arguments)
++    };
++    let start_server = !no_start_server
++        && commands
++            .first()
++            .is_some_and(|command| tmux_command_starts_server(&command.name));
+     if let Some(error) = tmux_label_creation_error(socket_path, socket_source, start_server) {
+         eprintln!("{}", error.message);
+         return ExitCode::FAILURE;
+@@ -76,7 +79,7 @@ pub(crate) fn run(
+     let mut output = ControlWriter::new(stdout.lock(), level >= 2);
+     let result = output
+         .start()
+-        .and_then(|()| drive(&client, command, &mut output));
++        .and_then(|()| drive(&client, commands, &mut output));
+     drop(terminal);
+     match result {
+         Ok(code) => ExitCode::from(code),
+@@ -89,7 +92,7 @@ pub(crate) fn run(
+ 
+ fn drive<W: Write>(
+     client: &Arc<InteractiveClient>,
+-    initial: CommandInvocation,
++    initial: Vec<CommandInvocation>,
+     output: &mut ControlWriter<W>,
+ ) -> io::Result<u8> {
+     let (events, receiver) = mpsc::sync_channel(32);
+@@ -98,11 +101,11 @@ fn drive<W: Write>(
+     let mut state = ControlState::default();
+     let mut pending_stdin = VecDeque::new();
+     ensure_stdin_reader(&events, &mut stdin_started);
+-    let prepared = prepare_command_unit(
++    let mut prepared = prepare_command_unit(
+         client.as_ref(),
+         &receiver,
+         output,
+-        vec![initial],
++        initial,
+         &mut state,
+         &mut pending_stdin,
+         None,
+@@ -138,18 +141,26 @@ fn drive<W: Write>(
+         )?;
+         return Ok(1);
+     }
+-    let initial_result = execute_prepared_command(
+-        client.as_ref(),
+-        &receiver,
+-        output,
+-        prepared.commands.into_iter().next().ok_or_else(|| {
+-            io::Error::new(io::ErrorKind::InvalidData, "missing prepared command")
+-        })?,
+-        0,
+-        &mut state,
+-        &mut pending_stdin,
+-        prepared.pending_return,
+-    )?;
++    let mut initial_result = CommandResult {
++        exit_code: 0,
++        exit: ExitSignal::None,
++        abort_line: false,
++    };
++    for command in prepared.commands {
++        initial_result = execute_prepared_command(
++            client.as_ref(),
++            &receiver,
++            output,
++            command,
++            0,
++            &mut state,
++            &mut pending_stdin,
++            prepared.pending_return.take(),
++        )?;
++        if initial_result.exit.is_some() || initial_result.abort_line {
++            break;
++        }
++    }
+     if initial_result.exit.is_some() {
+         finish_exit(
+             output,
+diff --git a/crates/zz-cli/src/lib.rs b/crates/zz-cli/src/lib.rs
+index cda62038..54838b1e 100644
+--- a/crates/zz-cli/src/lib.rs
++++ b/crates/zz-cli/src/lib.rs
+@@ -226,7 +226,7 @@ pub fn run_startup(socket_path: &Path, options: StartupOptions) -> Startup {
+             &mux_config_files,
+             no_start_server,
+             control_mode,
+-            remaining,
++            &remaining,
+         ));
+     }
+     if let Some(exit) = run_command_mode(
+@@ -1135,6 +1135,7 @@ fn run_command_mode(
+         None
+     };
+     client.enable_stdin();
++    client.set_stderr_handler(print_command_error);
+     let mut output_writer = CommandOutputWriter::default();
+     if let Some(prepared_commands) = prepared_commands {
+         let recover_kill = prepared_commands

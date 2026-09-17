@@ -1,0 +1,353 @@
+# Scenario: source-file-current-file
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/source-file-current-file.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: new-session -d -s cf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: display-message -p [#{current_file}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    []
+tmux stdout:
+    []
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: set-option -s command-alias[60] cfalias=set-option
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: source-file compat/scenarios/source-file-current-file-root.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: show-options -gv @cf-root
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    source-file-current-file-root.conf
+tmux stdout:
+    source-file-current-file-root.conf
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: show-options -gv @cf-child
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    source-file-current-file-child.conf
+tmux stdout:
+    source-file-current-file-child.conf
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: show-options -gv @cf-after-child
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    source-file-current-file-root.conf
+tmux stdout:
+    source-file-current-file-root.conf
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: show-options -gv @cf-alias
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    source-file-current-file-root.conf
+tmux stdout:
+    source-file-current-file-root.conf
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: show-options -gv @cf-hook
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    
+tmux stdout:
+    
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: show-options -gv @cf-if
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    source-file-current-file-root.conf
+tmux stdout:
+    source-file-current-file-root.conf
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: show-options -gv @cf-run
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    source-file-current-file-root.conf
+tmux stdout:
+    source-file-current-file-root.conf
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: display-message -p [#{==:#{@cf-root-full},#{@cf-child-full}}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [0]
+tmux stdout:
+    [0]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: display-message -p [#{current_file}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    []
+tmux stdout:
+    []
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: set-option -g @cf-child untouched
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: set-option -g @cf-root untouched
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: source-file -n compat/scenarios/source-file-current-file-child.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: show-options -gv @cf-child
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    untouched
+tmux stdout:
+    untouched
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: source-file compat/scenarios/source-file-current-file-child.conf compat/scenarios/source-file-current-file-root.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: show-options -gv @cf-child
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    source-file-current-file-child.conf
+tmux stdout:
+    source-file-current-file-child.conf
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: out: show-options -gv @cf-root
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    source-file-current-file-root.conf
+tmux stdout:
+    source-file-current-file-root.conf
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: source-file compat/scenarios/source-file-current-file-missing.conf
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    No such file or directory: compat/scenarios/source-file-current-file-missing.conf
+tmux stderr:
+    No such file or directory: compat/scenarios/source-file-current-file-missing.conf
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: display-message -p [#{current_file}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    []
+tmux stdout:
+    []
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: out: show-options -gv @cf-root
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    source-file-current-file-root.conf
+tmux stdout:
+    source-file-current-file-root.conf
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: set-hook -gu after-set-buffer
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=24 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

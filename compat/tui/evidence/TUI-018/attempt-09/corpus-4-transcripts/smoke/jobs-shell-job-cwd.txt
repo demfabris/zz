@@ -1,0 +1,49 @@
+# Scenario: smoke/jobs-shell-job-cwd
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/smoke/jobs-shell-job-cwd.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: out: set-environment -gu JOBS_SHELL_JOB_CWD
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: run-shell 'sh ~/jobs-shell-job-cwd.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g JOBS_SHELL_JOB_CWD
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    JOBS_SHELL_JOB_CWD=clean:8
+tmux stdout:
+    JOBS_SHELL_JOB_CWD=clean:8
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

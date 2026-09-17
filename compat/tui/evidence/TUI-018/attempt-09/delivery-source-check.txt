@@ -1,0 +1,7 @@
+crates/zz-cli/src/lib.rs: OK
+crates/zz-cli/src/control_mode.rs: OK
+crates/zz-daemon/src/client.rs: OK
+crates/zz-daemon/src/daemon.rs: OK
+crates/zz-mux/src/command.rs: OK
+compat/tui-command-streams.sh: OK
+target/debug/zz-alias4-corrected: OK

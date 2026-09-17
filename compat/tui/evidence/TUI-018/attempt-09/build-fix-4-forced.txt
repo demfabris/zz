@@ -1,0 +1,12 @@
+   Compiling libghostty-vt-sys v0.2.1 (/home/demfabris/dev/zz-c11-alias-fix/third_party/rust/libghostty-vt-sys)
+   Compiling libghostty-vt v0.2.1 (https://github.com/uzaaft/libghostty-rs?rev=46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0#46a9d2ac)
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-terminal)
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-mux)
+   Compiling zz-client v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-client)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-daemon)
+   Compiling zz-config v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-config)
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-tui)
+   Compiling zz-cli v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 43.99s
+exit_status=0

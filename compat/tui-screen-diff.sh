@@ -793,7 +793,7 @@ run_size() {
   side_command tmux set-option -gu status-style >/dev/null 2>&1 || true
 
   clear_both
-  send_both "printf '\\033[31mNAMED\\033[0m \\033[38;5;196mINDEXED\\033[0m \\033[38;2;1;2;3mRGB\\033[0m\\n'"
+  send_both "printf '\\033[31mNAMED\\033[0m \\033[38;5;196mINDEXED\\033[0m \\033[38;5;1mLOW\\033[0m \\033[38;2;1;2;3mRGB\\033[0m\\n'"
   checkpoint colour-classes "$mode"
 
   # THE SERVER THEME OPTION. options-table.c makes `theme` a server option and

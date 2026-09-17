@@ -3077,6 +3077,13 @@ fn write_cell_ground(
     match class {
         ColourClass::Default => write_default_ground(output, ground),
         ColourClass::Palette(index) => write_palette_ground(output, index, ground),
+        ColourClass::IndexedLow(index) => {
+            let base = match ground {
+                Ground::Foreground => 38,
+                Ground::Background => 48,
+            };
+            write!(output, "\x1b[{base};5;{index}m").expect("writing to Vec cannot fail");
+        }
         ColourClass::Resolved if colour == default => write_default_ground(output, ground),
         ColourClass::Rgb | ColourClass::Resolved => write_rgb_ground(output, colour, ground),
     }

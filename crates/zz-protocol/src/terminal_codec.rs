@@ -4784,7 +4784,7 @@ mod tests {
                 UnderlineStyle::None,
             )
             .with_classes(
-                zz_terminal::ColourClass::Palette(12),
+                zz_terminal::ColourClass::IndexedLow(12),
                 zz_terminal::ColourClass::Default,
             ),
         );
@@ -4795,7 +4795,7 @@ mod tests {
         dictionary.grapheme_offsets =
             Arc::from([0, u32::try_from(grapheme.len()).expect("small fixture")]);
         Arc::make_mut(&mut current.cells)[4] =
-            PackedCell::new(GRAPHEME_TABLE_BIT, 1, CellWidth::Narrow);
+            PackedCell::new(GRAPHEME_TABLE_BIT, 1, CellWidth::Narrow).with_tab(5);
         current.kitty_placements = Arc::from([KittyPlacement {
             image_id: 42,
             image_generation: 3,

@@ -1,0 +1,12 @@
+ok    matrix-direct-buffer-closed
+ok    matrix-direct-closed-unused
+ok    matrix-alias-buffer-closed
+ok    matrix-alias-closed-unused
+ok    matrix-file-buffer-closed
+ok    matrix-file-closed-unused
+ok    matrix-direct-closed
+ok    matrix-alias-closed
+ok    matrix-file-closed
+matrix: 9 asserted, 0 failures, 0 recorded:TUI-018, 0 decided:TUI-018, 0 self-check failures
+
+exit_status=0

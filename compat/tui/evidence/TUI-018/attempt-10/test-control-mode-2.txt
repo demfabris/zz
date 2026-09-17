@@ -1,0 +1,58 @@
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-mux)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-daemon)
+   Compiling zz-config v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-config)
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-tui)
+   Compiling zz-cli v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.99s
+     Running unittests src/lib.rs (target/debug/deps/zz_cli-f965dc967ecbbed2)
+
+running 44 tests
+test control_mode::tests::a_command_block_carries_the_output_bytes_it_was_given ... ok
+test control_mode::tests::authoritative_caller_detach_discards_return_observed_while_it_waits ... ok
+test control_mode::tests::blank_and_eof_discard_queued_and_future_pane_output_only ... ok
+test control_mode::tests::clean_control_exit_releases_only_the_initiating_alias ... ok
+test control_mode::tests::config_errors_route_on_their_payload_type_and_not_on_their_prose ... ok
+test control_mode::tests::blank_and_eof_suppress_layout_notifications_while_live_clients_keep_them ... ok
+test control_mode::tests::control_command_guard_status_is_independent_of_its_terminator ... ok
+test control_mode::tests::control_command_guards_defer_fifo_with_their_own_flags ... ok
+test control_mode::tests::control_command_output_follows_the_guard_raw_and_command_mode_stays_inside ... ok
+test control_mode::tests::control_lines_expand_tildes_from_the_daemon_answer ... ok
+test control_mode::tests::control_lines_expand_variables_from_the_daemon_global_environment ... ok
+test control_mode::tests::control_source_file_events_defer_raw_errors_and_consume_hidden_numbers ... ok
+test control_mode::tests::daemon_source_read_failures_keep_their_own_channel ... ok
+test control_mode::tests::detach_and_server_stop_keep_distinct_exit_signals ... ok
+test control_mode::tests::double_control_wraps_the_stream ... ok
+test control_mode::tests::dropping_a_double_writer_without_exit_still_terminates_the_dcs ... ok
+test control_mode::tests::expansion_answers_are_matched_by_kind_and_request_id ... ok
+test control_mode::tests::generic_nonzero_success_ends_and_continues ... ok
+test control_mode::tests::initial_eof_waits_behind_every_queued_input ... ok
+test control_mode::tests::input_error_keeps_pane_output_enabled ... ok
+test control_mode::tests::layout_notifications_ignore_windows_only_linked_to_another_session ... ok
+test control_mode::tests::layout_notifications_use_snapshot_dumps_and_raw_flag_order ... ok
+test control_mode::tests::legacy_diagnostic_errors_still_defer_after_open_commands ... ok
+test control_mode::tests::legacy_nested_source_warning_defers_a_plain_error_without_config_error ... ok
+test control_mode::tests::logical_command_holds_server_exit_until_child_events_finish ... ok
+test control_mode::tests::message_escaping_is_separate_from_output_escaping ... ok
+test control_mode::tests::notifications_defer_while_a_block_is_open ... ok
+test control_mode::tests::opaque_commands_render_children_and_only_fallback_before_them ... ok
+test control_mode::tests::open_guard_holds_server_exit_until_deferred_children_finish ... ok
+test control_mode::tests::output_escaping_preserves_del_and_raw_eight_bit_bytes ... ok
+test control_mode::tests::pane_output_state_and_flags_follow_the_control_event_channel ... ok
+test control_mode::tests::pending_return_waits_for_input_observed_before_it ... ok
+test control_mode::tests::parser_distinguishes_return_ignores_chains_and_errors ... ok
+test control_mode::tests::preparation_error_releases_eof_after_the_last_queued_input ... ok
+test control_mode::tests::prepared_response_matching_ignores_stale_request_ids ... ok
+test control_mode::tests::separate_nested_source_warnings_defer_separate_error_frames ... ok
+test control_mode::tests::serializer_keeps_frame_identity_payload_and_error_shapes ... ok
+test control_mode::tests::standalone_diagnostics_only_set_source_read_return_codes ... ok
+test control_mode::tests::startup_config_causes_are_immediate_and_prefix_each_element_once ... ok
+test control_mode::tests::subscription_changes_render_the_three_pin_shapes_byte_exact ... ok
+test control_mode::tests::termination_closes_pending_frame_and_releases_deferred_exit ... ok
+test control_mode::tests::typed_error_messages_use_standalone_frames_without_text_classification ... ok
+test control_mode::tests::wait_exit_releases_on_empty_line_and_eof ... ok
+test control_mode::tests::window_notifications_use_live_membership_instead_of_the_event_session ... ok
+
+test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 63 filtered out; finished in 0.00s
+
+
+exit_status=0

@@ -1,0 +1,12 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m checking pinned plugin corpus
+[1;36m==>[0m checking out tpm at e261deb1b47614eed3400089ce7197dc68acc4eb
+fatal: Unable to create '/home/demfabris/dev/zz-c11-alias-fix/compat/.cache/plugins/tpm/.git/index.lock': File exists.
+
+Another git process seems to be running in this repository, or the lock file may be stale
+[1;31merror:[0m fetch-corpus.sh failed with exit 128
+
+exit_status=1

@@ -1,0 +1,11 @@
+{
+  "selection": 241,
+  "shards": [
+    61,
+    60,
+    60,
+    60
+  ],
+  "commands": "source-file,load-buffer,save-buffer,show-buffer,display-message,split-window,run-shell,set-option,send-keys,send-text,agent-send",
+  "binary": "target/debug/zz-alias5-final"
+}

@@ -1,0 +1,3 @@
+    PID    PPID     ELAPSED COMMAND
+4027522 4027512       02:28 /home/demfabris/dev/zz-c11-alias-fix/target/debug/zz_cli -f /tmp/zz-cli-gQMmtl/empty.conf -S /tmp/zz-cli-gQMmtl/daemon.sock -C new-session -s wait-exit exec /bin/cat
+Stopped only this lane’s stalled wait-exit test child after more than two minutes; its forced failure is not a passing test.

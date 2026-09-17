@@ -1,0 +1,8 @@
+a8fb0f913a88e1896ad8f65dc029883fc47ac75cfc65c5c08af428273a6ca021  target/debug/zz-alias5-final
+0eba837ae1712538e15a69c4f132807e1df8e8d4852be934cfb6886437fc14de  target/debug/zz-alias5-desktop
+191413f870e2352acc27921614300c47f67900642722bd2aced149de189f6e2e  target/debug/zz-alias5-main
+3b37c77cb051013f71e09a6f51d2214eba76d2ab6b5ea1a048f4c0db3836b9e1  compat/tui-command-streams.sh
+d9fad50a8c3c6d7d57821ad7ef0424a57f18194f359196a1e2f59d7933040025  crates/zz-daemon/src/client.rs
+8896f396510d9a0251680c9175edbdf3fce2c6a9fade398ed3249ae0f97a1de3  crates/zz-daemon/src/daemon.rs
+1d6c11d1dffcd8b7134f8c94412259e21dd1025772741a66396bf215e0066e69  crates/zz-cli/src/control_mode.rs
+aaac26f119f34ad3dfb9c9e2ee789a35a02a482c7df923a78b1a8fd8aa0283b1  crates/zz-mux/src/command.rs

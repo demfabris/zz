@@ -1,0 +1,17 @@
+P1000p%begin 1789644299 1 0
+%end 1789644299 1 0
+%session-changed $0 cs
+%begin 1789644299 2 1
+MATRIX-BEGIN
+%end 1789644299 2 1
+%begin 1789644299 3 1
+%end 1789644299 3 1
+%begin 1789644299 4 1
+%end 1789644299 4 1
+%begin 1789644299 5 1
+%end 1789644299 5 1
+Bad file descriptor: -
+%begin 1789644299 7 1
+%end 1789644299 7 1
+%exit
+\

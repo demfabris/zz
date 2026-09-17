@@ -1,0 +1,91 @@
+      case matrix-direct-buffer-spent
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-direct-buffer-spent
+compat/tui-command-streams.sh: line 1226: 2560688 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-split-no-space
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < no space for a new pane
+DIFF  matrix-direct-split-no-space
+compat/tui-command-streams.sh: line 1226: 2562865 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+compat/tui-command-streams.sh: line 1226: 2564582 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-split-pending
+      state differs
+        4,5c4,5
+        < pending=0:3
+        < final=0:3
+        ---
+        > pending=1:2
+        > final=1:2
+DIFF  matrix-direct-split-pending
+      case matrix-direct-buffer-closed
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 13 bytes)
+        0a1
+        > MATRIX-AFTER
+      stderr differs
+        1d0
+        < [err] evsig_cb: recv: Bad file descriptor
+      state differs
+        3c3
+        < tail=
+        ---
+        > tail=yes
+DIFF  matrix-direct-buffer-closed
+ok    matrix-direct-closed-unused
+ok    matrix-alias-buffer-spent
+compat/tui-command-streams.sh: line 1226: 2568728 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-alias-split-no-space
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < no space for a new pane
+DIFF  matrix-alias-split-no-space
+compat/tui-command-streams.sh: line 1226: 2570644 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+compat/tui-command-streams.sh: line 1226: 2571967 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-alias-split-pending
+      state differs
+        4,5c4,5
+        < pending=0:3
+        < final=0:3
+        ---
+        > pending=1:2
+        > final=1:2
+DIFF  matrix-alias-split-pending
+      case matrix-alias-buffer-closed
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 13 bytes)
+        0a1
+        > MATRIX-AFTER
+      stderr differs
+        1d0
+        < [err] evsig_cb: recv: Bad file descriptor
+      state differs
+        3c3
+        < tail=
+        ---
+        > tail=yes
+DIFF  matrix-alias-buffer-closed
+ok    matrix-alias-closed-unused
+      case matrix-file-buffer-spent
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1d0
+        < Bad file descriptor: -
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-file-buffer-spent
+exit_status=143

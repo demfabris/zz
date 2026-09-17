@@ -1,0 +1,741 @@
+case=source-file-applies
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one alpha
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one alpha
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+case=source-file-applied-value
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+616c7068610a
+zz stderr hex
+tmux stdout hex
+616c7068610a
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one alpha
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one alpha
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+case=source-file-closed-stdin
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one alpha
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one alpha
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+case=source-file-unknown-command
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+2d3a313a20756e6b6e6f776e20636f6d6d616e643a20626f6775732d7a7a
+63732d636f6d6d616e640a
+zz stderr hex
+tmux stdout hex
+2d3a313a20756e6b6e6f776e20636f6d6d616e643a20626f6775732d7a7a
+63732d636f6d6d616e640a
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one alpha
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one alpha
+O @zzcs-two 
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+case=source-file-cancelled-midline
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+656d7074792076616c75650a
+tmux stdout hex
+tmux stderr hex
+656d7074792076616c75650a
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one alpha
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one alpha
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+case=source-file-parse-only
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one alpha
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one alpha
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse 
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+case=source-file-verbose
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+2d3a313a207365742d6f7074696f6e202d6720407a7a63732d7061727365
+2064656c74610a
+zz stderr hex
+tmux stdout hex
+2d3a313a207365742d6f7074696f6e202d6720407a7a63732d7061727365
+2064656c74610a
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one alpha
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one alpha
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel 
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+case=source-file-quiet
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one alpha
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one alpha
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+case=source-file-twice-one-stream
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+4261642066696c652064657363726970746f723a202d0a
+tmux stdout hex
+tmux stderr hex
+4261642066696c652064657363726970746f723a202d0a
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one zeta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one zeta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+case=source-file-twice-one-stream-value
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+7a6574610a
+zz stderr hex
+tmux stdout hex
+7a6574610a
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one zeta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one zeta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+case=source-file-dash-and-missing-path
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+4e6f20737563682066696c65206f72206469726563746f72793a202f6e6f
+6e6578697374656e742d7a7a63732e636f6e660a
+tmux stdout hex
+tmux stderr hex
+4e6f20737563682066696c65206f72206469726563746f72793a202f6e6f
+6e6578697374656e742d7a7a63732e636f6e660a
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+case=source-file-empty-stream
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+case=display-message-into-a-running-pane
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+70616e65206973206e6f7420656d7074790a
+tmux stdout hex
+tmux stderr hex
+70616e65206973206e6f7420656d7074790a
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+case=split-window-builds-and-writes
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x12
+P cs:0.1 dead=0 process=no 80x11
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+C 1 FIRST-WRITE|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x12
+P cs:0.1 dead=0 process=no 80x11
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+C 1 FIRST-WRITE|
+case=display-message-into-the-empty-pane
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x12
+P cs:0.1 dead=0 process=no 80x11
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+C 1 FIRST-WRITE|SECOND-WRITE|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x12
+P cs:0.1 dead=0 process=no 80x11
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+C 1 FIRST-WRITE|SECOND-WRITE|
+case=display-message-binary-bytes
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x12
+P cs:0.1 dead=0 process=no 80x11
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+C 1 FIRST-WRITE|SECOND-WRITE|BYTES-M-CM-)-M-oM-?M-=--END|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x12
+P cs:0.1 dead=0 process=no 80x11
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+C 1 FIRST-WRITE|SECOND-WRITE|BYTES-M-CM-)-M-oM-?M-=--END|
+case=display-message-closed-stdin
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x12
+P cs:0.1 dead=0 process=no 80x11
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+C 1 FIRST-WRITE|SECOND-WRITE|BYTES-M-CM-)-M-oM-?M-=--END|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x12
+P cs:0.1 dead=0 process=no 80x11
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+C 1 FIRST-WRITE|SECOND-WRITE|BYTES-M-CM-)-M-oM-?M-=--END|
+case=display-message-missing-target
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x12
+P cs:0.1 dead=0 process=no 80x11
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+C 1 FIRST-WRITE|SECOND-WRITE|BYTES-M-CM-)-M-oM-?M-=--END|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x12
+P cs:0.1 dead=0 process=no 80x11
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+C 1 FIRST-WRITE|SECOND-WRITE|BYTES-M-CM-)-M-oM-?M-=--END|
+case=pane-input-restored
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+case=split-window-prints-the-new-pane
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+31206e6f2d7069640a
+zz stderr hex
+tmux stdout hex
+31206e6f2d7069640a
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x12
+P cs:0.1 dead=0 process=no 80x11
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+C 1 PRINTED|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x12
+P cs:0.1 dead=0 process=no 80x11
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+C 1 PRINTED|
+case=split-window-print-restored
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+zz stderr hex
+tmux stdout hex
+tmux stderr hex
+zz state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|
+tmux state
+S cs 1
+P cs:0.0 dead=0 process=yes 80x24
+O @zzcs-after 
+O @zzcs-replay 
+O @zzcs-one eta
+O @zzcs-two beta
+O @zzcs-three 
+O @zzcs-parse delta
+O @zzcs-cancel epsilon
+O @zzcs-before 
+O @zzcs-control 
+C 0 $|

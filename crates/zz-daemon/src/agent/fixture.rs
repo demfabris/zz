@@ -12,11 +12,11 @@ use agent_client_protocol::{
     Agent, Client as AcpClientRole, ConnectTo, ConnectionTo,
     schema::v1::{
         AgentCapabilities, CancelRequestNotification, ContentBlock, ContentChunk,
-        InitializeRequest, InitializeResponse, LoadSessionRequest, NewSessionRequest,
-        NewSessionResponse, PermissionOption, PermissionOptionId, PermissionOptionKind,
-        PromptRequest, PromptResponse, RequestPermissionRequest, SessionNotification,
-        SessionUpdate, StopReason, TextContent, ToolCallStatus, ToolCallUpdate,
-        ToolCallUpdateFields, ToolKind,
+        InitializeRequest, InitializeResponse, LoadSessionRequest, LoadSessionResponse,
+        NewSessionRequest, NewSessionResponse, PermissionOption, PermissionOptionId,
+        PermissionOptionKind, PromptRequest, PromptResponse, RequestPermissionRequest,
+        SessionNotification, SessionUpdate, StopReason, TextContent, ToolCallStatus,
+        ToolCallUpdate, ToolCallUpdateFields, ToolKind,
     },
 };
 use zz_protocol::{AgentAutoApprove, AgentProvider};
@@ -31,6 +31,7 @@ use crate::agent::{
 pub(crate) enum Behavior {
     /// One message chunk, then the turn ends.
     Chunk,
+    Echo,
     /// A tool call that asks permission before it settles, declaring no kind.
     AskPermission,
     /// The same, with the tool kind the risk tier judges.
@@ -88,7 +89,18 @@ pub(crate) fn fixture_agent(behavior: Behavior, load: bool) -> impl ConnectTo<Ac
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async |_: LoadSessionRequest, responder, _| {
+            async move |request: LoadSessionRequest,
+                        responder,
+                        connection: ConnectionTo<AcpClientRole>| {
+                if behavior == Behavior::Echo {
+                    connection.send_notification(SessionNotification::new(
+                        request.session_id,
+                        SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Text(
+                            TextContent::new("loaded user history"),
+                        ))),
+                    ))?;
+                    return responder.respond(LoadSessionResponse::new());
+                }
                 responder.respond_with_error(
                     agent_client_protocol::Error::invalid_params()
                         .data("fixture session cannot be loaded"),
@@ -114,6 +126,14 @@ pub(crate) fn fixture_agent(behavior: Behavior, load: bool) -> impl ConnectTo<Ac
                         connection: ConnectionTo<AcpClientRole>| {
                 let turn = prompts.fetch_add(1, Ordering::Relaxed);
                 let session_id = prompt.session_id.clone();
+                if behavior == Behavior::Echo {
+                    for content in prompt.prompt {
+                        connection.send_notification(SessionNotification::new(
+                            session_id.clone(),
+                            SessionUpdate::UserMessageChunk(ContentChunk::new(content)),
+                        ))?;
+                    }
+                }
                 connection.send_notification(SessionNotification::new(
                     session_id.clone(),
                     SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
@@ -121,7 +141,9 @@ pub(crate) fn fixture_agent(behavior: Behavior, load: bool) -> impl ConnectTo<Ac
                     ))),
                 ))?;
                 match behavior {
-                    Behavior::Chunk => responder.respond(PromptResponse::new(StopReason::EndTurn)),
+                    Behavior::Chunk | Behavior::Echo => {
+                        responder.respond(PromptResponse::new(StopReason::EndTurn))
+                    }
                     Behavior::Hang => Ok(()),
                     // A real adapter answers the prompt from a task of its own;
                     // awaiting the permission inline would wedge the fixture's

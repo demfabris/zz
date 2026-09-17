@@ -25,9 +25,9 @@ use agent_client_protocol::{
         v1::{
             AgentNotification, AuthMethod, AuthenticateRequest, CancelNotification,
             ClientCapabilities, ClientSessionCapabilities, CloseSessionRequest, ContentBlock,
-            DeleteSessionRequest, ImageContent, Implementation, InitializeRequest,
-            ListSessionsRequest, LoadSessionRequest, NewSessionRequest, PermissionOption,
-            PermissionOptionKind, PromptRequest, RequestPermissionOutcome,
+            ContentChunk, DeleteSessionRequest, ImageContent, Implementation, InitializeRequest,
+            ListSessionsRequest, LoadSessionRequest, MessageId, NewSessionRequest,
+            PermissionOption, PermissionOptionKind, PromptRequest, RequestPermissionOutcome,
             RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
             SessionConfigOptionValue, SessionConfigOptionsCapabilities, SessionId as AcpSessionId,
             SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest, TextContent,
@@ -154,6 +154,7 @@ struct RuntimeRouting {
     staged_update_bytes: usize,
     staged_overflowed: bool,
     pending_new_session: bool,
+    user_echo_turn: Option<(String, u64)>,
     permissions: HashMap<u64, PendingPermissionResponder>,
     pending_permission_bytes: usize,
     /// Sessions whose updates are recorded. A session only enters once its
@@ -163,6 +164,16 @@ struct RuntimeRouting {
 }
 
 impl RuntimeRouting {
+    fn finish_prompt(&mut self, turn_id: u64) {
+        if self
+            .user_echo_turn
+            .as_ref()
+            .is_some_and(|(_, turn)| *turn == turn_id)
+        {
+            self.user_echo_turn = None;
+        }
+    }
+
     fn take_permission(&mut self, request_id: u64) -> Option<PendingPermissionResponder> {
         let pending = self.permissions.remove(&request_id)?;
         self.pending_permission_bytes = self.pending_permission_bytes.saturating_sub(pending.bytes);
@@ -623,6 +634,21 @@ pub(crate) async fn run_agent_connection(
                 match notification {
                     AgentNotification::SessionNotification(notification) => {
                         let session_id = notification.session_id.0.to_string();
+                        {
+                            let routing = notification_routing.lock();
+                            if matches!(&notification.update, SessionUpdate::UserMessageChunk(_))
+                                && !routing.staged_updates.contains_key(&session_id)
+                                && routing.user_echo_turn.as_ref().is_some_and(|(session, _)| session == &session_id)
+                            {
+                                return Ok(());
+                            }
+                        }
+                        let payload = update_payload(&notification.update)?;
+                        if validate_payload(&payload)? > MAX_AGENT_RESULT_BYTES {
+                            return Err(agent_client_protocol::Error::internal_error().data(format!(
+                                "agent stream item exceeds the {MAX_AGENT_RESULT_BYTES} byte limit"
+                            )));
+                        }
                         let (update, live, journaled) = {
                             let mut routing = notification_routing.lock();
                             let update = match routing.stage(&session_id, notification.update) {
@@ -636,7 +662,6 @@ pub(crate) async fn run_agent_connection(
                             )
                         };
                         if live {
-                            let payload = update_payload(&update)?;
                             if journaled {
                                 record_update(
                                     notification_journal.as_deref(),
@@ -838,6 +863,7 @@ pub(crate) async fn run_agent_connection(
                                 ))?;
                             }
                             cancel_pending_permissions(&control_routing, &control_events).await?;
+                            control_routing.lock().finish_prompt(turn_id);
                             send_payload(
                                 &control_events,
                                 AgentStreamPayload::PromptFinished {
@@ -1332,10 +1358,7 @@ pub(crate) async fn run_agent_connection(
                             continue;
                         };
                         let prompt_events = event_tx.clone();
-                        let request = connection.send_request(PromptRequest::new(
-                            session_id,
-                            prompt_blocks(prompt),
-                        ));
+                        let blocks = prompt_blocks(prompt);
                         let (cancel_tx, cancel_rx) = async_channel::bounded::<()>(1);
                         let (done_tx, done_rx) = async_channel::bounded::<()>(1);
                         let deferred = {
@@ -1372,7 +1395,18 @@ pub(crate) async fn run_agent_connection(
                             .await?;
                             continue;
                         }
+                        let message_id = MessageId::new(format!("zz-prompt-{turn_id}-{:016x}", getrandom::u64().map_err(|error| {
+                            agent_client_protocol::Error::internal_error().data(error.to_string())
+                        })?));
+                        for update in prompt_updates(&blocks, &message_id) {
+                            let payload = update_payload(&update)?;
+                            record_update(journal.as_deref(), provider, &session_id.0, &update);
+                            send_payload(&event_tx, payload).await?;
+                        }
+                        routing.lock().user_echo_turn = Some((session_id.0.to_string(), turn_id));
+                        let request = connection.send_request(PromptRequest::new(session_id, blocks));
                         let task_prompts = Arc::clone(&prompt_controls);
+                        let task_routing = Arc::clone(&routing);
                         let spawned = connection.spawn(async move {
                             let completed = futures_lite::future::race(
                                 async { Some(request.block_task().await) },
@@ -1383,6 +1417,7 @@ pub(crate) async fn run_agent_connection(
                             )
                             .await;
                             task_prompts.lock().pending.remove(&turn_id);
+                            task_routing.lock().finish_prompt(turn_id);
                             let _ = done_tx.try_send(());
                             let Some(completed) = completed else {
                                 return Ok(());
@@ -1620,6 +1655,12 @@ fn validate_payload(payload: &AgentStreamPayload) -> Result<usize, agent_client_
     })?;
     let limit = match payload {
         AgentStreamPayload::PermissionRequested { .. } => MAX_AGENT_PERMISSION_BYTES,
+        AgentStreamPayload::Update { update }
+            if update.get("sessionUpdate").and_then(Value::as_str)
+                == Some("user_message_chunk") =>
+        {
+            MAX_AGENT_UPDATES_BYTES
+        }
         _ => MAX_AGENT_RESULT_BYTES,
     };
     if bytes.len() > limit {
@@ -1761,6 +1802,34 @@ fn prompt_blocks(prompt: AgentPrompt) -> Vec<ContentBlock> {
     blocks
 }
 
+fn prompt_updates(blocks: &[ContentBlock], message_id: &MessageId) -> Vec<SessionUpdate> {
+    let mut updates = Vec::new();
+    for block in blocks {
+        let chunks = match block {
+            ContentBlock::Text(text) => {
+                let mut remaining = text.text.as_str();
+                let mut chunks = Vec::new();
+                while !remaining.is_empty() {
+                    let mut end = remaining.len().min(MAX_AGENT_RESULT_BYTES / 8);
+                    while !remaining.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    chunks.push(ContentBlock::Text(TextContent::new(&remaining[..end])));
+                    remaining = &remaining[end..];
+                }
+                chunks
+            }
+            _ => vec![block.clone()],
+        };
+        for content in chunks {
+            let mut chunk = ContentChunk::new(content);
+            chunk.message_id = Some(message_id.clone());
+            updates.push(SessionUpdate::UserMessageChunk(chunk));
+        }
+    }
+    updates
+}
+
 fn capped(mut text: String, max_bytes: usize) -> String {
     truncate_payload(&mut text, max_bytes);
     text
@@ -1862,6 +1931,42 @@ mod tests {
         assert_eq!(image.data, "eno=");
 
         assert!(prompt_blocks(AgentPrompt::default()).is_empty());
+    }
+
+    #[test]
+    fn submitted_prompt_updates_preserve_large_text_and_images_in_journal_replay() {
+        let directory = tempfile::tempdir().expect("journal directory");
+        let journal = AgentJournal::open(directory.path()).expect("journal");
+        let text = "\u{1}🦀".repeat(MAX_AGENT_RESULT_BYTES / 5);
+        let blocks = prompt_blocks(AgentPrompt {
+            owner: ClientInstanceId::default(),
+            text: text.clone(),
+            images: vec![AgentImage {
+                format: "image/png".to_owned(),
+                data: vec![42; zz_protocol::MAX_AGENT_PROMPT_BYTES - text.len()],
+            }],
+        });
+        let updates = prompt_updates(&blocks, &MessageId::new("large-prompt"));
+        let mut reconstructed = String::new();
+        for update in &updates {
+            let SessionUpdate::UserMessageChunk(chunk) = update else {
+                unreachable!();
+            };
+            if let ContentBlock::Text(text) = &chunk.content {
+                reconstructed.push_str(&text.text);
+            }
+            assert!(update_payload(update).is_ok());
+            record_update(Some(&journal), AgentProvider::Codex, "saved", update);
+        }
+        assert_eq!(reconstructed, text);
+        let replay = journal_replay(Some(&journal), AgentProvider::Codex, Some("saved"));
+        assert_eq!(replay.len(), updates.len());
+        for (replayed, update) in replay.iter().zip(&updates) {
+            assert_eq!(
+                json_of(&replayed.payload().expect("replayed payload")).expect("json"),
+                json_of(&update_payload(update).expect("payload")).expect("json"),
+            );
+        }
     }
 
     #[test]

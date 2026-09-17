@@ -3655,6 +3655,49 @@ mod tests {
     }
 
     #[gpui::test]
+    fn submitted_and_queued_user_messages_survive_session_switch_replay(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(44);
+        let user = |text: &str, id: &str| {
+            let mut chunk = ContentChunk::new(ContentBlock::Text(TextContent::new(text)));
+            chunk.message_id = Some(MessageId::new(id));
+            AgentStreamPayload::Update {
+                update: json(&SessionUpdate::UserMessageChunk(chunk)),
+            }
+        };
+        let items = vec![
+            item(1, user("first", "zz-prompt-1")),
+            item(2, chunk_update("answer one", "answer-1")),
+            item(3, turn_finished(StopReason::EndTurn)),
+            item(4, user("second", "zz-prompt-2")),
+            item(5, chunk_update("answer two", "answer-2")),
+            item(6, turn_finished(StopReason::EndTurn)),
+        ];
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                for provider in [AgentProvider::Codex, AgentProvider::ClaudeCode] {
+                    ready_pane(controller, pane);
+                    controller.panes.get_mut(&pane).expect("pane").provider = provider;
+                    controller.prompt(pane, "first", Vec::new(), cx).expect("first prompt");
+                    controller.prompt(pane, "second", Vec::new(), cx).expect("queued prompt");
+                    controller.apply_stream_items(pane, items.clone(), cx);
+                    let expected = controller.pane_entries(pane).expect("entries").0.to_vec();
+                    assert_eq!(expected.len(), 4);
+                    assert!(matches!(&expected[0], AgentThreadEntry::User { markdown, .. } if markdown == "first"));
+                    assert!(matches!(&expected[2], AgentThreadEntry::User { markdown, .. } if markdown == "second"));
+                    controller.retain_panes(&BTreeSet::new(), cx);
+                    ready_pane(controller, pane);
+                    controller.panes.get_mut(&pane).expect("pane").provider = provider;
+                    controller.apply_stream_items(pane, items.clone(), cx);
+                    controller.apply_stream_items(pane, items.clone(), cx);
+                    assert_eq!(controller.pane_entries(pane).expect("replayed entries").0, expected);
+                    controller.retain_panes(&BTreeSet::new(), cx);
+                }
+            });
+        });
+    }
+
+    #[gpui::test]
     fn an_unknown_update_mid_message_does_not_break_its_coalescing(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(41);

@@ -4,7 +4,7 @@ title: Native Agent pane
 description: The daemon-addressable Agent pane, its daemon-owned ACP v1 runtime, flat transcript, approvals, session controls, and restore metadata.
 resource: crates/zz/src/agent/controller.rs
 tags: [agent, gpui, markdown, mermaid, acp, pane, sessions, persistence, keyboard]
-timestamp: 2026-09-13T00:00:00-03:00
+timestamp: 2026-09-16T22:03:45Z
 ---
 
 # Overview
@@ -67,10 +67,14 @@ agent therefore opens the new pane where the user last was rather than at the pr
 a picker that outlived its donor re-resolves at materialization instead of losing the directory.
 Terminal splits go through the same helper, so both paths follow one rule.
 
-`AppView` reconciles visible `AgentView` entities by `PaneId`, while the shared controller retains
-the complete set of Agent panes from every daemon session. Switching attached sessions therefore
-drops only the inactive view entity, and the ACP session itself is untouched either way — it is not
-the client's to drop. Removing the actual daemon pane is what ends a conversation: the host sends
+`AppView` reconciles `AgentView` entities by `PaneId`. Its `retained_agents` and
+`register_agent_panes` paths retain controller threads only for the attached session, including
+every window in that session. Switching attached sessions drops the previous session's local
+transcripts and viewports; returning reconstructs them from daemon replay. The daemon keeps the
+ACP session alive. The daemon emits and journals submitted prompts as `UserMessageChunk` updates,
+so replay includes user text and attachments even when the adapter never echoes them. The desktop
+suppresses that echo for its locally inserted prompt; queued prompts arrive when dispatched.
+Removing the actual daemon pane is what ends a conversation: the host sends
 `session/close` when supported (otherwise `session/cancel`), resolves pending permission requests as
 cancelled, and stops that pane's agent process.
 
@@ -993,7 +997,8 @@ A daemon restart takes the pane and its adapter with it, and there is no on-disk
 resurrect them from.
 
 `session/load` is preferred where it exists, but it is no longer the only durability. `AgentJournal`
-(`zz-daemon/src/agent/journal.rs`) appends every inbound `session/update` verbatim to a per-session
+(`zz-daemon/src/agent/journal.rs`) appends accepted adapter updates and daemon-generated user
+message updates to a per-session
 JSONL file under `<data>/zz/daemon/agent-journal` . a directory the daemon owns, deliberately
 separate from the GUI's `<data>/zz` so the two never collide on one machine . with user-only
 directory and file modes. Adapters own the session-ID string, so it is jailed into a file stem before
@@ -1025,9 +1030,11 @@ ring: a client asking for a sequence older than the pane's 18 MiB in-memory ring
 adapter metadata, `SessionReset { restoring: true }`, the journalled updates, and `SessionReady` as
 freshly numbered items.
 
-What is journalled is what the agent said. Prompts are not written as requests (only whatever the
-agent echoes back as a `UserMessageChunk`), permission exchanges never reach the journal, and neither
-does authentication material. The reducer's own `MAX_TOOL_PAYLOAD_BYTES` / `MAX_DIFF_SIDE_BYTES` caps
+Before dispatching a prompt, `runtime.rs` emits and journals its text and images as standard
+`UserMessageChunk` updates with one message ID per prompt. Text is split on UTF-8 boundaries;
+images fit within the existing stream-frame limit. The runtime suppresses active-turn adapter
+user echoes while preserving user messages replayed by `session/load`. Permission exchanges
+and authentication material never reach the journal. The reducer's own `MAX_TOOL_PAYLOAD_BYTES` / `MAX_DIFF_SIDE_BYTES` caps
 are client-side and in-memory only: the journal stores what arrived, chunk-coalescing aside,
 subject solely to its own ceilings. A journal that cannot be opened is not fatal . the runtime simply runs without
 one, and the pane falls back to whatever the provider can replay.

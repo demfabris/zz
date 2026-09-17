@@ -105782,6 +105782,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 thread::sleep(Duration::from_millis(10));
             };
             assert!(screen.contains("> review this"), "{screen:?}");
+            assert_eq!(screen.matches("> review this").count(), 1, "{screen:?}");
 
             let last = run(&["show-last-output", "-t", &target])
                 .expect("OSC 133 marks delimit the turn")
@@ -106346,8 +106347,14 @@ bind - split-window -v -c "#{pane_current_path}"
             );
             assert_eq!(
                 replayed.iter().filter_map(chunk_text).collect::<Vec<_>>(),
-                ["turn 0", "turn 1"]
+                ["go", "turn 0", "again", "turn 1"]
             );
+            assert!(replayed.iter().any(|item| matches!(
+                &item.payload,
+                AgentStreamPayload::Update { update }
+                    if update["sessionUpdate"] == "user_message_chunk"
+                        && update["content"]["data"] == "eno="
+            )));
         }
     }
 }

@@ -1998,7 +1998,7 @@ mod tests {
         assert!(
             matches!(&payloads[2], AgentStreamPayload::SessionReady { session_id, .. } if session_id == "fixture-session")
         );
-        assert_eq!(chunk_texts(&payloads), ["turn 0"]);
+        assert_eq!(chunk_texts(&payloads), ["go", "turn 0"]);
 
         let seqs = fixture
             .recorder
@@ -2014,6 +2014,92 @@ mod tests {
         assert_eq!(state.last_seq, seqs.len() as u64);
         assert_eq!(state.queued_prompts, 0);
         fixture.close();
+    }
+
+    #[test]
+    fn submitted_prompts_are_streamed_and_journalled_once_with_or_without_adapter_echoes() {
+        for provider in [AgentProvider::Codex, AgentProvider::ClaudeCode] {
+            for behavior in [Behavior::Chunk, Behavior::Echo] {
+                let directory = tempfile::tempdir().expect("journal directory");
+                let journal = Arc::new(AgentJournal::open(directory.path()).expect("journal"));
+                let recorder = Recorder::default();
+                let host = AgentHost::with_journal(
+                    AgentSpawnConfig::default(),
+                    recorder.sink(),
+                    Some(journal.clone()),
+                );
+                let pane = PaneId(7);
+                assert!(host.open_with(
+                    pane,
+                    1,
+                    AgentPaneSpec {
+                        provider,
+                        cwd: directory.path().to_owned(),
+                        resume_session: None,
+                        auto_approve: Some(AgentAutoApprove::Off),
+                        workspace: AgentWorkspaceEnvironment::default(),
+                    },
+                    fixture_runner(provider, behavior, AgentAutoApprove::Off, false),
+                ));
+                let fixture = Fixture {
+                    host,
+                    recorder,
+                    pane,
+                };
+                fixture.wait_for_session();
+                for turn_id in 1..=2 {
+                    fixture.command(HostCommand::Prompt(
+                        AgentPrompt {
+                            owner: ClientInstanceId::default(),
+                            text: "look again".to_owned(),
+                            images: vec![AgentImage {
+                                format: "image/png".to_owned(),
+                                data: b"image".to_vec(),
+                            }],
+                        }
+                        .into(),
+                    ));
+                    fixture.recorder.wait("the completed prompt", |payload| {
+                        matches!(payload, AgentStreamPayload::PromptFinished { turn_id: id, .. } if *id == turn_id)
+                    });
+                }
+                let users = fixture
+                    .recorder
+                    .payloads()
+                    .into_iter()
+                    .filter_map(|payload| match payload {
+                        AgentStreamPayload::Update { update }
+                            if update["sessionUpdate"] == "user_message_chunk" =>
+                        {
+                            Some(update)
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(users.len(), 4, "{provider:?} {behavior:?}");
+                for pair in users.chunks_exact(2) {
+                    assert_eq!(pair[0]["content"]["text"], "look again");
+                    assert_eq!(pair[1]["content"]["data"], "aW1hZ2U=");
+                    assert_eq!(pair[0]["messageId"], pair[1]["messageId"]);
+                }
+                assert_ne!(users[0]["messageId"], users[2]["messageId"]);
+                let replayed_users = journal
+                    .replay_for(provider, "fixture-session")
+                    .expect("replay")
+                    .into_iter()
+                    .filter_map(|(_, entry)| match entry {
+                        crate::agent::journal::JournalEntry::Update(update)
+                            if update["sessionUpdate"] == "user_message_chunk" =>
+                        {
+                            Some(update)
+                        }
+                        crate::agent::journal::JournalEntry::Update(_) => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(replayed_users, users);
+                fixture.close();
+            }
+        }
     }
 
     fn scripted_reply_fixture(updates: Vec<AgentStreamPayload>, reason: &'static str) -> Fixture {
@@ -2663,6 +2749,10 @@ mod tests {
             std::thread::sleep(Duration::from_millis(2));
         }
         assert_eq!(fixture.state().queued_prompts, 1);
+        assert_eq!(
+            chunk_texts(&fixture.recorder.payloads()),
+            ["first", "turn 0"]
+        );
 
         let AgentStreamPayload::PermissionRequested { request_id, .. } = payloads
             .iter()
@@ -2687,7 +2777,10 @@ mod tests {
                         .and_then(Value::as_str) == Some("turn 1")
             )
         });
-        assert_eq!(chunk_texts(&payloads), ["turn 0", "turn 1"]);
+        assert_eq!(
+            chunk_texts(&payloads),
+            ["first", "turn 0", "second", "turn 1"]
+        );
         assert_eq!(fixture.state().queued_prompts, 0);
         fixture.close();
     }
@@ -3284,6 +3377,53 @@ mod tests {
             "the superseded journal is not left behind to be restored twice"
         );
         assert_eq!(fixture.state().phase, AgentConnectionPhase::Ready);
+        fixture.close();
+    }
+
+    #[test]
+    fn adapter_user_history_survives_loading_after_a_locally_submitted_prompt() {
+        let fixture = Fixture::build(
+            Behavior::Echo,
+            AgentAutoApprove::Off,
+            true,
+            None,
+            Some("prior-session".to_owned()),
+            None,
+        );
+        fixture.wait_for_session();
+        assert_eq!(
+            chunk_texts(&fixture.recorder.payloads()),
+            ["loaded user history"]
+        );
+        fixture.prompt("new user message");
+        fixture.recorder.wait("the completed prompt", |payload| {
+            matches!(payload, AgentStreamPayload::PromptFinished { .. })
+        });
+        assert_eq!(
+            chunk_texts(&fixture.recorder.payloads()),
+            ["loaded user history", "new user message", "turn 0"],
+        );
+        fixture.command(HostCommand::SwitchSession {
+            session: AgentSessionSummary {
+                session_id: "other-session".to_owned(),
+                cwd: PathBuf::from("/"),
+                additional_directories: Vec::new(),
+                title: None,
+                updated_at: None,
+            },
+        });
+        let switched = fixture.recorder.wait("loaded session history", |payload| {
+            matches!(payload, AgentStreamPayload::SessionSwitched { session_id, .. } if session_id == "other-session")
+        });
+        assert_eq!(
+            chunk_texts(&switched),
+            [
+                "loaded user history",
+                "new user message",
+                "turn 0",
+                "loaded user history"
+            ]
+        );
         fixture.close();
     }
 

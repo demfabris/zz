@@ -8690,8 +8690,30 @@ impl MuxEngine {
         }
     }
 
-    /// `window_pane_start_input`: a pane with a process of its own refuses the
-    /// stream, and a caller that brought no stream leaves the pane alone.
+    pub fn command_stdin_destination_ready(
+        &self,
+        context: &ExecutionContext,
+        command: &CommandInvocation,
+    ) -> Result<bool, ServerError> {
+        let name = canonical_command(&command.name);
+        if !matches!(name, "display-message" | "split-window") {
+            return Ok(true);
+        }
+        let (options, positional) = parse_command_options(name, &command.args)?;
+        if name == "display-message" {
+            let target = self.resolve_display_message_context(context, &options)?;
+            let Some(pane) = target.and_then(|target| target.pane) else {
+                return Ok(false);
+            };
+            self.pane_stream_input(pane, None)?;
+        } else {
+            self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+            pane_spawn_empty(&options, shell_command_positional(&positional).as_deref())?;
+            self.split_placement(&options, split_size(&options))?;
+        }
+        Ok(true)
+    }
+
     fn pane_stream_input(
         &self,
         pane: PaneId,
@@ -37088,6 +37110,54 @@ mod tests {
             Execution::default()
         );
         assert_eq!(engine.state.generation(), generation);
+    }
+
+    #[test]
+    fn caller_stream_destination_is_checked_without_mutating_panes() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "stream"]),
+            )
+            .unwrap();
+        let generation = engine.state.generation();
+        assert!(
+            engine
+                .command_stdin_destination_ready(&context, &command("display-message", &["-I"]))
+                .is_err()
+        );
+        assert!(
+            !engine
+                .command_stdin_destination_ready(
+                    &context,
+                    &command("display-message", &["-I", "-t", "%99999"])
+                )
+                .unwrap()
+        );
+        assert!(
+            engine
+                .command_stdin_destination_ready(
+                    &context,
+                    &command("split-window", &["-I", "-t", "%99999"])
+                )
+                .is_err()
+        );
+        assert!(
+            engine
+                .command_stdin_destination_ready(&context, &command("split-window", &["-I"]))
+                .unwrap()
+        );
+        assert_eq!(engine.state.generation(), generation);
+        engine
+            .execute(&mut context, &command("split-window", &["-I"]))
+            .unwrap();
+        assert!(
+            engine
+                .command_stdin_destination_ready(&context, &command("display-message", &["-I"]))
+                .unwrap()
+        );
     }
 
     #[test]

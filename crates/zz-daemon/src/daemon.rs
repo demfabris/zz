@@ -10068,7 +10068,7 @@ impl Shared {
                     });
                     continue;
                 }
-                let read_failure = request.stdin.is_some() || source_kind == ClientKind::Control;
+                let read_failure = request.stdin.is_some() || control_target.is_some();
                 let text = if read_failure {
                     spent_source_stream_error()
                 } else {
@@ -10177,9 +10177,11 @@ impl Shared {
             control_source_errors.clear();
         }
         for output in control_source_read_errors {
-            self.publish_to_client(
-                control_client.unwrap_or(source_client),
-                EventPayload::ControlCommandOutput { output },
+            self.publish_control_source_read_error(
+                control_target.expect("source read errors have a control target"),
+                context.pane,
+                ErrorKind::Other,
+                output,
             );
         }
         if source_invocation && queue_execution.is_some_and(CommandQueueExecution::is_draining) {
@@ -24798,9 +24800,25 @@ impl Shared {
 
     /// Append one line to the running Command request's stderr.
     fn record_command_stderr(&self, client: ClientId, line: &str) {
-        if let Some(streams) = self.inner.lock().command_streams.get_mut(&client) {
-            streams.stderr.push_str(line);
-            streams.stderr.push('\n');
+        let deliver = {
+            let mut inner = self.inner.lock();
+            if let Some(streams) = inner.command_streams.get_mut(&client) {
+                streams.stderr.push_str(line);
+                streams.stderr.push('\n');
+                inner.client_kinds.get(&client) == Some(&ClientKind::Command)
+            } else {
+                false
+            }
+        };
+        if deliver && let Some(writer) = self.client_writers.lock().get(&client).cloned() {
+            Self::send_event(
+                &writer,
+                EventPayload::ClientMessage {
+                    pane: None,
+                    kind: ClientMessageKind::Error,
+                    text: line.to_owned(),
+                },
+            );
         }
     }
 
@@ -24870,7 +24888,13 @@ impl Shared {
         let Some(sink) = command_stdin_sink(canonical_command(&command.name), &command.args) else {
             return Ok(None);
         };
-        if sink == CommandStdinSink::ConfigReplay {
+        if sink == CommandStdinSink::ConfigReplay
+            || !self
+                .inner
+                .lock()
+                .engine
+                .command_stdin_destination_ready(context, command)?
+        {
             return Ok(None);
         }
         let client = context.replay_client().unwrap_or(client);
@@ -24895,8 +24919,17 @@ impl Shared {
                         binary: sink.accepts_binary(),
                     },
                 )
-                .ok_or_else(|| ServerError::InvalidCommand(spent_source_stream_error()))??;
-            Some(SourceStream::Bytes(RawText::from_bytes(bytes)))
+                .ok_or_else(|| ServerError::InvalidCommand(spent_source_stream_error()))?;
+            Some(match bytes {
+                Ok(bytes) => SourceStream::Bytes(RawText::from_bytes(bytes)),
+                Err(error)
+                    if sink == CommandStdinSink::Config
+                        && error.tmux_message() == spent_source_stream_error() =>
+                {
+                    SourceStream::Spent
+                }
+                Err(error) => return Err(error.into()),
+            })
         } else {
             stdin
         };
@@ -26985,13 +27018,16 @@ impl Shared {
                 continue;
             }
             let caller_source_stream = source_file_reads_stdin(&routed.args)
-                && options.replay_client.is_some_and(|client| {
-                    self.inner
-                        .lock()
-                        .command_streams
-                        .get(&client)
-                        .is_some_and(|streams| streams.stdin.is_some() || streams.stdin_available)
-                });
+                && (options.control_target.is_some()
+                    || options.replay_client.is_some_and(|client| {
+                        self.inner
+                            .lock()
+                            .command_streams
+                            .get(&client)
+                            .is_some_and(|streams| {
+                                streams.stdin.is_some() || streams.stdin_available
+                            })
+                    }));
             if routed_name == "source-file" && !caller_source_stream {
                 let source_effects = {
                     let mut inner = self.inner.lock();
@@ -27414,7 +27450,7 @@ impl Shared {
             }
             let publish_guard =
                 |output: RawText, error: bool, sticky_failure: bool, captured_events| {
-                    if alias_group {
+                    if alias_group || caller_source_stream && routed_name == "source-file" {
                         if let Some((client, _)) = options.control_target {
                             self.publish_captured_control_command_events(client, captured_events);
                         }
@@ -43277,7 +43313,7 @@ mod tests {
         assert_eq!(read_global_option(&shared, "@after"), "yes");
         let messages = take_reliable_messages(&mailbox);
         assert!(messages.iter().any(|message| matches!(message,
-            ProtocolMessage::Event(Event { payload: EventPayload::ControlCommandOutput { output }, .. })
+            ProtocolMessage::Event(Event { payload: EventPayload::ControlSourceFile { event: ControlSourceFileEvent::ReadError(output) }, .. })
                 if output == "Bad file descriptor: -")), "{messages:?}");
         let guards = control_command_guards(messages);
         assert!(

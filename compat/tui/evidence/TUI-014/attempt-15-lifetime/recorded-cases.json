@@ -1,0 +1,127 @@
+[
+  {
+    "case": "lock-server",
+    "owner": "TUI-015",
+    "why": "Lock-program lifecycle remains recorded despite matching command channels."
+  },
+  {
+    "case": "lock-session",
+    "owner": "TUI-015",
+    "why": "Lock-program lifecycle remains recorded despite matching command channels."
+  },
+  {
+    "case": "lock-client",
+    "owner": "TUI-015",
+    "why": "Lock-program lifecycle remains recorded despite matching command channels."
+  },
+  {
+    "case": "lock-client-current",
+    "owner": "TUI-015",
+    "why": "Lock-program lifecycle remains recorded despite matching command channels."
+  },
+  {
+    "case": "capture-control",
+    "owner": "TUI-017",
+    "why": "Rich capture transports remain recorded."
+  },
+  {
+    "case": "capture-flags",
+    "owner": "TUI-017",
+    "why": "Rich capture transports remain recorded."
+  },
+  {
+    "case": "capture-hyperlinks",
+    "owner": "TUI-017",
+    "why": "Rich capture transports remain recorded."
+  },
+  {
+    "case": "capture-line-numbers",
+    "owner": "TUI-017",
+    "why": "Rich capture transports remain recorded."
+  },
+  {
+    "case": "capture-pending",
+    "owner": "TUI-017",
+    "why": "Rich capture transports remain recorded."
+  },
+  {
+    "case": "capture-grid",
+    "owner": "TUI-017",
+    "why": "Rich capture transports remain recorded."
+  },
+  {
+    "case": "messages-log",
+    "owner": "decided:TUI-016",
+    "why": "DECIDED: a client without a tty has a zz device identity."
+  },
+  {
+    "case": "refresh-pan-up",
+    "owner": "gap:clients.interactive-refresh",
+    "why": "Accepted pan and redraw-adjustment refusal."
+  },
+  {
+    "case": "refresh-pan-down",
+    "owner": "gap:clients.interactive-refresh",
+    "why": "Accepted pan and redraw-adjustment refusal."
+  },
+  {
+    "case": "refresh-pan-left",
+    "owner": "gap:clients.interactive-refresh",
+    "why": "Accepted pan and redraw-adjustment refusal."
+  },
+  {
+    "case": "refresh-pan-right",
+    "owner": "gap:clients.interactive-refresh",
+    "why": "Accepted pan and redraw-adjustment refusal."
+  },
+  {
+    "case": "refresh-pan-cursor",
+    "owner": "gap:clients.interactive-refresh",
+    "why": "Accepted pan and redraw-adjustment refusal."
+  },
+  {
+    "case": "refresh-clipboard",
+    "owner": "gap:clients.interactive-refresh",
+    "why": "Accepted pan and redraw-adjustment refusal."
+  },
+  {
+    "case": "refresh-adjustment",
+    "owner": "gap:clients.interactive-refresh",
+    "why": "Accepted pan and redraw-adjustment refusal."
+  },
+  {
+    "case": "client-tree-open",
+    "owner": "gap:clients.interactive-refresh",
+    "why": "Clientless choose-client requires an attached client on zz."
+  },
+  {
+    "case": "clock-over-copy",
+    "owner": "gap:clients.interactive-refresh",
+    "why": "Per-client copy state does not compose with the pane clock like the pin stack."
+  },
+  {
+    "case": "clock-over-copy-key",
+    "owner": "gap:clients.interactive-refresh",
+    "why": "Per-client copy state does not compose with the pane clock like the pin stack."
+  },
+  {
+    "case": "copy-over-clock",
+    "owner": "gap:clients.interactive-refresh",
+    "why": "Per-client copy state does not compose with the pane clock like the pin stack."
+  },
+  {
+    "case": "switch-mode-windows",
+    "owner": "gap:clients.interactive-refresh",
+    "why": "Default window rows retain a trailing-style capture difference."
+  },
+  {
+    "case": "switch-mode-duplicate-windows",
+    "owner": "gap:clients.interactive-refresh",
+    "why": "Default window rows retain a trailing-style capture difference."
+  },
+  {
+    "case": "server-access-add",
+    "owner": "gap:protocol.socket-acl",
+    "why": "Socket access is restricted to the invoking user."
+  }
+]

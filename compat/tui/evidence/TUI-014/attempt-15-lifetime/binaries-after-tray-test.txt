@@ -1,0 +1,2 @@
+637dfecfa7985a09e36da0cdd17441bdd920a412e486243e9ade8574cfb0ba9e  target/debug/zz_cli
+8241310b8f7a4e5a81956e9145c78abc89975a91590e62ee3fa29d74f9fda6b4  target/debug/zz-modes-lifetime

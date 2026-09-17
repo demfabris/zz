@@ -12,6 +12,7 @@
 #   compat/run.sh --delta origin/main..HEAD --commands split-window,new-window
 #   compat/run.sh --delta origin/main..HEAD --list   (print selection, run nothing)
 set -euo pipefail
+while IFS= read -r credential; do unset "$credential"; done < <(compgen -e | grep -E 'TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL')
 
 COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "$COMPAT_DIR/.." && pwd)"

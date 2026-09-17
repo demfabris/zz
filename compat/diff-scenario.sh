@@ -2,6 +2,7 @@
 # Runs one command corpus against zz and pinned tmux, comparing topology and
 # geometry after every command.
 set -euo pipefail
+while IFS= read -r credential; do unset "$credential"; done < <(compgen -e | grep -E 'TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL')
 set +B
 
 COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

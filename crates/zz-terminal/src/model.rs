@@ -139,19 +139,6 @@ impl PackedCell {
     }
 
     #[must_use]
-    pub const fn with_tab(self, tab: u8) -> Self {
-        Self {
-            flags: (self.flags & 3) | (tab as u16) << 2,
-            ..self
-        }
-    }
-
-    #[must_use]
-    pub const fn tab(self) -> u8 {
-        (self.flags >> 2) as u8
-    }
-
-    #[must_use]
     pub const fn glyph(self) -> u32 {
         self.glyph
     }
@@ -177,7 +164,6 @@ pub enum ColourClass {
     Resolved,
     Default,
     Palette(u8),
-    IndexedLow(u8),
     Rgb,
 }
 
@@ -196,16 +182,11 @@ impl ColourClass {
             Self::Default => (CLASS_DEFAULT, 0),
             Self::Palette(index) => (CLASS_PALETTE, index),
             Self::Rgb => (CLASS_RGB, 0),
-            Self::IndexedLow(index) => {
-                assert!(index < 16);
-                (CLASS_RESOLVED, index + 1)
-            }
         }
     }
 
     const fn from_code(code: u8, index: u8) -> Self {
         match code {
-            CLASS_RESOLVED if index > 0 && index <= 16 => Self::IndexedLow(index - 1),
             CLASS_DEFAULT => Self::Default,
             CLASS_PALETTE => Self::Palette(index),
             CLASS_RGB => Self::Rgb,

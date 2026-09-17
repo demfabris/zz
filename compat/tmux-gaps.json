@@ -217,6 +217,7 @@
         "native-command:focus-sidebar",
         "native-command:import-tmux-config",
         "native-command:inspect",
+        "native-command:new-agent-session",
         "native-command:new-browser",
         "native-command:reload-config",
         "native-command:restart-agent-pane",

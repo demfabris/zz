@@ -17862,7 +17862,7 @@ mod tests {
             ("set-option", vec!["-a", "experimental-agent-pane", "on"], 2),
             ("rename-window", vec![], 1),
             ("no-such-command", vec![], 1),
-            ("clock-mode", vec![], 1),
+            ("clock-mode", vec!["-Q"], 1),
         ] {
             let error = engine
                 .execute(&mut context, &command(name, &args))
@@ -43937,7 +43937,7 @@ mod tests {
         assert!(rows.contains(&"list-commands (lscm) [-F format] [command]"));
         assert!(rows.contains(&"start-server (start) "));
         assert!(rows.contains(
-            &"agent-send [-t target-pane] [--target target-pane] [--submit] [--wait] [--timeout seconds] [--on-block wait|fail] [--context context] [text ...]"
+            &"agent-send [-t target-pane] [--target target-pane] [--submit] [--wait] [--progress] [--timeout seconds] [--on-block wait|fail|allow|deny] [--json] [--final] [--context context] [text ...]"
         ));
         assert!(rows.contains(&"send-last-output [-t target-pane]"));
         assert!(rows.contains(&"capture-browser [-t target-pane] [-o output-path]"));

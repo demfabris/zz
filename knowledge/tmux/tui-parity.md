@@ -782,7 +782,7 @@ Sources:
 - `crates/zz-protocol/src/lib.rs`
 - `crates/zz-protocol/tests/hunt_claims.rs`
 - `crates/zz-tui/src/sidebar.rs`
-- `crates/zz/src/control_mode.rs`
+- `crates/zz-cli/src/control_mode.rs`
 - `crates/zz/src/mux/client.rs`
 - `crates/zz/src/workspace/sidebar.rs`
 - `crates/zz/src/workspace/view.rs`
@@ -793,7 +793,7 @@ Sources:
 - `knowledge/tmux/tui-parity.md`
 - `compat/tui-copy-mode.sh`
 - `crates/zz/src/lib.rs`
-- `crates/zz/tests/cli_binary.rs`
+- `crates/zz-cli/tests/cli_binary.rs`
 - `crates/zz/src/command/palette.rs`
 - `knowledge/tmux/commands.md`
 - `compat/tui/verify-claims.py`

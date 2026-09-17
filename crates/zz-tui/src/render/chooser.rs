@@ -119,6 +119,7 @@ pub(super) struct Grid {
     width: u16,
     height: u16,
     cells: Vec<Cell>,
+    clear_before_rows: Vec<Option<u16>>,
 }
 
 pub(super) fn plain() -> TmuxStyle {
@@ -230,6 +231,7 @@ impl Grid {
             width,
             height,
             cells: vec![blank; usize::from(width) * usize::from(height)],
+            clear_before_rows: vec![None; usize::from(height)],
         }
     }
 
@@ -311,11 +313,8 @@ impl Grid {
         }
     }
 
-    pub(super) fn extend_last_cell(&mut self, used: u16, y: u16) {
-        if used > 0 && used < self.width {
-            let paint = self.cells[self.index(used - 1, y).unwrap()].paint.clone();
-            self.fill(used, y, self.width - used, &paint);
-        }
+    pub(super) fn clear_before_row(&mut self, used: u16, y: u16) {
+        self.clear_before_rows[usize::from(y)] = Some(used.min(self.width));
     }
 
     pub(super) fn markup(
@@ -497,15 +496,29 @@ impl Grid {
         for row in 0..self.height {
             write_cursor_position(output, x, y + row);
             let line = &self.cells[usize::from(row) * width..(usize::from(row) + 1) * width];
-            let used = match trailing {
-                Trailing::Client => line
-                    .iter()
-                    .rposition(|cell| !erasable(cell))
-                    .map_or(0, |index| index + 1),
-                Trailing::Pane { .. } => clearable_from(line),
+            let clear_before = self.clear_before_rows[usize::from(row)]
+                .filter(|_| matches!(trailing, Trailing::Pane { .. }));
+            if clear_before.is_some() {
+                output.extend_from_slice(b"\x1b[0m");
+                if matches!(trailing, Trailing::Pane { reaches_edge: true }) {
+                    output.extend_from_slice(b"\x1b[K");
+                } else {
+                    output.extend_from_slice(format!("\x1b[{}X", self.width).as_bytes());
+                }
+            }
+            let used = if let Some(used) = clear_before {
+                usize::from(used)
+            } else {
+                match trailing {
+                    Trailing::Client => line
+                        .iter()
+                        .rposition(|cell| !erasable(cell))
+                        .map_or(0, |index| index + 1),
+                    Trailing::Pane { .. } => clearable_from(line),
+                }
             };
             let mut current: Option<&Paint> = None;
-            for cell in &line[..used] {
+            for (column, cell) in line[..used].iter().enumerate() {
                 if cell.width == 0 {
                     continue;
                 }
@@ -535,8 +548,17 @@ impl Grid {
                     current = Some(&cell.paint);
                 }
                 output.extend_from_slice(cell.glyph.as_bytes());
+                let end = column + usize::from(cell.width);
+                if clear_before.is_some()
+                    && end < used
+                    && (column == 0
+                        || column <= width / 4 && end > width / 4
+                        || column <= width / 2 && end > width / 2)
+                {
+                    write_cursor_position(output, x.saturating_add(narrow(end)), y + row);
+                }
             }
-            if used == width {
+            if used == width || clear_before.is_some() {
                 output.extend_from_slice(b"\x1b[0m");
                 continue;
             }

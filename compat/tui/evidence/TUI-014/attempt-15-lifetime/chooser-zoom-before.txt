@@ -1,0 +1,9 @@
+ok    zoom-tree-open
+ok    zoom-tree-closed
+ok    zoom-manual
+ok    zoom-prezoomed-open
+ok    zoom-prezoomed-closed
+ok    zoom-manual-released
+zz zoom and prefix: 0 0
+tmux zoom and prefix: 0 0
+chooser zoom checks=6 failures=0

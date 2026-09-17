@@ -1,0 +1,1114 @@
+      case switch-mode-kill
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > switch-mode -k and -Z are not implemented (TUI-014)
+      state differs
+        5c5
+        < W zzcc-k:0 ENV= * 1
+        ---
+        > W zzcc-k:0 0 * 1
+        8c8
+        < P zzcc-k:0.0 mode=1/switch-mode 80x24 alienware
+        ---
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-kill
+      case switch-mode-kill-exit
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        3a5
+        > W zzcc-k:0 0 * 1
+        5a8
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-kill-exit
+      case switch-mode-kill-restored
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        3a5
+        > W zzcc-k:0 0 * 1
+        5a8
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-kill-restored
+      case switch-mode-zoom
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > switch-mode -k and -Z are not implemented (TUI-014)
+      screen differs
+        1c1,3
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m2 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mwin^[[0m^[[48;2;184;134;11m
+        ---
+        > $ printf 'SCENE-%s\n' %0
+        > SCENE-%0
+        > $
+        22,23d23
+        < 
+        < ^[[38;2;13;13;13m(search) ^[[39m^[[49m
+        cursor tmux: 9,22 flag=1 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4c5,6
+        < P cli:0.0 mode=1/switch-mode 80x23 ptitle
+        ---
+        > W zzcc-k:0 0 * 1
+        > P cli:0.0 mode=0/ 80x23 ptitle
+        5a8
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-zoom
+      case switch-mode-zoom-single
+      screen differs
+        1c1,3
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m2 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mwin^[[0m^[[48;2;184;134;11m
+        ---
+        > $ printf 'SCENE-%s\n' %0
+        > SCENE-%0
+        > $
+        22,23d23
+        < 
+        < ^[[38;2;13;13;13m(search) ^[[39m^[[49m
+        cursor tmux: 9,22 flag=1 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4c5,6
+        < P cli:0.0 mode=1/switch-mode 80x23 ptitle
+        ---
+        > W zzcc-k:0 0 * 1
+        > P cli:0.0 mode=0/ 80x23 ptitle
+        5a8
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-zoom-single
+      case switch-mode-zoom-restored
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        3a5
+        > W zzcc-k:0 0 * 1
+        5a8
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-zoom-restored
+      case switch-mode-kill-visible
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > switch-mode -k and -Z are not implemented (TUI-014)
+      screen differs
+        1,12c1,13
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m3 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mlifetime^[[0m^[[48;2;184;134;11m         ^[[38;2;184;134;11m^[[49mM-bM-^TM-^B^[[39m$
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        ---
+        > $                                       ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        23d23
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m                               ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        cursor tmux: 9,22 flag=1 pane=80x24 shape=default
+        cursor zz:   2,0 flag=1 pane=80x24 shape=default
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4a6
+        > W zzcc-k:0 0 * 1
+        7c9
+        < P cli:2.0 mode=1/switch-mode 40x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 40x23 ptitle
+        8a11
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-kill-visible
+      case switch-mode-kill-covered
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4a6
+        > W zzcc-k:0 0 * 1
+        7c9
+        < P cli:2.0 mode=2/clock-mode 40x23 ptitle
+        ---
+        > P cli:2.0 mode=1/clock-mode 40x23 ptitle
+        8a11
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-kill-covered
+      case switch-mode-kill-uncovered
+      screen differs
+        1,12c1,13
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m3 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mlifetime^[[0m^[[48;2;184;134;11m         ^[[38;2;184;134;11m^[[49mM-bM-^TM-^B^[[39m$
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        ---
+        > $                                       ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        23d23
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m                               ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        cursor tmux: 9,22 flag=1 pane=80x24 shape=default
+        cursor zz:   2,0 flag=1 pane=80x24 shape=default
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4a6
+        > W zzcc-k:0 0 * 1
+        7c9
+        < P cli:2.0 mode=1/switch-mode 40x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 40x23 ptitle
+        8a11
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-kill-uncovered
+      case switch-mode-kill-survives-cover
+      stdout differs
+        1c1
+        < 0 1/switch-mode
+        ---
+        > 0 0/
+      screen differs
+        1,12c1,13
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m3 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mlifetime^[[0m^[[48;2;184;134;11m         ^[[38;2;184;134;11m^[[49mM-bM-^TM-^B^[[39m$
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        ---
+        > $                                       ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        23d23
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m                               ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        cursor tmux: 9,22 flag=1 pane=80x24 shape=default
+        cursor zz:   2,0 flag=1 pane=80x24 shape=default
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4a6
+        > W zzcc-k:0 0 * 1
+        7c9
+        < P cli:2.0 mode=1/switch-mode 40x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 40x23 ptitle
+        8a11
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-kill-survives-cover
+      case switch-mode-kill-visible-exit
+      screen differs
+        1,23c1,23
+        < $
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        ---
+        > $                                       ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4c5,6
+        < W cli:2 lifetime * 1
+        ---
+        > W cli:2 lifetime * 2
+        > W zzcc-k:0 0 * 1
+        7c9,11
+        < P cli:2.0 mode=0/ 80x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 40x23 ptitle
+        > P cli:2.1 mode=0/ 39x23 ptitle
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-kill-visible-exit
+      case switch-mode-kill-visible-panes
+      stdout differs
+        1a2
+        > 1
+      screen differs
+        1,23c1,23
+        < $
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        ---
+        > $                                       ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4c5,6
+        < W cli:2 lifetime * 1
+        ---
+        > W cli:2 lifetime * 2
+        > W zzcc-k:0 0 * 1
+        7c9,11
+        < P cli:2.0 mode=0/ 80x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 40x23 ptitle
+        > P cli:2.1 mode=0/ 39x23 ptitle
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-kill-visible-panes
+      case switch-mode-kill-drain-stack
+      screen differs
+        1,23c1,23
+        < $
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        ---
+        > $                   ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$                  ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m$
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4c5,6
+        < W cli:2 lifetime * 1
+        ---
+        > W cli:2 lifetime * 3
+        > W zzcc-k:0 0 * 1
+        7c9,12
+        < P cli:2.0 mode=0/ 80x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 20x23 ptitle
+        > P cli:2.1 mode=0/ 19x23 ptitle
+        > P cli:2.2 mode=0/ 39x23 ptitle
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-kill-drain-stack
+      case switch-mode-kill-drain-panes
+      stdout differs
+        1a2,3
+        > 1
+        > 2
+      screen differs
+        1,23c1,23
+        < $
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        ---
+        > $                   ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$                  ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m$
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4c5,6
+        < W cli:2 lifetime * 1
+        ---
+        > W cli:2 lifetime * 3
+        > W zzcc-k:0 0 * 1
+        7c9,12
+        < P cli:2.0 mode=0/ 80x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 20x23 ptitle
+        > P cli:2.1 mode=0/ 19x23 ptitle
+        > P cli:2.2 mode=0/ 39x23 ptitle
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-kill-drain-panes
+      case switch-mode-kill-visible-restored
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        3a5
+        > W zzcc-k:0 0 * 1
+        5a8
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-kill-visible-restored
+      case switch-mode-zoom-before-split
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > switch-mode -k and -Z are not implemented (TUI-014)
+      screen differs
+        1c1,2
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m3 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mlifetime^[[0m^[[48;2;184;134;11m
+        ---
+        > $
+        > 
+        23d23
+        < ^[[38;2;13;13;13m(search) ^[[39m^[[49m
+        cursor tmux: 9,22 flag=1 pane=80x24 shape=default
+        cursor zz:   2,0 flag=1 pane=80x24 shape=default
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4a6
+        > W zzcc-k:0 0 * 1
+        7c9,10
+        < P cli:2.0 mode=1/switch-mode 80x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 80x23 ptitle
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-zoom-before-split
+      case switch-mode-zoom-during-mode
+      screen differs
+        1c1,2
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m3 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mlifetime^[[0m^[[48;2;184;134;11m
+        ---
+        > $
+        > 
+        23d23
+        < ^[[38;2;13;13;13m(search) ^[[39m^[[49m
+        cursor tmux: 9,22 flag=1 pane=80x24 shape=default
+        cursor zz:   2,0 flag=1 pane=80x24 shape=default
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4a6
+        > W zzcc-k:0 0 * 1
+        7c9
+        < P cli:2.0 mode=1/switch-mode 80x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 80x23 ptitle
+        8a11
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-zoom-during-mode
+      case switch-mode-zoom-during-mode-flag
+      screen differs
+        1c1,2
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m3 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mlifetime^[[0m^[[48;2;184;134;11m
+        ---
+        > $
+        > 
+        23d23
+        < ^[[38;2;13;13;13m(search) ^[[39m^[[49m
+        cursor tmux: 9,22 flag=1 pane=80x24 shape=default
+        cursor zz:   2,0 flag=1 pane=80x24 shape=default
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4a6
+        > W zzcc-k:0 0 * 1
+        7c9
+        < P cli:2.0 mode=1/switch-mode 80x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 80x23 ptitle
+        8a11
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-zoom-during-mode-flag
+      case switch-mode-zoom-exit
+      screen differs
+        1,24c1,24
+        < $                                       ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL0:win- 1:two  ^[[4m2:lifetime*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        ---
+        > $
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4c5,6
+        < W cli:2 lifetime * 2
+        ---
+        > W cli:2 lifetime *Z 2
+        > W zzcc-k:0 0 * 1
+        7c9
+        < P cli:2.0 mode=0/ 40x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 80x23 ptitle
+        8a11
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-zoom-exit
+      case switch-mode-zoom-restored-flag
+      stdout differs
+        1c1
+        < 0
+        ---
+        > 1
+      screen differs
+        1,24c1,24
+        < $                                       ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL0:win- 1:two  ^[[4m2:lifetime*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        ---
+        > $
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4c5,6
+        < W cli:2 lifetime * 2
+        ---
+        > W cli:2 lifetime *Z 2
+        > W zzcc-k:0 0 * 1
+        7c9
+        < P cli:2.0 mode=0/ 40x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 80x23 ptitle
+        8a11
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-zoom-restored-flag
+      case switch-mode-already-zoomed
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > switch-mode -k and -Z are not implemented (TUI-014)
+      screen differs
+        1,24c1,24
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m3 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mlifetime^[[0m^[[48;2;184;134;11m
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < ^[[38;2;13;13;13m(search) ^[[39m^[[49m
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL0:win- 1:two  ^[[4m2:lifetime*Z^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        ---
+        > $                                       ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        cursor tmux: 9,22 flag=1 pane=80x24 shape=default
+        cursor zz:   2,0 flag=1 pane=80x24 shape=default
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4c5,6
+        < W cli:2 lifetime *Z 2
+        ---
+        > W cli:2 lifetime * 2
+        > W zzcc-k:0 0 * 1
+        7c9
+        < P cli:2.0 mode=1/switch-mode 80x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 40x23 ptitle
+        8a11
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-already-zoomed
+      case switch-mode-already-zoomed-exit
+      screen differs
+        1,24c1,24
+        < $
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL0:win- 1:two  ^[[4m2:lifetime*Z^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        ---
+        > $                                       ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4c5,6
+        < W cli:2 lifetime *Z 2
+        ---
+        > W cli:2 lifetime * 2
+        > W zzcc-k:0 0 * 1
+        7c9
+        < P cli:2.0 mode=0/ 80x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 40x23 ptitle
+        8a11
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-already-zoomed-exit
+      case switch-mode-already-zoomed-flag
+      stdout differs
+        1c1
+        < 1
+        ---
+        > 0
+      screen differs
+        1,24c1,24
+        < $
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL0:win- 1:two  ^[[4m2:lifetime*Z^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        ---
+        > $                                       ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4c5,6
+        < W cli:2 lifetime *Z 2
+        ---
+        > W cli:2 lifetime * 2
+        > W zzcc-k:0 0 * 1
+        7c9
+        < P cli:2.0 mode=0/ 80x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 40x23 ptitle
+        8a11
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-already-zoomed-flag
+      case switch-mode-zoom-lifetime-restored
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        3a5
+        > W zzcc-k:0 0 * 1
+        5a8
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-zoom-lifetime-restored
+      case switch-mode-kill-control
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > switch-mode -k and -Z are not implemented (TUI-014)
+      screen differs
+        1,12c1,13
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m3 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mlifetime^[[0m^[[48;2;184;134;11m         ^[[38;2;184;134;11m^[[49mM-bM-^TM-^B^[[39m$
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m
+        ---
+        > $                                       ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        >                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        23d23
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m                               ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        cursor tmux: 9,22 flag=1 pane=80x24 shape=default
+        cursor zz:   2,0 flag=1 pane=80x24 shape=default
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4a6
+        > W zzcc-k:0 0 * 1
+        7c9
+        < P cli:2.0 mode=1/switch-mode 40x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 40x23 ptitle
+        8a11
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+FAIL  self-check switch -k accepts the flag and opens the same mode: exit reported 1, expected 0
+      case switch-mode-kill-sabotage
+      stdout differs
+        1a2,3
+        > 1
+        > 2
+      screen differs
+        1,23c1,23
+        < $
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        ---
+        > $                   ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m$                  ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m$
+        >                     ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        >                     ^[[38;2;184;134;11mM-bM-^TM-^B^[[39m                   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4c5,6
+        < W cli:2 lifetime * 1
+        ---
+        > W cli:2 lifetime * 3
+        > W zzcc-k:0 0 * 1
+        7c9,12
+        < P cli:2.0 mode=0/ 80x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 20x23 ptitle
+        > P cli:2.1 mode=0/ 19x23 ptitle
+        > P cli:2.2 mode=0/ 39x23 ptitle
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+ok    self-check omitting -k preserves the source pane on one side
+      case switch-mode-kill-sabotage-restored
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        3a5
+        > W zzcc-k:0 0 * 1
+        5a8
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-kill-sabotage-restored
+      case switch-mode-zoom-control
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > switch-mode -k and -Z are not implemented (TUI-014)
+      screen differs
+        1c1,2
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m3 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mlifetime^[[0m^[[48;2;184;134;11m
+        ---
+        > $
+        > 
+        23d23
+        < ^[[38;2;13;13;13m(search) ^[[39m^[[49m
+        cursor tmux: 9,22 flag=1 pane=80x24 shape=default
+        cursor zz:   2,0 flag=1 pane=80x24 shape=default
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4a6
+        > W zzcc-k:0 0 * 1
+        7c9,10
+        < P cli:2.0 mode=1/switch-mode 80x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 80x23 ptitle
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+FAIL  self-check switch -Z accepts the flag and opens the same mode: exit reported 1, expected 0
+      case switch-mode-zoom-equivalence
+      screen differs
+        1a2
+        > ^[[49mzzcc-k ^[[2m1 windows^[[0m ^[[2mdetached^[[0m ^[[2m0^[[0m
+        22,23c23
+        < 
+        < ^[[38;2;13;13;13m(search) ^[[39m^[[49m
+        ---
+        > ^[[38;2;13;13;13m^[[48;2;184;134;11m(search) ^[[39m^[[49m
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4a6
+        > W zzcc-k:0 0 * 1
+        8a11
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+FAIL  self-check both modes show the zoom before exit: screen reported 1, expected 0
+      case switch-mode-zoom-sabotage
+      stdout differs
+        1c1
+        < 0
+        ---
+        > 1
+      screen differs
+        1,24c1,24
+        < $                                       ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        <                                         ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL0:win- 1:two  ^[[4m2:lifetime*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        ---
+        > $
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        4c5,6
+        < W cli:2 lifetime * 2
+        ---
+        > W cli:2 lifetime *Z 2
+        > W zzcc-k:0 0 * 1
+        7c9
+        < P cli:2.0 mode=0/ 40x23 ptitle
+        ---
+        > P cli:2.0 mode=0/ 80x23 ptitle
+        8a11
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+ok    self-check omitting -Z keeps a zoom the mode should restore
+      case switch-mode-zoom-sabotage-restored
+      state differs
+        1a2
+        > S zzcc-k 1 0
+        3a5
+        > W zzcc-k:0 0 * 1
+        5a8
+        > P zzcc-k:0.0 mode=0/ 80x24 alienware
+DIFF  switch-mode-zoom-sabotage-restored
+lifetime checks=26 failures=26 sabotage_failures=3

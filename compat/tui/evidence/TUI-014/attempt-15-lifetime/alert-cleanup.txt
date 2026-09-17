@@ -1,0 +1,250 @@
++1789610684.450670 probe_alert_message_lifecycle zz
++1789610684.450834 local side=zz
++1789610684.450873 local alert_window==attached:9
++1789610684.450888 local alert_pane==attached:9.0
++1789610684.450902 local zero_alert_window==attached:10
++1789610684.450913 local zero_alert_pane==attached:10.0
++1789610684.450926 local timed_marker=ATTACHED_ALERT_TIMED_OUTPUT_zz
++1789610684.450938 local repeated_marker=ATTACHED_ALERT_REPEATED_OUTPUT_zz
++1789610684.450949 local zero_marker=ATTACHED_ALERT_ZERO_OUTPUT_zz
++1789610684.450960 local 'alert_marker=Bell in window'
++1789610684.450972 local client_name
++1789610684.450981 local ready_baseline
+++1789610684.451514 side_command zz list-clients -F '#{client_name}'
+++1789610684.451610 local side=zz
+++1789610684.451640 shift
+++1789610684.451654 case "$side" in
+++1789610684.451669 zz_command list-clients -F '#{client_name}'
+++1789610684.451756 env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=/tmp/zza.PLGxxV/zz-home XDG_CONFIG_HOME=/tmp/zza.PLGxxV/zz-config TMUX_TMPDIR=/tmp /home/demfabris/dev/zz-c11-modes-final/target/debug/zz-modes-cleanup --socket /tmp/zza-PLGxxV.sock list-clients -F '#{client_name}'
++1789610685.125660 client_name=/dev/pts/70
++1789610685.125737 '[' -z /dev/pts/70 ']'
++1789610685.125762 [[ /dev/pts/70 == *
+* ]]
++1789610685.125792 side_command zz new-window -d -t =attached:9 -n alert-lifecycle
++1789610685.125833 local side=zz
++1789610685.125847 shift
++1789610685.125856 case "$side" in
++1789610685.125872 zz_command new-window -d -t =attached:9 -n alert-lifecycle
++1789610685.125928 env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=/tmp/zza.PLGxxV/zz-home XDG_CONFIG_HOME=/tmp/zza.PLGxxV/zz-config TMUX_TMPDIR=/tmp /home/demfabris/dev/zz-c11-modes-final/target/debug/zz-modes-cleanup --socket /tmp/zza-PLGxxV.sock new-window -d -t =attached:9 -n alert-lifecycle
++1789610687.021611 side_command zz new-window -d -t =attached:10 -n alert-zero
++1789610687.021679 local side=zz
++1789610687.021695 shift
++1789610687.021704 case "$side" in
++1789610687.021719 zz_command new-window -d -t =attached:10 -n alert-zero
++1789610687.021768 env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=/tmp/zza.PLGxxV/zz-home XDG_CONFIG_HOME=/tmp/zza.PLGxxV/zz-config TMUX_TMPDIR=/tmp /home/demfabris/dev/zz-c11-modes-final/target/debug/zz-modes-cleanup --socket /tmp/zza-PLGxxV.sock new-window -d -t =attached:10 -n alert-zero
++1789610689.232046 side_command zz set-option -g display-time 5000
++1789610689.232097 local side=zz
++1789610689.232114 shift
++1789610689.232123 case "$side" in
++1789610689.232137 zz_command set-option -g display-time 5000
++1789610689.232186 env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=/tmp/zza.PLGxxV/zz-home XDG_CONFIG_HOME=/tmp/zza.PLGxxV/zz-config TMUX_TMPDIR=/tmp /home/demfabris/dev/zz-c11-modes-final/target/debug/zz-modes-cleanup --socket /tmp/zza-PLGxxV.sock set-option -g display-time 5000
++1789610690.015393 side_command zz set-option -g visual-bell on
++1789610690.015449 local side=zz
++1789610690.015466 shift
++1789610690.015476 case "$side" in
++1789610690.015490 zz_command set-option -g visual-bell on
++1789610690.015551 env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=/tmp/zza.PLGxxV/zz-home XDG_CONFIG_HOME=/tmp/zza.PLGxxV/zz-config TMUX_TMPDIR=/tmp /home/demfabris/dev/zz-c11-modes-final/target/debug/zz-modes-cleanup --socket /tmp/zza-PLGxxV.sock set-option -g visual-bell on
++1789610690.750573 side_command zz set-option -g bell-action any
++1789610690.750616 local side=zz
++1789610690.750632 shift
++1789610690.750641 case "$side" in
++1789610690.750655 zz_command set-option -g bell-action any
++1789610690.750710 env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=/tmp/zza.PLGxxV/zz-home XDG_CONFIG_HOME=/tmp/zza.PLGxxV/zz-config TMUX_TMPDIR=/tmp /home/demfabris/dev/zz-c11-modes-final/target/debug/zz-modes-cleanup --socket /tmp/zza-PLGxxV.sock set-option -g bell-action any
++1789610692.230718 side_command zz set-window-option -t =attached:9 monitor-bell on
++1789610692.230775 local side=zz
++1789610692.230793 shift
++1789610692.230802 case "$side" in
++1789610692.230817 zz_command set-window-option -t =attached:9 monitor-bell on
++1789610692.230879 env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=/tmp/zza.PLGxxV/zz-home XDG_CONFIG_HOME=/tmp/zza.PLGxxV/zz-config TMUX_TMPDIR=/tmp /home/demfabris/dev/zz-c11-modes-final/target/debug/zz-modes-cleanup --socket /tmp/zza-PLGxxV.sock set-window-option -t =attached:9 monitor-bell on
++1789610693.064352 side_command zz set-window-option -t =attached:10 monitor-bell on
++1789610693.064411 local side=zz
++1789610693.064427 shift
++1789610693.064436 case "$side" in
++1789610693.064450 zz_command set-window-option -t =attached:10 monitor-bell on
++1789610693.064510 env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=/tmp/zza.PLGxxV/zz-home XDG_CONFIG_HOME=/tmp/zza.PLGxxV/zz-config TMUX_TMPDIR=/tmp /home/demfabris/dev/zz-c11-modes-final/target/debug/zz-modes-cleanup --socket /tmp/zza-PLGxxV.sock set-window-option -t =attached:10 monitor-bell on
++1789610693.755515 side_command zz display-message -d 1500 -N -c /dev/pts/70 -t =attached:0.0 ATTACHED_ALERT_STICKY
++1789610693.755574 local side=zz
++1789610693.755590 shift
++1789610693.755599 case "$side" in
++1789610693.755616 zz_command display-message -d 1500 -N -c /dev/pts/70 -t =attached:0.0 ATTACHED_ALERT_STICKY
++1789610693.755667 env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=/tmp/zza.PLGxxV/zz-home XDG_CONFIG_HOME=/tmp/zza.PLGxxV/zz-config TMUX_TMPDIR=/tmp /home/demfabris/dev/zz-c11-modes-final/target/debug/zz-modes-cleanup --socket /tmp/zza-PLGxxV.sock display-message -d 1500 -N -c /dev/pts/70 -t =attached:0.0 ATTACHED_ALERT_STICKY
++1789610694.573020 sleep 0.2
++1789610694.776637 side_command zz send-keys -l -t =attached:9.0 'printf '\''\007'\'''
++1789610694.776695 local side=zz
++1789610694.776712 shift
++1789610694.776722 case "$side" in
++1789610694.776737 zz_command send-keys -l -t =attached:9.0 'printf '\''\007'\'''
++1789610694.776794 env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=/tmp/zza.PLGxxV/zz-home XDG_CONFIG_HOME=/tmp/zza.PLGxxV/zz-config TMUX_TMPDIR=/tmp /home/demfabris/dev/zz-c11-modes-final/target/debug/zz-modes-cleanup --socket /tmp/zza-PLGxxV.sock send-keys -l -t =attached:9.0 'printf '\''\007'\'''
++1789610695.534385 side_command zz send-keys -t =attached:9.0 Enter
++1789610695.534436 local side=zz
++1789610695.534452 shift
++1789610695.534461 case "$side" in
++1789610695.534474 zz_command send-keys -t =attached:9.0 Enter
++1789610695.534520 env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=/tmp/zza.PLGxxV/zz-home XDG_CONFIG_HOME=/tmp/zza.PLGxxV/zz-config TMUX_TMPDIR=/tmp /home/demfabris/dev/zz-c11-modes-final/target/debug/zz-modes-cleanup --socket /tmp/zza-PLGxxV.sock send-keys -t =attached:9.0 Enter
++1789610697.196732 wait_for_current_marker zz 'Bell in window'
++1789610697.196783 local side=zz
++1789610697.196800 local 'marker=Bell in window'
++1789610697.196812 local attempt
++1789610697.196832 local screen
++1789610697.196843 (( attempt = 0 ))
++1789610697.196855 (( attempt < 200 ))
+++1789610697.197447 capture_current_screen zz
++1789610697.208344 screen=$'-sh-5.3$ printf \'ATTACHED_DRAW_%s\\n\' READY\nATTACHED_DRAW_READY\n-sh-5.3$ printf ATTACHED_ROOT_OK\nATTACHED_ROOT_OK-sh-5.3$ printf ATTACHED_PREFIX_OK\nATTACHED_PREFIX_OK-sh-5.3$ printf ATTACHED_PREFIX2_OK\nATTACHED_PREFIX2_OK-sh-5.3$\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n[attached]0:main* 9:alert-lifecycle  10:alert-zero   "alienware" 23:04 16-Sep-26'
++1789610697.208410 grep -Fq -- 'Bell in window'
++1789610697.212907 sleep 0.05
++1789610697.267217 (( attempt++ ))
++1789610697.267267 (( attempt < 200 ))
+++1789610697.269066 capture_current_screen zz
++1789610697.282307 screen=$'-sh-5.3$ printf \'ATTACHED_DRAW_%s\\n\' READY\nATTACHED_DRAW_READY\n-sh-5.3$ printf ATTACHED_ROOT_OK\nATTACHED_ROOT_OK-sh-5.3$ printf ATTACHED_PREFIX_OK\nATTACHED_PREFIX_OK-sh-5.3$ printf ATTACHED_PREFIX2_OK\nATTACHED_PREFIX2_OK-sh-5.3$\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nBell in window 9'
++1789610697.282385 grep -Fq -- 'Bell in window'
++1789610697.284360 return 0
++1789610697.284435 side_command zz send-keys -l -t =attached:0.0 'printf '\''ATTACHED_ALERT_TIMED_OUTPUT_zz\n'\'''
++1789610697.284464 local side=zz
++1789610697.284482 shift
++1789610697.284491 case "$side" in
++1789610697.284507 zz_command send-keys -l -t =attached:0.0 'printf '\''ATTACHED_ALERT_TIMED_OUTPUT_zz\n'\'''
++1789610697.284562 env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=/tmp/zza.PLGxxV/zz-home XDG_CONFIG_HOME=/tmp/zza.PLGxxV/zz-config TMUX_TMPDIR=/tmp /home/demfabris/dev/zz-c11-modes-final/target/debug/zz-modes-cleanup --socket /tmp/zza-PLGxxV.sock send-keys -l -t =attached:0.0 'printf '\''ATTACHED_ALERT_TIMED_OUTPUT_zz\n'\'''
++1789610698.125920 side_command zz send-keys -t =attached:0.0 Enter
++1789610698.125964 local side=zz
++1789610698.125979 shift
++1789610698.125988 case "$side" in
++1789610698.126001 zz_command send-keys -t =attached:0.0 Enter
++1789610698.126051 env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=/tmp/zza.PLGxxV/zz-home XDG_CONFIG_HOME=/tmp/zza.PLGxxV/zz-config TMUX_TMPDIR=/tmp /home/demfabris/dev/zz-c11-modes-final/target/debug/zz-modes-cleanup --socket /tmp/zza-PLGxxV.sock send-keys -t =attached:0.0 Enter
++1789610698.978113 wait_for_pane_marker zz ATTACHED_ALERT_TIMED_OUTPUT_zz
++1789610698.978165 local side=zz
++1789610698.978185 local marker=ATTACHED_ALERT_TIMED_OUTPUT_zz
++1789610698.978198 local attempt
++1789610698.978209 local captured
++1789610698.978219 (( attempt = 0 ))
++1789610698.978232 (( attempt < 200 ))
+++1789610698.978786 side_command zz capture-pane -p -J -S - -t =attached:0.0
++1789610699.810940 captured=$'-sh-5.3$ printf \'ATTACHED_DRAW_%s\\n\' READY\nATTACHED_DRAW_READY\n-sh-5.3$ printf ATTACHED_ROOT_OK\nATTACHED_ROOT_OK-sh-5.3$ printf ATTACHED_PREFIX_OK\nATTACHED_PREFIX_OK-sh-5.3$ printf ATTACHED_PREFIX2_OK\nATTACHED_PREFIX2_OK-sh-5.3$ printf \'ATTACHED_ALERT_TIMED_OUTPUT_zz\\n\'\nATTACHED_ALERT_TIMED_OUTPUT_zz\n-sh-5.3$ '
++1789610699.811010 grep -Fq -- ATTACHED_ALERT_TIMED_OUTPUT_zz
++1789610699.813600 return 0
++1789610699.813688 assert_current_marker_absent_while_alert zz ATTACHED_ALERT_TIMED_OUTPUT_zz 'Bell in window' 1.8
++1789610699.813722 local side=zz
++1789610699.813740 local marker=ATTACHED_ALERT_TIMED_OUTPUT_zz
++1789610699.813753 local 'alert_marker=Bell in window'
++1789610699.813764 local duration=1.8
++1789610699.813774 local screen
++1789610699.813784 sleep 1.8
+++1789610701.618541 capture_current_screen zz
++1789610701.625196 screen=$'-sh-5.3$ printf \'ATTACHED_DRAW_%s\\n\' READY\nATTACHED_DRAW_READY\n-sh-5.3$ printf ATTACHED_ROOT_OK\nATTACHED_ROOT_OK-sh-5.3$ printf ATTACHED_PREFIX_OK\nATTACHED_PREFIX_OK-sh-5.3$ printf ATTACHED_PREFIX2_OK\nATTACHED_PREFIX2_OK-sh-5.3$ printf \'ATTACHED_ALERT_TIMED_OUTPUT_zz\\n\'\nATTACHED_ALERT_TIMED_OUTPUT_zz\n-sh-5.3$\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n[attached]0:main* 9:alert-lifecycle! 10:alert-zero   "alienware" 23:04 16-Sep-26'
++1789610701.625249 grep -Fq -- 'Bell in window'
++1789610701.628623 fixture_failure 'zz alert expired before the 1.8 second freeze checkpoint'
++1789610701.628678 local 'message=zz alert expired before the 1.8 second freeze checkpoint'
++1789610701.628846 trap - ERR
++1789610701.628871 set +e
++1789610701.628893 printf 'error: %s\n' 'zz alert expired before the 1.8 second freeze checkpoint'
+error: zz alert expired before the 1.8 second freeze checkpoint
++1789610701.628915 dump_failure
++1789610701.628935 dump_screen zz
++1789610701.628958 local side=zz
++1789610701.628970 local screen
++1789610701.628985 printf '%s screen:\n' zz
+zz screen:
+++1789610701.629412 capture_screen zz
++1789610701.640331 screen=$'-sh-5.3$ printf \'ATTACHED_DRAW_%s\\n\' READY\nATTACHED_DRAW_READY\n-sh-5.3$ printf ATTACHED_ROOT_OK\nATTACHED_ROOT_OK-sh-5.3$ printf ATTACHED_PREFIX_OK\nATTACHED_PREFIX_OK-sh-5.3$ printf ATTACHED_PREFIX2_OK\nATTACHED_PREFIX2_OK-sh-5.3$ printf \'ATTACHED_ALERT_TIMED_OUTPUT_zz\\n\'\nATTACHED_ALERT_TIMED_OUTPUT_zz\n-sh-5.3$\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n[attached]0:main* 9:alert-lifecycle! 10:alert-zero   "alienware" 23:04 16-Sep-26'
++1789610701.640404 '[' -n $'-sh-5.3$ printf \'ATTACHED_DRAW_%s\\n\' READY\nATTACHED_DRAW_READY\n-sh-5.3$ printf ATTACHED_ROOT_OK\nATTACHED_ROOT_OK-sh-5.3$ printf ATTACHED_PREFIX_OK\nATTACHED_PREFIX_OK-sh-5.3$ printf ATTACHED_PREFIX2_OK\nATTACHED_PREFIX2_OK-sh-5.3$ printf \'ATTACHED_ALERT_TIMED_OUTPUT_zz\\n\'\nATTACHED_ALERT_TIMED_OUTPUT_zz\n-sh-5.3$\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n[attached]0:main* 9:alert-lifecycle! 10:alert-zero   "alienware" 23:04 16-Sep-26' ']'
++1789610701.640447 printf '%s\n' $'-sh-5.3$ printf \'ATTACHED_DRAW_%s\\n\' READY\nATTACHED_DRAW_READY\n-sh-5.3$ printf ATTACHED_ROOT_OK\nATTACHED_ROOT_OK-sh-5.3$ printf ATTACHED_PREFIX_OK\nATTACHED_PREFIX_OK-sh-5.3$ printf ATTACHED_PREFIX2_OK\nATTACHED_PREFIX2_OK-sh-5.3$ printf \'ATTACHED_ALERT_TIMED_OUTPUT_zz\\n\'\nATTACHED_ALERT_TIMED_OUTPUT_zz\n-sh-5.3$\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n[attached]0:main* 9:alert-lifecycle! 10:alert-zero   "alienware" 23:04 16-Sep-26'
+-sh-5.3$ printf 'ATTACHED_DRAW_%s\n' READY
+ATTACHED_DRAW_READY
+-sh-5.3$ printf ATTACHED_ROOT_OK
+ATTACHED_ROOT_OK-sh-5.3$ printf ATTACHED_PREFIX_OK
+ATTACHED_PREFIX_OK-sh-5.3$ printf ATTACHED_PREFIX2_OK
+ATTACHED_PREFIX2_OK-sh-5.3$ printf 'ATTACHED_ALERT_TIMED_OUTPUT_zz\n'
+ATTACHED_ALERT_TIMED_OUTPUT_zz
+-sh-5.3$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[attached]0:main* 9:alert-lifecycle! 10:alert-zero   "alienware" 23:04 16-Sep-26
++1789610701.640508 dump_screen tmux
++1789610701.640532 local side=tmux
++1789610701.640546 local screen
++1789610701.640561 printf '%s screen:\n' tmux
+tmux screen:
+++1789610701.641567 capture_screen tmux
++1789610701.646292 screen=$'-sh-5.3$ printf \'ATTACHED_DRAW_%s\\n\' READY\nATTACHED_DRAW_READY\n-sh-5.3$ printf ATTACHED_ROOT_OK\nATTACHED_ROOT_OK-sh-5.3$ printf ATTACHED_PREFIX_OK\nATTACHED_PREFIX_OK-sh-5.3$ printf ATTACHED_PREFIX2_OK\nATTACHED_PREFIX2_OK-sh-5.3$\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n[attached]0:main*                                    "alienware" 23:04 16-Sep-26'
++1789610701.646352 '[' -n $'-sh-5.3$ printf \'ATTACHED_DRAW_%s\\n\' READY\nATTACHED_DRAW_READY\n-sh-5.3$ printf ATTACHED_ROOT_OK\nATTACHED_ROOT_OK-sh-5.3$ printf ATTACHED_PREFIX_OK\nATTACHED_PREFIX_OK-sh-5.3$ printf ATTACHED_PREFIX2_OK\nATTACHED_PREFIX2_OK-sh-5.3$\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n[attached]0:main*                                    "alienware" 23:04 16-Sep-26' ']'
++1789610701.646381 printf '%s\n' $'-sh-5.3$ printf \'ATTACHED_DRAW_%s\\n\' READY\nATTACHED_DRAW_READY\n-sh-5.3$ printf ATTACHED_ROOT_OK\nATTACHED_ROOT_OK-sh-5.3$ printf ATTACHED_PREFIX_OK\nATTACHED_PREFIX_OK-sh-5.3$ printf ATTACHED_PREFIX2_OK\nATTACHED_PREFIX2_OK-sh-5.3$\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n[attached]0:main*                                    "alienware" 23:04 16-Sep-26'
+-sh-5.3$ printf 'ATTACHED_DRAW_%s\n' READY
+ATTACHED_DRAW_READY
+-sh-5.3$ printf ATTACHED_ROOT_OK
+ATTACHED_ROOT_OK-sh-5.3$ printf ATTACHED_PREFIX_OK
+ATTACHED_PREFIX_OK-sh-5.3$ printf ATTACHED_PREFIX2_OK
+ATTACHED_PREFIX2_OK-sh-5.3$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[attached]0:main*                                    "alienware" 23:04 16-Sep-26
++1789610701.646440 printf 'zz daemon stderr:\n'
+zz daemon stderr:
++1789610701.646466 '[' -s /tmp/zza.PLGxxV/zz-daemon.stderr ']'
++1789610701.646486 sed 's/^/    /' /tmp/zza.PLGxxV/zz-daemon.stderr
+    [2026-09-17T02:04:16Z INFO  zz_daemon::diagnostics::appearance] loaded appearance reason=startup root=None scheme=dark supported=0 unsupported=0 invalid=0 diagnostics_dropped=0 bytes=0 hash=9356683936999949859 appearance=TerminalAppearance { color_scheme: Dark, font_families: ["Noto Sans Mono"], font_families_bold: [], font_families_italic: [], font_families_bold_italic: [], font_size_points: 13.0, font_weight: 400, font_features: [], font_synthetic_style: FontSyntheticStyle { bold: true, italic: true, bold_italic: true }, font_thicken: false, font_thicken_strength: 255, cell_height_adjustment: None, padding_left: 10.0, padding_right: 10.0, padding_top: 10.0, padding_bottom: 10.0, foreground: Color { r: 216, g: 222, b: 233 }, background: Color { r: 16, g: 19, b: 24 }, cursor_color: Color { r: 229, g: 192, b: 123 }, cursor_style: Block, selection_foreground: Color { r: 216, g: 222, b: 233 }, selection_background: AppearanceColor { r: 80, g: 125, b: 184, a: 148 }, search_match_color: AppearanceColor { r: 224, g: 171, b: 56, a: 107 }, search_current_color: AppearanceColor { r: 250, g: 194, b: 71, a: 173 }, link_color: Color { r: 77, g: 163, b: 235 }, copy_cursor_color: AppearanceColor { r: 184, g: 199, b: 224, a: 107 }, palette_hash: 2756364480396514756, minimum_contrast: 1.0, cursor_blink_policy: Terminal, cursor_blink_interval_ms: 500, rounded_selection: true, background_opacity: 1.0, palette_classes: [], default_classes: [None, None] }
+    [2026-09-17T02:04:16Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=startup-mux-replay entries=0 prefix="C-b" mode_keys="emacs"
+    [2026-09-17T02:04:16Z INFO  zz_daemon::daemon] zz daemon listening at /tmp/zza-PLGxxV.sock
+    [2026-09-17T02:04:41Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-g table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_ROOT_OK"], source: None, command_blocks: [], expanded_alias_group: false, stdin: None }])
+    [2026-09-17T02:04:41Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-b table=root decision=Prefix
+    [2026-09-17T02:04:41Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-17T02:04:41Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=x table=prefix decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_PREFIX_OK"], source: None, command_blocks: [], expanded_alias_group: false, stdin: None }])
+    [2026-09-17T02:04:41Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false
+    [2026-09-17T02:04:41Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-a table=root decision=Prefix
+    [2026-09-17T02:04:41Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-17T02:04:41Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=y table=prefix decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_PREFIX2_OK"], source: None, command_blocks: [], expanded_alias_group: false, stdin: None }])
+    [2026-09-17T02:04:41Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false
+    [2026-09-17T02:04:41Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-b table=root decision=Prefix
+    [2026-09-17T02:04:41Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-17T02:04:41Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=[ table=prefix decision=Commands([CommandInvocation { name: "copy-mode", args: [], source: None, command_blocks: [], expanded_alias_group: false, stdin: None }])
+    [2026-09-17T02:04:42Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false
+    [2026-09-17T02:04:43Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=q table=copy-mode decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cancel"], source: None, command_blocks: [], expanded_alias_group: false, stdin: None }])
++1789610701.648318 exit 1
++1789610701.648362 cleanup
++1789610701.648412 local status=1
++1789610701.648432 local attempt
++1789610701.648448 trap - EXIT ERR INT TERM
++1789610701.648465 set +e
++1789610701.648485 '[' -n '' ']'
++1789610701.648498 tmux_outer_command kill-server
++1789610701.653035 zz_command kill-server
++1789610703.536135 tmux_inner_command kill-server
++1789610703.594057 '[' -n 1740047 ']'
++1789610703.594099 kill 1740047
++1789610703.594153 (( attempt = 0 ))
++1789610703.594167 (( attempt < 200 ))
++1789610703.594182 kill -0 1740047
++1789610703.594205 break
++1789610703.594228 kill -0 1740047
++1789610703.594266 wait 1740047
+++1789610703.595146 id -u
+++1789610703.601389 id -u
++1789610703.605445 rm -f -- /tmp/zza-PLGxxV.sock /tmp/tmux-1000/zzao-PLGxxV /tmp/tmux-1000/zzai-PLGxxV
++1789610703.608966 rm -rf -- /tmp/zza.PLGxxV
++1789610703.612915 exit 1

@@ -12,7 +12,7 @@ use gpui::{
     App, BorderStyle, Bounds, CursorStyle, Edges, Element, ElementId, GlobalElementId, Half,
     HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, StyledText,
-    TextLayout, Window, point, px, quad,
+    TextAlign, TextLayout, Window, WrappedLineLayout, point, px, quad,
 };
 
 use crate::{ActiveTheme, WindowExt as _};
@@ -30,7 +30,7 @@ use crate::Colorize as _;
 /// Horizontal and vertical breathing room around an inline code fill. The fill
 /// is painted under the glyphs rather than reserved in layout, so the padding
 /// has to stay under the width of the space that separates code from prose.
-const CODE_FILL_PAD_X: f32 = 3.0;
+const CODE_FILL_PAD_X: f32 = 1.0;
 const CODE_FILL_PAD_Y: f32 = 1.0;
 /// `widget-corner-radius` is sized for panels and buttons and goes as high as
 /// 24px; on a fill barely taller than the glyphs anything near half the height
@@ -38,45 +38,61 @@ const CODE_FILL_PAD_Y: f32 = 1.0;
 /// ever lowers the radius.
 const CODE_FILL_RADIUS_MAX: f32 = 6.0;
 
-/// One fill per visual line a code span covers. A span that survives a wrap
-/// runs to the text's own edges on the lines between its ends.
 fn code_fill_bounds(
-    start: Point<Pixels>,
-    end: Point<Pixels>,
+    text: &str,
+    range: Range<usize>,
+    lines: &[Arc<WrappedLineLayout>],
+    bounds: Bounds<Pixels>,
     line_height: Pixels,
-    ink: Pixels,
-    text_bounds: Bounds<Pixels>,
+    align: TextAlign,
 ) -> Vec<Bounds<Pixels>> {
-    let top_inset = ((line_height - ink) / 2.0).max(px(0.0)) - px(CODE_FILL_PAD_Y);
-    let height = ink + px(CODE_FILL_PAD_Y * 2.0);
-    let rows = if line_height > px(0.0) {
-        ((end.y - start.y) / line_height).round().max(0.0) as usize
-    } else {
-        0
-    };
-
-    (0..=rows)
-        .filter_map(|row| {
-            let left = if row == 0 {
-                start.x
-            } else {
-                text_bounds.left()
-            };
-            let right = if row == rows {
-                end.x
-            } else {
-                text_bounds.right()
-            };
-            if right <= left {
-                return None;
+    let mut fills = Vec::new();
+    let mut offset = 0;
+    let mut top = bounds.origin.y;
+    for line in lines {
+        let layout = &line.unwrapped_layout;
+        let ink = layout.ascent + layout.descent;
+        let top_inset = ((line_height - ink) / 2.0).max(px(0.0)) - px(CODE_FILL_PAD_Y);
+        let height = ink + px(CODE_FILL_PAD_Y * 2.0);
+        let mut row_start = 0;
+        for row_end in line
+            .wrap_boundaries
+            .iter()
+            .map(|boundary| layout.runs[boundary.run_ix].glyphs[boundary.glyph_ix].index)
+            .chain([line.len()])
+        {
+            let start = range.start.max(offset + row_start);
+            let mut end = range.end.min(offset + row_end);
+            if start < end {
+                if end == offset + row_end && row_end < line.len() {
+                    end = start + text[start..end].trim_end_matches(char::is_whitespace).len();
+                }
+                if start < end {
+                    let row_x = layout.x_for_index(row_start);
+                    let row_width = layout.x_for_index(row_end) - row_x;
+                    let align_offset = match align {
+                        TextAlign::Left => px(0.0),
+                        TextAlign::Center => (bounds.size.width - row_width) / 2.0,
+                        TextAlign::Right => bounds.size.width - row_width,
+                    };
+                    let left =
+                        bounds.left() + align_offset + layout.x_for_index(start - offset) - row_x;
+                    let right =
+                        bounds.left() + align_offset + layout.x_for_index(end - offset) - row_x;
+                    if right > left {
+                        fills.push(Bounds::from_corners(
+                            point(left - px(CODE_FILL_PAD_X), top + top_inset),
+                            point(right + px(CODE_FILL_PAD_X), top + top_inset + height),
+                        ));
+                    }
+                }
             }
-            let top = start.y + line_height * row as f32 + top_inset;
-            Some(Bounds::from_corners(
-                point(left - px(CODE_FILL_PAD_X), top),
-                point(right + px(CODE_FILL_PAD_X), top + height),
-            ))
-        })
-        .collect()
+            row_start = row_end;
+            top += line_height;
+        }
+        offset += line.len() + 1;
+    }
+    fills
 }
 
 pub(super) struct Inline {
@@ -161,20 +177,18 @@ impl Inline {
         let fill_color = cx.theme().background.raised(2);
         let radius = cx.theme().radius.min(px(CODE_FILL_RADIUS_MAX));
         let line_height = layout.line_height();
-        let text_bounds = layout.bounds();
+        let bounds = layout.bounds();
+        let lines = layout.line_layouts();
 
         for range in &self.code_ranges {
-            let (Some(start), Some(end)) = (
-                layout.position_for_index(range.start),
-                layout.position_for_index(range.end),
-            ) else {
-                continue;
-            };
-            let Some(line) = layout.line_layout_for_index(range.start) else {
-                continue;
-            };
-            let ink = line.unwrapped_layout.ascent + line.unwrapped_layout.descent;
-            for fill in code_fill_bounds(start, end, line_height, ink, text_bounds) {
+            for fill in code_fill_bounds(
+                &self.text,
+                range.clone(),
+                &lines,
+                bounds,
+                line_height,
+                window.text_style().text_align,
+            ) {
                 window.paint_quad(gpui::fill(fill, fill_color).corner_radii(radius));
             }
         }
@@ -715,53 +729,153 @@ fn point_in_text_selection(
 #[cfg(test)]
 mod tests {
     use super::{
-        CODE_FILL_PAD_X, CODE_FILL_PAD_Y, InlineState, code_fill_bounds, is_openable,
-        point_in_text_selection,
+        Bounds, CODE_FILL_PAD_X, CODE_FILL_PAD_Y, InlineState, TextAlign, code_fill_bounds,
+        is_openable, point_in_text_selection,
     };
-    use gpui::{Bounds, point, px};
+    use gpui::{
+        FontId, GlyphId, LineLayout, ShapedGlyph, ShapedRun, WrapBoundary, WrappedLineLayout,
+        point, px,
+    };
+    use std::sync::Arc;
 
-    #[test]
-    fn a_code_fill_hugs_the_ink_box_on_one_line() {
-        let text_bounds = Bounds::from_corners(point(px(0.0), px(0.0)), point(px(400.0), px(21.0)));
-        let fills = code_fill_bounds(
-            point(px(120.0), px(0.0)),
-            point(px(180.0), px(0.0)),
-            px(21.0),
-            px(15.31),
-            text_bounds,
-        );
-
-        assert_eq!(fills.len(), 1, "a span on one line paints one fill");
-        let fill = fills[0];
-        assert_eq!(fill.left(), px(120.0 - CODE_FILL_PAD_X));
-        assert_eq!(fill.right(), px(180.0 + CODE_FILL_PAD_X));
-        assert_eq!(fill.size.height, px(15.31 + CODE_FILL_PAD_Y * 2.0));
-        let ink_center = fill.top() + fill.size.height / 2.0;
-        assert!(
-            (ink_center - px(10.5)).abs() < px(0.01),
-            "the fill centres on the line box, not its top"
-        );
+    fn code_line(text: &str, wraps: &[usize]) -> Arc<WrappedLineLayout> {
+        let glyphs = text
+            .char_indices()
+            .enumerate()
+            .map(|(column, (index, _))| ShapedGlyph {
+                id: GlyphId(0),
+                position: point(px(column as f32 * 10.0), px(0.0)),
+                index,
+                is_emoji: false,
+            })
+            .collect::<Vec<_>>();
+        let boundaries = wraps
+            .iter()
+            .map(|index| WrapBoundary {
+                run_ix: 0,
+                glyph_ix: glyphs
+                    .iter()
+                    .position(|glyph| glyph.index == *index)
+                    .unwrap(),
+            })
+            .collect();
+        Arc::new(WrappedLineLayout {
+            unwrapped_layout: Arc::new(LineLayout {
+                font_size: px(13.0),
+                width: px(glyphs.len() as f32 * 10.0),
+                ascent: px(12.0),
+                descent: px(3.31),
+                runs: vec![ShapedRun {
+                    font_id: FontId(0),
+                    glyphs,
+                }],
+                len: text.len(),
+            }),
+            wrap_boundaries: boundaries,
+            wrap_width: Some(px(400.0)),
+        })
     }
 
     #[test]
-    fn a_wrapped_code_fill_splits_per_line() {
-        let text_bounds = Bounds::from_corners(point(px(0.0), px(0.0)), point(px(400.0), px(42.0)));
+    fn a_code_fill_hugs_the_ink_box_on_one_line() {
+        let text = "before code after";
         let fills = code_fill_bounds(
-            point(px(360.0), px(0.0)),
-            point(px(40.0), px(21.0)),
+            text,
+            7..11,
+            &[code_line(text, &[])],
+            Bounds::from_corners(point(px(5.0), px(0.0)), point(px(405.0), px(100.0))),
             px(21.0),
-            px(15.31),
-            text_bounds,
+            TextAlign::Left,
         );
+        assert_eq!(fills.len(), 1);
+        let fill = fills[0];
+        assert_eq!(fill.left(), px(75.0 - CODE_FILL_PAD_X));
+        assert_eq!(fill.right(), px(115.0 + CODE_FILL_PAD_X));
+        assert!((fill.size.height - px(15.31 + CODE_FILL_PAD_Y * 2.0)).abs() < px(0.01));
+        assert!((fill.top() + fill.size.height / 2.0 - px(10.5)).abs() < px(0.01));
+        assert!(fill.left() > px(65.0));
+        assert!(fill.right() < px(125.0));
+    }
 
-        assert_eq!(
-            fills.len(),
-            2,
-            "a span across a wrap paints one fill a line"
+    #[test]
+    fn a_wrapped_code_fill_stops_at_the_fragment_not_the_paragraph_edge() {
+        let text = "before cargo run -p zz-xtask after";
+        let fills = code_fill_bounds(
+            text,
+            7..28,
+            &[code_line(text, &[20])],
+            Bounds::from_corners(point(px(5.0), px(0.0)), point(px(405.0), px(100.0))),
+            px(21.0),
+            TextAlign::Left,
         );
-        assert_eq!(fills[0].right(), px(400.0 + CODE_FILL_PAD_X));
-        assert_eq!(fills[1].left(), px(0.0 - CODE_FILL_PAD_X));
+        assert_eq!(fills.len(), 2);
+        assert_eq!(fills[0].right(), px(195.0 + CODE_FILL_PAD_X));
+        assert_eq!(fills[1].left(), px(5.0 - CODE_FILL_PAD_X));
+        assert_eq!(fills[1].right(), px(85.0 + CODE_FILL_PAD_X));
         assert_eq!(fills[1].top() - fills[0].top(), px(21.0));
+    }
+
+    #[test]
+    fn code_at_a_wrap_boundary_has_no_fill_on_the_previous_row() {
+        let text = "before café after";
+        let lines = [code_line(text, &[7, 13])];
+        let fills = code_fill_bounds(
+            text,
+            7..12,
+            &lines,
+            Bounds::from_corners(point(px(0.0), px(0.0)), point(px(400.0), px(100.0))),
+            px(21.0),
+            TextAlign::Left,
+        );
+        assert_eq!(fills.len(), 1);
+        assert_eq!(fills[0].left(), px(-CODE_FILL_PAD_X));
+        assert_eq!(fills[0].right(), px(40.0 + CODE_FILL_PAD_X));
+        assert!(fills[0].top() >= px(21.0));
+        assert!(fills[0].bottom() <= px(42.0));
+    }
+
+    #[test]
+    fn code_fills_follow_centered_and_right_aligned_table_text() {
+        let text = "code";
+        for (align, left) in [(TextAlign::Center, 30.0), (TextAlign::Right, 60.0)] {
+            let fills = code_fill_bounds(
+                text,
+                0..text.len(),
+                &[code_line(text, &[])],
+                Bounds::from_corners(point(px(0.0), px(0.0)), point(px(100.0), px(21.0))),
+                px(21.0),
+                align,
+            );
+            assert_eq!(fills[0].left(), px(left - CODE_FILL_PAD_X));
+            assert_eq!(fills[0].right(), px(left + 40.0 + CODE_FILL_PAD_X));
+        }
+    }
+
+    #[gpui::test]
+    fn shaped_code_wrap_leaves_the_unused_line_width_unpainted(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.update(|window, _| {
+            let text = gpui::SharedString::from("cargo run -p zz-xtask");
+            let run = gpui::TextStyle::default().to_run(text.len());
+            let wrapped = window
+                .text_system()
+                .shape_text(text.clone(), px(13.0), &[run], Some(px(113.0)), None)
+                .expect("shape code");
+            let lines = wrapped
+                .iter()
+                .map(|line| Arc::clone(line))
+                .collect::<Vec<_>>();
+            let fills = code_fill_bounds(
+                &text,
+                0..text.len(),
+                &lines,
+                Bounds::from_corners(point(px(0.0), px(0.0)), point(px(113.0), px(100.0))),
+                px(21.0),
+                TextAlign::Left,
+            );
+            assert!(fills.len() >= 2);
+            assert!(fills[0].right() < px(113.0));
+        });
     }
 
     #[test]

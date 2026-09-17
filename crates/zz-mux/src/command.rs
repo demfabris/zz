@@ -22424,6 +22424,28 @@ mod tests {
                         .is_err()
                 );
             }
+            let index = target.rsplit_once('.').unwrap().1;
+            for exact_target in [
+                format!("work:=.{index}"),
+                format!("=work:=.{index}"),
+                format!(":=.{index}"),
+                format!("work:=.{pane}"),
+                "work:=.".to_owned(),
+            ] {
+                assert_eq!(
+                    engine.resolve_session(Some(&exact_target), Some(session)),
+                    Ok(session),
+                    "{exact_target}"
+                );
+            }
+            assert_eq!(
+                engine.resolve_session(Some("work:=.0"), Some(session)),
+                Err(ServerError::PaneNotFound("0".to_owned()))
+            );
+            assert_eq!(
+                engine.resolve_session(Some("work:=.9"), Some(session)),
+                Err(ServerError::PaneNotFound("9".to_owned()))
+            );
             assert_eq!(
                 engine.resolve_session(Some(&pane.to_string()), None),
                 Ok(session)

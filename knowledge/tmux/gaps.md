@@ -4,7 +4,7 @@ title: tmux compatibility gap report
 description: "Live TODO and status report for tmux compatibility gaps, decisions, evidence, and acceptance gates."
 resource: compat/tmux-gaps.json
 tags: [tmux, compatibility, gaps, tracker]
-timestamp: 2026-09-16T00:00:00-03:00
+timestamp: 2026-09-18T00:00:00-03:00
 ---
 
 # Overview
@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **41**. Classified items: **378**.
+Tracked gap groups: **42**. Classified items: **379**.
 
-- Status: open: 1, accepted: 40.
-- Decision: adopt: 1, native: 31, never: 9.
-- Priority: now: 1, none: 40.
+- Status: open: 2, accepted: 40.
+- Decision: adopt: 2, native: 31, never: 9.
+- Priority: now: 1, next: 1, none: 40.
 - Closed history entries: 207.
-- Surface: command: 8, flag: 23, extension-flag: 5, native-command: 32, option: 34, format: 43, key: 47, binding: 37, native-key: 91, semantic: 49, presentation: 8, protocol: 1.
+- Surface: command: 8, flag: 23, extension-flag: 5, native-command: 32, option: 34, format: 43, key: 47, binding: 37, native-key: 91, semantic: 50, presentation: 8, protocol: 1.
 
 ## Measured surface
 
@@ -52,6 +52,12 @@ structure as proof.
 | ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `desktop.overlay-consumers` | Give every daemon overlay payload a desktop consumer | adopt | open | medium | gui | daily, gui | none |
+
+## Next
+
+| ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `clients.command-round-trip-latency` | Answer a command client as fast as the pin does | adopt | open | medium | daemon | daily, scripts | none |
 
 ## None
 
@@ -139,6 +145,26 @@ Pinned tmux backs `-R`, `-P`, `-C`, `-F`, `-H`, and `-L` with its own grid and i
 - Acceptance:
   - ``capture-pane` keeps the pin's routing, boundaries and retained text/style semantics. `-C` and `-L` have byte assertions and TUI-017 records the remaining colour and charset provenance limitations; `-F`, `-H`, `-P` and `-R` keep measured workload-specific refusal decisions.`
   - `The divergence matrix keeps the accepted text-snapshot shape visible: the saved alternate grid the pin keeps for -a and the four rich transports.`
+
+### `clients.command-round-trip-latency`: Answer a command client as fast as the pin does
+
+Registered 2026-09-18 by the TUI-018 caller-stream lane, which measured it while fixing the ordering of `split-window -I -P` and does not own it. It is a real divergence with no record: every `-P` on an empty pane waits two seconds for a pid that cannot arrive, and every command client invocation costs about a hundred milliseconds where the pin costs two. Nothing in the observable-results contract names latency, so no TUI obligation closes on it, which is why it is a gap and not a clause.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `next` / `medium`
+- Owner: `daemon`
+- User impact: daily, scripts
+- Items: `semantic:command-client-round-trip-latency`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-cli/src/lib.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
+  - `resource:compat/tui/evidence/TUI-018/attempt-12/probes`
+- Acceptance:
+  - `One `split-window -d -P` that builds an empty pane answers in the same order of magnitude as the pin. Measured on 2026-09-18 against pinned tmux d77c9dc6 on the alienware box, three runs each, on this branch and on origin/main alike: `split-window -d -t ... -P -F '#{pane_id}' ''` takes 2183-2207 ms against the pin's 2-3 ms, while the same command without -P takes 214 ms and with a shell instead of an empty pane takes 269-364 ms.`
+  - `The two costs are separable and both are measured. The two-second part is `wait_for_terminal_identity` in crates/zz-daemon/src/daemon.rs, which the `MuxEffect::PaneFormatOutput` arm runs before it expands a -P format: it polls for `process_id()` and `tty()` for a full two seconds, and an empty pane has neither by construction, so every `-P` on an empty pane pays the whole deadline. TUI-018 removed it only for the pane a caller stream fills; the general guard is not written.`
+  - `The remaining part is per-invocation round trip: `display-message -p` answers in 88-117 ms against the pin's 2 ms and `list-panes` in 142 ms, so a plain command costs about two orders of magnitude more than the pin before any work happens.`
 
 ### `clients.interactive-refresh`: Complete interactive client commands
 

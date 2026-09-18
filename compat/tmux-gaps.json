@@ -1,7 +1,7 @@
 {
   "schema": 3,
   "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
-  "updated_on": "2026-09-16",
+  "updated_on": "2026-09-18",
   "gaps": [
     {
       "id": "aliases.remote-client-preflight",
@@ -61,6 +61,34 @@
       ],
       "depends_on": [],
       "reason": "Pinned tmux backs `-R`, `-P`, `-C`, `-F`, `-H`, and `-L` with its own grid and input-parser internals: `-R` prints per-line `grid_line` flags plus every cell's colour, attribute, and hyperlink id, and `-P` drains the incomplete escape sequence still sitting in `input_pending`. zz's capture surface is the terminal worker's retained UTF-8 text snapshot, which the daemon serves for `-a`, `-e`, `-J`, `-M`, `-N`, `-p`, `-q`, `-b`, `-S`, and `-E` with the pin's routing, alongside the zz-native `show-last-output` and `capture-browser` verbs. The remaining -F, -H, -P and -R transports stay loudly refused with measured workload-specific decisions. Reopen only when a named scripted workload needs cell attributes, hyperlinks, or a saved alternate grid, which takes a terminal-owned rich snapshot rather than another text transform. semantic:capture-pane-trailing-blank-rows closed 2026-09-14: the text residues were not the transports. cmd_capture_pane_history prints one line per grid row of the range whatever the row holds, and grid_string_cells walks each row to gl->cellsize under GRID_STRING_EMPTY_CELLS and to gl->cellused otherwise, then drops trailing spaces under GRID_STRING_TRIM_SPACES; cmd_capture_pane_exec then drops one trailing newline and prints one, so an empty last row survives. The worker now adds back the rows after the last one written and the cells after the ones used, and -M falls back to the pane the way the pin's else branch does. Measured 2026-09-14 on Linux against the pin d77c9dc6 on an 80x24 pane holding three written rows: capture-pane -p, -p -e, -p -N, -p -M and -p -a -q and every explicit range from -E 0 to -E 30 are byte-identical on both sides, where -p was 3 lines against 24 and -p -N was 37 bytes against 104 before. The one grid fact this reproduces is grid_expand_line's growth to a quarter, a half or the whole screen width, read off the cells the row currently uses: a row the pin once wrote wider and later erased keeps the wider allocation there and not here. The cases are capture-default-range, capture-past-last-row, capture-preserve-trailing and its three neighbours, capture-mode-screen, capture-mode-default, capture-escape, capture-alternate and capture-alternate-quiet in compat/tui-client-commands.sh. Narrowed on 2026-09-15 by the cycle 10 capture lane: `-C` and `-L` are transforms of the text snapshot and nothing else, so they left this gap. `-C` doubles a backslash in cell data and, with `-e`, writes every escape introducer as a literal `\\033` (grid.c also emits escaped SO/SI for retained DEC charset cells, a fact Ghostty does not retain). `-L` numbers each line from the history size, negative in history, and with `-J` keeps the number of every joined row inside the joined line. Both are asserted against the pin in compat/tui-client-commands.sh and compat/scenarios/capture-pane.txt. Fix pass 2026-09-15: numbered joins now use physical wrap flags, so ANSI style bytes cannot consume another row. Live styled captures emit the pin's colour and attribute transitions. TUI-017 remains active for explicit indexed colours 0 through 15, which Ghostty merges with named colours. Both plain and escaped DEC charset captures carry the authorized measured provenance decision; literal Unicode line drawing remains asserted."
+    },
+    {
+      "id": "clients.command-round-trip-latency",
+      "title": "Answer a command client as fast as the pin does",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "next",
+      "ease": "medium",
+      "impact": [
+        "daily",
+        "scripts"
+      ],
+      "owner": "daemon",
+      "items": [
+        "semantic:command-client-round-trip-latency"
+      ],
+      "evidence": [
+        "resource:crates/zz-cli/src/lib.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:compat/tui/evidence/TUI-018/attempt-12/probes"
+      ],
+      "acceptance": [
+        "One `split-window -d -P` that builds an empty pane answers in the same order of magnitude as the pin. Measured on 2026-09-18 against pinned tmux d77c9dc6 on the alienware box, three runs each, on this branch and on origin/main alike: `split-window -d -t ... -P -F '#{pane_id}' ''` takes 2183-2207 ms against the pin's 2-3 ms, while the same command without -P takes 214 ms and with a shell instead of an empty pane takes 269-364 ms.",
+        "The two costs are separable and both are measured. The two-second part is `wait_for_terminal_identity` in crates/zz-daemon/src/daemon.rs, which the `MuxEffect::PaneFormatOutput` arm runs before it expands a -P format: it polls for `process_id()` and `tty()` for a full two seconds, and an empty pane has neither by construction, so every `-P` on an empty pane pays the whole deadline. TUI-018 removed it only for the pane a caller stream fills; the general guard is not written.",
+        "The remaining part is per-invocation round trip: `display-message -p` answers in 88-117 ms against the pin's 2 ms and `list-panes` in 142 ms, so a plain command costs about two orders of magnitude more than the pin before any work happens."
+      ],
+      "depends_on": [],
+      "reason": "Registered 2026-09-18 by the TUI-018 caller-stream lane, which measured it while fixing the ordering of `split-window -I -P` and does not own it. It is a real divergence with no record: every `-P` on an empty pane waits two seconds for a pid that cannot arrive, and every command client invocation costs about a hundred milliseconds where the pin costs two. Nothing in the observable-results contract names latency, so no TUI obligation closes on it, which is why it is a gap and not a clause."
     },
     {
       "id": "clients.interactive-refresh",

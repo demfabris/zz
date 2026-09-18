@@ -718,7 +718,11 @@ the server log still records the command the caller typed. See
   scrolled so the cursor stays visible, with `prompt_cursor` its column and `prompt_top` set under
   `status-position top`; `ChooseTreeState.prompt` stays empty, so an option value longer than
   `MAX_CHOOSE_ITEM_TEXT_BYTES` never crosses a bounded field. A client that meets a control frame it
-  cannot decode now logs it and reads the next frame instead of dropping the connection.
+  cannot decode now logs it, reads the next frame instead of dropping the connection, and asks the
+  daemon for a `Resync` so a skipped frame cannot leave it silently stale.
+  `ChooserPresentation.prompt_style` carries `message-command-style` instead of `message-style`
+  while a mode prompt sits in vi command mode, which is a different value in a field that already
+  existed rather than a new one.
   `InputMessage::ClientSuspendState { suspended }` is a tail variant in v105. The raw TUI
   reports terminal suspension and resumption so client lists and attachment counts exclude
   a stopped client while its connection and pane views survive. `parse_styled_segments` also

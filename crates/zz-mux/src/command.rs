@@ -8056,12 +8056,6 @@ impl MuxEngine {
             let Some(target) = mouse.pane else {
                 return Err(ServerError::InvalidCommand("no mouse target".to_owned()));
             };
-            if context
-                .invoking_key()
-                .is_some_and(mouse_key_is_a_replayed_double_click)
-            {
-                return Ok(Execution::default());
-            }
             let Some(action) = mouse.view_action.clone() else {
                 return Ok(Execution::default());
             };
@@ -15232,8 +15226,11 @@ fn tmux_key_base_identity(base: &str) -> Option<(u32, u8, u8)> {
 /// the third press it was waiting for did not arrive, and `input_key_mouse`
 /// drops an ignored event. So a `send -M` from a `DoubleClick` binding writes
 /// nothing to the pane: the press that double click was made of reached it
-/// already, when the binding for the second press did not claim it.
-fn mouse_key_is_a_replayed_double_click(key: &str) -> bool {
+/// already, when the binding for the second press did not claim it. The drop
+/// belongs to the pane's own input, which `window_pane_key` reaches only after
+/// a pane holding a mode has already answered the key.
+#[must_use]
+pub fn mouse_key_is_a_replayed_double_click(key: &str) -> bool {
     key.rsplit_once('-')
         .map_or(key, |(_, base)| base)
         .starts_with("DoubleClick")

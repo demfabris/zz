@@ -8663,6 +8663,15 @@ impl Shared {
                             snapshot_changed = true;
                             continue;
                         }
+                        if command_name == "send-keys"
+                            && context.invoking_mouse().is_some()
+                            && !require_mode
+                            && context
+                                .invoking_key()
+                                .is_some_and(zz_mux::mouse_key_is_a_replayed_double_click)
+                        {
+                            continue;
+                        }
                         if matches!(action, zz_terminal::TerminalViewAction::ClearHistory)
                             && clear_pane_modes(&mut inner, *pane)
                         {

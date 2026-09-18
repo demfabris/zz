@@ -29,8 +29,9 @@ pub use command::{
     PaneRuntimeFacts, PopupOptions, PromptOutcome, RetainedJobEnvironment, SourceStream,
     StatusRowVariables, SwitchAction, SwitchMode, TMUX_OPTION_CONSUMERS, TerminalWorkerOptions,
     WindowStyleValues, copy_mode_action_is_read_only_safe, format_command, hook_format_variables,
-    if_shell_truthy, parse_tmux_key, resolve_invoking_mouse_targets, send_keys_is_read_only_safe,
-    send_keys_target_client, validate_static_command_chain,
+    if_shell_truthy, mouse_key_is_a_replayed_double_click, parse_tmux_key,
+    resolve_invoking_mouse_targets, send_keys_is_read_only_safe, send_keys_target_client,
+    validate_static_command_chain,
 };
 #[doc(hidden)]
 pub use command::{

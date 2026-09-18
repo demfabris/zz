@@ -994,6 +994,9 @@ Sources:
 - `compat/tui/evidence/TUI-017/attempt-10/native-summary.txt`
 - `compat/tui/evidence/TUI-017/attempt-10/native-attribution-summary.txt`
 - `compat/tui/evidence/TUI-017/attempt-10/delta-summary.json`
+- `knowledge/designs/tui-parity.md`
+- `knowledge/tmux/divergences.md`
+- `third_party/rust/libghostty-vt-sys/build.rs`
 
 Tmux gap references: `capture.rich-transports`.
 

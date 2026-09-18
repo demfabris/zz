@@ -1334,7 +1334,10 @@
         "compat/tui/evidence/TUI-017/attempt-10/case-changes.json",
         "compat/tui/evidence/TUI-017/attempt-10/native-summary.txt",
         "compat/tui/evidence/TUI-017/attempt-10/native-attribution-summary.txt",
-        "compat/tui/evidence/TUI-017/attempt-10/delta-summary.json"
+        "compat/tui/evidence/TUI-017/attempt-10/delta-summary.json",
+        "knowledge/designs/tui-parity.md",
+        "knowledge/tmux/divergences.md",
+        "third_party/rust/libghostty-vt-sys/build.rs"
       ],
       "acceptance": [
         "Answer capture-pane -C, -F, -H, -L, -P and -R with the pin's bytes over a rich snapshot the terminal worker owns, or keep each refusal with a measured reason that names the workload it would serve.",

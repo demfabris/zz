@@ -46019,6 +46019,37 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn detached_panes_spawn_at_their_laid_out_size() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "sized", "-x", "100", "-y", "30"],
+                ),
+            )
+            .expect("create a 100x30 session");
+        let pane = context.pane.expect("sized pane");
+        assert_eq!(
+            shared.inner.lock().terminal_spawns[&pane].initial_size,
+            Some(TerminalSize::cells(100, 30))
+        );
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("kill-session", ["-t", "sized"]),
+            )
+            .expect("remove sized session");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn default_command_is_injected_only_when_nonempty_at_create() {
         let shared = Arc::new(Shared::new(1));
         let mut context = ExecutionContext::default();

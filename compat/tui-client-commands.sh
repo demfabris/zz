@@ -1270,6 +1270,60 @@ customize_long_prompt_self_checks() {
   CASE_GRID_CELLS=0
 }
 
+# `prompt_set_options`: every prompt a mode tree raises is created through it,
+# so each one keeps the session's `status-keys` for its whole life and
+# `prompt_key` runs its keys through the vi table first. With `status-keys vi`
+# Escape does NOT close a mode prompt: it puts it in command mode with the
+# cursor stepped back, which is where `h`, `x`, `0`, `D` and the rest of the vi
+# table act, and `message-command-style` paints the row while it sits there.
+customize_prompt_vi_cases() {
+  customize_scene
+  run_on_both set-option -g status-keys vi
+  CASE_NEEDLE_MODE=1
+  case_run customize-prompt-vi-open same '' -- customize-mode -t PANE
+  case_run customize-prompt-vi-filter same '' -- send-keys -t PANE f
+  case_run customize-prompt-vi-typed same '' -- send-keys -t PANE a b c
+  case_run customize-prompt-vi-escape same '' -- send-keys -t PANE Escape
+  case_run customize-prompt-vi-left same '' -- send-keys -t PANE h
+  case_run customize-prompt-vi-delete same '' -- send-keys -t PANE x
+  case_run customize-prompt-vi-insert same '' -- send-keys -t PANE i Z
+  case_run customize-prompt-vi-apply same '' -- send-keys -t PANE Enter
+  case_run customize-prompt-vi-clear same '' -- send-keys -t PANE c
+  case_run customize-prompt-vi-search same '' -- send-keys -t PANE / s t a t u s
+  case_run customize-prompt-vi-search-command same '' -- send-keys -t PANE Escape
+  case_run customize-prompt-vi-search-home same '' -- send-keys -t PANE 0
+  case_run customize-prompt-vi-search-end same '' -- send-keys -t PANE '$'
+  case_run customize-prompt-vi-search-kill same '' -- send-keys -t PANE D
+  case_run customize-prompt-vi-search-cancel same '' -- send-keys -t PANE q
+  case_run customize-prompt-vi-option same '' -- send-keys -t PANE Right Down Enter
+  case_run customize-prompt-vi-option-command same '' -- send-keys -t PANE Escape
+  case_run customize-prompt-vi-option-word same '' -- send-keys -t PANE 0 w
+  case_run customize-prompt-vi-option-back same '' -- send-keys -t PANE b
+  case_run customize-prompt-vi-option-append same '' -- send-keys -t PANE A Z
+  case_run customize-prompt-vi-option-cancel same '' -- send-keys -t PANE C-c
+  restore_case customize-prompt-vi-closed
+  run_on_both set-option -g status-keys emacs
+  CASE_GRID_CELLS=0
+}
+
+customize_prompt_vi_self_checks() {
+  local CASE_EXPECT_EQUAL=1
+  customize_scene
+  run_on_both set-option -g status-keys vi
+  run_both customize-mode -t PANE
+  run_both send-keys -t PANE f a b c Escape
+  self_check_run customize-prompt-vi-control display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+  self_check_expect 'both filter prompts stay open in vi command mode' exit=0 stdout=0 stderr=0 screen=0 state=0
+  zz_command set-option -g status-keys emacs >/dev/null
+  zz_command send-keys -t "$(active_pane zz)" Escape >/dev/null
+  self_check_run customize-prompt-vi-sabotage display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
+  self_check_expect 'an emacs Escape cancels the filter prompt and changes the row' exit=0 stdout=0 stderr=0 screen=1 state=0
+  zz_command set-option -g status-keys vi >/dev/null
+  run_both copy-mode -q -t PANE
+  run_on_both set-option -g status-keys emacs
+  CASE_GRID_CELLS=0
+}
+
 customize_screen_case() {
   case_run "customize-screen-$1" same '' -- send-keys -t PANE "${@:2}"
 }
@@ -1948,6 +2002,7 @@ client_tool_cases() {
   switch_tail_style_cases
   switch_key_cases
   customize_long_prompt_cases
+  customize_prompt_vi_cases
   customize_screen_cases
   attach_both_at 80 24
   case_run server-access-bare same '' -- server-access
@@ -2483,6 +2538,7 @@ run_self_check() {
   customize_fix_self_checks
   switch_key_self_checks
   customize_long_prompt_self_checks
+  customize_prompt_vi_self_checks
   customize_screen_self_checks
   attach_both_at 80 24
   switch_tail_self_checks

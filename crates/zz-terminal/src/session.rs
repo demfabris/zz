@@ -1378,6 +1378,18 @@ pub struct TerminalSize {
     pub cell_height_px: u32,
 }
 
+impl TerminalSize {
+    #[must_use]
+    pub fn cells(columns: u16, rows: u16) -> Self {
+        Self {
+            columns,
+            rows,
+            cell_width_px: INITIAL_CELL_WIDTH,
+            cell_height_px: INITIAL_CELL_HEIGHT,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerminalProcessExit {
     pub code: u32,

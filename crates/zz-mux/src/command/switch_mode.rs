@@ -29,7 +29,6 @@ impl SwitchMode {
         kill_source: bool,
         zoom: bool,
         word_separators: &str,
-        vi_keys: bool,
     ) -> Self {
         Self {
             windows,
@@ -37,12 +36,19 @@ impl SwitchMode {
             template,
             kill_source,
             zoom,
-            prompt: ModePrompt::incremental("(search) ", "", word_separators)
-                .with_status_keys(vi_keys),
+            prompt: ModePrompt::incremental("(search) ", "", word_separators),
             filter: String::new(),
             current: 0,
             offset: 0,
         }
+    }
+
+    /// `prompt_set_options`: the `(search)` prompt keeps the raising session's
+    /// `status-keys` for its whole life.
+    #[must_use]
+    pub fn with_status_keys(mut self, vi: bool) -> Self {
+        self.prompt = std::mem::take(&mut self.prompt).with_status_keys(vi);
+        self
     }
 
     pub fn set_current(&mut self, current: usize, size: usize, visible: usize) {
@@ -84,10 +90,8 @@ impl SwitchMode {
                     self.set_current(current - 1, size, visible);
                 }
             }
-            ModeMouseKey::WheelDown => {
-                if size != 0 && current != size - 1 {
-                    self.set_current(current + 1, size, visible);
-                }
+            ModeMouseKey::WheelDown if size != 0 && current != size - 1 => {
+                self.set_current(current + 1, size, visible);
             }
             button @ (ModeMouseKey::Down1 | ModeMouseKey::DoubleClick1) => {
                 if y >= visible || self.offset + y >= size {
@@ -149,8 +153,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_pointer_steps_one_row_and_runs_on_a_double_click() {
+        let mut mode = SwitchMode::new(false, None, None, false, false, " ");
+        assert_eq!(
+            mode.mouse("MouseDown1Pane", 0, 2, 4, 22, 80, 24),
+            SwitchAction::Redraw
+        );
+        assert_eq!(mode.current, 2);
+        mode.mouse("WheelUpPane", 0, 2, 4, 22, 80, 24);
+        assert_eq!(mode.current, 1);
+        mode.mouse("WheelDownPane", 0, 2, 4, 22, 80, 24);
+        assert_eq!(mode.current, 2);
+        for _ in 0..4 {
+            mode.mouse("WheelUpPane", 0, 0, 4, 22, 80, 24);
+        }
+        assert_eq!(
+            mode.current, 0,
+            "the wheel stops at the top instead of wrapping"
+        );
+        mode.mouse("MouseDown1Pane", 0, 9, 4, 22, 80, 24);
+        assert_eq!(
+            mode.current, 0,
+            "a press past the last match selects nothing"
+        );
+        assert_eq!(
+            mode.mouse("DoubleClick1Pane", 0, 3, 4, 22, 80, 24),
+            SwitchAction::Run
+        );
+        assert_eq!(mode.current, 3);
+        mode.mouse("MouseDown1Pane", 9, 23, 4, 22, 80, 24);
+        assert_eq!(mode.prompt.draw(80).1, 9, "the prompt row takes the press");
+    }
+
+    #[test]
     fn movement_wraps_and_a_filter_edit_returns_to_the_top() {
-        let mut mode = SwitchMode::new(false, None, None, false, false, " ", false);
+        let mut mode = SwitchMode::new(false, None, None, false, false, " ");
         assert_eq!(mode.key("Down", 3, 22), SwitchAction::Redraw);
         assert_eq!(mode.current, 1);
         mode.key("C-p", 3, 22);

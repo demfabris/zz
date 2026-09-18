@@ -8520,15 +8520,17 @@ impl MuxEngine {
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         Ok(Execution::effect(MuxEffect::PaneModeChanged {
             pane,
-            mode: Some(PaneModeRequest::Switch(Box::new(SwitchMode::new(
-                options.has("-w"),
-                options.value("-F").map(str::to_owned),
-                chooser_command_template(invocation, positional_start, &positional),
-                options.has("-k"),
-                options.has("-Z"),
-                self.word_separators_for_pane(pane)?,
-                self.pane_prompt_keys_are_vi(pane),
-            )))),
+            mode: Some(PaneModeRequest::Switch(Box::new(
+                SwitchMode::new(
+                    options.has("-w"),
+                    options.value("-F").map(str::to_owned),
+                    chooser_command_template(invocation, positional_start, &positional),
+                    options.has("-k"),
+                    options.has("-Z"),
+                    self.word_separators_for_pane(pane)?,
+                )
+                .with_status_keys(self.pane_prompt_keys_are_vi(pane)),
+            ))),
         }))
     }
 

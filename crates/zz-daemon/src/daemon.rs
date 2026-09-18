@@ -91621,7 +91621,6 @@ bind - split-window -v -c "#{pane_current_path}"
             kill_source,
             zoom,
             " ",
-            false,
         )))
     }
 
@@ -91732,7 +91731,6 @@ bind - split-window -v -c "#{pane_current_path}"
             false,
             false,
             " ",
-            false,
         );
         let texts = |inner: &ServerState, mode: &zz_mux::SwitchMode| {
             chooser_presentation::switch_matches(inner, pane, mode)

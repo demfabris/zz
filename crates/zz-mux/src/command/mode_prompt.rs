@@ -491,7 +491,7 @@ impl ModePrompt {
             if width_so_far >= target {
                 break;
             }
-            width_so_far += Self::cell(&self.buffer[index]);
+            width_so_far += Self::cell(self.buffer[index]);
             index += 1;
         }
         if index == self.index {
@@ -522,8 +522,8 @@ impl ModePrompt {
         }
     }
 
-    fn cell(character: &char) -> usize {
-        if (*character as u32) < 0x20 || *character == '\u{7f}' {
+    fn cell(character: char) -> usize {
+        if (character as u32) < 0x20 || character == '\u{7f}' {
             2
         } else {
             character.width().unwrap_or(0)
@@ -543,11 +543,15 @@ impl ModePrompt {
     }
 
     fn cursor_width(&self) -> usize {
-        self.buffer[..self.index].iter().map(Self::cell).sum()
+        self.buffer[..self.index]
+            .iter()
+            .copied()
+            .map(Self::cell)
+            .sum()
     }
 
     fn buffer_width(&self) -> usize {
-        self.buffer.iter().map(Self::cell).sum::<usize>() + usize::from(self.quote_next)
+        self.buffer.iter().copied().map(Self::cell).sum::<usize>() + usize::from(self.quote_next)
     }
 
     /// `prompt_end_word`: forward to the last character of the next word.
@@ -664,7 +668,7 @@ impl ModePrompt {
         if left == 0 {
             return (text, u16::try_from(start).unwrap_or(u16::MAX));
         }
-        let cell = Self::cell;
+        let cell = |character: &char| Self::cell(*character);
         let cursor = self.cursor_width();
         let mut visible = self.buffer_width();
         let offset = if cursor >= left {
@@ -730,6 +734,58 @@ mod tests {
         assert_eq!(ModeKey::parse("KP5"), ModeKey::Keypad('5'));
         assert_eq!(ModeKey::parse("C-Left"), ModeKey::CtrlLeft);
         assert_eq!(ModeKey::parse("M--"), ModeKey::Meta('-'));
+    }
+
+    #[test]
+    fn a_vi_prompt_takes_escape_into_command_mode_instead_of_cancelling() {
+        let mut prompt = ModePrompt::new("(filter) ", "", "").with_status_keys(true);
+        for character in "abc".chars() {
+            assert_eq!(prompt.key(ModeKey::Char(character)), PromptOutcome::Handled);
+        }
+        assert!(!prompt.command_mode());
+        assert_eq!(
+            prompt.key(ModeKey::Char('\u{1b}')),
+            PromptOutcome::Handled,
+            "Escape closes an emacs prompt and only arms command mode in vi"
+        );
+        assert!(prompt.command_mode());
+        assert_eq!(prompt.draw(80), ("(filter) abc".to_owned(), 11));
+        prompt.key(ModeKey::Char('h'));
+        prompt.key(ModeKey::Char('x'));
+        assert_eq!(prompt.input(), "ac");
+        prompt.key(ModeKey::Char('i'));
+        assert!(!prompt.command_mode());
+        assert_eq!(prompt.key(ModeKey::Char('\r')), PromptOutcome::Done);
+    }
+
+    #[test]
+    fn the_vi_command_table_maps_the_word_motions_and_the_line_keys() {
+        let mut prompt = ModePrompt::new("(x) ", "alpha beta:gamma", " ").with_status_keys(true);
+        prompt.key(ModeKey::Char('\u{1b}'));
+        prompt.key(ModeKey::Char('0'));
+        assert_eq!(prompt.draw(80).1, 4);
+        prompt.key(ModeKey::Char('w'));
+        assert_eq!(prompt.draw(80).1, 10);
+        prompt.key(ModeKey::Char('e'));
+        assert_eq!(prompt.draw(80).1, 19);
+        prompt.key(ModeKey::Char('b'));
+        assert_eq!(prompt.draw(80).1, 10);
+        prompt.key(ModeKey::Char('D'));
+        assert_eq!(prompt.input(), "alpha ");
+        prompt.key(ModeKey::Char('A'));
+        assert!(!prompt.command_mode());
+        prompt.key(ModeKey::Char('Z'));
+        assert_eq!(prompt.input(), "alpha Z");
+    }
+
+    #[test]
+    fn a_press_on_the_prompt_row_moves_the_cursor_to_the_cell_it_landed_on() {
+        let mut prompt = ModePrompt::new("(filter) ", "abcdef", "");
+        assert_eq!(prompt.mouse(11, 80), PromptOutcome::Handled);
+        assert_eq!(prompt.draw(80).1, 11);
+        prompt.key(ModeKey::Char('Z'));
+        assert_eq!(prompt.input(), "abZcdef");
+        assert_eq!(prompt.mouse(80, 80), PromptOutcome::NotHandled);
     }
 
     #[test]

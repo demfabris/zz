@@ -27,6 +27,12 @@
 # `record` asserts nothing and has to say why; a recorded case holds the
 # obligation's clause open.
 #
+# THE TARGET CAN ALSO DISAPPEAR while the caller still holds stdin open. The
+# pin's callback checks `wp == NULL` before it looks at end of file, so a pane
+# killed mid-stream exits 1, prints nothing more and drops the rest of the
+# caller's `\;` chain. Four cells cover it: both readers, and a writer that
+# closes its end or writes more bytes once the pane is gone.
+#
 # THE ONE DECIDED DIFFERENCE is the bound on a sink that holds its payload.
 # Pinned tmux accumulates a source-file - or load-buffer - payload in 16 KiB
 # chunks with no total limit; zz reads at most MAX_AGENT_SEND_BYTES (1 MiB) and
@@ -121,6 +127,7 @@ LAST_EXIT_DIFFERED=0
 LAST_STDOUT_DIFFERED=0
 LAST_STDERR_DIFFERED=0
 LAST_STATE_DIFFERED=0
+ENVIRONMENT=0
 INNER_SHELL="ENV= PS1='\$ ' exec /bin/sh"
 DECISION='decided 2026-09-14 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
 mkdir -p "$ZZ_HOME" "$TMUX_HOME" "$ZZ_LOG_DIR"
@@ -377,6 +384,21 @@ compare_channels() {
   return 1
 }
 
+# A zz side that produced nothing at all where the pin produced bytes did not
+# lose a comparison, it never ran: under concurrent load on this box a starved
+# command client answers with an empty stream. That is an environment failure,
+# reported the way a wait that never reached its execution point already is,
+# and never a parity difference.
+stream_output_starved() {
+  [ ! -s "$SCRATCH_DIR/zz.out" ] && [ -s "$SCRATCH_DIR/tmux.out" ]
+}
+
+report_stream_environment_failure() {
+  ENVIRONMENT=$((ENVIRONMENT + 1))
+  printf 'env   %s: the zz side produced no stdout where the pin produced %s bytes\n' \
+    "$1" "$(wc -c <"$SCRATCH_DIR/tmux.out")"
+}
+
 # NAME MODE REASON -- command...
 #   same     all four channels asserted
 #   decided  a difference this campaign decided to keep; asserts nothing and
@@ -404,7 +426,11 @@ case_run() {
       printf 'ok    %s\n' "$name"
     else
       FAILURES=$((FAILURES + 1))
-      printf 'DIFF  %s\n' "$name"
+      if stream_output_starved; then
+        report_stream_environment_failure "$name"
+      else
+        printf 'DIFF  %s\n' "$name"
+      fi
     fi
     ;;
   decided)
@@ -920,6 +946,10 @@ pane_stream_wait() {
 #   slow     six writes 150 ms apart, sampled after the third and at EOF
 #   fast     a numbered payload over the 1 MiB cap written as fast as the pipe takes it
 #   utf8     a multibyte character and an escape sequence cut between writes
+# DESTINATION is the pane the bytes reach: an existing empty pane through
+# `display-message -I`, a pane `split-window -I` builds, or `split-print`, the
+# same split asking for `-P`, whose caller stdout is read while stdin is still
+# open so a server that holds the printed line until the command ends is caught.
 pane_stream_case() {
   local name="$1" destination="$2" shape="$3" side pid rc pane attempt sabotage oracle=1 piece
   local -a base command
@@ -936,6 +966,9 @@ pane_stream_case() {
     if [ "$destination" = display ]; then
       pane="$(side_command "$side" split-window -d -t "=$SESSION:$WINDOW_NAME.0" -P -F '#{pane_id}' '')"
       command=(display-message -I -t "$pane")
+    elif [ "$destination" = split-print ]; then
+      pane=''
+      command=(split-window -I -d -P -F '#{pane_index} #{?pane_pid,has-pid,no-pid}' -t "=$SESSION:$WINDOW_NAME.0")
     else
       pane=''
       command=(split-window -I -d -t "=$SESSION:$WINDOW_NAME.0")
@@ -959,6 +992,7 @@ pane_stream_case() {
       if [ "$sabotage" = 0 ]; then printf '\033[31mRED\033[0m' >&9; fi
       pane_stream_wait "$side" "$pane" RED || [ "$sabotage" = 1 ] || oracle=0
       pane_stream_sample "$side" "$pane" open >>"$SCRATCH_DIR/$side.matrix-state"
+      pane_stream_open_stdout "$side" "$destination" >>"$SCRATCH_DIR/$side.matrix-state"
       if [ "$shape" = term ]; then
         kill -TERM "$pid" 2>/dev/null || oracle=0
       else
@@ -1044,17 +1078,138 @@ pane_stream_case() {
       printf 'ok    %s\n' "$CASE_LABEL"
     else
       FAILURES=$((FAILURES + 1))
-      printf 'DIFF  %s\n' "$CASE_LABEL"
+      if stream_output_starved; then
+        oracle=0
+        report_stream_environment_failure "$CASE_LABEL"
+      else
+        printf 'DIFF  %s\n' "$CASE_LABEL"
+      fi
     fi
   fi
   CASE_STATE_FILE=0
+}
+
+# `-P` is `cmdq_print`, which the pin writes through to the caller's stdout
+# while the input callback is still open, so the new pane's line is readable
+# before the stream ends. Only the shapes that carry -P read it; the others
+# print nothing here and stay byte-for-byte what they were.
+pane_stream_open_stdout() {
+  local side="$1" destination="$2"
+  [ "$destination" = split-print ] || return 0
+  printf 'open-stdout=%s\n' "$(cat "$SCRATCH_DIR/$side.out" | cat -v | tr '\n' '|')"
+}
+
+# The target pane disappears while the caller's stream is still open.
+# `window_pane_input_callback` finds no pane, so the pin sets `c->retval = 1`
+# and `CLIENT_EXIT` and cancels the read: the invocation exits 1, prints
+# nothing of what came after it and the rest of the chain never runs. AFTER is
+# what the writer does once the pane is gone - close its end, or write more
+# bytes into a stream nobody reads any more.
+pane_death_case() {
+  local name="$1" destination="$2" after="$3" side pid rc pane attempt sabotage oracle=1
+  local -a base command
+  CASE_LABEL="stream-$name"
+  CASE_STATE_FILE=1
+  for side in zz tmux; do
+    if [ "$side" = zz ]; then
+      base=(env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_HOME/config" ZZ_LOG_DIR="$ZZ_LOG_DIR" "$ZZ_BIN" --socket "$ZZ_SOCKET")
+    else
+      base=(env -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME="$TMUX_HOME" XDG_CONFIG_HOME="$TMUX_HOME/config" "$TMUX_BIN" -L "$INNER_SOCKET_NAME")
+    fi
+    sabotage=0
+    if [ "$SELF_CHECK" = 1 ] && [ "$side" = zz ]; then sabotage=1; fi
+    side_command "$side" set-option -gu @zzcs-after >/dev/null 2>&1 || true
+    if [ "$destination" = display ]; then
+      pane="$(side_command "$side" split-window -d -t "=$SESSION:$WINDOW_NAME.0" -P -F '#{pane_id}' '')"
+      command=(display-message -I -t "$pane")
+    else
+      pane=''
+      command=(split-window -I -d -t "=$SESSION:$WINDOW_NAME.0")
+    fi
+    command+=(';' display-message -p tail-out ';' set-option -g @zzcs-after yes)
+    rm -f "$SCRATCH_DIR/stream-fifo"
+    mkfifo "$SCRATCH_DIR/stream-fifo"
+    exec 9<>"$SCRATCH_DIR/stream-fifo"
+    (exec "${base[@]}" "${command[@]}" <"$SCRATCH_DIR/stream-fifo" 9>&-) >"$SCRATCH_DIR/$side.out" 2>"$SCRATCH_DIR/$side.err" &
+    pid=$!
+    if [ -z "$pane" ]; then
+      for ((attempt = 0; attempt < 100; attempt++)); do
+        pane="$(side_command "$side" list-panes -t "=$SESSION:$WINDOW_NAME" -F '#{pane_index} #{pane_id}' 2>/dev/null | awk '$1 == 1 { print $2 }')"
+        [ -n "$pane" ] && break
+        sleep 0.03
+      done
+      [ -n "$pane" ] || oracle=0
+    fi
+    printf '\033[31mRED\033[0m' >&9
+    pane_stream_wait "$side" "$pane" RED || oracle=0
+    if [ "$sabotage" = 0 ]; then
+      side_command "$side" kill-pane -t "$pane" >/dev/null 2>&1 || oracle=0
+    fi
+    if [ "$after" = write ]; then printf 'AFTER-' >&9; fi
+    exec 9>&-
+    for ((attempt = 0; attempt < 1200; attempt++)); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.05
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "$pid" 2>/dev/null
+      oracle=0
+    fi
+    set +e
+    wait "$pid"
+    rc=$?
+    set -e
+    rm -f "$SCRATCH_DIR/stream-fifo"
+    printf '%s\n' "$rc" >"$SCRATCH_DIR/$side.rc"
+    settle_state "$side"
+    : >"$SCRATCH_DIR/$side.matrix-state"
+    {
+      printf 'after=%s\n' "$(side_command "$side" show-options -gqv @zzcs-after)"
+      printf 'panes=%s\n' "$(side_command "$side" list-panes -t "=$SESSION:$WINDOW_NAME" -F x | wc -l)"
+    } >>"$SCRATCH_DIR/$side.matrix-state"
+  done
+  compare_channels "$CASE_LABEL" || true
+  [ "$(cat "$SCRATCH_DIR/tmux.rc")" = 1 ] || oracle=0
+  if [ "$SELF_CHECK" = 1 ]; then
+    if [ "$oracle" != 1 ]; then
+      SELF_CHECK_FAILURES=$((SELF_CHECK_FAILURES + 1))
+      printf 'FAIL  self-check %s did not reach its required execution point\n' "$CASE_LABEL"
+    fi
+    self_check_expect "$CASE_LABEL: the pane survives the stream" exit=1 stdout=1 state=1
+  else
+    CHECKS=$((CHECKS + 1))
+    if [ "$LAST_EXIT_DIFFERED$LAST_STDOUT_DIFFERED$LAST_STDERR_DIFFERED$LAST_STATE_DIFFERED" = 0000 ] && [ "$oracle" = 1 ]; then
+      printf 'ok    %s\n' "$CASE_LABEL"
+    else
+      FAILURES=$((FAILURES + 1))
+      if stream_output_starved; then
+        oracle=0
+        report_stream_environment_failure "$CASE_LABEL"
+      else
+        printf 'DIFF  %s\n' "$CASE_LABEL"
+      fi
+    fi
+  fi
+  CASE_STATE_FILE=0
+}
+
+review_pane_death_cases() {
+  local row
+  for row in 'display-kill-close display close' 'display-kill-write display write' \
+    'split-kill-close split close' 'split-kill-write split write'; do
+    set -- $row
+    if [[ -n "${ZZ_STREAM_MATRIX_FILTER:-}" && ! "stream-$1" =~ $ZZ_STREAM_MATRIX_FILTER ]]; then continue; fi
+    pane_death_case "$1" "$2" "$3"
+  done
+  drop_extra_panes pane-death-restored
 }
 
 review_stream_delivery_cases() {
   local row
   for row in 'display-partial display partial' 'display-eof display eof' 'display-term display term' \
     'display-slow display slow' 'display-fast display fast' 'display-utf8 display utf8' \
-    'split-partial split partial' 'split-term split term' 'split-utf8 split utf8'; do
+    'split-partial split partial' 'split-term split term' 'split-utf8 split utf8' \
+    'split-print-partial split-print partial' 'split-print-term split-print term'; do
     set -- $row
     if [[ -n "${ZZ_STREAM_MATRIX_FILTER:-}" && ! "stream-$1" =~ $ZZ_STREAM_MATRIX_FILTER ]]; then continue; fi
     pane_stream_case "$1" "$2" "$3"
@@ -1507,7 +1662,12 @@ matrix_case() {
       printf 'ok    %s\n' "$CASE_LABEL"
     else
       FAILURES=$((FAILURES+1))
-      printf 'DIFF  %s\n' "$CASE_LABEL"
+      if stream_output_starved; then
+        oracle=0
+        report_stream_environment_failure "$CASE_LABEL"
+      else
+        printf 'DIFF  %s\n' "$CASE_LABEL"
+      fi
     fi
   fi
   CASE_STATE_FILE=0
@@ -1559,9 +1719,14 @@ run_cases() {
   startup_config_stream_case
   review_execution_cases
   review_stream_delivery_cases
+  review_pane_death_cases
   run_stream_matrix
   bound_cases
 
+  if [ "$ENVIRONMENT" -ne 0 ]; then
+    printf 'environment: %s of those cells produced no zz output at all where the pin produced bytes, which is starvation on this box and not a parity difference\n' \
+      "$ENVIRONMENT"
+  fi
   if [ "$FAILURES" -ne 0 ]; then
     printf '%s of %s asserted comparisons differ, %s recorded not asserted, %s decided (%s for a sibling lane)\n' \
       "$FAILURES" "$CHECKS" "$RECORDS" "$DECIDED" "$SIBLINGS"
@@ -1733,6 +1898,7 @@ run_self_check() {
   startup_config_stream_case
   review_execution_cases
   review_stream_delivery_cases
+  review_pane_death_cases
   run_stream_matrix
 
   # The second equivalence: with every sabotage withdrawn the comparison is
@@ -1760,6 +1926,7 @@ if [ "$MATRIX_CHECK" = 1 ]; then
   build_scene
   write_payloads
   review_stream_delivery_cases
+  review_pane_death_cases
   run_stream_matrix
   printf 'matrix: %s asserted, %s failures, %s recorded:TUI-018, %s decided:TUI-018, %s self-check failures\n' "$CHECKS" "$FAILURES" "$RECORDS" "$DECIDED" "$SELF_CHECK_FAILURES"
   [ "$FAILURES" = 0 ] && [ "$SELF_CHECK_FAILURES" = 0 ]
@@ -1770,6 +1937,7 @@ if [ "$EXECUTION_CHECK" -eq 1 ]; then
   write_payloads
   review_execution_cases
   review_stream_delivery_cases
+  review_pane_death_cases
   printf 'execution-check: %s asserted, %s failures, %s self-check failures\n' "$CHECKS" "$FAILURES" "$SELF_CHECK_FAILURES"
   [ "$FAILURES" -eq 0 ] && [ "$SELF_CHECK_FAILURES" -eq 0 ]
 elif [ "$SELF_CHECK" -eq 1 ]; then

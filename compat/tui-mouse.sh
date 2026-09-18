@@ -368,15 +368,30 @@ send_mouse_both() {
 # fixture most needs to be able to make.
 CLICK_SABOTAGE_SIDE=""
 CLICK_SABOTAGE_COLUMN=""
+CLICK_SABOTAGE_ROW=""
 BORDER_SABOTAGE_COLUMN=""
 COPY_PASTE_SABOTAGE_SIDE=""
 click_both() {
-  local button="$1" column="$2" row="$3" side aimed
+  local button="$1" column="$2" row="$3" side aimed aimed_row
   for side in zz tmux; do
     aimed="$column"
-    [ "$side" = "$CLICK_SABOTAGE_SIDE" ] && aimed="$CLICK_SABOTAGE_COLUMN"
-    send_mouse "$side" "$button" "$aimed" "$row" M
-    send_mouse "$side" "$button" "$aimed" "$row" m
+    aimed_row="$row"
+    if [ "$side" = "$CLICK_SABOTAGE_SIDE" ]; then
+      [ -n "$CLICK_SABOTAGE_COLUMN" ] && aimed="$CLICK_SABOTAGE_COLUMN"
+      [ -n "$CLICK_SABOTAGE_ROW" ] && aimed_row="$CLICK_SABOTAGE_ROW"
+    fi
+    send_mouse "$side" "$button" "$aimed" "$aimed_row" M
+    send_mouse "$side" "$button" "$aimed" "$aimed_row" m
+  done
+}
+# A wheel press on both sides. The self-check can hold one side's wheel back,
+# which is the one-sided difference a mode's own wheel row needs.
+WHEEL_SABOTAGE_SIDE=""
+send_wheel_both() {
+  local button="$1" column="$2" row="$3" side
+  for side in zz tmux; do
+    [ "$side" = "$WHEEL_SABOTAGE_SIDE" ] && continue
+    send_mouse "$side" "$button" "$column" "$row" M
   done
 }
 
@@ -1495,6 +1510,202 @@ case_focus() {
   set_on_both focus-events off
 }
 
+# --- the pane modes' own pointer -------------------------------------------
+#
+# `window_pane_key`: a mouse key the root table forwards with `send -M` reaches
+# the PANE, and a pane holding a mode hands it to that mode's key callback with
+# the cell `cmd_mouse_at` resolved. `mode_tree_key` and `window_switch_key` both
+# answer a pointer, so customize-mode and switch-mode each have pointer rows of
+# their own that no key fixture can reach.
+#
+# THE SETTLE FOR A POINTER IN A MODE. The mode's screen is the only observable
+# either binary offers for a selection, so a case cannot wait on a state that is
+# not the comparison itself. Each one waits a bounded two seconds for the two
+# screens to agree - which only gives the slower client time to repaint, and
+# cannot hide a divergence, because the comparison is still taken afterwards on
+# a settled screen and a screen that never agrees still fails - and then settles
+# both sides on four consecutive identical captures.
+MODE_POINTER_SETTLE_POLLS=8
+mode_screens_agree() {
+  [ "$(capture_screen zz)" = "$(capture_screen tmux)" ]
+}
+settle_still() {
+  local side="$1" previous="" current attempt stable=0
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    current="$(capture_screen "$side" 2>/dev/null || true)"
+    if [ "$current" = "$previous" ]; then
+      stable=$((stable + 1))
+      [ "$stable" -ge 4 ] && return 0
+    else
+      stable=0
+    fi
+    previous="$current"
+    sleep 0.05
+  done
+  return 0
+}
+settle_pointer() {
+  local attempt
+  for ((attempt = 0; attempt < 40; attempt++)); do
+    mode_screens_agree && break
+    sleep 0.05
+  done
+  settle_still zz
+  settle_still tmux
+}
+mode_is_open_both() {
+  wait_for 'the pin in a pane mode' pane_in_mode_is tmux "=$INNER_SESSION:0.0" 1
+  wait_for 'zz in a pane mode' pane_in_mode_is zz "=$INNER_SESSION:0.0" 1
+}
+mode_leave_both() {
+  local side
+  for side in zz tmux; do
+    side_command "$side" send-keys -t "=$INNER_SESSION:0.0" Escape >/dev/null 2>&1 || true
+  done
+  wait_for 'the pin left its pane mode' pane_in_mode_is tmux "=$INNER_SESSION:0.0" 0
+  wait_for 'zz left its pane mode' pane_in_mode_is zz "=$INNER_SESSION:0.0" 0
+}
+# The customize tree and the pin's own tree agree only when the two servers'
+# option values do; `history-limit` and `default-size` are the two this scene
+# has to pin, exactly as compat/tui-client-commands.sh's customize scene does.
+mode_pointer_scene() {
+  run_on_both set-option -g history-limit 2000
+  run_on_both set-option -t "$INNER_SESSION" default-size \
+    "${COLUMNS_UNDER_TEST}x${ROWS_UNDER_TEST}"
+}
+customize_open_both() {
+  run_on_both customize-mode -t "=$INNER_SESSION:0.0"
+  mode_is_open_both
+  settle_pointer
+}
+
+# `mode_tree_key`: a left press inside the tree puts the selection on the line
+# under the pointer, whatever the offset is. The whole decoded screen carries
+# it: the row's own selection style AND the preview title the new line names.
+case_customize_mouse_click() {
+  CASE_LABEL=customize-mouse-click
+  local left top
+  customize_open_both
+  left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
+  top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  click_both 0 "$((left + 3))" "$((top + 6))"
+  settle_pointer
+  check_screen MODE_POINTER customize-mouse-click/screen
+  mode_leave_both
+}
+
+# `mode_tree_key` again: a double click selects the line under the pointer AND
+# turns itself into `\r`, which on an option line is `window_customize_set`
+# raising that option's edit prompt.
+case_customize_mouse_double_click() {
+  CASE_LABEL=customize-mouse-double-click
+  local left top
+  customize_open_both
+  left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
+  top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  send_to_pane_both "=$INNER_SESSION:0.0" Right
+  settle_pointer
+  send_mouse_both 0 "$((left + 3))" "$((top + 2))" M
+  send_mouse_both 0 "$((left + 3))" "$((top + 2))" m
+  send_mouse_both 0 "$((left + 3))" "$((top + 2))" M
+  send_mouse_both 0 "$((left + 3))" "$((top + 2))" m
+  settle_pointer
+  check_screen MODE_POINTER customize-mouse-double-click/screen
+  send_to_pane_both "=$INNER_SESSION:0.0" Escape
+  settle_pointer
+  mode_leave_both
+}
+
+# The wheel and a press outside the tree are the two gestures `mode_tree_key`
+# swallows: with a real mouse event in hand it turns every key that is not
+# MouseDown1, MouseDown3 or DoubleClick1 into `KEYC_NONE`, and a press below
+# the tree's own height leaves the selection alone. Both are asserted BECAUSE
+# they do nothing: a client that scrolled or entered copy mode here would not.
+case_customize_mouse_quiet() {
+  CASE_LABEL=customize-mouse-quiet
+  local left top
+  customize_open_both
+  left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
+  top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  send_wheel_both 64 "$((left + 3))" "$((top + 4))" M
+  send_wheel_both 65 "$((left + 3))" "$((top + 4))" M
+  settle_pointer
+  check_screen MODE_POINTER customize-mouse-wheel/screen
+  check_value MODE_POINTER customize-mouse-wheel/pane-mode \
+    "$(side_command zz display-message -p -t "=$INNER_SESSION:0.0" '#{pane_in_mode}/#{pane_mode}')" \
+    "$(side_command tmux display-message -p -t "=$INNER_SESSION:0.0" '#{pane_in_mode}/#{pane_mode}')"
+  click_both 0 "$((left + 3))" "$((top + 18))"
+  settle_pointer
+  check_screen MODE_POINTER customize-mouse-preview/screen
+  mode_leave_both
+}
+
+# `prompt_mouse`: a left press on the prompt's own row moves the prompt cursor
+# to the cell it landed on. The cursor is not in a capture, so the case types a
+# character afterwards and compares where it landed.
+case_customize_mouse_prompt() {
+  CASE_LABEL=customize-mouse-prompt
+  local left top
+  customize_open_both
+  left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
+  top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  send_to_pane_both "=$INNER_SESSION:0.0" f
+  settle_pointer
+  send_to_pane_both "=$INNER_SESSION:0.0" a b c d e f
+  settle_pointer
+  click_both 0 "$((left + 12))" "$((top + ROWS_UNDER_TEST - 1))"
+  settle_pointer
+  send_to_pane_both "=$INNER_SESSION:0.0" Z
+  settle_pointer
+  check_screen MODE_POINTER customize-mouse-prompt/screen
+  send_to_pane_both "=$INNER_SESSION:0.0" Escape
+  settle_pointer
+  mode_leave_both
+}
+
+# `window_switch_key`'s mouse half: the wheel steps the selection one row
+# without wrapping, a left press picks the row under the pointer, and a double
+# click runs the template on it, which is a session switch the client itself
+# reports.
+case_switch_mouse() {
+  CASE_LABEL=switch-mouse
+  local left top
+  run_on_both new-session -d -s pointed -n win "$INNER_SHELL"
+  run_on_both switch-mode -t "=$INNER_SESSION:0.0"
+  mode_is_open_both
+  settle_pointer
+  left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
+  top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  click_both 0 "$((left + 3))" "$((top + 2))"
+  settle_pointer
+  check_screen MODE_POINTER switch-mouse-click/screen
+  send_wheel_both 64 "$((left + 3))" "$((top + 2))" M
+  settle_pointer
+  check_screen MODE_POINTER switch-mouse-wheel-up/screen
+  send_wheel_both 65 "$((left + 3))" "$((top + 2))" M
+  settle_pointer
+  check_screen MODE_POINTER switch-mouse-wheel-down/screen
+  send_mouse_both 0 "$((left + 3))" "$((top + 2))" M
+  send_mouse_both 0 "$((left + 3))" "$((top + 2))" m
+  send_mouse_both 0 "$((left + 3))" "$((top + 2))" M
+  send_mouse_both 0 "$((left + 3))" "$((top + 2))" m
+  wait_at_most client_session_is tmux pointed
+  settle_pointer
+  check_value MODE_POINTER switch-mouse-double-click/client-session \
+    "$(client_session zz)" "$(client_session tmux)"
+  run_on_both switch-client -t "=$INNER_SESSION"
+  wait_for 'the pin back on its own session' client_session_is tmux "$INNER_SESSION"
+  wait_for 'zz back on its own session' client_session_is zz "$INNER_SESSION"
+  run_on_both kill-session -t pointed
+  settle_pointer
+}
+client_session() {
+  side_command "$1" list-clients -F '#{client_session}' 2>/dev/null | head -1
+}
+client_session_is() {
+  [ "$(client_session "$1")" = "$2" ]
+}
+
 # --- dispositions ----------------------------------------------------------
 #
 # Each mode below is `same` where the two binaries are measured to agree and
@@ -1528,6 +1739,8 @@ CONTEXT_FORMAT_MODE=same
 CONTEXT_FORMAT_REASON=""
 RIGHT_CLICK_MODE=same
 RIGHT_CLICK_REASON=""
+MODE_POINTER_MODE=same
+MODE_POINTER_REASON=""
 
 run_cases() {
   start_both
@@ -1556,6 +1769,12 @@ run_cases() {
   case_paste_under_menu
   case_focus events-on on
   case_focus events-off off
+  mode_pointer_scene
+  case_customize_mouse_click
+  case_customize_mouse_double_click
+  case_customize_mouse_quiet
+  case_customize_mouse_prompt
+  case_switch_mouse
 
   printf '%s asserted checks, %s recorded checks\n' "$CHECKS" "$RECORDS"
   if [ "$FAILURES" -ne 0 ]; then
@@ -1848,6 +2067,26 @@ sc_one_sided_focus_off() {
   FOCUS_BYTES_ZZ=""
 }
 
+# zz's click inside the customize tree aimed at another line while the pin's
+# lands on the one the case names. customize-mouse-click/screen is the only
+# asserted check in that case and has to carry the difference.
+sc_one_sided_customize_click() {
+  mode_pointer_scene
+  CLICK_SABOTAGE_SIDE=zz
+  CLICK_SABOTAGE_ROW=$(($(pane_field tmux "=$INNER_SESSION:0.0" 2) + 3))
+  case_customize_mouse_click
+  CLICK_SABOTAGE_SIDE=""
+  CLICK_SABOTAGE_ROW=""
+}
+# switch-mode's own wheel row not driven on zz. switch-mouse-wheel-up/screen is
+# the check that has to report it.
+sc_one_sided_switch_wheel() {
+  mode_pointer_scene
+  WHEEL_SABOTAGE_SIDE=zz
+  case_switch_mouse
+  WHEEL_SABOTAGE_SIDE=""
+}
+
 run_self_check() {
   start_both
   printf 'self-check: one deliberate one-sided difference per channel\n'
@@ -1912,6 +2151,10 @@ run_self_check() {
     sc_one_sided_second_click
   self_check_case 'only the focus-out report sent to zz with focus-events off' catches \
     sc_one_sided_focus_off
+  self_check_case "zz's customize click aimed three rows higher" catches \
+    sc_one_sided_customize_click
+  self_check_case "switch-mode's wheel held back on zz only" catches \
+    sc_one_sided_switch_wheel
 
   if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
     printf '%s self-check cases did not behave as required\n' "$SELF_CHECK_FAILURES"

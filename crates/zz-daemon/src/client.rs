@@ -1010,7 +1010,14 @@ impl InteractiveClient {
             lock_wait_us,
             diagnostic_elapsed_us(started),
         );
-        result
+        match result {
+            Ok((message, false)) => Ok(message),
+            Ok((message, true)) => {
+                self.request_resync()?;
+                Ok(message)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn send(&self, message: &ProtocolMessage) -> Result<(), DaemonError> {
@@ -1050,16 +1057,18 @@ impl<S: TransportStream> ProtocolReceiver<S> {
         }
     }
 
-    fn recv_decodable(&mut self) -> Result<ProtocolMessage, DaemonError> {
+    fn recv_decodable(&mut self) -> Result<(ProtocolMessage, bool), DaemonError> {
+        let mut skipped = false;
         loop {
             match self.recv() {
                 Err(DaemonError::Protocol(ProtocolError::Decode(error))) => {
+                    skipped = true;
                     log::warn!(
                         target: "zz_daemon::diagnostics::client",
                         "skipping an undecodable daemon message: {error}"
                     );
                 }
-                result => return result,
+                result => return result.map(|message| (message, skipped)),
             }
         }
     }
@@ -1726,7 +1735,7 @@ mod tests {
                 .unwrap();
         }
         let mut receiver = super::ProtocolReceiver::new(client);
-        assert_eq!(receiver.recv_decodable().unwrap(), next);
+        assert_eq!(receiver.recv_decodable().unwrap(), (next, true));
     }
 
     #[test]

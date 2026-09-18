@@ -79,13 +79,39 @@ rows (fabrico, 2026-09-16). `MuxEngine::customize_rows` is the row assembly poin
 default tree the pin comparison reads, reached through an explicit action that is not a
 mode-tree key, and it needs its own tests as a zz extension. It is not built yet.
 
+# The pointer
+
+Neither mode declares a key table, so `server_client_key_callback` never swaps one in for
+them; their pointer rows are reached the way `window_pane_key` reaches any mode, through
+the root binding's `send -M` and, with nothing bound, through the forward that follows an
+unclaimed mouse key. `MuxEngine::customize_mouse` ports `mode_tree_key`'s pointer half and
+`SwitchMode::mouse` ports `window_switch_key`'s: a press selects the line under the
+pointer, a double click selects and activates, the wheel steps one row in switch-mode and
+is swallowed in the tree, a press outside the tree's own height does nothing, and a
+button-1 press on the prompt row moves the prompt cursor through `prompt_mouse`. The raw
+TUI forwards `MouseDown1Pane`, `MouseDown3Pane`, `DoubleClick1Pane`, `WheelUpPane` and
+`WheelDownPane` whenever the pane it resolved holds a mode, because the daemon is the side
+that runs `window_pane_key` and a name with no binding still has to arrive. The replayed
+`DoubleClick`'s `m->ignore` is the pane's own input drop, not the mode's, so it applies
+after the mode has had the key.
+
+# Prompts
+
+Every prompt either mode raises is built through `prompt_set_options`, so it keeps the
+raising session's `status-keys` and `word-separators`. Under `status-keys vi` an Escape
+puts the prompt in command mode with the cursor stepped back rather than cancelling it,
+`ModePrompt::translate_vi` carries the whole `prompt_translate_key` table including the
+three `KEYC_VI` word motions, and the daemon sends `message-command-style` in
+`ChooserPresentation.prompt_style` while the prompt sits there.
+
 # Limits
 
-Not built: the mouse inside either mode, the key-binding reset for keys whose default
-command changed in place, prompt history (`Up`/`Down` in an edit prompt), `Tab`
-completion in a command prompt, `C-y` pasting the top buffer, and vi `status-keys` in
-mode prompts. Rows are rebuilt live, so an option changed from outside shows at once
-where the pin shows it after its next build.
+Not built: `mode_tree_display_menu` on `MouseDown3Pane` (the press selects the line on both
+binaries and only the pin then opens the menu, `semantic:mode-tree-mouse-menu`), the
+key-binding reset for keys whose default command changed in place, prompt history
+(`Up`/`Down` in an edit prompt), `Tab` completion in a command prompt, and `C-y` pasting
+the top buffer, which is also what vi `p` maps onto. Rows are rebuilt live, so an option
+changed from outside shows at once where the pin shows it after its next build.
 
 # Suspend
 

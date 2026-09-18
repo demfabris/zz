@@ -776,6 +776,40 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   from `buffer + index + 1`, one entry past the buffer; a vi command-mode `x` at index 3 of a
   four-character buffer killed the pinned server, so the differential never presses Delete
   inside a prompt.
+- The prompts a PANE MODE raises read `status-keys` too, and until 2026-09-18 they did not.
+  `mode_tree_set_prompt` and `window_switch_init` both build their prompt through
+  `prompt_set_options`, so the filter, the search, the option edit and the key edit prompts all
+  keep the raising session's `status-keys` for their whole life. Under `status-keys vi` an Escape
+  inside one of them is not a cancel: `prompt_translate_key` puts the prompt in command mode with
+  the cursor stepped back, `h`, `x`, `0`, `$`, `D`, `w`, `b`, `A`, `i` and the rest act there, and
+  `prompt_draw` paints the row with `message-command-style` while it sits there. Measured
+  2026-09-17 at 80x24 with `status-keys vi`, customize-mode open, `f` pressed and `abc` typed:
+  Escape left the pin's row `(filter) abc` in yellow-on-black and the following `h`, `x`, Enter
+  applied `(filter: active)`, where zz cancelled the prompt on the Escape and did nothing with the
+  rest. `ModePrompt` now carries the same table and the daemon sends the command-mode style in
+  `ChooserPresentation.prompt_style`, so no wire field was added for it;
+  `customize-prompt-vi-*` in `compat/tui-client-commands.sh` asserts twenty-one of them.
+  `ModePrompt` still has no history, no completion and no `prompt_paste`, so vi `p` is a no-op the
+  way `C-y` is.
+- A pane holding one of the server's own modes answers a POINTER, and until 2026-09-18 zz
+  swallowed it. `server_client_key_callback` looks a mouse key up in the mode's key table only
+  when the mode declares one, which copy mode does and `window_customize_mode` and
+  `window_switch_mode` do not; their pointer rows are reached the other way, through the root
+  binding's `send -M` and `window_pane_key`, which hands a mouse key to `wme->mode->key` before
+  any of the pane's own input. `mode_tree_key` selects the line under the pointer on
+  `MouseDown1Pane`, `MouseDown3Pane` and `DoubleClick1Pane`, turns a double click into `\r`,
+  swallows the wheel and a press below the tree's own height, and moves the prompt cursor on a
+  button-1 press on the prompt row; `window_switch_key` steps its selection one row per wheel
+  press without wrapping, selects the row under a press and runs the template on a double click.
+  zz reproduces all of that in `CustomizeMode::customize_mouse` and `SwitchMode::mouse`, and the
+  raw TUI forwards those five names whenever the pane it resolved holds a mode, so they arrive
+  with nothing bound to them - which is the state `compat/tui-mouse.sh` reaches after its own
+  binding cases and the state the pin still answers in. The replayed `DoubleClick` carries
+  `m->ignore`, which drops it in `input_key_mouse` and NOT in `window_pane_key`, so the drop moved
+  out of `send-keys -M` and into the pane's own input. One row is still zz's: `MouseDown3Pane`
+  selects the line on both binaries, and only the pin then opens `mode_tree_display_menu` over it
+  (Select, Expand, Tag, Tag All, Tag None, Cancel), which is registered as
+  `semantic:mode-tree-mouse-menu`.
 - The freeze a message raises is DERIVED in zz and LATCHED in the pin, and they part company in
   one place. `status_message_clear` only drops `TTY_FREEZE` `if (c->prompt == NULL)`, so
   clearing a message while ANY prompt is open leaves the client frozen — including a

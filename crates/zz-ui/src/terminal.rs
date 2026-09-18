@@ -1968,14 +1968,42 @@ fn flush_cached_batch(
         glyph_options,
         ..
     } = batch;
-    let line = window
+    let mut line = window
         .text_system()
-        .shape_line(text.into(), font_size, &runs, Some(cell_width));
+        .shape_line(text.into(), font_size, &runs, None);
+    align_line_to_cells(&mut line, cell_width);
     output.push(CachedLine {
         line,
         start_column,
         glyph_options,
         raster: RefCell::new(RasterState::Untried),
+    });
+}
+
+fn align_line_to_cells(line: &mut ShapedLine, cell_width: Pixels) {
+    let columns: SmallVec<[usize; 128]> =
+        line.text.char_indices().map(|(index, _)| index).collect();
+    let mut runs = line.runs.clone();
+    let mut cluster = None;
+    for glyph in runs.iter_mut().flat_map(|run| &mut run.glyphs) {
+        let offset = match cluster {
+            Some((index, offset)) if index == glyph.index => offset,
+            _ => {
+                let column = columns.partition_point(|index| *index < glyph.index);
+                let offset = cell_width * column - glyph.position.x;
+                cluster = Some((glyph.index, offset));
+                offset
+            }
+        };
+        glyph.position.x += offset;
+    }
+    **line = Arc::new(gpui::LineLayout {
+        font_size: line.font_size,
+        width: cell_width * columns.len(),
+        ascent: line.ascent,
+        descent: line.descent,
+        runs,
+        len: line.len(),
     });
 }
 
@@ -3460,6 +3488,93 @@ mod tests {
         assert_eq!(runs[1].len, 4);
         assert_eq!(last_style, Some(bold));
         assert!(!same_visual_style(&runs[0], &runs[1]));
+    }
+
+    fn line_with_glyph_positions(text: &str, positions: &[(usize, f32)]) -> ShapedLine {
+        let mut line = ShapedLine::default();
+        line.text = text.to_owned().into();
+        *line = Arc::new(gpui::LineLayout {
+            font_size: px(13.0),
+            width: px(text.chars().count() as f32 * 7.8),
+            runs: vec![gpui::ShapedRun {
+                font_id: gpui::FontId(0),
+                glyphs: positions
+                    .iter()
+                    .map(|&(index, x)| gpui::ShapedGlyph {
+                        id: gpui::GlyphId(0),
+                        position: point(px(x), px(0.0)),
+                        index,
+                        is_emoji: false,
+                    })
+                    .collect(),
+            }],
+            len: text.len(),
+            ..Default::default()
+        });
+        line
+    }
+
+    #[test]
+    fn terminal_cell_positions_do_not_change_at_style_boundaries() {
+        let text = "  TYPESAFE_AI_API_KEY=";
+        let shape = |text: &str| {
+            line_with_glyph_positions(
+                text,
+                &text
+                    .char_indices()
+                    .enumerate()
+                    .map(|(column, (index, _))| (index, column as f32 * 7.8))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let mut whole = shape(text);
+        align_line_to_cells(&mut whole, px(8.0));
+        for boundary in 1..text.len() {
+            let mut suffix = shape(&text[boundary..]);
+            align_line_to_cells(&mut suffix, px(8.0));
+            for (column, glyph) in suffix.runs[0].glyphs.iter().enumerate() {
+                let expected = px(8.0) * (boundary + column);
+                assert_eq!(whole.runs[0].glyphs[boundary + column].position.x, expected);
+                assert_eq!(px(8.0) * boundary + glyph.position.x, expected);
+            }
+            assert_eq!(suffix.width, px(8.0) * (text.len() - boundary));
+        }
+    }
+
+    #[test]
+    fn terminal_cell_alignment_preserves_clusters_and_wide_cell_reservations() {
+        let mut line = line_with_glyph_positions(
+            "é=>界 x",
+            &[
+                (0, 0.0),
+                (0, 1.5),
+                (2, 7.8),
+                (4, 23.4),
+                (7, 31.2),
+                (8, 39.0),
+            ],
+        );
+        let layout = Arc::get_mut(&mut line).unwrap();
+        layout.runs[0].glyphs[1].position.y = px(-2.0);
+        let remainder = layout.runs[0].glyphs.split_off(1);
+        layout.runs.push(gpui::ShapedRun {
+            font_id: gpui::FontId(1),
+            glyphs: remainder,
+        });
+        let original = line.clone();
+
+        align_line_to_cells(&mut line, px(8.0));
+
+        let positions: Vec<_> = line
+            .runs
+            .iter()
+            .flat_map(|run| &run.glyphs)
+            .map(|glyph| f32::from(glyph.position.x))
+            .collect();
+        assert_eq!(positions, [0.0, 1.5, 8.0, 24.0, 32.0, 40.0]);
+        assert_eq!(line.runs[1].glyphs[0].position.y, px(-2.0));
+        assert_eq!(line.width, px(48.0));
+        assert_eq!(original.runs[1].glyphs[1].position.x, px(7.8));
     }
 
     #[test]

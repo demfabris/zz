@@ -866,7 +866,7 @@ rich_capture_case() {
       changed="${changed/5P/5m}"
       changed="${changed/80P/80m}"
     elif [[ "$name" == capture-edited-tab-ech-* ]]; then
-      changed="${payload/X/m}"
+      changed="${payload/DEF/XYZ}"
     elif [[ "$name" == capture-edited-tab-il-* ]]; then
       changed="${payload/\\033\[L/\\033[m}"
     elif [[ "$name" == capture-edited-tab-dl-* ]]; then

@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-use super::mode_prompt::{ModeKey, ModePrompt, PromptOutcome};
+use super::mode_prompt::{ModeKey, ModeMouseKey, ModePrompt, PromptOutcome};
 use super::*;
 use crate::tmux_option_metadata::TmuxOptionKind;
 use zz_protocol::{
@@ -96,6 +96,17 @@ pub struct CustomizeMode {
     pub zoom: bool,
 }
 
+impl CustomizeMode {
+    /// `PROMPT_COMMANDMODE`: `prompt_draw` paints the mode's prompt row with
+    /// `message-command-style` while a vi prompt sits in command mode.
+    #[must_use]
+    pub fn prompt_command_mode(&self) -> bool {
+        self.prompt
+            .as_ref()
+            .is_some_and(|(prompt, _)| prompt.command_mode())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Item {
     Section,
@@ -127,6 +138,23 @@ struct Row {
     children: bool,
     no_tag: bool,
     item: Item,
+}
+
+/// The prompt facts `prompt_set_options` copies off the session, kept for the
+/// whole life of every prompt the mode raises.
+struct ModePromptOptions {
+    vi: bool,
+    separators: String,
+}
+
+impl ModePromptOptions {
+    fn prompt(&self, label: impl Into<String>, input: &str) -> ModePrompt {
+        ModePrompt::new(label, input, &self.separators).with_status_keys(self.vi)
+    }
+
+    fn single(&self, label: impl Into<String>) -> ModePrompt {
+        ModePrompt::single(label).with_status_keys(self.vi)
+    }
 }
 
 pub struct CustomizeResult {
@@ -1024,15 +1052,12 @@ impl MuxEngine {
         expand: &mut CustomizeExpand<'_>,
     ) -> CustomizeResult {
         let key = ModeKey::parse(name);
-        let rows = self.customize_rows(pane, mode, expand);
-        let lines = customize_lines(&rows, mode);
-        if lines.is_empty() {
+        let Some(lines) = self.customize_ready(pane, mode, expand) else {
             return CustomizeResult {
                 close: true,
                 commands: Vec::new(),
             };
-        }
-        mode.current = mode.current.min(lines.len() - 1);
+        };
         if let Some((prompt, _)) = &mut mode.prompt {
             let outcome = prompt.key(key);
             let (value, purpose) = match outcome {
@@ -1056,7 +1081,95 @@ impl MuxEngine {
             mode.help = false;
             return CustomizeResult::stay();
         }
-        let size = lines.len();
+        self.customize_tree_key(pane, mode, key, lines, expand)
+    }
+
+    /// `mode_tree_build`'s line list with `mode_tree_check_selected` applied,
+    /// or nothing when the tree is empty and `mode_tree_key` closes the mode.
+    fn customize_ready(
+        &self,
+        pane: PaneId,
+        mode: &mut CustomizeMode,
+        expand: &mut CustomizeExpand<'_>,
+    ) -> Option<usize> {
+        let rows = self.customize_rows(pane, mode, expand);
+        let lines = customize_lines(&rows, mode);
+        if lines.is_empty() {
+            return None;
+        }
+        mode.current = mode.current.min(lines.len() - 1);
+        Some(lines.len())
+    }
+
+    /// `mode_tree_key`'s pointer half and `window_pane_key`'s mode branch: the
+    /// pin forwards a mouse key to the pane, the pane hands it to the mode, and
+    /// the mode answers it before any of its own key handling runs.
+    pub fn customize_mouse(
+        &self,
+        pane: PaneId,
+        mode: &mut CustomizeMode,
+        name: &str,
+        x: usize,
+        y: usize,
+        expand: &mut CustomizeExpand<'_>,
+    ) -> CustomizeResult {
+        let Some(size) = self.customize_ready(pane, mode, expand) else {
+            return CustomizeResult {
+                close: true,
+                commands: Vec::new(),
+            };
+        };
+        let columns = self.customize_screen_columns(pane);
+        let screen_rows = self.customize_screen_rows(pane);
+        let prompt_top = self.customize_prompt_top(pane);
+        if let Some((prompt, _)) = &mut mode.prompt {
+            let row = if prompt_top {
+                0
+            } else {
+                screen_rows.saturating_sub(1)
+            };
+            let handled = ModeMouseKey::is_press1(name)
+                && y == row
+                && prompt.mouse(x, columns) != PromptOutcome::NotHandled;
+            if handled {
+                return CustomizeResult::stay();
+            }
+        }
+        if mode.help {
+            return CustomizeResult::stay();
+        }
+        if x > columns || y > mode.height || mode.offset + y >= size {
+            return CustomizeResult::stay();
+        }
+        let button = ModeMouseKey::parse(name);
+        if matches!(
+            button,
+            ModeMouseKey::Down1 | ModeMouseKey::Down3 | ModeMouseKey::DoubleClick1
+        ) {
+            mode.current = mode.offset + y;
+        }
+        if button == ModeMouseKey::DoubleClick1 {
+            return self.customize_tree_key(pane, mode, ModeKey::Char('\r'), size, expand);
+        }
+        CustomizeResult::stay()
+    }
+
+    fn customize_tree_key(
+        &self,
+        pane: PaneId,
+        mode: &mut CustomizeMode,
+        key: ModeKey,
+        size: usize,
+        expand: &mut CustomizeExpand<'_>,
+    ) -> CustomizeResult {
+        let rows = self.customize_rows(pane, mode, expand);
+        let lines = customize_lines(&rows, mode);
+        if lines.is_empty() {
+            return CustomizeResult {
+                close: true,
+                commands: Vec::new(),
+            };
+        }
         let mut key = key;
         if let Some(choice) = (0..size.min(36)).find(|index| {
             key == if *index < 10 {
@@ -1191,7 +1304,7 @@ impl MuxEngine {
             }
             ModeKey::Char('?' | '/') | ModeKey::Ctrl('s') => {
                 mode.prompt = Some((
-                    ModePrompt::new("(search) ", "", &self.customize_separators(pane)),
+                    self.customize_prompt_options(pane).prompt("(search) ", ""),
                     PromptPurpose::Search,
                 ));
             }
@@ -1201,7 +1314,8 @@ impl MuxEngine {
             ModeKey::Char('f') => {
                 let input = mode.filter.clone().unwrap_or_default();
                 mode.prompt = Some((
-                    ModePrompt::new("(filter) ", &input, &self.customize_separators(pane)),
+                    self.customize_prompt_options(pane)
+                        .prompt("(filter) ", &input),
                     PromptPurpose::Filter,
                 ));
             }
@@ -1228,7 +1342,7 @@ impl MuxEngine {
             return CustomizeResult::stay();
         };
         let tag = Some(row.id.clone());
-        let separators = self.customize_separators(pane);
+        let separators = self.customize_prompt_options(pane);
         match key {
             ModeKey::Char('a') => {
                 if let Item::Option {
@@ -1239,7 +1353,7 @@ impl MuxEngine {
                 } = &row.item
                 {
                     mode.prompt = Some((
-                        ModePrompt::new(format!("({name}[{array_key}]) "), array_key, &separators),
+                        separators.prompt(format!("({name}[{array_key}]) "), array_key),
                         PromptPurpose::ArrayKey {
                             name: name.clone(),
                             array_key: array_key.clone(),
@@ -1355,9 +1469,15 @@ impl MuxEngine {
         CustomizeResult::stay()
     }
 
-    fn customize_separators(&self, pane: PaneId) -> String {
-        self.word_separators_for_pane(pane)
-            .map_or_else(|_| DEFAULT_WORD_SEPARATORS.to_owned(), str::to_owned)
+    /// `prompt_set_options`: every mode-tree prompt is created through it, so
+    /// each one keeps the session's `status-keys` and `word-separators`.
+    fn customize_prompt_options(&self, pane: PaneId) -> ModePromptOptions {
+        let session = self
+            .state
+            .window_for_pane(pane)
+            .map(|window| self.state.windows[&window].session);
+        let (vi, separators) = self.prompt_key_options(session);
+        ModePromptOptions { vi, separators }
     }
 
     fn customize_confirm(
@@ -1371,7 +1491,7 @@ impl MuxEngine {
         if mode.accept {
             return self.customize_answer(pane, mode, purpose, Some("y".to_owned()), expand);
         }
-        mode.prompt = Some((ModePrompt::single(label), purpose));
+        mode.prompt = Some((self.customize_prompt_options(pane).single(label), purpose));
         CustomizeResult::stay()
     }
 
@@ -1401,7 +1521,7 @@ impl MuxEngine {
         row: &Row,
         table: &str,
         key: &str,
-        separators: &str,
+        separators: &ModePromptOptions,
     ) -> Option<CommandInvocation> {
         let binding = self.keys.get(table, key)?;
         match row.name.as_str() {
@@ -1414,11 +1534,7 @@ impl MuxEngine {
             )),
             "Command" if matches!(row.item, Item::KeyField { .. }) => {
                 mode.prompt = Some((
-                    ModePrompt::new(
-                        format!("({key}) "),
-                        &customize_command_print(binding),
-                        separators,
-                    ),
+                    separators.prompt(format!("({key}) "), &customize_command_print(binding)),
                     PromptPurpose::Command {
                         table: table.to_owned(),
                         key: key.to_owned(),
@@ -1428,10 +1544,9 @@ impl MuxEngine {
             }
             "Note" if matches!(row.item, Item::KeyField { .. }) => {
                 mode.prompt = Some((
-                    ModePrompt::new(
+                    separators.prompt(
                         format!("({key}) "),
                         binding.note.as_deref().unwrap_or_default(),
-                        separators,
                     ),
                     PromptPurpose::Note {
                         table: table.to_owned(),
@@ -1451,7 +1566,7 @@ impl MuxEngine {
         row: &Row,
         global: bool,
         pane_scope: bool,
-        separators: &str,
+        separators: &ModePromptOptions,
     ) -> Option<CommandInvocation> {
         let Item::Option {
             name,
@@ -1536,7 +1651,7 @@ impl MuxEngine {
             _ => String::new(),
         };
         mode.prompt = Some((
-            ModePrompt::new(label, &value, separators),
+            separators.prompt(label, &value),
             PromptPurpose::Option {
                 name: name.clone(),
                 array_key: array_key.clone(),

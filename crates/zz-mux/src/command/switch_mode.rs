@@ -1,4 +1,4 @@
-use super::mode_prompt::{ModeKey, ModePrompt, PromptOutcome};
+use super::mode_prompt::{ModeKey, ModeMouseKey, ModePrompt, PromptOutcome};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SwitchMode {
@@ -29,6 +29,7 @@ impl SwitchMode {
         kill_source: bool,
         zoom: bool,
         word_separators: &str,
+        vi_keys: bool,
     ) -> Self {
         Self {
             windows,
@@ -36,7 +37,8 @@ impl SwitchMode {
             template,
             kill_source,
             zoom,
-            prompt: ModePrompt::incremental("(search) ", "", word_separators),
+            prompt: ModePrompt::incremental("(search) ", "", word_separators)
+                .with_status_keys(vi_keys),
             filter: String::new(),
             current: 0,
             offset: 0,
@@ -55,6 +57,50 @@ impl SwitchMode {
         } else if visible != 0 && self.current >= self.offset + visible {
             self.offset = self.current + 1 - visible;
         }
+    }
+
+    /// `window_switch_key`'s mouse half: a button-1 press on the prompt row
+    /// moves the prompt cursor, the wheel steps the selection one row without
+    /// wrapping, a press picks the row under the pointer and a double click
+    /// runs it.
+    pub fn mouse(
+        &mut self,
+        name: &str,
+        x: usize,
+        y: usize,
+        size: usize,
+        visible: usize,
+        columns: usize,
+        rows: usize,
+    ) -> SwitchAction {
+        if rows != 0 && y == rows - 1 && ModeMouseKey::is_press1(name) {
+            self.prompt.mouse(x, columns);
+            return SwitchAction::Redraw;
+        }
+        let current = self.current;
+        match ModeMouseKey::parse(name) {
+            ModeMouseKey::WheelUp => {
+                if size != 0 && current != 0 {
+                    self.set_current(current - 1, size, visible);
+                }
+            }
+            ModeMouseKey::WheelDown => {
+                if size != 0 && current != size - 1 {
+                    self.set_current(current + 1, size, visible);
+                }
+            }
+            button @ (ModeMouseKey::Down1 | ModeMouseKey::DoubleClick1) => {
+                if y >= visible || self.offset + y >= size {
+                    return SwitchAction::Redraw;
+                }
+                self.set_current(self.offset + y, size, visible);
+                if button == ModeMouseKey::DoubleClick1 {
+                    return SwitchAction::Run;
+                }
+            }
+            _ => {}
+        }
+        SwitchAction::Redraw
     }
 
     pub fn key(&mut self, name: &str, size: usize, visible: usize) -> SwitchAction {
@@ -104,7 +150,7 @@ mod tests {
 
     #[test]
     fn movement_wraps_and_a_filter_edit_returns_to_the_top() {
-        let mut mode = SwitchMode::new(false, None, None, false, false, " ");
+        let mut mode = SwitchMode::new(false, None, None, false, false, " ", false);
         assert_eq!(mode.key("Down", 3, 22), SwitchAction::Redraw);
         assert_eq!(mode.current, 1);
         mode.key("C-p", 3, 22);

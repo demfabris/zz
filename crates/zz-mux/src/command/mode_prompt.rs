@@ -119,6 +119,38 @@ impl ModeKey {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModeMouseKey {
+    Down1,
+    Down3,
+    DoubleClick1,
+    WheelUp,
+    WheelDown,
+    Other,
+}
+
+impl ModeMouseKey {
+    #[must_use]
+    pub fn parse(name: &str) -> Self {
+        match name {
+            "MouseDown1Pane" => Self::Down1,
+            "MouseDown3Pane" => Self::Down3,
+            "DoubleClick1Pane" => Self::DoubleClick1,
+            "WheelUpPane" => Self::WheelUp,
+            "WheelDownPane" => Self::WheelDown,
+            _ => Self::Other,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_press1(name: &str) -> bool {
+        matches!(
+            name.as_bytes(),
+            b"MouseDown1Pane" | b"SecondClick1Pane" | b"DoubleClick1Pane" | b"TripleClick1Pane"
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PromptOutcome {
     NotHandled,
     Move,
@@ -127,6 +159,37 @@ pub enum PromptOutcome {
     Done,
     Cancelled,
     Closed,
+}
+
+enum ViKey {
+    Edit(ModeKey),
+    Motion(ViMotion),
+    Append,
+    Handled,
+}
+
+#[derive(Clone, Copy)]
+enum ViMotion {
+    Forward { separators: bool },
+    End { separators: bool },
+    Backward { separators: bool },
+}
+
+impl ViMotion {
+    fn apply(self, prompt: &mut ModePrompt) {
+        let owned = prompt.word_separators.clone();
+        match self {
+            Self::Forward { separators } => {
+                prompt.forward_word_from(true, if separators { &owned } else { "" });
+            }
+            Self::End { separators } => {
+                prompt.end_word(if separators { &owned } else { "" });
+            }
+            Self::Backward { separators } => {
+                prompt.index = prompt.backward_word(if separators { &owned } else { "" });
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -139,6 +202,8 @@ pub struct ModePrompt {
     edit_arrows: bool,
     single: bool,
     quote_next: bool,
+    vi_keys: bool,
+    command_mode: bool,
     word_separators: String,
     copied: Option<Vec<char>>,
 }
@@ -177,6 +242,21 @@ impl ModePrompt {
         }
     }
 
+    /// `prompt_set_options`: a prompt keeps the session's `status-keys` for its
+    /// whole life, and `prompt_key` runs its keys through the vi table first.
+    #[must_use]
+    pub fn with_status_keys(mut self, vi: bool) -> Self {
+        self.vi_keys = vi;
+        self
+    }
+
+    /// `PROMPT_COMMANDMODE`: `prompt_draw` paints the row with
+    /// `message-command-style` while the vi prompt sits in command mode.
+    #[must_use]
+    pub const fn command_mode(&self) -> bool {
+        self.command_mode
+    }
+
     #[must_use]
     pub fn input(&self) -> String {
         self.buffer.iter().collect()
@@ -199,6 +279,22 @@ impl ModePrompt {
             self.quote_next = false;
             return self.append(character);
         }
+        let key = if self.vi_keys {
+            match self.translate_vi(key) {
+                ViKey::Edit(key) => key,
+                ViKey::Motion(motion) => {
+                    motion.apply(self);
+                    return self.changed('=');
+                }
+                ViKey::Append => match key {
+                    ModeKey::Char(character) => return self.append(character),
+                    _ => return PromptOutcome::Handled,
+                },
+                ViKey::Handled => return PromptOutcome::Handled,
+            }
+        } else {
+            key
+        };
         if self.incremental {
             match key {
                 ModeKey::Up | ModeKey::Down | ModeKey::PageUp | ModeKey::PageDown => {
@@ -302,6 +398,109 @@ impl ModePrompt {
         PromptOutcome::Handled
     }
 
+    /// `prompt_translate_key`: insert mode hands a fixed list of control keys to
+    /// the emacs handler, takes Escape or `C-[` into command mode with the
+    /// cursor stepped back, and appends everything else; command mode maps the
+    /// vi keys onto emacs keys and the `KEYC_VI` word motions and drops the rest.
+    fn translate_vi(&mut self, key: ModeKey) -> ViKey {
+        if !self.command_mode {
+            return match key {
+                ModeKey::Ctrl(
+                    'a' | 'c' | 'e' | 'g' | 'h' | 'k' | 'n' | 'p' | 't' | 'u' | 'v' | 'w' | 'y',
+                )
+                | ModeKey::Char('\t' | '\r' | '\n')
+                | ModeKey::CtrlLeft
+                | ModeKey::CtrlRight
+                | ModeKey::Backspace
+                | ModeKey::Delete
+                | ModeKey::Down
+                | ModeKey::End
+                | ModeKey::Home
+                | ModeKey::Left
+                | ModeKey::Right
+                | ModeKey::Up => ViKey::Edit(key),
+                ModeKey::Char('\u{1b}') | ModeKey::Ctrl('[') => {
+                    self.command_mode = true;
+                    self.index = self.index.saturating_sub(1);
+                    ViKey::Handled
+                }
+                _ => ViKey::Append,
+            };
+        }
+        match key {
+            ModeKey::Backspace => return ViKey::Edit(ModeKey::Left),
+            ModeKey::Char('\u{1b}') | ModeKey::Ctrl('[') => return ViKey::Handled,
+            ModeKey::Char('A' | 'I' | 'C' | 's' | 'a') => self.command_mode = false,
+            ModeKey::Char('S') => {
+                self.command_mode = false;
+                return ViKey::Edit(ModeKey::Ctrl('u'));
+            }
+            ModeKey::Char('i') => {
+                self.command_mode = false;
+                return ViKey::Handled;
+            }
+            _ => {}
+        }
+        match key {
+            ModeKey::Char('A' | '$') => ViKey::Edit(ModeKey::End),
+            ModeKey::Char('I' | '0' | '^') => ViKey::Edit(ModeKey::Home),
+            ModeKey::Char('C' | 'D') => ViKey::Edit(ModeKey::Ctrl('k')),
+            ModeKey::Char('X') => ViKey::Edit(ModeKey::Backspace),
+            ModeKey::Char('b') => ViKey::Motion(ViMotion::Backward { separators: true }),
+            ModeKey::Char('B') => ViKey::Motion(ViMotion::Backward { separators: false }),
+            ModeKey::Char('d') => ViKey::Edit(ModeKey::Ctrl('u')),
+            ModeKey::Char('e') => ViKey::Motion(ViMotion::End { separators: true }),
+            ModeKey::Char('E') => ViKey::Motion(ViMotion::End { separators: false }),
+            ModeKey::Char('w') => ViKey::Motion(ViMotion::Forward { separators: true }),
+            ModeKey::Char('W') => ViKey::Motion(ViMotion::Forward { separators: false }),
+            ModeKey::Char('p') => ViKey::Edit(ModeKey::Ctrl('y')),
+            ModeKey::Char('q') => ViKey::Edit(ModeKey::Ctrl('c')),
+            ModeKey::Char('s' | 'x') | ModeKey::Delete => ViKey::Edit(ModeKey::Delete),
+            ModeKey::Char('j') | ModeKey::Down => ViKey::Edit(ModeKey::Down),
+            ModeKey::Char('h') | ModeKey::Left => ViKey::Edit(ModeKey::Left),
+            ModeKey::Char('a' | 'l') | ModeKey::Right => ViKey::Edit(ModeKey::Right),
+            ModeKey::Char('k') | ModeKey::Up => ViKey::Edit(ModeKey::Up),
+            ModeKey::Ctrl('h' | 'c') | ModeKey::Char('\r' | '\n') => ViKey::Edit(key),
+            _ => ViKey::Handled,
+        }
+    }
+
+    /// `prompt_mouse`: a button-1 press on the prompt's own row puts the cursor
+    /// on the cell it landed on, with the same scroll offset `prompt_draw` used.
+    pub fn mouse(&mut self, x: usize, width: usize) -> PromptOutcome {
+        if x >= width {
+            return PromptOutcome::NotHandled;
+        }
+        let start = self.label_width(width);
+        let left = width - start;
+        if left == 0 {
+            return PromptOutcome::Handled;
+        }
+        let cursor = self.cursor_width();
+        let total = self.buffer_width();
+        let offset = if cursor >= left { cursor - left + 1 } else { 0 };
+        let target = if x <= start {
+            offset
+        } else {
+            offset + x - start
+        }
+        .min(total);
+        let mut width_so_far = 0;
+        let mut index = 0;
+        while index < self.buffer.len() {
+            if width_so_far >= target {
+                break;
+            }
+            width_so_far += Self::cell(&self.buffer[index]);
+            index += 1;
+        }
+        if index == self.index {
+            return PromptOutcome::Handled;
+        }
+        self.index = index;
+        PromptOutcome::Handled
+    }
+
     fn append(&mut self, character: char) -> PromptOutcome {
         self.buffer.insert(self.index, character);
         self.index += 1;
@@ -321,6 +520,64 @@ impl ModePrompt {
         } else {
             PromptOutcome::Handled
         }
+    }
+
+    fn cell(character: &char) -> usize {
+        if (*character as u32) < 0x20 || *character == '\u{7f}' {
+            2
+        } else {
+            character.width().unwrap_or(0)
+        }
+    }
+
+    fn label_width(&self, width: usize) -> usize {
+        let mut start = 0;
+        for character in self.label.chars() {
+            let cell = character.width().unwrap_or(0);
+            if start + cell > width {
+                break;
+            }
+            start += cell;
+        }
+        start
+    }
+
+    fn cursor_width(&self) -> usize {
+        self.buffer[..self.index].iter().map(Self::cell).sum()
+    }
+
+    fn buffer_width(&self) -> usize {
+        self.buffer.iter().map(Self::cell).sum::<usize>() + usize::from(self.quote_next)
+    }
+
+    /// `prompt_end_word`: forward to the last character of the next word.
+    fn end_word(&mut self, separators: &str) {
+        let size = self.buffer.len();
+        let mut index = self.index;
+        if index == size {
+            return;
+        }
+        loop {
+            index += 1;
+            if index == size {
+                self.index = index;
+                return;
+            }
+            if !self.space(index) {
+                break;
+            }
+        }
+        let word_is_separators = self.separator(index, separators);
+        loop {
+            index += 1;
+            if index == size
+                || self.space(index)
+                || word_is_separators != self.separator(index, separators)
+            {
+                break;
+            }
+        }
+        self.index = index - 1;
     }
 
     fn separator(&self, index: usize, separators: &str) -> bool {
@@ -353,23 +610,37 @@ impl ModePrompt {
     }
 
     fn forward_word(&mut self) {
+        let separators = self.word_separators.clone();
+        self.forward_word_from(false, &separators);
+    }
+
+    /// `prompt_forward_word`: emacs first skips spaces, both stop at the first
+    /// space or opposite character class, and vi then lands on the start of the
+    /// next word rather than the space.
+    fn forward_word_from(&mut self, vi: bool, separators: &str) {
         let size = self.buffer.len();
         let mut index = self.index;
-        while index != size && self.space(index) {
-            index += 1;
+        if !vi {
+            while index != size && self.space(index) {
+                index += 1;
+            }
         }
         if index == size {
             self.index = index;
             return;
         }
-        let separators = self.word_separators.clone();
-        let word_is_separators = self.separator(index, &separators) && !self.space(index);
+        let word_is_separators = self.separator(index, separators) && !self.space(index);
         loop {
             index += 1;
-            if self.space(index)
-                || index == size
-                || word_is_separators != self.separator(index, &separators)
-            {
+            if self.space(index) {
+                if vi {
+                    while index != size && self.space(index) {
+                        index += 1;
+                    }
+                }
+                break;
+            }
+            if index == size || word_is_separators != self.separator(index, separators) {
                 break;
             }
         }
@@ -393,16 +664,9 @@ impl ModePrompt {
         if left == 0 {
             return (text, u16::try_from(start).unwrap_or(u16::MAX));
         }
-        let cell = |character: &char| {
-            if (*character as u32) < 0x20 || *character == '\u{7f}' {
-                2
-            } else {
-                character.width().unwrap_or(0)
-            }
-        };
-        let cursor = self.buffer[..self.index].iter().map(cell).sum::<usize>();
-        let mut visible =
-            self.buffer.iter().map(cell).sum::<usize>() + usize::from(self.quote_next);
+        let cell = Self::cell;
+        let cursor = self.cursor_width();
+        let mut visible = self.buffer_width();
         let offset = if cursor >= left {
             visible = left;
             cursor - left + 1

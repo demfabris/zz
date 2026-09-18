@@ -3000,6 +3000,16 @@ impl MuxEngine {
     /// `prompt_set_options`: the prompt reads `status-keys` and
     /// `word-separators` off the session that raised it, or the global session
     /// options when there is no session, and keeps them for its whole life.
+    /// `prompt_set_options` for a prompt a pane's own mode raises.
+    #[must_use]
+    pub fn pane_prompt_keys_are_vi(&self, pane: PaneId) -> bool {
+        let session = self
+            .state
+            .window_for_pane(pane)
+            .map(|window| self.state.windows[&window].session);
+        self.prompt_key_options(session).0
+    }
+
     #[must_use]
     pub fn prompt_key_options(&self, session: Option<SessionId>) -> (bool, String) {
         let target = session.map_or(TmuxOptionTarget::GlobalSession, TmuxOptionTarget::Session);
@@ -8523,6 +8533,7 @@ impl MuxEngine {
                 options.has("-k"),
                 options.has("-Z"),
                 self.word_separators_for_pane(pane)?,
+                self.pane_prompt_keys_are_vi(pane),
             )))),
         }))
     }

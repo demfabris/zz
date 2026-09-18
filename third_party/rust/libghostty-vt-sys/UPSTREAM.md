@@ -36,23 +36,27 @@ and run the focused terminal tests plus the real macOS bundle build.
 ## Capture provenance
 
 `provenance.patch` retains explicit indexed foreground/background flags in the
-style's spare bits, including erased backgrounds, and tab spans in spare cell
-bits. The cell and style allocations keep their existing size. The C style
-uses its trailing padding for two booleans; cell queries append tags 12 and 13.
-The adjacent safe wrapper exposes these fields. Both wrappers must accompany
-this patch; a stock prebuilt libghostty-vt does not implement the new queries.
+style's spare bits, including erased backgrounds, which spare cell bits carry
+for background-only cells. The cell and style allocations keep their existing
+size. The C style uses its trailing padding for two booleans; cell queries
+append tag 12. The adjacent safe wrapper exposes these fields. Both wrappers
+must accompany this patch; a stock prebuilt libghostty-vt does not implement the
+new query.
 
-The HT path uses the cursor's cached cell pointer, validates at most 32 adjacent
-cells with a packed comparison, and marks the row dirty once. It performs no
-page lookup per column. A head stores the tab width; padding stores 128. Cell
-moves preserve both facts, while printing clears adjacent padding and its head
-where tmux would overwrite them. Capture reads the head and padding separately,
-so inserting, deleting or erasing part of a tab does not erase its surviving
-head. ICH clears the vacated source range, matching the pin when the insert
-count exceeds the number of cells moved.
+ICH clears only the cells it moved when the insert count exceeds them, as the
+pin's `grid_view_insert_cells` does; the stale cells it leaves show on the pin's
+screen and in its captures alike.
 
-The build applies the patch to its fetched or explicitly supplied Ghostty source
-and records the applied patch. On a later patch change it reverses only that
-recorded patch before applying the new one; a conflicting source edit fails.
-The pkg-config path accepts only packages declaring `zz_capture_provenance=1`;
-it falls back to the patched source build for an unmarked library.
+Tabs carry no provenance. The pin prints a literal tab for every cell a tab
+produced, and fabrico decided on 2026-09-18 that zz captures the spaces on
+screen instead (see `knowledge/designs/tui-parity.md`).
+
+The build never edits the Ghostty source it fetches or is given. It mirrors
+that tree into `OUT_DIR/ghostty-provenance-<hash>`, hard-linking every file but
+the ones the patch touches, applies the patch there and installs into a sibling
+directory keyed by the same hash of the patch and the Ghostty commit, so an
+unpatched or differently patched build in the same target never reuses it. A
+fetched tree an older build patched in place is restored first; an explicit
+`GHOSTTY_SOURCE_DIR` carrying such a patch is refused. The pkg-config path
+accepts only packages declaring `zz_capture_provenance=1`; it falls back to the
+patched source build for an unmarked library.

@@ -204,10 +204,6 @@ impl Row {
 pub struct Cell(pub(crate) ffi::Cell);
 
 impl Cell {
-    pub fn tab(self) -> Result<u8> {
-        self.get(ffi::CellData::TAB)
-    }
-
     pub fn bg_indexed(self) -> Result<bool> {
         self.get(ffi::CellData::BG_INDEXED)
     }

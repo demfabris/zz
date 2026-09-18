@@ -731,8 +731,7 @@ pub mod CellSemanticContent {
 }
 pub mod CellData {
     #[doc = " Cell data types.\n\n These values specify what type of data to extract from a cell\n using `ghostty_cell_get`.\n"]
-    pub const TAB: Type = 12;
-    pub const BG_INDEXED: Type = 13;
+    pub const BG_INDEXED: Type = 12;
     pub type Type = ::std::os::raw::c_uint;
     #[doc = " Invalid data type. Never results in any data extraction."]
     pub const INVALID: Type = 0;

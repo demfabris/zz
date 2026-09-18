@@ -8063,7 +8063,10 @@ impl Shared {
                             terminal_type: Some(
                                 inner.engine.default_terminal_for_spawn().to_owned(),
                             ),
-                            initial_size: None,
+                            initial_size: inner
+                                .engine
+                                .pane_geometry(*pane)
+                                .map(|(columns, rows)| TerminalSize::cells(columns, rows)),
                             non_login_shell: false,
                             env,
                         };
@@ -8233,7 +8236,10 @@ impl Shared {
                             terminal_type: Some(
                                 inner.engine.default_terminal_for_spawn().to_owned(),
                             ),
-                            initial_size: None,
+                            initial_size: inner
+                                .engine
+                                .pane_geometry(*pane)
+                                .map(|(columns, rows)| TerminalSize::cells(columns, rows)),
                             non_login_shell: false,
                             env,
                         };

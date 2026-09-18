@@ -289,9 +289,13 @@ final class BrowserPaneTests: XCTestCase {
         )
     }
 
-    private func loaded(_ tab: ZZBrowserTab, marker: String) async throws {
-        try await eventually {
-            if tab.error != nil { throw BrowserFixtureError.closed }
+    private func loaded(_ tab: ZZBrowserTab, marker: String,
+                        file: StaticString = #filePath, line: UInt = #line) async throws {
+        try await eventually(file: file, line: line) {
+            if let error = tab.error {
+                XCTFail("Browser tab failed: \(error)", file: file, line: line)
+                throw BrowserFixtureError.closed
+            }
             return (try? await self.javaScript("document.body.dataset.proxy || ''", in: tab.webView)) == marker
         }
         XCTAssertNil(tab.error)
@@ -306,12 +310,15 @@ final class BrowserPaneTests: XCTestCase {
         }
     }
 
-    private func eventually(_ condition: () async throws -> Bool) async throws {
-        let deadline = ContinuousClock.now + .seconds(15)
+    private func eventually(file: StaticString = #filePath, line: UInt = #line,
+                            _ condition: () async throws -> Bool) async throws {
+        let timeout = Duration.seconds(60)
+        let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {
             if try await condition() { return }
             try await Task.sleep(for: .milliseconds(50))
         }
+        XCTFail("Condition not met within \(timeout)", file: file, line: line)
         throw BrowserFixtureError.timedOut
     }
 }

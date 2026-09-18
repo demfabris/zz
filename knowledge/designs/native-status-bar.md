@@ -52,6 +52,12 @@ desktop view owns those concerns:
 The sidebar and status bar are mutually exclusive desktop views: an expanded sidebar hides the
 status bar; retracting it shows the status bar in the title bar. There is no bottom placement.
 
+Desktop shortcuts Cmd+1–9 on macOS and Ctrl+1–9 on Linux select windows by their
+position in the attached session's displayed order, whether the sidebar or titlebar
+is visible. They include windows outside the five visible pills and ignore missing
+positions. The `ui` chrome actions `select-window-1` through `select-window-9`
+support rebinding and take priority over pane shortcuts.
+
 Session and agent buttons share the active window pill’s background, theme border, shadow, and
 26px height, with widths sized to their contents.
 

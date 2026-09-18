@@ -2,9 +2,9 @@
 type: Concept
 title: Zed GPUI terminal rendering parity
 description: The effort to bring zz's terminal painting up to Zed's GPUI standard by mapping immutable renderer-neutral frames and dirty-row patches onto GPUI text, cursor, and overlay painting.
-resource: crates/zz/src/terminal/view.rs
+resource: crates/zz-ui/src/terminal.rs
 tags: [rendering, gpui, zed, parity, cursor, ime, contrast, box-drawing, block-elements, local-scroll]
-timestamp: 2026-09-05T00:00:00Z
+timestamp: 2026-09-17T00:00:00Z
 ---
 
 # Overview
@@ -25,7 +25,9 @@ and the list of carried patches live in [gpui-revision](/references/gpui-revisio
 
 # How frames map to GPUI painting
 
-The [terminal frame](/concepts/terminal-frame.md) is renderer-neutral; the app translates it:
+The [terminal frame](/concepts/terminal-frame.md) is renderer-neutral. Desktop and browser clients
+share the painter in `crates/zz-ui/src/terminal.rs`; the desktop adapter lives in
+`crates/zz/src/terminal/element.rs`.
 
 | Frame data | GPUI rendering |
 | --- | --- |
@@ -81,6 +83,11 @@ scroll ahead of the backfill reads as empty rather than as stale content.
   column origin lands on a device pixel, defines cell width; ascent +
   descent + line gap defines the natural cell height. The optional configured adjustment modifies
   that natural value, which rounds to a whole device pixel and converts back to logical pixels.
+- `align_line_to_cells` places each scalar batch's shaped glyph clusters at their source cell
+  columns and sets the line width to the reserved grid width. It preserves offsets within a
+  cluster and the source columns after ligatures and wide characters. GPUI's general fixed-width
+  adjustment permits up to one logical pixel of drift, which made the first letters move when a
+  highlight changed a batch boundary with a fractional-advance font such as Berkeley Mono 13pt.
 - Padding is independent per edge and excluded before grid dimensions are computed; a float tolerance is
   applied before flooring row/column counts.
 - Standard light box glyphs (`─│┌┐└┘├┤┬┴┼╭╮╯╰` and light half-lines) do not rely on the
@@ -133,7 +140,7 @@ copy-mode highlights, (4) box/block cell geometry, (5) cached text runs + decora
 
 # Non-goals
 
-No Ghostty custom shaders or GPU renderer; no Kitty graphics / Sixel / iTerm images; no settings UI; text
+No Ghostty custom shaders or GPU renderer; no Sixel / iTerm images; no settings UI; text
 blink is preserved in the model but not painted this milestone.
 
 # Related

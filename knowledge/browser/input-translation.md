@@ -4,7 +4,7 @@ title: Input translation (GPUI → CEF)
 description: Browser-neutral pointer/wheel/keyboard/text/IME input, ordered GPUI-to-CEF dispatch, pane shortcuts, address resolution, and history-backed omnibox interaction.
 resource: crates/zz-browser/src/input.rs
 tags: [browser, input, ime, keyboard, url, history, omnibox]
-timestamp: 2026-08-13T02:00:00Z
+timestamp: 2026-09-17T00:00:00Z
 ---
 
 # Overview
@@ -122,12 +122,18 @@ web page or the daemon's synchronized-input path:
 | Close tab | `Cmd+W` (last tab closes the pane) | `Ctrl+W` |
 | Next tab | `Ctrl+Tab`, `Cmd+Opt+→`, `Cmd+Shift+]` | `Ctrl+Tab`, `Ctrl+PgDn` |
 | Previous tab | `Ctrl+Shift+Tab`, `Cmd+Opt+←`, `Cmd+Shift+[` | `Ctrl+Shift+Tab`, `Ctrl+PgUp` |
-| Tab 1–8 | `Cmd+1`..`Cmd+8` | `Ctrl+1`..`Ctrl+8` |
-| Last tab | `Cmd+9` | `Ctrl+9` |
+| Tab 1–8 (when the matching `ui` binding is removed) | `Cmd+1`..`Cmd+8` | `Ctrl+1`..`Ctrl+8` |
+| Last tab (when the matching `ui` binding is removed) | `Cmd+9` | `Ctrl+9` |
 | Back / Forward | `Cmd+[` / `Cmd+]` | `Alt+←` / `Alt+→` |
 | Reload | `Cmd+R` | `Ctrl+R` or `F5` |
 | Focus address bar | `Cmd+L` (selects the URL) | `Ctrl+L` (selects the URL) |
 | Devtools | `Cmd+Opt+I` | `Ctrl+Shift+I` |
+
+The desktop workspace claims Cmd+1–9 on macOS and Ctrl+1–9 on Linux for window
+selection before browser bindings run. These select the first through ninth windows
+in the attached session's displayed order. Ctrl+Tab and Ctrl+Shift+Tab still cycle
+browser tabs. Removing a numbered `ui` binding with `chrome-unbind` restores its
+browser binding.
 
 Edit, tab, navigation, and address actions dispatch to the same handlers as the context menu,
 toolbar, and tab-strip controls. `Cmd+W` is not a `Browser`-context binding: a

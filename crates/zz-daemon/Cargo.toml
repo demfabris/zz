@@ -65,7 +65,7 @@ security-framework-sys = "2.17"
 
 [target.'cfg(unix)'.dependencies]
 async-signal = { workspace = true, optional = true }
-rustix = { workspace = true, features = ["fs"] }
+rustix = { workspace = true, features = ["fs", "net"] }
 
 [dev-dependencies]
 russh = { version = "0.63.3", default-features = false, features = ["ring", "flate2", "rsa"] }

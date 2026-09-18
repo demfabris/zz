@@ -9,7 +9,7 @@ tags:
 - window
 - appearance
 - mux
-timestamp: 2026-09-09T00:00:00Z
+timestamp: 2026-09-17T00:00:00Z
 ---
 
 # Overview
@@ -79,6 +79,15 @@ candidate exists, edits continue to target the first existing file selected by n
 `zz-client`, including `D-` for Command/Super and `S-` for Shift. These directives may appear more
 than once, preserve file order, and stay client-side. They are separate from the scalar
 knobs below and from the daemon-owned tmux tables in `zz/mux.conf`.
+
+The desktop binds `Cmd+1` through `Cmd+9` on macOS and `Ctrl+1` through `Ctrl+9`
+on Linux to `ui:select-window-1` through `ui:select-window-9`. Each number selects
+that position in the attached session's displayed window order, including windows
+beyond the visible titlebar range. Missing positions do nothing. The workspace
+intercepts these shortcuts before pane shortcuts, including browser tab selection.
+Dialogs, popups, menus, local palettes, and Settings retain their keyboard handling.
+For example, `chrome-keybind = ui:D-2=select-window-4` selects the fourth window
+with Cmd+2; `chrome-unbind = ui:D-2` restores the pane's handling of that chord.
 
 ## Client-local keys
 

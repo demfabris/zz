@@ -77,7 +77,7 @@ use crate::{
             SshPromptRequest,
         },
         hosts::HostId,
-        nav::{TreeTarget, kill_target_command, split_picker_command},
+        nav::{TreeTarget, kill_target_command, select_window_command, split_picker_command},
         prefix::{PrefixClaim, PressDisposition, terminal_key_input},
     },
     pane::display::DisplayPanesView,
@@ -210,6 +210,19 @@ fn attached_focused_window(
         .iter()
         .find(|session| Some(session.id) == attached)
         .map(|session| snapshot.focused_window_for(session))
+}
+
+fn window_at_position(
+    snapshot: &MuxSnapshot,
+    attached: Option<SessionId>,
+    position: u8,
+) -> Option<WindowId> {
+    snapshot
+        .sessions
+        .iter()
+        .find(|session| Some(session.id) == attached)
+        .and_then(|session| session.windows.get(usize::from(position)))
+        .map(|window| window.id)
 }
 
 fn browser_metadata_command(
@@ -899,9 +912,8 @@ impl AppView {
         if self.reconcile_dialog_prefix(window, cx) {
             return;
         }
-        if crate::keymap::resolve(cx, zz_client::UI_TABLE, &event.keystroke)
-            == Some(zz_client::ChromeAction::OpenCommandPalette)
-        {
+        let chrome_action = crate::keymap::resolve(cx, zz_client::UI_TABLE, &event.keystroke);
+        if chrome_action == Some(zz_client::ChromeAction::OpenCommandPalette) {
             self.open_command_palette(None, window, cx);
             cx.stop_propagation();
             return;
@@ -915,6 +927,18 @@ impl AppView {
             return;
         }
         if self.sidebar.read(cx).route() == WorkspaceRoute::Settings {
+            return;
+        }
+        if let Some(zz_client::ChromeAction::SelectWindow(position)) = chrome_action {
+            let mux = self.mux.read(cx);
+            if mux.is_connected()
+                && let Some(target) =
+                    window_at_position(&mux.snapshot(), mux.attached_session(), position)
+            {
+                mux.execute(select_window_command(target));
+                self.focus_active_pane(window, cx);
+            }
+            cx.stop_propagation();
             return;
         }
         let keystroke = &event.keystroke;
@@ -3373,6 +3397,8 @@ mod tests {
     use zz_client::CoreEvent;
     use zz_protocol::CommandPromptKind;
 
+    gpui::actions!(window_shortcut_tests, [WindowShortcutFallback]);
+
     #[derive(Debug, PartialEq)]
     enum PaneReleaseStep {
         Drop(CommandInvocation),
@@ -4071,6 +4097,94 @@ mod tests {
             cx.run_until_parked();
             assert!(cx.update(|window, cx| settings_focus.contains_focused(window, cx)));
         }
+    }
+
+    #[test]
+    fn window_shortcuts_follow_position_within_the_attached_session() {
+        let mut snapshot = one_pane_snapshot(1);
+        let mut attached = snapshot.sessions[0].clone();
+        attached.id = SessionId(42);
+        attached.windows = [(71, 4), (12, 10), (99, 90)]
+            .into_iter()
+            .map(|(id, index)| {
+                let mut window = attached.windows[0].clone();
+                window.id = WindowId(id);
+                window.index = index;
+                window
+            })
+            .collect();
+        snapshot.sessions.push(attached);
+        for (position, id) in [(0, 71), (1, 12), (2, 99)] {
+            assert_eq!(
+                window_at_position(&snapshot, Some(SessionId(42)), position),
+                Some(WindowId(id))
+            );
+        }
+        assert_eq!(window_at_position(&snapshot, Some(SessionId(42)), 3), None);
+        assert_eq!(window_at_position(&snapshot, Some(SessionId(100)), 0), None);
+        assert_eq!(window_at_position(&snapshot, None, 0), None);
+    }
+
+    #[gpui::test]
+    fn window_shortcuts_intercept_before_pane_input_and_honor_unbinds(cx: &mut TestAppContext) {
+        let fallback_count = Rc::new(Cell::new(0));
+        let (modifier, key) = if cfg!(any(target_os = "macos", target_os = "ios")) {
+            ("cmd", "D-1")
+        } else {
+            ("ctrl", "C-1")
+        };
+        cx.update(|cx| {
+            zz_ui::init(cx);
+            crate::keymap::install(&[], config::DEFAULT_BROWSER_ELEMENT_SELECTOR_HOTKEY, cx);
+            cx.bind_keys((1..=9).map(|position| {
+                gpui::KeyBinding::new(
+                    &format!("{modifier}-{position}"),
+                    WindowShortcutFallback,
+                    None,
+                )
+            }));
+            let fallback_count = fallback_count.clone();
+            cx.on_action(move |_: &WindowShortcutFallback, _| {
+                fallback_count.set(fallback_count.get() + 1);
+            });
+        });
+        let (workspace, cx) = cx.add_window_view(|window, cx| {
+            let controller = cx.new(|cx| {
+                BrowserController::new(Err(zz_browser::BrowserError::AlreadyShutdown), cx)
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread(
+                        "window shortcuts".to_owned(),
+                    )),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), one_pane_snapshot(1), cx);
+        });
+        cx.run_until_parked();
+        for position in 1..=9 {
+            cx.simulate_keystrokes(&format!("{modifier}-{position}"));
+        }
+        assert_eq!(fallback_count.get(), 0);
+        cx.update(|_, cx| {
+            crate::keymap::install(
+                &[crate::keymap::ChromeOverride::Unbind {
+                    table: zz_client::UI_TABLE,
+                    key: key.to_owned(),
+                }],
+                config::DEFAULT_BROWSER_ELEMENT_SELECTOR_HOTKEY,
+                cx,
+            );
+        });
+        cx.simulate_keystrokes(&format!("{modifier}-1"));
+        assert_eq!(fallback_count.get(), 1);
     }
 
     #[gpui::test]

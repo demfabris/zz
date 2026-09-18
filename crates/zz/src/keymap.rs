@@ -311,6 +311,15 @@ mod tests {
         assert_eq!(
             audited(ChromeProfile::DesktopApple, UI_TABLE),
             expected([
+                ("cmd-1", "select-window-1"),
+                ("cmd-2", "select-window-2"),
+                ("cmd-3", "select-window-3"),
+                ("cmd-4", "select-window-4"),
+                ("cmd-5", "select-window-5"),
+                ("cmd-6", "select-window-6"),
+                ("cmd-7", "select-window-7"),
+                ("cmd-8", "select-window-8"),
+                ("cmd-9", "select-window-9"),
                 ("cmd-k", "open-command-palette"),
                 ("cmd-p", "open-command-palette"),
                 ("cmd-n", "new-session"),
@@ -327,6 +336,15 @@ mod tests {
         assert_eq!(
             audited(ChromeProfile::Desktop, UI_TABLE),
             expected([
+                ("ctrl-1", "select-window-1"),
+                ("ctrl-2", "select-window-2"),
+                ("ctrl-3", "select-window-3"),
+                ("ctrl-4", "select-window-4"),
+                ("ctrl-5", "select-window-5"),
+                ("ctrl-6", "select-window-6"),
+                ("ctrl-7", "select-window-7"),
+                ("ctrl-8", "select-window-8"),
+                ("ctrl-9", "select-window-9"),
                 ("ctrl-shift-k", "open-command-palette"),
                 ("ctrl-shift-p", "open-command-palette"),
                 ("ctrl-=", "ui-zoom-in"),

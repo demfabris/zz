@@ -13,7 +13,7 @@
 | buffer-client-file-save | 3 | yes | 0 | yes | yes | yes |
 | buffer-missing-target-error | 2 | yes | 0 | yes | yes | yes |
 | buffer-path-format | 36 | yes | 0 | yes | yes | yes |
-| capture-pane | 23 | yes | 0 | yes | yes | yes |
+| capture-pane | 34 | yes | 0 | yes | yes | yes |
 | census-formats | 40 | yes | 0 | yes | yes | yes |
 | census-hooks | 152 | yes | 0 | yes | yes | yes |
 | census-options | 55 | yes | 0 | yes | yes | yes |
@@ -145,9 +145,9 @@
 | smoke/command-prompt-target | 3 | yes | 0 | yes | yes | yes |
 | smoke/config-alias-parse-unit | 2 | yes | 0 | yes | yes | yes |
 | smoke/config-chain-parse-abort | 2 | yes | 0 | yes | yes | yes |
-| smoke/config-discovery-explicit | 14 | yes | 0 | yes | yes | yes |
-| smoke/config-discovery-launcher | 13 | yes | 0 | yes | yes | yes |
-| smoke/config-discovery | 13 | yes | 0 | yes | yes | yes |
+| smoke/config-discovery-explicit | 13 | yes | 0 | yes | yes | yes |
+| smoke/config-discovery-launcher | 12 | yes | 0 | yes | yes | yes |
+| smoke/config-discovery | 12 | yes | 0 | yes | yes | yes |
 | smoke/config-grammar | 17 | yes | 0 | yes | yes | yes |
 | smoke/config-non-utf8-byte-matrix | 2 | yes | 0 | yes | yes | yes |
 | smoke/config-non-utf8-file-bytes | 8 | yes | 0 | yes | yes | yes |
@@ -260,7 +260,7 @@
 ## Attached-client fixture
 
 Status: `PASS`
-Recorded at: `996a8d0d15b5`
+Recorded at: `38c50df4c4d5`
 
 ## Retries
 

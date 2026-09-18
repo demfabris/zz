@@ -1314,6 +1314,7 @@ fn bound_mouse_key(
     );
     if !model.mouse_bindings.contains(&key)
         && !copy_mouse_key_is_reachable(model, &latch, &key)
+        && !pane_mode_mouse_key_is_reachable(model, &latch, &key)
         && !is_click_sequence_name(&key)
     {
         return MouseKeyRoute::Native;
@@ -1441,7 +1442,10 @@ pub(crate) fn expire_click_sequence(
         bound: false,
         press: sequence.cell,
     };
-    if !model.mouse_bindings.contains(&key) && !copy_mouse_key_is_reachable(model, &latch, &key) {
+    if !model.mouse_bindings.contains(&key)
+        && !copy_mouse_key_is_reachable(model, &latch, &key)
+        && !pane_mode_mouse_key_is_reachable(model, &latch, &key)
+    {
         return Ok(());
     }
     let (column, row, x, y) = sequence.cell;
@@ -1495,6 +1499,31 @@ fn bound_mouse_view_action(
         global_y,
         force_selection,
     )
+}
+
+/// `window_pane_key`'s mode branch: a pane holding one of the server's own pane
+/// modes answers a pointer in the mode itself, with no key table in the way, so
+/// the names `mode_tree_key` and `window_switch_key` read have to reach the
+/// daemon even when nothing is bound to them.
+const PANE_MODE_POINTER_KEYS: [&str; 5] = [
+    "MouseDown1Pane",
+    "MouseDown3Pane",
+    "DoubleClick1Pane",
+    "WheelUpPane",
+    "WheelDownPane",
+];
+
+fn pane_mode_mouse_key_is_reachable(
+    model: &Model,
+    latch: &crate::state::MouseDragLatch,
+    key: &str,
+) -> bool {
+    PANE_MODE_POINTER_KEYS.contains(&key)
+        && latch.pane.is_some_and(|pane| {
+            model
+                .pane_snapshot(pane)
+                .is_some_and(|snapshot| snapshot.mode.is_some())
+        })
 }
 
 /// The mode table half of `key_bindings_get`'s walk: the pane the pointer

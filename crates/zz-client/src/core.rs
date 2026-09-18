@@ -920,6 +920,8 @@ impl ClientCore {
             | EventPayload::ControlConfigError { .. }
             | EventPayload::ControlSourceFile { .. }
             | EventPayload::StartupConfigCauses { .. }
+            | EventPayload::CommandStdout { .. }
+            | EventPayload::CommandClientExit
             | EventPayload::SubscriptionChanged { .. } => {}
         }
     }

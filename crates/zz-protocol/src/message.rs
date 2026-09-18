@@ -3482,6 +3482,10 @@ pub enum EventPayload {
     ChooserPresentation {
         presentation: Option<Box<ChooserPresentation>>,
     },
+    CommandStdout {
+        output: RawText,
+    },
+    CommandClientExit,
 }
 
 impl EventPayload {
@@ -4901,6 +4905,39 @@ mod tests {
         spent.set_stdin("");
         assert!(spent.stdin().is_some());
         assert!(!spent.stdin_was_spent());
+    }
+
+    #[test]
+    fn released_command_stdout_and_client_exit_append_after_the_chooser_presentation() {
+        let presentation = super::Event {
+            sequence: 0,
+            payload: super::EventPayload::ChooserPresentation {
+                presentation: None,
+            },
+        };
+        let tag = postcard::to_stdvec(&presentation).expect("encode chooser presentation")[1];
+        let released = super::Event {
+            sequence: 0,
+            payload: super::EventPayload::CommandStdout {
+                output: super::RawText::from("%1\n"),
+            },
+        };
+        let bytes = postcard::to_stdvec(&released).expect("encode released stdout");
+        assert_eq!(bytes[1], tag + 1);
+        assert_eq!(
+            postcard::from_bytes::<super::Event>(&bytes).expect("decode released stdout"),
+            released
+        );
+        let exit = super::Event {
+            sequence: 0,
+            payload: super::EventPayload::CommandClientExit,
+        };
+        let bytes = postcard::to_stdvec(&exit).expect("encode client exit");
+        assert_eq!(bytes, [0, tag + 2]);
+        assert_eq!(
+            postcard::from_bytes::<super::Event>(&bytes).expect("decode client exit"),
+            exit
+        );
     }
 
     #[test]

@@ -8,6 +8,7 @@ mod fleet;
 #[cfg(not(target_os = "ios"))]
 use std::{
     borrow::Cow,
+    cell::RefCell,
     io::{self, ErrorKind, IsTerminal as _, Write as _},
     path::PathBuf,
     process::{Command, ExitCode, Stdio},
@@ -1136,7 +1137,7 @@ fn run_command_mode(
     };
     client.enable_stdin();
     client.set_stderr_handler(print_command_error);
-    let mut output_writer = CommandOutputWriter::default();
+    client.set_stdout_handler(print_released_command_output);
     if let Some(prepared_commands) = prepared_commands {
         let recover_kill = prepared_commands
             .first()
@@ -1149,7 +1150,7 @@ fn run_command_mode(
             },
             |(_, _command), outcome| {
                 let raw = raw_command_output(outcome.stdout_claim);
-                let status = output_writer.print(&outcome.stdout, raw);
+                let status = print_chain_output(&outcome.stdout, raw);
                 print_command_error(&outcome.stderr);
                 status
             },
@@ -1159,7 +1160,7 @@ fn run_command_mode(
                 Some(recover_kill_server_failure(socket_path, &error))
             }
             Err((_, DaemonError::CommandFailed { output, error })) => {
-                output_writer.print(&output, false);
+                print_chain_output(&output, false);
                 eprintln!("{}", command_error_message(&error));
                 Some(exit_code_for(CliFailure::Runtime))
             }
@@ -1173,15 +1174,14 @@ fn run_command_mode(
         command_chain,
         |command| client.execute_streams(command.clone()),
         |_command, outcome| {
-            let status =
-                output_writer.print(&outcome.stdout, raw_command_output(outcome.stdout_claim));
+            let status = print_chain_output(&outcome.stdout, raw_command_output(outcome.stdout_claim));
             print_command_error(&outcome.stderr);
             status
         },
     ) {
         Ok(exit_code) => Some(ExitCode::from(exit_code)),
         Err(DaemonError::CommandFailed { output, error }) => {
-            output_writer.print(&output, false);
+            print_chain_output(&output, false);
             eprintln!("{}", command_error_message(&error));
             Some(exit_code_for(CliFailure::Runtime))
         }
@@ -1506,8 +1506,9 @@ fn split_command_chain(arguments: &[RawText]) -> Vec<CommandInvocation> {
 
 /// Run every member of a `\;` chain, emitting each one's streams as it lands.
 /// The pin stops a chain only when a command itself fails (`cmdq_next` drops
-/// the rest of the group on `CMD_RETURN_ERROR`), never merely because the
-/// client's exit status went nonzero, and the last nonzero status wins.
+/// the rest of the group on `CMD_RETURN_ERROR`) or when the server sets
+/// `CLIENT_EXIT` on the client, never merely because the client's exit status
+/// went nonzero, and the last nonzero status wins.
 #[cfg(not(target_os = "ios"))]
 fn execute_command_chain<T, E>(
     commands: impl IntoIterator<Item = T>,
@@ -1523,6 +1524,9 @@ fn execute_command_chain<T, E>(
         }
         if output_status != 0 {
             exit_code = output_status;
+        }
+        if outcome.client_exit {
+            break;
         }
     }
     Ok(exit_code)
@@ -1907,6 +1911,23 @@ impl CommandOutputWriter {
         }
         0
     }
+}
+
+#[cfg(not(target_os = "ios"))]
+thread_local! {
+    static CHAIN_OUTPUT_WRITER: RefCell<CommandOutputWriter> =
+        const { RefCell::new(CommandOutputWriter { raw_owner: None }) };
+}
+
+#[cfg(not(target_os = "ios"))]
+fn print_chain_output(output: &RawText, raw: bool) -> u8 {
+    CHAIN_OUTPUT_WRITER.with(|writer| writer.borrow_mut().print(output, raw))
+}
+
+/// The daemon released a `cmdq_print` line while the command was still running.
+#[cfg(not(target_os = "ios"))]
+fn print_released_command_output(output: &RawText) {
+    let _ = print_chain_output(output, false);
 }
 
 #[cfg(not(target_os = "ios"))]

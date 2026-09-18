@@ -6643,23 +6643,6 @@ impl Shared {
             client_terminal,
             queue_execution,
         );
-        let result = result.and_then(|execution| {
-            if split_input
-                && let Some(pane) = execution.effects.iter().find_map(|effect| match effect {
-                    MuxEffect::PaneCreated { pane, .. } => Some(*pane),
-                    _ => None,
-                })
-            {
-                let input =
-                    CommandInvocation::new("display-message", ["-I", "-t", &pane.to_string()]);
-                if let Some(input) = self.command_with_caller_stdin(client, context, &input)?
-                    && let Some(bytes) = input.stdin()
-                {
-                    self.feed_pane_stream_input(pane, bytes.as_bytes());
-                }
-            }
-            Ok(execution)
-        });
         let (result, pane_exit_code) = self.wait_for_pane_command(client, kind, result);
         set_context_client_terminal(context, previous_client_terminal);
         context.copy_client_attachment(&original_context);
@@ -7744,6 +7727,8 @@ impl Shared {
         let mut format_variables = context.format_variables.clone();
         let event_hooks_enabled = !context.no_hooks;
         let command_name = canonical_command(&command.name);
+        let split_caller_stream = command_name == "split-window"
+            && command_stdin_sink(command_name, &command.args) == Some(CommandStdinSink::PaneInput);
         let mut terminals_to_watch = Vec::new();
         let mut client_events = Vec::new();
         let mut direct_events = Vec::new();
@@ -9567,9 +9552,11 @@ impl Shared {
             }
             if let Some((pane, format, active_session, format_client)) = pane_format_output {
                 if let Some(terminal) = inner.terminals.get(&pane).cloned() {
-                    drop(inner);
-                    wait_for_terminal_identity(&terminal);
-                    inner = self.inner.lock();
+                    if !split_caller_stream {
+                        drop(inner);
+                        wait_for_terminal_identity(&terminal);
+                        inner = self.inner.lock();
+                    }
                     if inner
                         .terminals
                         .get(&pane)
@@ -10008,6 +9995,20 @@ impl Shared {
             .unwrap_or(client);
         for (pane, bytes) in pane_stream_inputs {
             self.feed_pane_stream_input(pane, bytes.as_bytes());
+        }
+        if split_caller_stream
+            && let Some(pane) = execution.effects.iter().find_map(|effect| match effect {
+                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                _ => None,
+            })
+        {
+            self.release_command_stdout(source_client, &mut execution.output);
+            let input = CommandInvocation::new("display-message", ["-I", "-t", &pane.to_string()]);
+            if let Some(input) = self.command_with_caller_stdin(client, context, &input)?
+                && let Some(bytes) = input.stdin()
+            {
+                self.feed_pane_stream_input(pane, bytes.as_bytes());
+            }
         }
         let (
             source_kind,
@@ -12389,6 +12390,7 @@ impl Shared {
         for mut command in parsed.commands {
             if mode.queue_execution().has_yielded()
                 || self.command_queue_cancelled(client)
+                || self.command_client_exiting(stream_client)
                 || self.stopping.load(Ordering::Acquire)
                     && !mode.queue_execution().is_draining()
                     && !mode.queue_execution().detached
@@ -24871,15 +24873,36 @@ impl Shared {
         let Some(pane) = target.ok().and_then(|(target, _)| target?.pane) else {
             return;
         };
+        self.stream_caller_stdin_to_created_pane(client, pane);
+    }
+
+    /// `window_pane_input_callback` again: a pane that disappears while the
+    /// caller's stream is still open raises the invocation's status, stops the
+    /// rest of the client's chain and cancels the read.
+    fn stream_caller_stdin_to_created_pane(self: &Arc<Self>, client: ClientId, pane: PaneId) {
         while let Some(Ok(chunk)) = self.client_file_operation(
             Some(client),
             Path::new("-"),
             ClientFileOperation::ReadStdinChunk,
         ) {
-            if chunk.is_empty() || !self.feed_pane_stream_input(pane, &chunk) {
-                break;
+            if self.pane_stream_target_lost(pane) {
+                self.request_command_client_exit(client);
+                return;
+            }
+            if chunk.is_empty() {
+                return;
+            }
+            if !self.feed_pane_stream_input(pane, &chunk) {
+                if self.pane_stream_target_lost(pane) {
+                    self.request_command_client_exit(client);
+                }
+                return;
             }
         }
+    }
+
+    fn pane_stream_target_lost(&self, pane: PaneId) -> bool {
+        self.inner.lock().engine.state.pane(pane).is_none()
     }
 
     fn take_caller_stdin_error(&self, client: ClientId) -> String {
@@ -25063,6 +25086,62 @@ impl Shared {
         if let Some(streams) = self.inner.lock().command_streams.get_mut(&client) {
             streams.exit_code = 1;
         }
+    }
+
+    /// The pin's `c->retval = 1; c->flags |= CLIENT_EXIT`: the status is raised
+    /// and the client stops, so nothing queued behind this command runs.
+    fn request_command_client_exit(&self, client: ClientId) {
+        let announce = {
+            let mut inner = self.inner.lock();
+            let command_client = inner.client_kinds.get(&client) == Some(&ClientKind::Command);
+            match inner.command_streams.get_mut(&client) {
+                Some(streams) if !streams.client_exit => {
+                    streams.client_exit = true;
+                    streams.exit_code = 1;
+                    command_client
+                }
+                _ => false,
+            }
+        };
+        if announce
+            && let Some(writer) = self.client_writers.lock().get(&client).cloned()
+        {
+            Self::send_event(&writer, EventPayload::CommandClientExit);
+        }
+    }
+
+    fn command_client_exiting(&self, client: ClientId) -> bool {
+        self.inner
+            .lock()
+            .command_streams
+            .get(&client)
+            .is_some_and(|streams| streams.client_exit)
+    }
+
+    /// `cmdq_print` on a command client writes through to its stdout while the
+    /// item is still running, so a `-P` line is released before the caller's
+    /// stream opens rather than held until the command ends.
+    fn release_command_stdout(&self, client: ClientId, output: &mut RawText) {
+        if output.is_empty() {
+            return;
+        }
+        let command_client = {
+            let inner = self.inner.lock();
+            inner.client_kinds.get(&client) == Some(&ClientKind::Command)
+        };
+        if !command_client {
+            return;
+        }
+        let Some(writer) = self.client_writers.lock().get(&client).cloned() else {
+            return;
+        };
+        Self::send_event(
+            &writer,
+            EventPayload::CommandStdout {
+                output: std::mem::take(output),
+            },
+        );
+        self.record_command_stdout_claim(client, StdoutClaim::Print);
     }
 
     fn route_source_error(
@@ -29620,6 +29699,7 @@ struct CommandStreams {
     control_error: String,
     exit_code: u8,
     stdout_claim: Option<StdoutClaim>,
+    client_exit: bool,
 }
 
 #[derive(Default)]

@@ -140,12 +140,16 @@ pub struct CommandOutcome {
     /// stream while `stdout` was produced. The CLI writer reads this instead of
     /// guessing from the bytes.
     pub stdout_claim: StdoutClaim,
+    /// The pin's `CLIENT_EXIT`: the daemon asked this client to stop before the
+    /// rest of its command chain runs.
+    pub client_exit: bool,
 }
 
 pub struct CommandClient {
     stdin_enabled: bool,
     stdin_spent: bool,
     stderr_handler: Option<fn(&str)>,
+    stdout_handler: Option<fn(&RawText)>,
     reader: ProtocolReceiver<LocalStream>,
     writer: ProtocolSender<LocalStream>,
     hello: ServerHello,
@@ -243,6 +247,7 @@ impl CommandClient {
             stdin_enabled: false,
             stdin_spent: false,
             stderr_handler: None,
+            stdout_handler: None,
             reader,
             writer,
             hello,
@@ -265,6 +270,10 @@ impl CommandClient {
 
     pub fn set_stderr_handler(&mut self, handler: fn(&str)) {
         self.stderr_handler = Some(handler);
+    }
+
+    pub fn set_stdout_handler(&mut self, handler: fn(&RawText)) {
+        self.stdout_handler = Some(handler);
     }
 
     pub fn enable_stdin(&mut self) {
@@ -321,6 +330,7 @@ impl CommandClient {
         let mut command = command;
         command.set_stdin_available(self.stdin_enabled);
         let mut streamed_stderr = String::new();
+        let mut client_exit = false;
         let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
         self.writer
             .send(&ProtocolMessage::CommandRequest(CommandRequest {
@@ -345,6 +355,7 @@ impl CommandClient {
                             .to_owned(),
                         exit_code,
                         stdout_claim,
+                        client_exit,
                     });
                 }
                 ProtocolMessage::CommandResponse(CommandResponse::Error {
@@ -374,6 +385,20 @@ impl CommandClient {
                     let line = format!("{text}\n");
                     self.stderr_handler.expect("stderr handler checked")(&line);
                     streamed_stderr.push_str(&line);
+                }
+                ProtocolMessage::Event(zz_protocol::Event {
+                    payload: zz_protocol::EventPayload::CommandStdout { output },
+                    ..
+                }) => {
+                    if let Some(handler) = self.stdout_handler {
+                        handler(&output);
+                    }
+                }
+                ProtocolMessage::Event(zz_protocol::Event {
+                    payload: zz_protocol::EventPayload::CommandClientExit,
+                    ..
+                }) => {
+                    client_exit = true;
                 }
                 ProtocolMessage::ClientFileRequest(request) => {
                     let readable = self.stdin_enabled && !self.stdin_spent;

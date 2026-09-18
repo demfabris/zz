@@ -1194,12 +1194,18 @@ pane_death_case() {
 }
 
 review_pane_death_cases() {
-  local row
+  local row side
   for row in 'display-kill-close display close' 'display-kill-write display write' \
     'split-kill-close split close' 'split-kill-write split write'; do
     set -- $row
     if [[ -n "${ZZ_STREAM_MATRIX_FILTER:-}" && ! "stream-$1" =~ $ZZ_STREAM_MATRIX_FILTER ]]; then continue; fi
     pane_death_case "$1" "$2" "$3"
+  done
+  # The tail these cases prove never runs is an option both sides carry, so a
+  # sabotage that lets it run leaves the scene one-sided. Put it back on both
+  # sides before the next case reads the state.
+  for side in zz tmux; do
+    side_command "$side" set-option -gu @zzcs-after >/dev/null 2>&1 || true
   done
   drop_extra_panes pane-death-restored
 }

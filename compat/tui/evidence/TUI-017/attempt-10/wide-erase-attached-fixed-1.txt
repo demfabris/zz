@@ -1,0 +1,9 @@
+same  100x30/line/escape
+same  100x30/line/padding
+same  100x30/display/escape
+same  100x30/display/padding
+same  100x30/clear/escape
+same  100x30/clear/padding
+same  100x30/region/escape
+same  100x30/region/padding
+attached wide erase probe: 0 differences

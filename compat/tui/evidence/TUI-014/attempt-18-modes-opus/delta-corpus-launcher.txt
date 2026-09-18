@@ -11,7 +11,7 @@ compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
 ==> checking out tmux-continuum at 0698e8f4b17d6454c71bf5212895ec055c578da0
 ==> checking out tmux-fpp at 878302f228ee14f0fa59717f63743d396b327a21
 ==> checking out oh-my-tmux at 58a3dcc0d718ec0fa1c0d5a2fddd640a1ad7a5b7
-==> using prebuilt zz: /tmp/claude-1000/-home-demfabris-dev-zz/74f3d4ea-89fe-441e-858d-4b959ebb9bb7/scratchpad/mo/bin/zz_cli
+==> using prebuilt zz: <scratch>/mo/bin/zz_cli
 ==> running smoke/config-discovery-launcher
 smoke/config-discovery-launcher: 12 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
 ==> running smoke/launcher-installed-layout

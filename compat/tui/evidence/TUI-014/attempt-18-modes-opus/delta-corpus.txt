@@ -12,8 +12,8 @@ compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
 ==> checking out tmux-continuum at 0698e8f4b17d6454c71bf5212895ec055c578da0
 ==> checking out tmux-fpp at 878302f228ee14f0fa59717f63743d396b327a21
 ==> checking out oh-my-tmux at 58a3dcc0d718ec0fa1c0d5a2fddd640a1ad7a5b7
-warn: no zz_cli beside /tmp/claude-1000/-home-demfabris-dev-zz/74f3d4ea-89fe-441e-858d-4b959ebb9bb7/scratchpad/mo/zz_cli-final; installed layout scenarios will fail
-==> using prebuilt zz: /tmp/claude-1000/-home-demfabris-dev-zz/74f3d4ea-89fe-441e-858d-4b959ebb9bb7/scratchpad/mo/zz_cli-final
+warn: no zz_cli beside <scratch>/mo/zz_cli-final; installed layout scenarios will fail
+==> using prebuilt zz: <scratch>/mo/zz_cli-final
 ==> running alerts
 alerts: 62 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
 ==> running aliases-multi-body
@@ -558,7 +558,7 @@ smoke/config-chain-parse-abort: 2 step(s), 0 TOPO divergence(s), 0 GEO divergenc
 ==> running smoke/config-discovery-explicit
 smoke/config-discovery-explicit: 13 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
 ==> running smoke/config-discovery-launcher
-error: installed layout scenario needs zz_cli beside /tmp/claude-1000/-home-demfabris-dev-zz/74f3d4ea-89fe-441e-858d-4b959ebb9bb7/scratchpad/mo/zz_cli-final for the zz symlink on PATH (cargo build -p zz-cli)
+error: installed layout scenario needs zz_cli beside <scratch>/mo/zz_cli-final for the zz symlink on PATH (cargo build -p zz-cli)
 warn: smoke/config-discovery-launcher failed; it is retried alone after the corpus
 ==> running smoke/config-discovery
 smoke/config-discovery: 12 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
@@ -724,7 +724,7 @@ smoke/keys-table-lifecycle: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s)
 ==> running smoke/kill-filters
 smoke/kill-filters: 17 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
 ==> running smoke/launcher-installed-layout
-error: installed layout scenario needs zz_cli beside /tmp/claude-1000/-home-demfabris-dev-zz/74f3d4ea-89fe-441e-858d-4b959ebb9bb7/scratchpad/mo/zz_cli-final for the zz symlink on PATH (cargo build -p zz-cli)
+error: installed layout scenario needs zz_cli beside <scratch>/mo/zz_cli-final for the zz symlink on PATH (cargo build -p zz-cli)
 warn: smoke/launcher-installed-layout failed; it is retried alone after the corpus
 ==> running smoke/oh-my-tmux
 smoke/oh-my-tmux: 15 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
@@ -747,7 +747,7 @@ smoke/pane-engine-knobs: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0
 ==> running smoke/pane-runtime-facts
 smoke/pane-runtime-facts: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
 ==> running smoke/pane-tmux-path
-error: installed layout scenario needs zz_cli beside /tmp/claude-1000/-home-demfabris-dev-zz/74f3d4ea-89fe-441e-858d-4b959ebb9bb7/scratchpad/mo/zz_cli-final for the zz symlink on PATH (cargo build -p zz-cli)
+error: installed layout scenario needs zz_cli beside <scratch>/mo/zz_cli-final for the zz symlink on PATH (cargo build -p zz-cli)
 warn: smoke/pane-tmux-path failed; it is retried alone after the corpus
 ==> running smoke/plugin-runtime-continuum
 smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
@@ -1248,7 +1248,7 @@ warn: smoke/cli-chain-parse-abort failed again alone; see /home/demfabris/dev/zz
     
     SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=0
 ==> retrying smoke/config-discovery-launcher alone
-error: installed layout scenario needs zz_cli beside /tmp/claude-1000/-home-demfabris-dev-zz/74f3d4ea-89fe-441e-858d-4b959ebb9bb7/scratchpad/mo/zz_cli-final for the zz symlink on PATH (cargo build -p zz-cli)
+error: installed layout scenario needs zz_cli beside <scratch>/mo/zz_cli-final for the zz symlink on PATH (cargo build -p zz-cli)
 warn: smoke/config-discovery-launcher failed again alone; see /home/demfabris/dev/zz-c11-modes-final/compat/results/smoke/config-discovery-launcher.log
 ==> retrying smoke/default-client-command alone
 smoke/default-client-command: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 2 WARN divergence(s)
@@ -1284,10 +1284,10 @@ warn: smoke/default-client-command failed again alone; see /home/demfabris/dev/z
     
     SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=2
 ==> retrying smoke/launcher-installed-layout alone
-error: installed layout scenario needs zz_cli beside /tmp/claude-1000/-home-demfabris-dev-zz/74f3d4ea-89fe-441e-858d-4b959ebb9bb7/scratchpad/mo/zz_cli-final for the zz symlink on PATH (cargo build -p zz-cli)
+error: installed layout scenario needs zz_cli beside <scratch>/mo/zz_cli-final for the zz symlink on PATH (cargo build -p zz-cli)
 warn: smoke/launcher-installed-layout failed again alone; see /home/demfabris/dev/zz-c11-modes-final/compat/results/smoke/launcher-installed-layout.log
 ==> retrying smoke/pane-tmux-path alone
-error: installed layout scenario needs zz_cli beside /tmp/claude-1000/-home-demfabris-dev-zz/74f3d4ea-89fe-441e-858d-4b959ebb9bb7/scratchpad/mo/zz_cli-final for the zz symlink on PATH (cargo build -p zz-cli)
+error: installed layout scenario needs zz_cli beside <scratch>/mo/zz_cli-final for the zz symlink on PATH (cargo build -p zz-cli)
 warn: smoke/pane-tmux-path failed again alone; see /home/demfabris/dev/zz-c11-modes-final/compat/results/smoke/pane-tmux-path.log
 ==> retrying smoke/source-replay-diagnostics alone
 smoke/source-replay-diagnostics: 60 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 0 WARN divergence(s)

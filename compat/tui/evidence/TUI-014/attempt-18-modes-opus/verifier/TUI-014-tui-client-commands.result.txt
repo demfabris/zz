@@ -1,3 +1,3 @@
 command: bash /home/demfabris/dev/zz-c11-modes-final/compat/tui-client-commands.sh
-ZZ_BIN=/tmp/claude-1000/-home-demfabris-dev-zz/74f3d4ea-89fe-441e-858d-4b959ebb9bb7/scratchpad/mo/zz_cli-final
+ZZ_BIN=<scratch>/mo/zz_cli-final
 exit: 0

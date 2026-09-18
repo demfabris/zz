@@ -14,7 +14,7 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_one_hundred_and_four() {
+fn protocol_version_on_this_commit_is_one_hundred_and_five() {
     assert_eq!(PROTOCOL_VERSION, 105);
 }
 

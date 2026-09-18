@@ -761,6 +761,7 @@ CAPTURE_LINKS='DECIDED capture.rich-transports, refused with a measurement 2026-
 CAPTURE_PENDING='DECIDED capture.rich-transports, refused with a measurement 2026-09-15: -P prints the bytes the pin parser has read and not yet completed, input_pending(wp->ictx). libghostty-vt publishes no parser-pending buffer, so zz cannot answer it and an empty answer would be a fake channel that matched only because the buffer is almost always empty. The workload it would serve is debugging a half-written escape sequence. decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
 CAPTURE_GRID='DECIDED capture.rich-transports, refused with a measurement 2026-09-15: -R dumps the pin internal grid - a header G <sx>x<sy> (<hsize>/<hlimit>), then per line L <yy> (<n>) flags=<string>[<hex>] <cellused>/<cellsize>, then one C line per column carrying that cell colour, attribute and link ids. Measured at 40x8 that is 329 lines for eight rows. zz has no hsize/hlimit pair, no per-line cellused and cellsize, and no grid flag word: building them inside zz would be inventing tmux internals to make bytes match. The workload it would serve is a tmux regression test reading another tmux grid. decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
 CAPTURE_CHARSET='DECIDED capture charset provenance: decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible. At 80x24 ESC(0qqqESC(B gives literal \016qqq\017 under -C -e on the pin and UTF-8 box drawing on zz; without -e the pin emits qqq while zz still emits box drawing. Ghostty maps the source charset byte to Unicode before storing the cell and retains no charset bit. The workload is replaying original DEC line drawing bytes; ordinary Unicode text capture remains asserted'
+CAPTURE_TABS='DECIDED 2026-09-18 (fabrico): zz capture-pane returns the spaces a tab left on screen. Since tmux 3.4 the pin marks every cell a tab produced (GRID_FLAG_TAB) and prints a literal \t for it under any capture flags (grid.c:1202), and once an edit removes the head of such a tab it drops the padding cells that stay behind. zz keeps no tab provenance in its terminal grid: tracking it cost up to +68% CPU on output that overwrites tab-bearing rows and made every later edit keep the span honest. Recorded in knowledge/designs/tui-parity.md, amendment 2026-09-18'
 LOG_IDENTITY='DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. Measured 2026-09-14 on both sides: the pin names ANY tty-bearing client by that tty, including the attached terminal client whose attach-session row reads /dev/pts/<n>, and zz named none of them - it spelled every row by the device name the client sent, which for an interactive client is the hostname. That half is closed: the server log now names a client by its tty whenever it has one. What stays is the clientless CLI, which names a process that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked'
 SERVER_ACCESS='zz has no multi-user socket access list: the daemon socket is the invoking user, so there is no user or group to add, and TUI-014 carries the refusal shape'
 CLIENT_TREE_CLIENTLESS='clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer, while the pin exits 0 with no output and, alone among the three, opens no mode either: cmd_choose_tree_exec returns CMD_RETURN_NORMAL before window_pane_set_mode when server_client_how_many() == 0 (cmd-choose-tree.c), so the exit status and the error text are what diverge here, measured 2026-09-14. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open'
@@ -841,14 +842,14 @@ capture_scene_changed() {
 rich_capture_case() {
   local name="$1" payload="$2" disposition="$3" reason="$4"
   shift 4
-  local command side changed
+  local command side changed size="${CAPTURE_SIZE:-80x24}"
   printf -v command 'printf %%b %q; exec sleep 600' "$payload"
-  run_on_both new-session -d -s zzcap-rich -n win -x 80 -y 24 "$command"
+  run_on_both new-session -d -s zzcap-rich -n win -x "${size%x*}" -y "${size#*x}" "$command"
   run_on_both select-pane -t '=zzcap-rich:win' -T "$PANE_TITLE"
   for side in tmux zz; do
     wait_for "$side printed $name" capture_scene_ready "$side"
-    [ "$(side_command "$side" display-message -p -t '=zzcap-rich:win' '#{pane_width}x#{pane_height}')" = 80x24 ] ||
-      die "$side capture scene is not 80x24"
+    [ "$(side_command "$side" display-message -p -t '=zzcap-rich:win' '#{pane_width}x#{pane_height}')" = "$size" ] ||
+      die "$side capture scene is not $size"
   done
   if [ "$SELF_CHECK" -eq 1 ]; then
     self_check_run "$name-equivalence" capture-pane -p -t '=zzcap-rich:win' "$@"
@@ -859,8 +860,6 @@ rich_capture_case() {
       changed="${payload/41m/42m}"
     elif [[ "$name" == capture-edited-tab-ich-* ]]; then
       changed="${payload/@/m}"
-    elif [ "$name" = capture-edited-tab-dch-middle ]; then
-      changed="${payload/\\t/     }"
     elif [[ "$name" == capture-edited-tab-dch-* ]]; then
       changed="${payload/\\033\[P/\\033[m}"
       changed="${changed/2P/2m}"
@@ -872,14 +871,8 @@ rich_capture_case() {
       changed="${payload/\\033\[L/\\033[m}"
     elif [[ "$name" == capture-edited-tab-dl-* ]]; then
       changed="${payload/\\033\[M/\\033[m}"
-    elif [ "$name" = capture-edited-tab-scroll-down ]; then
-      changed="${payload/\\033M/\\033m}"
     elif [[ "$name" == capture-edited-tab-scroll-* ]]; then
       changed="${payload/\\n/}"
-    elif [ "$name" = capture-tab-wide ]; then
-      changed="${payload/\\t/      }"
-    elif [[ "$name" == capture-tab-* ]]; then
-      changed="${payload/\\t/     }"
     elif [ "$name" = capture-real-history ]; then
       changed="${payload//H/Z}"
     elif [[ "$name" == capture-erased-* ]]; then
@@ -903,28 +896,46 @@ rich_capture_case() {
 
 edited_tab_capture_cases() {
   rich_capture_case capture-edited-tab-overwrite-background '\033[44mABC\tDEF\033[0m\r\033[6G\033[41mX\033[0m\033[5;1HNEXT' same '' -C -e -S 0 -E 4
-  rich_capture_case capture-edited-tab-ich-middle 'ABC\tDEF\r\033[5G\033[@X\033[5;1HNEXT' same '' -C -S 0 -E 4
-  rich_capture_case capture-edited-tab-ich-before 'ABC\tDEF\r\033[2G\033[2@\033[5;1HNEXT' same '' -C -S 0 -E 4
-  rich_capture_case capture-edited-tab-ich-head 'ABC\tDEF\r\033[4G\033[@\033[5;1HNEXT' same '' -C -S 0 -E 4
   rich_capture_case capture-edited-tab-ich-off-line '\033[73GABC\tZ\r\033[70G\033[6@\033[5;1HNEXT' same '' -C -S 0 -E 4
-  rich_capture_case capture-edited-tab-ich-truncate '\033[73GABC\tZ\r\033[70G\033[2@\033[5;1HNEXT' same '' -C -S 0 -E 4
-  rich_capture_case capture-edited-tab-ich-overwrite 'ABC\tDEF\r\033[5G\033[@X\033[7GY\033[5;1HNEXT' same '' -C -S 0 -E 4
-  rich_capture_case capture-edited-tab-dch-middle 'ABC\tDEF\r\033[5G\033[P\033[5;1HNEXT' same '' -C -S 0 -E 4
-  rich_capture_case capture-edited-tab-dch-before 'ABC\tDEF\r\033[2G\033[2P\033[5;1HNEXT' same '' -C -S 0 -E 4
-  rich_capture_case capture-edited-tab-dch-head 'ABC\tDEF\r\033[4G\033[P\033[5;1HNEXT' same '' -C -S 0 -E 4
   rich_capture_case capture-edited-tab-dch-entire 'ABC\tDEF\r\033[4G\033[5P\033[5;1HNEXT' same '' -C -S 0 -E 4
   rich_capture_case capture-edited-tab-dch-off-line 'ABC\tDEF\r\033[80P\033[5;1HNEXT' same '' -C -S 0 -E 4
   rich_capture_case capture-edited-tab-dch-overwrite 'ABC\tDEF\r\033[5G\033[P\033[6GX\033[5;1HNEXT' same '' -C -S 0 -E 4
-  rich_capture_case capture-edited-tab-ech-middle 'ABC\tDEF\r\033[5G\033[2X\033[5;1HNEXT' same '' -C -S 0 -E 4
-  rich_capture_case capture-edited-tab-ech-head 'ABC\tDEF\r\033[4G\033[X\033[5;1HNEXT' same '' -C -S 0 -E 4
   rich_capture_case capture-edited-tab-ech-entire 'ABC\tDEF\r\033[4G\033[5X\033[5;1HNEXT' same '' -C -S 0 -E 4
-  rich_capture_case capture-edited-tab-il-shift 'TOP\r\nABC\tDEF\r\nBOTTOM\033[2;1H\033[L\033[5;1HNEXT' same '' -C -S 0 -E 4
   rich_capture_case capture-edited-tab-il-off-region '\033[2;3r\033[3;1HABC\tDEF\033[2;1H\033[L\033[r\033[5;1HNEXT' same '' -C -S 0 -E 4
-  rich_capture_case capture-edited-tab-dl-shift 'TOP\r\nABC\tDEF\r\nBOTTOM\033[1;1H\033[M\033[5;1HNEXT' same '' -C -S 0 -E 4
   rich_capture_case capture-edited-tab-dl-tab 'TOP\r\nABC\tDEF\r\nBOTTOM\033[2;1H\033[M\033[5;1HNEXT' same '' -C -S 0 -E 4
-  rich_capture_case capture-edited-tab-scroll-up '\033[2;4r\033[3;1HABC\tDEF\033[4;1H\n\033[r\033[5;1HNEXT' same '' -C -S 0 -E 4
-  rich_capture_case capture-edited-tab-scroll-down '\033[2;4r\033[2;1HABC\tDEF\033[2;1H\033M\033[r\033[5;1HNEXT' same '' -C -S 0 -E 4
   rich_capture_case capture-edited-tab-scroll-off-region '\033[2;4r\033[2;1HABC\tDEF\033[4;1H\n\033[r\033[5;1HNEXT' same '' -C -S 0 -E 4
+  [ "$SELF_CHECK" -eq 0 ] || return 0
+  rich_capture_case capture-tab-trailing 'ABC\t\r\nNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+  rich_capture_case capture-tab-internal 'ABC\tDEF\r\nNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+  rich_capture_case capture-tab-wide '界\t\r\nNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-ich-middle 'ABC\tDEF\r\033[5G\033[@X\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-ich-before 'ABC\tDEF\r\033[2G\033[2@\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-ich-head 'ABC\tDEF\r\033[4G\033[@\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-ich-truncate '\033[73GABC\tZ\r\033[70G\033[2@\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-ich-overwrite 'ABC\tDEF\r\033[5G\033[@X\033[7GY\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-dch-middle 'ABC\tDEF\r\033[5G\033[P\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-dch-before 'ABC\tDEF\r\033[2G\033[2P\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-dch-head 'ABC\tDEF\r\033[4G\033[P\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-ech-middle 'ABC\tDEF\r\033[5G\033[2X\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-ech-head 'ABC\tDEF\r\033[4G\033[X\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-il-shift 'TOP\r\nABC\tDEF\r\nBOTTOM\033[2;1H\033[L\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-dl-shift 'TOP\r\nABC\tDEF\r\nBOTTOM\033[1;1H\033[M\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-scroll-up '\033[2;4r\033[3;1HABC\tDEF\033[4;1H\n\033[r\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-scroll-down '\033[2;4r\033[2;1HABC\tDEF\033[2;1H\033M\033[r\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+}
+
+erased_wide_capture_cases() {
+  local scene payload
+  for scene in line display clear region; do
+    case "$scene" in
+    line) payload='\033[H\033[2J\033[41m\033[2K\033[0m\r\nNEXT' ;;
+    display) payload='\033[H\033[2J\033[41m\033[2J\033[0m\r\nNEXT' ;;
+    clear) payload='\033[H\033[2J\033[41m\033[H\033[2J\033[0m\r\nNEXT' ;;
+    region) payload='\033[H\033[2J\033[2;4r\033[2;1H\033[41m\033[2K\033[0m\r\nNEXT\033[r' ;;
+    esac
+    CAPTURE_SIZE=100x30 rich_capture_case "capture-erased-100x30-$scene-escape" "$payload" same '' -C -e -S 0 -E 4
+    CAPTURE_SIZE=100x30 rich_capture_case "capture-erased-100x30-$scene-padding" "$payload" same '' -e -N -S 0 -E 4
+  done
 }
 
 rich_capture_cases() {
@@ -955,9 +966,7 @@ rich_capture_cases() {
   rich_capture_case capture-wide-wrap-escape "\033[31m${wrap}界界\033[0mNEXT" same '' -C -e -S 0 -E 4
   rich_capture_case capture-wide-wrap-padding "\033[31m${wrap}界界\033[0mNEXT" same '' -e -N -S 0 -E 4
   rich_capture_case capture-wide-wrap-join "\033[31m${wrap}界界\033[0mNEXT" same '' -L -e -J -S 0 -E 4
-  rich_capture_case capture-tab-trailing 'ABC\t\r\nNEXT' same '' -C -S 0 -E 4
-  rich_capture_case capture-tab-internal 'ABC\tDEF\r\nNEXT' same '' -C -S 0 -E 4
-  rich_capture_case capture-tab-wide '界\t\r\nNEXT' same '' -C -S 0 -E 4
+  erased_wide_capture_cases
   edited_tab_capture_cases
   rich_capture_case capture-low-indexed-colour '\033[38;5;1mRED\033[0m\r\nNEXT' same '' -C -e -S 0 -E 0
   if [ "$SELF_CHECK" -eq 0 ]; then

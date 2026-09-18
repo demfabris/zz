@@ -1,0 +1,2 @@
+native benchmark: 3 blocks x 7 workloads x 2 variants x 5 ABBA pairs, cpu 8, ASLR off per child, 20 warm-up pairs, exit=0
+DONE 0

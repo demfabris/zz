@@ -1,0 +1,90 @@
+{
+  "source_revision": "7d9ec14aa47bfa1203d52895884949ec67ccb9c8",
+  "fixture_revision": "98ad1dfe6ebd1a018214d1d55c91096edc406edf",
+  "base": "7f8d2cc4440088eacbe42dbd266d232a748378ff",
+  "status": "review",
+  "decision": "fabrico 2026-09-18: capture returns the spaces a tab left on screen",
+  "cases": {
+    "asserted_to_decided": 17,
+    "edited_tab_cases_still_asserted": 9,
+    "new_asserted_100x30_erased": 8,
+    "sabotage_rewritten": ["capture-edited-tab-ech-entire"]
+  },
+  "shared_runs": 3,
+  "shared_asserted_per_run": 219,
+  "shared_records": 42,
+  "ordinary_owned": {
+    "TUI-015": 0,
+    "TUI-017": 0
+  },
+  "owners": {
+    "TUI-014": 6,
+    "decided:TUI-015": 4,
+    "decided:TUI-016": 1,
+    "decided:TUI-017": 23,
+    "gap:clients.interactive-refresh": 8
+  },
+  "unattributed": 0,
+  "self_check_expectations": 152,
+  "copy_mode": {
+    "asserted": 147,
+    "recorded_differences": 0,
+    "self_check": 27
+  },
+  "screen_diff": {
+    "asserted": 147,
+    "records": 6,
+    "records_owner": "the cursor-style-request DECSCUSR case this fixture already owned",
+    "self_check": 18
+  },
+  "attached_client": "PASS",
+  "verify_claims": {
+    "TUI-015": "42 recorded, none of them TUI-015's",
+    "TUI-017": "42 recorded, none of them TUI-017's"
+  },
+  "wide_erase_probe": {
+    "fixed_runs": [0, 0, 0],
+    "reverted_runs": [8, 7]
+  },
+  "performance": {
+    "method": "3 blocks x 7 workloads x 2 variants x 5 ABBA pairs, one pinned CPU, ASLR off per child, 20 warm-up pairs",
+    "cpu_median_delta_range_percent": [-19.6, 15.68],
+    "paired_median_delta_range_percent": [-3.3, 7.21],
+    "instructions": "every workload matches main to five decimal places except edits at +1.0831% (tabs) and +1.2903% (spaces)",
+    "attribution": "the indexed-colour-only control reproduces main on edits, so the retained ICH hunk carries that cost",
+    "removed_regressions": "the reviewer's +68.33% overwrite and +33% tab-stop workloads now execute main's instruction stream",
+    "host": "shared with other lanes; no exclusive-host claim"
+  },
+  "tests": {
+    "terminal_mux_tui": "1136 passed, 1 ignored, 0 failed",
+    "daemon": "986 passed, 1 ignored, 1 failed",
+    "daemon_failure": "agent_stream_soak_slow_client, 1501 update items against 1500; fails alone twice and attempt-07 reproduced the same count on a clean unmodified baseline",
+    "clippy": "zz-terminal zz-mux zz-daemon zz-tui, all targets and features, warnings denied; PASS",
+    "fmt": "cargo fmt --all --check clean",
+    "compat_check": "PASS",
+    "tracker_check": "PASS",
+    "evidence_secrets": "PASS",
+    "okf_validate": "CONFORMANT, one pre-existing research-freshness warning"
+  },
+  "delta": {
+    "rows_run": 254,
+    "delta_rows": 221,
+    "unrun": [],
+    "failed": 10,
+    "inherited": 7,
+    "environmental": 3,
+    "caused_here": 0,
+    "detail": "delta-summary.json"
+  },
+  "wire": "104 unchanged; no payload edits",
+  "limits": [
+    "No exclusive-host performance claim; the instruction counts carry the argument.",
+    "The edits workload keeps about 1% more instructions than main, which the asserted ICH case requires.",
+    "cargo test -p zz-daemon is not green: the agent soak failure is inherited, not fixed here.",
+    "Styled frozen-mode capture, narrow-screen reflow and compressed-history round trips stay unproven.",
+    "The corpus control binary is main 38c50df4, a day older than the base.",
+    "Attempt-07's environment listings are redacted at this tip but remain in this branch's history.",
+    "bench/run.sh did not run: fixtures and the release desktop bundle are absent.",
+    "Both obligations remain at review; the gate decides verification."
+  ]
+}

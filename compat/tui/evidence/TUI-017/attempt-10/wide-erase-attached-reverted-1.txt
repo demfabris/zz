@@ -1,0 +1,9 @@
+DIFF  100x30/line/escape
+DIFF  100x30/line/padding
+DIFF  100x30/display/escape
+DIFF  100x30/display/padding
+DIFF  100x30/clear/escape
+DIFF  100x30/clear/padding
+DIFF  100x30/region/escape
+DIFF  100x30/region/padding
+attached wide erase probe: 8 differences

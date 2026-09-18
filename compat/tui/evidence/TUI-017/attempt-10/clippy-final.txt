@@ -1,0 +1,16 @@
+    Checking log v0.4.34
+    Checking libghostty-vt-sys v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt-sys)
+    Checking portable-pty v0.9.0
+    Checking libghostty-vt v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt)
+    Checking russh-cryptovec v0.62.0
+    Checking russh v0.63.3
+    Checking zz-terminal v0.11.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-terminal)
+    Checking percent-encoding v2.3.2
+    Checking form_urlencoded v1.2.2
+    Checking url v2.5.8
+    Checking zz-protocol v0.11.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-protocol)
+    Checking zz-mux v0.11.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-mux)
+    Checking zz-client v0.11.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-client)
+    Checking zz-daemon v0.11.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-daemon)
+    Checking zz-tui v0.11.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-tui)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 36.24s

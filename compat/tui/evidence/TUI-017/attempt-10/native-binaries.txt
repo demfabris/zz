@@ -1,0 +1,6 @@
+f843db99f99e8fff8257153397167e343cc09a86fe8cac631f87914a71719c12  target/residuals-2/perf/main
+8e77c13836d782a667dff92dda2a9bfbc3a4d336997ff0aa548a51eb2652a6c4  target/residuals-2/perf/candidate
+3eb59ea3bd7b6220f248e566d5f06b0bdc75dcd75a32b114a46021d60375c64b  target/residuals-2/perf/indexed-only
+09d7e6230cca9e1adad62a8a24dc95c60b07878b49aadab497ab48b28e2fc4a3  target/residuals-2/perf/main-install/lib/libghostty-vt.a
+f7ce1699b49b791780ede13c4a1b15a1fe02c2c53f65c626998ccc36f9d7e84f  target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-provenance-f8f6a0352127c9a6-install/lib/libghostty-vt.a
+937f983c9695cf850b5515352ec06f56f5f9e90dc944aa3e52f775052f7d56bb  target/residuals-2/perf/noich-install/lib/libghostty-vt.a

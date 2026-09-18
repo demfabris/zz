@@ -63,7 +63,11 @@ pub fn tree_host_indicator(
                     window.push_notification(Notification::warning(toast_detail.clone()), cx);
                 })
         })
-        .child(Icon::new(IconName::Xmark).xsmall())
+        .child(
+            Icon::new(IconName::TriangleAlert)
+                .xsmall()
+                .text_color(cx.theme().warning),
+        )
         .into_any_element()
 }
 
@@ -105,17 +109,36 @@ pub fn tree_node_marker(
     .into_any_element()
 }
 
-pub fn tree_row_rename_menu(
-    row: Stateful<gpui::Div>,
+pub struct TreeRowMenuItem {
     label: SharedString,
-    on_rename: impl Fn(&mut Window, &mut App) + 'static,
-) -> AnyElement {
-    let on_rename = Rc::new(on_rename);
+    on_click: Rc<dyn Fn(&mut Window, &mut App)>,
+}
+
+impl TreeRowMenuItem {
+    pub fn new(
+        label: impl Into<SharedString>,
+        on_click: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            on_click: Rc::new(on_click),
+        }
+    }
+}
+
+pub fn tree_row_menu(row: Stateful<gpui::Div>, items: Vec<TreeRowMenuItem>) -> AnyElement {
+    if items.is_empty() {
+        return row.into_any_element();
+    }
+    let items = Rc::new(items);
     row.context_menu(move |menu, _, _| {
-        let on_rename = on_rename.clone();
-        menu.item(
-            PopupMenuItem::new(label.clone()).on_click(move |_, window, cx| on_rename(window, cx)),
-        )
+        items.iter().fold(menu, |menu, item| {
+            let on_click = Rc::clone(&item.on_click);
+            menu.item(
+                PopupMenuItem::new(item.label.clone())
+                    .on_click(move |_, window, cx| on_click(window, cx)),
+            )
+        })
     })
     .into_any_element()
 }

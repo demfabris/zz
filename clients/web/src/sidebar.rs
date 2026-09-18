@@ -16,9 +16,9 @@ use zz_ui::{
         WORKSPACE_TREE_CONTENT_INSET, WORKSPACE_TREE_INDENT_WIDTH,
         WORKSPACE_TREE_MARKER_SLOT_WIDTH,
         sidebar::{
-            TreeNavigation, TreeNavigationResult, TreeNavigationRow, tree_action_strip,
-            tree_host_indicator, tree_host_marker, tree_navigation, tree_node_marker,
-            tree_row_rename_menu, tree_window_layout_button,
+            TreeNavigation, TreeNavigationResult, TreeNavigationRow, TreeRowMenuItem,
+            tree_action_strip, tree_host_indicator, tree_host_marker, tree_navigation,
+            tree_node_marker, tree_row_menu, tree_window_layout_button,
         },
         tree::{IndentGuideColors, WorkspaceIndentGuides},
         workspace_tree_action_button, workspace_tree_disclosure, workspace_tree_row,
@@ -661,9 +661,12 @@ fn render_row(entry: &TreeRow, active: bool, runtime: &Runtime, cx: &mut App) ->
             rename_command(runtime.connection.read(cx).core.snapshot(), target)
     {
         let connection = runtime.connection.clone();
-        tree_row_rename_menu(row, label.into(), move |_, cx| {
-            execute(&connection, &command, cx);
-        })
+        tree_row_menu(
+            row,
+            vec![TreeRowMenuItem::new(label, move |_, cx| {
+                execute(&connection, &command, cx);
+            })],
+        )
     } else {
         row.into_any_element()
     }

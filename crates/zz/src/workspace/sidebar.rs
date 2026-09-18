@@ -19,9 +19,9 @@ use zz_ui::navigation::{
     WORKSPACE_TREE_MARKER_SLOT_WIDTH as TREE_MARKER_SLOT_WIDTH,
     WORKSPACE_TREE_NODE_ICON_SIZE as TREE_NODE_ICON_SIZE, WORKSPACE_TREE_ROW_HEIGHT,
     sidebar::{
-        TreeNavigation, TreeNavigationResult, TreeNavigationRow, tree_action_strip,
-        tree_host_indicator, tree_host_marker, tree_navigation, tree_node_marker,
-        tree_row_rename_menu, tree_window_layout_button,
+        TreeNavigation, TreeNavigationResult, TreeNavigationRow, TreeRowMenuItem,
+        tree_action_strip, tree_host_indicator, tree_host_marker, tree_navigation,
+        tree_node_marker, tree_row_menu, tree_window_layout_button,
     },
     workspace_chrome_controls, workspace_layout_button, workspace_settings_button,
     workspace_sidebar_divider, workspace_sidebar_surface, workspace_sidebar_titlebar,
@@ -1274,7 +1274,7 @@ fn render_tree_row(
         cx.stop_propagation();
     });
 
-    render_tree_row_context_menu(row, target, runtime)
+    render_tree_row_context_menu(row, entry, runtime)
 }
 
 fn render_add_host_row(cx: &mut App) -> AnyElement {
@@ -1301,21 +1301,30 @@ fn render_host_indicator(index: usize, indicator: HostIndicator, cx: &mut App) -
 
 fn render_tree_row_context_menu(
     row: gpui::Stateful<gpui::Div>,
-    target: Option<(HostId, TreeTarget)>,
+    entry: &VisibleTreeEntry,
     runtime: &TreeRowRuntime,
 ) -> AnyElement {
-    let rename_prompt = target.and_then(|(host, target)| {
-        runtime
+    let mut items = Vec::new();
+    if let Some((host, target)) = entry.target()
+        && let Some((menu_label, activation)) = runtime
             .tree_model
             .rename_activation_for_node(TreeNode::Target(host, target), runtime.attached_host)
-    });
-    let Some((menu_label, activation)) = rename_prompt else {
-        return row.into_any_element();
-    };
-    let rename_mux = runtime.mux.clone();
-    tree_row_rename_menu(row, menu_label.into(), move |_, cx| {
-        activate_sidebar(&rename_mux, activation.clone(), cx);
-    })
+    {
+        let rename_mux = runtime.mux.clone();
+        items.push(TreeRowMenuItem::new(menu_label, move |_, cx| {
+            activate_sidebar(&rename_mux, activation.clone(), cx);
+        }));
+    }
+    if let TreeNode::Host(host) = entry.node
+        && host != HostId::LOCAL
+    {
+        let name = entry.label.to_string();
+        let close_mux = runtime.mux.clone();
+        items.push(TreeRowMenuItem::new("Remove host", move |_, cx| {
+            close_host(&close_mux, host, &name, cx);
+        }));
+    }
+    tree_row_menu(row, items)
 }
 
 const fn pane_kind_icon(kind: MuxTreePaneKind) -> IconName {

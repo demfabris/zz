@@ -149,6 +149,18 @@ behaviour is reconsidered rather than imitated:
   `split-window -I` beside the `load-buffer -` pipe zz already supports. It is milestone 5 of the
   superset roadmap and the last obligation between this campaign and its twelfth item.
 
+Amendment 2026-09-18 (fabrico), under the same principle: **capture returns the spaces a tab left
+on screen.** Since tmux 3.4 the pin marks every cell a tab produced (`GRID_FLAG_TAB`) and
+`capture-pane` prints a literal tab there whatever its flags (`grid.c:1202`); once an edit removes
+the head of such a tab it also drops the padding cells left behind. Cycle 11 imitated this with tab
+spans in spare Ghostty cell bits. Review measured the cost at +68% CPU on output that overwrites
+tab-bearing rows and +33% with a tab stop on every column, and every later edit (insert, delete,
+erase, line insert and delete, scrolling) had to keep the span honest. zz does not imitate the
+marker: its capture returns the cells the screen shows, the span tracking left the patch, and
+TUI-017 files each tab case under `decided:TUI-017` in `compat/tui-client-commands.sh`. The
+indexed-colour class bits stay, because they cost nothing measurable and the pin's `38;5;1` is a
+real colour class, not bookkeeping.
+
 # Scope boundary
 
 This campaign covers terminal-client compatibility and composition of existing zz commands.

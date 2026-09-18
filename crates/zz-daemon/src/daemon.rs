@@ -7696,6 +7696,7 @@ impl Shared {
         let mut injected_client_keys = Vec::new();
         let mut mode_table_keys = Vec::new();
         let mut pane_mode_keys = Vec::new();
+        let mut pane_mode_pointers = Vec::new();
         let mut refresh_armed = false;
         let mut unfocused_copy_mode_exits = Vec::new();
         let mut pipes_to_close = Vec::new();
@@ -8650,10 +8651,15 @@ impl Shared {
                         require_mode,
                     } => {
                         if command_name == "send-keys"
-                            && context.invoking_mouse().is_some()
+                            && let Some(mouse) = context.invoking_mouse().cloned()
                             && !require_mode
                             && consume_pane_mode_mouse(&mut inner, *pane, Some(action))
                         {
+                            if let Some(key) = context.invoking_key()
+                                && let Some((x, y)) = mouse_pane_cell(&inner, *pane, &mouse)
+                            {
+                                pane_mode_pointers.push((*pane, key.to_owned(), x, y));
+                            }
                             snapshot_changed = true;
                             continue;
                         }
@@ -9769,6 +9775,9 @@ impl Shared {
         }
         for (selected, pane, keys, repeat) in pane_mode_keys {
             self.inject_pane_mode_keys(selected, context, pane, &keys, repeat)?;
+        }
+        for (pane, key, x, y) in pane_mode_pointers {
+            self.pane_mode_mouse(client, context, pane, &key, x, y);
         }
         self.reap_pane_mode_kill_panes(client, kind, context);
         for (target, keys, repeat) in injected_client_keys {
@@ -19497,6 +19506,31 @@ impl Shared {
         pane: PaneId,
         key: &str,
     ) -> bool {
+        self.pane_mode_input(client, context, pane, PaneModeInput::Key(key))
+    }
+
+    /// `window_pane_key`'s mode branch for a pointer: the pin forwards a mouse
+    /// key to the pane, and a pane holding a mode hands it to the mode's own
+    /// key callback with the cell `cmd_mouse_at` resolved.
+    fn pane_mode_mouse(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &mut ExecutionContext,
+        pane: PaneId,
+        key: &str,
+        x: usize,
+        y: usize,
+    ) -> bool {
+        self.pane_mode_input(client, context, pane, PaneModeInput::Pointer { key, x, y })
+    }
+
+    fn pane_mode_input(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &mut ExecutionContext,
+        pane: PaneId,
+        input: PaneModeInput<'_>,
+    ) -> bool {
         let Some(mode) = self
             .inner
             .lock()
@@ -19513,9 +19547,18 @@ impl Shared {
                     let inner = self.inner.lock();
                     let facts = format_hook_facts(&inner);
                     let mut expand = customize_expander(&inner, pane, &facts);
-                    inner
-                        .engine
-                        .customize_key(pane, &mut mode, key, &mut expand)
+                    match input {
+                        PaneModeInput::Key(key) => {
+                            inner
+                                .engine
+                                .customize_key(pane, &mut mode, key, &mut expand)
+                        }
+                        PaneModeInput::Pointer { key, x, y } => {
+                            inner
+                                .engine
+                                .customize_mouse(pane, &mut mode, key, x, y, &mut expand)
+                        }
+                    }
                 };
                 {
                     let mut inner = self.inner.lock();
@@ -19558,11 +19601,20 @@ impl Shared {
                 let (action, entry) = {
                     let inner = self.inner.lock();
                     let entries = chooser_presentation::switch_matches(&inner, pane, &mode);
-                    let visible = inner
-                        .engine
-                        .pane_geometry(pane)
-                        .map_or(0, |(_, rows)| usize::from(rows).saturating_sub(1));
-                    let action = mode.key(key, entries.len(), visible);
+                    let (columns, rows) = inner.engine.pane_geometry(pane).unwrap_or((80, 24));
+                    let visible = usize::from(rows).saturating_sub(1);
+                    let action = match input {
+                        PaneModeInput::Key(key) => mode.key(key, entries.len(), visible),
+                        PaneModeInput::Pointer { key, x, y } => mode.mouse(
+                            key,
+                            x,
+                            y,
+                            entries.len(),
+                            visible,
+                            usize::from(columns),
+                            usize::from(rows),
+                        ),
+                    };
                     let entry = (action == SwitchAction::Run)
                         .then(|| entries.into_iter().nth(mode.current))
                         .flatten();
@@ -19676,7 +19728,7 @@ impl Shared {
             })
         }) else {
             if root_was_first {
-                self.forward_mouse_key_to_pane(client, mouse);
+                self.forward_mouse_key_to_pane(client, key, mouse);
             }
             return Ok(());
         };
@@ -19718,7 +19770,12 @@ impl Shared {
     /// a mouse mode armed, so the pane input the client encoded with the event
     /// is the write, and anything the client encoded for its own pointer
     /// handling instead is dropped the way an unarmed pane drops a report.
-    fn forward_mouse_key_to_pane(self: &Arc<Self>, client: ClientId, mouse: &MouseEventTarget) {
+    fn forward_mouse_key_to_pane(
+        self: &Arc<Self>,
+        client: ClientId,
+        key: &str,
+        mouse: &MouseEventTarget,
+    ) {
         let Some(pane) = mouse.pane else {
             return;
         };
@@ -19735,7 +19792,20 @@ impl Shared {
         let Some(terminal) = terminal else {
             return;
         };
-        if consume_pane_mode_mouse(&mut self.inner.lock(), pane, mouse.view_action.as_ref()) {
+        let consumed = {
+            let mut inner = self.inner.lock();
+            consume_pane_mode_mouse(&mut inner, pane, mouse.view_action.as_ref()).then(|| {
+                (
+                    mouse_pane_cell(&inner, pane, mouse),
+                    client_attached_session(&inner, client),
+                )
+            })
+        };
+        if let Some((cell, session)) = consumed {
+            if let Some((x, y)) = cell {
+                let mut context = ExecutionContext::new(session, mouse.window, Some(pane));
+                self.pane_mode_mouse(client, &mut context, pane, key, x, y);
+            }
             self.publish_mux_snapshots();
             return;
         }
@@ -36097,7 +36167,8 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                                 chooser_presentation::mode_style_for_pane(inner, *pane);
                             presentation.border_style =
                                 chooser_presentation::border_style_for_pane(inner, *pane);
-                            presentation.prompt_style = chooser_presentation::prompt_style();
+                            presentation.prompt_style =
+                                chooser_presentation::prompt_style(mode.prompt_command_mode());
                             let (prompt, prompt_cursor, prompt_top) = prompt.unwrap_or_default();
                             PaneMode::Customize {
                                 state,
@@ -36144,7 +36215,9 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                                     inner, *pane,
                                 ),
                                 prompt,
-                                prompt_style: chooser_presentation::prompt_style(),
+                                prompt_style: chooser_presentation::prompt_style(
+                                    mode.prompt.command_mode(),
+                                ),
                                 prompt_cursor,
                                 matches,
                                 match_style: chooser_presentation::switch_match_style(inner, *pane),
@@ -38672,6 +38745,36 @@ fn mouse_mode_key_table(
         .copy_mode_table_for_pane(pane)
         .ok()
         .map(str::to_owned)
+}
+
+/// What a pane's mode is being handed: a key name, or a mouse key name with the
+/// cell inside the pane it landed on.
+#[derive(Clone, Copy)]
+enum PaneModeInput<'a> {
+    Key(&'a str),
+    Pointer { key: &'a str, x: usize, y: usize },
+}
+
+/// `cmd_mouse_at`: the cell inside `pane` a pointer event landed on, or nothing
+/// when it landed outside the pane.
+fn mouse_pane_cell(
+    inner: &ServerState,
+    pane: PaneId,
+    mouse: &MouseEventTarget,
+) -> Option<(usize, usize)> {
+    let window = inner.engine.state.window_for_pane(pane)?;
+    let session = inner.engine.state.windows[&window].session;
+    let geometry = inner
+        .engine
+        .format_status_context(Some(session), Some(window), Some(pane));
+    let (left, top) = (geometry.pane_left?, geometry.pane_top?);
+    let (x, y) = (mouse.column.checked_sub(left)?, mouse.row.checked_sub(top)?);
+    if geometry.pane_right.is_none_or(|right| mouse.column > right)
+        || geometry.pane_bottom.is_none_or(|bottom| mouse.row > bottom)
+    {
+        return None;
+    }
+    Some((usize::from(x), usize::from(y)))
 }
 
 fn wait_for_terminal_identity(terminal: &TerminalSession) {
@@ -91536,6 +91639,7 @@ bind - split-window -v -c "#{pane_current_path}"
             kill_source,
             zoom,
             " ",
+            false,
         )))
     }
 
@@ -91646,6 +91750,7 @@ bind - split-window -v -c "#{pane_current_path}"
             false,
             false,
             " ",
+            false,
         );
         let texts = |inner: &ServerState, mode: &zz_mux::SwitchMode| {
             chooser_presentation::switch_matches(inner, pane, mode)

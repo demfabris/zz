@@ -198,6 +198,7 @@ const TREE_MODE_PREVIEW_STYLE: &str = concat!(
     "themeblue}"
 );
 const MESSAGE_STYLE: &str = "bg=themeyellow,fg=themeblack";
+const MESSAGE_COMMAND_STYLE: &str = "bg=themeblack,fg=themeyellow";
 const PREVIEW_TEXT_LINES: usize = 256;
 
 fn scope_variables(session: bool, window: bool, pane: bool) -> BTreeMap<String, String> {
@@ -562,9 +563,6 @@ pub(super) struct SwitchEntry {
     score: u32,
 }
 
-/// `window_switch_build`: every session, or every window under `-w`, in name
-/// order, then the `fuzzy_match` survivors of the prompt's filter ranked by
-/// score and that order.
 pub(super) fn switch_matches(
     inner: &ServerState,
     pane: PaneId,
@@ -684,8 +682,12 @@ pub(super) fn border_style_for_pane(_inner: &ServerState, _pane: PaneId) -> Stri
     TREE_MODE_BORDER_STYLE.to_owned()
 }
 
-pub(super) fn prompt_style() -> String {
-    MESSAGE_STYLE.to_owned()
+pub(super) fn prompt_style(command_mode: bool) -> String {
+    if command_mode {
+        MESSAGE_COMMAND_STYLE.to_owned()
+    } else {
+        MESSAGE_STYLE.to_owned()
+    }
 }
 
 fn pane_viewport(inner: &ServerState, pane: PaneId) -> Option<TerminalViewport> {

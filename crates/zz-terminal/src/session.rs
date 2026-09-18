@@ -8553,7 +8553,7 @@ fn capture_terminal(
     let requested_rows = usize::try_from(end.saturating_sub(start).saturating_add(1)).unwrap_or(1);
 
     let columns = terminal.cols().map_err(capture_failure)?;
-    if options.escape_sequences || capture_has_tabs(terminal, start, end, columns)? {
+    if options.escape_sequences {
         return capture_styled_terminal(terminal, options, start, end, visible_start, columns);
     }
     let head = terminal
@@ -8631,29 +8631,6 @@ fn capture_terminal(
     ))
 }
 
-fn capture_has_tabs(
-    terminal: &Terminal<'_, '_>,
-    start: u64,
-    end: u64,
-    columns: u16,
-) -> Result<bool, TerminalCaptureError> {
-    for row in start..=end {
-        for x in 0..columns {
-            let cell = terminal
-                .grid_ref(Point::Screen(PointCoordinate {
-                    x,
-                    y: u32::try_from(row).unwrap_or(u32::MAX),
-                }))
-                .and_then(|grid| grid.cell())
-                .map_err(capture_failure)?;
-            if cell.tab().map_err(capture_failure)? != 0 {
-                return Ok(true);
-            }
-        }
-    }
-    Ok(false)
-}
-
 fn capture_styled_terminal(
     terminal: &Terminal<'_, '_>,
     options: CaptureOptions,
@@ -8699,10 +8676,8 @@ fn capture_styled_terminal(
                 .grid_ref(Point::Screen(PointCoordinate { x, y }))
                 .map_err(capture_failure)?;
             let cell = grid.cell().map_err(capture_failure)?;
-            let tab = cell.tab().map_err(capture_failure)?;
             let wide = cell.wide().map_err(capture_failure)?;
-            if tab >= 128
-                || wide == CellWide::SpacerTail
+            if wide == CellWide::SpacerTail
                 || (wide == CellWide::SpacerHead && options.join_wrapped)
             {
                 continue;
@@ -8723,14 +8698,8 @@ fn capture_styled_terminal(
                 }
                 CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {}
             }
-            if options.escape_sequences {
-                push_capture_sgr(&mut line, previous, style);
-            }
+            push_capture_sgr(&mut line, previous, style);
             previous = style;
-            if tab != 0 {
-                line.push('\t');
-                continue;
-            }
             let count = match grid.graphemes(&mut graphemes) {
                 Ok(count) => count,
                 Err(libghostty_vt::Error::OutOfSpace { required }) => {
@@ -18398,155 +18367,49 @@ mod tests {
     }
 
     #[test]
-    fn capture_preserves_tab_spans_and_discards_partial_overwrites() {
+    fn capture_returns_the_spaces_a_tab_left() {
         for (input, expected) in [
-            ("ABC\t\r\nNEXT", "ABC\t\nNEXT\n\n\n"),
-            ("ABC\tDEF\r\nNEXT", "ABC\tDEF\nNEXT\n\n\n"),
-            ("界\t\r\nNEXT", "界\t\nNEXT\n\n\n"),
-            ("ABCDEFGH\rABC\t\r\nNEXT", "ABCDEFGH\nNEXT\n\n\n"),
-            ("ABC\t\r\x1b[6GX\r\nNEXT", "ABC  X\nNEXT\n\n\n"),
-            ("ABC\t\r\x1b[4G\x1b[K\r\nNEXT", "ABC\nNEXT\n\n\n"),
+            ("ABC\t\r\nNEXT", "ABC\nNEXT\n\n\n"),
+            ("ABC\tDEF\r\nNEXT", "ABC     DEF\nNEXT\n\n\n"),
+            ("界\t\r\nNEXT", "界\nNEXT\n\n\n"),
+            ("ABC\tDEF\r\x1b[4G\x1b[P\r\nNEXT", "ABC    DEF\nNEXT\n\n\n"),
         ] {
-            for chunk_size in [1, input.len()] {
-                let mut terminal = Terminal::new(TerminalOptions {
-                    cols: 80,
-                    rows: 24,
-                    max_scrollback: 64,
-                })
-                .unwrap();
-                for chunk in input.as_bytes().chunks(chunk_size) {
-                    terminal.vt_write(chunk);
-                }
-                let options = CaptureOptions {
-                    end: CaptureBoundary::Relative(4),
-                    ..CaptureOptions::default()
-                };
-                assert_eq!(
-                    capture_terminal(&terminal, None, options).unwrap(),
-                    expected,
-                    "{input:?}"
-                );
-                terminal.resize(100, 24, 0, 0).unwrap();
-                assert_eq!(
-                    capture_terminal(&terminal, None, options).unwrap(),
-                    expected,
-                    "resized {input:?}"
-                );
-            }
+            let mut terminal = Terminal::new(TerminalOptions {
+                cols: 80,
+                rows: 24,
+                max_scrollback: 64,
+            })
+            .unwrap();
+            terminal.vt_write(input.as_bytes());
+            let options = CaptureOptions {
+                end: CaptureBoundary::Relative(4),
+                ..CaptureOptions::default()
+            };
+            assert_eq!(
+                capture_terminal(&terminal, None, options).unwrap(),
+                expected,
+                "{input:?}"
+            );
         }
     }
 
     #[test]
-    fn capture_preserves_edited_tab_cells() {
-        for (input, expected) in [
-            (
-                "ABC\tDEF\r\x1b[5G\x1b[@X\x1b[5;1HNEXT",
-                "ABC\tX    DEF\n\n\n\nNEXT",
-            ),
-            (
-                "ABC\tDEF\r\x1b[2G\x1b[2@\x1b[5;1HNEXT",
-                "A  BC\tDEF\n\n\n\nNEXT",
-            ),
-            (
-                "ABC\tDEF\r\x1b[4G\x1b[@\x1b[5;1HNEXT",
-                "ABC \tDEF\n\n\n\nNEXT",
-            ),
-            (
-                "\x1b[73GABC\tZ\r\x1b[70G\x1b[6@\x1b[5;1HNEXT",
-                "                                                                          C   AB\n\n\n\nNEXT",
-            ),
-            (
-                "\x1b[73GABC\tZ\r\x1b[70G\x1b[2@\x1b[5;1HNEXT",
-                "                                                                          ABC\t\n\n\n\nNEXT",
-            ),
-            (
-                "ABC\tDEF\r\x1b[5G\x1b[@X\x1b[7GY\x1b[5;1HNEXT",
-                "ABC\tX Y  DEF\n\n\n\nNEXT",
-            ),
-            (
-                "ABC\tDEF\r\x1b[5G\x1b[P\x1b[5;1HNEXT",
-                "ABC\tDEF\n\n\n\nNEXT",
-            ),
-            (
-                "ABC\tDEF\r\x1b[2G\x1b[2P\x1b[5;1HNEXT",
-                "A\tDEF\n\n\n\nNEXT",
-            ),
-            ("ABC\tDEF\r\x1b[4G\x1b[P\x1b[5;1HNEXT", "ABCDEF\n\n\n\nNEXT"),
-            (
-                "ABC\tDEF\r\x1b[4G\x1b[5P\x1b[5;1HNEXT",
-                "ABCDEF\n\n\n\nNEXT",
-            ),
-            ("ABC\tDEF\r\x1b[80P\x1b[5;1HNEXT", "\n\n\n\nNEXT"),
-            (
-                "ABC\tDEF\r\x1b[5G\x1b[P\x1b[6GX\x1b[5;1HNEXT",
-                "ABC  X DEF\n\n\n\nNEXT",
-            ),
-            (
-                "ABC\tDEF\r\x1b[5G\x1b[2X\x1b[5;1HNEXT",
-                "ABC\t  DEF\n\n\n\nNEXT",
-            ),
-            (
-                "ABC\tDEF\r\x1b[4G\x1b[X\x1b[5;1HNEXT",
-                "ABC DEF\n\n\n\nNEXT",
-            ),
-            (
-                "ABC\tDEF\r\x1b[4G\x1b[5X\x1b[5;1HNEXT",
-                "ABC     DEF\n\n\n\nNEXT",
-            ),
-            (
-                "TOP\r\nABC\tDEF\r\nBOTTOM\x1b[2;1H\x1b[L\x1b[5;1HNEXT",
-                "TOP\n\nABC\tDEF\nBOTTOM\nNEXT",
-            ),
-            (
-                "\x1b[2;3r\x1b[3;1HABC\tDEF\x1b[2;1H\x1b[L\x1b[r\x1b[5;1HNEXT",
-                "\n\n\n\nNEXT",
-            ),
-            (
-                "TOP\r\nABC\tDEF\r\nBOTTOM\x1b[1;1H\x1b[M\x1b[5;1HNEXT",
-                "ABC\tDEF\nBOTTOM\n\n\nNEXT",
-            ),
-            (
-                "TOP\r\nABC\tDEF\r\nBOTTOM\x1b[2;1H\x1b[M\x1b[5;1HNEXT",
-                "TOP\nBOTTOM\n\n\nNEXT",
-            ),
-            (
-                "\x1b[2;4r\x1b[3;1HABC\tDEF\x1b[4;1H\n\x1b[r\x1b[5;1HNEXT",
-                "\nABC\tDEF\n\n\nNEXT",
-            ),
-            (
-                "\x1b[2;4r\x1b[2;1HABC\tDEF\x1b[2;1H\x1bM\x1b[r\x1b[5;1HNEXT",
-                "\n\nABC\tDEF\n\nNEXT",
-            ),
-            (
-                "\x1b[2;4r\x1b[2;1HABC\tDEF\x1b[4;1H\n\x1b[r\x1b[5;1HNEXT",
-                "\n\n\n\nNEXT",
-            ),
-        ] {
-            for chunk_size in [1, input.len()] {
-                let mut terminal = Terminal::new(TerminalOptions {
-                    cols: 80,
-                    rows: 24,
-                    max_scrollback: 64,
-                })
-                .unwrap();
-                for chunk in input.as_bytes().chunks(chunk_size) {
-                    terminal.vt_write(chunk);
-                }
-                assert_eq!(
-                    capture_terminal(
-                        &terminal,
-                        None,
-                        CaptureOptions {
-                            end: CaptureBoundary::Relative(4),
-                            ..CaptureOptions::default()
-                        },
-                    )
-                    .unwrap(),
-                    expected,
-                    "{input:?} chunks={chunk_size}"
-                );
-            }
-        }
+    fn capture_keeps_the_cells_a_wide_insert_leaves_behind() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 80,
+            rows: 24,
+            max_scrollback: 64,
+        })
+        .unwrap();
+        terminal.vt_write(b"\x1b[71GABCDEFGHIJ\r\x1b[70G\x1b[6@\x1b[5;1HNEXT");
+        let options = CaptureOptions {
+            end: CaptureBoundary::Relative(4),
+            ..CaptureOptions::default()
+        };
+        assert_eq!(
+            capture_terminal(&terminal, None, options).unwrap(),
+            format!("{}E ABCD\n\n\n\nNEXT", " ".repeat(74))
+        );
     }
 
     #[test]

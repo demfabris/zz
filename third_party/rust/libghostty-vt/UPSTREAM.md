@@ -5,6 +5,6 @@ Source snapshot from Uzaaft/libghostty-rs at
 The manifest uses standalone package metadata and the adjacent sys dependency.
 Source comments are omitted to follow this repository's contribution rule.
 
-The local API exposes `Style.fg_indexed`, `Style.bg_indexed`, `Cell.tab()` and
+The local API exposes `Style.fg_indexed`, `Style.bg_indexed` and
 `Cell.bg_indexed()`. The sys crate's `provenance.patch` supplies these facts.
 No raw pointer or private Rust layout access is needed by zz-terminal.

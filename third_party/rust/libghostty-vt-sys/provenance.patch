@@ -1,11 +1,10 @@
 --- a/include/ghostty/vt/screen.h
 +++ b/include/ghostty/vt/screen.h
-@@ -204,6 +204,8 @@
+@@ -204,6 +204,7 @@
     * Output type: GhosttyColorRgb *
     */
    GHOSTTY_CELL_DATA_COLOR_RGB = 11,
-+  GHOSTTY_CELL_DATA_TAB = 12,
-+  GHOSTTY_CELL_DATA_BG_INDEXED = 13,
++  GHOSTTY_CELL_DATA_BG_INDEXED = 12,
    GHOSTTY_CELL_DATA_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
  } GhosttyCellData;
  
@@ -52,13 +51,12 @@
          },
  
 -        .reset_fg => self.cursor.style.fg_color = .none,
--
--        .reset_bg => self.cursor.style.bg_color = .none,
 +        .reset_fg => {
 +            self.cursor.style.fg_color = .none;
 +            self.cursor.style.flags.fg_indexed = false;
 +        },
-+
+ 
+-        .reset_bg => self.cursor.style.bg_color = .none,
 +        .reset_bg => {
 +            self.cursor.style.bg_color = .none;
 +            self.cursor.style.flags.bg_indexed = false;
@@ -86,115 +84,7 @@
  
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -731,6 +731,7 @@
-         "style_id",
-         "wide",
-         "hyperlink",
-+        "tab",
-     }, 4);
- 
-     // The bit offset of the codepoint content within a Cell, used to
-@@ -1017,7 +1018,8 @@
-                 const cell = &cells[k + offset];
-                 if (cell.wide != .narrow or
-                     cell.hasGrapheme() or
--                    cell.hyperlink) break :fill;
-+                    cell.hyperlink or
-+                    cell.tab != 0) break :fill;
-             }
-             for (0..general_count) |offset| {
-                 const cell = &cells[k + offset];
-@@ -1055,9 +1057,11 @@
-             // wrap flag set, matching print().
-             if (cursor.x + k >= right_limit) {
-                 assert(cursor.x + k == right_limit);
-+                if (right_limit < self.cols) self.clearTabPadding(cells, k, self.cols - cursor.x);
-                 screen.cursorRight(@intCast(k - 1));
-                 cursor.pending_wrap = true;
-             } else {
-+                self.clearTabPadding(cells, k, self.cols - cursor.x);
-                 screen.cursorRight(@intCast(k));
-             }
-         }
-@@ -1069,6 +1073,15 @@
-     }
- 
-     return printed;
-+}
-+
-+inline fn clearTabPadding(self: *Terminal, cells: [*]Cell, start: usize, limit: usize) void {
-+    if (cells[start].tab < 128) return;
-+    var end = start + 1;
-+    while (end < limit and cells[end].tab >= 128) end += 1;
-+    const screen = self.screens.active;
-+    screen.clearCells(screen.cursor.page_pin.node.page(), screen.cursor.page_row, cells[start..end]);
-+    @memset(cells[start..end], .{});
- }
- 
- /// The expected value of a simple cell (per SimpleMask in
-@@ -1476,6 +1489,20 @@
-     };
- 
-     const cell = self.screens.active.cursor.page_cell;
-+    const following: [*]Cell = @ptrCast(cell);
-+    if (cell.tab != 0 or (self.screens.active.cursor.x + 1 < self.cols and following[1].tab >= 128)) {
-+        const screen = self.screens.active;
-+        const cells = screen.cursor.page_pin.cells(.all);
-+        var left: usize = screen.cursor.x;
-+        var right = left + 1;
-+        if (cell.tab >= 128) {
-+            while (left > 0 and cells[left].tab >= 128) left -= 1;
-+            if (unmapped_c < 128 and cells[left].tab == 0 and cells[left].wide == .narrow) left += 1;
-+        }
-+        while (right < cells.len and cells[right].tab >= 128) right += 1;
-+        screen.clearCells(screen.cursor.page_pin.node.page(), screen.cursor.page_row, cells[left..right]);
-+        @memset(cells[left..right], .{});
-+    }
- 
-     // If the wide property of this cell is the same, then we don't
-     // need to do the special handling here because the structure will
-@@ -2109,15 +2136,31 @@
- /// Horizontal tab moves the cursor to the next tabstop, clearing
- /// the screen to the left the tabstop.
- pub fn horizontalTab(self: *Terminal) void {
--    while (self.screens.active.cursor.x < self.scrolling_region.right) {
--        // Move the cursor right
--        self.screens.active.cursorRight(1);
--
--        // If the last cursor position was a tabstop we return. We do
--        // "last cursor position" because we want a space to be written
--        // at the tabstop unless we're at the end (the while condition).
--        if (self.tabstops.get(self.screens.active.cursor.x)) return;
--    }
-+    const screen = self.screens.active;
-+    const start = screen.cursor.x;
-+    const cells: [*]Cell = @ptrCast(screen.cursor.page_cell);
-+    var target = start;
-+    while (target < self.scrolling_region.right) {
-+        target += 1;
-+        if (self.tabstops.get(target)) break;
-+    }
-+    const width = target - start;
-+    screen.cursorRight(width);
-+    if (width == 0 or width > 32) return;
-+    const first = cells[0];
-+    if (first.wide != .narrow or first.hyperlink or first.tab != 0) return;
-+    if (first.content_tag == .codepoint_grapheme) return;
-+    if (first.codepoint() != 0 and first.codepoint() != ' ') return;
-+    const Ignored = pagepkg.Mask(Cell, &.{ "protected", "semantic_content", "_padding" }, 4);
-+    var mask = comptime Ignored.strip(@bitCast(@as(u64, std.math.maxInt(u64))));
-+    if (first.content_tag == .codepoint) mask &= ~(@as(u64, ' ') << @bitOffsetOf(Cell, "content"));
-+    const expected = @as(u64, @bitCast(first)) & mask;
-+    for (cells[0..width]) |cell| {
-+        if (@as(u64, @bitCast(cell)) & mask != expected) return;
-+    }
-+    cells[0].tab = @intCast(width);
-+    for (cells[1..width]) |*cell| cell.tab = 128;
-+    screen.cursor.page_row.dirty = true;
- }
- 
- // Same as horizontalTab but moves to the previous tabstop instead of the next.
-@@ -3072,7 +3115,8 @@
+@@ -3072,7 +3072,8 @@
      }
  
      // Insert blanks. The blanks preserve the background color.
@@ -206,30 +96,26 @@
      self.screens.active.cursorMarkDirty();
 --- a/src/terminal/c/cell.zig
 +++ b/src/terminal/c/cell.zig
-@@ -82,6 +82,8 @@
+@@ -82,6 +82,7 @@
      /// Only valid when content_tag is bg_color_rgb.
      /// Output type: GhosttyColorRgb *
      color_rgb = 11,
-+    tab = 12,
-+    bg_indexed = 13,
++    bg_indexed = 12,
  
      /// Output type expected for querying the data of the given kind.
      pub fn OutType(comptime self: CellData) type {
-@@ -93,7 +95,8 @@
-             .has_text, .has_styling, .has_hyperlink, .protected => bool,
+@@ -94,6 +95,7 @@
              .style_id => u16,
              .semantic_content => SemanticContent,
--            .color_palette => u8,
-+            .color_palette, .tab => u8,
+             .color_palette => u8,
 +            .bg_indexed => bool,
              .color_rgb => color.RGB.C,
          };
      }
-@@ -159,6 +162,8 @@
+@@ -159,6 +161,7 @@
          .protected => out.* = cell.protected,
          .semantic_content => out.* = @enumFromInt(@intFromEnum(cell.semantic_content)),
          .color_palette => out.* = cell.content.color_palette.data,
-+        .tab => out.* = cell.tab,
 +        .bg_indexed => out.* = cell.bg_indexed,
          .color_rgb => {
              const rgb = cell.content.color_rgb;
@@ -252,33 +138,16 @@
              .underline_color = .fromColor(s.underline_color),
 --- a/src/terminal/page.zig
 +++ b/src/terminal/page.zig
-@@ -2084,7 +2084,9 @@
+@@ -2084,7 +2084,8 @@
      /// boundary points for content.
      semantic_content: SemanticContent = .output,
  
 -    _padding: u16 = 0,
-+    tab: u8 = 0,
 +    bg_indexed: bool = false,
-+    _padding: u7 = 0,
++    _padding: u15 = 0,
  
      pub const ContentTag = enum(u2) {
          /// A single codepoint, could be zero to be empty cell.
-@@ -2171,6 +2173,7 @@
-     ///   - Cell is styled but only with a background color and no text
-     ///   - Cell has a unicode placeholder for Kitty graphics protocol
-     pub inline fn hasText(self: Cell) bool {
-+        if (self.tab != 0) return true;
-         return switch (self.content_tag) {
-             .codepoint,
-             .codepoint_grapheme,
-@@ -2183,6 +2186,7 @@
-     }
- 
-     pub inline fn codepoint(self: Cell) u21 {
-+        if (self.tab != 0) return ' ';
-         return switch (self.content_tag) {
-             .codepoint,
-             .codepoint_grapheme,
 --- a/src/terminal/style.zig
 +++ b/src/terminal/style.zig
 @@ -36,7 +36,9 @@

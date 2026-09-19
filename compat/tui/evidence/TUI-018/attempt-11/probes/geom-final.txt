@@ -1,0 +1,2 @@
+zz size=80x11 cursor=0:10 history=20 cap=21 22 23 24 25 26 27 28 29 30  
+tmux size=80x11 cursor=0:10 history=20 cap=21 22 23 24 25 26 27 28 29 30  

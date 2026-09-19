@@ -1735,6 +1735,10 @@ pub struct CommandInvocation {
     /// commands the payload is not an argument; `format_command` never prints
     /// it. See `knowledge/designs/command-stream-channel.md`.
     stdin: Option<RawText>,
+    #[serde(skip)]
+    stdin_spent: bool,
+    #[serde(default)]
+    stdin_available: bool,
 }
 
 impl CommandInvocation {
@@ -1750,12 +1754,34 @@ impl CommandInvocation {
             command_blocks: Vec::new(),
             expanded_alias_group: false,
             stdin: None,
+            stdin_spent: false,
+            stdin_available: false,
         }
     }
 
     /// Attach the caller's standard input to this invocation.
     pub fn set_stdin(&mut self, stdin: impl Into<RawText>) {
         self.stdin = Some(stdin.into());
+        self.stdin_spent = false;
+    }
+
+    pub fn set_stdin_available(&mut self, available: bool) {
+        self.stdin_available = available;
+    }
+
+    #[must_use]
+    pub const fn stdin_available(&self) -> bool {
+        self.stdin_available
+    }
+
+    pub fn set_stdin_spent(&mut self) {
+        self.stdin = None;
+        self.stdin_spent = true;
+    }
+
+    #[must_use]
+    pub const fn stdin_was_spent(&self) -> bool {
+        self.stdin_spent
     }
 
     #[must_use]
@@ -3459,6 +3485,10 @@ pub enum EventPayload {
     ChooserPresentation {
         presentation: Option<Box<ChooserPresentation>>,
     },
+    CommandStdout {
+        output: RawText,
+    },
+    CommandClientExit,
 }
 
 impl EventPayload {
@@ -3872,6 +3902,10 @@ pub enum ClientFileOperation {
         #[serde(deserialize_with = "deserialize_client_file_bytes")]
         data: Vec<u8>,
     },
+    ReadStdin {
+        binary: bool,
+    },
+    ReadStdinChunk,
 }
 
 /// One file operation the daemon asks its invoking client to perform. `path` is
@@ -4827,6 +4861,84 @@ mod tests {
         })
         .expect("oversized shape");
         assert!(postcard::from_bytes::<super::ChooseTreeItem>(&oversized).is_err());
+    }
+
+    #[test]
+    fn deferred_stdin_availability_and_request_roundtrip() {
+        let mut command = super::CommandInvocation::new("source-file", ["config"]);
+        assert!(!command.stdin_available());
+        command.set_stdin_available(true);
+        let bytes = postcard::to_stdvec(&command).expect("encode available stream");
+        assert_eq!(
+            postcard::from_bytes::<super::CommandInvocation>(&bytes).expect("decode stream"),
+            command
+        );
+        let request = super::ClientFileOperation::ReadStdin { binary: true };
+        let bytes = postcard::to_stdvec(&request).expect("encode stdin request");
+        assert_eq!(bytes, [2, 1]);
+        assert_eq!(
+            postcard::from_bytes::<super::ClientFileOperation>(&bytes).expect("decode request"),
+            request
+        );
+        let chunk = super::ClientFileOperation::ReadStdinChunk;
+        let bytes = postcard::to_stdvec(&chunk).expect("encode stdin chunk request");
+        assert_eq!(bytes, [3]);
+        assert_eq!(
+            postcard::from_bytes::<super::ClientFileOperation>(&bytes).expect("decode chunk"),
+            chunk
+        );
+    }
+
+    #[test]
+    fn caller_stream_spent_marker_stays_in_process() {
+        let absent = super::CommandInvocation::new("source-file", ["-"]);
+        let mut spent = absent.clone();
+        spent.set_stdin("payload");
+        spent.set_stdin_spent();
+        assert!(spent.stdin().is_none());
+        assert!(spent.stdin_was_spent());
+        let bytes = postcard::to_stdvec(&spent).expect("encode spent stream");
+        assert_eq!(
+            bytes,
+            postcard::to_stdvec(&absent).expect("encode absent stream")
+        );
+        let decoded =
+            postcard::from_bytes::<super::CommandInvocation>(&bytes).expect("decode absent stream");
+        assert_eq!(decoded, absent);
+        spent.set_stdin("");
+        assert!(spent.stdin().is_some());
+        assert!(!spent.stdin_was_spent());
+    }
+
+    #[test]
+    fn released_command_stdout_and_client_exit_append_after_the_chooser_presentation() {
+        let presentation = super::Event {
+            sequence: 0,
+            payload: super::EventPayload::ChooserPresentation { presentation: None },
+        };
+        let tag = postcard::to_stdvec(&presentation).expect("encode chooser presentation")[1];
+        let released = super::Event {
+            sequence: 0,
+            payload: super::EventPayload::CommandStdout {
+                output: super::RawText::from("%1\n"),
+            },
+        };
+        let bytes = postcard::to_stdvec(&released).expect("encode released stdout");
+        assert_eq!(bytes[1], tag + 1);
+        assert_eq!(
+            postcard::from_bytes::<super::Event>(&bytes).expect("decode released stdout"),
+            released
+        );
+        let exit = super::Event {
+            sequence: 0,
+            payload: super::EventPayload::CommandClientExit,
+        };
+        let bytes = postcard::to_stdvec(&exit).expect("encode client exit");
+        assert_eq!(bytes, [0, tag + 2]);
+        assert_eq!(
+            postcard::from_bytes::<super::Event>(&bytes).expect("decode client exit"),
+            exit
+        );
     }
 
     #[test]

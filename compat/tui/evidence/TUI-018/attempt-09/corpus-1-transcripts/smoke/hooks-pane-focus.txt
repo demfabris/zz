@@ -1,0 +1,53 @@
+# Scenario: smoke/hooks-pane-focus
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/smoke/hooks-pane-focus.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: run-shell 'sh ~/hooks-pane-focus.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g HOOKS_PANE_FOCUS_OFF
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    HOOKS_PANE_FOCUS_OFF=pane-focus-in:%0@0 client-session-changed:%0@0 client-attached:%0@0 |attach| window-pane-changed:%1@0 |select-pane| session-window-changed:%2@1 |new-window| session-window-changed:%1@0 |select-window| window-pane-changed:%0@0 |kill-pane| pane-focus-out:%0@0 client-detached:%0@0 |detach| 
+tmux stdout:
+    HOOKS_PANE_FOCUS_OFF=pane-focus-in:%0@0 client-session-changed:%0@0 client-attached:%0@0 |attach| window-pane-changed:%1@0 |select-pane| session-window-changed:%2@1 |new-window| session-window-changed:%1@0 |select-window| window-pane-changed:%0@0 |kill-pane| pane-focus-out:%0@0 client-detached:%0@0 |detach| 
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g HOOKS_PANE_FOCUS_ON
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    HOOKS_PANE_FOCUS_ON=pane-focus-in:%0@0 client-session-changed:%0@0 client-attached:%0@0 |attach| pane-focus-out:%0@0 pane-focus-in:%1@0 window-pane-changed:%1@0 |select-pane| pane-focus-out:%1@0 pane-focus-in:%2@1 session-window-changed:%2@1 |new-window| pane-focus-out:%2@1 pane-focus-in:%1@0 session-window-changed:%1@0 |select-window| window-pane-changed:%0@0 pane-focus-in:%0@0 |kill-pane| pane-focus-out:%0@0 client-detached:%0@0 |detach| 
+tmux stdout:
+    HOOKS_PANE_FOCUS_ON=pane-focus-in:%0@0 client-session-changed:%0@0 client-attached:%0@0 |attach| pane-focus-out:%0@0 pane-focus-in:%1@0 window-pane-changed:%1@0 |select-pane| pane-focus-out:%1@0 pane-focus-in:%2@1 session-window-changed:%2@1 |new-window| pane-focus-out:%2@1 pane-focus-in:%1@0 session-window-changed:%1@0 |select-window| window-pane-changed:%0@0 pane-focus-in:%0@0 |kill-pane| pane-focus-out:%0@0 client-detached:%0@0 |detach| 
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

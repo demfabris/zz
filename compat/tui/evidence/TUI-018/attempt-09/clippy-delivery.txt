@@ -1,0 +1,4 @@
+    Checking zz-cli v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-cli)
+    Checking zz v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 23.26s
+exit_status=0

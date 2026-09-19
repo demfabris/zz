@@ -1,0 +1,84 @@
+case=matrix-direct-split-pending
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=yes
+pending=1:2
+final=0:3
+tmux state
+input=
+before=yes
+tail=yes
+pending=0:3
+final=0:3
+case=matrix-alias-split-pending
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=yes
+pending=1:2
+final=0:3
+tmux state
+input=
+before=yes
+tail=yes
+pending=0:3
+final=0:3
+case=matrix-file-split-pending
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=yes
+pending=1:2
+final=0:3
+tmux state
+input=
+before=yes
+tail=yes
+pending=0:3
+final=0:3
+case=matrix-direct-split-pending-zoom
+zz_exit=0
+tmux_exit=0
+zz stdout hex
+4d41545249582d41465445520a
+zz stderr hex
+tmux stdout hex
+4d41545249582d41465445520a
+tmux stderr hex
+zz state
+input=
+before=yes
+tail=yes
+pending=1:2
+final=1:3
+tmux state
+input=
+before=yes
+tail=yes
+pending=1:3
+final=1:3

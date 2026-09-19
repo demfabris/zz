@@ -1,0 +1,25 @@
+caller stream forms at 80x24 (pin tmux, cap 1048576 bytes)
+ok    source-file-applies
+ok    source-file-applied-value
+ok    source-file-closed-stdin
+ok    source-file-unknown-command
+ok    source-file-cancelled-midline
+ok    source-file-parse-only
+ok    source-file-verbose
+ok    source-file-quiet
+ok    source-file-twice-one-stream
+ok    source-file-twice-one-stream-value
+ok    source-file-dash-and-missing-path
+ok    source-file-empty-stream
+ok    display-message-into-a-running-pane
+ok    split-window-builds-and-writes
+ok    display-message-into-the-empty-pane
+compat/tui-command-streams.sh: line 508: warning: command substitution: ignored null byte in input
+ok    display-message-binary-bytes
+ok    display-message-closed-stdin
+ok    display-message-missing-target
+ok    pane-input-restored
+ok    split-window-prints-the-new-pane
+ok    split-window-print-restored
+
+intervention=terminated owned proof process group before fixture extension; exit_status=143

@@ -1,0 +1,909 @@
+56fcf707376c58bfcb9b08d5d193ea0272f69534e0f385046f524b655a5612a0  /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli
+df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux
+[2026-09-19T04:28:51Z INFO  zz_daemon::diagnostics::appearance] loaded appearance reason=startup root=None scheme=dark supported=0 unsupported=0 invalid=0 diagnostics_dropped=0 bytes=0 hash=9356683936999949859 appearance=TerminalAppearance { color_scheme: Dark, font_families: ["Noto Sans Mono"], font_families_bold: [], font_families_italic: [], font_families_bold_italic: [], font_size_points: 13.0, font_weight: 400, font_features: [], font_synthetic_style: FontSyntheticStyle { bold: true, italic: true, bold_italic: true }, font_thicken: false, font_thicken_strength: 255, cell_height_adjustment: None, padding_left: 10.0, padding_right: 10.0, padding_top: 10.0, padding_bottom: 10.0, foreground: Color { r: 216, g: 222, b: 233 }, background: Color { r: 16, g: 19, b: 24 }, cursor_color: Color { r: 229, g: 192, b: 123 }, cursor_style: Block, selection_foreground: Color { r: 216, g: 222, b: 233 }, selection_background: AppearanceColor { r: 80, g: 125, b: 184, a: 148 }, search_match_color: AppearanceColor { r: 224, g: 171, b: 56, a: 107 }, search_current_color: AppearanceColor { r: 250, g: 194, b: 71, a: 173 }, link_color: Color { r: 77, g: 163, b: 235 }, copy_cursor_color: AppearanceColor { r: 184, g: 199, b: 224, a: 107 }, palette_hash: 2756364480396514756, minimum_contrast: 1.0, cursor_blink_policy: Terminal, cursor_blink_interval_ms: 500, rounded_selection: true, background_opacity: 1.0, palette_classes: [], default_classes: [None, None] }
+[2026-09-19T04:28:51Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=startup-mux-replay entries=0 prefix="C-b" mode_keys="vi"
+[2026-09-19T04:28:51Z INFO  zz_daemon::daemon] zz daemon listening at /tmp/zzr7p1-iGDrmI.sock
+display-kill-close zz rc=1 stdout_bytes=0 stderr_bytes=0 after= panes=1 cursor=3,0,1
+^[[31mRED^[[39m
+
+
+
+
+
+
+
+
+
+
+
+display-kill-close tmux rc=1 stdout_bytes=0 stderr_bytes=0 after= panes=1 cursor=3,0,0
+^[[31mRED^[[39m
+
+
+
+
+
+
+
+
+
+
+
+PASS display-kill-close rc
+PASS display-kill-close stdout
+PASS display-kill-close stderr
+PASS display-kill-close after
+PASS display-kill-close panes
+PASS display-kill-close screen
+DIFF display-kill-close cursor
+display-kill-write zz rc=1 stdout_bytes=0 stderr_bytes=0 after= panes=1 cursor=3,0,1
+^[[31mRED^[[39m
+
+
+
+
+
+
+
+
+
+
+
+display-kill-write tmux rc=1 stdout_bytes=0 stderr_bytes=0 after= panes=1 cursor=3,0,0
+^[[31mRED^[[39m
+
+
+
+
+
+
+
+
+
+
+
+PASS display-kill-write rc
+PASS display-kill-write stdout
+PASS display-kill-write stderr
+PASS display-kill-write after
+PASS display-kill-write panes
+PASS display-kill-write screen
+DIFF display-kill-write cursor
+split-kill-close zz rc=1 stdout_bytes=0 stderr_bytes=0 after= panes=1 cursor=3,0,1
+^[[31mRED^[[39m
+
+
+
+
+
+
+
+
+
+
+
+split-kill-close tmux rc=1 stdout_bytes=0 stderr_bytes=0 after= panes=1 cursor=3,0,0
+^[[31mRED^[[39m
+
+
+
+
+
+
+
+
+
+
+
+PASS split-kill-close rc
+PASS split-kill-close stdout
+PASS split-kill-close stderr
+PASS split-kill-close after
+PASS split-kill-close panes
+PASS split-kill-close screen
+DIFF split-kill-close cursor
+split-kill-write zz rc=1 stdout_bytes=0 stderr_bytes=0 after= panes=1 cursor=3,0,1
+^[[31mRED^[[39m
+
+
+
+
+
+
+
+
+
+
+
+split-kill-write tmux rc=1 stdout_bytes=0 stderr_bytes=0 after= panes=1 cursor=3,0,0
+^[[31mRED^[[39m
+
+
+
+
+
+
+
+
+
+
+
+PASS split-kill-write rc
+PASS split-kill-write stdout
+PASS split-kill-write stderr
+PASS split-kill-write after
+PASS split-kill-write panes
+PASS split-kill-write screen
+DIFF split-kill-write cursor
+p1 done FAIL=1
+[2026-09-19T04:29:01Z INFO  zz_daemon::daemon] zz daemon stopped
+rmI.sock set-option -g automatic-rename off
++ tm set-option -g automatic-rename off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI set-option -g automatic-rename off
++ zz set-option -g status off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock set-option -g status off
++ tm set-option -g status off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI set-option -g status off
++ run_shape display-kill-close display close
++ local name=display-kill-close dest=display after=close side pane pid rc i PANE
++ for side in zz tmux
++ '[' zz = zz ']'
++ zz set-option -gu @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock set-option -gu @p1-after
++ '[' display = display ']'
++ '[' zz = zz ']'
+++ zz split-window -d -t =cs:win.0 -P -F '#{pane_id}' ''
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock split-window -d -t =cs:win.0 -P -F '#{pane_id}' ''
++ pane=%1
++ rm -f /tmp/zzr7p1.iGDrmI/fifo
++ mkfifo /tmp/zzr7p1.iGDrmI/fifo
++ rm -f /tmp/zzr7p1.iGDrmI/zz.rc
++ exec
++ '[' display = display ']'
++ '[' zz = zz ']'
++ pid=2626498
++ '[' -z %1 ']'
++ printf '\033[31mRED\033[0m'
++ wait_red zz %1
++ local side=zz pane=%1 i
++ zz display-message -I -t %1 ';' display-message -p tail-out ';' set-option -g @p1-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock display-message -I -t %1 ';' display-message -p tail-out ';' set-option -g @p1-after yes
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
++ zz capture-pane -p -t %1
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock capture-pane -p -t %1
++ grep -q RED
++ return 0
++ '[' zz = zz ']'
++ zz capture-pane -e -p -t %1
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock capture-pane -e -p -t %1
++ zz display-message -p -t %1 '#{cursor_x},#{cursor_y},#{cursor_flag}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock display-message -p -t %1 '#{cursor_x},#{cursor_y},#{cursor_flag}'
++ zz kill-pane -t %1
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock kill-pane -t %1
++ '[' close = write ']'
++ exec
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2626498
++ sleep 0.05
++ echo 1
++ for i in $(seq 1 400)
++ kill -0 2626498
++ break
++ kill -0 2626498
++ wait 2626498
+++ cat /tmp/zzr7p1.iGDrmI/zz.rc
++ rc=1
++ rm -f /tmp/zzr7p1.iGDrmI/fifo
++ '[' zz = zz ']'
++ zz show-options -gqv @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock show-options -gqv @p1-after
++ zz list-panes -t =cs:win -F x
++ wc -l
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock list-panes -t =cs:win -F x
+++ wc -c
+++ wc -c
+++ cat /tmp/zzr7p1.iGDrmI/zz.after
+++ cat /tmp/zzr7p1.iGDrmI/zz.panes
+++ cat /tmp/zzr7p1.iGDrmI/zz.cursor
++ printf '%s %s rc=%s stdout_bytes=%s stderr_bytes=%s after=%s panes=%s cursor=%s\n' display-kill-close zz 1 0 0 '' 1 3,0,1
++ xxd /tmp/zzr7p1.iGDrmI/zz.out
++ head -5
++ head -c 300 /tmp/zzr7p1.iGDrmI/zz.screen
++ cat -v
++ printf '\n'
++ cp /tmp/zzr7p1.iGDrmI/zz.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-display-kill-close-zz.out
++ cp /tmp/zzr7p1.iGDrmI/zz.screen /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-display-kill-close-zz.screen
++ cp /tmp/zzr7p1.iGDrmI/zz.cursor /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-display-kill-close-zz.cursor
++ '[' zz = tmux ']'
++ '[' zz = zz ']'
++ zz set-option -gu @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock set-option -gu @p1-after
++ for side in zz tmux
++ '[' tmux = zz ']'
++ tm set-option -gu @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI set-option -gu @p1-after
++ '[' display = display ']'
++ '[' tmux = zz ']'
+++ tm split-window -d -t =cs:win.0 -P -F '#{pane_id}' ''
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI split-window -d -t =cs:win.0 -P -F '#{pane_id}' ''
++ pane=%1
++ rm -f /tmp/zzr7p1.iGDrmI/fifo
++ mkfifo /tmp/zzr7p1.iGDrmI/fifo
++ rm -f /tmp/zzr7p1.iGDrmI/tmux.rc
++ exec
++ '[' display = display ']'
++ '[' tmux = zz ']'
++ pid=2626610
++ '[' -z %1 ']'
++ printf '\033[31mRED\033[0m'
++ wait_red tmux %1
++ local side=tmux pane=%1 i
++ tm display-message -I -t %1 ';' display-message -p tail-out ';' set-option -g @p1-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI display-message -I -t %1 ';' display-message -p tail-out ';' set-option -g @p1-after yes
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
++ tm capture-pane -p -t %1
++ grep -q RED
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI capture-pane -p -t %1
++ return 0
++ '[' tmux = zz ']'
++ tm capture-pane -e -p -t %1
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI capture-pane -e -p -t %1
++ tm display-message -p -t %1 '#{cursor_x},#{cursor_y},#{cursor_flag}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI display-message -p -t %1 '#{cursor_x},#{cursor_y},#{cursor_flag}'
++ tm kill-pane -t %1
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI kill-pane -t %1
++ '[' close = write ']'
++ exec
+++ seq 1 400
++ echo 1
++ for i in $(seq 1 400)
++ kill -0 2626610
++ break
++ kill -0 2626610
++ wait 2626610
+++ cat /tmp/zzr7p1.iGDrmI/tmux.rc
++ rc=1
++ rm -f /tmp/zzr7p1.iGDrmI/fifo
++ '[' tmux = zz ']'
++ tm show-options -gqv @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI show-options -gqv @p1-after
++ wc -l
++ tm list-panes -t =cs:win -F x
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI list-panes -t =cs:win -F x
+++ wc -c
+++ wc -c
+++ cat /tmp/zzr7p1.iGDrmI/tmux.after
+++ cat /tmp/zzr7p1.iGDrmI/tmux.panes
+++ cat /tmp/zzr7p1.iGDrmI/tmux.cursor
++ printf '%s %s rc=%s stdout_bytes=%s stderr_bytes=%s after=%s panes=%s cursor=%s\n' display-kill-close tmux 1 0 0 '' 1 3,0,0
++ xxd /tmp/zzr7p1.iGDrmI/tmux.out
++ head -5
++ head -c 300 /tmp/zzr7p1.iGDrmI/tmux.screen
++ cat -v
++ printf '\n'
++ cp /tmp/zzr7p1.iGDrmI/tmux.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-display-kill-close-tmux.out
++ cp /tmp/zzr7p1.iGDrmI/tmux.screen /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-display-kill-close-tmux.screen
++ cp /tmp/zzr7p1.iGDrmI/tmux.cursor /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-display-kill-close-tmux.cursor
++ '[' tmux = tmux ']'
++ check 'display-kill-close rc' /tmp/zzr7p1.iGDrmI/zz.rc /tmp/zzr7p1.iGDrmI/tmux.rc
++ local 'label=display-kill-close rc' a=/tmp/zzr7p1.iGDrmI/zz.rc b=/tmp/zzr7p1.iGDrmI/tmux.rc
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.rc /tmp/zzr7p1.iGDrmI/tmux.rc
++ printf 'PASS %s\n' 'display-kill-close rc'
++ check 'display-kill-close stdout' /tmp/zzr7p1.iGDrmI/zz.out /tmp/zzr7p1.iGDrmI/tmux.out
++ local 'label=display-kill-close stdout' a=/tmp/zzr7p1.iGDrmI/zz.out b=/tmp/zzr7p1.iGDrmI/tmux.out
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.out /tmp/zzr7p1.iGDrmI/tmux.out
++ printf 'PASS %s\n' 'display-kill-close stdout'
++ check 'display-kill-close stderr' /tmp/zzr7p1.iGDrmI/zz.err /tmp/zzr7p1.iGDrmI/tmux.err
++ local 'label=display-kill-close stderr' a=/tmp/zzr7p1.iGDrmI/zz.err b=/tmp/zzr7p1.iGDrmI/tmux.err
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.err /tmp/zzr7p1.iGDrmI/tmux.err
++ printf 'PASS %s\n' 'display-kill-close stderr'
++ check 'display-kill-close after' /tmp/zzr7p1.iGDrmI/zz.after /tmp/zzr7p1.iGDrmI/tmux.after
++ local 'label=display-kill-close after' a=/tmp/zzr7p1.iGDrmI/zz.after b=/tmp/zzr7p1.iGDrmI/tmux.after
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.after /tmp/zzr7p1.iGDrmI/tmux.after
++ printf 'PASS %s\n' 'display-kill-close after'
++ check 'display-kill-close panes' /tmp/zzr7p1.iGDrmI/zz.panes /tmp/zzr7p1.iGDrmI/tmux.panes
++ local 'label=display-kill-close panes' a=/tmp/zzr7p1.iGDrmI/zz.panes b=/tmp/zzr7p1.iGDrmI/tmux.panes
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.panes /tmp/zzr7p1.iGDrmI/tmux.panes
++ printf 'PASS %s\n' 'display-kill-close panes'
++ check 'display-kill-close screen' /tmp/zzr7p1.iGDrmI/zz.screen /tmp/zzr7p1.iGDrmI/tmux.screen
++ local 'label=display-kill-close screen' a=/tmp/zzr7p1.iGDrmI/zz.screen b=/tmp/zzr7p1.iGDrmI/tmux.screen
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.screen /tmp/zzr7p1.iGDrmI/tmux.screen
++ printf 'PASS %s\n' 'display-kill-close screen'
++ check 'display-kill-close cursor' /tmp/zzr7p1.iGDrmI/zz.cursor /tmp/zzr7p1.iGDrmI/tmux.cursor
++ local 'label=display-kill-close cursor' a=/tmp/zzr7p1.iGDrmI/zz.cursor b=/tmp/zzr7p1.iGDrmI/tmux.cursor
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.cursor /tmp/zzr7p1.iGDrmI/tmux.cursor
++ printf 'DIFF %s\n' 'display-kill-close cursor'
++ FAIL=1
++ '[' tmux = zz ']'
++ tm set-option -gu @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI set-option -gu @p1-after
++ run_shape display-kill-write display write
++ local name=display-kill-write dest=display after=write side pane pid rc i PANE
++ for side in zz tmux
++ '[' zz = zz ']'
++ zz set-option -gu @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock set-option -gu @p1-after
++ '[' display = display ']'
++ '[' zz = zz ']'
+++ zz split-window -d -t =cs:win.0 -P -F '#{pane_id}' ''
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock split-window -d -t =cs:win.0 -P -F '#{pane_id}' ''
++ pane=%2
++ rm -f /tmp/zzr7p1.iGDrmI/fifo
++ mkfifo /tmp/zzr7p1.iGDrmI/fifo
++ rm -f /tmp/zzr7p1.iGDrmI/zz.rc
++ exec
++ '[' display = display ']'
++ '[' zz = zz ']'
++ pid=2626760
++ '[' -z %2 ']'
++ printf '\033[31mRED\033[0m'
++ wait_red zz %2
++ local side=zz pane=%2 i
++ zz display-message -I -t %2 ';' display-message -p tail-out ';' set-option -g @p1-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock display-message -I -t %2 ';' display-message -p tail-out ';' set-option -g @p1-after yes
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
++ zz capture-pane -p -t %2
++ grep -q RED
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock capture-pane -p -t %2
++ return 0
++ '[' zz = zz ']'
++ zz capture-pane -e -p -t %2
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock capture-pane -e -p -t %2
++ zz display-message -p -t %2 '#{cursor_x},#{cursor_y},#{cursor_flag}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock display-message -p -t %2 '#{cursor_x},#{cursor_y},#{cursor_flag}'
++ zz kill-pane -t %2
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock kill-pane -t %2
++ '[' write = write ']'
++ printf AFTER-
++ exec
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2626760
++ sleep 0.05
++ echo 1
++ for i in $(seq 1 400)
++ kill -0 2626760
++ break
++ kill -0 2626760
++ wait 2626760
+++ cat /tmp/zzr7p1.iGDrmI/zz.rc
++ rc=1
++ rm -f /tmp/zzr7p1.iGDrmI/fifo
++ '[' zz = zz ']'
++ zz show-options -gqv @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock show-options -gqv @p1-after
++ zz list-panes -t =cs:win -F x
++ wc -l
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock list-panes -t =cs:win -F x
+++ wc -c
+++ wc -c
+++ cat /tmp/zzr7p1.iGDrmI/zz.after
+++ cat /tmp/zzr7p1.iGDrmI/zz.panes
+++ cat /tmp/zzr7p1.iGDrmI/zz.cursor
++ printf '%s %s rc=%s stdout_bytes=%s stderr_bytes=%s after=%s panes=%s cursor=%s\n' display-kill-write zz 1 0 0 '' 1 3,0,1
++ xxd /tmp/zzr7p1.iGDrmI/zz.out
++ head -5
++ head -c 300 /tmp/zzr7p1.iGDrmI/zz.screen
++ cat -v
++ printf '\n'
++ cp /tmp/zzr7p1.iGDrmI/zz.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-display-kill-write-zz.out
++ cp /tmp/zzr7p1.iGDrmI/zz.screen /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-display-kill-write-zz.screen
++ cp /tmp/zzr7p1.iGDrmI/zz.cursor /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-display-kill-write-zz.cursor
++ '[' zz = tmux ']'
++ '[' zz = zz ']'
++ zz set-option -gu @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock set-option -gu @p1-after
++ for side in zz tmux
++ '[' tmux = zz ']'
++ tm set-option -gu @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI set-option -gu @p1-after
++ '[' display = display ']'
++ '[' tmux = zz ']'
+++ tm split-window -d -t =cs:win.0 -P -F '#{pane_id}' ''
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI split-window -d -t =cs:win.0 -P -F '#{pane_id}' ''
++ pane=%2
++ rm -f /tmp/zzr7p1.iGDrmI/fifo
++ mkfifo /tmp/zzr7p1.iGDrmI/fifo
++ rm -f /tmp/zzr7p1.iGDrmI/tmux.rc
++ exec
++ '[' display = display ']'
++ '[' tmux = zz ']'
++ pid=2626822
++ '[' -z %2 ']'
++ printf '\033[31mRED\033[0m'
++ wait_red tmux %2
++ local side=tmux pane=%2 i
++ tm display-message -I -t %2 ';' display-message -p tail-out ';' set-option -g @p1-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI display-message -I -t %2 ';' display-message -p tail-out ';' set-option -g @p1-after yes
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
++ tm capture-pane -p -t %2
++ grep -q RED
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI capture-pane -p -t %2
++ return 0
++ '[' tmux = zz ']'
++ tm capture-pane -e -p -t %2
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI capture-pane -e -p -t %2
++ tm display-message -p -t %2 '#{cursor_x},#{cursor_y},#{cursor_flag}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI display-message -p -t %2 '#{cursor_x},#{cursor_y},#{cursor_flag}'
++ tm kill-pane -t %2
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI kill-pane -t %2
++ '[' write = write ']'
++ printf AFTER-
++ exec
++ echo 1
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2626822
++ break
++ kill -0 2626822
++ wait 2626822
+++ cat /tmp/zzr7p1.iGDrmI/tmux.rc
++ rc=1
++ rm -f /tmp/zzr7p1.iGDrmI/fifo
++ '[' tmux = zz ']'
++ tm show-options -gqv @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI show-options -gqv @p1-after
++ tm list-panes -t =cs:win -F x
++ wc -l
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI list-panes -t =cs:win -F x
+++ wc -c
+++ wc -c
+++ cat /tmp/zzr7p1.iGDrmI/tmux.after
+++ cat /tmp/zzr7p1.iGDrmI/tmux.panes
+++ cat /tmp/zzr7p1.iGDrmI/tmux.cursor
++ printf '%s %s rc=%s stdout_bytes=%s stderr_bytes=%s after=%s panes=%s cursor=%s\n' display-kill-write tmux 1 0 0 '' 1 3,0,0
++ xxd /tmp/zzr7p1.iGDrmI/tmux.out
++ head -5
++ head -c 300 /tmp/zzr7p1.iGDrmI/tmux.screen
++ cat -v
++ printf '\n'
++ cp /tmp/zzr7p1.iGDrmI/tmux.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-display-kill-write-tmux.out
++ cp /tmp/zzr7p1.iGDrmI/tmux.screen /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-display-kill-write-tmux.screen
++ cp /tmp/zzr7p1.iGDrmI/tmux.cursor /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-display-kill-write-tmux.cursor
++ '[' tmux = tmux ']'
++ check 'display-kill-write rc' /tmp/zzr7p1.iGDrmI/zz.rc /tmp/zzr7p1.iGDrmI/tmux.rc
++ local 'label=display-kill-write rc' a=/tmp/zzr7p1.iGDrmI/zz.rc b=/tmp/zzr7p1.iGDrmI/tmux.rc
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.rc /tmp/zzr7p1.iGDrmI/tmux.rc
++ printf 'PASS %s\n' 'display-kill-write rc'
++ check 'display-kill-write stdout' /tmp/zzr7p1.iGDrmI/zz.out /tmp/zzr7p1.iGDrmI/tmux.out
++ local 'label=display-kill-write stdout' a=/tmp/zzr7p1.iGDrmI/zz.out b=/tmp/zzr7p1.iGDrmI/tmux.out
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.out /tmp/zzr7p1.iGDrmI/tmux.out
++ printf 'PASS %s\n' 'display-kill-write stdout'
++ check 'display-kill-write stderr' /tmp/zzr7p1.iGDrmI/zz.err /tmp/zzr7p1.iGDrmI/tmux.err
++ local 'label=display-kill-write stderr' a=/tmp/zzr7p1.iGDrmI/zz.err b=/tmp/zzr7p1.iGDrmI/tmux.err
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.err /tmp/zzr7p1.iGDrmI/tmux.err
++ printf 'PASS %s\n' 'display-kill-write stderr'
++ check 'display-kill-write after' /tmp/zzr7p1.iGDrmI/zz.after /tmp/zzr7p1.iGDrmI/tmux.after
++ local 'label=display-kill-write after' a=/tmp/zzr7p1.iGDrmI/zz.after b=/tmp/zzr7p1.iGDrmI/tmux.after
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.after /tmp/zzr7p1.iGDrmI/tmux.after
++ printf 'PASS %s\n' 'display-kill-write after'
++ check 'display-kill-write panes' /tmp/zzr7p1.iGDrmI/zz.panes /tmp/zzr7p1.iGDrmI/tmux.panes
++ local 'label=display-kill-write panes' a=/tmp/zzr7p1.iGDrmI/zz.panes b=/tmp/zzr7p1.iGDrmI/tmux.panes
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.panes /tmp/zzr7p1.iGDrmI/tmux.panes
++ printf 'PASS %s\n' 'display-kill-write panes'
++ check 'display-kill-write screen' /tmp/zzr7p1.iGDrmI/zz.screen /tmp/zzr7p1.iGDrmI/tmux.screen
++ local 'label=display-kill-write screen' a=/tmp/zzr7p1.iGDrmI/zz.screen b=/tmp/zzr7p1.iGDrmI/tmux.screen
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.screen /tmp/zzr7p1.iGDrmI/tmux.screen
++ printf 'PASS %s\n' 'display-kill-write screen'
++ check 'display-kill-write cursor' /tmp/zzr7p1.iGDrmI/zz.cursor /tmp/zzr7p1.iGDrmI/tmux.cursor
++ local 'label=display-kill-write cursor' a=/tmp/zzr7p1.iGDrmI/zz.cursor b=/tmp/zzr7p1.iGDrmI/tmux.cursor
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.cursor /tmp/zzr7p1.iGDrmI/tmux.cursor
++ printf 'DIFF %s\n' 'display-kill-write cursor'
++ FAIL=1
++ '[' tmux = zz ']'
++ tm set-option -gu @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI set-option -gu @p1-after
++ run_shape split-kill-close split close
++ local name=split-kill-close dest=split after=close side pane pid rc i PANE
++ for side in zz tmux
++ '[' zz = zz ']'
++ zz set-option -gu @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock set-option -gu @p1-after
++ '[' split = display ']'
++ pane=
++ rm -f /tmp/zzr7p1.iGDrmI/fifo
++ mkfifo /tmp/zzr7p1.iGDrmI/fifo
++ rm -f /tmp/zzr7p1.iGDrmI/zz.rc
++ exec
++ '[' split = display ']'
++ '[' zz = zz ']'
++ pid=2626875
++ '[' -z '' ']'
++ find_split_pane zz
++ local side=zz i
++ zz split-window -I -d -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p1-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock split-window -I -d -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p1-after yes
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
++ PANE=%3
++ '[' -n %3 ']'
++ return 0
++ pane=%3
++ printf '\033[31mRED\033[0m'
++ wait_red zz %3
++ local side=zz pane=%3 i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
++ zz capture-pane -p -t %3
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock capture-pane -p -t %3
++ grep -q RED
++ return 0
++ '[' zz = zz ']'
++ zz capture-pane -e -p -t %3
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock capture-pane -e -p -t %3
++ zz display-message -p -t %3 '#{cursor_x},#{cursor_y},#{cursor_flag}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock display-message -p -t %3 '#{cursor_x},#{cursor_y},#{cursor_flag}'
++ zz kill-pane -t %3
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock kill-pane -t %3
++ '[' close = write ']'
++ exec
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2626875
++ sleep 0.05
++ echo 1
++ for i in $(seq 1 400)
++ kill -0 2626875
++ break
++ kill -0 2626875
++ wait 2626875
+++ cat /tmp/zzr7p1.iGDrmI/zz.rc
++ rc=1
++ rm -f /tmp/zzr7p1.iGDrmI/fifo
++ '[' zz = zz ']'
++ zz show-options -gqv @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock show-options -gqv @p1-after
++ wc -l
++ zz list-panes -t =cs:win -F x
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock list-panes -t =cs:win -F x
+++ wc -c
+++ wc -c
+++ cat /tmp/zzr7p1.iGDrmI/zz.after
+++ cat /tmp/zzr7p1.iGDrmI/zz.panes
+++ cat /tmp/zzr7p1.iGDrmI/zz.cursor
++ printf '%s %s rc=%s stdout_bytes=%s stderr_bytes=%s after=%s panes=%s cursor=%s\n' split-kill-close zz 1 0 0 '' 1 3,0,1
++ xxd /tmp/zzr7p1.iGDrmI/zz.out
++ head -5
++ cat -v
++ head -c 300 /tmp/zzr7p1.iGDrmI/zz.screen
++ printf '\n'
++ cp /tmp/zzr7p1.iGDrmI/zz.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-split-kill-close-zz.out
++ cp /tmp/zzr7p1.iGDrmI/zz.screen /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-split-kill-close-zz.screen
++ cp /tmp/zzr7p1.iGDrmI/zz.cursor /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-split-kill-close-zz.cursor
++ '[' zz = tmux ']'
++ '[' zz = zz ']'
++ zz set-option -gu @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock set-option -gu @p1-after
++ for side in zz tmux
++ '[' tmux = zz ']'
++ tm set-option -gu @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI set-option -gu @p1-after
++ '[' split = display ']'
++ pane=
++ rm -f /tmp/zzr7p1.iGDrmI/fifo
++ mkfifo /tmp/zzr7p1.iGDrmI/fifo
++ rm -f /tmp/zzr7p1.iGDrmI/tmux.rc
++ exec
++ '[' split = display ']'
++ '[' tmux = zz ']'
++ pid=2626990
++ '[' -z '' ']'
++ find_split_pane tmux
++ local side=tmux i
++ tm split-window -I -d -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p1-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI split-window -I -d -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p1-after yes
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
+++ awk '$1==1{print $2}'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ PANE=%3
++ '[' -n %3 ']'
++ return 0
++ pane=%3
++ printf '\033[31mRED\033[0m'
++ wait_red tmux %3
++ local side=tmux pane=%3 i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
++ tm capture-pane -p -t %3
++ grep -q RED
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI capture-pane -p -t %3
++ return 0
++ '[' tmux = zz ']'
++ tm capture-pane -e -p -t %3
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI capture-pane -e -p -t %3
++ tm display-message -p -t %3 '#{cursor_x},#{cursor_y},#{cursor_flag}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI display-message -p -t %3 '#{cursor_x},#{cursor_y},#{cursor_flag}'
++ tm kill-pane -t %3
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI kill-pane -t %3
++ '[' close = write ']'
++ exec
+++ seq 1 400
++ echo 1
++ for i in $(seq 1 400)
++ kill -0 2626990
++ break
++ kill -0 2626990
++ wait 2626990
+++ cat /tmp/zzr7p1.iGDrmI/tmux.rc
++ rc=1
++ rm -f /tmp/zzr7p1.iGDrmI/fifo
++ '[' tmux = zz ']'
++ tm show-options -gqv @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI show-options -gqv @p1-after
++ tm list-panes -t =cs:win -F x
++ wc -l
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI list-panes -t =cs:win -F x
+++ wc -c
+++ wc -c
+++ cat /tmp/zzr7p1.iGDrmI/tmux.after
+++ cat /tmp/zzr7p1.iGDrmI/tmux.panes
+++ cat /tmp/zzr7p1.iGDrmI/tmux.cursor
++ printf '%s %s rc=%s stdout_bytes=%s stderr_bytes=%s after=%s panes=%s cursor=%s\n' split-kill-close tmux 1 0 0 '' 1 3,0,0
++ xxd /tmp/zzr7p1.iGDrmI/tmux.out
++ head -5
++ head -c 300 /tmp/zzr7p1.iGDrmI/tmux.screen
++ cat -v
++ printf '\n'
++ cp /tmp/zzr7p1.iGDrmI/tmux.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-split-kill-close-tmux.out
++ cp /tmp/zzr7p1.iGDrmI/tmux.screen /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-split-kill-close-tmux.screen
++ cp /tmp/zzr7p1.iGDrmI/tmux.cursor /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-split-kill-close-tmux.cursor
++ '[' tmux = tmux ']'
++ check 'split-kill-close rc' /tmp/zzr7p1.iGDrmI/zz.rc /tmp/zzr7p1.iGDrmI/tmux.rc
++ local 'label=split-kill-close rc' a=/tmp/zzr7p1.iGDrmI/zz.rc b=/tmp/zzr7p1.iGDrmI/tmux.rc
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.rc /tmp/zzr7p1.iGDrmI/tmux.rc
++ printf 'PASS %s\n' 'split-kill-close rc'
++ check 'split-kill-close stdout' /tmp/zzr7p1.iGDrmI/zz.out /tmp/zzr7p1.iGDrmI/tmux.out
++ local 'label=split-kill-close stdout' a=/tmp/zzr7p1.iGDrmI/zz.out b=/tmp/zzr7p1.iGDrmI/tmux.out
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.out /tmp/zzr7p1.iGDrmI/tmux.out
++ printf 'PASS %s\n' 'split-kill-close stdout'
++ check 'split-kill-close stderr' /tmp/zzr7p1.iGDrmI/zz.err /tmp/zzr7p1.iGDrmI/tmux.err
++ local 'label=split-kill-close stderr' a=/tmp/zzr7p1.iGDrmI/zz.err b=/tmp/zzr7p1.iGDrmI/tmux.err
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.err /tmp/zzr7p1.iGDrmI/tmux.err
++ printf 'PASS %s\n' 'split-kill-close stderr'
++ check 'split-kill-close after' /tmp/zzr7p1.iGDrmI/zz.after /tmp/zzr7p1.iGDrmI/tmux.after
++ local 'label=split-kill-close after' a=/tmp/zzr7p1.iGDrmI/zz.after b=/tmp/zzr7p1.iGDrmI/tmux.after
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.after /tmp/zzr7p1.iGDrmI/tmux.after
++ printf 'PASS %s\n' 'split-kill-close after'
++ check 'split-kill-close panes' /tmp/zzr7p1.iGDrmI/zz.panes /tmp/zzr7p1.iGDrmI/tmux.panes
++ local 'label=split-kill-close panes' a=/tmp/zzr7p1.iGDrmI/zz.panes b=/tmp/zzr7p1.iGDrmI/tmux.panes
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.panes /tmp/zzr7p1.iGDrmI/tmux.panes
++ printf 'PASS %s\n' 'split-kill-close panes'
++ check 'split-kill-close screen' /tmp/zzr7p1.iGDrmI/zz.screen /tmp/zzr7p1.iGDrmI/tmux.screen
++ local 'label=split-kill-close screen' a=/tmp/zzr7p1.iGDrmI/zz.screen b=/tmp/zzr7p1.iGDrmI/tmux.screen
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.screen /tmp/zzr7p1.iGDrmI/tmux.screen
++ printf 'PASS %s\n' 'split-kill-close screen'
++ check 'split-kill-close cursor' /tmp/zzr7p1.iGDrmI/zz.cursor /tmp/zzr7p1.iGDrmI/tmux.cursor
++ local 'label=split-kill-close cursor' a=/tmp/zzr7p1.iGDrmI/zz.cursor b=/tmp/zzr7p1.iGDrmI/tmux.cursor
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.cursor /tmp/zzr7p1.iGDrmI/tmux.cursor
++ printf 'DIFF %s\n' 'split-kill-close cursor'
++ FAIL=1
++ '[' tmux = zz ']'
++ tm set-option -gu @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI set-option -gu @p1-after
++ run_shape split-kill-write split write
++ local name=split-kill-write dest=split after=write side pane pid rc i PANE
++ for side in zz tmux
++ '[' zz = zz ']'
++ zz set-option -gu @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock set-option -gu @p1-after
++ '[' split = display ']'
++ pane=
++ rm -f /tmp/zzr7p1.iGDrmI/fifo
++ mkfifo /tmp/zzr7p1.iGDrmI/fifo
++ rm -f /tmp/zzr7p1.iGDrmI/zz.rc
++ exec
++ '[' split = display ']'
++ '[' zz = zz ']'
++ pid=2627041
++ '[' -z '' ']'
++ find_split_pane zz
++ local side=zz i
++ zz split-window -I -d -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p1-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock split-window -I -d -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p1-after yes
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ PANE=%4
++ '[' -n %4 ']'
++ return 0
++ pane=%4
++ printf '\033[31mRED\033[0m'
++ wait_red zz %4
++ local side=zz pane=%4 i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
++ zz capture-pane -p -t %4
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock capture-pane -p -t %4
++ grep -q RED
++ return 0
++ '[' zz = zz ']'
++ zz capture-pane -e -p -t %4
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock capture-pane -e -p -t %4
++ zz display-message -p -t %4 '#{cursor_x},#{cursor_y},#{cursor_flag}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock display-message -p -t %4 '#{cursor_x},#{cursor_y},#{cursor_flag}'
++ zz kill-pane -t %4
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock kill-pane -t %4
++ '[' write = write ']'
++ printf AFTER-
++ exec
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2627041
++ sleep 0.05
++ echo 1
++ for i in $(seq 1 400)
++ kill -0 2627041
++ break
++ kill -0 2627041
++ wait 2627041
+++ cat /tmp/zzr7p1.iGDrmI/zz.rc
++ rc=1
++ rm -f /tmp/zzr7p1.iGDrmI/fifo
++ '[' zz = zz ']'
++ zz show-options -gqv @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock show-options -gqv @p1-after
++ zz list-panes -t =cs:win -F x
++ wc -l
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock list-panes -t =cs:win -F x
+++ wc -c
+++ wc -c
+++ cat /tmp/zzr7p1.iGDrmI/zz.after
+++ cat /tmp/zzr7p1.iGDrmI/zz.panes
+++ cat /tmp/zzr7p1.iGDrmI/zz.cursor
++ printf '%s %s rc=%s stdout_bytes=%s stderr_bytes=%s after=%s panes=%s cursor=%s\n' split-kill-write zz 1 0 0 '' 1 3,0,1
++ xxd /tmp/zzr7p1.iGDrmI/zz.out
++ head -5
++ head -c 300 /tmp/zzr7p1.iGDrmI/zz.screen
++ cat -v
++ printf '\n'
++ cp /tmp/zzr7p1.iGDrmI/zz.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-split-kill-write-zz.out
++ cp /tmp/zzr7p1.iGDrmI/zz.screen /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-split-kill-write-zz.screen
++ cp /tmp/zzr7p1.iGDrmI/zz.cursor /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-split-kill-write-zz.cursor
++ '[' zz = tmux ']'
++ '[' zz = zz ']'
++ zz set-option -gu @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock set-option -gu @p1-after
++ for side in zz tmux
++ '[' tmux = zz ']'
++ tm set-option -gu @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI set-option -gu @p1-after
++ '[' split = display ']'
++ pane=
++ rm -f /tmp/zzr7p1.iGDrmI/fifo
++ mkfifo /tmp/zzr7p1.iGDrmI/fifo
++ rm -f /tmp/zzr7p1.iGDrmI/tmux.rc
++ exec
++ '[' split = display ']'
++ '[' tmux = zz ']'
++ pid=2627167
++ '[' -z '' ']'
++ find_split_pane tmux
++ local side=tmux i
++ tm split-window -I -d -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p1-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI split-window -I -d -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p1-after yes
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ PANE=%4
++ '[' -n %4 ']'
++ return 0
++ pane=%4
++ printf '\033[31mRED\033[0m'
++ wait_red tmux %4
++ local side=tmux pane=%4 i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
++ tm capture-pane -p -t %4
++ grep -q RED
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI capture-pane -p -t %4
++ return 0
++ '[' tmux = zz ']'
++ tm capture-pane -e -p -t %4
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI capture-pane -e -p -t %4
++ tm display-message -p -t %4 '#{cursor_x},#{cursor_y},#{cursor_flag}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI display-message -p -t %4 '#{cursor_x},#{cursor_y},#{cursor_flag}'
++ tm kill-pane -t %4
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI kill-pane -t %4
++ '[' write = write ']'
++ printf AFTER-
++ exec
+++ seq 1 400
++ echo 1
++ for i in $(seq 1 400)
++ kill -0 2627167
++ break
++ kill -0 2627167
++ wait 2627167
+++ cat /tmp/zzr7p1.iGDrmI/tmux.rc
++ rc=1
++ rm -f /tmp/zzr7p1.iGDrmI/fifo
++ '[' tmux = zz ']'
++ tm show-options -gqv @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI show-options -gqv @p1-after
++ tm list-panes -t =cs:win -F x
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI list-panes -t =cs:win -F x
++ wc -l
+++ wc -c
+++ wc -c
+++ cat /tmp/zzr7p1.iGDrmI/tmux.after
+++ cat /tmp/zzr7p1.iGDrmI/tmux.panes
+++ cat /tmp/zzr7p1.iGDrmI/tmux.cursor
++ printf '%s %s rc=%s stdout_bytes=%s stderr_bytes=%s after=%s panes=%s cursor=%s\n' split-kill-write tmux 1 0 0 '' 1 3,0,0
++ xxd /tmp/zzr7p1.iGDrmI/tmux.out
++ head -5
++ head -c 300 /tmp/zzr7p1.iGDrmI/tmux.screen
++ cat -v
++ printf '\n'
++ cp /tmp/zzr7p1.iGDrmI/tmux.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-split-kill-write-tmux.out
++ cp /tmp/zzr7p1.iGDrmI/tmux.screen /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-split-kill-write-tmux.screen
++ cp /tmp/zzr7p1.iGDrmI/tmux.cursor /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p1-split-kill-write-tmux.cursor
++ '[' tmux = tmux ']'
++ check 'split-kill-write rc' /tmp/zzr7p1.iGDrmI/zz.rc /tmp/zzr7p1.iGDrmI/tmux.rc
++ local 'label=split-kill-write rc' a=/tmp/zzr7p1.iGDrmI/zz.rc b=/tmp/zzr7p1.iGDrmI/tmux.rc
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.rc /tmp/zzr7p1.iGDrmI/tmux.rc
++ printf 'PASS %s\n' 'split-kill-write rc'
++ check 'split-kill-write stdout' /tmp/zzr7p1.iGDrmI/zz.out /tmp/zzr7p1.iGDrmI/tmux.out
++ local 'label=split-kill-write stdout' a=/tmp/zzr7p1.iGDrmI/zz.out b=/tmp/zzr7p1.iGDrmI/tmux.out
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.out /tmp/zzr7p1.iGDrmI/tmux.out
++ printf 'PASS %s\n' 'split-kill-write stdout'
++ check 'split-kill-write stderr' /tmp/zzr7p1.iGDrmI/zz.err /tmp/zzr7p1.iGDrmI/tmux.err
++ local 'label=split-kill-write stderr' a=/tmp/zzr7p1.iGDrmI/zz.err b=/tmp/zzr7p1.iGDrmI/tmux.err
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.err /tmp/zzr7p1.iGDrmI/tmux.err
++ printf 'PASS %s\n' 'split-kill-write stderr'
++ check 'split-kill-write after' /tmp/zzr7p1.iGDrmI/zz.after /tmp/zzr7p1.iGDrmI/tmux.after
++ local 'label=split-kill-write after' a=/tmp/zzr7p1.iGDrmI/zz.after b=/tmp/zzr7p1.iGDrmI/tmux.after
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.after /tmp/zzr7p1.iGDrmI/tmux.after
++ printf 'PASS %s\n' 'split-kill-write after'
++ check 'split-kill-write panes' /tmp/zzr7p1.iGDrmI/zz.panes /tmp/zzr7p1.iGDrmI/tmux.panes
++ local 'label=split-kill-write panes' a=/tmp/zzr7p1.iGDrmI/zz.panes b=/tmp/zzr7p1.iGDrmI/tmux.panes
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.panes /tmp/zzr7p1.iGDrmI/tmux.panes
++ printf 'PASS %s\n' 'split-kill-write panes'
++ check 'split-kill-write screen' /tmp/zzr7p1.iGDrmI/zz.screen /tmp/zzr7p1.iGDrmI/tmux.screen
++ local 'label=split-kill-write screen' a=/tmp/zzr7p1.iGDrmI/zz.screen b=/tmp/zzr7p1.iGDrmI/tmux.screen
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.screen /tmp/zzr7p1.iGDrmI/tmux.screen
++ printf 'PASS %s\n' 'split-kill-write screen'
++ check 'split-kill-write cursor' /tmp/zzr7p1.iGDrmI/zz.cursor /tmp/zzr7p1.iGDrmI/tmux.cursor
++ local 'label=split-kill-write cursor' a=/tmp/zzr7p1.iGDrmI/zz.cursor b=/tmp/zzr7p1.iGDrmI/tmux.cursor
++ cmp -s /tmp/zzr7p1.iGDrmI/zz.cursor /tmp/zzr7p1.iGDrmI/tmux.cursor
++ printf 'DIFF %s\n' 'split-kill-write cursor'
++ FAIL=1
++ '[' tmux = zz ']'
++ tm set-option -gu @p1-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI set-option -gu @p1-after
++ printf 'p1 done FAIL=%s\n' 1
++ exit 1
++ cleanup
++ set +e
++ zz kill-server
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p1.iGDrmI/zz-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p1.iGDrmI/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p1-iGDrmI.sock kill-server
++ tm kill-server
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p1.iGDrmI/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p1.iGDrmI/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p1t-iGDrmI kill-server
++ kill 2626313
++ wait 2626313
++ rm -rf -- /tmp/zzr7p1.iGDrmI

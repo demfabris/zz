@@ -1,0 +1,69 @@
+# Scenario: smoke/client-exit-actions
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/smoke/client-exit-actions.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: out: set-environment -gu CLIENT_EXIT_ACTIONS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: run-shell 'sh ~/client-exit-actions.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    observed empty-exec rc=0 stderr=- notice=none hangup=False status=attached clients=1
+    observed plain rc=0 stderr=- notice=plain hangup=False status=exit0 clients=0
+    observed parent-hangup rc=0 stderr=- notice=hangup hangup=True status=exit0 clients=0
+    observed exec rc=0 stderr=- notice=none hangup=False status=exit7 clients=0
+    observed exec-marker EXECMARK
+    observed exec-over-hangup rc=0 stderr=- notice=none hangup=False status=exit5 clients=0
+    observed steal-detach notice=plain hangup=False status=exit0 clients=1
+    observed steal-hangup notice=hangup hangup=True status=exit0 clients=1
+    observed new-session-hangup notice=hangup hangup=True status=exit0 clients=1
+tmux stdout:
+    observed empty-exec rc=0 stderr=- notice=none hangup=False status=attached clients=1
+    observed plain rc=0 stderr=- notice=plain hangup=False status=exit0 clients=0
+    observed parent-hangup rc=0 stderr=- notice=hangup hangup=True status=exit0 clients=0
+    observed exec rc=0 stderr=- notice=none hangup=False status=exit7 clients=0
+    observed exec-marker EXECMARK
+    observed exec-over-hangup rc=0 stderr=- notice=none hangup=False status=exit5 clients=0
+    observed steal-detach notice=plain hangup=False status=exit0 clients=1
+    observed steal-hangup notice=hangup hangup=True status=exit0 clients=1
+    observed new-session-hangup notice=hangup hangup=True status=exit0 clients=1
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g CLIENT_EXIT_ACTIONS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    CLIENT_EXIT_ACTIONS=observed:9
+tmux stdout:
+    CLIENT_EXIT_ACTIONS=observed:9
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

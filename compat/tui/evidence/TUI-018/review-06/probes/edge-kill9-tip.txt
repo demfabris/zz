@@ -1,0 +1,12 @@
+./edge-kill9.sh: line 7: 1680850 Killed                     ( exec "${A[@]}" "$@" < $P/fifo > $P/out 2> $P/err 9>&- )
+zz display KILL rc=137 after=invalid option: @after pane=abc cursor=3:0 hist=0 size=80x11 dead=0 pid=no  clients=0
+./edge-kill9.sh: line 7: 1681365 Killed                     ( exec "${A[@]}" "$@" < $P/fifo > $P/out 2> $P/err 9>&- )
+zz split KILL rc=137 after=invalid option: @after panes=2
+./edge-kill9.sh: line 7: 1681987 Killed                     ( exec "${A[@]}" "$@" < $P/fifo > $P/out 2> $P/err 9>&- )
+zz source KILL rc=137 after=invalid option: @after x=invalid option: @x
+./edge-kill9.sh: line 7: 1682431 Killed                     ( exec "${A[@]}" "$@" < $P/fifo > $P/out 2> $P/err 9>&- )
+tmux display KILL rc=137 after=invalid option: @after pane=abc cursor=3:0 hist=0 size=80x11 dead=0 pid=no  clients=0
+./edge-kill9.sh: line 7: 1682564 Killed                     ( exec "${A[@]}" "$@" < $P/fifo > $P/out 2> $P/err 9>&- )
+tmux split KILL rc=137 after=invalid option: @after panes=2
+./edge-kill9.sh: line 7: 1682812 Killed                     ( exec "${A[@]}" "$@" < $P/fifo > $P/out 2> $P/err 9>&- )
+tmux source KILL rc=137 after=invalid option: @after x=invalid option: @x

@@ -1,0 +1,22 @@
+      case matrix-direct-attached
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 200 bytes)
+        0a1,14
+        > MATRIX-BEGIN
+        > %end TIME ID 1
+        > %begin TIME ID 1
+        > %end TIME ID 1
+        > %begin TIME ID 1
+        > %end TIME ID 1
+        > Bad file descriptor: -
+        > %begin TIME ID 1
+        > MATRIX-AFTER
+        > %end TIME ID 1
+        > %begin TIME ID 1
+        > %end TIME ID 1
+        > %exit
+        > ^[\
+        \ No newline at end of file
+DIFF  matrix-direct-attached
+matrix: 1 asserted, 1 failures, 0 decided:TUI-018, 0 self-check failures
+exit_status=1

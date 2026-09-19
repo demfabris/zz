@@ -1,0 +1,24 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.24s
+     Running tests/cli_binary.rs (target/debug/deps/cli_binary-8b5c06dbd1308a7d)
+
+running 1 test
+test daemon_autostart::control_mode::control_return_and_explicit_detach_follow_the_full_retval_matrix ... FAILED
+
+failures:
+
+---- daemon_autostart::control_mode::control_return_and_explicit_detach_follow_the_full_retval_matrix stdout ----
+
+thread 'daemon_autostart::control_mode::control_return_and_explicit_detach_follow_the_full_retval_matrix' (3967750) panicked at crates/zz-cli/tests/cli_binary.rs:4775:21:
+control process did not reach generic-nonzero-eof: %begin 1789647916 1 0
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    daemon_autostart::control_mode::control_return_and_explicit_detach_follow_the_full_retval_matrix
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 135 filtered out; finished in 95.81s
+
+error: test failed, to rerun pass `-p zz-cli --test cli_binary`
+
+exit_status=101

@@ -3098,6 +3098,225 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn caller_stream_source_alias_group_applies_once_and_reports_the_spent_reader() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "stream"])
+                .status
+                .success()
+        );
+        assert!(
+            fixture
+                .run(&[
+                    "set-option",
+                    "-s",
+                    "command-alias[40]",
+                    "stream=display-message -p before ; source-file - ; source-file - ; display-message -p after ; set -g @after yes",
+                ])
+                .status
+                .success()
+        );
+        let output = fixture.run_with_stdin(&["stream"], b"set -ag @stream once\n");
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.stdout, b"before\nafter\n");
+        assert_eq!(
+            fixture.run(&["show-options", "-gqv", "@after"]).stdout,
+            b"yes\n"
+        );
+        assert_eq!(output.stderr, b"Bad file descriptor: -\n");
+        assert_eq!(
+            fixture.run(&["show-options", "-gqv", "@stream"]).stdout,
+            b"once\n"
+        );
+    }
+
+    #[test]
+    fn caller_stream_buffer_alias_groups_preserve_bytes_and_continue_after_a_spent_reader() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "stream"])
+                .status
+                .success()
+        );
+        let payload = b"a\xff\0z";
+        for (body, stdout, stderr, status) in [
+            (
+                "load-buffer -b alias - ; save-buffer -b alias -",
+                &b"a\xff\0z"[..],
+                &b""[..],
+                0,
+            ),
+            ("load-buffer -b alias -", &b""[..], &b""[..], 0),
+            (
+                "load-buffer -b alias - ; source-file -",
+                &b""[..],
+                &b"Bad file descriptor: -\n"[..],
+                1,
+            ),
+            (
+                "load-buffer -b alias - ; load-buffer -b second - ; display-message -p after-error",
+                &b"after-error\n"[..],
+                &b"Bad file descriptor: -\n"[..],
+                1,
+            ),
+            (
+                "load-buffer -b alias - ; display-message -p after",
+                &b"after\n"[..],
+                &b""[..],
+                0,
+            ),
+            (
+                "display-message -p before ; load-buffer -b alias -",
+                &b"before\n"[..],
+                &b""[..],
+                0,
+            ),
+        ] {
+            assert!(
+                fixture
+                    .run(&[
+                        "set-option",
+                        "-s",
+                        "command-alias[40]",
+                        &format!("stream={body}")
+                    ])
+                    .status
+                    .success()
+            );
+            let output = fixture.run_with_stdin(&["stream"], payload);
+            assert_eq!(output.status.code(), Some(status), "{body}: {output:?}");
+            assert_eq!(output.stdout, stdout, "{body}");
+            assert_eq!(output.stderr, stderr, "{body}");
+            let saved = fixture.run(&["save-buffer", "-b", "alias", "-"]);
+            assert!(saved.status.success());
+            assert_eq!(saved.stdout, payload, "{body}");
+            assert!(saved.stderr.is_empty());
+            assert_eq!(
+                fixture
+                    .run(&["list-buffers", "-F", "#{buffer_name}"])
+                    .stdout,
+                b"alias\n"
+            );
+            assert!(
+                fixture
+                    .run(&["delete-buffer", "-b", "alias"])
+                    .status
+                    .success()
+            );
+        }
+        assert!(fixture.run(&["set-option", "-s", "command-alias[40]",
+            "stream=source-file - ; load-buffer -b second - ; display-message -p after-error",
+        ]).status.success());
+        let output = fixture.run_with_stdin(&["stream"], b"set -g @stream source-first\n");
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.stdout, b"after-error\n");
+        assert_eq!(output.stderr, b"Bad file descriptor: -\n");
+        assert_eq!(
+            fixture.run(&["show-options", "-gqv", "@stream"]).stdout,
+            b"source-first\n"
+        );
+        assert!(
+            fixture
+                .run(&["list-buffers", "-F", "#{buffer_name}"])
+                .stdout
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn caller_stream_file_replay_keeps_one_reader_across_aliases_and_nested_files() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "stream"])
+                .status
+                .success()
+        );
+        let child = write_source(fixture._directory.path(), "child.conf", "stream\n");
+        let parent = write_source(
+            fixture._directory.path(),
+            "parent.conf",
+            &format!("source-file {child}\n"),
+        );
+        for (body, status, stderr) in [
+            ("source-file -", 0, &b""[..]),
+            ("set -g @nonreader yes ; source-file -", 0, &b""[..]),
+            (
+                "source-file - ; source-file - ; set -g @after yes",
+                1,
+                &b"Bad file descriptor: -\n"[..],
+            ),
+        ] {
+            assert!(
+                fixture
+                    .run(&["set", "-s", "command-alias[40]", &format!("stream={body}")])
+                    .status
+                    .success()
+            );
+            for path in [&child, &parent] {
+                assert!(fixture.run(&["set", "-gu", "@stream"]).status.success());
+                let output =
+                    fixture.run_with_stdin(&["source-file", path], b"set -ag @stream once\n");
+                assert_eq!(output.status.code(), Some(status), "{body}: {output:?}");
+                assert_eq!(output.stdout, b"", "{body}");
+                assert_eq!(output.stderr, stderr, "{body}");
+                assert_eq!(
+                    fixture.run(&["show-options", "-gqv", "@stream"]).stdout,
+                    b"once\n"
+                );
+            }
+        }
+        assert!(
+            fixture
+                .run(&[
+                    "set",
+                    "-s",
+                    "command-alias[40]",
+                    "stream=load-buffer -b file-stream - ; save-buffer -b file-stream -"
+                ])
+                .status
+                .success()
+        );
+        assert!(
+            fixture
+                .run(&[
+                    "set",
+                    "-s",
+                    "command-alias[41]",
+                    "tail=display-message -p ignored ; set -g @tail yes"
+                ])
+                .status
+                .success()
+        );
+        let with_tail = write_source(
+            fixture._directory.path(),
+            "with-tail.conf",
+            "stream\ntail\n",
+        );
+        for path in [&child, &parent, &with_tail] {
+            let output = fixture.run_with_stdin(&["source-file", path], b"a\xff\0z");
+            assert_eq!(output.status.code(), Some(0), "{output:?}");
+            assert_eq!(output.stdout, b"a\xff\0z");
+            assert!(output.stderr.is_empty());
+        }
+        assert_eq!(
+            fixture.run(&["show-options", "-gqv", "@after"]).stdout,
+            b"yes\n"
+        );
+    }
+
+    #[test]
     fn live_agent_send_aliases_control_stdin_capture() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
@@ -4594,7 +4813,10 @@ mod daemon_autostart {
                 }
                 if Instant::now() >= deadline {
                     child.kill().expect("kill stalled control block process");
-                    panic!("control process did not reach {label}");
+                    panic!(
+                        "control process did not reach {label}: {}",
+                        String::from_utf8_lossy(&output)
+                    );
                 }
                 thread::sleep(Duration::from_millis(10));
             }

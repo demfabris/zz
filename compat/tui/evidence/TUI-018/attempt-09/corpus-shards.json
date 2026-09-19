@@ -1,0 +1,12 @@
+{
+  "binary": "target/debug/zz-alias4-corrected",
+  "selected_rows": 230,
+  "shard_sizes": [
+    51,
+    59,
+    60,
+    60
+  ],
+  "disjoint": true,
+  "missing": []
+}

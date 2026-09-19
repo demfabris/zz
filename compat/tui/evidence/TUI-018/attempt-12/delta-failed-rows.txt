@@ -1,0 +1,9 @@
+lane2-store.txt
+micro-flags.txt
+show-options-hooks.txt
+smoke/cli-chain-parse-abort.txt
+smoke/default-client-command.txt
+smoke/plugin-runtime-continuum.txt
+smoke/plugin-runtime-resurrect-restore.txt
+smoke/source-replay-diagnostics.txt
+smoke/status-background-jobs.txt

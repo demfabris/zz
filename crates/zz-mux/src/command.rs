@@ -4481,6 +4481,11 @@ impl MuxEngine {
         }
         for expanded in &mut commands {
             expanded.source.clone_from(&command.source);
+            if let Some(stdin) = command.stdin() {
+                expanded.set_stdin(stdin.clone());
+            } else if command.stdin_was_spent() {
+                expanded.set_stdin_spent();
+            }
         }
         if commands.len() == 1 {
             return CommandAliasResolution::Expanded(commands.remove(0));
@@ -4491,6 +4496,11 @@ impl MuxEngine {
                 .with_command_blocks([0])
                 .into_expanded_alias_group();
         expanded.source.clone_from(&command.source);
+        if let Some(stdin) = command.stdin() {
+            expanded.set_stdin(stdin.clone());
+        } else if command.stdin_was_spent() {
+            expanded.set_stdin_spent();
+        }
         CommandAliasResolution::Expanded(expanded)
     }
 
@@ -4560,10 +4570,13 @@ impl MuxEngine {
         if let Some(commands) = parse_command_alias_group(command)? {
             validate_static_command_chain(&commands)?;
             let mut combined = Execution::default();
-            let stream = command.stdin();
+            let mut stream = command.stdin().cloned();
+            let mut spent = command.stdin_was_spent();
             for mut command in commands {
-                if let Some(stream) = stream {
+                if let Some(stream) = &stream {
                     command.set_stdin(stream.clone());
+                } else if spent {
+                    command.set_stdin_spent();
                 }
                 let execution = self.execute_without_alias_expansion(
                     context,
@@ -4571,6 +4584,18 @@ impl MuxEngine {
                     hooks,
                     default_shell_is_valid,
                 )?;
+                if execution.effects.iter().any(|effect| {
+                    matches!(
+                        effect,
+                        MuxEffect::SourceFile {
+                            stdin: Some(SourceStream::Bytes(_)),
+                            ..
+                        } | MuxEffect::PaneStreamInput { .. }
+                    )
+                }) {
+                    stream = None;
+                    spent = true;
+                }
                 if !execution.output.is_empty() {
                     if !combined.output.is_empty() && !combined.output.ends_with('\n') {
                         combined.output.push_bytes(b"\n");
@@ -4702,7 +4727,13 @@ impl MuxEngine {
             )?,
             "set-environment" => self.set_environment(context, &command.args, hooks)?,
             "show-environment" => self.show_environment(context, &command.args)?,
-            "source-file" => self.source_file(context, &command.args, command.stdin(), hooks)?,
+            "source-file" => self.source_file(
+                context,
+                &command.args,
+                command.stdin(),
+                command.stdin_was_spent(),
+                hooks,
+            )?,
             "reload-config" => {
                 parse_command_options("reload-config", &command.args)?;
                 if command.args.is_empty() {
@@ -6762,10 +6793,52 @@ impl MuxEngine {
         } else {
             Axis::Vertical
         };
-        let placement = self.split_placement(options, size)?;
+        let placement = if apply_tmux_zoom {
+            let size = match size {
+                None => LayoutSplitSize::Default,
+                Some(SplitSize::Percentage(value)) => LayoutSplitSize::Percent(
+                    u8::try_from(parse_strtonum(value, 0, 100, "invalid tiled geometry")?)
+                        .expect("bounded percentage"),
+                ),
+                Some(SplitSize::Cells(value)) => {
+                    if let Some(value) = value.strip_suffix('%') {
+                        LayoutSplitSize::Percent(
+                            u8::try_from(parse_strtonum(value, 0, 100, "invalid tiled geometry")?)
+                                .expect("bounded percentage"),
+                        )
+                    } else {
+                        LayoutSplitSize::Cells(
+                            u16::try_from(parse_strtonum(
+                                value,
+                                0,
+                                i64::from(i32::MAX),
+                                "invalid tiled geometry",
+                            )?)
+                            .unwrap_or(u16::MAX),
+                        )
+                    }
+                }
+            };
+            SplitPlacement {
+                size,
+                before: options.has("-b"),
+                full_size: options.has("-f"),
+                detached: options.has("-d"),
+            }
+        } else {
+            self.split_placement(options, size)?
+        };
         let snapshot_kind = pane_kind_snapshot(&kind);
         let (inherit_cwd_from, cwd) =
             spawn_cwd_source(self, options, Some(target), &kind, format_client, hooks);
+        if apply_tmux_zoom
+            && self
+                .state
+                .window_for_pane(target)
+                .is_some_and(|window| self.state.windows[&window].zoomed_pane.is_some())
+        {
+            self.state.toggle_zoom(target)?;
+        }
         let pane = self.state.split_pane_with(target, axis, kind, placement)?;
         if empty {
             self.state.mark_pane_empty(pane)?;
@@ -8815,8 +8888,30 @@ impl MuxEngine {
         }
     }
 
-    /// `window_pane_start_input`: a pane with a process of its own refuses the
-    /// stream, and a caller that brought no stream leaves the pane alone.
+    pub fn command_stdin_destination_ready(
+        &self,
+        context: &ExecutionContext,
+        command: &CommandInvocation,
+    ) -> Result<bool, ServerError> {
+        let name = canonical_command(&command.name);
+        if !matches!(name, "display-message" | "split-window") {
+            return Ok(true);
+        }
+        let (options, positional) = parse_command_options(name, &command.args)?;
+        if name == "display-message" {
+            let target = self.resolve_display_message_context(context, &options)?;
+            let Some(pane) = target.and_then(|target| target.pane) else {
+                return Ok(false);
+            };
+            self.pane_stream_input(pane, None)?;
+        } else {
+            self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+            pane_spawn_empty(&options, shell_command_positional(&positional).as_deref())?;
+            self.split_placement(&options, split_size(&options))?;
+        }
+        Ok(true)
+    }
+
     fn pane_stream_input(
         &self,
         pane: PaneId,
@@ -13702,6 +13797,7 @@ impl MuxEngine {
         context: &ExecutionContext,
         args: &[RawText],
         stdin: Option<&RawText>,
+        stdin_spent: bool,
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("source-file", args)?;
@@ -13726,7 +13822,7 @@ impl MuxEngine {
             }
         }
         let mut stream = stdin.cloned();
-        let carried_a_stream = stdin.is_some();
+        let carried_a_stream = stdin.is_some() || stdin_spent;
         Ok(Execution {
             output: RawText::default(),
             effects: positional
@@ -37502,6 +37598,112 @@ mod tests {
             Execution::default()
         );
         assert_eq!(engine.state.generation(), generation);
+    }
+
+    #[test]
+    fn caller_stream_destination_is_checked_without_mutating_panes() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "stream"]),
+            )
+            .unwrap();
+        let generation = engine.state.generation();
+        assert!(
+            engine
+                .command_stdin_destination_ready(&context, &command("display-message", &["-I"]))
+                .is_err()
+        );
+        assert!(
+            !engine
+                .command_stdin_destination_ready(
+                    &context,
+                    &command("display-message", &["-I", "-t", "%99999"])
+                )
+                .unwrap()
+        );
+        assert!(
+            engine
+                .command_stdin_destination_ready(
+                    &context,
+                    &command("split-window", &["-I", "-t", "%99999"])
+                )
+                .is_err()
+        );
+        assert!(
+            engine
+                .command_stdin_destination_ready(&context, &command("split-window", &["-I"]))
+                .unwrap()
+        );
+        assert_eq!(engine.state.generation(), generation);
+        engine
+            .execute(&mut context, &command("split-window", &["-I"]))
+            .unwrap();
+        assert!(
+            engine
+                .command_stdin_destination_ready(&context, &command("display-message", &["-I"]))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn caller_stream_survives_alias_expansion_and_is_spent_by_the_first_reader() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        for (body, expected) in [
+            ("source-file -", vec![true]),
+            (
+                "display-message -p before ; source-file local.conf ; source-file - - ; source-file -",
+                vec![true, false, false],
+            ),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-option",
+                        ["-s", "command-alias[90]", &format!("stream={body}")],
+                    ),
+                )
+                .expect("install stream alias");
+            for payload in ["", "set -g @stream yes"] {
+                let mut invocation = command("stream", &[]);
+                invocation.set_stdin(payload);
+                let execution = engine
+                    .execute(&mut context, &invocation)
+                    .expect("stream alias");
+                let streams = execution
+                    .effects
+                    .into_iter()
+                    .filter_map(|effect| match effect {
+                        MuxEffect::SourceFile { path, stdin, .. } if path == "-" => Some(stdin),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(streams.len(), expected.len());
+                for (stream, available) in streams.into_iter().zip(&expected) {
+                    assert_eq!(
+                        stream,
+                        Some(if *available {
+                            SourceStream::Bytes(payload.into())
+                        } else {
+                            SourceStream::Spent
+                        })
+                    );
+                }
+            }
+            let execution = engine
+                .execute(&mut context, &command("stream", &[]))
+                .expect("callerless alias");
+            assert!(
+                execution
+                    .effects
+                    .iter()
+                    .all(|effect| !matches!(effect, MuxEffect::SourceFile { stdin: Some(_), .. }))
+            );
+        }
     }
 
     #[test]

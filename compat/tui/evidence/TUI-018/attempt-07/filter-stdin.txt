@@ -1,0 +1,27 @@
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.28s
+     Running unittests src/lib.rs (target/debug/deps/zz_daemon-7a6e412177cab2ac)
+
+running 6 tests
+test client::tests::local_control_facts_use_only_stdin_identity ... ok
+test daemon::tests::agent_send_reads_stdin_only_when_argv_carries_no_text ... ok
+test daemon::tests::standard_buffer_streams_preserve_bytes_empty_input_and_stdin_bound ... ok
+test daemon::tests::shell_job_closes_stdin_and_ignores_inherited_output_descriptors_after_exit ... ok
+test daemon::tests::control_source_stdin_read_failure_keeps_alias_continuation ... FAILED
+test daemon::tests::caller_stdin_request_waits_for_the_alias_reader ... ok
+
+failures:
+
+---- daemon::tests::control_source_stdin_read_failure_keeps_alias_continuation stdout ----
+
+thread 'daemon::tests::control_source_stdin_read_failure_keeps_alias_continuation' (2046404) panicked at crates/zz-daemon/src/daemon.rs:42738:9:
+assertion failed: matches!(response, CommandResponse::Success { .. })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    daemon::tests::control_source_stdin_read_failure_keeps_alias_continuation
+
+test result: FAILED. 5 passed; 1 failed; 0 ignored; 0 measured; 947 filtered out; finished in 0.08s
+
+error: test failed, to rerun pass `-p zz-daemon --lib`

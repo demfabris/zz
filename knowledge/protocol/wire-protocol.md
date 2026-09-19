@@ -4,7 +4,7 @@ title: zz wire protocol (v105)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-08-31T00:00:00-03:00
+timestamp: 2026-09-17T00:00:00-03:00
 ---
 
 # Overview
@@ -683,6 +683,27 @@ invocation rather than in `args` for the commands whose payload is not an argume
 the server log still records the command the caller typed. See
 [the command stream channel](/designs/command-stream-channel.md) for the sinks and the bound.
 
+v105 is unreleased. The cycle-11 caller-stream correction appends
+`CommandInvocation.stdin_available: bool` with `#[serde(default)]` and
+`ClientFileOperation::ReadStdin { binary: bool }` after `Write`, then `ReadStdinChunk` after
+`ReadStdin`. A command client opts in to stdin requests. The daemon requests bytes when the reader
+executes, through the existing `ClientFileRequest` and bounded `ClientFileResponse` exchange.
+`ReadStdin` answers the whole bounded payload; `ReadStdinChunk` answers one read of at most 16 KiB,
+an empty payload at end of file, and the daemon requests the next chunk only after the pane took
+the previous one. Unused stdin stays unread.
+`CommandInvocation::stdin_spent` uses `#[serde(skip)]` and stays inside the daemon;
+`caller_stream_spent_marker_stays_in_process` checks that absent and spent streams encode
+identically. The same entry appends two `EventPayload` variants after `ChooserPresentation`:
+`CommandStdout { output: RawText }`, which releases a `cmdq_print` line to a Command client's stdout
+while its request is still running so a `split-window -I -P` line is not held until the stream ends,
+and `CommandClientExit`, the pin's `CLIENT_EXIT`, which the daemon raises when a caller stream's
+target pane disappears so the client stops the rest of its `\;` chain. Released bytes leave the
+request's own output, so the final `CommandResponse` never repeats them.
+`released_command_stdout_and_client_exit_append_after_the_chooser_presentation` pins both tags to
+the end of the enum. These appends were written against an unreleased 104; zz 0.11.0 shipped 104 with
+main's three `ServerError::Native*` variants and without them, so they moved to 105. The v103 and
+v104 entries describe released layouts and remain intact.
+
 # Versioning & compatibility
 
 - **`PROTOCOL_VERSION: u16 = 105`** is stamped into every frame's envelope and re-checked inside
@@ -736,7 +757,10 @@ the server log still records the command the caller typed. See
   Both parse variants retain the same diagnostic text and parse-error classification.
   `NativeInvalidCommand` preserves the runtime phase when bind-key or untyped confirm-before
   constructs an invalid native callback, while retaining native usage exit 2.
-  v103 shipped in zz 0.10.0, so these builds require v104 on both sides of the connection.
+  v103 shipped in zz 0.10.0, so v104 builds require v104 on both sides of the connection.
+- v105 appends `CommandInvocation.stdin_available` and `ClientFileOperation::ReadStdin` and
+  `ReadStdinChunk`, the caller stream requests described above. v104 shipped in zz 0.11.0, so these
+  builds require v105 on both sides of the connection.
 - v103 carries the pin's pane prompt and the terminal name a client learned after the hello.
   `CommandPromptState` appends `pane: Option<PaneId>` after `no_freeze`: `command-prompt -P` is
   `window_pane_set_prompt`, so the prompt hangs on the pane the command targeted rather than on the

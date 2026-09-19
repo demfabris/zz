@@ -1,0 +1,6 @@
+awk: cmd. line:1: fatal: printf to "standard output" failed: No space left on device
+daemon rss_kb_before=66604 tmux-server rss_kb=4600
+zz 64MiB rc=0 ms=2849 client_VmHWM_kb=29688 writer_wchan= client_wchan=0 last=6800384
+daemon rss_kb_after=63692 hwm=66400
+tmux 64MiB rc=0 ms=2040 client_VmHWM_kb=57560 writer_wchan= client_wchan=poll_schedule_timeout.constprop.0 last=6800384
+tmux-server rss_kb_after=4948

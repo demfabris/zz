@@ -1,0 +1,334 @@
+      case matrix-direct-buffer-spent
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-direct-buffer-spent
+compat/tui-command-streams.sh: line 1226: 2577331 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-split-no-space
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < no space for a new pane
+DIFF  matrix-direct-split-no-space
+compat/tui-command-streams.sh: line 1226: 2579164 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+compat/tui-command-streams.sh: line 1226: 2580707 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-split-pending
+      state differs
+        4,5c4,5
+        < pending=0:3
+        < final=0:3
+        ---
+        > pending=1:2
+        > final=1:2
+DIFF  matrix-direct-split-pending
+      case matrix-direct-buffer-closed
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 13 bytes)
+        0a1
+        > MATRIX-AFTER
+      stderr differs
+        1d0
+        < [err] evsig_cb: recv: Bad file descriptor
+      state differs
+        3c3
+        < tail=
+        ---
+        > tail=yes
+DIFF  matrix-direct-buffer-closed
+ok    matrix-direct-closed-unused
+ok    matrix-alias-buffer-spent
+compat/tui-command-streams.sh: line 1226: 2583810 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-alias-split-no-space
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < no space for a new pane
+DIFF  matrix-alias-split-no-space
+compat/tui-command-streams.sh: line 1226: 2585539 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+compat/tui-command-streams.sh: line 1226: 2587042 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-alias-split-pending
+      state differs
+        4,5c4,5
+        < pending=0:3
+        < final=0:3
+        ---
+        > pending=1:2
+        > final=1:2
+DIFF  matrix-alias-split-pending
+      case matrix-alias-buffer-closed
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 13 bytes)
+        0a1
+        > MATRIX-AFTER
+      stderr differs
+        1d0
+        < [err] evsig_cb: recv: Bad file descriptor
+      state differs
+        3c3
+        < tail=
+        ---
+        > tail=yes
+DIFF  matrix-alias-buffer-closed
+ok    matrix-alias-closed-unused
+      case matrix-file-buffer-spent
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1d0
+        < Bad file descriptor: -
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-file-buffer-spent
+compat/tui-command-streams.sh: line 1226: 2590240 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-file-split-no-space
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < no space for a new pane
+DIFF  matrix-file-split-no-space
+compat/tui-command-streams.sh: line 1226: 2592010 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+compat/tui-command-streams.sh: line 1226: 2593414 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-file-split-pending
+      state differs
+        4,5c4,5
+        < pending=0:3
+        < final=0:3
+        ---
+        > pending=1:2
+        > final=1:2
+DIFF  matrix-file-split-pending
+      case matrix-file-buffer-closed
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 13 bytes)
+        0a1
+        > MATRIX-AFTER
+      stderr differs
+        1d0
+        < [err] evsig_cb: recv: Bad file descriptor
+      state differs
+        3c3
+        < tail=
+        ---
+        > tail=yes
+DIFF  matrix-file-buffer-closed
+ok    matrix-file-closed-unused
+compat/tui-command-streams.sh: line 1226: 2595970 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-split-horizontal-no-space
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < no space for a new pane
+DIFF  matrix-direct-split-horizontal-no-space
+      case matrix-direct-split-bad-size
+      stderr differs
+        1c1
+        < invalid tiled geometry invalid
+        ---
+        > invalid pane size: invalid
+DIFF  matrix-direct-split-bad-size
+      case matrix-direct-split-bad-percent
+      stderr differs
+        1c1
+        < invalid tiled geometry invalid
+        ---
+        > invalid pane percentage: invalid
+DIFF  matrix-direct-split-bad-percent
+ok    matrix-direct-split-command
+compat/tui-command-streams.sh: line 1226: 2600255 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+compat/tui-command-streams.sh: line 1226: 2601456 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-split-style
+      state differs
+        4c4
+        < final=0:2
+        ---
+        > final=0:1
+DIFF  matrix-direct-split-style
+compat/tui-command-streams.sh: line 1226: 2602545 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+compat/tui-command-streams.sh: line 1226: 2603739 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-split-active-style
+      state differs
+        4c4
+        < final=0:2
+        ---
+        > final=0:1
+DIFF  matrix-direct-split-active-style
+compat/tui-command-streams.sh: line 1226: 2604949 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+compat/tui-command-streams.sh: line 1226: 2606242 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-split-border-style
+      state differs
+        4c4
+        < final=0:2
+        ---
+        > final=0:1
+DIFF  matrix-direct-split-border-style
+ok    matrix-direct-display-bad-flag
+ok    matrix-direct-display-too-many
+compat/tui-command-streams.sh: line 1226: 2608496 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+compat/tui-command-streams.sh: line 1226: 2609842 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-split-pending-zoom
+      state differs
+        4,5c4,5
+        < pending=1:3
+        < final=1:3
+        ---
+        > pending=1:2
+        > final=1:2
+DIFF  matrix-direct-split-pending-zoom
+      case matrix-direct-display-closed
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 13 bytes)
+        0a1
+        > MATRIX-AFTER
+      stderr differs
+        1d0
+        < [err] evsig_cb: recv: Bad file descriptor
+      state differs
+        3c3
+        < tail=
+        ---
+        > tail=yes
+DIFF  matrix-direct-display-closed
+      case matrix-direct-split-closed
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 13 bytes)
+        0a1
+        > MATRIX-AFTER
+      stderr differs
+        1d0
+        < [err] evsig_cb: recv: Bad file descriptor
+      state differs
+        3c3
+        < tail=
+        ---
+        > tail=yes
+DIFF  matrix-direct-split-closed
+ok    matrix-alias-eof
+ok    matrix-file-eof
+      case matrix-attached-term-idle-before
+      exit tmux: 0  zz: 143
+      stdout differs (tmux 36 bytes, zz 459 bytes)
+        3,4c3
+        < %exit
+        < ^[\
+        \ No newline at end of file
+        ---
+        > Terminated                 ( printf "%s\n" "$BASHPID" > /tmp/zzcs.3cj90h/zz.pid; exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzcs.3cj90h/zz-home XDG_CONFIG_HOME=/tmp/zzcs.3cj90h/zz-home/config ZZ_LOG_DIR=/tmp/zzcs.3cj90h/zz-logs /home/demfabris/dev/zz-c11-alias-fix/target/debug/zz-alias5-baseline --socket /tmp/zzcs-3cj90h.sock -CC attach-session -f no-output -t =cs 2> /tmp/zzcs.3cj90h/zz.err )
+DIFF  matrix-attached-term-idle-before
+      case matrix-attached-term-before
+      exit tmux: 0  zz: 143
+      stdout differs (tmux 100 bytes, zz 508 bytes)
+        6,8c6
+        < %end TIME ID 1
+        < %exit
+        < ^[\
+        \ No newline at end of file
+        ---
+        > Terminated                 ( printf "%s\n" "$BASHPID" > /tmp/zzcs.3cj90h/zz.pid; exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzcs.3cj90h/zz-home XDG_CONFIG_HOME=/tmp/zzcs.3cj90h/zz-home/config ZZ_LOG_DIR=/tmp/zzcs.3cj90h/zz-logs /home/demfabris/dev/zz-c11-alias-fix/target/debug/zz-alias5-baseline --socket /tmp/zzcs-3cj90h.sock -CC attach-session -f no-output -t =cs 2> /tmp/zzcs.3cj90h/zz.err )
+DIFF  matrix-attached-term-before
+      case matrix-attached-term-after
+      exit tmux: 0  zz: 143
+      stdout differs (tmux 155 bytes, zz 563 bytes)
+        9,11c9
+        < %end TIME ID 1
+        < %exit
+        < ^[\
+        \ No newline at end of file
+        ---
+        > Terminated                 ( printf "%s\n" "$BASHPID" > /tmp/zzcs.3cj90h/zz.pid; exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzcs.3cj90h/zz-home XDG_CONFIG_HOME=/tmp/zzcs.3cj90h/zz-home/config ZZ_LOG_DIR=/tmp/zzcs.3cj90h/zz-logs /home/demfabris/dev/zz-c11-alias-fix/target/debug/zz-alias5-baseline --socket /tmp/zzcs-3cj90h.sock -CC attach-session -f no-output -t =cs 2> /tmp/zzcs.3cj90h/zz.err )
+DIFF  matrix-attached-term-after
+      case matrix-attached-term-after-two
+      exit tmux: 0  zz: 143
+      stdout differs (tmux 210 bytes, zz 618 bytes)
+        12,14c12
+        < %end TIME ID 1
+        < %exit
+        < ^[\
+        \ No newline at end of file
+        ---
+        > Terminated                 ( printf "%s\n" "$BASHPID" > /tmp/zzcs.3cj90h/zz.pid; exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzcs.3cj90h/zz-home XDG_CONFIG_HOME=/tmp/zzcs.3cj90h/zz-home/config ZZ_LOG_DIR=/tmp/zzcs.3cj90h/zz-logs /home/demfabris/dev/zz-c11-alias-fix/target/debug/zz-alias5-baseline --socket /tmp/zzcs-3cj90h.sock -CC attach-session -f no-output -t =cs 2> /tmp/zzcs.3cj90h/zz.err )
+DIFF  matrix-attached-term-after-two
+      case matrix-attached-term-idle-after
+      exit tmux: 0  zz: 143
+      stdout differs (tmux 200 bytes, zz 623 bytes)
+        13,14c13
+        < %exit
+        < ^[\
+        \ No newline at end of file
+        ---
+        > Terminated                 ( printf "%s\n" "$BASHPID" > /tmp/zzcs.3cj90h/zz.pid; exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzcs.3cj90h/zz-home XDG_CONFIG_HOME=/tmp/zzcs.3cj90h/zz-home/config ZZ_LOG_DIR=/tmp/zzcs.3cj90h/zz-logs /home/demfabris/dev/zz-c11-alias-fix/target/debug/zz-alias5-baseline --socket /tmp/zzcs-3cj90h.sock -CC attach-session -f no-output -t =cs 2> /tmp/zzcs.3cj90h/zz.err )
+DIFF  matrix-attached-term-idle-after
+      case matrix-attached-term-file-after
+      exit tmux: 0  zz: 143
+      stdout differs (tmux 187 bytes, zz 476 bytes)
+        4,13c4
+        < %end TIME ID 1
+        < %begin TIME ID 1
+        < %end TIME ID 1
+        < %begin TIME ID 1
+        < %end TIME ID 1
+        < Bad file descriptor: -
+        < %begin TIME ID 1
+        < %end TIME ID 1
+        < %exit
+        < ^[\
+        \ No newline at end of file
+        ---
+        > Terminated                 ( printf "%s\n" "$BASHPID" > /tmp/zzcs.3cj90h/zz.pid; exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzcs.3cj90h/zz-home XDG_CONFIG_HOME=/tmp/zzcs.3cj90h/zz-home/config ZZ_LOG_DIR=/tmp/zzcs.3cj90h/zz-logs /home/demfabris/dev/zz-c11-alias-fix/target/debug/zz-alias5-baseline --socket /tmp/zzcs-3cj90h.sock -CC attach-session -f no-output -t =cs 2> /tmp/zzcs.3cj90h/zz.err )
+DIFF  matrix-attached-term-file-after
+      case matrix-direct-closed
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 13 bytes)
+        0a1
+        > MATRIX-AFTER
+      stderr differs
+        1d0
+        < [err] evsig_cb: recv: Bad file descriptor
+      state differs
+        3c3
+        < tail=
+        ---
+        > tail=yes
+DIFF  matrix-direct-closed
+      case matrix-alias-closed
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 13 bytes)
+        0a1
+        > MATRIX-AFTER
+      stderr differs
+        1d0
+        < [err] evsig_cb: recv: Bad file descriptor
+      state differs
+        3c3
+        < tail=
+        ---
+        > tail=yes
+DIFF  matrix-alias-closed
+      case matrix-file-closed
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 13 bytes)
+        0a1
+        > MATRIX-AFTER
+      stderr differs
+        1d0
+        < [err] evsig_cb: recv: Bad file descriptor
+      state differs
+        3c3
+        < tail=
+        ---
+        > tail=yes
+DIFF  matrix-file-closed
+ok    matrix-direct-eof
+ok    matrix-direct-split-missing
+ok    matrix-alias-split-missing
+ok    matrix-file-split-missing
+matrix: 42 asserted, 29 failures, 0 recorded:TUI-018, 0 decided:TUI-018, 0 self-check failures
+exit_status=1

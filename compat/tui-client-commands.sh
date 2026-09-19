@@ -1526,6 +1526,8 @@ CAPTURE_PENDING='DECIDED capture.rich-transports, refused with a measurement 202
 CAPTURE_GRID='DECIDED capture.rich-transports, refused with a measurement 2026-09-15: -R dumps the pin internal grid - a header G <sx>x<sy> (<hsize>/<hlimit>), then per line L <yy> (<n>) flags=<string>[<hex>] <cellused>/<cellsize>, then one C line per column carrying that cell colour, attribute and link ids. Measured at 40x8 that is 329 lines for eight rows. zz has no hsize/hlimit pair, no per-line cellused and cellsize, and no grid flag word: building them inside zz would be inventing tmux internals to make bytes match. The workload it would serve is a tmux regression test reading another tmux grid. decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
 CAPTURE_CHARSET='DECIDED capture charset provenance: decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible. At 80x24 ESC(0qqqESC(B gives literal \016qqq\017 under -C -e on the pin and UTF-8 box drawing on zz; without -e the pin emits qqq while zz still emits box drawing. Ghostty maps the source charset byte to Unicode before storing the cell and retains no charset bit. The workload is replaying original DEC line drawing bytes; ordinary Unicode text capture remains asserted'
 CAPTURE_TABS='DECIDED 2026-09-18 (fabrico): zz capture-pane returns the spaces a tab left on screen. Since tmux 3.4 the pin marks every cell a tab produced (GRID_FLAG_TAB) and prints a literal \t for it under any capture flags (grid.c:1202), and once an edit removes the head of such a tab it drops the padding cells that stay behind. zz keeps no tab provenance in its terminal grid: tracking it cost up to +68% CPU on output that overwrites tab-bearing rows and made every later edit keep the span honest. Recorded in knowledge/designs/tui-parity.md, amendment 2026-09-18'
+CAPTURE_UNPATCHED_INDEXED='DECIDED 2026-09-18 (fabrico): zz carries no patch on the vendored terminal engine; the divergence is accepted. The pin re-emits the colour class on capture-pane -e, so SGR 38;5;1 comes back indexed: at 80x24 ESC[38;5;1mREDESC[0m gives literal \033[38;5;1mRED\033[39m on the pin and \033[31mRED\033[39m on zz under -C -e -S 0 -E 0, because libghostty-vt stores a low palette index and its named colour the same way. Recorded in knowledge/designs/tui-parity.md, amendment 2026-09-18'
+CAPTURE_UNPATCHED_ICH='DECIDED 2026-09-18 (fabrico): zz carries no patch on the vendored terminal engine; the divergence is accepted. An insert wider than the cells it moves clears differently without the carried ICH hunk: ESC[73GABC<TAB>Z CR ESC[70G ESC[6@ leaves row 0 as 74 spaces, C, 3 spaces, AB on the pin and 78 spaces, AB on zz under -C -S 0 -E 4. Recorded in knowledge/designs/tui-parity.md, amendment 2026-09-18'
 LOG_IDENTITY='DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. Measured 2026-09-14 on both sides: the pin names ANY tty-bearing client by that tty, including the attached terminal client whose attach-session row reads /dev/pts/<n>, and zz named none of them - it spelled every row by the device name the client sent, which for an interactive client is the hostname. That half is closed: the server log now names a client by its tty whenever it has one. What stays is the clientless CLI, which names a process that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked'
 SERVER_ACCESS='protocol.socket-acl, accepted as a permanent exclusion: the daemon socket is the invoking user at mode 0600, so zz keeps no peer identity and every other form of the command - the list, the lookups, the owner test, the flag conflicts, the deny of an entry that is not there and the no-action form - answers exactly as the pin does, measured 2026-09-15. Only admitting a second identity diverges - semantic:multi-user-socket-acl, the permanent exclusion this gap exists for: the pin stores the entry and exits 0, zz refuses it'
 CLIENT_TREE_CLIENTLESS='clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer. Measured 2026-09-17 with the fixture client attached, as it is in every run: the pin exits 0 with no output and opens client-mode on the target pane, drawing the client tree and the preview box over it, because server_client_how_many() counts that attached client (cmd-choose-tree.c); zz exits 1 with choose-client requires an interactive client on stderr and leaves the pane in no mode. The exit status, stderr, the screen and the pane mode diverge. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open'
@@ -1618,12 +1620,8 @@ rich_capture_case() {
   if [ "$SELF_CHECK" -eq 1 ]; then
     self_check_run "$name-equivalence" capture-pane -p -t '=zzcap-rich:win' "$@"
     self_check_expect "$name exact bytes before sabotage" exit=0 stdout=0 stderr=0
-    if [ "$name" = capture-low-indexed-colour ]; then
-      changed="${payload/38;5;1/31}"
-    elif [ "$name" = capture-edited-tab-overwrite-background ]; then
+    if [ "$name" = capture-edited-tab-overwrite-background ]; then
       changed="${payload/41m/42m}"
-    elif [[ "$name" == capture-edited-tab-ich-* ]]; then
-      changed="${payload/@/m}"
     elif [[ "$name" == capture-edited-tab-dch-* ]]; then
       changed="${payload/\\033\[P/\\033[m}"
       changed="${changed/2P/2m}"
@@ -1660,7 +1658,6 @@ rich_capture_case() {
 
 edited_tab_capture_cases() {
   rich_capture_case capture-edited-tab-overwrite-background '\033[44mABC\tDEF\033[0m\r\033[6G\033[41mX\033[0m\033[5;1HNEXT' same '' -C -e -S 0 -E 4
-  rich_capture_case capture-edited-tab-ich-off-line '\033[73GABC\tZ\r\033[70G\033[6@\033[5;1HNEXT' same '' -C -S 0 -E 4
   rich_capture_case capture-edited-tab-dch-entire 'ABC\tDEF\r\033[4G\033[5P\033[5;1HNEXT' same '' -C -S 0 -E 4
   rich_capture_case capture-edited-tab-dch-off-line 'ABC\tDEF\r\033[80P\033[5;1HNEXT' same '' -C -S 0 -E 4
   rich_capture_case capture-edited-tab-dch-overwrite 'ABC\tDEF\r\033[5G\033[P\033[6GX\033[5;1HNEXT' same '' -C -S 0 -E 4
@@ -1677,6 +1674,7 @@ edited_tab_capture_cases() {
   rich_capture_case capture-edited-tab-ich-head 'ABC\tDEF\r\033[4G\033[@\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
   rich_capture_case capture-edited-tab-ich-truncate '\033[73GABC\tZ\r\033[70G\033[2@\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
   rich_capture_case capture-edited-tab-ich-overwrite 'ABC\tDEF\r\033[5G\033[@X\033[7GY\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
+  rich_capture_case capture-edited-tab-ich-off-line '\033[73GABC\tZ\r\033[70G\033[6@\033[5;1HNEXT' record "$CAPTURE_UNPATCHED_ICH" -C -S 0 -E 4
   rich_capture_case capture-edited-tab-dch-middle 'ABC\tDEF\r\033[5G\033[P\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
   rich_capture_case capture-edited-tab-dch-before 'ABC\tDEF\r\033[2G\033[2P\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
   rich_capture_case capture-edited-tab-dch-head 'ABC\tDEF\r\033[4G\033[P\033[5;1HNEXT' record "$CAPTURE_TABS" -C -S 0 -E 4
@@ -1732,8 +1730,8 @@ rich_capture_cases() {
   rich_capture_case capture-wide-wrap-join "\033[31m${wrap}界界\033[0mNEXT" same '' -L -e -J -S 0 -E 4
   erased_wide_capture_cases
   edited_tab_capture_cases
-  rich_capture_case capture-low-indexed-colour '\033[38;5;1mRED\033[0m\r\nNEXT' same '' -C -e -S 0 -E 0
   if [ "$SELF_CHECK" -eq 0 ]; then
+    rich_capture_case capture-low-indexed-colour '\033[38;5;1mRED\033[0m\r\nNEXT' record "$CAPTURE_UNPATCHED_INDEXED" -C -e -S 0 -E 0
     rich_capture_case capture-charset-text '\033(0qqq\033(B\r\nNEXT' record "$CAPTURE_CHARSET" -C -S 0 -E 0
     rich_capture_case capture-charset-escape '\033(0qqq\033(B\r\nNEXT' record "$CAPTURE_CHARSET" -C -e -S 0 -E 0
   fi

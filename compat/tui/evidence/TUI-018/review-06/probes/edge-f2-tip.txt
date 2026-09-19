@@ -1,0 +1,80 @@
+--- zz display TERM open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  @after=invalid option: @after
+--- tmux display TERM open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  @after=invalid option: @after
+--- zz split TERM open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  @after=invalid option: @after
+--- tmux split TERM open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  @after=invalid option: @after
+--- zz display HUP open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+still running after HUP
+--- after MORE: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no  @after=yes
+--- tmux display HUP open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  @after=invalid option: @after
+--- zz split HUP open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+still running after HUP
+--- after MORE: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no  @after=yes
+--- tmux split HUP open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  @after=invalid option: @after
+--- zz display INT open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+still running after INT
+--- after MORE: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no  @after=yes
+--- tmux display INT open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+still running after INT
+--- after MORE: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no  @after=yes
+--- zz split INT open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+still running after INT
+--- after MORE: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no  @after=yes
+--- tmux split INT open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+still running after INT
+--- after MORE: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no  @after=yes
+--- zz display QUIT open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+still running after QUIT
+--- after MORE: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no  @after=yes
+--- tmux display QUIT open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+still running after QUIT
+--- after MORE: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no  @after=yes
+--- zz split QUIT open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+still running after QUIT
+--- after MORE: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no  @after=yes
+--- tmux split QUIT open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+still running after QUIT
+--- after MORE: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39mMORE cursor=7:0 hist=0 size=80x11 dead=0 pid=no  @after=yes
+--- zz display EOF open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  @after=yes
+--- tmux display EOF open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  @after=yes
+--- zz split EOF open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  @after=yes
+--- tmux split EOF open: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+rc=0 out=[] err=[]
+--- after: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  @after=yes

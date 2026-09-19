@@ -1,0 +1,16 @@
+writeonly direct source;source zz: rc=1 stdout=[] stderr=[Bad file descriptor: -|] @after=yes
+writeonly direct source;source;display zz: rc=1 stdout=[after-out|] stderr=[Bad file descriptor: -|] @after=
+writeonly alias zz: rc=1 stdout=[] stderr=[Bad file descriptor: -|] @after=yes
+writeonly file zz: rc=1 stdout=[] stderr=[Bad file descriptor: -|] @after=yes
+directory direct source;source;display zz: rc=1 stdout=[] stderr=[could not read standard input: Is a directory (os error 21): -|] @after=
+readable source;display;source zz: rc=1 stdout=[mid|] stderr=[Bad file descriptor: -|] @after=
+readable source;display;source;display zz: rc=1 stdout=[mid|end|] stderr=[Bad file descriptor: -|] @after=
+readable load;display;load;display zz: rc=1 stdout=[mid|end|] stderr=[Bad file descriptor: -|] @after=
+writeonly direct source;source tmux: rc=1 stdout=[] stderr=[] @after=yes
+writeonly direct source;source;display tmux: rc=1 stdout=[Input/output error: -|Input/output error: -|after-out|] stderr=[] @after=
+writeonly alias tmux: rc=1 stdout=[] stderr=[] @after=yes
+writeonly file tmux: rc=1 stdout=[] stderr=[] @after=yes
+directory direct source;source;display tmux: rc=1 stdout=[Input/output error: -|Input/output error: -|after-out|] stderr=[] @after=
+readable source;display;source tmux: rc=1 stdout=[] stderr=[mid|Input/output error: -|] @after=
+readable source;display;source;display tmux: rc=1 stdout=[] stderr=[mid|end|Input/output error: -|] @after=
+readable load;display;load;display tmux: rc=1 stdout=[] stderr=[mid|end|Input/output error: -|] @after=

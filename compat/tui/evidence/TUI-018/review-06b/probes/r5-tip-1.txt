@@ -1,0 +1,12 @@
+rep1 [split-window -I -d -t cs:win.0] zz first_visible_ms=645 probes=1
+rep1 [split-window -I -d -t cs:win.0] tmux first_visible_ms=12 probes=1
+rep1 [split-window -I -d -P -t cs:win.0] zz first_visible_ms=2743 probes=12
+rep1 [split-window -I -d -P -t cs:win.0] tmux first_visible_ms=9 probes=1
+rep1 [display] zz first_visible_ms=349 probes=1
+rep1 [display] tmux first_visible_ms=5 probes=1
+rep2 [split-window -I -d -t cs:win.0] zz first_visible_ms=661 probes=1
+rep2 [split-window -I -d -t cs:win.0] tmux first_visible_ms=9 probes=1
+rep2 [split-window -I -d -P -t cs:win.0] zz first_visible_ms=2724 probes=10
+rep2 [split-window -I -d -P -t cs:win.0] tmux first_visible_ms=13 probes=1
+rep2 [display] zz first_visible_ms=387 probes=1
+rep2 [display] tmux first_visible_ms=5 probes=1

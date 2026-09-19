@@ -1,0 +1,12 @@
+# the six new cells on the candidate binary target/alias7-bins/zz_cli-cand2
+# sha256 66d541d556202e4b1da430b9e9a95b9f9e1912b892bdcc54cc2b8b6ffdd8e544
+
+ok    stream-split-print-partial
+ok    stream-split-print-term
+ok    stream-display-kill-close
+ok    stream-display-kill-write
+ok    stream-split-kill-close
+ok    stream-split-kill-write
+ok    pane-death-restored
+matrix: 7 asserted, 0 failures, 0 recorded:TUI-018, 0 decided:TUI-018, 0 self-check failures
+EXIT 0

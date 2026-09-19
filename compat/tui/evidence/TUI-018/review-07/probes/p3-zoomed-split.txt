@@ -1,0 +1,148 @@
+56fcf707376c58bfcb9b08d5d193ea0272f69534e0f385046f524b655a5612a0  /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli
+df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux
+[2026-09-19T04:32:50Z INFO  zz_daemon::diagnostics::appearance] loaded appearance reason=startup root=None scheme=dark supported=0 unsupported=0 invalid=0 diagnostics_dropped=0 bytes=0 hash=9356683936999949859 appearance=TerminalAppearance { color_scheme: Dark, font_families: ["Noto Sans Mono"], font_families_bold: [], font_families_italic: [], font_families_bold_italic: [], font_size_points: 13.0, font_weight: 400, font_features: [], font_synthetic_style: FontSyntheticStyle { bold: true, italic: true, bold_italic: true }, font_thicken: false, font_thicken_strength: 255, cell_height_adjustment: None, padding_left: 10.0, padding_right: 10.0, padding_top: 10.0, padding_bottom: 10.0, foreground: Color { r: 216, g: 222, b: 233 }, background: Color { r: 16, g: 19, b: 24 }, cursor_color: Color { r: 229, g: 192, b: 123 }, cursor_style: Block, selection_foreground: Color { r: 216, g: 222, b: 233 }, selection_background: AppearanceColor { r: 80, g: 125, b: 184, a: 148 }, search_match_color: AppearanceColor { r: 224, g: 171, b: 56, a: 107 }, search_current_color: AppearanceColor { r: 250, g: 194, b: 71, a: 173 }, link_color: Color { r: 77, g: 163, b: 235 }, copy_cursor_color: AppearanceColor { r: 184, g: 199, b: 224, a: 107 }, palette_hash: 2756364480396514756, minimum_contrast: 1.0, cursor_blink_policy: Terminal, cursor_blink_interval_ms: 500, rounded_selection: true, background_opacity: 1.0, palette_classes: [], default_classes: [None, None] }
+[2026-09-19T04:32:50Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=startup-mux-replay entries=0 prefix="C-b" mode_keys="vi"
+[2026-09-19T04:32:50Z INFO  zz_daemon::daemon] zz daemon listening at /tmp/zzr7p3-iA7VHX.sock
+p3 zz rc=0 zoom_before=1 zoom_after=0 out=%2 1 no-pid|
+0
+1
+2
+p3 tmux rc=0 zoom_before=1 zoom_after=0 out=%2 1 no-pid|
+0
+1
+2
+PASS p3 zoom-before
+PASS p3 zoom-after
+PASS p3 rc
+PASS p3 panes
+PASS p3 geom
+PASS p3 screen
+PASS p3 escreen
+p3 done FAIL=0
+NOTE p3 stdout (-P pane ids) intentionally not compared: ids are per-server
+%2 1 no-pid
+%2 1 no-pid
+[2026-09-19T04:32:52Z INFO  zz_daemon::daemon] zz daemon stopped
+-y 24 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm -f /dev/null new-session -d -s cs -n win -x 80 -y 24 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p3.iA7VHX/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p3t-iA7VHX -f /dev/null new-session -d -s cs -n win -x 80 -y 24 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ zz set-option -g automatic-rename off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p3.iA7VHX/zz-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p3.iA7VHX/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p3-iA7VHX.sock set-option -g automatic-rename off
++ tm set-option -g automatic-rename off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p3.iA7VHX/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p3t-iA7VHX set-option -g automatic-rename off
++ zz set-option -g status off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p3.iA7VHX/zz-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p3.iA7VHX/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p3-iA7VHX.sock set-option -g status off
++ tm set-option -g status off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p3.iA7VHX/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p3t-iA7VHX set-option -g status off
++ for side in zz tmux
++ '[' zz = zz ']'
++ zz split-window -d -t =cs:win.0 sleep 300
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p3.iA7VHX/zz-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p3.iA7VHX/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p3-iA7VHX.sock split-window -d -t =cs:win.0 sleep 300
++ zz resize-pane -Z -t =cs:win.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p3.iA7VHX/zz-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p3.iA7VHX/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p3-iA7VHX.sock resize-pane -Z -t =cs:win.0
++ zz display-message -p -t =cs:win '#{window_zoomed_flag}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p3.iA7VHX/zz-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p3.iA7VHX/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p3-iA7VHX.sock display-message -p -t =cs:win '#{window_zoomed_flag}'
++ printf ZOOMED-BYTES
++ '[' zz = zz ']'
++ zz split-window -I -d -P -F '#{pane_id} #{pane_index} #{?pane_pid,has-pid,no-pid}' -t =cs:win.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p3.iA7VHX/zz-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p3.iA7VHX/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p3-iA7VHX.sock split-window -I -d -P -F '#{pane_id} #{pane_index} #{?pane_pid,has-pid,no-pid}' -t =cs:win.0
++ echo 0
++ '[' zz = zz ']'
++ zz display-message -p -t =cs:win '#{window_zoomed_flag}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p3.iA7VHX/zz-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p3.iA7VHX/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p3-iA7VHX.sock display-message -p -t =cs:win '#{window_zoomed_flag}'
++ zz list-panes -t =cs:win -F '#{pane_index}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p3.iA7VHX/zz-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p3.iA7VHX/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p3-iA7VHX.sock list-panes -t =cs:win -F '#{pane_index}'
++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p3.iA7VHX/zz-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p3.iA7VHX/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p3-iA7VHX.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_width}x#{pane_height}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p3.iA7VHX/zz-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p3.iA7VHX/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p3-iA7VHX.sock list-panes -t =cs:win -F '#{pane_index} #{pane_width}x#{pane_height}'
++ zz capture-pane -p -t =cs:win.1
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p3.iA7VHX/zz-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p3.iA7VHX/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p3-iA7VHX.sock capture-pane -p -t =cs:win.1
++ zz capture-pane -e -p -t =cs:win.1
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p3.iA7VHX/zz-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p3.iA7VHX/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p3-iA7VHX.sock capture-pane -e -p -t =cs:win.1
+++ cat /tmp/zzr7p3.iA7VHX/zz.rc
+++ cat /tmp/zzr7p3.iA7VHX/zz.zoom-before
+++ cat /tmp/zzr7p3.iA7VHX/zz.zoom-after
+++ cat /tmp/zzr7p3.iA7VHX/zz.out
+++ tr '\n' '|'
++ printf 'p3 %s rc=%s zoom_before=%s zoom_after=%s out=%s\n' zz 0 1 0 '%2 1 no-pid|'
++ cat /tmp/zzr7p3.iA7VHX/zz.panes
++ cp /tmp/zzr7p3.iA7VHX/zz.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p3-zz.out
++ cp /tmp/zzr7p3.iA7VHX/zz.screen /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p3-zz.screen
++ for side in zz tmux
++ '[' tmux = zz ']'
++ tm split-window -d -t =cs:win.0 sleep 300
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p3.iA7VHX/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p3t-iA7VHX split-window -d -t =cs:win.0 sleep 300
++ tm resize-pane -Z -t =cs:win.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p3.iA7VHX/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p3t-iA7VHX resize-pane -Z -t =cs:win.0
++ tm display-message -p -t =cs:win '#{window_zoomed_flag}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p3.iA7VHX/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p3t-iA7VHX display-message -p -t =cs:win '#{window_zoomed_flag}'
++ printf ZOOMED-BYTES
++ '[' tmux = zz ']'
++ tm split-window -I -d -P -F '#{pane_id} #{pane_index} #{?pane_pid,has-pid,no-pid}' -t =cs:win.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p3.iA7VHX/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p3t-iA7VHX split-window -I -d -P -F '#{pane_id} #{pane_index} #{?pane_pid,has-pid,no-pid}' -t =cs:win.0
++ echo 0
++ '[' tmux = zz ']'
++ tm display-message -p -t =cs:win '#{window_zoomed_flag}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p3.iA7VHX/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p3t-iA7VHX display-message -p -t =cs:win '#{window_zoomed_flag}'
++ tm list-panes -t =cs:win -F '#{pane_index}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p3.iA7VHX/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p3t-iA7VHX list-panes -t =cs:win -F '#{pane_index}'
++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p3.iA7VHX/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p3t-iA7VHX list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_width}x#{pane_height}'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p3.iA7VHX/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p3t-iA7VHX list-panes -t =cs:win -F '#{pane_index} #{pane_width}x#{pane_height}'
++ tm capture-pane -p -t =cs:win.1
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p3.iA7VHX/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p3t-iA7VHX capture-pane -p -t =cs:win.1
++ tm capture-pane -e -p -t =cs:win.1
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p3.iA7VHX/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p3t-iA7VHX capture-pane -e -p -t =cs:win.1
+++ cat /tmp/zzr7p3.iA7VHX/tmux.rc
+++ cat /tmp/zzr7p3.iA7VHX/tmux.zoom-before
+++ cat /tmp/zzr7p3.iA7VHX/tmux.zoom-after
+++ cat /tmp/zzr7p3.iA7VHX/tmux.out
+++ tr '\n' '|'
++ printf 'p3 %s rc=%s zoom_before=%s zoom_after=%s out=%s\n' tmux 0 1 0 '%2 1 no-pid|'
++ cat /tmp/zzr7p3.iA7VHX/tmux.panes
++ cp /tmp/zzr7p3.iA7VHX/tmux.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p3-tmux.out
++ cp /tmp/zzr7p3.iA7VHX/tmux.screen /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p3-tmux.screen
++ check 'p3 zoom-before' /tmp/zzr7p3.iA7VHX/zz.zoom-before /tmp/zzr7p3.iA7VHX/tmux.zoom-before
++ local 'label=p3 zoom-before' a=/tmp/zzr7p3.iA7VHX/zz.zoom-before b=/tmp/zzr7p3.iA7VHX/tmux.zoom-before
++ cmp -s /tmp/zzr7p3.iA7VHX/zz.zoom-before /tmp/zzr7p3.iA7VHX/tmux.zoom-before
++ printf 'PASS %s\n' 'p3 zoom-before'
++ check 'p3 zoom-after' /tmp/zzr7p3.iA7VHX/zz.zoom-after /tmp/zzr7p3.iA7VHX/tmux.zoom-after
++ local 'label=p3 zoom-after' a=/tmp/zzr7p3.iA7VHX/zz.zoom-after b=/tmp/zzr7p3.iA7VHX/tmux.zoom-after
++ cmp -s /tmp/zzr7p3.iA7VHX/zz.zoom-after /tmp/zzr7p3.iA7VHX/tmux.zoom-after
++ printf 'PASS %s\n' 'p3 zoom-after'
++ check 'p3 rc' /tmp/zzr7p3.iA7VHX/zz.rc /tmp/zzr7p3.iA7VHX/tmux.rc
++ local 'label=p3 rc' a=/tmp/zzr7p3.iA7VHX/zz.rc b=/tmp/zzr7p3.iA7VHX/tmux.rc
++ cmp -s /tmp/zzr7p3.iA7VHX/zz.rc /tmp/zzr7p3.iA7VHX/tmux.rc
++ printf 'PASS %s\n' 'p3 rc'
++ check 'p3 panes' /tmp/zzr7p3.iA7VHX/zz.panes /tmp/zzr7p3.iA7VHX/tmux.panes
++ local 'label=p3 panes' a=/tmp/zzr7p3.iA7VHX/zz.panes b=/tmp/zzr7p3.iA7VHX/tmux.panes
++ cmp -s /tmp/zzr7p3.iA7VHX/zz.panes /tmp/zzr7p3.iA7VHX/tmux.panes
++ printf 'PASS %s\n' 'p3 panes'
++ check 'p3 geom' /tmp/zzr7p3.iA7VHX/zz.geom /tmp/zzr7p3.iA7VHX/tmux.geom
++ local 'label=p3 geom' a=/tmp/zzr7p3.iA7VHX/zz.geom b=/tmp/zzr7p3.iA7VHX/tmux.geom
++ cmp -s /tmp/zzr7p3.iA7VHX/zz.geom /tmp/zzr7p3.iA7VHX/tmux.geom
++ printf 'PASS %s\n' 'p3 geom'
++ check 'p3 screen' /tmp/zzr7p3.iA7VHX/zz.screen /tmp/zzr7p3.iA7VHX/tmux.screen
++ local 'label=p3 screen' a=/tmp/zzr7p3.iA7VHX/zz.screen b=/tmp/zzr7p3.iA7VHX/tmux.screen
++ cmp -s /tmp/zzr7p3.iA7VHX/zz.screen /tmp/zzr7p3.iA7VHX/tmux.screen
++ printf 'PASS %s\n' 'p3 screen'
++ check 'p3 escreen' /tmp/zzr7p3.iA7VHX/zz.escreen /tmp/zzr7p3.iA7VHX/tmux.escreen
++ local 'label=p3 escreen' a=/tmp/zzr7p3.iA7VHX/zz.escreen b=/tmp/zzr7p3.iA7VHX/tmux.escreen
++ cmp -s /tmp/zzr7p3.iA7VHX/zz.escreen /tmp/zzr7p3.iA7VHX/tmux.escreen
++ printf 'PASS %s\n' 'p3 escreen'
++ printf 'p3 done FAIL=%s\n' 0
++ printf 'NOTE p3 stdout (-P pane ids) intentionally not compared: ids are per-server\n'
++ cat /tmp/zzr7p3.iA7VHX/zz.out
++ cat /tmp/zzr7p3.iA7VHX/tmux.out
++ exit 0
++ cleanup
++ set +e
++ zz kill-server
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p3.iA7VHX/zz-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p3.iA7VHX/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p3-iA7VHX.sock kill-server
++ tm kill-server
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p3.iA7VHX/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p3.iA7VHX/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p3t-iA7VHX kill-server
++ kill 2650529
++ wait 2650529
++ rm -rf -- /tmp/zzr7p3.iA7VHX

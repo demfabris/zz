@@ -1,0 +1,16 @@
+wo zz [source-file -] rc=0 out=after| err= tail=yes panes=2
+wo zz [load-buffer -b pb -] rc=0 out=after| err= tail=yes panes=2
+wo zz [display-message -I] rc=0 out=after| err= tail=yes panes=2
+wo zz [split-window -I -d] rc=0 out=after| err= tail=yes panes=3
+wo tmux [source-file -] rc=1 out=after| err=Input/output error: -| tail=yes panes=2
+wo tmux [load-buffer -b pb -] rc=1 out=after| err=Input/output error: -| tail=yes panes=2
+wo tmux [display-message -I] rc=0 out=after| err= tail=yes panes=2
+wo tmux [split-window -I -d] rc=0 out=after| err= tail=yes panes=3
+dir zz [source-file -] rc=1 out= err=could not read standard input: Is a directory (os error 21): -| tail= panes=2
+dir zz [load-buffer -b pb -] rc=1 out= err=could not read standard input: Is a directory (os error 21): -| tail= panes=2
+dir zz [display-message -I] rc=1 out= err=could not read standard input: Is a directory (os error 21): -| tail= panes=2
+dir zz [split-window -I -d] rc=1 out= err=could not read standard input: Is a directory (os error 21): -| tail= panes=3
+dir tmux [source-file -] rc=1 out=after| err=Input/output error: -| tail=yes panes=2
+dir tmux [load-buffer -b pb -] rc=1 out=after| err=Input/output error: -| tail=yes panes=2
+dir tmux [display-message -I] rc=0 out=after| err= tail=yes panes=2
+dir tmux [split-window -I -d] rc=0 out=after| err= tail=yes panes=3

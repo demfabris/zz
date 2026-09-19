@@ -1,0 +1,42 @@
+[
+  {
+    "row": "lane2-store.txt",
+    "candidate": "compat/tui/evidence/TUI-018/attempt-09/corpus-3-transcripts/lane2-store.txt",
+    "main": "compat/tui/evidence/TUI-018/attempt-09/delta-main-transcripts/lane2-store.txt",
+    "classification": "inherited",
+    "identical_transcript_except_source_header": true,
+    "identical_output_diff_blocks": true
+  },
+  {
+    "row": "smoke/plugin-runtime-resurrect-restore.txt",
+    "candidate": "compat/tui/evidence/TUI-018/attempt-09/corpus-3-transcripts/smoke/plugin-runtime-resurrect-restore.txt",
+    "main": "compat/tui/evidence/TUI-018/attempt-09/delta-main-transcripts/smoke/plugin-runtime-resurrect-restore.txt",
+    "classification": "inherited",
+    "identical_transcript_except_source_header": true,
+    "identical_output_diff_blocks": true
+  },
+  {
+    "row": "show-options-hooks.txt",
+    "candidate": "compat/tui/evidence/TUI-018/attempt-09/corpus-4-transcripts/show-options-hooks.txt",
+    "main": "compat/tui/evidence/TUI-018/attempt-09/delta-main-transcripts/show-options-hooks.txt",
+    "classification": "inherited",
+    "identical_transcript_except_source_header": true,
+    "identical_output_diff_blocks": true
+  },
+  {
+    "row": "smoke/cli-chain-parse-abort.txt",
+    "candidate": "compat/tui/evidence/TUI-018/attempt-09/corpus-4-transcripts/smoke/cli-chain-parse-abort.txt",
+    "main": "compat/tui/evidence/TUI-018/attempt-09/delta-main-transcripts/smoke/cli-chain-parse-abort.txt",
+    "classification": "inherited",
+    "identical_transcript_except_source_header": true,
+    "identical_output_diff_blocks": true
+  },
+  {
+    "row": "smoke/default-client-command.txt",
+    "candidate": "compat/tui/evidence/TUI-018/attempt-09/corpus-4-transcripts/smoke/default-client-command.txt",
+    "main": "compat/tui/evidence/TUI-018/attempt-09/delta-main-transcripts/smoke/default-client-command.txt",
+    "classification": "inherited",
+    "identical_transcript_except_source_header": true,
+    "identical_output_diff_blocks": true
+  }
+]

@@ -1,0 +1,17 @@
+      case matrix-direct-error-newline
+      stderr differs
+        2d1
+        < 
+DIFF  matrix-direct-error-newline
+      case matrix-alias-error-newline
+      stderr differs
+        2d1
+        < 
+DIFF  matrix-alias-error-newline
+      case matrix-file-error-newline
+      stderr differs
+        2d1
+        < 
+DIFF  matrix-file-error-newline
+matrix: 3 asserted, 3 failures, 0 recorded:TUI-018, 0 decided:TUI-018, 0 self-check failures
+exit_status=1

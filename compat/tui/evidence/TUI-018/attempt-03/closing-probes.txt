@@ -1,0 +1,84 @@
+tmux ['new-session', '-d', '-s', 'p', '-n', 'w', 'sleep 180'] 0 b'' b''
+CASE load-save-binary
+tmux ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 0 b'' b''
+tmux ['source-file', '/tmp/zzprobe-order018-i4wbdqtk/invoke.conf'] 0 b'a\xff\x00z' b''
+tmux ['save-buffer', '-b', 'review', '-'] 0 b'a\xff\x00z' b''
+CASE load-save-text
+tmux ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 0 b'' b''
+tmux ['source-file', '/tmp/zzprobe-order018-i4wbdqtk/invoke.conf'] 0 b'no-newline' b''
+tmux ['save-buffer', '-b', 'review', '-'] 0 b'no-newline' b''
+CASE load-save-newline
+tmux ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 0 b'' b''
+tmux ['source-file', '/tmp/zzprobe-order018-i4wbdqtk/invoke.conf'] 0 b'with-newline\n' b''
+tmux ['save-buffer', '-b', 'review', '-'] 0 b'with-newline\n' b''
+tmux ['kill-server'] 0 b'' b''
+zz ['new-session', '-d', '-s', 'p', '-n', 'w', 'sleep 180'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+CASE load-save-binary
+zz ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['source-file', '/tmp/zzprobe-order018-7p23om2r/invoke.conf'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['save-buffer', '-b', 'review', '-'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+CASE load-save-text
+zz ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['source-file', '/tmp/zzprobe-order018-7p23om2r/invoke.conf'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['save-buffer', '-b', 'review', '-'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+CASE load-save-newline
+zz ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['source-file', '/tmp/zzprobe-order018-7p23om2r/invoke.conf'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['save-buffer', '-b', 'review', '-'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['kill-server'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+tmux ['new-session', '-d', '-s', 'p', '-n', 'w', 'sleep 180'] 0 b'' b''
+CASE load-save-binary
+tmux ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 0 b'' b''
+tmux ['revieworder'] 0 b'a\xff\x00z' b''
+tmux ['save-buffer', '-b', 'review', '-'] 0 b'a\xff\x00z' b''
+CASE load-save-text
+tmux ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 0 b'' b''
+tmux ['revieworder'] 0 b'no-newline' b''
+tmux ['save-buffer', '-b', 'review', '-'] 0 b'no-newline' b''
+CASE load-save-newline
+tmux ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 0 b'' b''
+tmux ['revieworder'] 0 b'with-newline\n' b''
+tmux ['save-buffer', '-b', 'review', '-'] 0 b'with-newline\n' b''
+tmux ['kill-server'] 0 b'' b''
+zz ['new-session', '-d', '-s', 'p', '-n', 'w', 'sleep 180'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+CASE load-save-binary
+zz ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['revieworder'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['save-buffer', '-b', 'review', '-'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+CASE load-save-text
+zz ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['revieworder'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['save-buffer', '-b', 'review', '-'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+CASE load-save-newline
+zz ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review -'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['revieworder'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['save-buffer', '-b', 'review', '-'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['kill-server'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+tmux ['new-session', '-d', '-s', 'p', '-n', 'w', 'sleep 180'] 0 b'' b''
+CASE load-save-binary
+tmux ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review - ; save-buffer -b review - ; set -g @after yes'] 0 b'' b''
+tmux ['revieworder'] 1 b'a\xff\x00z' b'Bad file descriptor: -\n'
+tmux ['save-buffer', '-b', 'review', '-'] 0 b'a\xff\x00z' b''
+CASE load-save-text
+tmux ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review - ; save-buffer -b review - ; set -g @after yes'] 0 b'' b''
+tmux ['revieworder'] 1 b'no-newline' b'Bad file descriptor: -\n'
+tmux ['save-buffer', '-b', 'review', '-'] 0 b'no-newline' b''
+CASE load-save-newline
+tmux ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review - ; save-buffer -b review - ; set -g @after yes'] 0 b'' b''
+tmux ['revieworder'] 1 b'with-newline\n' b'Bad file descriptor: -\n'
+tmux ['save-buffer', '-b', 'review', '-'] 0 b'with-newline\n' b''
+tmux ['kill-server'] 0 b'' b''
+zz ['new-session', '-d', '-s', 'p', '-n', 'w', 'sleep 180'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+CASE load-save-binary
+zz ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review - ; save-buffer -b review - ; set -g @after yes'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['revieworder'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['save-buffer', '-b', 'review', '-'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+CASE load-save-text
+zz ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review - ; save-buffer -b review - ; set -g @after yes'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['revieworder'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['save-buffer', '-b', 'review', '-'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+CASE load-save-newline
+zz ['set', '-s', 'command-alias[77]', 'revieworder=load-buffer -b review - ; save-buffer -b review - ; save-buffer -b review - ; set -g @after yes'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['revieworder'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['save-buffer', '-b', 'review', '-'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'
+zz ['kill-server'] 127 b'' b'/home/demfabris/dev/zz-c11-alias/target/c11-alias-proof/zz: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory\n'

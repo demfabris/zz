@@ -1,0 +1,477 @@
+56fcf707376c58bfcb9b08d5d193ea0272f69534e0f385046f524b655a5612a0  /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli
+df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux
+[2026-09-19T04:29:21Z INFO  zz_daemon::diagnostics::appearance] loaded appearance reason=startup root=None scheme=dark supported=0 unsupported=0 invalid=0 diagnostics_dropped=0 bytes=0 hash=9356683936999949859 appearance=TerminalAppearance { color_scheme: Dark, font_families: ["Noto Sans Mono"], font_families_bold: [], font_families_italic: [], font_families_bold_italic: [], font_size_points: 13.0, font_weight: 400, font_features: [], font_synthetic_style: FontSyntheticStyle { bold: true, italic: true, bold_italic: true }, font_thicken: false, font_thicken_strength: 255, cell_height_adjustment: None, padding_left: 10.0, padding_right: 10.0, padding_top: 10.0, padding_bottom: 10.0, foreground: Color { r: 216, g: 222, b: 233 }, background: Color { r: 16, g: 19, b: 24 }, cursor_color: Color { r: 229, g: 192, b: 123 }, cursor_style: Block, selection_foreground: Color { r: 216, g: 222, b: 233 }, selection_background: AppearanceColor { r: 80, g: 125, b: 184, a: 148 }, search_match_color: AppearanceColor { r: 224, g: 171, b: 56, a: 107 }, search_current_color: AppearanceColor { r: 250, g: 194, b: 71, a: 173 }, link_color: Color { r: 77, g: 163, b: 235 }, copy_cursor_color: AppearanceColor { r: 184, g: 199, b: 224, a: 107 }, palette_hash: 2756364480396514756, minimum_contrast: 1.0, cursor_blink_policy: Terminal, cursor_blink_interval_ms: 500, rounded_selection: true, background_opacity: 1.0, palette_classes: [], default_classes: [None, None] }
+[2026-09-19T04:29:21Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=startup-mux-replay entries=0 prefix="C-b" mode_keys="vi"
+[2026-09-19T04:29:21Z INFO  zz_daemon::daemon] zz daemon listening at /tmp/zzr7p5-03oH0F.sock
+=== P5a: split -d -P empty, no -I ===
+p5a zz trial 1: 2237 ms
+p5a tmux trial 1: 3 ms
+p5a zz trial 2: 2303 ms
+p5a tmux trial 2: 3 ms
+p5a zz trial 3: 2354 ms
+p5a tmux trial 3: 2 ms
+p5a zz rc=0 out=1|no-pid|no-tty||80x11 err=
+p5a tmux rc=0 out=1|no-pid|no-tty|''|80x11 err=
+PASS p5a rc
+DIFF p5a stdout
+PASS p5a stderr
+=== P5b: split -d -P with shell ===
+p5b zz trial 1: 986 ms
+p5b tmux trial 1: 3 ms
+p5b zz trial 2: 868 ms
+p5b tmux trial 2: 3 ms
+p5b zz trial 3: 973 ms
+p5b tmux trial 3: 3 ms
+p5b zz rc=0 out=PID=N TTYSET=yes err=
+p5b tmux rc=0 out=PID=N TTYSET=yes err=
+PASS p5b rc
+PASS p5b stdout
+PASS p5b stderr
+=== P5c: split -I -P (skip expected) ===
+p5c zz trial 1: 779 ms
+p5c tmux trial 1: 2 ms
+p5c zz trial 2: 846 ms
+p5c tmux trial 2: 2 ms
+p5c zz trial 3: 890 ms
+p5c tmux trial 3: 2 ms
+p5c zz rc=0 out=1|no-pid|no-tty||80x11 err=
+p5c tmux rc=0 out=1|no-pid|no-tty|bash|80x11 err=
+PASS p5c rc
+DIFF p5c stdout
+PASS p5c stderr
+=== P5d: split -I -P through an alias ===
+p5d zz: 1079 ms rc=0 out=AL-1-no-pid err=
+p5d tmux: 2 ms rc=0 out=AL-1-no-pid err=
+PASS p5d rc
+PASS p5d stdout
+PASS p5d stderr
+=== P5e: split -E -P (empty, no -I) ===
+p5e zz: 3129 ms rc=0 out=1-no-pid err=
+p5e tmux: 2 ms rc=0 out=1-no-pid err=
+PASS p5e rc
+PASS p5e stdout
+PASS p5e stderr
+p5 done FAIL=1
+[2026-09-19T04:30:02Z INFO  zz_daemon::daemon] zz daemon stopped
+ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock set-option -g automatic-rename off
++ tm set-option -g automatic-rename off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F set-option -g automatic-rename off
++ zz set-option -g status off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock set-option -g status off
++ tm set-option -g status off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F set-option -g status off
++ FMT='#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}'
++ printf '=== P5a: split -d -P empty, no -I ===\n'
++ for trial in 1 2 3
++ fresh_window p5a1
++ local name=p5a1
++ zz new-window -d -n p5a1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock new-window -d -n p5a1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n p5a1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F new-window -d -n p5a1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
+++ date +%s%N
++ s=1789792162543010028
++ zz split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5a1.0 ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5a1.0 ''
+++ date +%s%N
++ e=1789792164780263451
++ printf 'p5a zz trial %s: %s ms\n' 1 2237
+++ date +%s%N
++ s=1789792164781148459
++ tm split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5a1.0 ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5a1.0 ''
+++ date +%s%N
++ e=1789792164784293490
++ printf 'p5a tmux trial %s: %s ms\n' 1 3
++ for trial in 1 2 3
++ fresh_window p5a2
++ local name=p5a2
++ zz new-window -d -n p5a2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock new-window -d -n p5a2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n p5a2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F new-window -d -n p5a2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
+++ date +%s%N
++ s=1789792165474040816
++ zz split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5a2.0 ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5a2.0 ''
+++ date +%s%N
++ e=1789792167777605576
++ printf 'p5a zz trial %s: %s ms\n' 2 2303
+++ date +%s%N
++ s=1789792167778518045
++ tm split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5a2.0 ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5a2.0 ''
+++ date +%s%N
++ e=1789792167781914468
++ printf 'p5a tmux trial %s: %s ms\n' 2 3
++ for trial in 1 2 3
++ fresh_window p5a3
++ local name=p5a3
++ zz new-window -d -n p5a3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock new-window -d -n p5a3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n p5a3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F new-window -d -n p5a3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
+++ date +%s%N
++ s=1789792168415553633
++ zz split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5a3.0 ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5a3.0 ''
+++ date +%s%N
++ e=1789792170769809733
++ printf 'p5a zz trial %s: %s ms\n' 3 2354
+++ date +%s%N
++ s=1789792170770635583
++ tm split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5a3.0 ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5a3.0 ''
+++ date +%s%N
++ e=1789792170773553859
++ printf 'p5a tmux trial %s: %s ms\n' 3 2
++ fresh_window p5aout
++ local name=p5aout
++ zz new-window -d -n p5aout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock new-window -d -n p5aout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n p5aout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F new-window -d -n p5aout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
++ zz split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5aout.0 ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5aout.0 ''
++ echo 0
++ tm split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5aout.0 ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5aout.0 ''
++ echo 0
+++ cat /tmp/zzr7p5.03oH0F/zz.rc
+++ cat /tmp/zzr7p5.03oH0F/zz.out
+++ cat /tmp/zzr7p5.03oH0F/zz.err
++ printf 'p5a zz rc=%s out=%s err=%s\n' 0 '1|no-pid|no-tty||80x11' ''
+++ cat /tmp/zzr7p5.03oH0F/tmux.rc
+++ cat /tmp/zzr7p5.03oH0F/tmux.out
+++ cat /tmp/zzr7p5.03oH0F/tmux.err
++ printf 'p5a tmux rc=%s out=%s err=%s\n' 0 '1|no-pid|no-tty|'\'''\''|80x11' ''
++ cp /tmp/zzr7p5.03oH0F/zz.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p5a-zz.out
++ cp /tmp/zzr7p5.03oH0F/tmux.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p5a-tmux.out
++ check 'p5a rc' /tmp/zzr7p5.03oH0F/zz.rc /tmp/zzr7p5.03oH0F/tmux.rc
++ local 'label=p5a rc' a=/tmp/zzr7p5.03oH0F/zz.rc b=/tmp/zzr7p5.03oH0F/tmux.rc
++ cmp -s /tmp/zzr7p5.03oH0F/zz.rc /tmp/zzr7p5.03oH0F/tmux.rc
++ printf 'PASS %s\n' 'p5a rc'
++ check 'p5a stdout' /tmp/zzr7p5.03oH0F/zz.out /tmp/zzr7p5.03oH0F/tmux.out
++ local 'label=p5a stdout' a=/tmp/zzr7p5.03oH0F/zz.out b=/tmp/zzr7p5.03oH0F/tmux.out
++ cmp -s /tmp/zzr7p5.03oH0F/zz.out /tmp/zzr7p5.03oH0F/tmux.out
++ printf 'DIFF %s\n' 'p5a stdout'
++ FAIL=1
++ check 'p5a stderr' /tmp/zzr7p5.03oH0F/zz.err /tmp/zzr7p5.03oH0F/tmux.err
++ local 'label=p5a stderr' a=/tmp/zzr7p5.03oH0F/zz.err b=/tmp/zzr7p5.03oH0F/tmux.err
++ cmp -s /tmp/zzr7p5.03oH0F/zz.err /tmp/zzr7p5.03oH0F/tmux.err
++ printf 'PASS %s\n' 'p5a stderr'
++ printf '=== P5b: split -d -P with shell ===\n'
++ for trial in 1 2 3
++ fresh_window p5b1
++ local name=p5b1
++ zz new-window -d -n p5b1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock new-window -d -n p5b1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n p5b1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F new-window -d -n p5b1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
+++ date +%s%N
++ s=1789792175135542970
++ zz split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5b1.0 sleep 300
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5b1.0 sleep 300
+++ date +%s%N
++ e=1789792176122183930
++ printf 'p5b zz trial %s: %s ms\n' 1 986
+++ date +%s%N
++ s=1789792176123160109
++ tm split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5b1.0 sleep 300
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5b1.0 sleep 300
+++ date +%s%N
++ e=1789792176126961545
++ printf 'p5b tmux trial %s: %s ms\n' 1 3
++ for trial in 1 2 3
++ fresh_window p5b2
++ local name=p5b2
++ zz new-window -d -n p5b2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock new-window -d -n p5b2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n p5b2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F new-window -d -n p5b2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
+++ date +%s%N
++ s=1789792177228597927
++ zz split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5b2.0 sleep 300
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5b2.0 sleep 300
+++ date +%s%N
++ e=1789792178097551399
++ printf 'p5b zz trial %s: %s ms\n' 2 868
+++ date +%s%N
++ s=1789792178098382574
++ tm split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5b2.0 sleep 300
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5b2.0 sleep 300
+++ date +%s%N
++ e=1789792178101930668
++ printf 'p5b tmux trial %s: %s ms\n' 2 3
++ for trial in 1 2 3
++ fresh_window p5b3
++ local name=p5b3
++ zz new-window -d -n p5b3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock new-window -d -n p5b3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n p5b3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F new-window -d -n p5b3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
+++ date +%s%N
++ s=1789792179307070361
++ zz split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5b3.0 sleep 300
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5b3.0 sleep 300
+++ date +%s%N
++ e=1789792180280944144
++ printf 'p5b zz trial %s: %s ms\n' 3 973
+++ date +%s%N
++ s=1789792180281774681
++ tm split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5b3.0 sleep 300
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F split-window -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5b3.0 sleep 300
+++ date +%s%N
++ e=1789792180285151270
++ printf 'p5b tmux trial %s: %s ms\n' 3 3
++ fresh_window p5bout
++ local name=p5bout
++ zz new-window -d -n p5bout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock new-window -d -n p5bout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n p5bout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F new-window -d -n p5bout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
++ zz split-window -d -P -F 'PID=#{pane_pid} TTYSET=#{?pane_tty,yes,no}' -t =cs:p5bout.0 sleep 300
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock split-window -d -P -F 'PID=#{pane_pid} TTYSET=#{?pane_tty,yes,no}' -t =cs:p5bout.0 sleep 300
++ echo 0
++ tm split-window -d -P -F 'PID=#{pane_pid} TTYSET=#{?pane_tty,yes,no}' -t =cs:p5bout.0 sleep 300
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F split-window -d -P -F 'PID=#{pane_pid} TTYSET=#{?pane_tty,yes,no}' -t =cs:p5bout.0 sleep 300
++ echo 0
+++ cat /tmp/zzr7p5.03oH0F/zz.rc
+++ cat /tmp/zzr7p5.03oH0F/zz.out
+++ sed -E 's/PID=[0-9]+/PID=N/'
+++ cat /tmp/zzr7p5.03oH0F/zz.err
++ printf 'p5b zz rc=%s out=%s err=%s\n' 0 'PID=N TTYSET=yes' ''
+++ cat /tmp/zzr7p5.03oH0F/tmux.rc
+++ cat /tmp/zzr7p5.03oH0F/tmux.out
+++ sed -E 's/PID=[0-9]+/PID=N/'
+++ cat /tmp/zzr7p5.03oH0F/tmux.err
++ printf 'p5b tmux rc=%s out=%s err=%s\n' 0 'PID=N TTYSET=yes' ''
++ sed -E 's/PID=[0-9]+/PID=N/' /tmp/zzr7p5.03oH0F/zz.out
++ sed -E 's/PID=[0-9]+/PID=N/' /tmp/zzr7p5.03oH0F/tmux.out
++ cp /tmp/zzr7p5.03oH0F/zz.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p5b-zz.out
++ cp /tmp/zzr7p5.03oH0F/tmux.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p5b-tmux.out
++ check 'p5b rc' /tmp/zzr7p5.03oH0F/zz.rc /tmp/zzr7p5.03oH0F/tmux.rc
++ local 'label=p5b rc' a=/tmp/zzr7p5.03oH0F/zz.rc b=/tmp/zzr7p5.03oH0F/tmux.rc
++ cmp -s /tmp/zzr7p5.03oH0F/zz.rc /tmp/zzr7p5.03oH0F/tmux.rc
++ printf 'PASS %s\n' 'p5b rc'
++ check 'p5b stdout' /tmp/zzr7p5.03oH0F/zz.outn /tmp/zzr7p5.03oH0F/tmux.outn
++ local 'label=p5b stdout' a=/tmp/zzr7p5.03oH0F/zz.outn b=/tmp/zzr7p5.03oH0F/tmux.outn
++ cmp -s /tmp/zzr7p5.03oH0F/zz.outn /tmp/zzr7p5.03oH0F/tmux.outn
++ printf 'PASS %s\n' 'p5b stdout'
++ check 'p5b stderr' /tmp/zzr7p5.03oH0F/zz.err /tmp/zzr7p5.03oH0F/tmux.err
++ local 'label=p5b stderr' a=/tmp/zzr7p5.03oH0F/zz.err b=/tmp/zzr7p5.03oH0F/tmux.err
++ cmp -s /tmp/zzr7p5.03oH0F/zz.err /tmp/zzr7p5.03oH0F/tmux.err
++ printf 'PASS %s\n' 'p5b stderr'
++ printf '=== P5c: split -I -P (skip expected) ===\n'
++ printf PAY
++ for trial in 1 2 3
++ fresh_window p5c1
++ local name=p5c1
++ zz new-window -d -n p5c1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock new-window -d -n p5c1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n p5c1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F new-window -d -n p5c1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
+++ date +%s%N
++ s=1789792184098088207
++ zz split-window -I -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5c1.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock split-window -I -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5c1.0
+++ date +%s%N
++ e=1789792184877150458
++ printf 'p5c zz trial %s: %s ms\n' 1 779
+++ date +%s%N
++ s=1789792184878010903
++ tm split-window -I -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5c1.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F split-window -I -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5c1.0
+++ date +%s%N
++ e=1789792184880745407
++ printf 'p5c tmux trial %s: %s ms\n' 1 2
++ for trial in 1 2 3
++ fresh_window p5c2
++ local name=p5c2
++ zz new-window -d -n p5c2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock new-window -d -n p5c2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n p5c2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F new-window -d -n p5c2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
+++ date +%s%N
++ s=1789792186382172038
++ zz split-window -I -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5c2.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock split-window -I -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5c2.0
+++ date +%s%N
++ e=1789792187228175613
++ printf 'p5c zz trial %s: %s ms\n' 2 846
+++ date +%s%N
++ s=1789792187228980670
++ tm split-window -I -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5c2.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F split-window -I -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5c2.0
+++ date +%s%N
++ e=1789792187231682130
++ printf 'p5c tmux trial %s: %s ms\n' 2 2
++ for trial in 1 2 3
++ fresh_window p5c3
++ local name=p5c3
++ zz new-window -d -n p5c3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock new-window -d -n p5c3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n p5c3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F new-window -d -n p5c3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
+++ date +%s%N
++ s=1789792188867109067
++ zz split-window -I -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5c3.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock split-window -I -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5c3.0
+++ date +%s%N
++ e=1789792189757845955
++ printf 'p5c zz trial %s: %s ms\n' 3 890
+++ date +%s%N
++ s=1789792189758686169
++ tm split-window -I -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5c3.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F split-window -I -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5c3.0
+++ date +%s%N
++ e=1789792189761516693
++ printf 'p5c tmux trial %s: %s ms\n' 3 2
++ fresh_window p5cout
++ local name=p5cout
++ zz new-window -d -n p5cout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock new-window -d -n p5cout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n p5cout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F new-window -d -n p5cout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
++ zz split-window -I -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5cout.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock split-window -I -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5cout.0
++ echo 0
++ tm split-window -I -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5cout.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F split-window -I -d -P -F '#{pane_index}|#{?pane_pid,has-pid,no-pid}|#{?pane_tty,has-tty,no-tty}|#{pane_current_command}|#{pane_width}x#{pane_height}' -t =cs:p5cout.0
++ echo 0
+++ cat /tmp/zzr7p5.03oH0F/zz.rc
+++ cat /tmp/zzr7p5.03oH0F/zz.out
+++ cat /tmp/zzr7p5.03oH0F/zz.err
++ printf 'p5c zz rc=%s out=%s err=%s\n' 0 '1|no-pid|no-tty||80x11' ''
+++ cat /tmp/zzr7p5.03oH0F/tmux.rc
+++ cat /tmp/zzr7p5.03oH0F/tmux.out
+++ cat /tmp/zzr7p5.03oH0F/tmux.err
++ printf 'p5c tmux rc=%s out=%s err=%s\n' 0 '1|no-pid|no-tty|bash|80x11' ''
++ cp /tmp/zzr7p5.03oH0F/zz.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p5c-zz.out
++ cp /tmp/zzr7p5.03oH0F/tmux.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p5c-tmux.out
++ check 'p5c rc' /tmp/zzr7p5.03oH0F/zz.rc /tmp/zzr7p5.03oH0F/tmux.rc
++ local 'label=p5c rc' a=/tmp/zzr7p5.03oH0F/zz.rc b=/tmp/zzr7p5.03oH0F/tmux.rc
++ cmp -s /tmp/zzr7p5.03oH0F/zz.rc /tmp/zzr7p5.03oH0F/tmux.rc
++ printf 'PASS %s\n' 'p5c rc'
++ check 'p5c stdout' /tmp/zzr7p5.03oH0F/zz.out /tmp/zzr7p5.03oH0F/tmux.out
++ local 'label=p5c stdout' a=/tmp/zzr7p5.03oH0F/zz.out b=/tmp/zzr7p5.03oH0F/tmux.out
++ cmp -s /tmp/zzr7p5.03oH0F/zz.out /tmp/zzr7p5.03oH0F/tmux.out
++ printf 'DIFF %s\n' 'p5c stdout'
++ FAIL=1
++ check 'p5c stderr' /tmp/zzr7p5.03oH0F/zz.err /tmp/zzr7p5.03oH0F/tmux.err
++ local 'label=p5c stderr' a=/tmp/zzr7p5.03oH0F/zz.err b=/tmp/zzr7p5.03oH0F/tmux.err
++ cmp -s /tmp/zzr7p5.03oH0F/zz.err /tmp/zzr7p5.03oH0F/tmux.err
++ printf 'PASS %s\n' 'p5c stderr'
++ printf '=== P5d: split -I -P through an alias ===\n'
++ zz set -s 'command-alias[90]' 'p5split=split-window -I -d -P -F "AL-#{pane_index}-#{?pane_pid,has-pid,no-pid}"'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock set -s 'command-alias[90]' 'p5split=split-window -I -d -P -F "AL-#{pane_index}-#{?pane_pid,has-pid,no-pid}"'
++ tm set -s 'command-alias[90]' 'p5split=split-window -I -d -P -F "AL-#{pane_index}-#{?pane_pid,has-pid,no-pid}"'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F set -s 'command-alias[90]' 'p5split=split-window -I -d -P -F "AL-#{pane_index}-#{?pane_pid,has-pid,no-pid}"'
++ fresh_window p5dout
++ local name=p5dout
++ zz new-window -d -n p5dout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock new-window -d -n p5dout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n p5dout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F new-window -d -n p5dout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
+++ date +%s%N
++ s=1789792194829595764
++ zz p5split -t =cs:p5dout.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock p5split -t =cs:p5dout.0
++ echo 0
+++ date +%s%N
++ e=1789792195909013449
+++ cat /tmp/zzr7p5.03oH0F/zz.rc
+++ cat /tmp/zzr7p5.03oH0F/zz.out
+++ cat /tmp/zzr7p5.03oH0F/zz.err
++ printf 'p5d zz: %s ms rc=%s out=%s err=%s\n' 1079 0 AL-1-no-pid ''
+++ date +%s%N
++ s=1789792195911929503
++ tm p5split -t =cs:p5dout.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F p5split -t =cs:p5dout.0
++ echo 0
+++ date +%s%N
++ e=1789792195914658387
+++ cat /tmp/zzr7p5.03oH0F/tmux.rc
+++ cat /tmp/zzr7p5.03oH0F/tmux.out
+++ cat /tmp/zzr7p5.03oH0F/tmux.err
++ printf 'p5d tmux: %s ms rc=%s out=%s err=%s\n' 2 0 AL-1-no-pid ''
++ cp /tmp/zzr7p5.03oH0F/zz.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p5d-zz.out
++ cp /tmp/zzr7p5.03oH0F/tmux.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p5d-tmux.out
++ check 'p5d rc' /tmp/zzr7p5.03oH0F/zz.rc /tmp/zzr7p5.03oH0F/tmux.rc
++ local 'label=p5d rc' a=/tmp/zzr7p5.03oH0F/zz.rc b=/tmp/zzr7p5.03oH0F/tmux.rc
++ cmp -s /tmp/zzr7p5.03oH0F/zz.rc /tmp/zzr7p5.03oH0F/tmux.rc
++ printf 'PASS %s\n' 'p5d rc'
++ check 'p5d stdout' /tmp/zzr7p5.03oH0F/zz.out /tmp/zzr7p5.03oH0F/tmux.out
++ local 'label=p5d stdout' a=/tmp/zzr7p5.03oH0F/zz.out b=/tmp/zzr7p5.03oH0F/tmux.out
++ cmp -s /tmp/zzr7p5.03oH0F/zz.out /tmp/zzr7p5.03oH0F/tmux.out
++ printf 'PASS %s\n' 'p5d stdout'
++ check 'p5d stderr' /tmp/zzr7p5.03oH0F/zz.err /tmp/zzr7p5.03oH0F/tmux.err
++ local 'label=p5d stderr' a=/tmp/zzr7p5.03oH0F/zz.err b=/tmp/zzr7p5.03oH0F/tmux.err
++ cmp -s /tmp/zzr7p5.03oH0F/zz.err /tmp/zzr7p5.03oH0F/tmux.err
++ printf 'PASS %s\n' 'p5d stderr'
++ printf '=== P5e: split -E -P (empty, no -I) ===\n'
++ fresh_window p5eout
++ local name=p5eout
++ zz new-window -d -n p5eout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock new-window -d -n p5eout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n p5eout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F new-window -d -n p5eout -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
+++ date +%s%N
++ s=1789792198380403855
++ zz split-window -E -d -P -F '#{pane_index}-#{?pane_pid,has-pid,no-pid}' -t =cs:p5eout.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock split-window -E -d -P -F '#{pane_index}-#{?pane_pid,has-pid,no-pid}' -t =cs:p5eout.0
++ echo 0
+++ date +%s%N
++ e=1789792201510149318
+++ cat /tmp/zzr7p5.03oH0F/zz.rc
+++ cat /tmp/zzr7p5.03oH0F/zz.out
+++ cat /tmp/zzr7p5.03oH0F/zz.err
++ printf 'p5e zz: %s ms rc=%s out=%s err=%s\n' 3129 0 1-no-pid ''
+++ date +%s%N
++ s=1789792201513014201
++ tm split-window -E -d -P -F '#{pane_index}-#{?pane_pid,has-pid,no-pid}' -t =cs:p5eout.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F split-window -E -d -P -F '#{pane_index}-#{?pane_pid,has-pid,no-pid}' -t =cs:p5eout.0
++ echo 0
+++ date +%s%N
++ e=1789792201515862019
+++ cat /tmp/zzr7p5.03oH0F/tmux.rc
+++ cat /tmp/zzr7p5.03oH0F/tmux.out
+++ cat /tmp/zzr7p5.03oH0F/tmux.err
++ printf 'p5e tmux: %s ms rc=%s out=%s err=%s\n' 2 0 1-no-pid ''
++ check 'p5e rc' /tmp/zzr7p5.03oH0F/zz.rc /tmp/zzr7p5.03oH0F/tmux.rc
++ local 'label=p5e rc' a=/tmp/zzr7p5.03oH0F/zz.rc b=/tmp/zzr7p5.03oH0F/tmux.rc
++ cmp -s /tmp/zzr7p5.03oH0F/zz.rc /tmp/zzr7p5.03oH0F/tmux.rc
++ printf 'PASS %s\n' 'p5e rc'
++ check 'p5e stdout' /tmp/zzr7p5.03oH0F/zz.out /tmp/zzr7p5.03oH0F/tmux.out
++ local 'label=p5e stdout' a=/tmp/zzr7p5.03oH0F/zz.out b=/tmp/zzr7p5.03oH0F/tmux.out
++ cmp -s /tmp/zzr7p5.03oH0F/zz.out /tmp/zzr7p5.03oH0F/tmux.out
++ printf 'PASS %s\n' 'p5e stdout'
++ check 'p5e stderr' /tmp/zzr7p5.03oH0F/zz.err /tmp/zzr7p5.03oH0F/tmux.err
++ local 'label=p5e stderr' a=/tmp/zzr7p5.03oH0F/zz.err b=/tmp/zzr7p5.03oH0F/tmux.err
++ cmp -s /tmp/zzr7p5.03oH0F/zz.err /tmp/zzr7p5.03oH0F/tmux.err
++ printf 'PASS %s\n' 'p5e stderr'
++ printf 'p5 done FAIL=%s\n' 1
++ exit 1
++ cleanup
++ set +e
++ zz kill-server
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p5.03oH0F/zz-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p5.03oH0F/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p5-03oH0F.sock kill-server
++ tm kill-server
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p5.03oH0F/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p5.03oH0F/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p5t-03oH0F kill-server
++ kill 2629489
++ wait 2629489
++ rm -rf -- /tmp/zzr7p5.03oH0F

@@ -1,0 +1,61 @@
+# Scenario: smoke/copy-mode-mode-keys-tail
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/smoke/copy-mode-mode-keys-tail.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: out: set-environment -gu COPY_MODE_MODE_KEYS_TAIL
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: run-shell 'sh ~/copy-mode-mode-keys-tail.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+tmux stdout:
+    copy-mode-mode-keys-tail-tmux: vi-on-the-closing-paren want=[4,1] got=[0,2]
+    copy-mode-mode-keys-tail-tmux: vi-next-matching-bracket-from-a-closing-one want=[0,1] got=[4,2]
+    copy-mode-mode-keys-tail-tmux: emacs-next-matching-bracket-from-a-closing-one want=[5,1] got=[1,2]
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: divergence
+--- zz SMOKE STDOUT step 2
++++ tmux SMOKE STDOUT step 2
+@@ -0,0 +1,3 @@
++copy-mode-mode-keys-tail-tmux: vi-on-the-closing-paren want=[4,1] got=[0,2]
++copy-mode-mode-keys-tail-tmux: vi-next-matching-bracket-from-a-closing-one want=[0,1] got=[4,2]
++copy-mode-mode-keys-tail-tmux: emacs-next-matching-bracket-from-a-closing-one want=[5,1] got=[1,2]
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g COPY_MODE_MODE_KEYS_TAIL
+zz exit: 0
+tmux exit: 1
+zz stderr:
+    <empty>
+tmux stderr:
+    unknown variable: COPY_MODE_MODE_KEYS_TAIL
+zz stdout:
+    COPY_MODE_MODE_KEYS_TAIL=clean:44
+OUT QUERY: failure
+SMOKE STDERR: divergence
+--- zz SMOKE STDERR step 3
++++ tmux SMOKE STDERR step 3
+@@ -0,0 +1 @@
++unknown variable: COPY_MODE_MODE_KEYS_TAIL
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=2

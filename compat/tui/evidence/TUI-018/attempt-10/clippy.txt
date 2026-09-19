@@ -1,0 +1,44 @@
+    Checking zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-terminal)
+    Checking zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-protocol)
+    Checking zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-mux)
+    Checking zz-client v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-client)
+    Checking zz-browser v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-browser)
+    Checking zz-ui v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-ui)
+    Checking zz-chrome-import v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-chrome-import)
+    Checking zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-daemon)
+    Checking zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-tui)
+    Checking zz-config v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-config)
+    Checking zz-cli v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-cli)
+error: these match arms have identical bodies
+    --> crates/zz-cli/src/control_mode.rs:1638:13
+     |
+1638 |             Ok(_) => {}
+     |             ^^^^^^^^^^^
+1639 |             Err(mpsc::RecvTimeoutError::Timeout) => {}
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: if this is unintentional make the arms return different values
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#match_same_arms
+     = note: `-D clippy::match-same-arms` implied by `-D warnings`
+     = help: to override `-D warnings` add `#[allow(clippy::match_same_arms)]`
+help: otherwise merge the patterns into a single arm
+     |
+1638 ~             Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+1639 ~             Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
+     |
+
+error: could not compile `zz-cli` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: you appear to be counting bytes the naive way
+    --> crates/zz-cli/src/control_mode.rs:2440:13
+     |
+2440 |             writer.output.iter().filter(|byte| **byte == 0x1b).count(),
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using the bytecount crate: `bytecount::count(writer.output, 0x1b)`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#naive_bytecount
+     = note: `-D clippy::naive-bytecount` implied by `-D warnings`
+     = help: to override `-D warnings` add `#[allow(clippy::naive_bytecount)]`
+
+error: could not compile `zz-cli` (lib test) due to 2 previous errors
+
+exit_status=101

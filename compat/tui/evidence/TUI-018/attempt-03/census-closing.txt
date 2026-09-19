@@ -1,0 +1,6 @@
+census: 470 corpus files under compat/scenarios, compat/attached-client.sh, compat/status-row.sh, compat/diff-scenario.sh
+options: 23 of 146 never exercised
+hooks: 8 of 68 never exercised
+formats: 11 of 198 never exercised
+format_aliases: 0 of 9 never exercised
+format_modifiers: 0 of 2 never exercised

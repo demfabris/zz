@@ -1,0 +1,8 @@
+display more-then-eof zz: client running before EOF | rc=0 stdout=[tail-out|] stderr=[] @after=yes panes=1
+display more-then-eof tmux: client exited before EOF | rc=1 stdout=[] stderr=[] @after= panes=1
+display eof zz: client running before EOF | rc=0 stdout=[tail-out|] stderr=[] @after=yes panes=1
+display eof tmux: client running before EOF | rc=1 stdout=[] stderr=[] @after= panes=1
+split more-then-eof zz: client running before EOF | rc=0 stdout=[tail-out|] stderr=[] @after=yes panes=1
+split more-then-eof tmux: client exited before EOF | rc=1 stdout=[] stderr=[] @after= panes=1
+split eof zz: client running before EOF | rc=0 stdout=[tail-out|] stderr=[] @after=yes panes=1
+split eof tmux: client running before EOF | rc=1 stdout=[] stderr=[] @after= panes=1

@@ -4839,6 +4839,7 @@ fn run_output_view(
                     if let Some(status) = last_command_status {
                         publisher.set_last_command_status(status.code());
                     }
+                    publisher.set_facts(engine_filter.facts(&terminal)?);
                     publisher.mark_output_activity();
                     publish_active_views(
                         &mut terminal,
@@ -8703,7 +8704,6 @@ fn capture_styled_terminal(
                 CellContentTag::BgColorPalette => {
                     style.bg_color =
                         StyleColor::Palette(cell.bg_color_palette().map_err(capture_failure)?);
-                    style.bg_indexed = cell.bg_indexed().map_err(capture_failure)?;
                 }
                 CellContentTag::BgColorRgb => {
                     style.bg_color = StyleColor::Rgb(cell.bg_color_rgb().map_err(capture_failure)?);
@@ -8806,37 +8806,18 @@ fn push_capture_sgr(
         output.push_str(&attributes.join(";"));
         output.push('m');
     }
-    for (old, new, old_indexed, indexed, base) in [
-        (
-            previous.fg_color,
-            style.fg_color,
-            previous.fg_indexed,
-            style.fg_indexed,
-            30,
-        ),
-        (
-            previous.bg_color,
-            style.bg_color,
-            previous.bg_indexed,
-            style.bg_indexed,
-            40,
-        ),
-        (
-            previous.underline_color,
-            style.underline_color,
-            true,
-            true,
-            50,
-        ),
+    for (old, new, base) in [
+        (previous.fg_color, style.fg_color, 30),
+        (previous.bg_color, style.bg_color, 40),
+        (previous.underline_color, style.underline_color, 50),
     ] {
-        if (reset && new != StyleColor::None) || (!reset && (old != new || old_indexed != indexed))
-        {
-            push_capture_colour(output, new, base, indexed);
+        if (reset && new != StyleColor::None) || (!reset && old != new) {
+            push_capture_colour(output, new, base);
         }
     }
 }
 
-fn push_capture_colour(output: &mut String, colour: StyleColor, base: u16, indexed: bool) {
+fn push_capture_colour(output: &mut String, colour: StyleColor, base: u16) {
     use std::fmt::Write as _;
 
     match colour {
@@ -8844,10 +8825,10 @@ fn push_capture_colour(output: &mut String, colour: StyleColor, base: u16, index
         StyleColor::None => {
             let _ = write!(output, "\x1b[{}m", base + 9);
         }
-        StyleColor::Palette(index) if !indexed && base != 50 && index.0 < 8 => {
+        StyleColor::Palette(index) if base != 50 && index.0 < 8 => {
             let _ = write!(output, "\x1b[{}m", base + u16::from(index.0));
         }
-        StyleColor::Palette(index) if !indexed && base != 50 && index.0 < 16 => {
+        StyleColor::Palette(index) if base != 50 && index.0 < 16 => {
             let _ = write!(output, "\x1b[{}m", base + 60 + u16::from(index.0) - 8);
         }
         StyleColor::Palette(index) => {
@@ -18406,7 +18387,7 @@ mod tests {
     }
 
     #[test]
-    fn capture_keeps_the_cells_a_wide_insert_leaves_behind() {
+    fn capture_clears_the_cells_a_wide_insert_crosses() {
         let mut terminal = Terminal::new(TerminalOptions {
             cols: 80,
             rows: 24,
@@ -18420,28 +18401,25 @@ mod tests {
         };
         assert_eq!(
             capture_terminal(&terminal, None, options).unwrap(),
-            format!("{}E ABCD\n\n\n\nNEXT", " ".repeat(74))
+            format!("{}ABCD\n\n\n\nNEXT", " ".repeat(76))
         );
     }
 
     #[test]
-    fn styled_capture_matches_pinned_colour_and_attribute_transitions() {
+    fn styled_capture_emits_colour_and_attribute_transitions() {
         for (input, expected) in [
             (
                 "\x1b[44mABC\tDEF\x1b[0m\r\x1b[6G\x1b[41mX\x1b[0m",
                 "\x1b[44mABC\x1b[49m  \x1b[41mX\x1b[49m  \x1b[44mDEF\x1b[49m",
             ),
             ("\x1b[31mRED\x1b[0m", "\x1b[31mRED\x1b[39m"),
-            ("\x1b[38;5;1mRED\x1b[0m", "\x1b[38;5;1mRED\x1b[39m"),
+            ("\x1b[38;5;1mRED\x1b[0m", "\x1b[31mRED\x1b[39m"),
             (
                 "\x1b[31mA\x1b[38;5;1mB\x1b[31mC\x1b[0m",
-                "\x1b[31mA\x1b[38;5;1mB\x1b[31mC\x1b[39m",
+                "\x1b[31mABC\x1b[39m",
             ),
-            (
-                "\x1b[48;5;1mA\x1b[41mB\x1b[0m",
-                "\x1b[48;5;1mA\x1b[41mB\x1b[49m",
-            ),
-            ("\x1b[48;5;1m\x1b[2K\x1b[0m", "\x1b[48;5;1m"),
+            ("\x1b[48;5;1mA\x1b[41mB\x1b[0m", "\x1b[41mAB\x1b[49m"),
+            ("\x1b[48;5;1m\x1b[2K\x1b[0m", "\x1b[41m"),
             ("\x1b[38;5;196mRED\x1b[0m", "\x1b[38;5;196mRED\x1b[39m"),
             ("\x1b[38;2;1;2;3mRGB\x1b[0m", "\x1b[38;2;1;2;3mRGB\x1b[39m"),
             ("\x1b[1mBOLD\x1b[0m", "\x1b[1mBOLD\x1b[0m"),

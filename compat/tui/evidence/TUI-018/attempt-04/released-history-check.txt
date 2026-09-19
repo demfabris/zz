@@ -1,0 +1,2 @@
+PASS: all v103 append history paragraphs are byte-identical to v0.10.0.
+PASS: delta selection is byte-identical to attempt-03/delta-selection-full.txt (222 rows).

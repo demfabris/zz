@@ -1,0 +1,3 @@
+    PID ELAPSED COMMAND
+2828463    3268 /home/demfabris/dev/zz-c11-alias-fix/target/debug/zz_cli -f /tmp/zz-cli-qSyYy3/empty.conf -S /tmp/zz-cli-qSyYy3/daemon.sock -C new-ses
+SIGKILL sent to the stalled wait_exit_holds_the_control_process_until_a_second_blank_line control client child at epoch 1789662282, after the elapsed time shown above

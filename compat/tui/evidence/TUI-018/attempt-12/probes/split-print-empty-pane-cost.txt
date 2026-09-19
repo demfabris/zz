@@ -1,0 +1,14 @@
+# split-window -d -P cost localized on the tip binary: -P on an empty pane is the two seconds
+
+empty-P 2186 ms -> %1
+empty-noP 214 ms -> 
+empty-E 232 ms -> 
+shell-P 364 ms -> %4
+new-window-empty 138 ms -> create window failed: index 0 in use
+list-panes 142 ms -> %0 0
+%4 0
+%3 0
+%2 0
+%1 0
+PROBE-DONE
+EXIT 0

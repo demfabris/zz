@@ -1,0 +1,417 @@
+# Scenario: exec-family
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/exec-family.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: new-session -d -s w -n main -x 80 -y 24
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    duplicate session: w
+tmux stderr:
+    duplicate session: w
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: run-shell 'true'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: run-shell 'exit 3'
+zz exit: 3
+tmux exit: 3
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    'exit 3' returned 3
+tmux stdout:
+    'exit 3' returned 3
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: run-shell
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: run-shell echo
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    
+tmux stdout:
+    
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: if-shell 'true' 'set -g @exec-then 1' 'set -g @exec-else 1'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: show-options -gv @exec-then
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: if-shell 'false' 'set -g @exec-then2 1' 'set -g @exec-else2 1'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: show-options -gv @exec-else2
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: if-shell -F '' 'set -g @f-true 1' 'set -g @f-false 1'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: show-options -gv @f-false
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: if-shell -F '0abc' 'set -g @fz-true 1' 'set -g @fz-false 1'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: show-options -gv @fz-false
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: if-shell -F ' 0' 'set -g @fs-true 1' 'set -g @fs-false 1'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: show-options -gv @fs-true
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: run-shell -C 'set -g @via-c 1'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: show-options -gv @via-c
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: wait-for -S exec-ready
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: wait-for -U exec-missing
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    channel exec-missing not locked
+tmux stderr:
+    channel exec-missing not locked
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: new-window -d -t w -n piped -- sleep 300
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: pipe-pane -t w:piped 'cat'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: list-panes -t w:piped -F pipe=#{pane_pipe}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    pipe=1
+tmux stdout:
+    pipe=1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: pipe-pane -t w:piped
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: out: list-panes -t w:piped -F pipe=#{pane_pipe}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    pipe=0
+tmux stdout:
+    pipe=0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: pipe-pane -o -t w:piped 'cat'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: out: list-panes -t w:piped -F pipe=#{pane_pipe}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    pipe=1
+tmux stdout:
+    pipe=1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: pipe-pane -o -t w:piped 'cat'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: out: list-panes -t w:piped -F pipe=#{pane_pipe}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    pipe=0
+tmux stdout:
+    pipe=0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: pipe-pane -t w:piped ''
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: out: list-panes -t w:piped -F pipe=#{pane_pipe}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    pipe=0
+tmux stdout:
+    pipe=0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=30 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

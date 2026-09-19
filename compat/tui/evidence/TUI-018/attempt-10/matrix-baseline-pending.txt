@@ -1,0 +1,30 @@
+      case matrix-direct-split-pending
+      state differs
+        4c4
+        < pending=0:3
+        ---
+        > pending=1:2
+DIFF  matrix-direct-split-pending
+      case matrix-alias-split-pending
+      state differs
+        4c4
+        < pending=0:3
+        ---
+        > pending=1:2
+DIFF  matrix-alias-split-pending
+      case matrix-file-split-pending
+      state differs
+        4c4
+        < pending=0:3
+        ---
+        > pending=1:2
+DIFF  matrix-file-split-pending
+      case matrix-direct-split-pending-zoom
+      state differs
+        4c4
+        < pending=1:3
+        ---
+        > pending=1:2
+DIFF  matrix-direct-split-pending-zoom
+matrix: 4 asserted, 4 failures, 0 recorded:TUI-018, 0 decided:TUI-018, 0 self-check failures
+exit_status=1

@@ -1,0 +1,467 @@
+# Scenario: known/known-terminal-runtime
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/known/known-terminal-runtime.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: set-option -g status off
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: new-window -n retained "sleep 600"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: resize-window -x 80 -y 24
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: fmt: alternate_saved_x=#{alternate_saved_x}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alternate_saved_x=0
+tmux stdout:
+    alternate_saved_x=4294967295
+FMT: divergence
+--- zz FMT step 4
++++ tmux FMT step 4
+@@ -1 +1 @@
+-alternate_saved_x=0
++alternate_saved_x=4294967295
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: fmt: alternate_saved_y=#{alternate_saved_y}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alternate_saved_y=0
+tmux stdout:
+    alternate_saved_y=4294967295
+FMT: divergence
+--- zz FMT step 5
++++ tmux FMT step 5
+@@ -1 +1 @@
+-alternate_saved_y=0
++alternate_saved_y=4294967295
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: fmt: bracket_paste_flag=#{bracket_paste_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bracket_paste_flag=0
+tmux stdout:
+    bracket_paste_flag=0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: fmt: cursor_blinking=#{cursor_blinking}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    cursor_blinking=0
+tmux stdout:
+    cursor_blinking=0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: fmt: cursor_flag=#{cursor_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    cursor_flag=1
+tmux stdout:
+    cursor_flag=1
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: fmt: cursor_shape=#{cursor_shape}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    cursor_shape=0
+tmux stdout:
+    cursor_shape=default
+FMT: divergence
+--- zz FMT step 9
++++ tmux FMT step 9
+@@ -1 +1 @@
+-cursor_shape=0
++cursor_shape=default
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: fmt: cursor_very_visible=#{cursor_very_visible}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    cursor_very_visible=0
+tmux stdout:
+    cursor_very_visible=0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: fmt: history_all_bytes=#{history_all_bytes}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    history_all_bytes=0
+tmux stdout:
+    history_all_bytes=24,960,0,0,0,0
+FMT: divergence
+--- zz FMT step 11
++++ tmux FMT step 11
+@@ -1 +1 @@
+-history_all_bytes=0
++history_all_bytes=24,960,0,0,0,0
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: fmt: history_bytes=#{history_bytes}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    history_bytes=0
+tmux stdout:
+    history_bytes=960
+FMT: divergence
+--- zz FMT step 12
++++ tmux FMT step 12
+@@ -1 +1 @@
+-history_bytes=0
++history_bytes=960
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: fmt: insert_flag=#{insert_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    insert_flag=0
+tmux stdout:
+    insert_flag=0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: fmt: keypad_cursor_flag=#{keypad_cursor_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    keypad_cursor_flag=0
+tmux stdout:
+    keypad_cursor_flag=0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: fmt: keypad_flag=#{keypad_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    keypad_flag=0
+tmux stdout:
+    keypad_flag=0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: fmt: mouse_all_flag=#{mouse_all_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    mouse_all_flag=0
+tmux stdout:
+    mouse_all_flag=0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: fmt: mouse_any_flag=#{mouse_any_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    mouse_any_flag=0
+tmux stdout:
+    mouse_any_flag=0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: fmt: mouse_button_flag=#{mouse_button_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    mouse_button_flag=0
+tmux stdout:
+    mouse_button_flag=0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: fmt: mouse_sgr_flag=#{mouse_sgr_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    mouse_sgr_flag=0
+tmux stdout:
+    mouse_sgr_flag=0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: fmt: mouse_standard_flag=#{mouse_standard_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    mouse_standard_flag=0
+tmux stdout:
+    mouse_standard_flag=0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: fmt: mouse_utf8_flag=#{mouse_utf8_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    mouse_utf8_flag=0
+tmux stdout:
+    mouse_utf8_flag=0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: fmt: origin_flag=#{origin_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    origin_flag=0
+tmux stdout:
+    origin_flag=0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: fmt: scroll_region_lower=#{scroll_region_lower}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    scroll_region_lower=0
+tmux stdout:
+    scroll_region_lower=23
+FMT: divergence
+--- zz FMT step 23
++++ tmux FMT step 23
+@@ -1 +1 @@
+-scroll_region_lower=0
++scroll_region_lower=23
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: fmt: scroll_region_upper=#{scroll_region_upper}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    scroll_region_upper=0
+tmux stdout:
+    scroll_region_upper=0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: fmt: sixel_support=#{sixel_support}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    sixel_support=0
+tmux stdout:
+    sixel_support=0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: fmt: synchronized_output_flag=#{synchronized_output_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    synchronized_output_flag=0
+tmux stdout:
+    synchronized_output_flag=0
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: fmt: wrap_flag=#{wrap_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    wrap_flag=1
+tmux stdout:
+    wrap_flag=1
+FMT: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: kill-window -t w:retained
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=28 topo_divergences=0 geo_divergences=0 fmt_divergences=6 out_divergences=0 warn_divergences=0

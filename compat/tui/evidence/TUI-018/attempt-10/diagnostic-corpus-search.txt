@@ -1,0 +1,2 @@
+
+rg_exit_status=1

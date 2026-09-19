@@ -120,9 +120,8 @@ fn build_vendored(link_mode: LinkMode) {
         Err(_) => fetch_ghostty(&out_dir),
     };
 
-    let (ghostty_dir, install_prefix) = provenance_tree(&source_dir, &out_dir);
-
     // Build libghostty-vt via zig.
+    let install_prefix = out_dir.join("ghostty-install");
     let zig_cache_dir = out_dir.join("zig-cache");
     let zig_global_cache_dir = out_dir.join("zig-global-cache");
 
@@ -140,8 +139,7 @@ fn build_vendored(link_mode: LinkMode) {
         .arg(&install_prefix)
         .arg("--cache-dir")
         .arg(&zig_cache_dir)
-        .env("GIT_CEILING_DIRECTORIES", &out_dir)
-        .current_dir(&ghostty_dir);
+        .current_dir(&source_dir);
 
     // Package managers can provide Ghostty's Zig package cache ahead of time
     // and ask Zig to resolve packages from that immutable store path instead
@@ -172,13 +170,6 @@ fn build_vendored(link_mode: LinkMode) {
     }
 
     run(build, "zig build");
-    for name in ["libghostty-vt.pc", "libghostty-vt-static.pc"] {
-        let path = install_prefix.join("share/pkgconfig").join(name);
-        if let Ok(contents) = std::fs::read_to_string(&path) {
-            std::fs::write(path, format!("zz_capture_provenance=1\n{contents}"))
-                .expect("mark terminal provenance package");
-        }
-    }
 
     let lib_dir = install_prefix.join("lib");
     let include_dir = install_prefix.join("include");
@@ -244,12 +235,6 @@ fn warn_unused_xcframework(lib_dir: &Path) {
 
 #[cfg(feature = "pkg-config")]
 fn try_pkg_config(link_mode: LinkMode) -> bool {
-    if !matches!(
-        pkg_config::get_variable(link_mode.pkg_config_name(), "zz_capture_provenance").as_deref(),
-        Ok("1")
-    ) {
-        return false;
-    }
     let mut config = pkg_config::Config::new();
     let lib = match link_mode {
         LinkMode::Dynamic => config.probe(link_mode.pkg_config_name()),
@@ -356,7 +341,6 @@ fn fetch_ghostty(out_dir: &Path) -> PathBuf {
     if stamp.exists()
         && let Ok(existing) = std::fs::read_to_string(&stamp)
         && existing.trim() == GHOSTTY_COMMIT
-        && restore_in_place_patch(&src_dir)
     {
         return src_dir;
     }
@@ -388,105 +372,6 @@ fn fetch_ghostty(out_dir: &Path) -> PathBuf {
     std::fs::write(&stamp, GHOSTTY_COMMIT).unwrap_or_else(|e| panic!("failed to write stamp: {e}"));
 
     src_dir
-}
-
-const IN_PLACE_STAMP: &str = ".zz-provenance.patch";
-
-fn restore_in_place_patch(source: &Path) -> bool {
-    let stamp = source.join(IN_PLACE_STAMP);
-    if !stamp.exists() {
-        return true;
-    }
-    let restored = Command::new("git")
-        .args(["apply", "--reverse"])
-        .arg(&stamp)
-        .current_dir(source)
-        .status()
-        .is_ok_and(|status| status.success());
-    restored && std::fs::remove_file(&stamp).is_ok()
-}
-
-fn provenance_tree(source: &Path, out_dir: &Path) -> (PathBuf, PathBuf) {
-    let patch = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("provenance.patch");
-    println!("cargo:rerun-if-changed={}", patch.display());
-    assert!(
-        !source.join(IN_PLACE_STAMP).exists(),
-        "{} still carries a provenance patch an older build applied in place; restore its sources",
-        source.display()
-    );
-    let contents = std::fs::read(&patch).expect("read terminal provenance patch");
-    let key = contents
-        .iter()
-        .chain(GHOSTTY_COMMIT.as_bytes())
-        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-            (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
-        });
-    let name = format!("ghostty-provenance-{key:016x}");
-    for entry in std::fs::read_dir(out_dir).expect("read OUT_DIR").flatten() {
-        let stale = entry.file_name().to_string_lossy().into_owned();
-        if stale.starts_with("ghostty-provenance-") && !stale.starts_with(&name) {
-            std::fs::remove_dir_all(entry.path()).expect("remove stale provenance tree");
-        }
-    }
-    let tree = out_dir.join(&name);
-    if tree.exists() {
-        std::fs::remove_dir_all(&tree).expect("remove previous provenance tree");
-    }
-    let patched: Vec<PathBuf> = String::from_utf8_lossy(&contents)
-        .lines()
-        .filter_map(|line| line.strip_prefix("+++ b/"))
-        .map(PathBuf::from)
-        .collect();
-    mirror_source(source, &tree, Path::new(""), &patched);
-    let mut apply = Command::new("git");
-    apply
-        .arg("apply")
-        .arg(&patch)
-        .env("GIT_CEILING_DIRECTORIES", out_dir)
-        .current_dir(&tree);
-    run(apply, "apply terminal provenance patch");
-    (tree, out_dir.join(format!("{name}-install")))
-}
-
-fn mirror_source(source: &Path, tree: &Path, relative: &Path, patched: &[PathBuf]) {
-    std::fs::create_dir_all(tree.join(relative)).expect("create provenance tree");
-    let entries = std::fs::read_dir(source.join(relative))
-        .unwrap_or_else(|error| panic!("read {}: {error}", source.join(relative).display()));
-    for entry in entries {
-        let entry = entry.expect("read Ghostty source entry");
-        let name = entry.file_name();
-        if relative.as_os_str().is_empty()
-            && [".git", ".zig-cache", "zig-out", ".ghostty-commit"]
-                .iter()
-                .any(|skip| name == *skip)
-        {
-            continue;
-        }
-        let path = relative.join(&name);
-        let (from, to) = (source.join(&path), tree.join(&path));
-        let kind = entry.file_type().expect("read Ghostty source entry type");
-        if kind.is_dir() {
-            mirror_source(source, tree, &path, patched);
-        } else if kind.is_symlink() {
-            mirror_symlink(&from, &to);
-        } else if patched.contains(&path) || std::fs::hard_link(&from, &to).is_err() {
-            std::fs::copy(&from, &to)
-                .unwrap_or_else(|error| panic!("copy {}: {error}", from.display()));
-        }
-    }
-}
-
-#[cfg(unix)]
-fn mirror_symlink(from: &Path, to: &Path) {
-    let target = std::fs::read_link(from).expect("read Ghostty source symlink");
-    std::os::unix::fs::symlink(target, to).expect("mirror Ghostty source symlink");
-}
-
-#[cfg(not(unix))]
-fn mirror_symlink(from: &Path, to: &Path) {
-    if from.is_file() {
-        std::fs::copy(from, to).expect("copy Ghostty source symlink target");
-    }
 }
 
 fn run(mut command: Command, context: &str) {

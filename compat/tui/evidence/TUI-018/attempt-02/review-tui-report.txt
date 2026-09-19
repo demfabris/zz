@@ -1,0 +1,1 @@
+Wrote knowledge/tmux/tui-parity.md

@@ -1,0 +1,2 @@
+smoke/format-modifier-client-loop: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+exit_status=0

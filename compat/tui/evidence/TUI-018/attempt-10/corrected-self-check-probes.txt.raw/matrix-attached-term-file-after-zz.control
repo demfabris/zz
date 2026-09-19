@@ -1,0 +1,8 @@
+P1000p%begin 1789646406 1 0
+%end 1789646406 1 0
+%session-changed $0 cs
+%begin 1789646407 2 1
+MATRIX-BEGIN
+%end 1789646407 2 1
+%begin 1789646407 3 1
+/tmp/zzcs.x0McMN/attached-zz.sh: line 2: 3487790 Killed                     ( printf "%s\n" "$BASHPID" > /tmp/zzcs.x0McMN/zz.pid; exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzcs.x0McMN/zz-home XDG_CONFIG_HOME=/tmp/zzcs.x0McMN/zz-home/config ZZ_LOG_DIR=/tmp/zzcs.x0McMN/zz-logs /home/demfabris/dev/zz-c11-alias-fix/target/debug/zz-alias5-corrected --socket /tmp/zzcs-x0McMN.sock -CC attach-session -f no-output -t =cs 2> /tmp/zzcs.x0McMN/zz.err )

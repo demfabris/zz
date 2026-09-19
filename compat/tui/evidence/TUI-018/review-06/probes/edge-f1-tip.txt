@@ -1,0 +1,34 @@
+=== zz display twice
+rc=0
+yes
+abc
+cursor=3:0 hist=0 size=80x11 dead=0 pid=no
+=== zz split twice
+rc=0
+yes
+0 dead=0 80x6
+1 dead=0 80x5
+2 dead=0 80x11
+
+xyz
+=== zz display then split then load-buffer spent
+Bad file descriptor: -
+rc=1
+yes
+=== tmux display twice
+rc=0
+yes
+abc
+cursor=3:0 hist=0 size=80x11 dead=0 pid=no
+=== tmux split twice
+rc=0
+yes
+0 dead=0 80x6
+1 dead=0 80x5
+2 dead=0 80x11
+
+xyz
+=== tmux display then split then load-buffer spent
+Bad file descriptor: -
+rc=1
+yes

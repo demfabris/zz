@@ -1,0 +1,1 @@
+Stopped pending repetitions after discovering the single-reader file-replay regression; results through fixture-02/self-check-03 use the earlier binary.

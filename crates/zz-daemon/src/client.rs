@@ -25,6 +25,36 @@ use zz_protocol::{
 /// file opened.
 const CLIENT_FILE_READ_ERRNO: i32 = 5;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+static STDIN_WAS_CLOSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[used]
+#[cfg_attr(target_os = "linux", unsafe(link_section = ".init_array"))]
+#[cfg_attr(target_os = "macos", unsafe(link_section = "__DATA,__mod_init_func"))]
+#[allow(
+    unsafe_code,
+    reason = "capture descriptor validity before Rust sanitizes standard input"
+)]
+static CAPTURE_STDIN: extern "C" fn() = capture_stdin;
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[allow(
+    unsafe_code,
+    reason = "fcntl and errno inspect fd 0 without allocating or changing it"
+)]
+extern "C" fn capture_stdin() {
+    unsafe {
+        if libc::fcntl(0, libc::F_GETFD) == -1 {
+            #[cfg(target_os = "linux")]
+            let error = *libc::__errno_location();
+            #[cfg(target_os = "macos")]
+            let error = *libc::__error();
+            STDIN_WAS_CLOSED.store(error == libc::EBADF, Ordering::Relaxed);
+        }
+    }
+}
+
 static CLIENT_INSTANCE_ID: OnceLock<ClientInstanceId> = OnceLock::new();
 
 fn client_instance_id() -> ClientInstanceId {
@@ -110,9 +140,16 @@ pub struct CommandOutcome {
     /// stream while `stdout` was produced. The CLI writer reads this instead of
     /// guessing from the bytes.
     pub stdout_claim: StdoutClaim,
+    /// The pin's `CLIENT_EXIT`: the daemon asked this client to stop before the
+    /// rest of its command chain runs.
+    pub client_exit: bool,
 }
 
 pub struct CommandClient {
+    stdin_enabled: bool,
+    stdin_spent: bool,
+    stderr_handler: Option<fn(&str)>,
+    stdout_handler: Option<fn(&RawText)>,
     reader: ProtocolReceiver<LocalStream>,
     writer: ProtocolSender<LocalStream>,
     hello: ServerHello,
@@ -207,6 +244,10 @@ impl CommandClient {
 
     fn from_connected((reader, writer, hello): Connected<LocalStream>) -> Self {
         Self {
+            stdin_enabled: false,
+            stdin_spent: false,
+            stderr_handler: None,
+            stdout_handler: None,
             reader,
             writer,
             hello,
@@ -225,6 +266,18 @@ impl CommandClient {
     #[must_use]
     pub fn server_hello(&self) -> &ServerHello {
         &self.hello
+    }
+
+    pub fn set_stderr_handler(&mut self, handler: fn(&str)) {
+        self.stderr_handler = Some(handler);
+    }
+
+    pub fn set_stdout_handler(&mut self, handler: fn(&RawText)) {
+        self.stdout_handler = Some(handler);
+    }
+
+    pub fn enable_stdin(&mut self) {
+        self.stdin_enabled = true;
     }
 
     pub fn wait_for_disconnect(mut self) {
@@ -269,6 +322,15 @@ impl CommandClient {
         command: CommandInvocation,
         prepared: bool,
     ) -> Result<CommandOutcome, DaemonError> {
+        #[cfg(all(unix, feature = "daemon"))]
+        let _signal = self
+            .stdin_enabled
+            .then(StdinReadSignal::install)
+            .transpose()?;
+        let mut command = command;
+        command.set_stdin_available(self.stdin_enabled);
+        let mut streamed_stderr = String::new();
+        let mut client_exit = false;
         let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
         self.writer
             .send(&ProtocolMessage::CommandRequest(CommandRequest {
@@ -287,9 +349,13 @@ impl CommandClient {
                 }) if response_id == request_id => {
                     return Ok(CommandOutcome {
                         stdout: output,
-                        stderr,
+                        stderr: stderr
+                            .strip_prefix(&streamed_stderr)
+                            .unwrap_or(&stderr)
+                            .to_owned(),
                         exit_code,
                         stdout_claim,
+                        client_exit,
                     });
                 }
                 ProtocolMessage::CommandResponse(CommandResponse::Error {
@@ -307,11 +373,58 @@ impl CommandClient {
                         })
                     };
                 }
+                ProtocolMessage::Event(zz_protocol::Event {
+                    payload:
+                        zz_protocol::EventPayload::ClientMessage {
+                            kind: zz_protocol::ClientMessageKind::Error,
+                            text,
+                            ..
+                        },
+                    ..
+                }) if self.stderr_handler.is_some() => {
+                    let line = format!("{text}\n");
+                    self.stderr_handler.expect("stderr handler checked")(&line);
+                    streamed_stderr.push_str(&line);
+                }
+                ProtocolMessage::Event(zz_protocol::Event {
+                    payload: zz_protocol::EventPayload::CommandStdout { output },
+                    ..
+                }) => {
+                    if let Some(handler) = self.stdout_handler {
+                        handler(&output);
+                    }
+                }
+                ProtocolMessage::Event(zz_protocol::Event {
+                    payload: zz_protocol::EventPayload::CommandClientExit,
+                    ..
+                }) => {
+                    client_exit = true;
+                }
                 ProtocolMessage::ClientFileRequest(request) => {
+                    let readable = self.stdin_enabled && !self.stdin_spent;
+                    let result = match request.operation {
+                        ClientFileOperation::ReadStdin { binary } if readable => {
+                            self.stdin_spent = true;
+                            read_command_stdin(binary)
+                        }
+                        ClientFileOperation::ReadStdinChunk if readable => {
+                            let chunk = read_command_stdin_chunk();
+                            self.stdin_spent = !matches!(&chunk, Ok(chunk) if !chunk.is_empty());
+                            chunk
+                        }
+                        _ => {
+                            self.writer.send(&ProtocolMessage::ClientFileResponse(
+                                answer_client_file(&request),
+                            ))?;
+                            continue;
+                        }
+                    };
                     self.writer
-                        .send(&ProtocolMessage::ClientFileResponse(answer_client_file(
-                            &request,
-                        )))?;
+                        .send(&ProtocolMessage::ClientFileResponse(ClientFileResponse {
+                            request_id: request.request_id,
+                            data: result.as_ref().cloned().unwrap_or_default(),
+                            error: result.err(),
+                        }))?;
                 }
                 _ => {}
             }
@@ -1639,12 +1752,117 @@ pub fn short_device_name() -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Do the one bounded file operation the daemon asked for, on this client's own
-/// host. The daemon has already expanded the path against this client's working
-/// directory, so nothing here resolves anything.
+const STDIN_CHUNK_BYTES: usize = 16 * 1024;
+
+fn caller_stdin() -> Result<std::fs::File, String> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if STDIN_WAS_CLOSED.load(Ordering::Relaxed) {
+        eprintln!(
+            "[err] evsig_cb: recv: {}",
+            crate::strerror_text(&io::Error::from_raw_os_error(libc::EBADF))
+        );
+        std::process::exit(1);
+    }
+    let stdin = io::stdin();
+    #[cfg(unix)]
+    let duplicate = std::os::fd::AsFd::as_fd(&stdin).try_clone_to_owned();
+    #[cfg(windows)]
+    let duplicate = std::os::windows::io::AsHandle::as_handle(&stdin).try_clone_to_owned();
+    duplicate
+        .map(std::fs::File::from)
+        .map_err(|error| crate::strerror_text(&error))
+}
+
+fn stdin_read_error() -> String {
+    crate::strerror_text(&io::Error::from_raw_os_error(CLIENT_FILE_READ_ERRNO))
+}
+
+fn read_command_stdin(binary: bool) -> Result<Vec<u8>, String> {
+    read_command_stdin_from(caller_stdin()?, binary)
+}
+
+fn read_command_stdin_chunk() -> Result<Vec<u8>, String> {
+    read_command_stdin_chunk_from(caller_stdin()?)
+}
+
+fn read_command_stdin_chunk_from(mut reader: impl Read) -> Result<Vec<u8>, String> {
+    #[cfg(all(unix, feature = "daemon"))]
+    let _signal = StdinReadSignal::install().map_err(|error| error.to_string())?;
+    let mut chunk = vec![0; STDIN_CHUNK_BYTES];
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(read) => {
+                chunk.truncate(read);
+                return Ok(chunk);
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(_) => return Err(stdin_read_error()),
+        }
+    }
+}
+
+fn read_command_stdin_from(reader: impl Read, binary: bool) -> Result<Vec<u8>, String> {
+    #[cfg(all(unix, feature = "daemon"))]
+    let _signal = StdinReadSignal::install().map_err(|error| error.to_string())?;
+    let limit = zz_protocol::MAX_AGENT_SEND_BYTES;
+    let mut payload = Vec::new();
+    reader
+        .take(limit as u64 + 1)
+        .read_to_end(&mut payload)
+        .map_err(|_| stdin_read_error())?;
+    if payload.len() > limit {
+        return Err(format!("standard input exceeds {limit} bytes"));
+    }
+    if !binary && std::str::from_utf8(&payload).is_err() {
+        return Err("could not read standard input: stream did not contain valid UTF-8".to_owned());
+    }
+    Ok(payload)
+}
+
+#[cfg(all(unix, feature = "daemon"))]
+struct StdinReadSignal(libc::sigaction);
+
+#[cfg(all(unix, feature = "daemon"))]
+#[allow(
+    unsafe_code,
+    reason = "sigaction saves and restores the exact previous disposition"
+)]
+impl StdinReadSignal {
+    fn install() -> io::Result<Self> {
+        unsafe extern "C" fn terminate(_: libc::c_int) {
+            unsafe { libc::_exit(0) };
+        }
+        unsafe {
+            let mut previous = std::mem::zeroed();
+            let mut action: libc::sigaction = std::mem::zeroed();
+            action.sa_sigaction = terminate as *const () as usize;
+            libc::sigemptyset(&raw mut action.sa_mask);
+            if libc::sigaction(libc::SIGTERM, &raw const action, &raw mut previous) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Self(previous))
+        }
+    }
+}
+
+#[cfg(all(unix, feature = "daemon"))]
+#[allow(
+    unsafe_code,
+    reason = "restore the saved signal disposition when the scope ends"
+)]
+impl Drop for StdinReadSignal {
+    fn drop(&mut self) {
+        unsafe { libc::sigaction(libc::SIGTERM, &raw const self.0, std::ptr::null_mut()) };
+    }
+}
+
 fn answer_client_file(request: &ClientFileRequest) -> ClientFileResponse {
     let path = PathBuf::from(&request.path);
     let (data, error) = match &request.operation {
+        ClientFileOperation::ReadStdin { .. } | ClientFileOperation::ReadStdinChunk => (
+            Vec::new(),
+            Some(crate::strerror_text(&io::Error::from_raw_os_error(9))),
+        ),
         ClientFileOperation::Read => match read_client_file(&path) {
             Ok(data) => (data, None),
             Err(error) => (Vec::new(), Some(error)),
@@ -1736,6 +1954,84 @@ mod tests {
         }
         let mut receiver = super::ProtocolReceiver::new(client);
         assert_eq!(receiver.recv_decodable().unwrap(), (next, true));
+    #[cfg(all(unix, feature = "daemon"))]
+    #[test]
+    #[allow(
+        unsafe_code,
+        reason = "query signal dispositions without changing them"
+    )]
+    fn stdin_read_restores_signal_disposition_on_success_and_errors() {
+        fn disposition() -> libc::sighandler_t {
+            unsafe {
+                let mut action: libc::sigaction = std::mem::zeroed();
+                assert_eq!(
+                    libc::sigaction(libc::SIGTERM, std::ptr::null(), &raw mut action),
+                    0
+                );
+                action.sa_sigaction
+            }
+        }
+        struct FailedRead;
+        impl std::io::Read for FailedRead {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("read failed"))
+            }
+        }
+        let previous = disposition();
+        let command = super::StdinReadSignal::install().expect("command signal");
+        let pending = disposition();
+        assert_eq!(
+            super::read_command_stdin_from(&b"ok"[..], false),
+            Ok(b"ok".to_vec())
+        );
+        assert_eq!(disposition(), pending);
+        assert!(super::read_command_stdin_from(FailedRead, false).is_err());
+        assert_eq!(disposition(), pending);
+        assert!(super::read_command_stdin_from(&b"\xff"[..], false).is_err());
+        assert_eq!(disposition(), pending);
+        assert!(super::read_command_stdin_from(std::io::repeat(b'x'), true).is_err());
+        assert_eq!(disposition(), pending);
+        drop(command);
+        assert_eq!(disposition(), previous);
+    }
+
+    #[test]
+    fn stdin_chunk_returns_available_bytes_and_maps_read_errors_to_eio() {
+        struct OneRead(Option<&'static [u8]>);
+        impl std::io::Read for OneRead {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                let bytes = self
+                    .0
+                    .take()
+                    .expect("a chunk read never waits for more input");
+                buffer[..bytes.len()].copy_from_slice(bytes);
+                Ok(bytes.len())
+            }
+        }
+        struct FailedRead;
+        impl std::io::Read for FailedRead {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("is a directory"))
+            }
+        }
+        assert_eq!(
+            super::read_command_stdin_chunk_from(OneRead(Some(b"\x1b[31"))),
+            Ok(b"\x1b[31".to_vec())
+        );
+        assert_eq!(
+            super::read_command_stdin_chunk_from(OneRead(Some(b""))),
+            Ok(Vec::new())
+        );
+        assert_eq!(
+            super::read_command_stdin_chunk_from(FailedRead),
+            Err("Input/output error".to_owned())
+        );
+        assert_eq!(
+            super::read_command_stdin_from(FailedRead, true),
+            Err("Input/output error".to_owned())
+        );
+        let chunk = super::read_command_stdin_chunk_from(std::io::repeat(b'x')).expect("chunk");
+        assert_eq!(chunk.len(), super::STDIN_CHUNK_BYTES);
     }
 
     #[test]

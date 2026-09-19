@@ -1,0 +1,7 @@
+P1000p%begin 1789647903 1 0
+%end 1789647903 1 0
+%session-changed $0 cs
+%begin 1789647903 2 1
+MATRIX-BEGIN
+%end 1789647903 2 1
+/tmp/zzcs.CKNS7p/attached-zz.sh: line 2: 3994302 Killed                     ( printf "%s\n" "$BASHPID" > /tmp/zzcs.CKNS7p/zz.pid; exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzcs.CKNS7p/zz-home XDG_CONFIG_HOME=/tmp/zzcs.CKNS7p/zz-home/config ZZ_LOG_DIR=/tmp/zzcs.CKNS7p/zz-logs /home/demfabris/dev/zz-c11-alias-fix/target/debug/zz-alias5-corrected --socket /tmp/zzcs-CKNS7p.sock -CC attach-session -f no-output -t =cs 2> /tmp/zzcs.CKNS7p/zz.err )

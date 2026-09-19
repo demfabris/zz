@@ -1,0 +1,13 @@
+{
+  "smoke/source-replay-diagnostics.txt": {
+    "classification": "inherited",
+    "reason": "Both fresh main and candidate time out the accepted control confirm request at 124 instead of the pin\u2019s 1. All other steps match. Candidate additionally emits one empty success guard before waiting, consistent with its earlier control-file-replay guard fix. The transcripts are not identical; the retained diff names this difference.",
+    "comparison": "source-replay-main-comparison.diff"
+  },
+  "smoke/status-background-jobs.txt": {
+    "classification": "inherited intermittent blank status",
+    "reason": "Fresh main exactly reproduces the first candidate transcript: first drawn expansion is empty. Candidate\u2019s automatic retry reaches later checkpoints then fails because the drawn DATE remains blank. The final transcripts differ in checkpoint; the diff is retained. Both have one output divergence and one warning.",
+    "first_candidate_matches_main": true,
+    "comparison": "status-background-main-comparison.diff"
+  }
+}

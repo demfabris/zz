@@ -1,0 +1,38 @@
+case=matrix-direct-split-zoom-no-space
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+6e6f20737061636520666f722061206e65772070616e650a
+tmux stdout hex
+tmux stderr hex
+6e6f20737061636520666f722061206e65772070616e650a
+zz state
+input=
+before=yes
+tail=
+final=1:2
+tmux state
+input=
+before=yes
+tail=
+final=0:2
+case=matrix-direct-split-keep-zoom-no-space
+zz_exit=1
+tmux_exit=1
+zz stdout hex
+zz stderr hex
+6e6f20737061636520666f722061206e65772070616e650a
+tmux stdout hex
+tmux stderr hex
+6e6f20737061636520666f722061206e65772070616e650a
+zz state
+input=
+before=yes
+tail=
+final=1:2
+tmux state
+input=
+before=yes
+tail=
+final=0:2

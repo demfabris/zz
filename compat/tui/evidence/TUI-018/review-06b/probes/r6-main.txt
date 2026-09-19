@@ -1,0 +1,10 @@
+zz split-window -d -P run1 ms=2235
+zz split-window -d -P run2 ms=2266
+zz split-window -d run1 ms=273
+zz split-window -d run2 ms=327
+zz display-message -p ms=229 (client+daemon roundtrip baseline)
+tmux split-window -d -P run1 ms=3
+tmux split-window -d -P run2 ms=3
+tmux split-window -d run1 ms=2
+tmux split-window -d run2 ms=2
+tmux display-message -p ms=2 (client+daemon roundtrip baseline)

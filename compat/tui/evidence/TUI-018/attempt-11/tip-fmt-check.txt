@@ -1,0 +1,12 @@
+Diff in /home/demfabris/dev/zz-c11-alias-fix/crates/zz/src/terminal/view.rs:2186:
+             && !modifiers.control()
+             && !modifiers.alt()
+             && !modifiers.platform();
+[31m-        self.text_input_key = (text_key && self.retained.read().viewport.kitty_keyboard)
+(B[m[31m-            .then(|| event.clone());
+(B[m[32m+        self.text_input_key =
+(B[m[32m+            (text_key && self.retained.read().viewport.kitty_keyboard).then(|| event.clone());
+(B[m         if self.popup {
+             if !text_key {
+                 self.forwarded_keys.insert(event.keystroke.key.clone());
+DONE 1

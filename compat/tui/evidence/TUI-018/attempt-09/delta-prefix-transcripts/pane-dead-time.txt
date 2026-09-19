@@ -1,0 +1,85 @@
+# Scenario: pane-dead-time
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/pane-dead-time.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: set-window-option remain-on-exit on
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: respawn-pane -k -t w:0.0 false
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: run-shell "sleep 1"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: display-message -p -t w:0.0 #{?pane_dead_time,set,unset}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    set
+tmux stdout:
+    set
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: respawn-pane -E -t w:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: display-message -p -t w:0.0 #{?pane_dead_time,set,unset}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    unset
+tmux stdout:
+    unset
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=6 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

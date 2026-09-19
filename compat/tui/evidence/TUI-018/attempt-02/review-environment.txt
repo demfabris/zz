@@ -1,0 +1,25 @@
+Review started 2026-09-15 21:42:45 UTC; hard deadline 2026-09-16 00:12:45 UTC
+Linux-7.0.0-31-generic-x86_64-with-glibc2.43
+COMMAND ['git', 'rev-parse', 'HEAD']
+57bf163f8dc5dbe3547ed9a039485e08f5c46eff
+COMMAND ['git', 'rev-parse', 'origin/main']
+1077951108aabe956104ac8de62da319aa06db4b
+COMMAND ['uname', '-a']
+Linux ubuntu 7.0.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 04:26:38 UTC 2026 x86_64 GNU/Linux
+COMMAND ['bash', '--version']
+GNU bash, version 5.3.9(1)-release (x86_64-pc-linux-gnu)
+Copyright (C) 2025 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+
+This is free software; you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+COMMAND ['python3', '--version']
+Python 3.14.4
+COMMAND ['sha256sum', 'target/debug/zz', '/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux']
+2c01f3148caa78ae1d603fa7167faabf68543cd4f6f3304d11b7269662fe4dd5  target/debug/zz
+fe82462af83f515034c25bb8576eef8a11a0ad3a5c1029af70b0973b028aed5d  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+COMMAND ['git', '-C', '/home/demfabris/dev/zz/compat/.cache/tmux-src', 'rev-parse', 'HEAD']
+d77c9dc6aa021e4bc61f0da128c591af695e6466
+RUN_ENV: ZZ_COMPAT_TMUX=TMUX_BIN=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux; ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins; ZZ_BIN=ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-box-reds/target/debug/zz; ZZ_TRAY=0; HOME=/tmp/zz-emptyhome; XDG_CONFIG_HOME=/tmp/zz-emptyhome/config; no ZZ_DEV_BUILD. Fixtures replace HOME and sockets with their own scratch paths.
+Cargo: systemd-run --user --scope -q -p MemoryMax=10G -p MemorySwapMax=4G flock -w 540 /tmp/zz-cargo-slot-$S.lock cargo, S random modulo 2; --jobs 4; tests --test-threads=4. Toolchain homes retained.
+d1f44fd6596e0ca3268f50d4c4bbbca1d98f495b0c3f5d5ac0611e79cd71c432  target/debug/zz

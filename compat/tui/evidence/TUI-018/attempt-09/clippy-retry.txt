@@ -1,0 +1,2 @@
+exit_status=143
+Requeued after more than five minutes waiting while the other shared slot was idle.

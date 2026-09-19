@@ -16,7 +16,8 @@ timestamp: 2026-08-25T00:00:00-03:00
 # Overview
 
 zz swallows BEL today. libghostty exposes `Terminal::on_bell`
-(`third_party/rust/libghostty-vt/src/terminal.rs`), and the session layer registers five
+(upstream `libghostty-vt`, since the 2026-09-18 unpatch un-vendored the wrapper),
+and the session layer registers five
 other callbacks right next to where it would go (`crates/zz-terminal/src/session.rs`,
 `on_pty_write` / `on_clipboard_write` / etc.) . the bell callback is the one nobody wired.
 This plan wires it, end to end, copying Ghostty 1.2's default bell behavior because that is

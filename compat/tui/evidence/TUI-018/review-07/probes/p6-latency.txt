@@ -1,0 +1,492 @@
+4a4eb327a1f6f5731b9276742de1641baa89b7444bdc7524a4426223e7cc5634  /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli
+df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux
+[2026-09-19T06:51:12Z INFO  zz_daemon::diagnostics::appearance] loaded appearance reason=startup root=None scheme=dark supported=0 unsupported=0 invalid=0 diagnostics_dropped=0 bytes=0 hash=9356683936999949859 appearance=TerminalAppearance { color_scheme: Dark, font_families: ["Noto Sans Mono"], font_families_bold: [], font_families_italic: [], font_families_bold_italic: [], font_size_points: 13.0, font_weight: 400, font_features: [], font_synthetic_style: FontSyntheticStyle { bold: true, italic: true, bold_italic: true }, font_thicken: false, font_thicken_strength: 255, cell_height_adjustment: None, padding_left: 10.0, padding_right: 10.0, padding_top: 10.0, padding_bottom: 10.0, foreground: Color { r: 216, g: 222, b: 233 }, background: Color { r: 16, g: 19, b: 24 }, cursor_color: Color { r: 229, g: 192, b: 123 }, cursor_style: Block, selection_foreground: Color { r: 216, g: 222, b: 233 }, selection_background: AppearanceColor { r: 80, g: 125, b: 184, a: 148 }, search_match_color: AppearanceColor { r: 224, g: 171, b: 56, a: 107 }, search_current_color: AppearanceColor { r: 250, g: 194, b: 71, a: 173 }, link_color: Color { r: 77, g: 163, b: 235 }, copy_cursor_color: AppearanceColor { r: 184, g: 199, b: 224, a: 107 }, palette_hash: 2756364480396514756, minimum_contrast: 1.0, cursor_blink_policy: Terminal, cursor_blink_interval_ms: 500, rounded_selection: true, background_opacity: 1.0, palette_classes: [], default_classes: [None, None] }
+[2026-09-19T06:51:12Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=startup-mux-replay entries=0 prefix="C-b" mode_keys="vi"
+[2026-09-19T06:51:12Z INFO  zz_daemon::daemon] zz daemon listening at /tmp/zzr7p6-ARcjuF.sock
+split-empty-P run1 zz 2230 ms rc=0
+split-empty-P run1 tmux 2 ms rc=0
+split-empty-P run2 zz 2297 ms rc=0
+split-empty-P run2 tmux 2 ms rc=0
+split-empty-P run3 zz 2368 ms rc=0
+split-empty-P run3 tmux 3 ms rc=0
+split-empty-noP run1 zz 411 ms rc=0
+split-empty-noP run1 tmux 2 ms rc=0
+split-empty-noP run2 zz 491 ms rc=0
+split-empty-noP run2 tmux 2 ms rc=0
+split-empty-noP run3 zz 580 ms rc=0
+split-empty-noP run3 tmux 2 ms rc=0
+split-shell-P run1 zz 980 ms rc=0
+split-shell-P run1 tmux 3 ms rc=0
+split-shell-P run2 zz 1098 ms rc=0
+split-shell-P run2 tmux 3 ms rc=0
+split-shell-P run3 zz 1138 ms rc=0
+split-shell-P run3 tmux 3 ms rc=0
+display-message-p run1 zz 417 ms rc=0
+display-message-p run1 tmux 2 ms rc=0
+display-message-p run2 zz 406 ms rc=0
+display-message-p run2 tmux 3 ms rc=0
+display-message-p run3 zz 415 ms rc=0
+display-message-p run3 tmux 3 ms rc=0
+list-panes run1 zz 398 ms rc=0
+list-panes run1 tmux 2 ms rc=0
+list-panes run2 zz 416 ms rc=0
+list-panes run2 tmux 2 ms rc=0
+list-panes run3 zz 403 ms rc=0
+list-panes run3 tmux 2 ms rc=0
+p6 done
+[2026-09-19T06:51:37Z INFO  zz_daemon::daemon] zz daemon stopped
+ GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock set-option -g automatic-rename off
++ tm set-option -g automatic-rename off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF set-option -g automatic-rename off
++ zz set-option -g status off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock set-option -g status off
++ tm set-option -g status off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF set-option -g status off
++ for trial in 1 2 3
++ fresh_window wE1
++ local name=wE1
++ zz new-window -d -n wE1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock new-window -d -n wE1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n wE1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF new-window -d -n wE1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
++ timed 'split-empty-P run1' zz split-window -d -t =cs:wE1.0 -P -F '#{pane_id}' ''
++ local 'tag=split-empty-P run1' side=zz s e rc
++ shift 2
+++ date +%s%N
++ s=1789800674108519466
++ '[' zz = zz ']'
++ zz split-window -d -t =cs:wE1.0 -P -F '#{pane_id}' ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock split-window -d -t =cs:wE1.0 -P -F '#{pane_id}' ''
++ rc=0
+++ date +%s%N
++ e=1789800676338557140
++ printf '%s %s %s ms rc=%s\n' 'split-empty-P run1' zz 2230 0
++ timed 'split-empty-P run1' tmux split-window -d -t =cs:wE1.0 -P -F '#{pane_id}' ''
++ local 'tag=split-empty-P run1' side=tmux s e rc
++ shift 2
+++ date +%s%N
++ s=1789800676339420878
++ '[' tmux = zz ']'
++ tm split-window -d -t =cs:wE1.0 -P -F '#{pane_id}' ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF split-window -d -t =cs:wE1.0 -P -F '#{pane_id}' ''
++ rc=0
+++ date +%s%N
++ e=1789800676342206645
++ printf '%s %s %s ms rc=%s\n' 'split-empty-P run1' tmux 2 0
++ for trial in 1 2 3
++ fresh_window wE2
++ local name=wE2
++ zz new-window -d -n wE2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock new-window -d -n wE2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n wE2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF new-window -d -n wE2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
++ timed 'split-empty-P run2' zz split-window -d -t =cs:wE2.0 -P -F '#{pane_id}' ''
++ local 'tag=split-empty-P run2' side=zz s e rc
++ shift 2
+++ date +%s%N
++ s=1789800677050148917
++ '[' zz = zz ']'
++ zz split-window -d -t =cs:wE2.0 -P -F '#{pane_id}' ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock split-window -d -t =cs:wE2.0 -P -F '#{pane_id}' ''
++ rc=0
+++ date +%s%N
++ e=1789800679347258403
++ printf '%s %s %s ms rc=%s\n' 'split-empty-P run2' zz 2297 0
++ timed 'split-empty-P run2' tmux split-window -d -t =cs:wE2.0 -P -F '#{pane_id}' ''
++ local 'tag=split-empty-P run2' side=tmux s e rc
++ shift 2
+++ date +%s%N
++ s=1789800679348215686
++ '[' tmux = zz ']'
++ tm split-window -d -t =cs:wE2.0 -P -F '#{pane_id}' ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF split-window -d -t =cs:wE2.0 -P -F '#{pane_id}' ''
++ rc=0
+++ date +%s%N
++ e=1789800679350974885
++ printf '%s %s %s ms rc=%s\n' 'split-empty-P run2' tmux 2 0
++ for trial in 1 2 3
++ fresh_window wE3
++ local name=wE3
++ zz new-window -d -n wE3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock new-window -d -n wE3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n wE3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF new-window -d -n wE3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
++ timed 'split-empty-P run3' zz split-window -d -t =cs:wE3.0 -P -F '#{pane_id}' ''
++ local 'tag=split-empty-P run3' side=zz s e rc
++ shift 2
+++ date +%s%N
++ s=1789800680335170768
++ '[' zz = zz ']'
++ zz split-window -d -t =cs:wE3.0 -P -F '#{pane_id}' ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock split-window -d -t =cs:wE3.0 -P -F '#{pane_id}' ''
++ rc=0
+++ date +%s%N
++ e=1789800682704112915
++ printf '%s %s %s ms rc=%s\n' 'split-empty-P run3' zz 2368 0
++ timed 'split-empty-P run3' tmux split-window -d -t =cs:wE3.0 -P -F '#{pane_id}' ''
++ local 'tag=split-empty-P run3' side=tmux s e rc
++ shift 2
+++ date +%s%N
++ s=1789800682705124394
++ '[' tmux = zz ']'
++ tm split-window -d -t =cs:wE3.0 -P -F '#{pane_id}' ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF split-window -d -t =cs:wE3.0 -P -F '#{pane_id}' ''
++ rc=0
+++ date +%s%N
++ e=1789800682708191198
++ printf '%s %s %s ms rc=%s\n' 'split-empty-P run3' tmux 3 0
++ for trial in 1 2 3
++ fresh_window wN1
++ local name=wN1
++ zz new-window -d -n wN1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock new-window -d -n wN1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n wN1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF new-window -d -n wN1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
++ timed 'split-empty-noP run1' zz split-window -d -t =cs:wN1.0 ''
++ local 'tag=split-empty-noP run1' side=zz s e rc
++ shift 2
+++ date +%s%N
++ s=1789800683614313577
++ '[' zz = zz ']'
++ zz split-window -d -t =cs:wN1.0 ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock split-window -d -t =cs:wN1.0 ''
++ rc=0
+++ date +%s%N
++ e=1789800684025668638
++ printf '%s %s %s ms rc=%s\n' 'split-empty-noP run1' zz 411 0
++ timed 'split-empty-noP run1' tmux split-window -d -t =cs:wN1.0 ''
++ local 'tag=split-empty-noP run1' side=tmux s e rc
++ shift 2
+++ date +%s%N
++ s=1789800684026596495
++ '[' tmux = zz ']'
++ tm split-window -d -t =cs:wN1.0 ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF split-window -d -t =cs:wN1.0 ''
++ rc=0
+++ date +%s%N
++ e=1789800684029429438
++ printf '%s %s %s ms rc=%s\n' 'split-empty-noP run1' tmux 2 0
++ for trial in 1 2 3
++ fresh_window wN2
++ local name=wN2
++ zz new-window -d -n wN2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock new-window -d -n wN2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n wN2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF new-window -d -n wN2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
++ timed 'split-empty-noP run2' zz split-window -d -t =cs:wN2.0 ''
++ local 'tag=split-empty-noP run2' side=zz s e rc
++ shift 2
+++ date +%s%N
++ s=1789800685038452361
++ '[' zz = zz ']'
++ zz split-window -d -t =cs:wN2.0 ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock split-window -d -t =cs:wN2.0 ''
++ rc=0
+++ date +%s%N
++ e=1789800685529846944
++ printf '%s %s %s ms rc=%s\n' 'split-empty-noP run2' zz 491 0
++ timed 'split-empty-noP run2' tmux split-window -d -t =cs:wN2.0 ''
++ local 'tag=split-empty-noP run2' side=tmux s e rc
++ shift 2
+++ date +%s%N
++ s=1789800685530647500
++ '[' tmux = zz ']'
++ tm split-window -d -t =cs:wN2.0 ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF split-window -d -t =cs:wN2.0 ''
++ rc=0
+++ date +%s%N
++ e=1789800685533298028
++ printf '%s %s %s ms rc=%s\n' 'split-empty-noP run2' tmux 2 0
++ for trial in 1 2 3
++ fresh_window wN3
++ local name=wN3
++ zz new-window -d -n wN3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock new-window -d -n wN3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n wN3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF new-window -d -n wN3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
++ timed 'split-empty-noP run3' zz split-window -d -t =cs:wN3.0 ''
++ local 'tag=split-empty-noP run3' side=zz s e rc
++ shift 2
+++ date +%s%N
++ s=1789800686971594034
++ '[' zz = zz ']'
++ zz split-window -d -t =cs:wN3.0 ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock split-window -d -t =cs:wN3.0 ''
++ rc=0
+++ date +%s%N
++ e=1789800687551818412
++ printf '%s %s %s ms rc=%s\n' 'split-empty-noP run3' zz 580 0
++ timed 'split-empty-noP run3' tmux split-window -d -t =cs:wN3.0 ''
++ local 'tag=split-empty-noP run3' side=tmux s e rc
++ shift 2
+++ date +%s%N
++ s=1789800687552895777
++ '[' tmux = zz ']'
++ tm split-window -d -t =cs:wN3.0 ''
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF split-window -d -t =cs:wN3.0 ''
++ rc=0
+++ date +%s%N
++ e=1789800687555626953
++ printf '%s %s %s ms rc=%s\n' 'split-empty-noP run3' tmux 2 0
++ for trial in 1 2 3
++ fresh_window wS1
++ local name=wS1
++ zz new-window -d -n wS1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock new-window -d -n wS1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n wS1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF new-window -d -n wS1 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
++ timed 'split-shell-P run1' zz split-window -d -t =cs:wS1.0 -P -F '#{pane_id}' sleep 300
++ local 'tag=split-shell-P run1' side=zz s e rc
++ shift 2
+++ date +%s%N
++ s=1789800688771325685
++ '[' zz = zz ']'
++ zz split-window -d -t =cs:wS1.0 -P -F '#{pane_id}' sleep 300
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock split-window -d -t =cs:wS1.0 -P -F '#{pane_id}' sleep 300
++ rc=0
+++ date +%s%N
++ e=1789800689752250072
++ printf '%s %s %s ms rc=%s\n' 'split-shell-P run1' zz 980 0
++ timed 'split-shell-P run1' tmux split-window -d -t =cs:wS1.0 -P -F '#{pane_id}' sleep 300
++ local 'tag=split-shell-P run1' side=tmux s e rc
++ shift 2
+++ date +%s%N
++ s=1789800689753114673
++ '[' tmux = zz ']'
++ tm split-window -d -t =cs:wS1.0 -P -F '#{pane_id}' sleep 300
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF split-window -d -t =cs:wS1.0 -P -F '#{pane_id}' sleep 300
++ rc=0
+++ date +%s%N
++ e=1789800689756126658
++ printf '%s %s %s ms rc=%s\n' 'split-shell-P run1' tmux 3 0
++ for trial in 1 2 3
++ fresh_window wS2
++ local name=wS2
++ zz new-window -d -n wS2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock new-window -d -n wS2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n wS2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF new-window -d -n wS2 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
++ timed 'split-shell-P run2' zz split-window -d -t =cs:wS2.0 -P -F '#{pane_id}' sleep 300
++ local 'tag=split-shell-P run2' side=zz s e rc
++ shift 2
+++ date +%s%N
++ s=1789800691052745181
++ '[' zz = zz ']'
++ zz split-window -d -t =cs:wS2.0 -P -F '#{pane_id}' sleep 300
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock split-window -d -t =cs:wS2.0 -P -F '#{pane_id}' sleep 300
++ rc=0
+++ date +%s%N
++ e=1789800692151177408
++ printf '%s %s %s ms rc=%s\n' 'split-shell-P run2' zz 1098 0
++ timed 'split-shell-P run2' tmux split-window -d -t =cs:wS2.0 -P -F '#{pane_id}' sleep 300
++ local 'tag=split-shell-P run2' side=tmux s e rc
++ shift 2
+++ date +%s%N
++ s=1789800692152146264
++ '[' tmux = zz ']'
++ tm split-window -d -t =cs:wS2.0 -P -F '#{pane_id}' sleep 300
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF split-window -d -t =cs:wS2.0 -P -F '#{pane_id}' sleep 300
++ rc=0
+++ date +%s%N
++ e=1789800692155502876
++ printf '%s %s %s ms rc=%s\n' 'split-shell-P run2' tmux 3 0
++ for trial in 1 2 3
++ fresh_window wS3
++ local name=wS3
++ zz new-window -d -n wS3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock new-window -d -n wS3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ tm new-window -d -n wS3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF new-window -d -n wS3 -t =cs 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ sleep 0.3
++ timed 'split-shell-P run3' zz split-window -d -t =cs:wS3.0 -P -F '#{pane_id}' sleep 300
++ local 'tag=split-shell-P run3' side=zz s e rc
++ shift 2
+++ date +%s%N
++ s=1789800693608740701
++ '[' zz = zz ']'
++ zz split-window -d -t =cs:wS3.0 -P -F '#{pane_id}' sleep 300
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock split-window -d -t =cs:wS3.0 -P -F '#{pane_id}' sleep 300
++ rc=0
+++ date +%s%N
++ e=1789800694746777029
++ printf '%s %s %s ms rc=%s\n' 'split-shell-P run3' zz 1138 0
++ timed 'split-shell-P run3' tmux split-window -d -t =cs:wS3.0 -P -F '#{pane_id}' sleep 300
++ local 'tag=split-shell-P run3' side=tmux s e rc
++ shift 2
+++ date +%s%N
++ s=1789800694747690524
++ '[' tmux = zz ']'
++ tm split-window -d -t =cs:wS3.0 -P -F '#{pane_id}' sleep 300
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF split-window -d -t =cs:wS3.0 -P -F '#{pane_id}' sleep 300
++ rc=0
+++ date +%s%N
++ e=1789800694750955134
++ printf '%s %s %s ms rc=%s\n' 'split-shell-P run3' tmux 3 0
++ for trial in 1 2 3
++ timed 'display-message-p run1' zz display-message -p hello
++ local 'tag=display-message-p run1' side=zz s e rc
++ shift 2
+++ date +%s%N
++ s=1789800694751811184
++ '[' zz = zz ']'
++ zz display-message -p hello
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock display-message -p hello
++ rc=0
+++ date +%s%N
++ e=1789800695169052829
++ printf '%s %s %s ms rc=%s\n' 'display-message-p run1' zz 417 0
++ timed 'display-message-p run1' tmux display-message -p hello
++ local 'tag=display-message-p run1' side=tmux s e rc
++ shift 2
+++ date +%s%N
++ s=1789800695169966599
++ '[' tmux = zz ']'
++ tm display-message -p hello
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF display-message -p hello
++ rc=0
+++ date +%s%N
++ e=1789800695172369261
++ printf '%s %s %s ms rc=%s\n' 'display-message-p run1' tmux 2 0
++ for trial in 1 2 3
++ timed 'display-message-p run2' zz display-message -p hello
++ local 'tag=display-message-p run2' side=zz s e rc
++ shift 2
+++ date +%s%N
++ s=1789800695173105973
++ '[' zz = zz ']'
++ zz display-message -p hello
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock display-message -p hello
++ rc=0
+++ date +%s%N
++ e=1789800695579181901
++ printf '%s %s %s ms rc=%s\n' 'display-message-p run2' zz 406 0
++ timed 'display-message-p run2' tmux display-message -p hello
++ local 'tag=display-message-p run2' side=tmux s e rc
++ shift 2
+++ date +%s%N
++ s=1789800695580180118
++ '[' tmux = zz ']'
++ tm display-message -p hello
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF display-message -p hello
++ rc=0
+++ date +%s%N
++ e=1789800695583192893
++ printf '%s %s %s ms rc=%s\n' 'display-message-p run2' tmux 3 0
++ for trial in 1 2 3
++ timed 'display-message-p run3' zz display-message -p hello
++ local 'tag=display-message-p run3' side=zz s e rc
++ shift 2
+++ date +%s%N
++ s=1789800695583985286
++ '[' zz = zz ']'
++ zz display-message -p hello
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock display-message -p hello
++ rc=0
+++ date +%s%N
++ e=1789800695999271035
++ printf '%s %s %s ms rc=%s\n' 'display-message-p run3' zz 415 0
++ timed 'display-message-p run3' tmux display-message -p hello
++ local 'tag=display-message-p run3' side=tmux s e rc
++ shift 2
+++ date +%s%N
++ s=1789800696000242002
++ '[' tmux = zz ']'
++ tm display-message -p hello
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF display-message -p hello
++ rc=0
+++ date +%s%N
++ e=1789800696003481295
++ printf '%s %s %s ms rc=%s\n' 'display-message-p run3' tmux 3 0
++ for trial in 1 2 3
++ timed 'list-panes run1' zz list-panes -t =cs:win
++ local 'tag=list-panes run1' side=zz s e rc
++ shift 2
+++ date +%s%N
++ s=1789800696004456779
++ '[' zz = zz ']'
++ zz list-panes -t =cs:win
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock list-panes -t =cs:win
++ rc=0
+++ date +%s%N
++ e=1789800696402937961
++ printf '%s %s %s ms rc=%s\n' 'list-panes run1' zz 398 0
++ timed 'list-panes run1' tmux list-panes -t =cs:win
++ local 'tag=list-panes run1' side=tmux s e rc
++ shift 2
+++ date +%s%N
++ s=1789800696403796183
++ '[' tmux = zz ']'
++ tm list-panes -t =cs:win
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF list-panes -t =cs:win
++ rc=0
+++ date +%s%N
++ e=1789800696406244399
++ printf '%s %s %s ms rc=%s\n' 'list-panes run1' tmux 2 0
++ for trial in 1 2 3
++ timed 'list-panes run2' zz list-panes -t =cs:win
++ local 'tag=list-panes run2' side=zz s e rc
++ shift 2
+++ date +%s%N
++ s=1789800696406992354
++ '[' zz = zz ']'
++ zz list-panes -t =cs:win
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock list-panes -t =cs:win
++ rc=0
+++ date +%s%N
++ e=1789800696823840864
++ printf '%s %s %s ms rc=%s\n' 'list-panes run2' zz 416 0
++ timed 'list-panes run2' tmux list-panes -t =cs:win
++ local 'tag=list-panes run2' side=tmux s e rc
++ shift 2
+++ date +%s%N
++ s=1789800696824667684
++ '[' tmux = zz ']'
++ tm list-panes -t =cs:win
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF list-panes -t =cs:win
++ rc=0
+++ date +%s%N
++ e=1789800696827185586
++ printf '%s %s %s ms rc=%s\n' 'list-panes run2' tmux 2 0
++ for trial in 1 2 3
++ timed 'list-panes run3' zz list-panes -t =cs:win
++ local 'tag=list-panes run3' side=zz s e rc
++ shift 2
+++ date +%s%N
++ s=1789800696827878544
++ '[' zz = zz ']'
++ zz list-panes -t =cs:win
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock list-panes -t =cs:win
++ rc=0
+++ date +%s%N
++ e=1789800697231272026
++ printf '%s %s %s ms rc=%s\n' 'list-panes run3' zz 403 0
++ timed 'list-panes run3' tmux list-panes -t =cs:win
++ local 'tag=list-panes run3' side=tmux s e rc
++ shift 2
+++ date +%s%N
++ s=1789800697232174683
++ '[' tmux = zz ']'
++ tm list-panes -t =cs:win
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF list-panes -t =cs:win
++ rc=0
+++ date +%s%N
++ e=1789800697235107099
++ printf '%s %s %s ms rc=%s\n' 'list-panes run3' tmux 2 0
++ printf 'p6 done\n'
++ cleanup
++ set +e
++ zz kill-server
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p6.ARcjuF/zz-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p6.ARcjuF/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p6-ARcjuF.sock kill-server
++ tm kill-server
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p6.ARcjuF/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p6.ARcjuF/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p6t-ARcjuF kill-server
++ kill 3620828
++ wait 3620828
++ rm -rf -- /tmp/zzr7p6.ARcjuF

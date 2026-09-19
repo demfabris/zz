@@ -1,0 +1,74 @@
+# the six new cells on the pre-fix binary target/alias7-bins/zz_cli-tip7
+# (branch tip 834002cf merged with origin/main 394ef850, before 1bba089c)
+# sha256 cb6bc171142f9619be1ae48ea2ce80f43b5de8f9ec645b7b1ea79dd180340d2b
+
+      case stream-split-print-partial
+      state differs
+        2c2
+        < open-stdout=1 no-pid|
+        ---
+        > open-stdout=
+DIFF  stream-split-print-partial
+      case stream-split-print-term
+      stdout differs (tmux 9 bytes, zz 0 bytes)
+        1d0
+        < 1 no-pid
+      state differs
+        2c2
+        < open-stdout=1 no-pid|
+        ---
+        > open-stdout=
+DIFF  stream-split-print-term
+      case stream-display-kill-close
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 9 bytes)
+        0a1
+        > tail-out
+      state differs
+        1c1
+        < after=
+        ---
+        > after=yes
+DIFF  stream-display-kill-close
+      case stream-display-kill-write
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 9 bytes)
+        0a1
+        > tail-out
+      state differs
+        1c1
+        < after=
+        ---
+        > after=yes
+DIFF  stream-display-kill-write
+      case stream-split-kill-close
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 9 bytes)
+        0a1
+        > tail-out
+      state differs
+        1c1
+        < after=
+        ---
+        > after=yes
+DIFF  stream-split-kill-close
+      case stream-split-kill-write
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 9 bytes)
+        0a1
+        > tail-out
+      state differs
+        1c1
+        < after=
+        ---
+        > after=yes
+DIFF  stream-split-kill-write
+      case pane-death-restored
+      state differs
+        3c3
+        < O @zzcs-after 
+        ---
+        > O @zzcs-after yes
+DIFF  pane-death-restored
+matrix: 7 asserted, 7 failures, 0 recorded:TUI-018, 0 decided:TUI-018, 0 self-check failures
+EXIT 1

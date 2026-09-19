@@ -1,0 +1,3333 @@
+# Scenario: lane2-store
+# Source: /home/demfabris/dev/zz-c11-alias-fix/target/alias-main-source/compat/scenarios/lane2-store.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: out: show-options -sv backspace
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-?
+tmux stdout:
+    C-?
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-options -sv default-client-command
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    new-session
+tmux stdout:
+    new-session
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-options -sv editor
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    /usr/bin/vi
+tmux stdout:
+    /usr/bin/vi
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: show-options -sv extended-keys
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    off
+tmux stdout:
+    off
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: show-options -sv extended-keys-format
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    xterm
+tmux stdout:
+    xterm
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: show-options -sv get-clipboard
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    buffer
+tmux stdout:
+    buffer
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: show-options -sv input-buffer-size
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1048576
+tmux stdout:
+    1048576
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: show-options -sv variation-selector-always-wide
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    on
+tmux stdout:
+    on
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: show-options -gv assume-paste-time
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    1
+tmux stdout:
+    1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: show-options -gv activity-action
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    other
+tmux stdout:
+    other
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: show-options -gv message-command-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}
+tmux stdout:
+    bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: show-options -gv message-format
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    #[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}
+tmux stdout:
+    #[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: show-options -gv message-line
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: out: show-options -gv message-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}
+tmux stdout:
+    bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: show-options -gv prompt-cursor-colour
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    
+tmux stdout:
+    
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: show-options -gv prompt-command-cursor-colour
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    
+tmux stdout:
+    
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: show-options -gv prompt-cursor-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    default
+tmux stdout:
+    default
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: show-options -gv silence-action
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    other
+tmux stdout:
+    other
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: show-options -gv prompt-command-cursor-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    default
+tmux stdout:
+    default
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: out: show-options -gwv clock-mode-colour
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    themeblue
+tmux stdout:
+    themeblue
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: show-options -gwv clock-mode-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    24
+tmux stdout:
+    24
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: show-options -gwv fill-character
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    
+tmux stdout:
+    
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: out: show-options -gwv monitor-activity
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    off
+tmux stdout:
+    off
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: out: show-options -gwv monitor-bell
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    on
+tmux stdout:
+    on
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: out: show-options -gwv monitor-silence
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0
+tmux stdout:
+    0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: out: show-options -gwv pane-border-indicators
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    colour
+tmux stdout:
+    colour
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: out: show-options -gwv pane-border-lines
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    single
+tmux stdout:
+    single
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: out: show-options -gwv pane-scrollbars
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    off
+tmux stdout:
+    off
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: out: show-options -gwv pane-scrollbars-timeout
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    500
+tmux stdout:
+    500
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: out: show-options -gwv pane-scrollbars-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bg=themedarkgrey,fg=themelightgrey,width=1,pad=0
+tmux stdout:
+    bg=themedarkgrey,fg=themelightgrey,width=1,pad=0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 31
+COMMAND: out: show-options -gwv pane-scrollbars-position
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    right
+tmux stdout:
+    right
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 32
+COMMAND: out: show-options -gwv xterm-keys
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    on
+tmux stdout:
+    on
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 33
+COMMAND: set-option -g history-limit 2000
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 34
+COMMAND: out: show-options -s
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    backspace C-?
+    buffer-limit 50
+    command-alias[0] split-pane=split-window
+    command-alias[1] splitp=split-window
+    command-alias[2] "server-info=show-messages -JT"
+    command-alias[3] "info=show-messages -JT"
+    command-alias[4] "choose-window=choose-tree -w"
+    command-alias[5] "choose-session=choose-tree -s"
+    codepoint-widths
+    copy-command ''
+    default-client-command new-session
+    default-terminal tmux-256color
+    editor /usr/bin/vi
+    escape-time 10
+    exit-empty on
+    exit-unattached off
+    extended-keys off
+    extended-keys-format xterm
+    focus-events off
+    get-clipboard buffer
+    history-file ''
+    input-buffer-size 1048576
+    message-limit 1000
+    prefix-timeout 0
+    prompt-history-limit 100
+    set-clipboard external
+    terminal-overrides[0] linux*:AX@
+    terminal-features[0] xterm*:clipboard:ccolour:cstyle:focus:title
+    terminal-features[1] screen*:title
+    terminal-features[2] rxvt*:ignorefkeys
+    theme detect
+    dark-theme-black "#{?#{e|>=:#{client_colours},256},gray5,black}"
+    dark-theme-white "#{?#{e|>=:#{client_colours},256},gray90,white}"
+    dark-theme-light-grey "#{?#{e|>=:#{client_colours},256},gray70,white}"
+    dark-theme-dark-grey "#{?#{e|>=:#{client_colours},256},gray15,black}"
+    dark-theme-green "#{?#{e|>=:#{client_colours},256},yellowgreen,green}"
+    dark-theme-yellow "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"
+    dark-theme-red "#{?#{e|>=:#{client_colours},256},indianred,red}"
+    dark-theme-blue "#{?#{e|>=:#{client_colours},256},skyblue3,blue}"
+    dark-theme-cyan "#{?#{e|>=:#{client_colours},256},cadetblue,cyan}"
+    dark-theme-magenta "#{?#{e|>=:#{client_colours},256},mediumpurple,magenta}"
+    light-theme-black "#{?#{e|>=:#{client_colours},256},gray10,black}"
+    light-theme-white "#{?#{e|>=:#{client_colours},256},gray95,white}"
+    light-theme-light-grey "#{?#{e|>=:#{client_colours},256},gray80,white}"
+    light-theme-dark-grey "#{?#{e|>=:#{client_colours},256},gray45,black}"
+    light-theme-green "#{?#{e|>=:#{client_colours},256},seagreen,green}"
+    light-theme-yellow "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"
+    light-theme-red "#{?#{e|>=:#{client_colours},256},indianred4,red}"
+    light-theme-blue "#{?#{e|>=:#{client_colours},256},steelblue,blue}"
+    light-theme-cyan "#{?#{e|>=:#{client_colours},256},darkcyan,cyan}"
+    light-theme-magenta "#{?#{e|>=:#{client_colours},256},purple4,magenta}"
+    user-keys
+    variation-selector-always-wide on
+tmux stdout:
+    backspace C-?
+    buffer-limit 50
+    command-alias[0] split-pane=split-window
+    command-alias[1] splitp=split-window
+    command-alias[2] "server-info=show-messages -JT"
+    command-alias[3] "info=show-messages -JT"
+    command-alias[4] "choose-window=choose-tree -w"
+    command-alias[5] "choose-session=choose-tree -s"
+    codepoint-widths
+    copy-command ''
+    default-client-command new-session
+    default-terminal tmux-256color
+    editor /usr/bin/vi
+    escape-time 10
+    exit-empty on
+    exit-unattached off
+    extended-keys off
+    extended-keys-format xterm
+    focus-events off
+    get-clipboard buffer
+    history-file ''
+    input-buffer-size 1048576
+    message-limit 1000
+    prefix-timeout 0
+    prompt-history-limit 100
+    set-clipboard external
+    terminal-overrides[0] linux*:AX@
+    terminal-features[0] xterm*:clipboard:ccolour:cstyle:focus:title
+    terminal-features[1] screen*:title
+    terminal-features[2] rxvt*:ignorefkeys
+    theme detect
+    dark-theme-black "#{?#{e|>=:#{client_colours},256},gray5,black}"
+    dark-theme-white "#{?#{e|>=:#{client_colours},256},gray90,white}"
+    dark-theme-light-grey "#{?#{e|>=:#{client_colours},256},gray70,white}"
+    dark-theme-dark-grey "#{?#{e|>=:#{client_colours},256},gray15,black}"
+    dark-theme-green "#{?#{e|>=:#{client_colours},256},yellowgreen,green}"
+    dark-theme-yellow "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"
+    dark-theme-red "#{?#{e|>=:#{client_colours},256},indianred,red}"
+    dark-theme-blue "#{?#{e|>=:#{client_colours},256},skyblue3,blue}"
+    dark-theme-cyan "#{?#{e|>=:#{client_colours},256},cadetblue,cyan}"
+    dark-theme-magenta "#{?#{e|>=:#{client_colours},256},mediumpurple,magenta}"
+    light-theme-black "#{?#{e|>=:#{client_colours},256},gray10,black}"
+    light-theme-white "#{?#{e|>=:#{client_colours},256},gray95,white}"
+    light-theme-light-grey "#{?#{e|>=:#{client_colours},256},gray80,white}"
+    light-theme-dark-grey "#{?#{e|>=:#{client_colours},256},gray45,black}"
+    light-theme-green "#{?#{e|>=:#{client_colours},256},seagreen,green}"
+    light-theme-yellow "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"
+    light-theme-red "#{?#{e|>=:#{client_colours},256},indianred4,red}"
+    light-theme-blue "#{?#{e|>=:#{client_colours},256},steelblue,blue}"
+    light-theme-cyan "#{?#{e|>=:#{client_colours},256},darkcyan,cyan}"
+    light-theme-magenta "#{?#{e|>=:#{client_colours},256},purple4,magenta}"
+    user-keys
+    variation-selector-always-wide on
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 35
+COMMAND: out: show-options -g
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    activity-action other
+    assume-paste-time 1
+    base-index 0
+    bell-action any
+    default-command ''
+    default-shell /bin/bash
+    default-size 80x24
+    destroy-unattached off
+    detach-on-destroy on
+    display-panes-active-colour themered
+    display-panes-colour themeblue
+    display-panes-format "#[align=right]#{pane_width}x#{pane_height}"
+    display-panes-time 1000
+    display-time 750
+    focus-follows-mouse off
+    history-limit 2000
+    initial-repeat-time 0
+    key-table root
+    lock-after-time 0
+    lock-command "lock -np"
+    message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+    message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+    message-line 0
+    message-style "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"
+    mouse on
+    prefix C-b
+    prefix2 None
+    renumber-windows off
+    repeat-time 500
+    set-titles off
+    set-titles-string "#S:#I:#W - \"#T\" #{session_alerts}"
+    silence-action other
+    status on
+    status-bg default
+    status-fg default
+    status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+    status-format[1] "#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }"
+    status-format[2] "#[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }"
+    status-interval 15
+    status-justify left
+    status-keys emacs
+    status-left "[#{session_name}] "
+    status-left-length 10
+    status-left-style default
+    status-position bottom
+    status-right "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+    status-right-length 40
+    status-right-style default
+    status-style bg=themegreen,fg=themeblack
+    prompt-cursor-colour ''
+    prompt-command-cursor-colour ''
+    prompt-cursor-style default
+    prompt-command-cursor-style default
+    update-environment[0] DISPLAY
+    update-environment[1] KRB5CCNAME
+    update-environment[2] MSYSTEM
+    update-environment[3] SSH_ASKPASS
+    update-environment[4] SSH_AUTH_SOCK
+    update-environment[5] SSH_AGENT_PID
+    update-environment[6] SSH_CONNECTION
+    update-environment[7] WAYLAND_DISPLAY
+    update-environment[8] WINDOWID
+    update-environment[9] XAUTHORITY
+    update-environment[10] XDG_CURRENT_DESKTOP
+    update-environment[11] XDG_SESSION_DESKTOP
+    update-environment[12] XDG_SESSION_TYPE
+    visual-activity off
+    visual-bell off
+    visual-silence off
+    word-separators "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+tmux stdout:
+    activity-action other
+    assume-paste-time 1
+    base-index 0
+    bell-action any
+    default-command ''
+    default-shell /bin/bash
+    default-size 80x24
+    destroy-unattached off
+    detach-on-destroy on
+    display-panes-active-colour themered
+    display-panes-colour themeblue
+    display-panes-format "#[align=right]#{pane_width}x#{pane_height}"
+    display-panes-time 1000
+    display-time 750
+    focus-follows-mouse off
+    history-limit 2000
+    initial-repeat-time 0
+    key-table root
+    lock-after-time 0
+    lock-command vlock
+    message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+    message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+    message-line 0
+    message-style "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"
+    mouse on
+    prefix C-b
+    prefix2 None
+    renumber-windows off
+    repeat-time 500
+    set-titles off
+    set-titles-string "#S:#I:#W - \"#T\" #{session_alerts}"
+    silence-action other
+    status on
+    status-bg default
+    status-fg default
+    status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+    status-format[1] "#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }"
+    status-format[2] "#[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }"
+    status-interval 15
+    status-justify left
+    status-keys emacs
+    status-left "[#{session_name}] "
+    status-left-length 10
+    status-left-style default
+    status-position bottom
+    status-right "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+    status-right-length 40
+    status-right-style default
+    status-style bg=themegreen,fg=themeblack
+    prompt-cursor-colour ''
+    prompt-command-cursor-colour ''
+    prompt-cursor-style default
+    prompt-command-cursor-style default
+    update-environment[0] DISPLAY
+    update-environment[1] KRB5CCNAME
+    update-environment[2] MSYSTEM
+    update-environment[3] SSH_ASKPASS
+    update-environment[4] SSH_AUTH_SOCK
+    update-environment[5] SSH_AGENT_PID
+    update-environment[6] SSH_CONNECTION
+    update-environment[7] WAYLAND_DISPLAY
+    update-environment[8] WINDOWID
+    update-environment[9] XAUTHORITY
+    update-environment[10] XDG_CURRENT_DESKTOP
+    update-environment[11] XDG_SESSION_DESKTOP
+    update-environment[12] XDG_SESSION_TYPE
+    visual-activity off
+    visual-bell off
+    visual-silence off
+    word-separators "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+OUT: divergence
+--- zz OUT step 35
++++ tmux OUT step 35
+@@ -17,7 +17,7 @@
+ initial-repeat-time 0
+ key-table root
+ lock-after-time 0
+-lock-command "lock -np"
++lock-command vlock
+ message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+ message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+ message-line 0
+TOPO: clean
+GEO: clean
+
+## Step 36
+COMMAND: out: show-options -gw
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    cursor-colour ''
+    cursor-style default
+    menu-style bg=themedarkgrey,fg=themewhite
+    menu-selected-style bg=themeyellow,fg=themeblack
+    menu-border-style bg=themedarkgrey,fg=themelightgrey
+    menu-border-lines single
+    pane-status-current-style underscore
+    pane-status-style default
+    session-status-current-style underscore
+    session-status-style default
+    aggressive-resize off
+    allow-passthrough off
+    allow-rename off
+    allow-set-title on
+    alternate-screen on
+    automatic-rename on
+    automatic-rename-format "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}"
+    clock-mode-colour themeblue
+    clock-mode-style 24
+    copy-mode-match-style bg=themecyan,fg=themeblack
+    copy-mode-current-match-style bg=thememagenta,fg=themeblack
+    copy-mode-mark-style bg=themeyellow,fg=themeblack
+    copy-mode-position-format "#[align=right]#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}[#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}"
+    copy-mode-position-style "#{E:mode-style}"
+    copy-mode-selection-style "#{E:mode-style}"
+    copy-mode-current-line-number-style fg=themeyellow
+    copy-mode-line-number-style fg=themelightgrey,dim
+    copy-mode-line-numbers off
+    fill-character ''
+    main-pane-height 24
+    main-pane-width 80
+    mode-keys emacs
+    mode-style noattr,bg=themeyellow,fg=themeblack
+    monitor-activity off
+    monitor-bell on
+    monitor-silence 0
+    other-pane-height 0
+    other-pane-width 0
+    pane-active-border-style "fg=#{?pane_marked,thememagenta,#{?synchronize-panes,themered,#{?pane_in_mode,themeyellow,themegreen}}}"
+    pane-base-index 0
+    pane-border-format "#{?pane_active,#[reverse],}#{pane_index}#[default] \"#{pane_title}\"#{?#{mouse},#[align=right]#[range=control|7][#{?#{pane_floating_flag},t,f}]#[norange]#[range=control|8][#{?#{window_zoomed_flag},u,z}]#[norange]#[range=control|9][x]#[norange],}"
+    pane-border-indicators colour
+    pane-border-lines single
+    pane-border-status off
+    pane-border-style fg=themelightgrey
+    pane-colours
+    pane-scrollbars off
+    pane-scrollbars-timeout 500
+    pane-scrollbars-style bg=themedarkgrey,fg=themelightgrey,width=1,pad=0
+    pane-scrollbars-position right
+    popup-style bg=themedarkgrey,fg=themewhite
+    popup-border-style bg=themedarkgrey,fg=themelightgrey
+    popup-border-lines single
+    remain-on-exit off
+    remain-on-exit-format "Pane is dead (#{?#{!=:#{pane_dead_status},},status #{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},}, #{t:pane_dead_time})"
+    scroll-on-clear on
+    switch-mode-match-style "bg=cyan fg=black"
+    synchronize-panes off
+    tiled-layout-max-columns 0
+    tree-mode-border-style bg=themedarkgrey,fg=themelightgrey
+    tree-mode-preview-format "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}"
+    tree-mode-preview-style "fg=#{?#{||:#{&&:#{pane_format},#{pane_active}},#{&&:#{window_format},#{window_active}}},themered,themeblue}"
+    tree-mode-selection-style "#{E:mode-style}"
+    window-active-style default
+    window-pane-current-status-format "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+    window-pane-status-format "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+    window-size latest
+    window-style default
+    window-status-activity-style reverse
+    window-status-bell-style reverse
+    window-status-current-format "#I:#W#{?window_flags,#{window_flags}, }"
+    window-status-current-style underscore
+    window-status-format "#I:#W#{?window_flags,#{window_flags}, }"
+    window-status-last-style default
+    window-status-separator " "
+    window-status-style default
+    wrap-search on
+    xterm-keys on
+tmux stdout:
+    cursor-colour ''
+    cursor-style default
+    menu-style bg=themedarkgrey,fg=themewhite
+    menu-selected-style bg=themeyellow,fg=themeblack
+    menu-border-style bg=themedarkgrey,fg=themelightgrey
+    menu-border-lines single
+    pane-status-current-style underscore
+    pane-status-style default
+    session-status-current-style underscore
+    session-status-style default
+    aggressive-resize off
+    allow-passthrough off
+    allow-rename off
+    allow-set-title on
+    alternate-screen on
+    automatic-rename on
+    automatic-rename-format "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}"
+    clock-mode-colour themeblue
+    clock-mode-style 24
+    copy-mode-match-style bg=themecyan,fg=themeblack
+    copy-mode-current-match-style bg=thememagenta,fg=themeblack
+    copy-mode-mark-style bg=themeyellow,fg=themeblack
+    copy-mode-position-format "#[align=right]#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}[#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}"
+    copy-mode-position-style "#{E:mode-style}"
+    copy-mode-selection-style "#{E:mode-style}"
+    copy-mode-current-line-number-style fg=themeyellow
+    copy-mode-line-number-style fg=themelightgrey,dim
+    copy-mode-line-numbers off
+    fill-character ''
+    main-pane-height 24
+    main-pane-width 80
+    mode-keys emacs
+    mode-style noattr,bg=themeyellow,fg=themeblack
+    monitor-activity off
+    monitor-bell on
+    monitor-silence 0
+    other-pane-height 0
+    other-pane-width 0
+    pane-active-border-style "fg=#{?pane_marked,thememagenta,#{?synchronize-panes,themered,#{?pane_in_mode,themeyellow,themegreen}}}"
+    pane-base-index 0
+    pane-border-format "#{?pane_active,#[reverse],}#{pane_index}#[default] \"#{pane_title}\"#{?#{mouse},#[align=right]#[range=control|7][#{?#{pane_floating_flag},t,f}]#[norange]#[range=control|8][#{?#{window_zoomed_flag},u,z}]#[norange]#[range=control|9][x]#[norange],}"
+    pane-border-indicators colour
+    pane-border-lines single
+    pane-border-status off
+    pane-border-style fg=themelightgrey
+    pane-colours
+    pane-scrollbars off
+    pane-scrollbars-timeout 500
+    pane-scrollbars-style bg=themedarkgrey,fg=themelightgrey,width=1,pad=0
+    pane-scrollbars-position right
+    popup-style bg=themedarkgrey,fg=themewhite
+    popup-border-style bg=themedarkgrey,fg=themelightgrey
+    popup-border-lines single
+    remain-on-exit off
+    remain-on-exit-format "Pane is dead (#{?#{!=:#{pane_dead_status},},status #{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},}, #{t:pane_dead_time})"
+    scroll-on-clear on
+    switch-mode-match-style "bg=cyan fg=black"
+    synchronize-panes off
+    tiled-layout-max-columns 0
+    tree-mode-border-style bg=themedarkgrey,fg=themelightgrey
+    tree-mode-preview-format "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}"
+    tree-mode-preview-style "fg=#{?#{||:#{&&:#{pane_format},#{pane_active}},#{&&:#{window_format},#{window_active}}},themered,themeblue}"
+    tree-mode-selection-style "#{E:mode-style}"
+    window-active-style default
+    window-pane-current-status-format "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+    window-pane-status-format "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+    window-size latest
+    window-style default
+    window-status-activity-style reverse
+    window-status-bell-style reverse
+    window-status-current-format "#I:#W#{?window_flags,#{window_flags}, }"
+    window-status-current-style underscore
+    window-status-format "#I:#W#{?window_flags,#{window_flags}, }"
+    window-status-last-style default
+    window-status-separator " "
+    window-status-style default
+    wrap-search on
+    xterm-keys on
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 37
+COMMAND: set-option -s backspace C-a
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 38
+COMMAND: set-option -s default-client-command display-message
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 39
+COMMAND: set-option -s editor /bin/ed
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 40
+COMMAND: set-option -s extended-keys always
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 41
+COMMAND: set-option -s extended-keys-format csi-u
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 42
+COMMAND: set-option -s get-clipboard both
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 43
+COMMAND: set-option -s input-buffer-size 2097152
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 44
+COMMAND: set-option -s variation-selector-always-wide off
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 45
+COMMAND: set-option -g assume-paste-time 25
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 46
+COMMAND: set-option -g activity-action current
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 47
+COMMAND: set-option -g message-command-style fg=red
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 48
+COMMAND: set-option -g message-format plain
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 49
+COMMAND: set-option -g message-line 4
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 50
+COMMAND: set-option -g message-style bg=blue
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 51
+COMMAND: set-option -g prompt-cursor-colour red
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 52
+COMMAND: set-option -g prompt-command-cursor-colour blue
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 53
+COMMAND: set-option -g prompt-cursor-style bar
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 54
+COMMAND: set-option -g prompt-command-cursor-style blinking-bar
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 55
+COMMAND: set-option -g silence-action none
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 56
+COMMAND: set-option -gw clock-mode-colour green
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 57
+COMMAND: set-option -gw clock-mode-style 24-with-seconds
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 58
+COMMAND: set-option -gw fill-character x
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 59
+COMMAND: set-option -gw monitor-activity on
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 60
+COMMAND: set-option -gw monitor-bell off
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 61
+COMMAND: set-option -gw monitor-silence 30
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 62
+COMMAND: set-option -gw pane-border-indicators both
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 63
+COMMAND: set-option -gw pane-border-lines double
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 64
+COMMAND: set-option -gw pane-scrollbars auto-hide
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 65
+COMMAND: set-option -gw pane-scrollbars-timeout 750
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 66
+COMMAND: set-option -gw pane-scrollbars-style fg=white
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 67
+COMMAND: set-option -gw pane-scrollbars-position left
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 68
+COMMAND: set-option -gw xterm-keys off
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 69
+COMMAND: out: show-options -sv backspace
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-a
+tmux stdout:
+    C-a
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 70
+COMMAND: out: show-options -sv default-client-command
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    display-message
+tmux stdout:
+    display-message
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 71
+COMMAND: out: show-options -sv editor
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    /bin/ed
+tmux stdout:
+    /bin/ed
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 72
+COMMAND: out: show-options -sv extended-keys
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    always
+tmux stdout:
+    always
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 73
+COMMAND: out: show-options -sv extended-keys-format
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    csi-u
+tmux stdout:
+    csi-u
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 74
+COMMAND: out: show-options -sv get-clipboard
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    both
+tmux stdout:
+    both
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 75
+COMMAND: out: show-options -sv input-buffer-size
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    2097152
+tmux stdout:
+    2097152
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 76
+COMMAND: out: show-options -sv variation-selector-always-wide
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    off
+tmux stdout:
+    off
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 77
+COMMAND: out: show-options -gv assume-paste-time
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    25
+tmux stdout:
+    25
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 78
+COMMAND: out: show-options -gv activity-action
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    current
+tmux stdout:
+    current
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 79
+COMMAND: out: show-options -gv message-command-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    fg=red
+tmux stdout:
+    fg=red
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 80
+COMMAND: out: show-options -gv message-format
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    plain
+tmux stdout:
+    plain
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 81
+COMMAND: out: show-options -gv message-line
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    4
+tmux stdout:
+    4
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 82
+COMMAND: out: show-options -gv message-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bg=blue
+tmux stdout:
+    bg=blue
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 83
+COMMAND: out: show-options -gv prompt-cursor-colour
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    red
+tmux stdout:
+    red
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 84
+COMMAND: out: show-options -gv prompt-command-cursor-colour
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    blue
+tmux stdout:
+    blue
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 85
+COMMAND: out: show-options -gv prompt-cursor-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bar
+tmux stdout:
+    bar
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 86
+COMMAND: out: show-options -gv silence-action
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    none
+tmux stdout:
+    none
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 87
+COMMAND: out: show-options -gv prompt-command-cursor-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    blinking-bar
+tmux stdout:
+    blinking-bar
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 88
+COMMAND: out: show-options -gwv clock-mode-colour
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    green
+tmux stdout:
+    green
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 89
+COMMAND: out: show-options -gwv clock-mode-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    24-with-seconds
+tmux stdout:
+    24-with-seconds
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 90
+COMMAND: out: show-options -gwv fill-character
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    x
+tmux stdout:
+    x
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 91
+COMMAND: out: show-options -gwv monitor-activity
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    on
+tmux stdout:
+    on
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 92
+COMMAND: out: show-options -gwv monitor-bell
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    off
+tmux stdout:
+    off
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 93
+COMMAND: out: show-options -gwv monitor-silence
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    30
+tmux stdout:
+    30
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 94
+COMMAND: out: show-options -gwv pane-border-indicators
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    both
+tmux stdout:
+    both
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 95
+COMMAND: out: show-options -gwv pane-border-lines
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    double
+tmux stdout:
+    double
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 96
+COMMAND: out: show-options -gwv pane-scrollbars
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    auto-hide
+tmux stdout:
+    auto-hide
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 97
+COMMAND: out: show-options -gwv pane-scrollbars-timeout
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    750
+tmux stdout:
+    750
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 98
+COMMAND: out: show-options -gwv pane-scrollbars-style
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    fg=white
+tmux stdout:
+    fg=white
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 99
+COMMAND: out: show-options -gwv pane-scrollbars-position
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    left
+tmux stdout:
+    left
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 100
+COMMAND: out: show-options -gwv xterm-keys
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    off
+tmux stdout:
+    off
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 101
+COMMAND: set-option -p pane-border-lines heavy
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 102
+COMMAND: set-option -wU pane-border-lines
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 103
+COMMAND: out: show-options -pA pane-border-lines
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    pane-border-lines* double
+tmux stdout:
+    pane-border-lines* double
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 104
+COMMAND: set-option -s backspace not-a-key
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    bad key: not-a-key
+tmux stderr:
+    bad key: not-a-key
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 105
+COMMAND: set-option -s default-client-command no-such-command
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    unknown command: no-such-command
+tmux stderr:
+    unknown command: no-such-command
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 106
+COMMAND: set-option -s extended-keys sometimes
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    unknown value: sometimes
+tmux stderr:
+    unknown value: sometimes
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 107
+COMMAND: set-option -s input-buffer-size 0
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    value is too small: 0
+tmux stderr:
+    value is too small: 0
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 108
+COMMAND: set-option -s variation-selector-always-wide maybe
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    bad value: maybe
+tmux stderr:
+    bad value: maybe
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 109
+COMMAND: set-option -g assume-paste-time -1
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    value is too small: -1
+tmux stderr:
+    value is too small: -1
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 110
+COMMAND: set-option -g activity-action all
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    unknown value: all
+tmux stderr:
+    unknown value: all
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 111
+COMMAND: set-option -g message-line 5
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    unknown value: 5
+tmux stderr:
+    unknown value: 5
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 112
+COMMAND: set-option -g prompt-cursor-colour not-a-colour
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    invalid colour: not-a-colour
+tmux stderr:
+    invalid colour: not-a-colour
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 113
+COMMAND: set-option -g silence-action ALL
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    unknown value: ALL
+tmux stderr:
+    unknown value: ALL
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 114
+COMMAND: set-option -gw clock-mode-style 13
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    unknown value: 13
+tmux stderr:
+    unknown value: 13
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 115
+COMMAND: set-option -gw monitor-activity maybe
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    bad value: maybe
+tmux stderr:
+    bad value: maybe
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 116
+COMMAND: set-option -gw monitor-bell maybe
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    bad value: maybe
+tmux stderr:
+    bad value: maybe
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 117
+COMMAND: set-option -gw monitor-silence -1
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    value is too small: -1
+tmux stderr:
+    value is too small: -1
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 118
+COMMAND: set-option -gw pane-scrollbars-style not-a-style
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    invalid style: not-a-style
+tmux stderr:
+    invalid style: not-a-style
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 119
+COMMAND: set-option -s command-alias zero=display-message,one=display-message
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 120
+COMMAND: out: show-options -s command-alias
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    command-alias[0] zero=display-message
+    command-alias[1] one=display-message
+tmux stdout:
+    command-alias[0] zero=display-message
+    command-alias[1] one=display-message
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 121
+COMMAND: set-option -s command-alias[0] ZERO
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 122
+COMMAND: set-option -sa command-alias[1] -suffix
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 123
+COMMAND: set-option -su command-alias[0]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 124
+COMMAND: set-option -sa command-alias hole=display-message,tail=display-message
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 125
+COMMAND: out: show-options -s command-alias
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    command-alias[0] hole=display-message
+    command-alias[1] one=display-message-suffix
+    command-alias[2] tail=display-message
+tmux stdout:
+    command-alias[0] hole=display-message
+    command-alias[1] one=display-message-suffix
+    command-alias[2] tail=display-message
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 126
+COMMAND: set-option -su command-alias
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 127
+COMMAND: out: show-options -s command-alias
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    command-alias[0] split-pane=split-window
+    command-alias[1] splitp=split-window
+    command-alias[2] "server-info=show-messages -JT"
+    command-alias[3] "info=show-messages -JT"
+    command-alias[4] "choose-window=choose-tree -w"
+    command-alias[5] "choose-session=choose-tree -s"
+tmux stdout:
+    command-alias[0] split-pane=split-window
+    command-alias[1] splitp=split-window
+    command-alias[2] "server-info=show-messages -JT"
+    command-alias[3] "info=show-messages -JT"
+    command-alias[4] "choose-window=choose-tree -w"
+    command-alias[5] "choose-session=choose-tree -s"
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 128
+COMMAND: set-option -s codepoint-widths U+0041=1,U+0042=2
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 129
+COMMAND: out: show-options -s codepoint-widths
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    codepoint-widths[0] U+0041=1
+    codepoint-widths[1] U+0042=2
+tmux stdout:
+    codepoint-widths[0] U+0041=1
+    codepoint-widths[1] U+0042=2
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 130
+COMMAND: set-option -s codepoint-widths[4] U+0043=1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 131
+COMMAND: set-option -su codepoint-widths[0]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 132
+COMMAND: set-option -sa codepoint-widths U+0044=2
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 133
+COMMAND: out: show-options -s codepoint-widths
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    codepoint-widths[0] U+0044=2
+    codepoint-widths[1] U+0042=2
+    codepoint-widths[4] U+0043=1
+tmux stdout:
+    codepoint-widths[0] U+0044=2
+    codepoint-widths[1] U+0042=2
+    codepoint-widths[4] U+0043=1
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 134
+COMMAND: set-option -su codepoint-widths
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 135
+COMMAND: out: show-options -s codepoint-widths
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    codepoint-widths
+tmux stdout:
+    codepoint-widths
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 136
+COMMAND: set-option -s terminal-overrides alpha:RGB,beta:AX
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 137
+COMMAND: out: show-options -s terminal-overrides
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    terminal-overrides[0] alpha:RGB
+    terminal-overrides[1] beta:AX
+tmux stdout:
+    terminal-overrides[0] alpha:RGB
+    terminal-overrides[1] beta:AX
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 138
+COMMAND: set-option -s terminal-overrides[7] gamma:Tc
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 139
+COMMAND: set-option -sa terminal-overrides[7] -suffix
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 140
+COMMAND: set-option -su terminal-overrides[0]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 141
+COMMAND: set-option -sa terminal-overrides hole:Ms
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 142
+COMMAND: out: show-options -s terminal-overrides
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    terminal-overrides[0] hole:Ms
+    terminal-overrides[1] beta:AX
+    terminal-overrides[7] gamma:Tc-suffix
+tmux stdout:
+    terminal-overrides[0] hole:Ms
+    terminal-overrides[1] beta:AX
+    terminal-overrides[7] gamma:Tc-suffix
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 143
+COMMAND: set-option -su terminal-overrides
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 144
+COMMAND: out: show-options -s terminal-overrides
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    terminal-overrides[0] linux*:AX@
+tmux stdout:
+    terminal-overrides[0] linux*:AX@
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 145
+COMMAND: set-option -s terminal-features alpha:title,beta:clipboard
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 146
+COMMAND: out: show-options -s terminal-features
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    terminal-features[0] alpha:title
+    terminal-features[1] beta:clipboard
+tmux stdout:
+    terminal-features[0] alpha:title
+    terminal-features[1] beta:clipboard
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 147
+COMMAND: set-option -s terminal-features[7] gamma:focus
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 148
+COMMAND: set-option -sa terminal-features[7] :cstyle
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 149
+COMMAND: set-option -su terminal-features[0]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 150
+COMMAND: set-option -sa terminal-features hole:ccolour
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 151
+COMMAND: out: show-options -s terminal-features
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    terminal-features[0] hole:ccolour
+    terminal-features[1] beta:clipboard
+    terminal-features[7] gamma:focus:cstyle
+tmux stdout:
+    terminal-features[0] hole:ccolour
+    terminal-features[1] beta:clipboard
+    terminal-features[7] gamma:focus:cstyle
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 152
+COMMAND: set-option -su terminal-features
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 153
+COMMAND: out: show-options -s terminal-features
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    terminal-features[0] xterm*:clipboard:ccolour:cstyle:focus:title
+    terminal-features[1] screen*:title
+    terminal-features[2] rxvt*:ignorefkeys
+tmux stdout:
+    terminal-features[0] xterm*:clipboard:ccolour:cstyle:focus:title
+    terminal-features[1] screen*:title
+    terminal-features[2] rxvt*:ignorefkeys
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 154
+COMMAND: set-option -s user-keys first,second
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 155
+COMMAND: out: show-options -s user-keys
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    user-keys[0] first
+    user-keys[1] second
+tmux stdout:
+    user-keys[0] first
+    user-keys[1] second
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 156
+COMMAND: set-option -s user-keys[7] third
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 157
+COMMAND: set-option -sa user-keys[7] -suffix
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 158
+COMMAND: set-option -su user-keys[0]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 159
+COMMAND: set-option -sa user-keys hole
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 160
+COMMAND: out: show-options -s user-keys
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    user-keys[0] hole
+    user-keys[1] second
+    user-keys[7] third-suffix
+tmux stdout:
+    user-keys[0] hole
+    user-keys[1] second
+    user-keys[7] third-suffix
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 161
+COMMAND: set-option -su user-keys
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 162
+COMMAND: out: show-options -s user-keys
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    user-keys
+tmux stdout:
+    user-keys
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 163
+COMMAND: set-option -g status-format left,right
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 164
+COMMAND: out: show-options -g status-format
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    status-format[0] left
+    status-format[1] right
+tmux stdout:
+    status-format[0] left
+    status-format[1] right
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 165
+COMMAND: set-option -g status-format[7] tail
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 166
+COMMAND: set-option -ga status-format[7] -suffix
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 167
+COMMAND: set-option -gu status-format[0]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 168
+COMMAND: set-option -ga status-format hole
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 169
+COMMAND: out: show-options -g status-format
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    status-format[0] hole
+    status-format[1] right
+    status-format[7] tail-suffix
+tmux stdout:
+    status-format[0] hole
+    status-format[1] right
+    status-format[7] tail-suffix
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 170
+COMMAND: set-option -gu status-format
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 171
+COMMAND: out: show-options -g status-format
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+    status-format[1] "#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }"
+    status-format[2] "#[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }"
+tmux stdout:
+    status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+    status-format[1] "#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }"
+    status-format[2] "#[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }"
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 172
+COMMAND: set-option -gw pane-colours red,blue
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 173
+COMMAND: out: show-options -gw pane-colours
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    pane-colours[0] red
+    pane-colours[1] blue
+tmux stdout:
+    pane-colours[0] red
+    pane-colours[1] blue
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 174
+COMMAND: set-option -gw pane-colours[7] green
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 175
+COMMAND: set-option -gwa pane-colours[7] yellow
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 176
+COMMAND: set-option -gwu pane-colours[0]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 177
+COMMAND: set-option -gwa pane-colours white
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 178
+COMMAND: out: show-options -gw pane-colours
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    pane-colours[0] white
+    pane-colours[1] blue
+    pane-colours[7] yellow
+tmux stdout:
+    pane-colours[0] white
+    pane-colours[1] blue
+    pane-colours[7] yellow
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 179
+COMMAND: set-option -gwu pane-colours
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 180
+COMMAND: out: show-options -gw pane-colours
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    pane-colours
+tmux stdout:
+    pane-colours
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 181
+COMMAND: set-option -g alert-bell display-message
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 182
+COMMAND: out: show-hooks -g alert-bell
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alert-bell[0] display-message
+tmux stdout:
+    alert-bell[0] display-message
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 183
+COMMAND: out: show-options -g alert-bell
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alert-bell[0] display-message
+tmux stdout:
+    alert-bell[0] display-message
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 184
+COMMAND: set-option -ga alert-bell 'display-message -p added'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 185
+COMMAND: out: show-hooks -g alert-bell
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alert-bell[0] display-message
+    alert-bell[1] display-message -p added
+tmux stdout:
+    alert-bell[0] display-message
+    alert-bell[1] display-message -p added
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 186
+COMMAND: out: show-options -g alert-bell
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alert-bell[0] display-message
+    alert-bell[1] display-message -p added
+tmux stdout:
+    alert-bell[0] display-message
+    alert-bell[1] display-message -p added
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 187
+COMMAND: set-option -gu alert-bell[0]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 188
+COMMAND: out: show-hooks -g alert-bell
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alert-bell[1] display-message -p added
+tmux stdout:
+    alert-bell[1] display-message -p added
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 189
+COMMAND: out: show-options -g alert-bell
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alert-bell[1] display-message -p added
+tmux stdout:
+    alert-bell[1] display-message -p added
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 190
+COMMAND: set-option -gu alert-bell
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 191
+COMMAND: out: show-hooks -g alert-bell
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alert-bell
+tmux stdout:
+    alert-bell
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 192
+COMMAND: out: show-options -g alert-bell
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alert-bell
+tmux stdout:
+    alert-bell
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 193
+COMMAND: out: show-options -g
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    activity-action current
+    assume-paste-time 25
+    base-index 0
+    bell-action any
+    default-command ''
+    default-shell /bin/bash
+    default-size 80x24
+    destroy-unattached off
+    detach-on-destroy on
+    display-panes-active-colour themered
+    display-panes-colour themeblue
+    display-panes-format "#[align=right]#{pane_width}x#{pane_height}"
+    display-panes-time 1000
+    display-time 750
+    focus-follows-mouse off
+    history-limit 2000
+    initial-repeat-time 0
+    key-table root
+    lock-after-time 0
+    lock-command "lock -np"
+    message-command-style fg=red
+    message-format plain
+    message-line 4
+    message-style bg=blue
+    mouse on
+    prefix C-b
+    prefix2 None
+    renumber-windows off
+    repeat-time 500
+    set-titles off
+    set-titles-string "#S:#I:#W - \"#T\" #{session_alerts}"
+    silence-action none
+    status on
+    status-bg default
+    status-fg default
+    status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+    status-format[1] "#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }"
+    status-format[2] "#[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }"
+    status-interval 15
+    status-justify left
+    status-keys emacs
+    status-left "[#{session_name}] "
+    status-left-length 10
+    status-left-style default
+    status-position bottom
+    status-right "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+    status-right-length 40
+    status-right-style default
+    status-style bg=themegreen,fg=themeblack
+    prompt-cursor-colour red
+    prompt-command-cursor-colour blue
+    prompt-cursor-style bar
+    prompt-command-cursor-style blinking-bar
+    update-environment[0] DISPLAY
+    update-environment[1] KRB5CCNAME
+    update-environment[2] MSYSTEM
+    update-environment[3] SSH_ASKPASS
+    update-environment[4] SSH_AUTH_SOCK
+    update-environment[5] SSH_AGENT_PID
+    update-environment[6] SSH_CONNECTION
+    update-environment[7] WAYLAND_DISPLAY
+    update-environment[8] WINDOWID
+    update-environment[9] XAUTHORITY
+    update-environment[10] XDG_CURRENT_DESKTOP
+    update-environment[11] XDG_SESSION_DESKTOP
+    update-environment[12] XDG_SESSION_TYPE
+    visual-activity off
+    visual-bell off
+    visual-silence off
+    word-separators "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+tmux stdout:
+    activity-action current
+    assume-paste-time 25
+    base-index 0
+    bell-action any
+    default-command ''
+    default-shell /bin/bash
+    default-size 80x24
+    destroy-unattached off
+    detach-on-destroy on
+    display-panes-active-colour themered
+    display-panes-colour themeblue
+    display-panes-format "#[align=right]#{pane_width}x#{pane_height}"
+    display-panes-time 1000
+    display-time 750
+    focus-follows-mouse off
+    history-limit 2000
+    initial-repeat-time 0
+    key-table root
+    lock-after-time 0
+    lock-command vlock
+    message-command-style fg=red
+    message-format plain
+    message-line 4
+    message-style bg=blue
+    mouse on
+    prefix C-b
+    prefix2 None
+    renumber-windows off
+    repeat-time 500
+    set-titles off
+    set-titles-string "#S:#I:#W - \"#T\" #{session_alerts}"
+    silence-action none
+    status on
+    status-bg default
+    status-fg default
+    status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+    status-format[1] "#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }"
+    status-format[2] "#[align=left]#{R: ,#{n:#{session_name}}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{session_alert}#[pop-default]#[norange list=on default] }"
+    status-interval 15
+    status-justify left
+    status-keys emacs
+    status-left "[#{session_name}] "
+    status-left-length 10
+    status-left-style default
+    status-position bottom
+    status-right "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+    status-right-length 40
+    status-right-style default
+    status-style bg=themegreen,fg=themeblack
+    prompt-cursor-colour red
+    prompt-command-cursor-colour blue
+    prompt-cursor-style bar
+    prompt-command-cursor-style blinking-bar
+    update-environment[0] DISPLAY
+    update-environment[1] KRB5CCNAME
+    update-environment[2] MSYSTEM
+    update-environment[3] SSH_ASKPASS
+    update-environment[4] SSH_AUTH_SOCK
+    update-environment[5] SSH_AGENT_PID
+    update-environment[6] SSH_CONNECTION
+    update-environment[7] WAYLAND_DISPLAY
+    update-environment[8] WINDOWID
+    update-environment[9] XAUTHORITY
+    update-environment[10] XDG_CURRENT_DESKTOP
+    update-environment[11] XDG_SESSION_DESKTOP
+    update-environment[12] XDG_SESSION_TYPE
+    visual-activity off
+    visual-bell off
+    visual-silence off
+    word-separators "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+OUT: divergence
+--- zz OUT step 193
++++ tmux OUT step 193
+@@ -17,7 +17,7 @@
+ initial-repeat-time 0
+ key-table root
+ lock-after-time 0
+-lock-command "lock -np"
++lock-command vlock
+ message-command-style fg=red
+ message-format plain
+ message-line 4
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=193 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=2 warn_divergences=0

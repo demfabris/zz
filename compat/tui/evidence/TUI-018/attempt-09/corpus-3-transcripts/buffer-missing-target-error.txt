@@ -1,0 +1,76 @@
+# Scenario: buffer-missing-target-error
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/buffer-missing-target-error.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: run-shell 'sh ~/buffer-missing-target-error.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-buffer -b transcript
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    buffers-now=[]
+    empty-paste-named status=1 message=no buffer nosuch
+    empty-save-named status=1 message=no buffer nosuch
+    empty-show-named status=1 message=no buffer nosuch
+    empty-delete-named status=1 message=unknown buffer: nosuch
+    empty-rename-named status=1 message=unknown buffer: nosuch
+    empty-save-top status=1 message=no buffers
+    empty-show-top status=1 message=no buffers
+    empty-delete-top status=1 message=no buffer
+    empty-rename-top status=1 message=no buffer
+    empty-paste-top status=0 message=
+    buffers-now=[present,]
+    stocked-paste-named status=1 message=no buffer nosuch
+    stocked-save-named status=1 message=no buffer nosuch
+    stocked-show-named status=1 message=no buffer nosuch
+    stocked-delete-named status=1 message=unknown buffer: nosuch
+    stocked-rename-named status=1 message=unknown buffer: nosuch
+    stocked-save-top status=1 message=no buffers
+    stocked-show-top status=1 message=no buffers
+    stocked-delete-top status=1 message=no buffer
+    stocked-rename-top status=1 message=no buffer
+tmux stdout:
+    buffers-now=[]
+    empty-paste-named status=1 message=no buffer nosuch
+    empty-save-named status=1 message=no buffer nosuch
+    empty-show-named status=1 message=no buffer nosuch
+    empty-delete-named status=1 message=unknown buffer: nosuch
+    empty-rename-named status=1 message=unknown buffer: nosuch
+    empty-save-top status=1 message=no buffers
+    empty-show-top status=1 message=no buffers
+    empty-delete-top status=1 message=no buffer
+    empty-rename-top status=1 message=no buffer
+    empty-paste-top status=0 message=
+    buffers-now=[present,]
+    stocked-paste-named status=1 message=no buffer nosuch
+    stocked-save-named status=1 message=no buffer nosuch
+    stocked-show-named status=1 message=no buffer nosuch
+    stocked-delete-named status=1 message=unknown buffer: nosuch
+    stocked-rename-named status=1 message=unknown buffer: nosuch
+    stocked-save-top status=1 message=no buffers
+    stocked-show-top status=1 message=no buffers
+    stocked-delete-top status=1 message=no buffer
+    stocked-rename-top status=1 message=no buffer
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

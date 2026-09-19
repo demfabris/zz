@@ -1,0 +1,30 @@
+{
+  "binary": "target/debug/zz-alias5-corrected",
+  "fixture": "compat/tui-command-streams.sh",
+  "runs": [
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/corrected-streams-1.txt",
+      "summary": "all 156 asserted comparisons identical, 0 recorded not asserted, 5 decided (0 for a sibling lane)",
+      "asserted": 156,
+      "recorded": 0,
+      "decided": 5,
+      "exit_status": 0
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/corrected-streams-2.txt",
+      "summary": "all 156 asserted comparisons identical, 0 recorded not asserted, 5 decided (0 for a sibling lane)",
+      "asserted": 156,
+      "recorded": 0,
+      "decided": 5,
+      "exit_status": 0
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-10/corrected-streams-3.txt",
+      "summary": "all 156 asserted comparisons identical, 0 recorded not asserted, 5 decided (0 for a sibling lane)",
+      "asserted": 156,
+      "recorded": 0,
+      "decided": 5,
+      "exit_status": 0
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.63s
+     Running tests/cli_binary.rs (target/alias-main-tests/debug/deps/cli_binary-8b5c06dbd1308a7d)
+
+running 1 test
+test daemon_autostart::control_mode::wait_exit_holds_the_control_process_until_a_second_blank_line ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 132 filtered out; finished in 3.01s
+
+
+exit_status=0

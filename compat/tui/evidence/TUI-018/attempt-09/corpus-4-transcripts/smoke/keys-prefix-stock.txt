@@ -1,0 +1,706 @@
+# Scenario: smoke/keys-prefix-stock
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/smoke/keys-prefix-stock.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: keys: prefix x
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|x|0|confirm-before -p "kill-pane #P? (y/n)" kill-pane
+tmux stdout:
+    prefix|x|0|confirm-before -p "kill-pane #P? (y/n)" kill-pane
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: keys: prefix &
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|&|0|confirm-before -p "kill-window #W? (y/n)" kill-window
+tmux stdout:
+    prefix|&|0|confirm-before -p "kill-window #W? (y/n)" kill-window
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: keys: prefix ]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|]|0|paste-buffer -p
+tmux stdout:
+    prefix|]|0|paste-buffer -p
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: keys: prefix ?
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|?|0|list-keys -N
+tmux stdout:
+    prefix|?|0|list-keys -N
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: keys: prefix d
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|d|0|detach-client
+tmux stdout:
+    prefix|d|0|detach-client
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: keys: prefix PPage
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|PPage|0|copy-mode -u
+tmux stdout:
+    prefix|PPage|0|copy-mode -u
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: keys: prefix f
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|f|0|command-prompt { find-window -Z "%%" }
+tmux stdout:
+    prefix|f|0|command-prompt { find-window -Z "%%" }
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: keys: prefix .
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|.|0|command-prompt { move-window -t "%%" }
+tmux stdout:
+    prefix|.|0|command-prompt { move-window -t "%%" }
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: keys: prefix (
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|(|0|switch-client -p
+tmux stdout:
+    prefix|(|0|switch-client -p
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: keys: prefix )
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|)|0|switch-client -n
+tmux stdout:
+    prefix|)|0|switch-client -n
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: keys: prefix L
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|L|0|switch-client -l
+tmux stdout:
+    prefix|L|0|switch-client -l
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: keys: prefix m
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|m|0|select-pane -m
+tmux stdout:
+    prefix|m|0|select-pane -m
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: keys: prefix M
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|M|0|select-pane -M
+tmux stdout:
+    prefix|M|0|select-pane -M
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: keys: prefix i
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|i|0|display-message
+tmux stdout:
+    prefix|i|0|display-message
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: keys: prefix ~
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|~|0|show-messages
+tmux stdout:
+    prefix|~|0|show-messages
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: keys: prefix #
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|#|0|list-buffers
+tmux stdout:
+    prefix|#|0|list-buffers
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: keys: prefix -
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|-|0|delete-buffer
+tmux stdout:
+    prefix|-|0|delete-buffer
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: keys: prefix '
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|'|0|command-prompt -p index { select-window -t ":%%" }
+tmux stdout:
+    prefix|'|0|command-prompt -p index { select-window -t ":%%" }
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: keys: prefix M-n
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|M-n|0|next-window -a
+tmux stdout:
+    prefix|M-n|0|next-window -a
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: keys: prefix M-p
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix|M-p|0|previous-window -a
+tmux stdout:
+    prefix|M-p|0|previous-window -a
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: list-keys -N -T prefix x
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b x Kill the active pane
+tmux stdout:
+    C-b x Kill the active pane
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: list-keys -N -T prefix &
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b & Kill current window
+tmux stdout:
+    C-b & Kill current window
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: out: list-keys -N -T prefix ]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b ] Paste the most recent paste buffer
+tmux stdout:
+    C-b ] Paste the most recent paste buffer
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: out: list-keys -N -T prefix ?
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b ? List key bindings
+tmux stdout:
+    C-b ? List key bindings
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: out: list-keys -N -T prefix d
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b d Detach the current client
+tmux stdout:
+    C-b d Detach the current client
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: out: list-keys -N -T prefix PPage
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b PPage Enter copy mode and scroll up
+tmux stdout:
+    C-b PPage Enter copy mode and scroll up
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: out: list-keys -N -T prefix f
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b f Search for a pane
+tmux stdout:
+    C-b f Search for a pane
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: out: list-keys -N -T prefix .
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b . Move the current window
+tmux stdout:
+    C-b . Move the current window
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: out: list-keys -N -T prefix (
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b ( Switch to previous client
+tmux stdout:
+    C-b ( Switch to previous client
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: out: list-keys -N -T prefix )
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b ) Switch to next client
+tmux stdout:
+    C-b ) Switch to next client
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 31
+COMMAND: out: list-keys -N -T prefix L
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b L Switch to the last client
+tmux stdout:
+    C-b L Switch to the last client
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 32
+COMMAND: out: list-keys -N -T prefix m
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b m Toggle the marked pane
+tmux stdout:
+    C-b m Toggle the marked pane
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 33
+COMMAND: out: list-keys -N -T prefix M
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b M Clear the marked pane
+tmux stdout:
+    C-b M Clear the marked pane
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 34
+COMMAND: out: list-keys -N -T prefix i
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b i Display window information
+tmux stdout:
+    C-b i Display window information
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 35
+COMMAND: out: list-keys -N -T prefix ~
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b ~ Show messages
+tmux stdout:
+    C-b ~ Show messages
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 36
+COMMAND: out: list-keys -N -T prefix #
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b # List all paste buffers
+tmux stdout:
+    C-b # List all paste buffers
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 37
+COMMAND: out: list-keys -N -T prefix -
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b - Delete the most recent paste buffer
+tmux stdout:
+    C-b - Delete the most recent paste buffer
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 38
+COMMAND: list-keys -N -T prefix "'"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b ' Prompt for window index to select
+tmux stdout:
+    C-b ' Prompt for window index to select
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 39
+COMMAND: out: list-keys -N -T prefix M-n
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b M-n Select the next window with an alert
+tmux stdout:
+    C-b M-n Select the next window with an alert
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 40
+COMMAND: out: list-keys -N -T prefix M-p
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    C-b M-p Select the previous window with an alert
+tmux stdout:
+    C-b M-p Select the previous window with an alert
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=40 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

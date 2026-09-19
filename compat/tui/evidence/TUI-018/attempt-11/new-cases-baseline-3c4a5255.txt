@@ -1,0 +1,365 @@
+      case stream-display-partial
+      state differs
+        1,2c1,2
+        < open=^[[31mRED^[[39m| cursor=3:0 history=0
+        < final=^[[31mRED^[[39m| cursor=3:0 history=0
+        ---
+        > open= cursor=0:0 history=0
+        > final=^[[31mRED^[[39m| cursor=0:0 history=0
+DIFF  stream-display-partial
+      case stream-display-eof
+      state differs
+        1,2c1,2
+        < open=FIRST-| cursor=6:0 history=0
+        < final=FIRST-^[[1mSECOND^[[0m| cursor=5:1 history=0
+        ---
+        > open= cursor=0:0 history=0
+        > final=FIRST-^[[1mSECOND^[[0m| cursor=0:0 history=0
+DIFF  stream-display-eof
+      case stream-display-term
+      state differs
+        1,2c1,2
+        < open=^[[31mRED^[[39m| cursor=3:0 history=0
+        < final=^[[31mRED^[[39m| cursor=3:0 history=0
+        ---
+        > open= cursor=0:0 history=0
+        > final= cursor=0:0 history=0
+DIFF  stream-display-term
+      case stream-display-slow
+      state differs
+        1,2c1,2
+        < third=slow1-slow2-slow3-| cursor=18:0 history=0
+        < final=slow1-slow2-slow3-slow4-slow5-slow6-| cursor=36:0 history=0
+        ---
+        > third= cursor=0:0 history=0
+        > final=slow1-slow2-slow3-slow4-slow5-slow6-| cursor=0:0 history=0
+DIFF  stream-display-slow
+      case stream-display-fast
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > standard input exceeds 1048576 bytes: -
+      state differs
+        1c1
+        < final=9875 179876 179877 179878 179879 179880 179881 179882 179883 179884 179885 17988|6 179887 179888 179889 179890 179891 179892 179893 179894 179895 179896 179897 1|79898 179899 179900 179901 179902 179903 179904 179905 179906 179907 179908 1799|09 179910 179911 179912 179913 179914 179915 179916 179917 179918 179919 179920|179921 179922 179923 179924 179925 179926 179927 179928 179929 179930 179931 179|932 179933 179934 179935 179936 179937 179938 179939 179940 179941 179942 179943| 179944 179945 179946 179947 179948 179949 179950 179951 179952 179953 179954 17|9955 179956 179957 179958 179959 179960 179961 179962 179963 179964 179965 17996|6 179967 179968 179969 179970 179971 179972 179973 179974 179975 179976 179977 1|79978 179979 179980 179981 179982 179983 179984 179985 179986 179987 179988 1799|89 179990 179991 179992 179993 179994 179995 179996 179997 179998 179999 180000| cursor=80:10
+        ---
+        > final= cursor=0:0
+DIFF  stream-display-fast
+      case stream-display-utf8
+      state differs
+        1,2c1,2
+        < open=AM-CM-)B^[[31mRED^[[39mC| cursor=7:0 history=0
+        < final=AM-CM-)B^[[31mRED^[[39mC| cursor=7:0 history=0
+        ---
+        > open= cursor=0:0 history=0
+        > final=AM-CM-)B^[[31mRED^[[39mC| cursor=0:0 history=0
+DIFF  stream-display-utf8
+      case stream-split-partial
+      state differs
+        1,2c1,2
+        < open=^[[31mRED^[[39m| cursor=3:0 history=0
+        < final=^[[31mRED^[[39m| cursor=3:0 history=0
+        ---
+        > open= cursor=0:0 history=0
+        > final=^[[31mRED^[[39m| cursor=0:0 history=0
+DIFF  stream-split-partial
+      case stream-split-term
+      state differs
+        1,2c1,2
+        < open=^[[31mRED^[[39m| cursor=3:0 history=0
+        < final=^[[31mRED^[[39m| cursor=3:0 history=0
+        ---
+        > open= cursor=0:0 history=0
+        > final= cursor=0:0 history=0
+DIFF  stream-split-term
+      case stream-split-utf8
+      state differs
+        1,2c1,2
+        < open=AM-CM-)B^[[31mRED^[[39mC| cursor=7:0 history=0
+        < final=AM-CM-)B^[[31mRED^[[39mC| cursor=7:0 history=0
+        ---
+        > open= cursor=0:0 history=0
+        > final=AM-CM-)B^[[31mRED^[[39mC| cursor=0:0 history=0
+DIFF  stream-split-utf8
+ok    matrix-direct-buffer-spent
+ok    matrix-alias-buffer-spent
+ok    matrix-file-buffer-spent
+ok    matrix-direct-spent
+ok    matrix-alias-spent
+ok    matrix-file-spent
+      case matrix-direct-display-spent
+      exit tmux: 0  zz: 1
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        0a1
+        > Bad file descriptor: -
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-direct-display-spent
+ok    matrix-alias-display-spent
+ok    matrix-file-display-spent
+      case matrix-direct-split-spent
+      exit tmux: 0  zz: 1
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        0a1
+        > Bad file descriptor: -
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-direct-split-spent
+ok    matrix-alias-split-spent
+ok    matrix-file-split-spent
+      case matrix-direct-source-writeonly
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < Input/output error: -
+DIFF  matrix-direct-source-writeonly
+      case matrix-alias-source-writeonly
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < Input/output error: -
+DIFF  matrix-alias-source-writeonly
+      case matrix-file-source-writeonly
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < Input/output error: -
+DIFF  matrix-file-source-writeonly
+      case matrix-direct-buffer-writeonly
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < Input/output error: -
+DIFF  matrix-direct-buffer-writeonly
+      case matrix-alias-buffer-writeonly
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < Input/output error: -
+DIFF  matrix-alias-buffer-writeonly
+      case matrix-file-buffer-writeonly
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < Input/output error: -
+DIFF  matrix-file-buffer-writeonly
+ok    matrix-direct-display-writeonly
+ok    matrix-alias-display-writeonly
+ok    matrix-file-display-writeonly
+ok    matrix-direct-split-writeonly
+ok    matrix-alias-split-writeonly
+ok    matrix-file-split-writeonly
+      case matrix-direct-source-directory
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > could not read standard input: Is a directory (os error 21): -
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-direct-source-directory
+      case matrix-alias-source-directory
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > could not read standard input: Is a directory (os error 21): -
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-alias-source-directory
+      case matrix-file-source-directory
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > could not read standard input: Is a directory (os error 21): -
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-file-source-directory
+      case matrix-direct-buffer-directory
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > could not read standard input: Is a directory (os error 21): -
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-direct-buffer-directory
+      case matrix-alias-buffer-directory
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > could not read standard input: Is a directory (os error 21): -
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-alias-buffer-directory
+      case matrix-file-buffer-directory
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > could not read standard input: Is a directory (os error 21): -
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-file-buffer-directory
+      case matrix-direct-display-directory
+      exit tmux: 0  zz: 1
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        0a1
+        > could not read standard input: Is a directory (os error 21): -
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-direct-display-directory
+      case matrix-alias-display-directory
+      exit tmux: 0  zz: 1
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        0a1
+        > could not read standard input: Is a directory (os error 21): -
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-alias-display-directory
+      case matrix-file-display-directory
+      exit tmux: 0  zz: 1
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        0a1
+        > could not read standard input: Is a directory (os error 21): -
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-file-display-directory
+      case matrix-direct-split-directory
+      exit tmux: 0  zz: 1
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        0a1
+        > could not read standard input: Is a directory (os error 21): -
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-direct-split-directory
+      case matrix-alias-split-directory
+      exit tmux: 0  zz: 1
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        0a1
+        > could not read standard input: Is a directory (os error 21): -
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-alias-split-directory
+      case matrix-file-split-directory
+      exit tmux: 0  zz: 1
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        0a1
+        > could not read standard input: Is a directory (os error 21): -
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+DIFF  matrix-file-split-directory
+      case matrix-alias-attached-term-before
+      stdout differs (tmux 100 bytes, zz 68 bytes)
+        5,6d4
+        < %begin TIME ID 1
+        < %end TIME ID 1
+DIFF  matrix-alias-attached-term-before
+      case matrix-alias-attached-term-after
+      stdout differs (tmux 155 bytes, zz 123 bytes)
+        8,9d7
+        < %begin TIME ID 1
+        < %end TIME ID 1
+DIFF  matrix-alias-attached-term-after
+      case matrix-alias-control-term-before
+      stdout differs (tmux 70 bytes, zz 38 bytes)
+        3,4d2
+        < %begin TIME ID 0
+        < %end TIME ID 0
+DIFF  matrix-alias-control-term-before
+      case matrix-alias-control-term-after
+      stdout differs (tmux 125 bytes, zz 93 bytes)
+        6,7d5
+        < %begin TIME ID 0
+        < %end TIME ID 0
+DIFF  matrix-alias-control-term-after
+ok    matrix-file-control-term-before
+ok    matrix-file-control-term-after
+matrix: 51 asserted, 33 failures, 0 recorded:TUI-018, 0 decided:TUI-018, 0 self-check failures
+DONE 1

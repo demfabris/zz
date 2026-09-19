@@ -1,0 +1,29 @@
+wait that ran out: zz daemon socket (case none yet)
+--- zz state ---
+/tmp/zz-alias-candidate: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory
+/tmp/zz-alias-candidate: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory
+/tmp/zz-alias-candidate: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory
+O @zzcs-after /tmp/zz-alias-candidate: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory
+O @zzcs-replay /tmp/zz-alias-candidate: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory
+O @zzcs-one /tmp/zz-alias-candidate: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory
+O @zzcs-two /tmp/zz-alias-candidate: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory
+O @zzcs-three /tmp/zz-alias-candidate: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory
+O @zzcs-parse /tmp/zz-alias-candidate: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory
+O @zzcs-cancel /tmp/zz-alias-candidate: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory
+O @zzcs-before /tmp/zz-alias-candidate: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory
+O @zzcs-control /tmp/zz-alias-candidate: error while loading shared libraries: libcef.so: cannot open shared object file: No such file or directory
+--- tmux state ---
+error connecting to /tmp/tmux-1000/zzcst-25tQrp (No such file or directory)
+error connecting to /tmp/tmux-1000/zzcst-25tQrp (No such file or directory)
+error connecting to /tmp/tmux-1000/zzcst-25tQrp (No such file or directory)
+O @zzcs-after error connecting to /tmp/tmux-1000/zzcst-25tQrp (No such file or directory)
+O @zzcs-replay error connecting to /tmp/tmux-1000/zzcst-25tQrp (No such file or directory)
+O @zzcs-one error connecting to /tmp/tmux-1000/zzcst-25tQrp (No such file or directory)
+O @zzcs-two error connecting to /tmp/tmux-1000/zzcst-25tQrp (No such file or directory)
+O @zzcs-three error connecting to /tmp/tmux-1000/zzcst-25tQrp (No such file or directory)
+O @zzcs-parse error connecting to /tmp/tmux-1000/zzcst-25tQrp (No such file or directory)
+O @zzcs-cancel error connecting to /tmp/tmux-1000/zzcst-25tQrp (No such file or directory)
+O @zzcs-before error connecting to /tmp/tmux-1000/zzcst-25tQrp (No such file or directory)
+O @zzcs-control error connecting to /tmp/tmux-1000/zzcst-25tQrp (No such file or directory)
+error: zz daemon socket did not happen within 10 seconds
+exit_status=2

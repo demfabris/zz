@@ -1,0 +1,17 @@
+# same probe on the candidate binary target/alias7-bins/zz_cli-cand1
+
+split-empty zz run1 2186 ms pane=%1
+split-empty zz run2 2191 ms pane=%2
+split-empty zz run3 2183 ms pane=%3
+split-shell zz run1 272 ms pane=%4
+split-shell zz run2 269 ms pane=%5
+split-shell zz run3 282 ms pane=%6
+display-message zz 88 ms
+split-empty tmux run1 3 ms pane=%1
+split-empty tmux run2 2 ms pane=%2
+split-empty tmux run3 2 ms pane=%3
+split-shell tmux run1 3 ms pane=%4
+split-shell tmux run2 3 ms pane=%5
+split-shell tmux run3 2 ms pane=%6
+display-message tmux 2 ms
+sample zz at 1203 ms pane=%7 row1=\^\[\[31mRED\^\[\[39m cursor=3:0 stdout-while-open=%7

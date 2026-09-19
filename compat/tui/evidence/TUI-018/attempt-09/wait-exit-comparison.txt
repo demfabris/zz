@@ -1,0 +1,4 @@
+main still alive seven seconds after acknowledgement and EOF; terminated for cleanup
+main process_status=143
+final still alive seven seconds after acknowledgement and EOF; terminated for cleanup
+final process_status=143

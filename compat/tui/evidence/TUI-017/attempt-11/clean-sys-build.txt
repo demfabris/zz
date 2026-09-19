@@ -1,0 +1,5 @@
+    Updating crates.io index
+     Locking 28 packages to latest Rust 1.90 compatible versions
+      Adding bindgen v0.72.1 (available: v0.73.2)
+   Compiling libghostty-vt-sys v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt-sys)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 00s

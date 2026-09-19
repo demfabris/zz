@@ -1,0 +1,86 @@
+# Scenario: smoke/pane-runtime-facts
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/smoke/pane-runtime-facts.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: run-shell 'python3 ~/pane-runtime-facts.py'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    NESTED_RUN_SHELL_TARGET_SINK=[]
+    NESTED_RUN_SHELL_CURRENT_SINK=[41]
+    NESTED_IF_SHELL_TARGET_SINK=[]
+    NESTED_IF_SHELL_CURRENT_SINK=[4142]
+    NESTED_IF_SHELL_CONDITION_SINK=[414243]
+    NESTED_RUN_SHELL_EXPANSION_SINK=[41424330]
+    NESTED_TARGET_SINK_TOTAL=[]
+    SPAWN_TITLE_IS_HOSTNAME=True
+    SPAWN_TITLE_T_MATCHES=True
+    SELECT_PANE_TITLE=chosen-title
+    OSC2_TITLE=pane-osc2-title
+    NEW_WINDOW_PRINT=[]|<HOST>
+    IMMEDIATE1_OUTSIDE=<DIR>|[]
+    IMMEDIATE2_OUTSIDE=<DIR>|[]
+    IMMEDIATE3_OUTSIDE=<DIR>|[]
+    IMMEDIATE1_INSIDE=IMMEDIATE|<DIR>|[]
+    IMMEDIATE2_INSIDE=IMMEDIATE|<DIR>|[]
+    IMMEDIATE3_INSIDE=IMMEDIATE|<DIR>|[]
+    SPAWN_FIRST_FACTS=FIRST|<DIR>|[]
+    PANE_PATH_BEFORE_OSC7=[]
+    PANE_PATH_AFTER_OSC7=[file://zzhost/tmp]
+    PANE_CURRENT_PATH_AFTER_OSC7=<DIR>
+    DEAD_PANE_CURRENT_PATH=[]
+    DEAD_PANE_PATH=[]
+tmux stdout:
+    NESTED_RUN_SHELL_TARGET_SINK=[]
+    NESTED_RUN_SHELL_CURRENT_SINK=[41]
+    NESTED_IF_SHELL_TARGET_SINK=[]
+    NESTED_IF_SHELL_CURRENT_SINK=[4142]
+    NESTED_IF_SHELL_CONDITION_SINK=[414243]
+    NESTED_RUN_SHELL_EXPANSION_SINK=[41424330]
+    NESTED_TARGET_SINK_TOTAL=[]
+    SPAWN_TITLE_IS_HOSTNAME=True
+    SPAWN_TITLE_T_MATCHES=True
+    SELECT_PANE_TITLE=chosen-title
+    OSC2_TITLE=pane-osc2-title
+    NEW_WINDOW_PRINT=[]|<HOST>
+    IMMEDIATE1_OUTSIDE=<DIR>|[]
+    IMMEDIATE2_OUTSIDE=<DIR>|[]
+    IMMEDIATE3_OUTSIDE=<DIR>|[]
+    IMMEDIATE1_INSIDE=IMMEDIATE|<DIR>|[]
+    IMMEDIATE2_INSIDE=IMMEDIATE|<DIR>|[]
+    IMMEDIATE3_INSIDE=IMMEDIATE|<DIR>|[]
+    SPAWN_FIRST_FACTS=FIRST|<DIR>|[]
+    PANE_PATH_BEFORE_OSC7=[]
+    PANE_PATH_AFTER_OSC7=[file://zzhost/tmp]
+    PANE_CURRENT_PATH_AFTER_OSC7=<DIR>
+    DEAD_PANE_CURRENT_PATH=[]
+    DEAD_PANE_PATH=[]
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g ZZ_PANE_RUNTIME_FACTS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    ZZ_PANE_RUNTIME_FACTS=clean:nested-target-title-default-spawn-path-dead
+tmux stdout:
+    ZZ_PANE_RUNTIME_FACTS=clean:nested-target-title-default-spawn-path-dead
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

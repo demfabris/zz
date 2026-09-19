@@ -1,0 +1,26 @@
+   Compiling zz-cli v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.70s
+     Running tests/cli_binary.rs (target/debug/deps/cli_binary-8b5c06dbd1308a7d)
+
+running 1 test
+test daemon_autostart::control_mode::wait_exit_holds_the_control_process_until_a_second_blank_line has been running for over 60 seconds
+test daemon_autostart::control_mode::wait_exit_holds_the_control_process_until_a_second_blank_line ... FAILED
+
+failures:
+
+---- daemon_autostart::control_mode::wait_exit_holds_the_control_process_until_a_second_blank_line stdout ----
+
+thread 'daemon_autostart::control_mode::wait_exit_holds_the_control_process_until_a_second_blank_line' (3696461) panicked at crates/zz-cli/tests/cli_binary.rs:8256:13:
+assertion `left == right` failed
+  left: None
+ right: Some(0)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    daemon_autostart::control_mode::wait_exit_holds_the_control_process_until_a_second_blank_line
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 135 filtered out; finished in 81.75s
+
+error: test failed, to rerun pass `-p zz-cli --test cli_binary`
+exit_status=101

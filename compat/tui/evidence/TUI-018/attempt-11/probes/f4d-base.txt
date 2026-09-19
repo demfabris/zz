@@ -1,0 +1,17 @@
+== zz rc=0 tail=
+%begin T I 0
+%end T I 0
+%begin T I 0
+%end T I 0
+%exit
+== tmux rc=0 tail=yes
+%begin T I 0
+%end T I 0
+%begin T I 0
+%end T I 0
+%begin T I 0
+after
+%end T I 0
+%begin T I 0
+%end T I 0
+%exit

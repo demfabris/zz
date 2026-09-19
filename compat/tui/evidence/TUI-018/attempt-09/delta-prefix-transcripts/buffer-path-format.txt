@@ -1,0 +1,477 @@
+# Scenario: buffer-path-format
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/buffer-path-format.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: select-pane -t =w:0.0 -T buffer-pane
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: set-buffer -b seed buffer-path-payload
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: run-shell -C "save-buffer -b seed /tmp/zz-buffer-path-#{pid}-canonical-load-buffer"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: load-buffer -b canonical "/tmp/zz-buffer-path-#{pid}-canonical-#{command}"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: list-buffers -f #{==:#{buffer_name},canonical} -F #{buffer_name}:#{buffer_sample}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    canonical:buffer-path-payload
+tmux stdout:
+    canonical:buffer-path-payload
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: run-shell -C "save-buffer -b seed /tmp/zz-buffer-path-#{pid}-alias-load-buffer"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: loadb -b alias "/tmp/zz-buffer-path-#{pid}-alias-#{command}"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: list-buffers -f #{==:#{buffer_name},alias} -F #{buffer_name}:#{buffer_sample}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    alias:buffer-path-payload
+tmux stdout:
+    alias:buffer-path-payload
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: run-shell -C "save-buffer -b seed /tmp/zz-buffer-path-#{pid}-prefix-load-buffer"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: loa -b prefix "/tmp/zz-buffer-path-#{pid}-prefix-#{command}"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: list-buffers -f #{==:#{buffer_name},prefix} -F #{buffer_name}:#{buffer_sample}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    prefix:buffer-path-payload
+tmux stdout:
+    prefix:buffer-path-payload
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: set-option -s command-alias[50] zzload=load-buffer
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: run-shell -C "save-buffer -b seed /tmp/zz-buffer-path-#{pid}-user-load-buffer"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: zzload -b user-alias "/tmp/zz-buffer-path-#{pid}-user-#{command}"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: list-buffers -f #{==:#{buffer_name},user-alias} -F #{buffer_name}:#{buffer_sample}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    user-alias:buffer-path-payload
+tmux stdout:
+    user-alias:buffer-path-payload
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: run-shell "cp /etc/hosts /tmp/zz-buffer-path-#{pid}-##{session_name}"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: load-buffer -b one-pass "/tmp/zz-buffer-path-#{pid}-##{session_name}"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: list-buffers -f #{==:#{buffer_name},one-pass} -F #{buffer_name}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    one-pass
+tmux stdout:
+    one-pass
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: run-shell -C "save-buffer -b seed ~/zz-buffer-path-#{pid}-tilde-load-buffer"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: load-buffer -b tilde '#{?session_name,~/zz-buffer-path-#{pid}-tilde-#{command},/tmp/missing}'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: list-buffers -f #{==:#{buffer_name},tilde} -F #{buffer_name}:#{buffer_sample}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    tilde:buffer-path-payload
+tmux stdout:
+    tilde:buffer-path-payload
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: run-shell "rm -f ~/zz-buffer-path-#{pid}-tilde-load-buffer"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: save-buffer -b seed "/tmp/zz-buffer-path-#{pid}-canonical-#{command}"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: run-shell -C "load-buffer -b saved-canonical /tmp/zz-buffer-path-#{pid}-canonical-save-buffer"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: out: list-buffers -f #{==:#{buffer_name},saved-canonical} -F #{buffer_name}:#{buffer_sample}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    saved-canonical:buffer-path-payload
+tmux stdout:
+    saved-canonical:buffer-path-payload
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: saveb -b seed "/tmp/zz-buffer-path-#{pid}-alias-#{command}"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: run-shell -C "load-buffer -b saved-alias /tmp/zz-buffer-path-#{pid}-alias-save-buffer"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: out: list-buffers -f #{==:#{buffer_name},saved-alias} -F #{buffer_name}:#{buffer_sample}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    saved-alias:buffer-path-payload
+tmux stdout:
+    saved-alias:buffer-path-payload
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: sa -b seed "/tmp/zz-buffer-path-#{pid}-prefix-#{command}"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: run-shell -C "load-buffer -b saved-prefix /tmp/zz-buffer-path-#{pid}-prefix-save-buffer"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 31
+COMMAND: out: list-buffers -f #{==:#{buffer_name},saved-prefix} -F #{buffer_name}:#{buffer_sample}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    saved-prefix:buffer-path-payload
+tmux stdout:
+    saved-prefix:buffer-path-payload
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 32
+COMMAND: set-option -s command-alias[51] zzsave=save-buffer
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 33
+COMMAND: zzsave -b seed "/tmp/zz-buffer-path-#{pid}-user-#{command}"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 34
+COMMAND: run-shell -C "load-buffer -b saved-user /tmp/zz-buffer-path-#{pid}-user-save-buffer"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 35
+COMMAND: out: list-buffers -f #{==:#{buffer_name},saved-user} -F #{buffer_name}:#{buffer_sample}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    saved-user:buffer-path-payload
+tmux stdout:
+    saved-user:buffer-path-payload
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 36
+COMMAND: run-shell "rm -f /tmp/zz-buffer-path-#{pid}-*"
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=36 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

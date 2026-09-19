@@ -1,0 +1,345 @@
+# Scenario: manual-window-size-transition
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/manual-window-size-transition.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: new-session -d -s msize -x 80 -y 24
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [80x24|:]
+tmux stdout:
+    [80x24|:]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: resize-window -t msize:0 -x 40 -y 12
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [40x12|40:12]
+tmux stdout:
+    [40x12|40:12]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: show-window-options -v -t msize:0 window-size
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    manual
+tmux stdout:
+    manual
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: set-window-option -t msize:0 window-size latest
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [40x12|:]
+tmux stdout:
+    [40x12|:]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: set-window-option -t msize:0 window-size manual
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [40x12|40:12]
+tmux stdout:
+    [40x12|40:12]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: set-option -t msize default-size 100x30
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [40x12|40:12]
+tmux stdout:
+    [40x12|40:12]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: resize-window -t msize:0 -A
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [100x30|100:30]
+tmux stdout:
+    [100x30|100:30]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: out: show-window-options -v -t msize:0 window-size
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    manual
+tmux stdout:
+    manual
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: set-window-option -t msize:0 window-size largest
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [100x30|:]
+tmux stdout:
+    [100x30|:]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: set-window-option -t msize:0 window-size manual
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [100x30|100:30]
+tmux stdout:
+    [100x30|100:30]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: resize-window -t msize:0 -R 5
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [105x30|105:30]
+tmux stdout:
+    [105x30|105:30]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: resize-window -t msize:0 -a
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [100x30|100:30]
+tmux stdout:
+    [100x30|100:30]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: set-window-option -u -t msize:0 window-size
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [100x30|:]
+tmux stdout:
+    [100x30|:]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=24 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

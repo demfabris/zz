@@ -1,0 +1,271 @@
+# fourth whole run, at the reflowed tip 52100308, ZZ_BIN=target/alias7-bins/zz_cli-final sha256 44382b63...
+
+caller stream forms at 80x24 (pin tmux, cap 1048576 bytes)
+ok    source-file-applies
+ok    source-file-applied-value
+ok    source-file-closed-stdin
+ok    source-file-unknown-command
+ok    source-file-cancelled-midline
+ok    source-file-parse-only
+ok    source-file-verbose
+ok    source-file-quiet
+ok    source-file-twice-one-stream
+ok    source-file-twice-one-stream-value
+ok    source-file-dash-and-missing-path
+ok    source-file-empty-stream
+ok    display-message-into-a-running-pane
+ok    split-window-builds-and-writes
+ok    display-message-into-the-empty-pane
+compat/tui-command-streams.sh: line 537: warning: command substitution: ignored null byte in input
+ok    display-message-binary-bytes
+ok    display-message-closed-stdin
+ok    display-message-missing-target
+ok    pane-input-restored
+ok    split-window-prints-the-new-pane
+ok    split-window-print-restored
+ok    split-window-with-a-command
+ok    split-window-closed-stdin
+ok    split-window-restored
+ok    load-buffer-binary-stdin
+ok    save-buffer-binary-stdout
+ok    save-buffer-binary-append
+ok    save-buffer-missing-buffer
+ok    buffer-deleted
+ok    source-file-alias-group-two-members
+ok    source-file-alias-group-two-members-value
+ok    source-file-alias-single-member
+ok    source-file-alias-single-member-value
+ok    load-buffer-alias-group-source-second
+ok    load-buffer-alias-group-source-second-value
+ok    load-buffer-alias-group-two-readers
+ok    load-buffer-alias-group-two-readers-value
+ok    load-buffer-alias-group-reader-last
+ok    load-buffer-alias-group-reader-last-value
+ok    alias-source-spent-source-continues
+ok    alias-buffer-spent-source-continues
+ok    alias-pane-spent-source-continues
+ok    alias-missing-source-aborts
+ok    file-replay-single-reader
+ok    file-replay-nonreader-then-reader
+ok    file-replay-two-readers
+ok    alias-binary-unterminated-stdout
+ok    alias-c-locale-binary-unterminated-stdout
+ok    file-replay-binary-unterminated-stdout
+ok    file-replay-binary-then-alias-print
+ok    alias-binary-then-print
+ok    daemon-start-config-refuses-stdin
+ok    file-unused-open-stdin
+ok    file-unused-oversized-stdin
+ok    alias-preceding-state-before-eof
+ok    file-preceding-state-before-eof
+ok    pending-source-sigterm-status
+ok    pending-source-sigterm-payload-unapplied
+ok    pending-source-sigterm-tail-unapplied
+ok    control-source-read-error-continues-output
+ok    control-source-read-error-continues-state
+ok    stream-display-partial
+ok    stream-display-eof
+ok    stream-display-term
+ok    stream-display-slow
+ok    stream-display-fast
+ok    stream-display-utf8
+ok    stream-split-partial
+ok    stream-split-term
+ok    stream-split-utf8
+ok    stream-split-print-partial
+ok    stream-split-print-term
+ok    stream-display-kill-close
+ok    stream-display-kill-write
+ok    stream-split-kill-close
+ok    stream-split-kill-write
+ok    pane-death-restored
+ok    matrix-direct-buffer-spent
+ok    matrix-direct-split-no-space
+ok    matrix-direct-split-pending
+ok    matrix-direct-buffer-closed
+ok    matrix-direct-closed-unused
+ok    matrix-alias-buffer-spent
+ok    matrix-alias-split-no-space
+ok    matrix-alias-split-pending
+ok    matrix-alias-buffer-closed
+ok    matrix-alias-closed-unused
+ok    matrix-file-buffer-spent
+ok    matrix-file-split-no-space
+ok    matrix-file-split-pending
+ok    matrix-file-buffer-closed
+ok    matrix-file-closed-unused
+ok    matrix-direct-split-zoom-no-space
+ok    matrix-direct-split-keep-zoom-no-space
+ok    matrix-direct-split-horizontal-no-space
+ok    matrix-direct-split-bad-size
+ok    matrix-direct-split-bad-percent
+ok    matrix-direct-split-command
+ok    matrix-direct-split-style
+ok    matrix-direct-split-active-style
+ok    matrix-direct-split-border-style
+ok    matrix-direct-display-bad-flag
+ok    matrix-direct-display-too-many
+ok    matrix-direct-split-pending-zoom
+ok    matrix-direct-display-closed
+ok    matrix-direct-split-closed
+ok    matrix-alias-eof
+ok    matrix-file-eof
+ok    matrix-attached-term-idle-before
+ok    matrix-attached-term-before
+ok    matrix-attached-term-after
+ok    matrix-attached-term-after-two
+ok    matrix-attached-term-idle-after
+ok    matrix-attached-term-file-after
+ok    matrix-direct-use
+ok    matrix-alias-use
+ok    matrix-file-use
+ok    matrix-startup-use
+ok    matrix-direct-control
+ok    matrix-alias-control
+ok    matrix-file-control
+ok    matrix-direct-attached
+ok    matrix-alias-attached
+ok    matrix-file-attached
+ok    matrix-direct-unused
+ok    matrix-alias-unused
+ok    matrix-file-unused
+ok    matrix-startup-unused
+ok    matrix-direct-spent
+ok    matrix-alias-spent
+ok    matrix-file-spent
+ok    matrix-direct-closed
+ok    matrix-alias-closed
+ok    matrix-file-closed
+ok    matrix-direct-eof
+ok    matrix-direct-large-unused
+ok    matrix-alias-large-unused
+ok    matrix-file-large-unused
+ok    matrix-startup-large-unused
+      case matrix-direct-large-used
+      exit tmux: 0  zz: 1
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        0a1
+        > standard input exceeds 1048576 bytes: -
+      state differs
+        1c1
+        < input=yes
+        ---
+        > input=
+        3c3
+        < tail=yes
+        ---
+        > tail=
+note  matrix-direct-large-used decided:TUI-018: pinned tmux accumulates a source-file or load-buffer payload in 16 KiB chunks with no total limit and zz refuses one larger than MAX_AGENT_SEND_BYTES (1048576) at the reader, before the daemon sees a byte: bulk file transfer through a command client is a workload zz does not serve, because an unbounded stream lets one caller grow daemon memory without limit; decided 2026-09-14 by the orchestrator under fabrico's TUI parity contract of 2026-09-09; reversible
+ok    matrix-direct-display-valid
+ok    matrix-direct-display-running
+ok    matrix-alias-display-running
+ok    matrix-file-display-running
+ok    matrix-direct-display-missing
+ok    matrix-alias-display-missing
+ok    matrix-file-display-missing
+ok    matrix-direct-split-missing
+ok    matrix-alias-split-missing
+ok    matrix-file-split-missing
+ok    matrix-direct-fail-after-read
+ok    matrix-alias-fail-after-read
+ok    matrix-file-fail-after-read
+ok    matrix-direct-error-newline
+ok    matrix-alias-error-newline
+ok    matrix-file-error-newline
+ok    matrix-direct-term-before
+ok    matrix-alias-term-before
+ok    matrix-file-term-before
+ok    matrix-direct-term-during
+ok    matrix-alias-term-during
+ok    matrix-file-term-during
+ok    matrix-direct-term-after
+ok    matrix-alias-term-after
+ok    matrix-file-term-after
+ok    matrix-direct-term-after-error
+ok    matrix-alias-term-after-error
+ok    matrix-file-term-after-error
+ok    matrix-direct-display-spent
+ok    matrix-alias-display-spent
+ok    matrix-file-display-spent
+ok    matrix-direct-split-spent
+ok    matrix-alias-split-spent
+ok    matrix-file-split-spent
+ok    matrix-direct-source-writeonly
+ok    matrix-alias-source-writeonly
+ok    matrix-file-source-writeonly
+ok    matrix-direct-buffer-writeonly
+ok    matrix-alias-buffer-writeonly
+ok    matrix-file-buffer-writeonly
+ok    matrix-direct-display-writeonly
+ok    matrix-alias-display-writeonly
+ok    matrix-file-display-writeonly
+ok    matrix-direct-split-writeonly
+ok    matrix-alias-split-writeonly
+ok    matrix-file-split-writeonly
+ok    matrix-direct-source-directory
+ok    matrix-alias-source-directory
+ok    matrix-file-source-directory
+ok    matrix-direct-buffer-directory
+ok    matrix-alias-buffer-directory
+ok    matrix-file-buffer-directory
+ok    matrix-direct-display-directory
+ok    matrix-alias-display-directory
+ok    matrix-file-display-directory
+ok    matrix-direct-split-directory
+ok    matrix-alias-split-directory
+ok    matrix-file-split-directory
+ok    matrix-alias-attached-term-before
+ok    matrix-alias-attached-term-after
+ok    matrix-alias-control-term-before
+ok    matrix-alias-control-term-after
+ok    matrix-file-control-term-before
+ok    matrix-file-control-term-after
+ok    load-buffer-at-the-cap
+ok    load-buffer-at-the-cap-saved
+ok    load-buffer-at-the-cap-deleted
+ok    source-file-at-the-cap
+      case load-buffer-over-the-cap
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > standard input exceeds 1048576 bytes: -
+      state differs
+        3d2
+        < B zzcsover 1048577
+note  load-buffer-over-the-cap decided, not asserted: pinned tmux accumulates a source-file or load-buffer payload in 16 KiB chunks with no total limit and zz refuses one larger than MAX_AGENT_SEND_BYTES (1048576) at the reader, before the daemon sees a byte: bulk file transfer through a command client is a workload zz does not serve, because an unbounded stream lets one caller grow daemon memory without limit; decided 2026-09-14 by the orchestrator under fabrico's TUI parity contract of 2026-09-09; reversible
+      case load-buffer-over-the-cap-listed
+      stdout differs (tmux 9 bytes, zz 0 bytes)
+        1d0
+        < zzcsover
+      state differs
+        3d2
+        < B zzcsover 1048577
+note  load-buffer-over-the-cap-listed decided, not asserted: pinned tmux accumulates a source-file or load-buffer payload in 16 KiB chunks with no total limit and zz refuses one larger than MAX_AGENT_SEND_BYTES (1048576) at the reader, before the daemon sees a byte: bulk file transfer through a command client is a workload zz does not serve, because an unbounded stream lets one caller grow daemon memory without limit; decided 2026-09-14 by the orchestrator under fabrico's TUI parity contract of 2026-09-09; reversible
+      case source-file-over-the-cap
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > standard input exceeds 1048576 bytes: -
+      state differs
+        5c5
+        < O @zzcs-one iota
+        ---
+        > O @zzcs-one theta
+note  source-file-over-the-cap decided, not asserted: pinned tmux accumulates a source-file or load-buffer payload in 16 KiB chunks with no total limit and zz refuses one larger than MAX_AGENT_SEND_BYTES (1048576) at the reader, before the daemon sees a byte: bulk file transfer through a command client is a workload zz does not serve, because an unbounded stream lets one caller grow daemon memory without limit; decided 2026-09-14 by the orchestrator under fabrico's TUI parity contract of 2026-09-09; reversible
+      case source-file-over-the-cap-value
+      stdout differs (tmux 5 bytes, zz 6 bytes)
+        1c1
+        < iota
+        ---
+        > theta
+      state differs
+        5c5
+        < O @zzcs-one iota
+        ---
+        > O @zzcs-one theta
+note  source-file-over-the-cap-value decided, not asserted: pinned tmux accumulates a source-file or load-buffer payload in 16 KiB chunks with no total limit and zz refuses one larger than MAX_AGENT_SEND_BYTES (1048576) at the reader, before the daemon sees a byte: bulk file transfer through a command client is a workload zz does not serve, because an unbounded stream lets one caller grow daemon memory without limit; decided 2026-09-14 by the orchestrator under fabrico's TUI parity contract of 2026-09-09; reversible
+all 208 asserted comparisons identical, 0 recorded not asserted, 5 decided (0 for a sibling lane)
+EXIT 0

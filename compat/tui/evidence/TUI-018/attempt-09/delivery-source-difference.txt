@@ -1,0 +1,50 @@
+--- frozen-build/daemon.rs
++++ crates/zz-daemon/src/daemon.rs
+@@ -24811,11 +24811,14 @@
+             }
+         };
+         if deliver && let Some(writer) = self.client_writers.lock().get(&client).cloned() {
+-            Self::send_event(&writer, EventPayload::ClientMessage {
+-                pane: None,
+-                kind: ClientMessageKind::Error,
+-                text: line.to_owned(),
+-            });
++            Self::send_event(
++                &writer,
++                EventPayload::ClientMessage {
++                    pane: None,
++                    kind: ClientMessageKind::Error,
++                    text: line.to_owned(),
++                },
++            );
+         }
+     }
+ 
+--- frozen-build/control_mode.rs
++++ crates/zz-cli/src/control_mode.rs
+@@ -30,12 +30,12 @@
+     mux_config_files: &[PathBuf],
+     no_start_server: bool,
+     level: u8,
+-    arguments: Vec<zz_protocol::RawText>,
++    arguments: &[zz_protocol::RawText],
+ ) -> ExitCode {
+     let commands = if arguments.is_empty() {
+         vec![CommandInvocation::new("new-session", [] as [&str; 0])]
+     } else {
+-        super::split_command_chain(&arguments)
++        super::split_command_chain(arguments)
+     };
+     let start_server = !no_start_server
+         && commands
+--- frozen-build/cli-lib.rs
++++ crates/zz-cli/src/lib.rs
+@@ -226,7 +226,7 @@
+             &mux_config_files,
+             no_start_server,
+             control_mode,
+-            remaining,
++            &remaining,
+         ));
+     }
+     if let Some(exit) = run_command_mode(

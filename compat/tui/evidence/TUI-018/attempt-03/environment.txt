@@ -1,0 +1,27 @@
+Wed Sep 16 13:21:18 UTC 2026
+abcaa5a67de6338112cad4790c000f9a81f12f21
+be5709dfcd9936d44519683e5da8dc6ab7748d96
+ M compat/tui-command-streams.sh
+ M crates/zz-daemon/src/daemon.rs
+ M crates/zz/src/lib.rs
+ M knowledge/designs/command-stream-channel.md
+?? compat/tui/evidence/TUI-018/attempt-03/
+Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+4d48dda4f2494c6cd81208a925de02df6330a53dc361b8a547a432d1d9411777  target/debug/zz
+df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  compat/.cache/tmux-src/tmux
+#!/usr/bin/env bash
+# Two-slot, memory-capped cargo for the alienware box (15 GB RAM + zram).
+# Every cargo command in cycle 11 goes through this. Never run bare cargo.
+set -uo pipefail
+CAP="${ZZ_CARGO_CAP:-5G}"
+SWAP="${ZZ_CARGO_SWAP:-3G}"
+JOBS="${ZZ_CARGO_JOBS:-3}"
+S=$((RANDOM % 2))
+exec systemd-run --user --scope -q \
+  -p MemoryMax="$CAP" -p MemorySwapMax="$SWAP" \
+  flock -w 900 /tmp/zz-cargo-slot-$S.lock \
+  cargo "$@" --jobs "$JOBS"
+xterm-ghostty
+/bin/bash
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/nvme0n1p2  952G  556G  396G  59% /home

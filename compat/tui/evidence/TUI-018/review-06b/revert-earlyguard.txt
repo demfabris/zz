@@ -1,0 +1,12 @@
+      stdout differs (tmux 102 bytes, zz 70 bytes)
+        5,6d4
+        < %begin TIME ID 0
+        < %end TIME ID 0
+DIFF  matrix-file-control-term-before
+      case matrix-file-control-term-after
+      stdout differs (tmux 157 bytes, zz 125 bytes)
+        8,9d7
+        < %begin TIME ID 0
+        < %end TIME ID 0
+DIFF  matrix-file-control-term-after
+matrix: 6 asserted, 6 failures, 0 recorded:TUI-018, 0 decided:TUI-018, 0 self-check failures

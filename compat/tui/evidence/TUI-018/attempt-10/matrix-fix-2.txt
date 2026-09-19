@@ -1,0 +1,45 @@
+ok    matrix-direct-buffer-spent
+ok    matrix-direct-split-no-space
+ok    matrix-direct-split-pending
+ok    matrix-direct-buffer-closed
+ok    matrix-direct-closed-unused
+ok    matrix-alias-buffer-spent
+ok    matrix-alias-split-no-space
+ok    matrix-alias-split-pending
+ok    matrix-alias-buffer-closed
+ok    matrix-alias-closed-unused
+ok    matrix-file-buffer-spent
+ok    matrix-file-split-no-space
+ok    matrix-file-split-pending
+ok    matrix-file-buffer-closed
+ok    matrix-file-closed-unused
+ok    matrix-direct-split-horizontal-no-space
+ok    matrix-direct-split-bad-size
+ok    matrix-direct-split-bad-percent
+ok    matrix-direct-split-command
+ok    matrix-direct-split-style
+ok    matrix-direct-split-active-style
+ok    matrix-direct-split-border-style
+ok    matrix-direct-display-bad-flag
+ok    matrix-direct-display-too-many
+ok    matrix-direct-split-pending-zoom
+ok    matrix-direct-display-closed
+ok    matrix-direct-split-closed
+ok    matrix-alias-eof
+ok    matrix-file-eof
+ok    matrix-attached-term-idle-before
+ok    matrix-attached-term-before
+ok    matrix-attached-term-after
+ok    matrix-attached-term-after-two
+ok    matrix-attached-term-idle-after
+ok    matrix-attached-term-file-after
+ok    matrix-direct-closed
+ok    matrix-alias-closed
+ok    matrix-file-closed
+ok    matrix-direct-eof
+ok    matrix-direct-split-missing
+ok    matrix-alias-split-missing
+ok    matrix-file-split-missing
+matrix: 42 asserted, 0 failures, 0 recorded:TUI-018, 0 decided:TUI-018, 0 self-check failures
+
+exit_status=0

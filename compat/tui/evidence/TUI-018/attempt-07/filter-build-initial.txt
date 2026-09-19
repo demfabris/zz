@@ -1,0 +1,33 @@
+   Compiling libghostty-vt-sys v0.2.1 (/home/demfabris/dev/zz-c11-alias-fix/third_party/rust/libghostty-vt-sys)
+   Compiling libghostty-vt v0.2.1 (https://github.com/uzaaft/libghostty-rs?rev=46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0#46a9d2ac)
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-terminal)
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-mux)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-daemon)
+error: usage of an `unsafe` block
+    --> crates/zz-daemon/src/client.rs:1667:13
+     |
+1667 |             unsafe { libc::_exit(0) }
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: requested on the command line with `-D unsafe-code`
+
+error: usage of an `unsafe` block
+    --> crates/zz-daemon/src/client.rs:1669:9
+     |
+1669 | /         unsafe {
+1670 | |             let mut action: libc::sigaction = std::mem::zeroed();
+1671 | |             let mut previous = std::mem::zeroed();
+1672 | |             action.sa_sigaction = terminate as *const () as usize;
+...    |
+1677 | |             Ok(Self(previous))
+1678 | |         }
+     | |_________^
+
+error: usage of an `unsafe` block
+    --> crates/zz-daemon/src/client.rs:1685:9
+     |
+1685 |         unsafe { libc::sigaction(libc::SIGTERM, &self.0, std::ptr::null_mut()); }
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: could not compile `zz-daemon` (lib test) due to 3 previous errors

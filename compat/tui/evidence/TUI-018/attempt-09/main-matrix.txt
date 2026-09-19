@@ -1,0 +1,47 @@
+      case matrix-file-control
+      stdout differs (tmux 202 bytes, zz 262 bytes)
+        6,7c6,7
+        < %end TIME ID 0
+        < Bad file descriptor: -
+        ---
+        > /tmp/zzcs.IZT0Hh/matrix.conf:1: source-file from standard input is not supported
+        > %error TIME ID 0
+DIFF  matrix-file-control
+      case matrix-direct-closed
+      stdout differs (tmux 0 bytes, zz 13 bytes)
+        0a1
+        > MATRIX-AFTER
+      stderr differs
+        1c1
+        < [err] evsig_cb: recv: Bad file descriptor
+        ---
+        > source-file from standard input is not supported
+      state differs
+        3c3
+        < tail=
+        ---
+        > tail=yes
+note  matrix-direct-closed owner:TUI-018: closed fd 0 is sanitized to /dev/null by Rust before application entry; the pin instead fails in libevent after the preceding command (exit 1, evsig_cb Bad file descriptor), so the tail state differs
+      case matrix-alias-closed
+      stderr differs
+        1c1
+        < [err] evsig_cb: recv: Bad file descriptor
+        ---
+        > source-file from standard input is not supported
+note  matrix-alias-closed owner:TUI-018: closed fd 0 is sanitized to /dev/null by Rust before application entry; the pin instead fails in libevent after the preceding command (exit 1, evsig_cb Bad file descriptor), so the tail state differs
+      case matrix-file-closed
+      stdout differs (tmux 0 bytes, zz 94 bytes)
+        0a1,2
+        > MATRIX-AFTER
+        > /tmp/zzcs.IZT0Hh/matrix.conf:1: source-file from standard input is not supported
+      stderr differs
+        1d0
+        < [err] evsig_cb: recv: Bad file descriptor
+      state differs
+        3c3
+        < tail=
+        ---
+        > tail=yes
+note  matrix-file-closed owner:TUI-018: closed fd 0 is sanitized to /dev/null by Rust before application entry; the pin instead fails in libevent after the preceding command (exit 1, evsig_cb Bad file descriptor), so the tail state differs
+matrix: 1 asserted, 1 failures, 3 recorded:TUI-018, 0 decided:TUI-018, 0 self-check failures
+exit_status=1

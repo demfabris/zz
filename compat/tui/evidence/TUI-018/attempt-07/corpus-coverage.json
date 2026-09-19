@@ -1,0 +1,1831 @@
+{
+  "selected_rows": 222,
+  "completed_rows": 222,
+  "completed_steps": 2639,
+  "complete": true,
+  "unrun_rows": [],
+  "unexpected_rows": [],
+  "exit_status": 1,
+  "zero_divergence_rows": 213,
+  "first_pass_failures": [
+    "lane2-store",
+    "show-options-hooks",
+    "smoke/cli-chain-parse-abort",
+    "smoke/format-modifier-client-loop",
+    "smoke/plugin-runtime-resurrect-restore",
+    "smoke/refresh-status",
+    "smoke/status-background-jobs"
+  ],
+  "passed_after_retry": [
+    "smoke/refresh-status"
+  ],
+  "failed_after_retry": [
+    "lane2-store",
+    "show-options-hooks",
+    "smoke/cli-chain-parse-abort",
+    "smoke/format-modifier-client-loop",
+    "smoke/plugin-runtime-resurrect-restore",
+    "smoke/status-background-jobs"
+  ],
+  "known_divergences": {
+    "known/known-main-preset-two-panes.txt": [
+      0,
+      1,
+      0,
+      0,
+      0
+    ],
+    "known/known-pane-scrollbar-columns.txt": [
+      0,
+      2,
+      0,
+      1,
+      0
+    ],
+    "known/known-spread-mixed.txt": [
+      0,
+      1,
+      0,
+      0,
+      0
+    ]
+  },
+  "results": {
+    "alerts.txt": {
+      "steps": 62,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "aliases-multi-body.txt": {
+      "steps": 8,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "bare-targets.txt": {
+      "steps": 8,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "base-index.txt": {
+      "steps": 11,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "behavior-options.txt": {
+      "steps": 12,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "break-pane.txt": {
+      "steps": 30,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "buffer-missing-target-error.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "buffer-path-format.txt": {
+      "steps": 36,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "capture-pane.txt": {
+      "steps": 23,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "census-formats.txt": {
+      "steps": 40,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "census-hooks.txt": {
+      "steps": 152,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "collapse.txt": {
+      "steps": 4,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "command-alias.txt": {
+      "steps": 16,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "command-item-format.txt": {
+      "steps": 125,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "copy-mode-cursor-view.txt": {
+      "steps": 13,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "copy-mode-goto-line.txt": {
+      "steps": 18,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "copy-mode-previous-bracket.txt": {
+      "steps": 23,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "copy-mode-recentre.txt": {
+      "steps": 8,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "copy-mode-scroll-exit.txt": {
+      "steps": 11,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "copy-mode-selection-lifecycle.txt": {
+      "steps": 19,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "copy-mode-stock-action-keys.txt": {
+      "steps": 17,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "daemon-command-item-format.txt": {
+      "steps": 24,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "display-message.txt": {
+      "steps": 27,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "format-environment-fallback.txt": {
+      "steps": 27,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "format-flags.txt": {
+      "steps": 8,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "format-modifier-option-loop.txt": {
+      "steps": 17,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "format-option-loop-context.txt": {
+      "steps": 14,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "format-window-cell-metrics.txt": {
+      "steps": 8,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "format-window-neighbour-user-options.txt": {
+      "steps": 26,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "formats-values.txt": {
+      "steps": 45,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "formats.txt": {
+      "steps": 16,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "honest-knobs-c1-layout.txt": {
+      "steps": 9,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "honest-knobs-c1-readback.txt": {
+      "steps": 21,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "if-shell-background-order.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "join-pane-size.txt": {
+      "steps": 11,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "known/known-main-preset-two-panes.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 1,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "known/known-pane-scrollbar-columns.txt": {
+      "steps": 4,
+      "topology": 0,
+      "geometry": 2,
+      "format": 0,
+      "output": 1,
+      "warning": 0
+    },
+    "known/known-spread-mixed.txt": {
+      "steps": 6,
+      "topology": 0,
+      "geometry": 1,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "lane2-store.txt": {
+      "steps": 193,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 2,
+      "warning": 0
+    },
+    "last-pane-input-off.txt": {
+      "steps": 15,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "layout-strings.txt": {
+      "steps": 6,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "list-keys-padding.txt": {
+      "steps": 46,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "list-sort-filter.txt": {
+      "steps": 12,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "manual-window-size-transition.txt": {
+      "steps": 24,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "micro-flags.txt": {
+      "steps": 17,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "mru-activity.txt": {
+      "steps": 11,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "native-prefix-isolation.txt": {
+      "steps": 29,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "nested-splits.txt": {
+      "steps": 4,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "new-session-cwd.txt": {
+      "steps": 10,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "new-session-environment.txt": {
+      "steps": 18,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "option-name-formats.txt": {
+      "steps": 60,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "pane-border-span-owner.txt": {
+      "steps": 10,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "pane-dead-time.txt": {
+      "steps": 6,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "pane-exact-target-prefix.txt": {
+      "steps": 31,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "pane-selection-input-style.txt": {
+      "steps": 40,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "pane-selection-marked.txt": {
+      "steps": 73,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "pane-spawn-options.txt": {
+      "steps": 25,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "pane-spawn-retain.txt": {
+      "steps": 27,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "pane-spawn-style-title-v2.txt": {
+      "steps": 18,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "pane-target-grammar.txt": {
+      "steps": 70,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "panes.txt": {
+      "steps": 9,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "presets-mirrored.txt": {
+      "steps": 6,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "presets.txt": {
+      "steps": 7,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "resize-directions.txt": {
+      "steps": 16,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "resize-window.txt": {
+      "steps": 16,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "resize.txt": {
+      "steps": 6,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "send-keys-repeat.txt": {
+      "steps": 16,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "send-keys-reset.txt": {
+      "steps": 16,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "show-options-hooks.txt": {
+      "steps": 34,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 7,
+      "warning": 0
+    },
+    "smoke/alias-group-forgery.txt": {
+      "steps": 7,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/args-parse-bind-key.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/args-parse-choosers.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/args-parse-command-prompt.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/args-parse-confirm-before.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/args-parse-display-menu.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/args-parse-display-panes.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/args-parse-if-shell.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/args-parse-run-shell.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/args-parse-set-hook.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/args-parse-set-option.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/buffer-clipboard-write.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/buffer-standard-streams.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/cheap-flags.txt": {
+      "steps": 22,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/chooser-buffer-confirm-flag.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/chooser-buffer-vocabulary.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/chooser-kill-keys.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/chooser-kill-on-exit.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/chooser-row-flags.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/chooser-tree-vocabulary.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/clear-history-hyperlinks.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/cli-chain-parse-abort.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 1,
+      "warning": 0
+    },
+    "smoke/cli-output-bytes.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/client-exit-actions.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/client-non-utf8-cwd.txt": {
+      "steps": 4,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/client-resized-context.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/client-utf8-sanitizer.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/command-flag-errors.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/command-prompt-chain.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/command-prompt-editing.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/command-prompt-target.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/config-alias-parse-unit.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/config-chain-parse-abort.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/config-discovery-explicit.txt": {
+      "steps": 13,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/config-discovery-launcher.txt": {
+      "steps": 12,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/config-discovery.txt": {
+      "steps": 12,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/config-grammar.txt": {
+      "steps": 17,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/config-non-utf8-byte-matrix.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/config-non-utf8-file-bytes.txt": {
+      "steps": 8,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/continuum-init.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/control-alias-prepare.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/control-eof-drain.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/control-hard-loss.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/control-notify.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/control-tilde-environment.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/copy-mode-command-errors.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/copy-mode-copy-line.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/copy-mode-formats.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/copy-mode-kill-on-exit.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/copy-mode-mode-keys-tail.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/copy-mode-mode-keys.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/copy-mode-prompt-bindings.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/copy-mode-refresh.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/copy-mode-search.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/copy-mode-source-pane.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/copy-selection-clipboard-bytes.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/daemon-invalid-flags.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/default-client-command.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/display-menu-action-queue.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/display-menu-cell-layout.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/display-menu-mouse.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/display-menu-paste.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/display-menu-resize-lifecycle.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/display-menu-shortcut-grammar.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/display-menu-style-refresh.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/display-message-client-aliases.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/display-panes-template.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/display-popup-drag.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/display-popup-kitty-noresize.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/display-popup-kitty.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/display-popup-menu-policy.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/display-popup-menu.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/display-popup-resize-lifecycle.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/display-popup-style-refresh.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/display-popup-to-pane.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/environment-bytes.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/fixture-conf.txt": {
+      "steps": 5,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/focus-follows-mouse.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/format-client-loop-context.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/format-environment-loop-context.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/format-listing.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/format-modifier-client-loop.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 1,
+      "warning": 2
+    },
+    "smoke/format-modifier-environment-loop.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/format-modifier-interrogate.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/format-monitor-hooks.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/format-pane-process.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/format-pane-progress.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/format-trace.txt": {
+      "steps": 29,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/format-window-bigger.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/fpp-init.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/hooks-pane-focus-clients.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/hooks-pane-focus.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/jobs-command-environment.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/jobs-display-popup-environment.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/jobs-shell-job-cwd.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/keys-prefix-attached.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/keys-prefix-remainder.txt": {
+      "steps": 6,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/keys-prefix-stock.txt": {
+      "steps": 40,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/keys-shift-attached.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/keys-table-lifecycle.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/kill-filters.txt": {
+      "steps": 17,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/launcher-installed-layout.txt": {
+      "steps": 7,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/oh-my-tmux.txt": {
+      "steps": 15,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/own-conf.txt": {
+      "steps": 6,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/pane-border-indicators.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/pane-border-lines.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/pane-border-status.txt": {
+      "steps": 34,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/pane-border-zorder.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/pane-colours-palette.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/pane-engine-knobs-input.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/pane-engine-knobs.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/pane-runtime-facts.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/pane-tmux-path.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/plugin-runtime-continuum.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/plugin-runtime-fpp.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/plugin-runtime-oh-my-tmux.txt": {
+      "steps": 4,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/plugin-runtime-resurrect-restore.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 1,
+      "warning": 1
+    },
+    "smoke/plugin-runtime-tpm-install.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/plugin-runtime-vim-tmux-navigator.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/plugin-runtime-yank.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/positional-maximums.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/positional-minimums.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/refresh-status.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/remain-on-exit-format.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/resurrect-init.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/resurrect-save.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/send-keys-client-selection.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/send-keys-control.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/send-keys-inject.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/sensible.txt": {
+      "steps": 6,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/source-file-byte-name.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/source-file-control.txt": {
+      "steps": 12,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/source-file-depth.txt": {
+      "steps": 4,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/source-file-diagnostics.txt": {
+      "steps": 12,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/source-file-tilde.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/source-replay-diagnostics.txt": {
+      "steps": 60,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/split-window-wait.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/status-background-jobs.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 1,
+      "warning": 1
+    },
+    "smoke/status-keys-editor-default.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/terminal-facts.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/tpm-init.txt": {
+      "steps": 5,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/tui-client-input-backpressure.txt": {
+      "steps": 2,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/vim-tmux-navigator.txt": {
+      "steps": 8,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "smoke/yank.txt": {
+      "steps": 3,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "source-file-current-file.txt": {
+      "steps": 24,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "source-file-format.txt": {
+      "steps": 40,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "source-file-output.txt": {
+      "steps": 12,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "split-window-zoom-hidden-width.txt": {
+      "steps": 21,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "split-window-zoom.txt": {
+      "steps": 11,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "splits-sized.txt": {
+      "steps": 5,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "stderr-parity.txt": {
+      "steps": 14,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "strict-key-validation.txt": {
+      "steps": 40,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    },
+    "zoom.txt": {
+      "steps": 5,
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 0,
+      "warning": 0
+    }
+  }
+}

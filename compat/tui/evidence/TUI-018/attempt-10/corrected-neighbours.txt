@@ -1,0 +1,10 @@
+ok    matrix-direct-split-pending
+ok    matrix-alias-split-pending
+ok    matrix-file-split-pending
+ok    matrix-direct-split-zoom-no-space
+ok    matrix-direct-split-keep-zoom-no-space
+ok    matrix-direct-split-pending-zoom
+ok    matrix-attached-term-file-after
+matrix: 7 asserted, 0 failures, 0 recorded:TUI-018, 0 decided:TUI-018, 0 self-check failures
+
+exit_status=0

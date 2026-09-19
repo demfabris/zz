@@ -5,7 +5,7 @@ description: "The contract for a tmux-compatible zz CLI: tmux spellings keep tmu
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, philosophy, reimplementation, cli]
 timestamp: 2026-08-24T00:00:00-03:00
-last_updated: 2026-09-09
+last_updated: 2026-09-16
 ---
 
 # Overview
@@ -381,8 +381,7 @@ snapshots, and GPUI retain their prior contracts. Mutable tiled order after `joi
 
 `F-ALIASES-MULTI-BODY` closes executable empty and multi-command user aliases. Preparation stores one
 opaque typed group in protocol v84's existing `CommandInvocation` shape: empty groups succeed
-without effects, caller arguments and client-owned stdin attach only to the final child, and
-nonempty groups preserve child
+without effects, caller arguments attach only to the final child, and nonempty groups preserve child
 boundaries and physical source groups through mux, daemon, stored command, config, local CLI, and
 Control execution. The wrapper is never dispatched or framed; Control emits each child with the
 enclosing queue's flags. Its eight-step differential has zero mismatches. Forced-shutdown
@@ -390,7 +389,10 @@ multi-window `window-unlinked` order is an accepted divergence under
 `hooks.shutdown-window-unlinked-order`, decided `never`, because tmux derives it from winlink
 red-black-tree history that zz does not retain. Closure review advanced protocol v85 for typed
 post-admission callback provenance and daemon-authoritative `Attached` reconnect state, not for an
-alias child-vector field.
+alias child-vector field. TUI-018 later shares caller stdin with the first reader across group
+members and command-client config replay. A spent source reader resumes the queue after reporting
+its error, and raw alias stdout retains the child writer claim. See the
+[command stream channel](/designs/command-stream-channel.md).
 The next worker claims the dispatch-board front from published `origin/main`.
 
 Protocol v84 closes all six runtime rules

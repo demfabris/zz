@@ -1,0 +1,202 @@
+56fcf707376c58bfcb9b08d5d193ea0272f69534e0f385046f524b655a5612a0  /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli
+df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux
+[2026-09-19T04:29:19Z INFO  zz_daemon::diagnostics::appearance] loaded appearance reason=startup root=None scheme=dark supported=0 unsupported=0 invalid=0 diagnostics_dropped=0 bytes=0 hash=9356683936999949859 appearance=TerminalAppearance { color_scheme: Dark, font_families: ["Noto Sans Mono"], font_families_bold: [], font_families_italic: [], font_families_bold_italic: [], font_size_points: 13.0, font_weight: 400, font_features: [], font_synthetic_style: FontSyntheticStyle { bold: true, italic: true, bold_italic: true }, font_thicken: false, font_thicken_strength: 255, cell_height_adjustment: None, padding_left: 10.0, padding_right: 10.0, padding_top: 10.0, padding_bottom: 10.0, foreground: Color { r: 216, g: 222, b: 233 }, background: Color { r: 16, g: 19, b: 24 }, cursor_color: Color { r: 229, g: 192, b: 123 }, cursor_style: Block, selection_foreground: Color { r: 216, g: 222, b: 233 }, selection_background: AppearanceColor { r: 80, g: 125, b: 184, a: 148 }, search_match_color: AppearanceColor { r: 224, g: 171, b: 56, a: 107 }, search_current_color: AppearanceColor { r: 250, g: 194, b: 71, a: 173 }, link_color: Color { r: 77, g: 163, b: 235 }, copy_cursor_color: AppearanceColor { r: 184, g: 199, b: 224, a: 107 }, palette_hash: 2756364480396514756, minimum_contrast: 1.0, cursor_blink_policy: Terminal, cursor_blink_interval_ms: 500, rounded_selection: true, background_opacity: 1.0, palette_classes: [], default_classes: [None, None] }
+[2026-09-19T04:29:19Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=startup-mux-replay entries=0 prefix="C-b" mode_keys="vi"
+[2026-09-19T04:29:19Z INFO  zz_daemon::daemon] zz daemon listening at /tmp/zzr7p4-cjPJNC.sock
+=== P4a: -P release then raw save-buffer ===
+p4a zz rc=1 err=Bad file descriptor: -
+p4a tmux rc=1 err=Bad file descriptor: -
+00000000: 5046 582d 310a                           PFX-1.
+00000000: 5046 582d 310a                           PFX-1.
+PASS p4a rc
+PASS p4a stdout
+PASS p4a stderr
+=== P4b: raw save-buffer then -P release ===
+p4b zz rc=0 err=
+p4b tmux rc=0 err=
+00000000: 4255 462d 4259 5445 532d 4e4f 2d4e 4557  BUF-BYTES-NO-NEW
+00000010: 4c49 4e45                                LINE
+00000000: 4255 462d 4259 5445 532d 4e4f 2d4e 4557  BUF-BYTES-NO-NEW
+00000010: 4c49 4e45                                LINE
+PASS p4b rc
+PASS p4b stdout
+PASS p4b stderr
+=== P4c: middle command fails ===
+p4c zz rc=1 out= err=unknown command: nosuchcommand-xyz|
+p4c tmux rc=1 out= err=unknown command: nosuchcommand-xyz|
+PASS p4c rc
+PASS p4c stdout
+PASS p4c stderr
+=== P4d: stream, failing middle, tail ===
+p4d zz rc=1 err=unknown command: nosuchcommand-xyz|
+p4d tmux rc=1 err=unknown command: nosuchcommand-xyz|
+PASS p4d rc
+PASS p4d stdout
+PASS p4d stderr
+p4 done FAIL=0
+[2026-09-19T04:29:21Z INFO  zz_daemon::daemon] zz daemon stopped
+ome/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p4t-cjPJNC -f /dev/null new-session -d -s cs -n win -x 80 -y 24 'ENV= PS1='\''$ '\'' exec /bin/sh'
++ zz set-option -g automatic-rename off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p4.cjPJNC/zz-home XDG_CONFIG_HOME=/tmp/zzr7p4.cjPJNC/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p4.cjPJNC/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p4-cjPJNC.sock set-option -g automatic-rename off
++ tm set-option -g automatic-rename off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p4.cjPJNC/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p4.cjPJNC/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p4t-cjPJNC set-option -g automatic-rename off
++ zz set-option -g status off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p4.cjPJNC/zz-home XDG_CONFIG_HOME=/tmp/zzr7p4.cjPJNC/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p4.cjPJNC/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p4-cjPJNC.sock set-option -g status off
++ tm set-option -g status off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p4.cjPJNC/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p4.cjPJNC/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p4t-cjPJNC set-option -g status off
++ zz set-buffer -b p4buf BUF-BYTES-NO-NEWLINE
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p4.cjPJNC/zz-home XDG_CONFIG_HOME=/tmp/zzr7p4.cjPJNC/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p4.cjPJNC/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p4-cjPJNC.sock set-buffer -b p4buf BUF-BYTES-NO-NEWLINE
++ tm set-buffer -b p4buf BUF-BYTES-NO-NEWLINE
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p4.cjPJNC/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p4.cjPJNC/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p4t-cjPJNC set-buffer -b p4buf BUF-BYTES-NO-NEWLINE
++ printf STREAMZ
++ printf '=== P4a: -P release then raw save-buffer ===\n'
++ zz split-window -I -d -P -F 'PFX-#{pane_index}' -t =cs:win.0 ';' save-buffer -b p4buf -
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p4.cjPJNC/zz-home XDG_CONFIG_HOME=/tmp/zzr7p4.cjPJNC/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p4.cjPJNC/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p4-cjPJNC.sock split-window -I -d -P -F 'PFX-#{pane_index}' -t =cs:win.0 ';' save-buffer -b p4buf -
++ echo 1
++ tm split-window -I -d -P -F 'PFX-#{pane_index}' -t =cs:win.0 ';' save-buffer -b p4buf -
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p4.cjPJNC/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p4.cjPJNC/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p4t-cjPJNC split-window -I -d -P -F 'PFX-#{pane_index}' -t =cs:win.0 ';' save-buffer -b p4buf -
++ echo 1
+++ cat /tmp/zzr7p4.cjPJNC/zz.rc
+++ cat /tmp/zzr7p4.cjPJNC/zz.err
+++ cat -v
++ printf 'p4a zz rc=%s err=%s\n' 1 'Bad file descriptor: -'
+++ cat /tmp/zzr7p4.cjPJNC/tmux.rc
+++ cat /tmp/zzr7p4.cjPJNC/tmux.err
+++ cat -v
++ printf 'p4a tmux rc=%s err=%s\n' 1 'Bad file descriptor: -'
++ xxd /tmp/zzr7p4.cjPJNC/zz.out
++ xxd /tmp/zzr7p4.cjPJNC/tmux.out
++ cp /tmp/zzr7p4.cjPJNC/zz.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p4a-zz.out
++ cp /tmp/zzr7p4.cjPJNC/tmux.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p4a-tmux.out
++ cp /tmp/zzr7p4.cjPJNC/zz.err /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p4a-zz.err
++ cp /tmp/zzr7p4.cjPJNC/tmux.err /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p4a-tmux.err
++ norm_ids /tmp/zzr7p4.cjPJNC/zz.out /tmp/zzr7p4.cjPJNC/zz.outn
++ sed -E 's/%[0-9]+/%N/g' /tmp/zzr7p4.cjPJNC/zz.out
++ norm_ids /tmp/zzr7p4.cjPJNC/tmux.out /tmp/zzr7p4.cjPJNC/tmux.outn
++ sed -E 's/%[0-9]+/%N/g' /tmp/zzr7p4.cjPJNC/tmux.out
++ check 'p4a rc' /tmp/zzr7p4.cjPJNC/zz.rc /tmp/zzr7p4.cjPJNC/tmux.rc
++ local 'label=p4a rc' a=/tmp/zzr7p4.cjPJNC/zz.rc b=/tmp/zzr7p4.cjPJNC/tmux.rc
++ cmp -s /tmp/zzr7p4.cjPJNC/zz.rc /tmp/zzr7p4.cjPJNC/tmux.rc
++ printf 'PASS %s\n' 'p4a rc'
++ check 'p4a stdout' /tmp/zzr7p4.cjPJNC/zz.outn /tmp/zzr7p4.cjPJNC/tmux.outn
++ local 'label=p4a stdout' a=/tmp/zzr7p4.cjPJNC/zz.outn b=/tmp/zzr7p4.cjPJNC/tmux.outn
++ cmp -s /tmp/zzr7p4.cjPJNC/zz.outn /tmp/zzr7p4.cjPJNC/tmux.outn
++ printf 'PASS %s\n' 'p4a stdout'
++ check 'p4a stderr' /tmp/zzr7p4.cjPJNC/zz.err /tmp/zzr7p4.cjPJNC/tmux.err
++ local 'label=p4a stderr' a=/tmp/zzr7p4.cjPJNC/zz.err b=/tmp/zzr7p4.cjPJNC/tmux.err
++ cmp -s /tmp/zzr7p4.cjPJNC/zz.err /tmp/zzr7p4.cjPJNC/tmux.err
++ printf 'PASS %s\n' 'p4a stderr'
++ printf '=== P4b: raw save-buffer then -P release ===\n'
++ zz save-buffer -b p4buf - ';' split-window -I -d -P -F 'PFX-#{pane_index}' -t =cs:win.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p4.cjPJNC/zz-home XDG_CONFIG_HOME=/tmp/zzr7p4.cjPJNC/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p4.cjPJNC/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p4-cjPJNC.sock save-buffer -b p4buf - ';' split-window -I -d -P -F 'PFX-#{pane_index}' -t =cs:win.0
++ echo 0
++ tm save-buffer -b p4buf - ';' split-window -I -d -P -F 'PFX-#{pane_index}' -t =cs:win.0
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p4.cjPJNC/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p4.cjPJNC/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p4t-cjPJNC save-buffer -b p4buf - ';' split-window -I -d -P -F 'PFX-#{pane_index}' -t =cs:win.0
++ echo 0
+++ cat /tmp/zzr7p4.cjPJNC/zz.rc
+++ cat /tmp/zzr7p4.cjPJNC/zz.err
+++ cat -v
++ printf 'p4b zz rc=%s err=%s\n' 0 ''
+++ cat /tmp/zzr7p4.cjPJNC/tmux.rc
+++ cat /tmp/zzr7p4.cjPJNC/tmux.err
+++ cat -v
++ printf 'p4b tmux rc=%s err=%s\n' 0 ''
++ xxd /tmp/zzr7p4.cjPJNC/zz.out
++ xxd /tmp/zzr7p4.cjPJNC/tmux.out
++ cp /tmp/zzr7p4.cjPJNC/zz.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p4b-zz.out
++ cp /tmp/zzr7p4.cjPJNC/tmux.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p4b-tmux.out
++ norm_ids /tmp/zzr7p4.cjPJNC/zz.out /tmp/zzr7p4.cjPJNC/zz.outn
++ sed -E 's/%[0-9]+/%N/g' /tmp/zzr7p4.cjPJNC/zz.out
++ norm_ids /tmp/zzr7p4.cjPJNC/tmux.out /tmp/zzr7p4.cjPJNC/tmux.outn
++ sed -E 's/%[0-9]+/%N/g' /tmp/zzr7p4.cjPJNC/tmux.out
++ check 'p4b rc' /tmp/zzr7p4.cjPJNC/zz.rc /tmp/zzr7p4.cjPJNC/tmux.rc
++ local 'label=p4b rc' a=/tmp/zzr7p4.cjPJNC/zz.rc b=/tmp/zzr7p4.cjPJNC/tmux.rc
++ cmp -s /tmp/zzr7p4.cjPJNC/zz.rc /tmp/zzr7p4.cjPJNC/tmux.rc
++ printf 'PASS %s\n' 'p4b rc'
++ check 'p4b stdout' /tmp/zzr7p4.cjPJNC/zz.outn /tmp/zzr7p4.cjPJNC/tmux.outn
++ local 'label=p4b stdout' a=/tmp/zzr7p4.cjPJNC/zz.outn b=/tmp/zzr7p4.cjPJNC/tmux.outn
++ cmp -s /tmp/zzr7p4.cjPJNC/zz.outn /tmp/zzr7p4.cjPJNC/tmux.outn
++ printf 'PASS %s\n' 'p4b stdout'
++ check 'p4b stderr' /tmp/zzr7p4.cjPJNC/zz.err /tmp/zzr7p4.cjPJNC/tmux.err
++ local 'label=p4b stderr' a=/tmp/zzr7p4.cjPJNC/zz.err b=/tmp/zzr7p4.cjPJNC/tmux.err
++ cmp -s /tmp/zzr7p4.cjPJNC/zz.err /tmp/zzr7p4.cjPJNC/tmux.err
++ printf 'PASS %s\n' 'p4b stderr'
++ printf '=== P4c: middle command fails ===\n'
++ zz display-message -p one ';' nosuchcommand-xyz ';' display-message -p three
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p4.cjPJNC/zz-home XDG_CONFIG_HOME=/tmp/zzr7p4.cjPJNC/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p4.cjPJNC/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p4-cjPJNC.sock display-message -p one ';' nosuchcommand-xyz ';' display-message -p three
++ echo 1
++ tm display-message -p one ';' nosuchcommand-xyz ';' display-message -p three
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p4.cjPJNC/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p4.cjPJNC/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p4t-cjPJNC display-message -p one ';' nosuchcommand-xyz ';' display-message -p three
++ echo 1
+++ cat /tmp/zzr7p4.cjPJNC/zz.rc
+++ cat /tmp/zzr7p4.cjPJNC/zz.out
+++ tr '\n' '|'
+++ cat /tmp/zzr7p4.cjPJNC/zz.err
+++ tr '\n' '|'
++ printf 'p4c zz rc=%s out=%s err=%s\n' 1 '' 'unknown command: nosuchcommand-xyz|'
+++ cat /tmp/zzr7p4.cjPJNC/tmux.rc
+++ cat /tmp/zzr7p4.cjPJNC/tmux.out
+++ tr '\n' '|'
+++ cat /tmp/zzr7p4.cjPJNC/tmux.err
+++ tr '\n' '|'
++ printf 'p4c tmux rc=%s out=%s err=%s\n' 1 '' 'unknown command: nosuchcommand-xyz|'
++ cp /tmp/zzr7p4.cjPJNC/zz.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p4c-zz.out
++ cp /tmp/zzr7p4.cjPJNC/tmux.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p4c-tmux.out
++ check 'p4c rc' /tmp/zzr7p4.cjPJNC/zz.rc /tmp/zzr7p4.cjPJNC/tmux.rc
++ local 'label=p4c rc' a=/tmp/zzr7p4.cjPJNC/zz.rc b=/tmp/zzr7p4.cjPJNC/tmux.rc
++ cmp -s /tmp/zzr7p4.cjPJNC/zz.rc /tmp/zzr7p4.cjPJNC/tmux.rc
++ printf 'PASS %s\n' 'p4c rc'
++ check 'p4c stdout' /tmp/zzr7p4.cjPJNC/zz.out /tmp/zzr7p4.cjPJNC/tmux.out
++ local 'label=p4c stdout' a=/tmp/zzr7p4.cjPJNC/zz.out b=/tmp/zzr7p4.cjPJNC/tmux.out
++ cmp -s /tmp/zzr7p4.cjPJNC/zz.out /tmp/zzr7p4.cjPJNC/tmux.out
++ printf 'PASS %s\n' 'p4c stdout'
++ check 'p4c stderr' /tmp/zzr7p4.cjPJNC/zz.err /tmp/zzr7p4.cjPJNC/tmux.err
++ local 'label=p4c stderr' a=/tmp/zzr7p4.cjPJNC/zz.err b=/tmp/zzr7p4.cjPJNC/tmux.err
++ cmp -s /tmp/zzr7p4.cjPJNC/zz.err /tmp/zzr7p4.cjPJNC/tmux.err
++ printf 'PASS %s\n' 'p4c stderr'
++ printf '=== P4d: stream, failing middle, tail ===\n'
++ zz split-window -I -d -P -F 'PFX-#{pane_index}' -t =cs:win.0 ';' nosuchcommand-xyz ';' display-message -p tail
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p4.cjPJNC/zz-home XDG_CONFIG_HOME=/tmp/zzr7p4.cjPJNC/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p4.cjPJNC/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p4-cjPJNC.sock split-window -I -d -P -F 'PFX-#{pane_index}' -t =cs:win.0 ';' nosuchcommand-xyz ';' display-message -p tail
++ echo 1
++ tm split-window -I -d -P -F 'PFX-#{pane_index}' -t =cs:win.0 ';' nosuchcommand-xyz ';' display-message -p tail
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p4.cjPJNC/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p4.cjPJNC/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p4t-cjPJNC split-window -I -d -P -F 'PFX-#{pane_index}' -t =cs:win.0 ';' nosuchcommand-xyz ';' display-message -p tail
++ echo 1
+++ cat /tmp/zzr7p4.cjPJNC/zz.rc
+++ cat /tmp/zzr7p4.cjPJNC/zz.err
+++ tr '\n' '|'
++ printf 'p4d zz rc=%s err=%s\n' 1 'unknown command: nosuchcommand-xyz|'
+++ cat /tmp/zzr7p4.cjPJNC/tmux.rc
+++ cat /tmp/zzr7p4.cjPJNC/tmux.err
+++ tr '\n' '|'
++ printf 'p4d tmux rc=%s err=%s\n' 1 'unknown command: nosuchcommand-xyz|'
++ xxd /tmp/zzr7p4.cjPJNC/zz.out
++ xxd /tmp/zzr7p4.cjPJNC/tmux.out
++ cp /tmp/zzr7p4.cjPJNC/zz.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p4d-zz.out
++ cp /tmp/zzr7p4.cjPJNC/tmux.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p4d-tmux.out
++ norm_ids /tmp/zzr7p4.cjPJNC/zz.out /tmp/zzr7p4.cjPJNC/zz.outn
++ sed -E 's/%[0-9]+/%N/g' /tmp/zzr7p4.cjPJNC/zz.out
++ norm_ids /tmp/zzr7p4.cjPJNC/tmux.out /tmp/zzr7p4.cjPJNC/tmux.outn
++ sed -E 's/%[0-9]+/%N/g' /tmp/zzr7p4.cjPJNC/tmux.out
++ check 'p4d rc' /tmp/zzr7p4.cjPJNC/zz.rc /tmp/zzr7p4.cjPJNC/tmux.rc
++ local 'label=p4d rc' a=/tmp/zzr7p4.cjPJNC/zz.rc b=/tmp/zzr7p4.cjPJNC/tmux.rc
++ cmp -s /tmp/zzr7p4.cjPJNC/zz.rc /tmp/zzr7p4.cjPJNC/tmux.rc
++ printf 'PASS %s\n' 'p4d rc'
++ check 'p4d stdout' /tmp/zzr7p4.cjPJNC/zz.outn /tmp/zzr7p4.cjPJNC/tmux.outn
++ local 'label=p4d stdout' a=/tmp/zzr7p4.cjPJNC/zz.outn b=/tmp/zzr7p4.cjPJNC/tmux.outn
++ cmp -s /tmp/zzr7p4.cjPJNC/zz.outn /tmp/zzr7p4.cjPJNC/tmux.outn
++ printf 'PASS %s\n' 'p4d stdout'
++ check 'p4d stderr' /tmp/zzr7p4.cjPJNC/zz.err /tmp/zzr7p4.cjPJNC/tmux.err
++ local 'label=p4d stderr' a=/tmp/zzr7p4.cjPJNC/zz.err b=/tmp/zzr7p4.cjPJNC/tmux.err
++ cmp -s /tmp/zzr7p4.cjPJNC/zz.err /tmp/zzr7p4.cjPJNC/tmux.err
++ printf 'PASS %s\n' 'p4d stderr'
++ printf 'p4 done FAIL=%s\n' 0
++ exit 0
++ cleanup
++ set +e
++ zz kill-server
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p4.cjPJNC/zz-home XDG_CONFIG_HOME=/tmp/zzr7p4.cjPJNC/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p4.cjPJNC/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p4-cjPJNC.sock kill-server
++ tm kill-server
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p4.cjPJNC/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p4.cjPJNC/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p4t-cjPJNC kill-server
++ kill 2629245
++ wait 2629245
++ rm -rf -- /tmp/zzr7p4.cjPJNC

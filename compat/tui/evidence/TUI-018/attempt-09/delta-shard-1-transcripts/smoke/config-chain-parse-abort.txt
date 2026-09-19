@@ -1,0 +1,36 @@
+# Scenario: smoke/config-chain-parse-abort
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/smoke/config-chain-parse-abort.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: run-shell 'sh ~/config-chain-parse-abort.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g CONFIG_CHAIN_PARSE_ABORT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    CONFIG_CHAIN_PARSE_ABORT=direct:clean,nv:clean,batch:clean,nested:clean,startup:clean,control:clean,runtime:clean
+tmux stdout:
+    CONFIG_CHAIN_PARSE_ABORT=direct:clean,nv:clean,batch:clean,nested:clean,startup:clean,control:clean,runtime:clean
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

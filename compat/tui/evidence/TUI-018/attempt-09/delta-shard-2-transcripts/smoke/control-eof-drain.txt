@@ -1,0 +1,168 @@
+# Scenario: smoke/control-eof-drain
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/smoke/control-eof-drain.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: run-shell 'sh ~/control-eof-drain.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    three-messages rc=0 late=[]
+    three-messages | %begin 0
+    three-messages | %end 0
+    three-messages | %session-changed w
+    three-messages | %begin 1
+    three-messages | ONE
+    three-messages | %end 1
+    three-messages | %begin 1
+    three-messages | TWO
+    three-messages | %end 1
+    three-messages | %begin 1
+    three-messages | THREE
+    three-messages | %end 1
+    three-messages | %exit
+    block-first rc=0 at-exit=[] late=[m1]
+    block-first | %begin 0
+    block-first | %end 0
+    block-first | %session-changed w
+    block-first | %begin 1
+    block-first | %end 1
+    block-first | %exit
+    block-last rc=0 at-exit=[] late=[m3]
+    block-last | %begin 0
+    block-last | %end 0
+    block-last | %session-changed w
+    block-last | %begin 1
+    block-last | ONE
+    block-last | %end 1
+    block-last | %begin 1
+    block-last | TWO
+    block-last | %end 1
+    block-last | %begin 1
+    block-last | %end 1
+    block-last | %exit
+    blank-return rc=0 at-exit=[] late=[m1]
+    blank-return | %begin 0
+    blank-return | %end 0
+    blank-return | %session-changed w
+    blank-return | %begin 1
+    blank-return | %end 1
+    blank-return | %exit
+    fast-run-first rc=0 late=[m1]
+    fast-run-first | %begin 0
+    fast-run-first | %end 0
+    fast-run-first | %session-changed w
+    fast-run-first | %begin 1
+    fast-run-first | %end 1
+    fast-run-first | %exit
+    size-reports rc=0 late=[]
+    size-reports | %begin 0
+    size-reports | %end 0
+    size-reports | %session-changed w
+    size-reports | %begin 1
+    size-reports | %end 1
+    size-reports | %begin 1
+    size-reports | %end 1
+    size-reports | %begin 1
+    size-reports | SIZE
+    size-reports | %end 1
+    size-reports | %begin 1
+    size-reports | %end 1
+    size-reports | %exit
+    source-park rc=0 at-exit=[] late=[m3]
+    source-park | SRC-A
+    source-park | SRC-B
+tmux stdout:
+    three-messages rc=0 late=[]
+    three-messages | %begin 0
+    three-messages | %end 0
+    three-messages | %session-changed w
+    three-messages | %begin 1
+    three-messages | ONE
+    three-messages | %end 1
+    three-messages | %begin 1
+    three-messages | TWO
+    three-messages | %end 1
+    three-messages | %begin 1
+    three-messages | THREE
+    three-messages | %end 1
+    three-messages | %exit
+    block-first rc=0 at-exit=[] late=[m1]
+    block-first | %begin 0
+    block-first | %end 0
+    block-first | %session-changed w
+    block-first | %begin 1
+    block-first | %end 1
+    block-first | %exit
+    block-last rc=0 at-exit=[] late=[m3]
+    block-last | %begin 0
+    block-last | %end 0
+    block-last | %session-changed w
+    block-last | %begin 1
+    block-last | ONE
+    block-last | %end 1
+    block-last | %begin 1
+    block-last | TWO
+    block-last | %end 1
+    block-last | %begin 1
+    block-last | %end 1
+    block-last | %exit
+    blank-return rc=0 at-exit=[] late=[m1]
+    blank-return | %begin 0
+    blank-return | %end 0
+    blank-return | %session-changed w
+    blank-return | %begin 1
+    blank-return | %end 1
+    blank-return | %exit
+    fast-run-first rc=0 late=[m1]
+    fast-run-first | %begin 0
+    fast-run-first | %end 0
+    fast-run-first | %session-changed w
+    fast-run-first | %begin 1
+    fast-run-first | %end 1
+    fast-run-first | %exit
+    size-reports rc=0 late=[]
+    size-reports | %begin 0
+    size-reports | %end 0
+    size-reports | %session-changed w
+    size-reports | %begin 1
+    size-reports | %end 1
+    size-reports | %begin 1
+    size-reports | %end 1
+    size-reports | %begin 1
+    size-reports | SIZE
+    size-reports | %end 1
+    size-reports | %begin 1
+    size-reports | %end 1
+    size-reports | %exit
+    source-park rc=0 at-exit=[] late=[m3]
+    source-park | SRC-A
+    source-park | SRC-B
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g CONTROL_EOF_DRAIN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    CONTROL_EOF_DRAIN=reached-end
+tmux stdout:
+    CONTROL_EOF_DRAIN=reached-end
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=2 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

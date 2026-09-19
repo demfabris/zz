@@ -1,0 +1,53 @@
+# Scenario: smoke/control-alias-prepare
+# Source: /home/demfabris/dev/zz-c11-alias-fix/compat/scenarios/smoke/control-alias-prepare.txt
+# Strict geometry: no
+
+## Step 1
+COMMAND: run-shell 'sh ~/control-alias-prepare.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -g CONTROL_ALIAS_SNAPSHOT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    CONTROL_ALIAS_SNAPSHOT=frozen
+tmux stdout:
+    CONTROL_ALIAS_SNAPSHOT=frozen
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g CONTROL_PREPARE_ABORT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    CONTROL_PREPARE_ABORT=clean
+tmux stdout:
+    CONTROL_PREPARE_ABORT=clean
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

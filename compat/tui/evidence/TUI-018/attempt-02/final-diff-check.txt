@@ -1,0 +1,10 @@
+compat/tui/evidence/TUI-018/attempt-02/streams-fix1-self-check.txt:34: trailing whitespace.
++        < C 1 
+compat/tui/evidence/TUI-018/attempt-02/streams-fix2-self-check.txt:34: trailing whitespace.
++        < C 1 
+compat/tui/evidence/TUI-018/attempt-02/test-fix1-cli.txt:40: new blank line at EOF.
+compat/tui/evidence/TUI-018/attempt-02/test-fix1-unit.txt:17: new blank line at EOF.
+compat/tui/evidence/TUI-018/attempt-02/test-fix2-cli.txt:10: new blank line at EOF.
+compat/tui/evidence/TUI-018/attempt-02/test-fix2-routing.txt:13: new blank line at EOF.
+compat/tui/evidence/TUI-018/attempt-02/test-libraries-precommit-retry.txt:1698: new blank line at EOF.
+compat/tui/evidence/TUI-018/attempt-02/test-zz-precommit.txt:857: new blank line at EOF.

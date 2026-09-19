@@ -1,0 +1,5 @@
+main still alive seven seconds after acknowledgement and EOF; SIGKILL for cleanup
+/tmp/zz-alias5-wait-exit-probe.sh: line 33: 3318169 Killed                     "$binary" --socket "$socket" -f /dev/null -C new-session -s wait-exit 'exec /bin/cat' < "$fifo" 9>&- > "$proof/wait-exit-$side.out" 2> "$proof/wait-exit-$side.err"
+main process_status=137
+corrected exited after acknowledgement and EOF
+corrected process_status=0

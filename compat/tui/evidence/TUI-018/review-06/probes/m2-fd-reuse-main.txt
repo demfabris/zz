@@ -1,0 +1,16 @@
+writeonly direct source;source zz: rc=1 stdout=[] stderr=[source-file from standard input is not supported|] @after=yes
+writeonly direct source;source;display zz: rc=1 stdout=[after-out|] stderr=[source-file from standard input is not supported|] @after=
+writeonly alias zz: rc=1 stdout=[] stderr=[source-file from standard input is not supported|] @after=
+writeonly file zz: rc=1 stdout=[/tmp/claude-1000/-home-demfabris-dev-zz/74f3d4ea-89fe-441e-858d-4b959ebb9bb7/scratchpad/r6/p/r4/f.conf:1: source-file from standard input is not supported|/tmp/claude-1000/-home-demfabris-dev-zz/74f3d4ea-89fe-441e-858d-4b959ebb9bb7/scratchpad/r6/p/r4/f.conf:2: source-file from standard input is not supported|] stderr=[] @after=yes
+directory direct source;source;display zz: rc=1 stdout=[] stderr=[zz: could not read standard input: Is a directory (os error 21)|] @after=
+readable source;display;source zz: rc=1 stdout=[mid|] stderr=[source-file from standard input is not supported|] @after=
+readable source;display;source;display zz: rc=1 stdout=[mid|end|] stderr=[source-file from standard input is not supported|] @after=
+readable load;display;load;display zz: rc=1 stdout=[mid|] stderr=[load-buffer from standard input requires a command client stdin payload|] @after=
+writeonly direct source;source tmux: rc=1 stdout=[] stderr=[] @after=yes
+writeonly direct source;source;display tmux: rc=1 stdout=[Input/output error: -|Input/output error: -|after-out|] stderr=[] @after=
+writeonly alias tmux: rc=1 stdout=[] stderr=[] @after=yes
+writeonly file tmux: rc=1 stdout=[] stderr=[] @after=yes
+directory direct source;source;display tmux: rc=1 stdout=[after-out|] stderr=[] @after=
+readable source;display;source tmux: rc=1 stdout=[] stderr=[mid|Input/output error: -|] @after=
+readable source;display;source;display tmux: rc=1 stdout=[] stderr=[mid|end|Input/output error: -|] @after=
+readable load;display;load;display tmux: rc=1 stdout=[] stderr=[Input/output error: -|] @after=

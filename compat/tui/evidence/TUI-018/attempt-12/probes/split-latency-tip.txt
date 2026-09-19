@@ -1,0 +1,20 @@
+# split-window latency and -I -P stream order, alienware, 2026-09-18
+# zz binary: target/alias7-bins/zz_cli-tip7 (branch tip 834002cf merged with origin/main 394ef850, before this pass's source change)
+# pin: compat/.cache/tmux-src/tmux d77c9dc6
+
+split-empty zz run1 2205 ms pane=%1
+split-empty zz run2 2203 ms pane=%2
+split-empty zz run3 2207 ms pane=%3
+split-shell zz run1 297 ms pane=%4
+split-shell zz run2 292 ms pane=%5
+split-shell zz run3 299 ms pane=%6
+display-message zz 117 ms
+split-empty tmux run1 3 ms pane=%1
+split-empty tmux run2 3 ms pane=%2
+split-empty tmux run3 3 ms pane=%3
+split-shell tmux run1 3 ms pane=%4
+split-shell tmux run2 3 ms pane=%5
+split-shell tmux run3 3 ms pane=%6
+display-message tmux 2 ms
+sample zz at 1202 ms pane=%7 row1='' cursor=0:0 stdout-while-open=''
+EXIT 124

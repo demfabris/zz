@@ -1,0 +1,437 @@
+rg -n -F -- 'Bad file descriptor: -' compat/scenarios
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:57:        if (observed.stdout, observed.stderr, observed.returncode) != (expected, b"Bad file descriptor: -\n", 1):
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:75:        if (observed.stdout, observed.stderr, observed.returncode) != (expected, b"Bad file descriptor: -\n", 1):
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:87:        if (observed.stdout, observed.stderr, observed.returncode) != (expected, b"Bad file descriptor: -\n", 1):
+exit=0
+rg -n -F -- 'source-file from standard input is not supported' compat/scenarios
+exit=1
+rg -n -F -- 'command load-buffer: too many arguments (need at most 1)' compat/scenarios
+exit=1
+rg -n -F -- 'invalid octal escape' compat/scenarios
+compat/scenarios/smoke/config-grammar.txt:2:expect-warn: zz /tmp/zz-config-grammar-error.conf:2: invalid octal escape
+compat/scenarios/smoke/config-grammar.txt:3:expect-warn: tmux /tmp/zz-config-grammar-error.conf:2: invalid octal escape
+exit=0
+rg -n -F -- '__zz-stdin-payload' compat/scenarios
+exit=1
+rg -n -F -- 'source-file' compat/scenarios
+compat/scenarios/stderr-parity.txt:13:err: source-file /nonexistent-census-path
+compat/scenarios/behavior-options.txt:1:source-file compat/scenarios/behavior-options.conf
+compat/scenarios/source-hook-cwd-sourced/a/entry.conf:1:set-hook -g after-display-message 'source-file compat/scenarios/source-hook-cwd-sourced/leaf.conf'
+compat/scenarios/honest-knobs-c1-readback.txt:1:source-file compat/scenarios/honest-knobs-c1-readback.conf
+compat/scenarios/source-file-output.txt:1:out: source-file -v compat/scenarios/source-file-output-root.conf
+compat/scenarios/source-file-output.txt:2:out: source-file -v compat/scenarios/source-file-output-child.conf compat/scenarios/source-file-output-root.conf
+compat/scenarios/source-file-output.txt:3:out: source-file -v compat/scenarios/source-file-output-[cr]*.conf
+compat/scenarios/source-file-output.txt:4:out: source-file -v compat/scenarios/source-file-parse-assignment.conf compat/scenarios/source-file-parse-assignment-branch.conf compat/scenarios/source-file-parse-replay.conf compat/scenarios/source-file-parse-replay-branch.conf
+compat/scenarios/source-file-output.txt:5:out: source-file -nv compat/scenarios/source-file-parse-only-assignment.conf compat/scenarios/source-file-parse-only-branch.conf
+compat/scenarios/source-file-output.txt:6:set-option -s command-alias[90] 'indirect=source-file -v compat/scenarios/source-file-output-child.conf'
+compat/scenarios/source-file-output.txt:7:out: source-file compat/scenarios/source-file-output-alias-root.conf
+compat/scenarios/source-file-output.txt:8:set-hook -g after-display-message 'source-file compat/scenarios/source-file-output-hook-child.conf'
+compat/scenarios/source-file-output.txt:9:out: source-file compat/scenarios/source-file-output-hook-root.conf
+compat/scenarios/source-file-output.txt:11:source-file compat/scenarios/source-file-output-indirect-error-root.conf
+compat/scenarios/source-file-output.txt:12:source-file compat/scenarios/source-file-output-ordered-error-root.conf
+compat/scenarios/source-file-output-root.conf:2:source-file -v compat/scenarios/source-file-output-child.conf
+compat/scenarios/source-file-output-ordered-error-root.conf:2:if-shell -F 1 'source-file compat/scenarios/source-file-output-ordered-error-child.conf'
+compat/scenarios/source-file-output-indirect-error-root.conf:2:if-shell -F 1 'source-file compat/scenarios/source-file-output-indirect-error-child.conf'
+compat/scenarios/fixtures/source-hook-cwd-sourced.sh:54:main_client -C source-file "$entry" </dev/null >"$work/control" 2>&1
+compat/scenarios/fixtures/source-hook-cwd-event.sh:82:    main_client set-hook -g "$1" "source-file $relative"
+compat/scenarios/source-file-output-alias-root.conf:4:if-shell -F 1 'source-file -v compat/scenarios/source-file-output-child.conf'
+compat/scenarios/fixtures/jobs-run-shell-order.sh:94:    main_client source-file "$config"
+compat/scenarios/fixtures/jobs-run-shell-order.sh:113:    main_client source-file "$config"
+compat/scenarios/fixtures/if-shell-background-order.sh:57:    main_client source-file "$config"
+compat/scenarios/source-file-nested-client-cwd/a/entry.conf:2:source-file compat/scenarios/source-file-nested-client-cwd/leaf.conf
+compat/scenarios/source-file-format.txt:1:source-file -F 'compat/scenarios/source-file-format-#{session_name}-#{window_index}-#{pane_index}-[12]0.conf'
+compat/scenarios/source-file-format.txt:3:source-file -F 'compat/scenarios/source-file-format-#{session_name}-#{window_index}-#{pane_index}-20.conf' 'compat/scenarios/source-file-format-#{session_name}-#{window_index}-#{pane_index}-10.conf'
+compat/scenarios/source-file-format.txt:5:source-file -Fq 'compat/scenarios/source-file-format-#{session_name}-missing.conf' 'compat/scenarios/source-file-format-#{session_name}-#{window_index}-#{pane_index}-20.conf'
+compat/scenarios/source-file-format.txt:7:source-file 'compat/scenarios/source-file-glob/literal\q.conf'
+compat/scenarios/source-file-format.txt:10:source-file 'compat/scenarios/source-file-glob/*.conf'
+compat/scenarios/source-file-format.txt:13:source-file 'compat/scenarios/source-file-glob/**/*.conf'
+compat/scenarios/source-file-format.txt:16:source-file 'compat/scenarios/source-file-glob/prefix-siblings/zz*/match.conf'
+compat/scenarios/source-file-format.txt:18:source-file 'compat/scenarios/source-file-nested-client-cwd/a/entry.conf'
+compat/scenarios/source-file-format.txt:24:out: source-file -nv compat/scenarios/source-file-flags-parse-only.conf
+compat/scenarios/source-file-format.txt:31:source-file -t source-target:0 compat/scenarios/source-file-flags-target.conf
+compat/scenarios/source-file-format.txt:35:source-file -F -t source-target:0 compat/scenarios/source-file-flags-#{session_name}.conf
+compat/scenarios/source-file-format.txt:37:source-file -t missing:0 compat/scenarios/source-file-flags-targetless.conf
+compat/scenarios/source-file-format.txt:39:out: source-file -v compat/scenarios/source-file-flags-beta.conf compat/scenarios/source-file-flags-alpha.conf
+compat/scenarios/source-file-current-file.txt:7:source-file compat/scenarios/source-file-current-file-root.conf
+compat/scenarios/source-file-current-file.txt:19:source-file -n compat/scenarios/source-file-current-file-child.conf
+compat/scenarios/source-file-current-file.txt:21:out: source-file compat/scenarios/source-file-current-file-child.conf compat/scenarios/source-file-current-file-root.conf
+compat/scenarios/source-file-current-file.txt:24:source-file compat/scenarios/source-file-current-file-missing.conf
+compat/scenarios/source-file-current-file-root.conf:3:source-file compat/scenarios/source-file-current-file-child.conf
+compat/scenarios/smoke/config-discovery-launcher.txt:10:tmux-only: source-file -F '#{HOME}/.tmux.conf'
+compat/scenarios/smoke/source-replay-diagnostics.txt:4:source-file /tmp/zz-source-replay-if.conf
+compat/scenarios/smoke/source-replay-diagnostics.txt:7:source-file /tmp/zz-source-replay-run.conf
+compat/scenarios/smoke/client-non-utf8-cwd.txt:3:# resolves relative source-file paths against that directory. The cwd is a Unix
+compat/scenarios/daemon-command-item-format.txt:14:source-file compat/scenarios/daemon-command-item-format.conf
+compat/scenarios/smoke/config-non-utf8-byte-matrix.txt:18:# PY:     return subprocess.run(client + ["source-file", "-v", str(path)], env=client_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+compat/scenarios/smoke/config-non-utf8-byte-matrix.txt:28:# PY:     result = subprocess.run(client + ["source-file", "-v", str(mode_path)], env=client_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+compat/scenarios/smoke/config-discovery.txt:9:tmux-only: source-file -F '#{HOME}/.tmux.conf'
+compat/scenarios/smoke/source-file-byte-name.txt:8:stage: fixtures/source-file-byte-name.sh ~/source-file-byte-name.sh
+compat/scenarios/smoke/source-file-byte-name.txt:9:run-shell 'sh ~/source-file-byte-name.sh'
+compat/scenarios/smoke/source-file-depth.txt:2:# Counting the initial source-file as invocation 1, the pin runs 50 concurrent
+compat/scenarios/smoke/source-file-depth.txt:12:stage: fixtures/source-file-depth.sh ~/source-file-depth.sh
+compat/scenarios/smoke/source-file-depth.txt:13:run-shell 'sh ~/source-file-depth.sh'
+compat/scenarios/smoke/fixtures/command-flag-errors.tsv:77:source-file	source	-t	[-Fnqv] [-t target-pane] path ...
+compat/scenarios/smoke/source-file-control.txt:6:stage: fixtures/source-file-control.sh ~/source-file-control.sh
+compat/scenarios/smoke/source-file-control.txt:7:run-shell 'sh ~/source-file-control.sh'
+compat/scenarios/smoke/source-file-diagnostics.txt:2:# The fixture drives the PLAIN CLI's source-file diagnostics on both sides from
+compat/scenarios/smoke/source-file-diagnostics.txt:10:conf: fixtures/source-file-diagnostics.conf
+compat/scenarios/smoke/fixtures/client-non-utf8-cwd.sh:46:(cd "$work" && main_client source-file rel.conf) >"$root/direct.out" 2>"$root/direct.err" ||
+compat/scenarios/smoke/fixtures/client-non-utf8-cwd.sh:50:(cd "$work" && main_client source-file ./nested/leaf.conf) >"$root/nested.out" \
+compat/scenarios/smoke/fixtures/client-non-utf8-cwd.sh:54:(cd "$work" && main_client source-file -q missing.conf) >"$root/quiet.out" \
+compat/scenarios/smoke/fixtures/client-non-utf8-cwd.sh:58:(cd "$work" && main_client source-file missing.conf) >"$root/missing.out" \
+compat/scenarios/smoke/fixtures/args-parse-set-option.sh:52:    main_client source-file "$config" >"$output_file" 2>"$error_file"
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:42:    require_bytes(["source-file", str(path)], b"\nline\n\n")
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:64:    require_bytes(["source-file", str(path)], b"hello")
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:65:    require_bytes(["source-file", str(raw_only), ";", "display", "-p", "AFTER"], b"hello")
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:66:    require_bytes(["show-buffer", "-b", "bytes", ";", "source-file", str(prints)], b"hello")
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:67:    require_bytes(["source-file", str(prints), ";", "display", "-p", "AFTER"], b"\nline\n\nAFTER\n")
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:71:        (["source-file", str(double)], b"hello"),
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:72:        (["display", "-p", "BEFORE", ";", "source-file", str(raw_only)], b"BEFORE\n"),
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:78:    nested_raw.write_text(f"source-file {raw_only}\nsource-file {raw_only}\n")
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:81:        f"display-message -p OUTER\nsource-file {raw_only}\ndisplay-message -p TAIL\n")
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:83:        (["source-file", str(nested_raw)], b"hello"),
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:84:        (["source-file", str(nested_print)], b"OUTER\nTAIL\n"),
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:94:    require_bytes(["source-file", str(raw_newline), ";", "display", "-p", "AFTER"], b"hello\n")
+compat/scenarios/smoke/fixtures/args-parse-set-hook.sh:57:    main_client source-file "$config" >"$output_file" 2>"$error_file"
+compat/scenarios/smoke/fixtures/args-parse-run-shell.sh:52:    main_client source-file "$config" >"$output_file" 2>"$error_file"
+compat/scenarios/smoke/fixtures/args-parse-if-shell.sh:52:    main_client source-file "$config" >"$output_file" 2>"$error_file"
+compat/scenarios/smoke/fixtures/tpm-install-runtime.py:68:    tmux("source-file", str(config))
+compat/scenarios/smoke/fixtures/tpm-install-runtime.py:90:    tmux("source-file", str(config))
+compat/scenarios/smoke/fixtures/args-parse-display-panes.sh:47:    main_client source-file "$config" >"$output_file" 2>"$error_file"
+compat/scenarios/smoke/fixtures/args-parse-display-menu.sh:65:    main_client source-file "$config" >"$output_file" 2>"$error_file"
+compat/scenarios/smoke/fixtures/args-parse-confirm-before.sh:57:    main_client source-file "$config" >"$output_file" 2>"$error_file"
+compat/scenarios/smoke/fixtures/args-parse-command-prompt.sh:57:    main_client source-file "$config" >"$output_file" 2>"$error_file"
+compat/scenarios/smoke/fixtures/args-parse-choosers.sh:209:check_command binding-load main_client source-file "$bindings"
+compat/scenarios/smoke/fixtures/args-parse-choosers.sh:224:    source-file "$typed_arity"
+compat/scenarios/smoke/fixtures/control-notify.py:195:    control.phase("config-error", "source-file " + shlex.quote(str(bad)))
+compat/scenarios/smoke/source-file-tilde.txt:2:stage: fixtures/source-file-tilde-decoy.conf ~/.tmux/source-file-tilde-decoy.conf
+compat/scenarios/smoke/source-file-tilde.txt:4:source-file -q '~/.tmux/source-file-tilde-decoy.conf'
+compat/scenarios/smoke/fixtures/control-hard-loss.py:93:    client.stdin.write("source-file %s\n" % queue)
+compat/scenarios/smoke/fixtures/control-hard-loss.py:115:    client.stdin.write("source-file %s\n" % queue)
+compat/scenarios/smoke/fixtures/control-eof-drain.sh:132:printf 'source-file %s\n' "$conf" | control_client >"$work/source.raw" 2>"$work/source.err"
+compat/scenarios/smoke/fixtures/config-chain-parse-abort.sh:155:main_client source-file -v "$direct_config" >"$direct_out" 2>"$direct_err"
+compat/scenarios/smoke/fixtures/config-chain-parse-abort.sh:190:main_client source-file -nv "$nv_config" >"$nv_out" 2>"$nv_err"
+compat/scenarios/smoke/fixtures/config-chain-parse-abort.sh:230:main_client source-file "$batch_first" "$batch_invalid" "$batch_later" \
+compat/scenarios/smoke/fixtures/config-chain-parse-abort.sh:261:    "source-file '$nested_child' ; set-environment -g CHAIN_PARENT_SAME yes" \
+compat/scenarios/smoke/fixtures/config-chain-parse-abort.sh:268:main_client source-file "$nested_parent" >"$nested_out" 2>"$nested_err"
+compat/scenarios/smoke/fixtures/config-chain-parse-abort.sh:402:    "source-file '$control_nested_good' '$control_nested_bad' '$control_nested_later'" \
+compat/scenarios/smoke/fixtures/config-chain-parse-abort.sh:412:printf "source-file '%s' '%s' '%s'\n" \
+compat/scenarios/smoke/fixtures/config-chain-parse-abort.sh:418:    printf "source-file '%s'\n" "$control_nested_root" >&3
+compat/scenarios/smoke/fixtures/config-chain-parse-abort.sh:527:main_client source-file "$runtime_config" >"$runtime_out" 2>"$runtime_err"
+compat/scenarios/smoke/fixtures/config-alias-parse-unit.sh:54:    if main_client source-file "$@" >"$capture_out" 2>"$capture_err"; then
+compat/scenarios/smoke/fixtures/config-alias-parse-unit.sh:91:    "source-file '$batch_child'" \
+compat/scenarios/smoke/fixtures/config-tilde-grammar.sh:91:main_client source-file "$main_config" >/dev/null 2>&1 || main_status=$?
+compat/scenarios/smoke/fixtures/config-tilde-grammar.sh:95:main_client source-file "$empty_config" >/dev/null 2>&1 || empty_status=$?
+compat/scenarios/smoke/fixtures/config-tilde-grammar.sh:99:main_client source-file "$unset_config" >/dev/null 2>&1 || unset_status=$?
+compat/scenarios/smoke/fixtures/config-tilde-grammar.sh:104:main_client source-file -nv "$parse_only_config" >"$parse_only_out" 2>/dev/null || parse_only_status=$?
+compat/scenarios/smoke/fixtures/config-tilde-grammar.sh:107:main_client source-file -n "$invalid_config" >"$invalid_out" 2>"$invalid_err" || invalid_status=$?
+compat/scenarios/smoke/fixtures/config-tilde-grammar.sh:110:main_client source-file -n "$long_user_config" >"$long_user_out" 2>"$long_user_err" || long_user_status=$?
+compat/scenarios/smoke/fixtures/config-non-utf8-file-bytes.sh:12:printf 'display-message -p ROOT_BEFORE\nif-shell -F 1 "source-file %s"\ndisplay-message -p ROOT_AFTER\n' \
+compat/scenarios/smoke/fixtures/config-non-utf8-file-bytes.sh:20:    if tmux source-file -v "$1" >"$byte_root/out" 2>"$byte_root/err"; then
+compat/scenarios/smoke/fixtures/config-grammar.conf:31:run-shell "path=\"$HOME/zz-config-grammar-error.conf\"; printf '%s\\n' 'GRAMMAR_PARSE_ASSIGN=preserved' 'set @bad \\400' 'set-environment -g GRAMMAR_BEFORE_ERROR wrong' 'set-environment -g GRAMMAR_AFTER_ERROR wrong' > \"\$path\"; tmux -C source-file \"\$path\" | sed \"s|\$path|/tmp/zz-config-grammar-error.conf|g\" | grep '^%config-error' || true; rm -f \"\$path\""
+compat/scenarios/smoke/fixtures/own.conf:100:bind r source-file ~/.tmux.conf \; display-message "Reloaded!"
+compat/scenarios/smoke/fixtures/oh-my-tmux-runtime.py:119:    tmux("source-file", str(conf))
+compat/scenarios/smoke/fixtures/positional-minimums.sh:51:probe source-file source-file 1 source-file -t =missing
+compat/scenarios/smoke/fixtures/positional-minimums.sh:66:probe source-alias source-file 1 source -t =missing
+compat/scenarios/smoke/fixtures/source-file-depth.sh:20:                printf 'source-file %s/f%s.conf\n' "$chain_dir" \
+compat/scenarios/smoke/fixtures/source-file-depth.sh:24:                    printf 'source-file %s/leaf.conf ; set-option -g @source_line_depth_same yes\n' \
+compat/scenarios/smoke/fixtures/source-file-depth.sh:28:                    printf 'source-file %s/leaf.conf\n' "$chain_dir"
+compat/scenarios/smoke/fixtures/source-file-depth.sh:30:                printf 'source-file -q %s/leaf.conf\n' "$chain_dir"
+compat/scenarios/smoke/fixtures/source-file-depth.sh:49:    if tmux source-file "$probe_dir/f1.conf" \
+compat/scenarios/smoke/fixtures/source-file-depth.sh:63:source-file missing-loud.conf ; set-option -g @source_line_loud_same yes
+compat/scenarios/smoke/fixtures/source-file-depth.sh:65:source-file -q missing-quiet.conf ; set-option -g @source_line_quiet_same yes
+compat/scenarios/smoke/fixtures/source-file-depth.sh:69:source-file '$depth_root/matched-read-failure' ; set-option -g @source_line_read_same yes
+compat/scenarios/smoke/fixtures/source-file-depth.sh:73:tmux source-file "$depth_root/line-groups.conf" \
+compat/scenarios/smoke/fixtures/source-file-diagnostics.conf:1:run-shell "d=\"$HOME/wave-e\"; rm -rf \"\$d\"; mkdir -p \"\$d\"; printf 'wibble\\n' > \"\$d/bad.conf\"; tmux source-file \"\$d/bad.conf\" > \"\$d/out\" 2> \"\$d/err\"; r=\$?; o=\$(sed \"s|\$d/||g\" \"\$d/out\" | tr '\\n' '~'); e=\$(sed \"s|\$d/||g\" \"\$d/err\" | tr '\\n' '~'); tmux set-environment -g SOURCE_INVALID \"rc=\$r out=\$o err=\$e\""
+compat/scenarios/smoke/fixtures/source-file-diagnostics.conf:2:run-shell "d=\"$HOME/wave-e\"; tmux source-file \"\$d/missing.conf\" > \"\$d/out\" 2> \"\$d/err\"; r=\$?; o=\$(sed \"s|\$d/||g\" \"\$d/out\" | tr '\\n' '~'); e=\$(sed \"s|\$d/||g\" \"\$d/err\" | tr '\\n' '~'); tmux set-environment -g SOURCE_MISS \"rc=\$r out=\$o err=\$e\""
+compat/scenarios/smoke/fixtures/source-file-diagnostics.conf:3:run-shell "d=\"$HOME/wave-e\"; tmux source-file -q \"\$d/missing.conf\" > \"\$d/out\" 2> \"\$d/err\"; r=\$?; o=\$(sed \"s|\$d/||g\" \"\$d/out\" | tr '\\n' '~'); e=\$(sed \"s|\$d/||g\" \"\$d/err\" | tr '\\n' '~'); tmux set-environment -g SOURCE_QUIET \"rc=\$r out=\$o err=\$e\""
+compat/scenarios/smoke/fixtures/source-file-diagnostics.conf:4:run-shell "d=\"$HOME/wave-e\"; tmux source-file \"\$d/bad.conf\" \"\$d/missing.conf\" > \"\$d/out\" 2> \"\$d/err\"; r=\$?; o=\$(sed \"s|\$d/||g\" \"\$d/out\" | tr '\\n' '~'); e=\$(sed \"s|\$d/||g\" \"\$d/err\" | tr '\\n' '~'); tmux set-environment -g SOURCE_MIXED \"rc=\$r out=\$o err=\$e\""
+compat/scenarios/smoke/fixtures/source-file-diagnostics.conf:5:run-shell "d=\"$HOME/wave-e\"; tmux source-file \"\$d/[.conf\" > \"\$d/out\" 2> \"\$d/err\"; r=\$?; o=\$(sed \"s|\$d/||g\" \"\$d/out\" | tr '\\n' '~'); e=\$(sed \"s|\$d/||g\" \"\$d/err\" | tr '\\n' '~'); tmux set-environment -g SOURCE_MALFORMED \"rc=\$r out=\$o err=\$e\""
+compat/scenarios/smoke/fixtures/source-file-diagnostics.conf:6:run-shell "d=\"$HOME/wave-e\"; tmux source-file -q \"\$d/[.conf\" > \"\$d/out\" 2> \"\$d/err\"; r=\$?; o=\$(sed \"s|\$d/||g\" \"\$d/out\" | tr '\\n' '~'); e=\$(sed \"s|\$d/||g\" \"\$d/err\" | tr '\\n' '~'); tmux set-environment -g SOURCE_MALFORMED_QUIET \"rc=\$r out=\$o err=\$e\""
+compat/scenarios/smoke/fixtures/source-file-diagnostics.conf:7:run-shell "d=\"$HOME/wave-e\"; p=\"\$d/parent with spaces\"; mkdir -p \"\$p\"; printf 'source-file nested-missing.conf\\n' > \"\$p/entry.conf\"; tmux source-file \"\$p/entry.conf\" > \"\$d/out\" 2> \"\$d/err\"; r=\$?; o=\$(sed \"s|\$d/||g\" \"\$d/out\" | tr '\\n' '~'); e=\$(sed \"s|\$d/||g\" \"\$d/err\" | tr '\\n' '~'); tmux set-environment -g SOURCE_NESTED_MISS \"rc=\$r out=\$o err=\$e\""
+compat/scenarios/smoke/fixtures/source-file-diagnostics.conf:8:run-shell "d=\"$HOME/wave-e\"; p=\"\$d/parent with spaces\"; printf 'source-file -q nested-missing.conf\\n' > \"\$p/quiet-entry.conf\"; tmux source-file \"\$p/quiet-entry.conf\" > \"\$d/out\" 2> \"\$d/err\"; r=\$?; o=\$(sed \"s|\$d/||g\" \"\$d/out\" | tr '\\n' '~'); e=\$(sed \"s|\$d/||g\" \"\$d/err\" | tr '\\n' '~'); tmux set-environment -g SOURCE_NESTED_QUIET \"rc=\$r out=\$o err=\$e\""
+compat/scenarios/smoke/fixtures/source-file-diagnostics.conf:9:run-shell "d=\"$HOME/wave-e\"; printf 'kill-session -t missing-runtime\\nset-option -g nonexistent-option value\\nset-option -g @runtime-after yes\\n' > \"\$d/runtime.conf\"; tmux source-file \"\$d/runtime.conf\" > \"\$d/out\" 2> \"\$d/err\"; r=\$?; o=\$(sed \"s|\$d/||g\" \"\$d/out\" | tr '\\n' '~'); e=\$(sed \"s|\$d/||g\" \"\$d/err\" | tr '\\n' '~'); a=\$(tmux show-options -gqv @runtime-after); tmux set-environment -g SOURCE_RUNTIME \"rc=\$r out=\$o err=\$e after=\$a\""
+compat/scenarios/smoke/fixtures/source-file-diagnostics.conf:10:run-shell "d=\"$HOME/wave-e\"; printf 'kill-session -t missing-inner\\nset-option -g @inner-after yes\\n' > \"\$d/runtime-inner.conf\"; printf 'source-file %s/runtime-inner.conf\\nset-option -g @outer-after yes\\n' \"\$d\" > \"\$d/runtime-outer.conf\"; tmux source-file \"\$d/runtime-outer.conf\" > \"\$d/out\" 2> \"\$d/err\"; r=\$?; o=\$(sed \"s|\$d/||g\" \"\$d/out\" | tr '\\n' '~'); e=\$(sed \"s|\$d/||g\" \"\$d/err\" | tr '\\n' '~'); i=\$(tmux show-options -gqv @inner-after); a=\$(tmux show-options -gqv @outer-after); tmux set-environment -g SOURCE_RUNTIME_OUTER \"rc=\$r out=\$o err=\$e inner=\$i outer=\$a\""
+compat/scenarios/smoke/fixtures/source-file-diagnostics.conf:11:run-shell "d=\"$HOME/wave-e\"; c=\"$XDG_CONFIG_HOME/zz\"; mkdir -p \"\$c\"; printf 'set-option -ag @default_order D\\n' > \"\$c/mux.conf\"; printf 'set-option -ag @default_order A\\n' > \"\$d/after.conf\"; tmux set-option -g @default_order ''; tmux source-file -v \"\$c/mux.conf\" \"\$d/missing-middle.conf\" \"\$d/after.conf\" \"\$c/mux.conf\" > \"\$d/out\" 2> \"\$d/err\"; r=\$?; o=\$(sed -e \"s|\$c/mux.conf|DEFAULT|g\" -e \"s|\$d/after.conf|AFTER|g\" \"\$d/out\" | tr '\\n' '~'); e=\$(sed \"s|\$d/missing-middle.conf|MISSING|g\" \"\$d/err\" | tr '\\n' '~'); a=\$(tmux show-options -gqv @default_order); tmux set-environment -g SOURCE_DEFAULT_ORDER \"rc=\$r out=\$o err=\$e order=\$a\""
+compat/scenarios/smoke/config-non-utf8-file-bytes.txt:2:# The daemon reads config files as bytes: a runtime source-file carries the
+compat/scenarios/smoke/fixtures/alias-group-forgery.sh:42:main_client source-file "$conf" >"$out" 2>"$err" || status=$?
+compat/scenarios/smoke/fixtures/alias-group-forgery.sh:50:printf 'source-file %s\ndetach-client\n' "$conf" | control_client >"$out" 2>"$err" || true
+compat/scenarios/smoke/fixtures/source-file-byte-name.sh:21:root="$HOME/source-file-byte-name-$side"
+compat/scenarios/smoke/fixtures/source-file-byte-name.sh:34:main_client source-file "$plain" >/dev/null 2>&1 || :
+compat/scenarios/smoke/fixtures/source-file-byte-name.sh:42:main_client source-file "$directory/*.conf" >/dev/null 2>&1 || :
+compat/scenarios/smoke/fixtures/source-file-byte-name.sh:50:main_client source-file -F '#{ZZ_SOURCE_BYTE_PATH}' >/dev/null 2>&1 || :
+compat/scenarios/smoke/fixtures/source-file-byte-name.sh:54:main_client source-file -q "$root/$(printf 'miss\377ing').conf" >"$root/quiet" 2>&1 || :
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:190:control_callback_body="display-message -p OUTER_BEFORE ; source-file '$control_callback_path' ; display-message -p OUTER_AFTER"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:191:control_runtime_body="display-message -p OUTER_BEFORE ; source-file '$control_runtime_path' ; display-message -p OUTER_AFTER"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:192:control_read_body="display-message -p OUTER_BEFORE ; source-file '$control_read_path' ; display-message -p OUTER_AFTER"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:324:        initial_control_client source-file "$source_path" \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:334:        printf "source-file '%s'\n" "$source_path" >&3
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:365:    main_client source-file "$command_source_path" \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:436:    main_client source-file "$mixed_depth_alias_path" \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:483:    main_client source-file "$nested_only_alias_path" \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:508:    main_client source-file "$alias_source_path" \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:593:        initial_control_client source-file "$hook_source" \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:603:        printf "source-file '%s'\n" "$hook_source" >&3
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:626:    main_client source-file "$hook_source" \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:681:        "source-file '$hook_source_child_path'"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:888:        "source-file '$shutdown_nested_child_path'"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:890:        "run-shell -bC 'kill-server ; source-file \"$shutdown_nested_root_path\" ; display-message -p OUTER'")"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:947:    main_client source-file "$callback_hook_path" \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:962:        "$callback_hook_name" source-file "$callback_hook_path")"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:973:        "source-file '$callback_hook_path'" \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1093:    confirm_body="source-file '$control_confirm_child_path' ; display-message -p CONFIRM_INNER_AFTER"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1144:        prepared-runtime-argv source-file "$prepared_runtime_parse_path")"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1149:        "source-file '$prepared_runtime_parse_path'" \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1158:        prepared-runtime-alias-argv source-file "$prepared_runtime_alias_path")"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1163:        "source-file '$prepared_runtime_alias_path'" \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1175:        callback-unknown-argv source-file "$control_callback_unknown_path"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1178:        "source-file '$control_callback_unknown_path'" \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1181:        callback-arity-argv source-file "$control_callback_arity_path"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1184:        "source-file '$control_callback_arity_path'" \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1187:        callback-environment-argv source-file "$control_callback_environment_path"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1190:        "source-file '$control_callback_environment_path'" \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1199:        mixed-depth-argv source-file "$mixed_depth_alias_path")"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1205:        "source-file '$mixed_depth_alias_path'" \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1212:        nested-only-argv source-file "$nested_only_alias_path")"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1218:        "source-file '$nested_only_alias_path'" \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1278:        source-file "$control_callback_runtime_alias_path")"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1283:        "source-file '$control_callback_runtime_alias_path'" \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1307:        "source-file '$control_mixed_child_path' ; run-shell -C \"{ display-message -p quoted }\""
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1309:        mixed-source-first source-file "$control_mixed_outer_path"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1311:        "run-shell -C \"{ display-message -p quoted }\" ; source-file '$control_mixed_child_path'"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1313:        mixed-direct-first source-file "$control_mixed_outer_path"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1317:        parser source-file "$control_parser_path"
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:1319:        parser-no-execute source-file -n "$control_parser_path"
+compat/scenarios/smoke/fixtures/source-file-control.sh:9:control_dir="$HOME/source-file-control-$control_side"
+compat/scenarios/smoke/fixtures/source-file-control.sh:12:printf '%s\n' 'source-file zz-control-nested-one-missing.conf zz-control-nested-two-missing.conf' >"$control_dir/nested.conf"
+compat/scenarios/smoke/fixtures/source-file-control.sh:20:printf '%s\n' 'source-file status-nested-missing.conf' >"$control_dir/status-source.conf"
+compat/scenarios/smoke/fixtures/source-file-control.sh:27:    "source-file '$hooks_dir/leaf.conf'" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:28:    "source-file '$hooks_dir/unknown.conf'" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:36:    "source-file '$read_dir/direct-one' '$read_dir/direct-two' '$read_dir/direct-child.conf'" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:40:    "source-file '$read_dir/hook-bad'" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:44:    "source-file '$read_dir/hook-nested.conf'" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:49:printf "source-file middle-before-missing.conf '%s' middle-after-missing.conf\n" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:51:printf "source-file root-before-missing.conf '%s' root-after-missing.conf\n" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:57:printf "if-shell -F 1 'source-file %s'\n" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:67:    printf "run-shell -C 'source-file %s'\n" "$if_dir/child.conf"
+compat/scenarios/smoke/fixtures/source-file-control.sh:68:    printf "if-shell -bF 1 'source-file %s'\n" "$if_dir/child.conf"
+compat/scenarios/smoke/fixtures/source-file-control.sh:69:    printf "if-shell -F 1 'source-file %s'\n" "$if_dir/child.conf"
+compat/scenarios/smoke/fixtures/source-file-control.sh:70:    printf "if-shell 'true' 'source-file %s'\n" "$if_dir/child.conf"
+compat/scenarios/smoke/fixtures/source-file-control.sh:71:    printf "if-shell -F 1 'source-file %s'\n" "$if_dir/middle.conf"
+compat/scenarios/smoke/fixtures/source-file-control.sh:72:    printf "if-shell -F 1 'source-file %s'\n" "$if_dir/error-child.conf"
+compat/scenarios/smoke/fixtures/source-file-control.sh:73:    printf "if-shell -F 1 'source-file %s'\n" "$if_dir/missing.conf"
+compat/scenarios/smoke/fixtures/source-file-control.sh:89:            printf 'source-file %s/f%s.conf\n' "$depth_dir" "$((depth_level + 1))"
+compat/scenarios/smoke/fixtures/source-file-control.sh:91:            printf 'source-file %s/leaf.conf\n' "$depth_dir"
+compat/scenarios/smoke/fixtures/source-file-control.sh:92:            printf 'source-file -q %s/leaf.conf\n' "$depth_dir"
+compat/scenarios/smoke/fixtures/source-file-control.sh:349:printf "source-file '%s' '%s' ; display-message -p DIRECT_SHOULD_NOT_RUN\n" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:351:printf "source-file '%s' '%s' ; display-message -p PARTIAL_CONT\n" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:353:printf "source-file '%s' ; display-message -p NESTED_CONT\n" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:355:printf "source-file '%s' ; display-message -p INVALID_CONT\n" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:363:printf "source-file '%s' ; display-message -p SOURCED_RUN_CONT\n" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:440:    printf "source-file -v '%s'\n" "$control_dir/verbose.conf"
+compat/scenarios/smoke/fixtures/source-file-control.sh:461:printf "source-file '%s'\n" "$control_dir/runtime.conf" >&3
+compat/scenarios/smoke/fixtures/source-file-control.sh:488:printf "source-file '%s'\n" "$queue_dir/root.conf" >&3
+compat/scenarios/smoke/fixtures/source-file-control.sh:534:printf "source-file '%s'\n" "$if_dir/root.conf" >&3
+compat/scenarios/smoke/fixtures/source-file-control.sh:580:printf "source-file '%s' ; display-message -p DEPTH_CONT\n" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:719:        "source-file '$control_dir/status-runtime.conf'" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:722:        "source-file '$control_dir/status-source.conf'" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:762:    "source-file '$control_dir/status-runtime.conf'" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:771:    "source-file '$hooks_dir/root.conf'"
+compat/scenarios/smoke/fixtures/source-file-control.sh:773:    "source-file '$hooks_dir/missing.conf'"
+compat/scenarios/smoke/fixtures/source-file-control.sh:851:printf "source-file '%s'\n" "$read_dir/direct-root.conf" >&3
+compat/scenarios/smoke/fixtures/source-file-control.sh:869:    "source-file '$read_dir/hook-root.conf'"
+compat/scenarios/smoke/fixtures/source-file-control.sh:912:printf "run-shell -bC -d 0.3 'source-file \"%s\"'\n" \
+compat/scenarios/smoke/fixtures/source-file-control.sh:914:printf "run-shell -bC -d 0.6 'source-file \"%s\"'\n" \
+compat/scenarios/smoke/fixtures/args-parse-bind-key.sh:56:    main_client source-file "$config" >"$output_file" 2>"$error_file"
+exit=0
+rg -n -F -- 'load-buffer' compat/scenarios
+compat/scenarios/census-hooks.txt:47:set-hook -g after-load-buffer "set-environment -g CENSUS_AFTER_LOAD_BUFFER yes"
+compat/scenarios/census-hooks.txt:48:load-buffer -b censusbuf /etc/hostname
+compat/scenarios/census-hooks.txt:49:set-hook -gu after-load-buffer
+compat/scenarios/buffer-path-format.txt:3:run-shell -C "save-buffer -b seed /tmp/zz-buffer-path-#{pid}-canonical-load-buffer"
+compat/scenarios/buffer-path-format.txt:4:load-buffer -b canonical "/tmp/zz-buffer-path-#{pid}-canonical-#{command}"
+compat/scenarios/buffer-path-format.txt:6:run-shell -C "save-buffer -b seed /tmp/zz-buffer-path-#{pid}-alias-load-buffer"
+compat/scenarios/buffer-path-format.txt:9:run-shell -C "save-buffer -b seed /tmp/zz-buffer-path-#{pid}-prefix-load-buffer"
+compat/scenarios/buffer-path-format.txt:12:set-option -s command-alias[50] zzload=load-buffer
+compat/scenarios/buffer-path-format.txt:13:run-shell -C "save-buffer -b seed /tmp/zz-buffer-path-#{pid}-user-load-buffer"
+compat/scenarios/buffer-path-format.txt:17:load-buffer -b one-pass "/tmp/zz-buffer-path-#{pid}-##{session_name}"
+compat/scenarios/buffer-path-format.txt:19:run-shell -C "save-buffer -b seed ~/zz-buffer-path-#{pid}-tilde-load-buffer"
+compat/scenarios/buffer-path-format.txt:20:load-buffer -b tilde '#{?session_name,~/zz-buffer-path-#{pid}-tilde-#{command},/tmp/missing}'
+compat/scenarios/buffer-path-format.txt:22:run-shell "rm -f ~/zz-buffer-path-#{pid}-tilde-load-buffer"
+compat/scenarios/buffer-path-format.txt:24:run-shell -C "load-buffer -b saved-canonical /tmp/zz-buffer-path-#{pid}-canonical-save-buffer"
+compat/scenarios/buffer-path-format.txt:27:run-shell -C "load-buffer -b saved-alias /tmp/zz-buffer-path-#{pid}-alias-save-buffer"
+compat/scenarios/buffer-path-format.txt:30:run-shell -C "load-buffer -b saved-prefix /tmp/zz-buffer-path-#{pid}-prefix-save-buffer"
+compat/scenarios/buffer-path-format.txt:34:run-shell -C "load-buffer -b saved-user /tmp/zz-buffer-path-#{pid}-user-save-buffer"
+compat/scenarios/micro-flags.txt:10:load-buffer -t missing /dev/null
+compat/scenarios/fixtures/if-shell-background-order.sh:105:main_client load-buffer -b order-transcript "$transcript"
+compat/scenarios/fixtures/buffer-missing-target-error.sh:72:main_client load-buffer -b transcript "$transcript"
+compat/scenarios/fixtures/buffer-client-file-load.sh:74:probe_client "$work/first" "$HOME" load-buffer -b first shared.txt
+compat/scenarios/fixtures/buffer-client-file-load.sh:77:probe_client "$work/second" "$HOME" load-buffer -b second shared.txt
+compat/scenarios/fixtures/buffer-client-file-load.sh:80:probe_client "$work/second" "$HOME" load-buffer -b nested nested/deep.txt
+compat/scenarios/fixtures/buffer-client-file-load.sh:84:    load-buffer -b tilde '~/buffer-client-file-tilde.txt'
+compat/scenarios/fixtures/buffer-client-file-load.sh:87:probe_client "$work/first" "$HOME" load-buffer -b absolute "$work/absolute.txt"
+compat/scenarios/fixtures/buffer-client-file-load.sh:92:    load-buffer -b missing nope.txt 2>&1 >/dev/null)" || missing_status=$?
+compat/scenarios/smoke/buffer-standard-streams.txt:2:# Pinned d77c9dc6 cmd-load-buffer.c reads the invoking client's stdin;
+compat/scenarios/smoke/fixtures/buffer-standard-streams.py:21:    require(tmux("load-buffer", "-", data=payload).returncode == 0, "load stdin")
+compat/scenarios/smoke/fixtures/buffer-standard-streams.py:26:    require(tmux("load-buffer", "-b", "named", "-", data=payload).returncode == 0, "named stdin")
+compat/scenarios/smoke/fixtures/buffer-standard-streams.py:29:    require(tmux("load-buffer", "-b", "named", "-", data=b"").returncode == 0, "empty stdin")
+compat/scenarios/smoke/fixtures/buffer-standard-streams.py:35:    require(tmux("load-buffer", "-", "extra", data=b"invalid").returncode != 0, "public arity")
+compat/scenarios/smoke/fixtures/buffer-standard-streams.py:39:                   data=b"load-buffer -b named - extra\n\n")
+compat/scenarios/smoke/fixtures/buffer-clipboard-write.sh:126:main_client load-buffer -w -b three -t "$viewer" "$work/bravo"
+compat/scenarios/smoke/fixtures/buffer-clipboard-write.sh:127:expect bravo-three load-buffer-w
+compat/scenarios/smoke/fixtures/copy-mode-mode-keys-tail.sh:124:main_client load-buffer -b cmtail "$work/in.txt"
+compat/scenarios/smoke/fixtures/copy-mode-mode-keys-tail.sh:181:main_client load-buffer -b cmtail2 "$work/wrapped.txt"
+compat/scenarios/smoke/fixtures/copy-mode-mode-keys-tail.sh:224:main_client load-buffer -b cmtail3 "$work/long.txt"
+compat/scenarios/smoke/fixtures/copy-mode-mode-keys-tail.sh:293:main_client load-buffer -b cmtail4 "$work/search.txt"
+compat/scenarios/smoke/fixtures/copy-mode-formats.sh:117:main_client load-buffer -b cmformats "$work/lines.txt"
+compat/scenarios/smoke/fixtures/copy-mode-copy-line.sh:111:main_client load-buffer -b cmcopyline "$work/lines.txt"
+compat/scenarios/smoke/fixtures/command-flag-errors.tsv:36:load-buffer	loadb	-b	[-b buffer-name] [-t target-client] path
+compat/scenarios/smoke/fixtures/positional-minimums.sh:44:probe load-buffer load-buffer 1 load-buffer -t missing
+compat/scenarios/smoke/fixtures/positional-minimums.sh:59:probe loadb-alias load-buffer 1 loadb -t missing
+compat/scenarios/smoke/fixtures/positional-maximums.sh:109:load-buffer load-buffer 1
+compat/scenarios/smoke/fixtures/positional-maximums.sh:110:loadb load-buffer 1
+compat/scenarios/smoke/fixtures/copy-mode-search.sh:110:main_client load-buffer -b cmsearch "$work/in.txt"
+compat/scenarios/smoke/fixtures/copy-mode-prompt-bindings.sh:145:probe load-buffer -b cmpb "$work/in.txt"
+compat/scenarios/smoke/fixtures/copy-mode-prompt-bindings.sh:265:probe load-buffer -b cmpb2 "$work/long.txt"
+compat/scenarios/smoke/fixtures/copy-mode-mode-keys.sh:103:main_client load-buffer -b cmmodekeys "$work/short.txt"
+compat/scenarios/smoke/fixtures/copy-mode-mode-keys.sh:215:main_client load-buffer -b cmmodekeys "$work/wrapped.txt"
+exit=0
+rg -n -F -- 'save-buffer' compat/scenarios
+compat/scenarios/fixtures/buffer-missing-target-error.sh:45:probe empty-save-named save-buffer -b nosuch "$work/out"
+compat/scenarios/fixtures/buffer-missing-target-error.sh:49:probe empty-save-top save-buffer "$work/out"
+compat/scenarios/fixtures/buffer-missing-target-error.sh:60:probe stocked-save-named save-buffer -b nosuch "$work/out"
+compat/scenarios/fixtures/buffer-missing-target-error.sh:64:probe stocked-save-top save-buffer "$work/out"
+compat/scenarios/fixtures/buffer-client-file-save.sh:74:probe_client "$work/first" "$HOME" save-buffer -b saved out.txt
+compat/scenarios/fixtures/buffer-client-file-save.sh:79:probe_client "$work/first" "$HOME" save-buffer -a -b saved out.txt
+compat/scenarios/fixtures/buffer-client-file-save.sh:82:probe_client "$work/first" "$HOME" save-buffer -b saved out.txt
+compat/scenarios/fixtures/buffer-client-file-save.sh:86:    save-buffer -b saved '~/buffer-client-file-saved-tilde.txt'
+compat/scenarios/fixtures/buffer-client-file-save.sh:92:probe_client "$work/first" "$HOME" save-buffer -b saved "$work/second/absolute.txt"
+compat/scenarios/fixtures/buffer-client-file-save.sh:97:    save-buffer -b saved nodir/out.txt 2>&1 >/dev/null)" || missing_status=$?
+compat/scenarios/smoke/source-replay-diagnostics.txt:3:save-buffer -b zz-source-replay-if /tmp/zz-source-replay-if.conf
+compat/scenarios/smoke/source-replay-diagnostics.txt:6:save-buffer -b zz-source-replay-run /tmp/zz-source-replay-run.conf
+compat/scenarios/smoke/plugin-runtime-oh-my-tmux.txt:4:# `run -b "\"$TMUX_PROGRAM\" ${TMUX_SOCKET:+-S \"$TMUX_SOCKET\"} save-buffer - | xsel -i -b"`,
+compat/scenarios/buffer-missing-target-error.txt:3:# target resolver: cmd-paste-buffer.c:82 and cmd-save-buffer.c:92 answer
+compat/scenarios/buffer-missing-target-error.txt:4:# `no buffer NAME`, cmd-save-buffer.c:86 answers `no buffers` when nothing
+compat/scenarios/buffer-path-format.txt:3:run-shell -C "save-buffer -b seed /tmp/zz-buffer-path-#{pid}-canonical-load-buffer"
+compat/scenarios/buffer-path-format.txt:6:run-shell -C "save-buffer -b seed /tmp/zz-buffer-path-#{pid}-alias-load-buffer"
+compat/scenarios/buffer-path-format.txt:9:run-shell -C "save-buffer -b seed /tmp/zz-buffer-path-#{pid}-prefix-load-buffer"
+compat/scenarios/buffer-path-format.txt:13:run-shell -C "save-buffer -b seed /tmp/zz-buffer-path-#{pid}-user-load-buffer"
+compat/scenarios/buffer-path-format.txt:19:run-shell -C "save-buffer -b seed ~/zz-buffer-path-#{pid}-tilde-load-buffer"
+compat/scenarios/buffer-path-format.txt:23:save-buffer -b seed "/tmp/zz-buffer-path-#{pid}-canonical-#{command}"
+compat/scenarios/buffer-path-format.txt:24:run-shell -C "load-buffer -b saved-canonical /tmp/zz-buffer-path-#{pid}-canonical-save-buffer"
+compat/scenarios/buffer-path-format.txt:27:run-shell -C "load-buffer -b saved-alias /tmp/zz-buffer-path-#{pid}-alias-save-buffer"
+compat/scenarios/buffer-path-format.txt:30:run-shell -C "load-buffer -b saved-prefix /tmp/zz-buffer-path-#{pid}-prefix-save-buffer"
+compat/scenarios/buffer-path-format.txt:32:set-option -s command-alias[51] zzsave=save-buffer
+compat/scenarios/buffer-path-format.txt:34:run-shell -C "load-buffer -b saved-user /tmp/zz-buffer-path-#{pid}-user-save-buffer"
+compat/scenarios/smoke/buffer-standard-streams.txt:3:# cmd-save-buffer.c writes stdout verbatim, including with -a.
+compat/scenarios/census-hooks.txt:90:set-hook -g after-save-buffer "set-environment -g CENSUS_AFTER_SAVE_BUFFER yes"
+compat/scenarios/census-hooks.txt:91:save-buffer -b censuspaste /dev/null
+compat/scenarios/census-hooks.txt:92:set-hook -gu after-save-buffer
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:46:    require_bytes(["save-buffer", "-b", "bytes", "-", ";", "display", "-p", "AFTER"], b"hello")
+compat/scenarios/smoke/fixtures/cli-output-bytes.py:48:    require_bytes(["save-buffer", "-b", "bytes", str(saved), ";", "display", "-p", "AFTER"], b"AFTER\n")
+compat/scenarios/smoke/fixtures/buffer-standard-streams.py:22:    saved = tmux("save-buffer", "-")
+compat/scenarios/smoke/fixtures/buffer-standard-streams.py:27:    saved = tmux("save-buffer", "-a", "-b", "named", "-")
+compat/scenarios/smoke/fixtures/buffer-standard-streams.py:30:    require(tmux("save-buffer", "-b", "named", "-").stdout == payload, "empty preserves named buffer")
+compat/scenarios/smoke/fixtures/buffer-standard-streams.py:32:    require(tmux("save-buffer", "-b", "named", str(path)).returncode == 0, "save file")
+compat/scenarios/smoke/fixtures/buffer-standard-streams.py:33:    require(tmux("save-buffer", "-a", "-b", "named", str(path)).returncode == 0, "append file")
+compat/scenarios/smoke/fixtures/buffer-standard-streams.py:41:    require(tmux("save-buffer", "-b", "named", "-").stdout == b"tail\n", "Control preserves buffer")
+compat/scenarios/smoke/fixtures/stderr-parity-negative.scenario:15:err: save-buffer -b nosuchbuffer /dev/null
+compat/scenarios/smoke/fixtures/command-flag-errors.tsv:59:save-buffer	saveb	-b	[-a] [-b buffer-name] path
+compat/scenarios/smoke/fixtures/positional-minimums.sh:47:probe save-buffer save-buffer 1 save-buffer
+compat/scenarios/smoke/fixtures/positional-minimums.sh:62:probe saveb-alias save-buffer 1 saveb
+compat/scenarios/smoke/fixtures/positional-maximums.sh:145:save-buffer save-buffer 1
+compat/scenarios/smoke/fixtures/positional-maximums.sh:146:saveb save-buffer 1
+exit=0
+rg -n -F -- 'command-alias' compat/scenarios
+compat/scenarios/daemon-command-item-format.txt:11:set-option -s command-alias[31] zzrun=run-shell
+compat/scenarios/command-item-format.txt:3:# alias, a unique prefix, or a user command-alias still reports that name, and
+compat/scenarios/command-item-format.txt:12:set-option -s command-alias[30] zzitem=display-message
+compat/scenarios/command-item-format.txt:13:out: show-options -sv command-alias[30]
+compat/scenarios/command-alias.txt:1:# One command-alias layer expands before command lookup, appends caller args,
+compat/scenarios/command-alias.txt:4:set-option -s command-alias[10] lsw=list-windows
+compat/scenarios/command-alias.txt:5:out: show-options -sv command-alias[10]
+compat/scenarios/command-alias.txt:8:set-option -s command-alias[11] chain1=chain2
+compat/scenarios/command-alias.txt:9:set-option -s command-alias[12] chain2=list-sessions
+compat/scenarios/command-alias.txt:12:set-option -s command-alias[13] grab=capture-pane
+compat/scenarios/buffer-path-format.txt:12:set-option -s command-alias[50] zzload=load-buffer
+compat/scenarios/buffer-path-format.txt:32:set-option -s command-alias[51] zzsave=save-buffer
+compat/scenarios/source-file-output.txt:6:set-option -s command-alias[90] 'indirect=source-file -v compat/scenarios/source-file-output-child.conf'
+compat/scenarios/aliases-multi-body.txt:2:run-shell "python3 -c '__import__(\"subprocess\").run([\"tmux\",\"set-option\",\"-s\",\"command-alias[90]\",\"zzaliasmulti=display-message -p first\"+chr(10)+\"display-message -p\"],check=True)'"
+compat/scenarios/aliases-multi-body.txt:6:set-option -s command-alias[91] zzaliasempty=
+compat/scenarios/aliases-multi-body.txt:8:run-shell "python3 -c '__import__(\"subprocess\").run([\"tmux\",\"set-option\",\"-s\",\"command-alias[92]\",\"zzaliasdash=display-message -p -- -literal\"+chr(10)+\"display-message -p ok\"],check=True)'"
+compat/scenarios/lane2-store.txt:120:set-option -s command-alias zero=display-message,one=display-message
+compat/scenarios/lane2-store.txt:121:out: show-options -s command-alias
+compat/scenarios/lane2-store.txt:122:set-option -s command-alias[0] ZERO
+compat/scenarios/lane2-store.txt:123:set-option -sa command-alias[1] -suffix
+compat/scenarios/lane2-store.txt:124:set-option -su command-alias[0]
+compat/scenarios/lane2-store.txt:125:set-option -sa command-alias hole=display-message,tail=display-message
+compat/scenarios/lane2-store.txt:126:out: show-options -s command-alias
+compat/scenarios/lane2-store.txt:127:set-option -su command-alias
+compat/scenarios/lane2-store.txt:128:out: show-options -s command-alias
+compat/scenarios/option-name-formats.txt:39:set-option -su 'command-alias[0]'
+compat/scenarios/option-name-formats.txt:40:set-option -su 'command-alias[1]'
+compat/scenarios/option-name-formats.txt:41:set-option -su 'command-alias[2]'
+compat/scenarios/option-name-formats.txt:42:set-option -su 'command-alias[3]'
+compat/scenarios/option-name-formats.txt:43:set-option -su 'command-alias[4]'
+compat/scenarios/option-name-formats.txt:44:set-option -su 'command-alias[5]'
+compat/scenarios/option-name-formats.txt:45:set-option -s 'command-alias[9]' NINE
+compat/scenarios/option-name-formats.txt:46:set-option -s 'command-alias[4]' FOUR
+compat/scenarios/option-name-formats.txt:47:set-option -s 'command-alias[named]' NAMED
+compat/scenarios/option-name-formats.txt:56:out: display-message -p -t w:0.0 #{command-alias}|#{command-alias[4]}|#{command-alias[9]}|#{command-alias[named]}|[#{command-alias[missing]}]
+compat/scenarios/native-prefix-isolation.txt:29:set-option -s command-alias[40] 'split=list-commands -F "#{command_list_name}" capture-pane'
+compat/scenarios/source-file-current-file.txt:6:set-option -s command-alias[60] cfalias=set-option
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:87:main_client set-option -s 'command-alias[100]' 'rr=run-shell -C'
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:88:main_client set-option -s 'command-alias[101]' \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:90:main_client set-option -s 'command-alias[102]' \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:92:main_client set-option -s 'command-alias[103]' \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:94:main_client set-option -s 'command-alias[104]' \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:193:main_client set-option -s 'command-alias[105]' \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:195:main_client set-option -s 'command-alias[106]' \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:197:main_client set-option -s 'command-alias[107]' \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:199:main_client set-option -s 'command-alias[108]' \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:201:main_client set-option -s 'command-alias[109]' \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:203:main_client set-option -s 'command-alias[110]' \
+compat/scenarios/smoke/fixtures/source-replay-diagnostics.sh:205:main_client set-option -s 'command-alias[111]' \
+compat/scenarios/smoke/fixtures/args-parse-set-option.sh:63:main_client set-option -s 'command-alias[90]' 'zzset84=set-option -g'
+compat/scenarios/smoke/fixtures/args-parse-set-option.sh:64:main_client set-option -s 'command-alias[91]' 'zzdm84=display-message -p'
+compat/scenarios/smoke/fixtures/args-parse-set-hook.sh:84:main_client set-option -s 'command-alias[90]' 'zzhook84=set-hook -g'
+compat/scenarios/smoke/fixtures/args-parse-set-hook.sh:85:main_client set-option -s 'command-alias[91]' 'zzdisplay84=display-message -p'
+compat/scenarios/smoke/fixtures/args-parse-run-shell.sh:124:main_client set-option -s command-alias[90] 'zzrun84=run-shell'
+compat/scenarios/smoke/fixtures/args-parse-display-panes.sh:110:main_client set-option -s 'command-alias[90]' \
+compat/scenarios/smoke/fixtures/args-parse-display-panes.sh:112:main_client set-option -s 'command-alias[91]' \
+compat/scenarios/smoke/fixtures/args-parse-display-menu.sh:268:main_client set-option -s 'command-alias[90]' 'zzmenu10h=display-menu'
+compat/scenarios/smoke/fixtures/args-parse-display-menu.sh:269:main_client set-option -s 'command-alias[91]' \
+compat/scenarios/smoke/fixtures/args-parse-confirm-before.sh:198:    'command-alias[90]=zzconfirm84=confirm-before -c x' \
+compat/scenarios/smoke/fixtures/args-parse-confirm-before.sh:199:    'command-alias[91]=inner10e=display-message -p nested' \
+compat/scenarios/smoke/fixtures/args-parse-confirm-before.sh:200:    'command-alias[92]=outer10e=confirm-before { inner10e }' \
+compat/scenarios/smoke/fixtures/args-parse-confirm-before.sh:201:    'command-alias[93]=loop10e=confirm-before { loop10e }'
+compat/scenarios/smoke/fixtures/args-parse-command-prompt.sh:177:    'command-alias[94]=cpalias10f=set-environment -g CP_ALIAS_FROZEN' \
+compat/scenarios/smoke/fixtures/args-parse-command-prompt.sh:178:    'command-alias[95]=cpchild10f=set-environment -g CP_ALIAS_SIBLING' \
+compat/scenarios/smoke/fixtures/args-parse-command-prompt.sh:179:    'command-alias[96]=cpouter10f=command-prompt { cpchild10f yes }'
+compat/scenarios/smoke/fixtures/args-parse-command-prompt.sh:289:if ! main_client set-option -s 'command-alias[94]' \
+compat/scenarios/smoke/fixtures/control-alias-prepare.sh:24:main_client set-option -s command-alias[40] 'live=display-message -p old'
+compat/scenarios/smoke/fixtures/control-alias-prepare.sh:28:    printf '%s\n' "set-option -s command-alias[40] 'live=display-message -p new' ; live"
+compat/scenarios/smoke/fixtures/args-parse-choosers.sh:176:    'command-alias[90]=oldpick=set-option -g @TYPED' \
+compat/scenarios/smoke/fixtures/args-parse-choosers.sh:177:    'command-alias[91]=latepick=set-environment -g QUOTED_BEFORE'
+compat/scenarios/smoke/fixtures/args-parse-choosers.sh:253:main_client set-option -s 'command-alias[92]' \
+compat/scenarios/smoke/fixtures/args-parse-choosers.sh:259:main_client set -su 'command-alias[92]'
+compat/scenarios/smoke/fixtures/args-parse-choosers.sh:266:main_client set-option -s 'command-alias[91]' \
+compat/scenarios/smoke/fixtures/args-parse-choosers.sh:306:    main_client set-option -su "command-alias[$index]" >/dev/null 2>&1 || true
+compat/scenarios/smoke/fixtures/args-parse-bind-key.sh:189:main_client set-option -s 'command-alias[90]' 'zzbind84=bind-key -T zzalias'
+compat/scenarios/smoke/fixtures/args-parse-bind-key.sh:190:main_client set-option -s 'command-alias[91]' 'zzdisplay84=display-message -p'
+compat/scenarios/smoke/fixtures/alias-group-forgery.sh:24:forged=__zz-command-alias-group
+compat/scenarios/smoke/fixtures/alias-group-forgery.sh:64:main_client set-option -s 'command-alias[90]' \
+compat/scenarios/smoke/fixtures/config-alias-parse-unit.sh:67:main_client set-option -s 'command-alias[94]' \
+compat/scenarios/smoke/fixtures/config-alias-parse-unit.sh:70:    "set-option -s command-alias[94] 'zsame=display-message -p same-new' ; zsame" \
+compat/scenarios/smoke/fixtures/config-alias-parse-unit.sh:75:main_client set-option -s 'command-alias[95]' \
+compat/scenarios/smoke/fixtures/config-alias-parse-unit.sh:78:    "set-option -s command-alias[95] 'zlater=display-message -p later-new'" \
+compat/scenarios/smoke/fixtures/config-alias-parse-unit.sh:85:main_client set-option -s 'command-alias[97]' \
+compat/scenarios/smoke/fixtures/config-alias-parse-unit.sh:90:    "set-option -s command-alias[97] 'zparse=display-message -p nested-new'" \
+compat/scenarios/smoke/fixtures/config-alias-parse-unit.sh:104:    "set-option -s command-alias[98] 'zroots=set-option -g @alias_root_seen seen'" \
+compat/scenarios/smoke/fixtures/config-alias-parse-unit.sh:116:    root_alias="$(cold_client show-options -sqv 'command-alias[98]' 2>/dev/null || :)"
+compat/scenarios/smoke/fixtures/config-chain-parse-abort.sh:173:main_client set-option -s 'command-alias[99]' \
+exit=0
+rg -n -F -- 'agent-send' compat/scenarios
+exit=1
+rg -n -F -- 'send-text' compat/scenarios
+exit=1

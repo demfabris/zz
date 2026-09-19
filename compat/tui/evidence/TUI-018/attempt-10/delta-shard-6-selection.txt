@@ -1,0 +1,11 @@
+smoke/config-grammar.txt
+smoke/copy-mode-kill-on-exit.txt
+smoke/display-menu-mouse.txt
+smoke/display-popup-resize-lifecycle.txt
+smoke/format-monitor-hooks.txt
+smoke/keys-prefix-remainder.txt
+smoke/pane-colours-palette.txt
+smoke/positional-maximums.txt
+smoke/source-file-depth.txt
+source-file-current-file.txt
+zoom.txt

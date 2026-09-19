@@ -1,0 +1,47 @@
+{
+  "production_revision": "c3104379cc1887cf962565fe45c629c518a85eca",
+  "binary_sha256": "aadc7cb880201b46bef471be47bbd88657a4627ff4b1d3d4ac856e118bf9cf9e",
+  "normal_runs": [
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/corrected-streams-1.txt",
+      "summary": "all 116 asserted comparisons identical, 3 recorded not asserted, 5 decided (0 for a sibling lane)",
+      "exit_status": 0
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/corrected-streams-2.txt",
+      "summary": "all 116 asserted comparisons identical, 3 recorded not asserted, 5 decided (0 for a sibling lane)",
+      "exit_status": 0
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/corrected-streams-3.txt",
+      "summary": "all 116 asserted comparisons identical, 3 recorded not asserted, 5 decided (0 for a sibling lane)",
+      "exit_status": 0
+    }
+  ],
+  "self_check_runs": [
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/corrected-self-check-1.txt",
+      "expectations_passed": 90,
+      "sabotages_caught": 88,
+      "equivalences_passed": 2,
+      "matrix_sabotages_passed": 50,
+      "exit_status": 0
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/corrected-self-check-2.txt",
+      "expectations_passed": 90,
+      "sabotages_caught": 88,
+      "equivalences_passed": 2,
+      "matrix_sabotages_passed": 50,
+      "exit_status": 0
+    },
+    {
+      "artifact": "compat/tui/evidence/TUI-018/attempt-09/corrected-self-check-3.txt",
+      "expectations_passed": 90,
+      "sabotages_caught": 88,
+      "equivalences_passed": 2,
+      "matrix_sabotages_passed": 50,
+      "exit_status": 0
+    }
+  ]
+}

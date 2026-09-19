@@ -1,0 +1,28 @@
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-mux)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 15.00s
+     Running unittests src/lib.rs (target/debug/deps/zz_mux-eed3ba838a6892ab)
+
+running 5 tests
+test command::tests::new_and_split_window_create_live_empty_panes ... ok
+test command::tests::new_and_split_window_carry_pane_local_environment ... ok
+test command::tests::split_window_zoom_follows_the_post_spawn_active_pane ... ok
+test command::tests::split_window_retain_flags_write_the_pins_pane_local_key_retention ... ok
+test command::tests::split_window_style_and_title_flags_match_pinned_spawn_semantics ... FAILED
+
+failures:
+
+---- command::tests::split_window_style_and_title_flags_match_pinned_spawn_semantics stdout ----
+
+thread 'command::tests::split_window_style_and_title_flags_match_pinned_spawn_semantics' (2660271) panicked at crates/zz-mux/src/command.rs:24176:14:
+called `Result::unwrap()` on an `Err` value: InvalidCommand("bad style: fg=not-a-colour")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    command::tests::split_window_style_and_title_flags_match_pinned_spawn_semantics
+
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 532 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `-p zz-mux --lib`
+exit_status=101

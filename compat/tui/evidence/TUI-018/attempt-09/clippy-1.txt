@@ -1,0 +1,79 @@
+    Checking libghostty-vt-sys v0.2.1 (/home/demfabris/dev/zz-c11-alias-fix/third_party/rust/libghostty-vt-sys)
+   Compiling cef-dll-sys v152.2.0+152.0.6
+   Compiling zz v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz)
+    Checking libghostty-vt v0.2.1 (https://github.com/uzaaft/libghostty-rs?rev=46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0#46a9d2ac)
+    Checking zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-terminal)
+    Checking cef v152.2.0+152.0.6
+    Checking zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-protocol)
+    Checking zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-mux)
+    Checking zz-client v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-client)
+    Checking zz-browser v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-browser)
+    Checking zz-ui v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-ui)
+    Checking zz-chrome-import v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-chrome-import)
+    Checking zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-alias-fix/crates/zz-daemon)
+error: implicit borrow as raw pointer
+    --> crates/zz-daemon/src/client.rs:1710:31
+     |
+1710 |             libc::sigemptyset(&mut action.sa_mask);
+     |                               ^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#borrow_as_ptr
+     = note: `-D clippy::borrow-as-ptr` implied by `-D warnings`
+     = help: to override `-D warnings` add `#[allow(clippy::borrow_as_ptr)]`
+help: use a raw pointer instead
+     |
+1710 |             libc::sigemptyset(&raw mut action.sa_mask);
+     |                                +++
+
+error: implicit borrow as raw pointer
+    --> crates/zz-daemon/src/client.rs:1711:47
+     |
+1711 |             if libc::sigaction(libc::SIGTERM, &action, &mut previous) != 0 {
+     |                                               ^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#borrow_as_ptr
+help: use a raw pointer instead
+     |
+1711 |             if libc::sigaction(libc::SIGTERM, &raw const action, &mut previous) != 0 {
+     |                                                +++++++++
+
+error: implicit borrow as raw pointer
+    --> crates/zz-daemon/src/client.rs:1711:56
+     |
+1711 |             if libc::sigaction(libc::SIGTERM, &action, &mut previous) != 0 {
+     |                                                        ^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#borrow_as_ptr
+help: use a raw pointer instead
+     |
+1711 |             if libc::sigaction(libc::SIGTERM, &action, &raw mut previous) != 0 {
+     |                                                         +++
+
+error: implicit borrow as raw pointer
+    --> crates/zz-daemon/src/client.rs:1726:49
+     |
+1726 |         unsafe { libc::sigaction(libc::SIGTERM, &self.0, std::ptr::null_mut()) };
+     |                                                 ^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#borrow_as_ptr
+help: use a raw pointer instead
+     |
+1726 |         unsafe { libc::sigaction(libc::SIGTERM, &raw const self.0, std::ptr::null_mut()) };
+     |                                                  +++++++++
+
+error: could not compile `zz-daemon` (lib) due to 4 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: implicit borrow as raw pointer
+    --> crates/zz-daemon/src/client.rs:1809:70
+     |
+1809 |                     libc::sigaction(libc::SIGTERM, std::ptr::null(), &mut action),
+     |                                                                      ^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#borrow_as_ptr
+help: use a raw pointer instead
+     |
+1809 |                     libc::sigaction(libc::SIGTERM, std::ptr::null(), &raw mut action),
+     |                                                                       +++
+
+error: could not compile `zz-daemon` (lib test) due to 5 previous errors
+exit_status=101

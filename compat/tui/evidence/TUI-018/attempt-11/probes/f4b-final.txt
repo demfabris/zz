@@ -1,0 +1,12 @@
+probe/f4b.sh: line 22: kill: (2644513) - No such process
+SAME direct before
+probe/f4b.sh: line 22: kill: (2645708) - No such process
+DIFF direct after
+9c9
+< rc=0 tail= err=
+---
+> rc=1 tail= err=
+SAME alias before
+SAME alias after
+SAME file before
+SAME file after

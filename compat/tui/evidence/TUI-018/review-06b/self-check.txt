@@ -1,0 +1,1561 @@
+self-check: one deliberate one-sided difference per channel, plus two equivalences
+ok    self-check equivalence: the same command on both sides
+      case stdout-sabotage
+      stdout differs (tmux 0 bytes, zz 9 bytes)
+        0a1
+        > SABOTAGE
+ok    self-check stdout, an option on one side only
+ok    self-check exit and stderr, a buffer missing on both sides
+      case exit-sabotage-present
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 0 bytes, zz 8 bytes)
+        0a1
+        > SABOTAGE
+        \ No newline at end of file
+      stderr differs
+        1d0
+        < no buffer zzcs-sabotage
+      state differs
+        2a3
+        > B zzcs-sabotage 8
+ok    self-check exit and stderr, a buffer one side does not have
+      case state-sabotage
+      state differs
+        1a2
+        > S zzcs-sab 1
+        2a4
+        > P zzcs-sab:0.0 dead=0 process=yes 80x24
+        11a14
+        > C 0 $|
+ok    self-check state, a session on one side only
+      case content-sabotage
+      state differs
+        14c14
+        < C 1 
+        ---
+        > C 1 ONE-SIDED|
+ok    self-check pane content, bytes written into one side only
+      case source-file-alias-group-two-members
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < Bad file descriptor: -
+ok    self-check source-file-alias-group-two-members: second reader removed on zz
+      case source-file-alias-group-two-members-value
+      stdout differs (tmux 6 bytes, zz 9 bytes)
+        1c1
+        < kappa
+        ---
+        > sabotage
+      state differs
+        5c5
+        < O @zzcs-one kappa
+        ---
+        > O @zzcs-one sabotage
+ok    self-check source-file-alias-group-two-members-value: zz option changed
+      case load-buffer-alias-group-source-second
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < Bad file descriptor: -
+ok    self-check load-buffer-alias-group-source-second: source reader removed on zz
+      case load-buffer-alias-group-source-second-value
+      stdout differs (tmux 9 bytes, zz 9 bytes)
+        1c1
+        < aM-CM-)bM-^?c^@d
+        ---
+        > zM-CM-)bM-^?c^@d
+ok    self-check load-buffer-alias-group-source-second-value: one byte changed on zz
+      case load-buffer-alias-group-two-readers
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < Bad file descriptor: -
+ok    self-check load-buffer-alias-group-two-readers: second reader removed on zz
+      case load-buffer-alias-group-two-readers-value
+      stdout differs (tmux 9 bytes, zz 9 bytes)
+        1c1
+        < aM-CM-)bM-^?c^@d
+        ---
+        > zM-CM-)bM-^?c^@d
+ok    self-check load-buffer-alias-group-two-readers-value: one byte changed on zz
+      case load-buffer-alias-group-reader-last
+      stdout differs (tmux 7 bytes, zz 9 bytes)
+        1c1
+        < before
+        ---
+        > sabotage
+ok    self-check load-buffer-alias-group-reader-last: first member output changed on zz
+      case load-buffer-alias-group-reader-last-value
+      stdout differs (tmux 9 bytes, zz 9 bytes)
+        1c1
+        < aM-CM-)bM-^?c^@d
+        ---
+        > zM-CM-)bM-^?c^@d
+ok    self-check load-buffer-alias-group-reader-last-value: one byte changed on zz
+      case alias-source-spent-source-continues
+      stdout differs (tmux 6 bytes, zz 0 bytes)
+        1d0
+        < after
+      state differs
+        3c3
+        < O @zzcs-after yes
+        ---
+        > O @zzcs-after 
+ok    self-check alias-source-spent-source-continues: altered alias member on zz
+      case alias-source-spent-source-continues-state
+      state differs
+        3c3
+        < O @zzcs-after yes
+        ---
+        > O @zzcs-after 
+ok    self-check alias-source-spent-source-continues-state: altered alias member on zz
+      case alias-buffer-spent-source-continues
+      stdout differs (tmux 6 bytes, zz 0 bytes)
+        1d0
+        < after
+      state differs
+        4c4
+        < O @zzcs-after yes
+        ---
+        > O @zzcs-after 
+ok    self-check alias-buffer-spent-source-continues: altered alias member on zz
+      case alias-buffer-spent-source-continues-state
+      state differs
+        4c4
+        < O @zzcs-after yes
+        ---
+        > O @zzcs-after 
+ok    self-check alias-buffer-spent-source-continues-state: altered alias member on zz
+      case alias-pane-spent-source-continues
+      stdout differs (tmux 6 bytes, zz 0 bytes)
+        1d0
+        < after
+      state differs
+        4c4
+        < O @zzcs-after yes
+        ---
+        > O @zzcs-after 
+ok    self-check alias-pane-spent-source-continues: altered alias member on zz
+      case alias-pane-spent-source-continues-state
+      state differs
+        5c5
+        < O @zzcs-after yes
+        ---
+        > O @zzcs-after 
+ok    self-check alias-pane-spent-source-continues-state: altered alias member on zz
+      case alias-missing-source-aborts
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 7 bytes, zz 13 bytes)
+        1a2
+        > after
+      stderr differs
+        1d0
+        < No such file or directory: /tmp/zz018-no-such-config
+      state differs
+        3c3
+        < O @zzcs-after 
+        ---
+        > O @zzcs-after yes
+ok    self-check alias-missing-source-aborts: altered alias member on zz
+      case file-replay-single-reader
+      stdout differs (tmux 0 bytes, zz 8 bytes)
+        0a1
+        > dropped
+      state differs
+        4c4
+        < O @zzcs-replay applied
+        ---
+        > O @zzcs-replay 
+ok    self-check file-replay-single-reader: altered alias member on zz
+      case file-replay-nonreader-then-reader
+      state differs
+        4c4
+        < O @zzcs-replay applied
+        ---
+        > O @zzcs-replay 
+ok    self-check file-replay-nonreader-then-reader: altered alias member on zz
+      case file-replay-two-readers
+      exit tmux: 1  zz: 0
+      stderr differs
+        1d0
+        < Bad file descriptor: -
+ok    self-check file-replay-two-readers: altered alias member on zz
+      case alias-binary-unterminated-stdout
+      stdout differs (tmux 4 bytes, zz 5 bytes)
+        1c1
+        < aM-^?^@z
+        \ No newline at end of file
+        ---
+        > aM-^?^@z
+ok    self-check alias-binary-unterminated-stdout: altered alias member on zz
+      case alias-c-locale-binary-unterminated-stdout
+      stdout differs (tmux 4 bytes, zz 5 bytes)
+        1c1
+        < aM-^?^@z
+        \ No newline at end of file
+        ---
+        > aM-^?^@z
+ok    self-check alias-c-locale-binary-unterminated-stdout: altered alias member on zz
+      case file-replay-binary-unterminated-stdout
+      stdout differs (tmux 4 bytes, zz 5 bytes)
+        1c1
+        < aM-^?^@z
+        \ No newline at end of file
+        ---
+        > aM-^?^@z
+ok    self-check file-replay-binary-unterminated-stdout: altered alias member on zz
+      case file-replay-binary-then-alias-print
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > Bad file descriptor: -
+ok    self-check file-replay-binary-then-alias-print: altered alias member on zz
+      case alias-binary-then-print
+      stdout differs (tmux 4 bytes, zz 8 bytes)
+        1c1
+        < aM-^?^@z
+        \ No newline at end of file
+        ---
+        > changed
+ok    self-check alias-binary-then-print: altered alias member on zz
+      case daemon-start-config-refuses-stdin
+      stdout differs (tmux 4 bytes, zz 12 bytes)
+        0a1
+        > applied
+ok    self-check daemon-start-config-refuses-stdin: applied payload on zz
+      case file-unused-open-stdin
+      exit tmux: 0  zz: 124
+      state differs
+        4c4
+        < O @zzcs-replay yes
+        ---
+        > O @zzcs-replay 
+ok    self-check file-unused-open-stdin: unused-open sabotage
+      case file-unused-oversized-stdin
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > standard input exceeds 1048576 bytes: -
+ok    self-check file-unused-oversized-stdin: unused-large sabotage
+      case alias-preceding-state-before-eof
+      stdout differs (tmux 15 bytes, zz 12 bytes)
+        1c1
+        < before-eof=yes
+        ---
+        > before-eof=
+      state differs
+        10c10
+        < O @zzcs-before yes
+        ---
+        > O @zzcs-before 
+ok    self-check alias-preceding-state-before-eof: alias-order sabotage
+      case file-preceding-state-before-eof
+      stdout differs (tmux 15 bytes, zz 12 bytes)
+        1c1
+        < before-eof=yes
+        ---
+        > before-eof=
+      state differs
+        10c10
+        < O @zzcs-before yes
+        ---
+        > O @zzcs-before 
+ok    self-check file-preceding-state-before-eof: file-order sabotage
+      case pending-source-sigterm-status
+      exit tmux: 0  zz: 143
+ok    self-check pending-source-sigterm-status: term-status sabotage
+      case pending-source-sigterm-payload-unapplied
+      state differs
+        4c4
+        < O @zzcs-replay 
+        ---
+        > O @zzcs-replay payload
+ok    self-check pending-source-sigterm-payload-unapplied: term-payload sabotage
+      case pending-source-sigterm-tail-unapplied
+      state differs
+        9c9
+        < O @zzcs-cancel 
+        ---
+        > O @zzcs-cancel yes
+ok    self-check pending-source-sigterm-tail-unapplied: term-tail sabotage
+      case control-source-read-error-continues-output
+      stdout differs (tmux 131 bytes, zz 93 bytes)
+        5,7d4
+        < after
+        < %end TIME ID 0
+        < %begin TIME ID 0
+ok    self-check control-source-read-error-continues-output: removed continuation on zz
+      case control-source-read-error-continues-state
+      stdout differs (tmux 131 bytes, zz 99 bytes)
+        7,8d6
+        < %begin TIME ID 0
+        < %end TIME ID 0
+      state differs
+        11c11
+        < O @zzcs-control yes
+        ---
+        > O @zzcs-control 
+ok    self-check control-source-read-error-continues-state: removed continuation on zz
+      case stream-display-partial
+      state differs
+        1c1
+        < open=^[[31mRED^[[39m| cursor=3:0 history=0
+        ---
+        > open= cursor=0:0 history=0
+ok    self-check stream-display-partial: partial delivery sabotage
+      case stream-display-eof
+      state differs
+        2c2
+        < final=FIRST-^[[1mSECOND^[[0m| cursor=5:1 history=0
+        ---
+        > final=FIRST-| cursor=6:0 history=0
+ok    self-check stream-display-eof: eof delivery sabotage
+      case stream-display-term
+      state differs
+        1,2c1,2
+        < open=^[[31mRED^[[39m| cursor=3:0 history=0
+        < final=^[[31mRED^[[39m| cursor=3:0 history=0
+        ---
+        > open= cursor=0:0 history=0
+        > final= cursor=0:0 history=0
+ok    self-check stream-display-term: term delivery sabotage
+      case stream-display-slow
+      state differs
+        2c2
+        < final=slow1-slow2-slow3-slow4-slow5-slow6-| cursor=36:0 history=0
+        ---
+        > final=slow1-slow2-slow3-slow4-slow6-| cursor=30:0 history=0
+ok    self-check stream-display-slow: slow delivery sabotage
+      case stream-display-fast
+      state differs
+        1c1
+        < final=9875 179876 179877 179878 179879 179880 179881 179882 179883 179884 179885 17988|6 179887 179888 179889 179890 179891 179892 179893 179894 179895 179896 179897 1|79898 179899 179900 179901 179902 179903 179904 179905 179906 179907 179908 1799|09 179910 179911 179912 179913 179914 179915 179916 179917 179918 179919 179920|179921 179922 179923 179924 179925 179926 179927 179928 179929 179930 179931 179|932 179933 179934 179935 179936 179937 179938 179939 179940 179941 179942 179943| 179944 179945 179946 179947 179948 179949 179950 179951 179952 179953 179954 17|9955 179956 179957 179958 179959 179960 179961 179962 179963 179964 179965 17996|6 179967 179968 179969 179970 179971 179972 179973 179974 179975 179976 179977 1|79978 179979 179980 179981 179982 179983 179984 179985 179986 179987 179988 1799|89 179990 179991 179992 179993 179994 179995 179996 179997 179998 179999 180000| cursor=80:10
+        ---
+        > final= 177544 177545 177546 177547 177548 177549 177550 177551 177552 177553 177554 17|7555 177556 177557 177558 177559 177560 177561 177562 177563 177564 177565 17756|6 177567 177568 177569 177570 177571 177572 177573 177574 177575 177576 177577 1|77578 177579 177580 177581 177582 177583 177584 177585 177586 177587 177588 1775|89 177590 177591 177592 177593 177594 177595 177596 177597 177598 177599 177600|177601 177602 177603 177604 177605 177606 177607 177608 177609 177610 177611 177|612 177613 177614 177615 177616 177617 177618 177619 177620 177621 177622 177623| 177624 177625 177626 177627 177628 177629 177630 177631 177632 177633 177634 17|7635 177636 177637 177638 177639 177640 177641 177642 177643 177644 177645 17764|6 177647 177648 177649 177650 177651 177652 177653 177654 177655 177656 177657 1|77658 177659 177| cursor=16:10
+ok    self-check stream-display-fast: fast delivery sabotage
+      case stream-display-utf8
+      state differs
+        1,2c1,2
+        < open=AM-CM-)B^[[31mRED^[[39mC| cursor=7:0 history=0
+        < final=AM-CM-)B^[[31mRED^[[39mC| cursor=7:0 history=0
+        ---
+        > open=AM-oM-?M-=B^[[31mRED^[[39mC| cursor=7:0 history=0
+        > final=AM-oM-?M-=B^[[31mRED^[[39mC| cursor=7:0 history=0
+ok    self-check stream-display-utf8: utf8 delivery sabotage
+      case stream-split-partial
+      state differs
+        1c1
+        < open=^[[31mRED^[[39m| cursor=3:0 history=0
+        ---
+        > open= cursor=0:0 history=0
+ok    self-check stream-split-partial: partial delivery sabotage
+      case stream-split-term
+      state differs
+        1,2c1,2
+        < open=^[[31mRED^[[39m| cursor=3:0 history=0
+        < final=^[[31mRED^[[39m| cursor=3:0 history=0
+        ---
+        > open= cursor=0:0 history=0
+        > final= cursor=0:0 history=0
+ok    self-check stream-split-term: term delivery sabotage
+      case stream-split-utf8
+      state differs
+        1,2c1,2
+        < open=AM-CM-)B^[[31mRED^[[39mC| cursor=7:0 history=0
+        < final=AM-CM-)B^[[31mRED^[[39mC| cursor=7:0 history=0
+        ---
+        > open=AM-oM-?M-=B^[[31mRED^[[39mC| cursor=7:0 history=0
+        > final=AM-oM-?M-=B^[[31mRED^[[39mC| cursor=7:0 history=0
+ok    self-check stream-split-utf8: utf8 delivery sabotage
+      case matrix-direct-buffer-spent
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-direct-buffer-spent: state execution sabotage
+compat/tui-command-streams.sh: line 1453: 3556978 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-split-no-space
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < no space for a new pane
+ok    self-check matrix-direct-split-no-space: exit execution sabotage
+      case matrix-direct-split-pending
+      state differs
+        4,5c4,5
+        < pending=0:3
+        < final=0:3
+        ---
+        > pending=1:3
+        > final=1:3
+ok    self-check matrix-direct-split-pending: state execution sabotage
+      case matrix-direct-buffer-closed
+      stdout differs (tmux 0 bytes, zz 13 bytes)
+        0a1
+        > MATRIX-AFTER
+      stderr differs
+        1c1
+        < [err] evsig_cb: recv: Bad file descriptor
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+      state differs
+        3c3
+        < tail=
+        ---
+        > tail=yes
+ok    self-check matrix-direct-buffer-closed: stderr execution sabotage
+      case matrix-direct-closed-unused
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-direct-closed-unused: state execution sabotage
+      case matrix-alias-buffer-spent
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-alias-buffer-spent: state execution sabotage
+compat/tui-command-streams.sh: line 1453: 3560183 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-alias-split-no-space
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < no space for a new pane
+ok    self-check matrix-alias-split-no-space: exit execution sabotage
+      case matrix-alias-split-pending
+      state differs
+        4,5c4,5
+        < pending=0:3
+        < final=0:3
+        ---
+        > pending=1:3
+        > final=1:3
+ok    self-check matrix-alias-split-pending: state execution sabotage
+      case matrix-alias-buffer-closed
+      stderr differs
+        1c1
+        < [err] evsig_cb: recv: Bad file descriptor
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+ok    self-check matrix-alias-buffer-closed: stderr execution sabotage
+      case matrix-alias-closed-unused
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-alias-closed-unused: state execution sabotage
+      case matrix-file-buffer-spent
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-file-buffer-spent: state execution sabotage
+compat/tui-command-streams.sh: line 1453: 3563104 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-file-split-no-space
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < no space for a new pane
+ok    self-check matrix-file-split-no-space: exit execution sabotage
+      case matrix-file-split-pending
+      state differs
+        4,5c4,5
+        < pending=0:3
+        < final=0:3
+        ---
+        > pending=1:3
+        > final=1:3
+ok    self-check matrix-file-split-pending: state execution sabotage
+      case matrix-file-buffer-closed
+      stderr differs
+        1c1
+        < [err] evsig_cb: recv: Bad file descriptor
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+ok    self-check matrix-file-buffer-closed: stderr execution sabotage
+      case matrix-file-closed-unused
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-file-closed-unused: state execution sabotage
+      case matrix-direct-split-zoom-no-space
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-direct-split-zoom-no-space: state execution sabotage
+      case matrix-direct-split-keep-zoom-no-space
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-direct-split-keep-zoom-no-space: state execution sabotage
+compat/tui-command-streams.sh: line 1453: 3567750 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-split-horizontal-no-space
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < no space for a new pane
+ok    self-check matrix-direct-split-horizontal-no-space: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3568628 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-split-bad-size
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < invalid tiled geometry invalid
+ok    self-check matrix-direct-split-bad-size: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3569543 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-split-bad-percent
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < invalid tiled geometry invalid
+ok    self-check matrix-direct-split-bad-percent: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3570959 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-split-command
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < command cannot be given for empty pane
+ok    self-check matrix-direct-split-command: exit execution sabotage
+      case matrix-direct-split-style
+      state differs
+        4,5c4,5
+        < pending=0:2
+        < final=0:2
+        ---
+        > pending=1:2
+        > final=1:2
+ok    self-check matrix-direct-split-style: state execution sabotage
+      case matrix-direct-split-active-style
+      state differs
+        4,5c4,5
+        < pending=0:2
+        < final=0:2
+        ---
+        > pending=1:2
+        > final=1:2
+ok    self-check matrix-direct-split-active-style: state execution sabotage
+      case matrix-direct-split-border-style
+      state differs
+        4,5c4,5
+        < pending=0:2
+        < final=0:2
+        ---
+        > pending=1:2
+        > final=1:2
+ok    self-check matrix-direct-split-border-style: state execution sabotage
+compat/tui-command-streams.sh: line 1453: 3575633 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-display-bad-flag
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < command display-message: unknown flag -Q
+      state differs
+        2c2
+        < before=
+        ---
+        > before=yes
+ok    self-check matrix-direct-display-bad-flag: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3577009 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-display-too-many
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < command display-message: too many arguments (need at most 1)
+      state differs
+        2c2
+        < before=
+        ---
+        > before=yes
+ok    self-check matrix-direct-display-too-many: exit execution sabotage
+      case matrix-direct-split-pending-zoom
+      state differs
+        4,5c4,5
+        < pending=1:3
+        < final=1:3
+        ---
+        > pending=0:3
+        > final=0:3
+ok    self-check matrix-direct-split-pending-zoom: state execution sabotage
+      case matrix-direct-display-closed
+      stdout differs (tmux 0 bytes, zz 13 bytes)
+        0a1
+        > MATRIX-AFTER
+      stderr differs
+        1c1
+        < [err] evsig_cb: recv: Bad file descriptor
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+      state differs
+        3c3
+        < tail=
+        ---
+        > tail=yes
+ok    self-check matrix-direct-display-closed: stderr execution sabotage
+      case matrix-direct-split-closed
+      stdout differs (tmux 0 bytes, zz 13 bytes)
+        0a1
+        > MATRIX-AFTER
+      stderr differs
+        1c1
+        < [err] evsig_cb: recv: Bad file descriptor
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+      state differs
+        3,4c3,4
+        < tail=
+        < final=0:2
+        ---
+        > tail=yes
+        > final=0:1
+ok    self-check matrix-direct-split-closed: stderr execution sabotage
+      case matrix-alias-eof
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-alias-eof: state execution sabotage
+      case matrix-file-eof
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-file-eof: state execution sabotage
+      case matrix-attached-term-idle-before
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 36 bytes, zz 503 bytes)
+        3,4c3
+        < %exit
+        < ^[\
+        \ No newline at end of file
+        ---
+        > /tmp/zzcs.4jnjYC/attached-zz.sh: line 2: 3582241 Killed                     ( printf "%s\n" "$BASHPID" > /tmp/zzcs.4jnjYC/zz.pid; exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzcs.4jnjYC/zz-home XDG_CONFIG_HOME=/tmp/zzcs.4jnjYC/zz-home/config ZZ_LOG_DIR=/tmp/zzcs.4jnjYC/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/rev6/zz_cli-tip --socket /tmp/zzcs-4jnjYC.sock -CC attach-session -f no-output -t =cs 2> /tmp/zzcs.4jnjYC/zz.err )
+ok    self-check matrix-attached-term-idle-before: exit execution sabotage
+      case matrix-attached-term-before
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 100 bytes, zz 552 bytes)
+        6,8c6
+        < %end TIME ID 1
+        < %exit
+        < ^[\
+        \ No newline at end of file
+        ---
+        > /tmp/zzcs.4jnjYC/attached-zz.sh: line 2: 3583188 Killed                     ( printf "%s\n" "$BASHPID" > /tmp/zzcs.4jnjYC/zz.pid; exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzcs.4jnjYC/zz-home XDG_CONFIG_HOME=/tmp/zzcs.4jnjYC/zz-home/config ZZ_LOG_DIR=/tmp/zzcs.4jnjYC/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/rev6/zz_cli-tip --socket /tmp/zzcs-4jnjYC.sock -CC attach-session -f no-output -t =cs 2> /tmp/zzcs.4jnjYC/zz.err )
+ok    self-check matrix-attached-term-before: exit execution sabotage
+      case matrix-attached-term-after
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 155 bytes, zz 607 bytes)
+        9,11c9
+        < %end TIME ID 1
+        < %exit
+        < ^[\
+        \ No newline at end of file
+        ---
+        > /tmp/zzcs.4jnjYC/attached-zz.sh: line 2: 3584957 Killed                     ( printf "%s\n" "$BASHPID" > /tmp/zzcs.4jnjYC/zz.pid; exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzcs.4jnjYC/zz-home XDG_CONFIG_HOME=/tmp/zzcs.4jnjYC/zz-home/config ZZ_LOG_DIR=/tmp/zzcs.4jnjYC/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/rev6/zz_cli-tip --socket /tmp/zzcs-4jnjYC.sock -CC attach-session -f no-output -t =cs 2> /tmp/zzcs.4jnjYC/zz.err )
+ok    self-check matrix-attached-term-after: exit execution sabotage
+      case matrix-attached-term-after-two
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 210 bytes, zz 662 bytes)
+        12,14c12
+        < %end TIME ID 1
+        < %exit
+        < ^[\
+        \ No newline at end of file
+        ---
+        > /tmp/zzcs.4jnjYC/attached-zz.sh: line 2: 3586534 Killed                     ( printf "%s\n" "$BASHPID" > /tmp/zzcs.4jnjYC/zz.pid; exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzcs.4jnjYC/zz-home XDG_CONFIG_HOME=/tmp/zzcs.4jnjYC/zz-home/config ZZ_LOG_DIR=/tmp/zzcs.4jnjYC/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/rev6/zz_cli-tip --socket /tmp/zzcs-4jnjYC.sock -CC attach-session -f no-output -t =cs 2> /tmp/zzcs.4jnjYC/zz.err )
+ok    self-check matrix-attached-term-after-two: exit execution sabotage
+      case matrix-attached-term-idle-after
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 200 bytes, zz 667 bytes)
+        13,14c13
+        < %exit
+        < ^[\
+        \ No newline at end of file
+        ---
+        > /tmp/zzcs.4jnjYC/attached-zz.sh: line 2: 3587497 Killed                     ( printf "%s\n" "$BASHPID" > /tmp/zzcs.4jnjYC/zz.pid; exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzcs.4jnjYC/zz-home XDG_CONFIG_HOME=/tmp/zzcs.4jnjYC/zz-home/config ZZ_LOG_DIR=/tmp/zzcs.4jnjYC/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/rev6/zz_cli-tip --socket /tmp/zzcs-4jnjYC.sock -CC attach-session -f no-output -t =cs 2> /tmp/zzcs.4jnjYC/zz.err )
+ok    self-check matrix-attached-term-idle-after: exit execution sabotage
+      case matrix-attached-term-file-after
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 187 bytes, zz 520 bytes)
+        4,13c4
+        < %end TIME ID 1
+        < %begin TIME ID 1
+        < %end TIME ID 1
+        < %begin TIME ID 1
+        < %end TIME ID 1
+        < Bad file descriptor: -
+        < %begin TIME ID 1
+        < %end TIME ID 1
+        < %exit
+        < ^[\
+        \ No newline at end of file
+        ---
+        > /tmp/zzcs.4jnjYC/attached-zz.sh: line 2: 3588278 Killed                     ( printf "%s\n" "$BASHPID" > /tmp/zzcs.4jnjYC/zz.pid; exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzcs.4jnjYC/zz-home XDG_CONFIG_HOME=/tmp/zzcs.4jnjYC/zz-home/config ZZ_LOG_DIR=/tmp/zzcs.4jnjYC/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/rev6/zz_cli-tip --socket /tmp/zzcs-4jnjYC.sock -CC attach-session -f no-output -t =cs 2> /tmp/zzcs.4jnjYC/zz.err )
+ok    self-check matrix-attached-term-file-after: exit execution sabotage
+      case matrix-direct-use
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-direct-use: state execution sabotage
+      case matrix-alias-use
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-alias-use: state execution sabotage
+      case matrix-file-use
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-file-use: state execution sabotage
+      case matrix-startup-use
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-startup-use: state execution sabotage
+      case matrix-direct-control
+      stdout differs (tmux 170 bytes, zz 173 bytes)
+        7c7
+        < MATRIX-AFTER
+        ---
+        > MATRIX-SABOTAGE
+ok    self-check matrix-direct-control: stdout execution sabotage
+      case matrix-alias-control
+      stdout differs (tmux 170 bytes, zz 173 bytes)
+        7c7
+        < MATRIX-AFTER
+        ---
+        > MATRIX-SABOTAGE
+ok    self-check matrix-alias-control: stdout execution sabotage
+      case matrix-file-control
+      stdout differs (tmux 202 bytes, zz 205 bytes)
+        9c9
+        < MATRIX-AFTER
+        ---
+        > MATRIX-SABOTAGE
+ok    self-check matrix-file-control: stdout execution sabotage
+      case matrix-direct-attached
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 200 bytes, zz 177 bytes)
+        7d6
+        < Bad file descriptor: -
+      state differs
+        1c1
+        < input=
+        ---
+        > input=unused
+ok    self-check matrix-direct-attached: exit execution sabotage
+      case matrix-alias-attached
+      exit tmux: 1  zz: 0
+      stdout differs (tmux 200 bytes, zz 177 bytes)
+        7d6
+        < Bad file descriptor: -
+      state differs
+        1c1
+        < input=
+        ---
+        > input=unused
+ok    self-check matrix-alias-attached: exit execution sabotage
+      case matrix-file-attached
+      stdout differs (tmux 232 bytes, zz 235 bytes)
+        11c11
+        < MATRIX-AFTER
+        ---
+        > MATRIX-SABOTAGE
+ok    self-check matrix-file-attached: stdout execution sabotage
+compat/tui-command-streams.sh: line 1453: 3593512 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-unused
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      state differs
+        1c1
+        < input=unused
+        ---
+        > input=
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-direct-unused: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3594091 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-alias-unused
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      state differs
+        1c1
+        < input=unused
+        ---
+        > input=
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-alias-unused: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3594660 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-file-unused
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      state differs
+        1c1
+        < input=unused
+        ---
+        > input=
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-file-unused: exit execution sabotage
+      case matrix-startup-unused
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-startup-unused: state execution sabotage
+      case matrix-direct-spent
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-direct-spent: state execution sabotage
+      case matrix-alias-spent
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-alias-spent: state execution sabotage
+      case matrix-file-spent
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-file-spent: state execution sabotage
+      case matrix-direct-closed
+      stdout differs (tmux 0 bytes, zz 13 bytes)
+        0a1
+        > MATRIX-AFTER
+      stderr differs
+        1c1
+        < [err] evsig_cb: recv: Bad file descriptor
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+      state differs
+        3c3
+        < tail=
+        ---
+        > tail=yes
+ok    self-check matrix-direct-closed: stderr execution sabotage
+      case matrix-alias-closed
+      stderr differs
+        1c1
+        < [err] evsig_cb: recv: Bad file descriptor
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+ok    self-check matrix-alias-closed: stderr execution sabotage
+      case matrix-file-closed
+      stderr differs
+        1c1
+        < [err] evsig_cb: recv: Bad file descriptor
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+ok    self-check matrix-file-closed: stderr execution sabotage
+      case matrix-direct-eof
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-direct-eof: state execution sabotage
+      case matrix-direct-large-unused
+      exit tmux: 0  zz: 1
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        0a1
+        > standard input exceeds 1048576 bytes: -
+      state differs
+        1c1
+        < input=unused
+        ---
+        > input=
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-direct-large-unused: exit execution sabotage
+      case matrix-alias-large-unused
+      exit tmux: 0  zz: 1
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        0a1
+        > standard input exceeds 1048576 bytes: -
+      state differs
+        1c1
+        < input=unused
+        ---
+        > input=
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-alias-large-unused: exit execution sabotage
+      case matrix-file-large-unused
+      exit tmux: 0  zz: 1
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        0a1
+        > standard input exceeds 1048576 bytes: -
+      state differs
+        1c1
+        < input=unused
+        ---
+        > input=
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-file-large-unused: exit execution sabotage
+      case matrix-startup-large-unused
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-startup-large-unused: state execution sabotage
+      case matrix-direct-large-used
+      exit tmux: 0  zz: 1
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        0a1
+        > standard input exceeds 1048576 bytes: -
+      state differs
+        1c1
+        < input=yes
+        ---
+        > input=
+        3c3
+        < tail=yes
+        ---
+        > tail=
+      case matrix-direct-display-valid
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-direct-display-valid: state execution sabotage
+compat/tui-command-streams.sh: line 1453: 3598828 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-display-running
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < pane is not empty
+ok    self-check matrix-direct-display-running: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3599359 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-alias-display-running
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < pane is not empty
+ok    self-check matrix-alias-display-running: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3599845 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-file-display-running
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < pane is not empty
+ok    self-check matrix-file-display-running: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3600354 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-display-missing
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-direct-display-missing: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3600916 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-alias-display-missing
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-alias-display-missing: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3601630 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-file-display-missing
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-file-display-missing: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3602031 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-split-missing
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < can't find pane: %99999
+ok    self-check matrix-direct-split-missing: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3602414 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-alias-split-missing
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < can't find pane: %99999
+ok    self-check matrix-alias-split-missing: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3602810 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-file-split-missing
+      exit tmux: 1  zz: 137
+      stderr differs
+        1d0
+        < can't find pane: %99999
+ok    self-check matrix-file-split-missing: exit execution sabotage
+      case matrix-direct-fail-after-read
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-direct-fail-after-read: state execution sabotage
+      case matrix-alias-fail-after-read
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-alias-fail-after-read: state execution sabotage
+      case matrix-file-fail-after-read
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-file-fail-after-read: state execution sabotage
+      case matrix-direct-error-newline
+      stderr differs
+        1,2c1
+        < No such file or directory: /tmp/zzcs-matrix-missing
+        < 
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+      state differs
+        1c1
+        < input=yes
+        ---
+        > input=
+ok    self-check matrix-direct-error-newline: stderr execution sabotage
+      case matrix-alias-error-newline
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1,2c1
+        < No such file or directory: /tmp/zzcs-matrix-missing
+        < 
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+      state differs
+        1c1
+        < input=yes
+        ---
+        > input=
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-alias-error-newline: stderr execution sabotage
+      case matrix-file-error-newline
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1,2c1
+        < No such file or directory: /tmp/zzcs-matrix-missing
+        < 
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+      state differs
+        1c1
+        < input=yes
+        ---
+        > input=
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-file-error-newline: stderr execution sabotage
+compat/tui-command-streams.sh: line 1453: 3604442 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-input" ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-term-before
+      exit tmux: 0  zz: 137
+ok    self-check matrix-direct-term-before: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3604853 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-input" ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-alias-term-before
+      exit tmux: 0  zz: 137
+ok    self-check matrix-alias-term-before: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3605255 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-input" ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-file-term-before
+      exit tmux: 0  zz: 137
+ok    self-check matrix-file-term-before: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3605653 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-term-during
+      exit tmux: 0  zz: 137
+ok    self-check matrix-direct-term-during: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3606078 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-alias-term-during
+      exit tmux: 0  zz: 137
+ok    self-check matrix-alias-term-during: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3606479 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-fifo" 9>&- ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-file-term-during
+      exit tmux: 0  zz: 137
+ok    self-check matrix-file-term-during: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3606876 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-input" ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-term-after
+      exit tmux: 0  zz: 137
+ok    self-check matrix-direct-term-after: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3607304 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-input" ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-alias-term-after
+      exit tmux: 0  zz: 137
+ok    self-check matrix-alias-term-after: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3607659 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-input" ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-file-term-after
+      exit tmux: 0  zz: 137
+ok    self-check matrix-file-term-after: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3608071 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-input" ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-direct-term-after-error
+      exit tmux: 0  zz: 137
+ok    self-check matrix-direct-term-after-error: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3608596 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-input" ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-alias-term-after-error
+      exit tmux: 0  zz: 137
+ok    self-check matrix-alias-term-after-error: exit execution sabotage
+compat/tui-command-streams.sh: line 1453: 3609187 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-input" ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-file-term-after-error
+      exit tmux: 0  zz: 137
+ok    self-check matrix-file-term-after-error: exit execution sabotage
+      case matrix-direct-display-spent
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-direct-display-spent: state execution sabotage
+      case matrix-alias-display-spent
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-alias-display-spent: state execution sabotage
+      case matrix-file-display-spent
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-file-display-spent: state execution sabotage
+      case matrix-direct-split-spent
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-direct-split-spent: state execution sabotage
+      case matrix-alias-split-spent
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-alias-split-spent: state execution sabotage
+      case matrix-file-split-spent
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-file-split-spent: state execution sabotage
+      case matrix-direct-source-writeonly
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+ok    self-check matrix-direct-source-writeonly: stderr execution sabotage
+      case matrix-alias-source-writeonly
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-alias-source-writeonly: stderr execution sabotage
+      case matrix-file-source-writeonly
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-file-source-writeonly: stderr execution sabotage
+      case matrix-direct-buffer-writeonly
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+ok    self-check matrix-direct-buffer-writeonly: stderr execution sabotage
+      case matrix-alias-buffer-writeonly
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-alias-buffer-writeonly: stderr execution sabotage
+      case matrix-file-buffer-writeonly
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-file-buffer-writeonly: stderr execution sabotage
+      case matrix-direct-display-writeonly
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-direct-display-writeonly: state execution sabotage
+      case matrix-alias-display-writeonly
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-alias-display-writeonly: state execution sabotage
+      case matrix-file-display-writeonly
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-file-display-writeonly: state execution sabotage
+      case matrix-direct-split-writeonly
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-direct-split-writeonly: state execution sabotage
+      case matrix-alias-split-writeonly
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-alias-split-writeonly: state execution sabotage
+      case matrix-file-split-writeonly
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-file-split-writeonly: state execution sabotage
+      case matrix-direct-source-directory
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+ok    self-check matrix-direct-source-directory: stderr execution sabotage
+      case matrix-alias-source-directory
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-alias-source-directory: stderr execution sabotage
+      case matrix-file-source-directory
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-file-source-directory: stderr execution sabotage
+      case matrix-direct-buffer-directory
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+ok    self-check matrix-direct-buffer-directory: stderr execution sabotage
+      case matrix-alias-buffer-directory
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-alias-buffer-directory: stderr execution sabotage
+      case matrix-file-buffer-directory
+      stdout differs (tmux 13 bytes, zz 0 bytes)
+        1d0
+        < MATRIX-AFTER
+      stderr differs
+        1c1
+        < Input/output error: -
+        ---
+        > No such file or directory: /tmp/zzcs-sabotage-missing
+      state differs
+        3c3
+        < tail=yes
+        ---
+        > tail=
+ok    self-check matrix-file-buffer-directory: stderr execution sabotage
+      case matrix-direct-display-directory
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-direct-display-directory: state execution sabotage
+      case matrix-alias-display-directory
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-alias-display-directory: state execution sabotage
+      case matrix-file-display-directory
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-file-display-directory: state execution sabotage
+      case matrix-direct-split-directory
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-direct-split-directory: state execution sabotage
+      case matrix-alias-split-directory
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-alias-split-directory: state execution sabotage
+      case matrix-file-split-directory
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=SABOTAGE
+ok    self-check matrix-file-split-directory: state execution sabotage
+      case matrix-alias-attached-term-before
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 100 bytes, zz 535 bytes)
+        5,8c5
+        < %begin TIME ID 1
+        < %end TIME ID 1
+        < %exit
+        < ^[\
+        \ No newline at end of file
+        ---
+        > /tmp/zzcs.4jnjYC/attached-zz.sh: line 2: 3621636 Killed                     ( printf "%s\n" "$BASHPID" > /tmp/zzcs.4jnjYC/zz.pid; exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzcs.4jnjYC/zz-home XDG_CONFIG_HOME=/tmp/zzcs.4jnjYC/zz-home/config ZZ_LOG_DIR=/tmp/zzcs.4jnjYC/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/rev6/zz_cli-tip --socket /tmp/zzcs-4jnjYC.sock -CC attach-session -f no-output -t =cs 2> /tmp/zzcs.4jnjYC/zz.err )
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=
+ok    self-check matrix-alias-attached-term-before: stdout execution sabotage
+      case matrix-alias-attached-term-after
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 155 bytes, zz 590 bytes)
+        5,6d4
+        < %begin TIME ID 1
+        < %end TIME ID 1
+        10,11c8
+        < %exit
+        < ^[\
+        \ No newline at end of file
+        ---
+        > /tmp/zzcs.4jnjYC/attached-zz.sh: line 2: 3622352 Killed                     ( printf "%s\n" "$BASHPID" > /tmp/zzcs.4jnjYC/zz.pid; exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzcs.4jnjYC/zz-home XDG_CONFIG_HOME=/tmp/zzcs.4jnjYC/zz-home/config ZZ_LOG_DIR=/tmp/zzcs.4jnjYC/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/rev6/zz_cli-tip --socket /tmp/zzcs-4jnjYC.sock -CC attach-session -f no-output -t =cs 2> /tmp/zzcs.4jnjYC/zz.err )
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=
+ok    self-check matrix-alias-attached-term-after: stdout execution sabotage
+compat/tui-command-streams.sh: line 1453: 3623034 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-input" ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-alias-control-term-before
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 70 bytes, zz 32 bytes)
+        3,5d2
+        < %begin TIME ID 0
+        < %end TIME ID 0
+        < %exit
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=
+ok    self-check matrix-alias-control-term-before: stdout execution sabotage
+compat/tui-command-streams.sh: line 1453: 3623570 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-input" ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-alias-control-term-after
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 125 bytes, zz 87 bytes)
+        3,4d2
+        < %begin TIME ID 0
+        < %end TIME ID 0
+        8d5
+        < %exit
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=
+ok    self-check matrix-alias-control-term-after: stdout execution sabotage
+compat/tui-command-streams.sh: line 1453: 3624230 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-input" ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-file-control-term-before
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 102 bytes, zz 17 bytes)
+        2,7d1
+        < %end TIME ID 0
+        < %begin TIME ID 0
+        < %end TIME ID 0
+        < %begin TIME ID 0
+        < %end TIME ID 0
+        < %exit
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=
+ok    self-check matrix-file-control-term-before: stdout execution sabotage
+compat/tui-command-streams.sh: line 1453: 3625172 Killed                     ( exec "${MATRIX_BASE[@]}" "${command[@]}" < "$SCRATCH_DIR/matrix-input" ) > "$SCRATCH_DIR/$side.out" 2> "$SCRATCH_DIR/$side.err"
+      case matrix-file-control-term-after
+      exit tmux: 0  zz: 137
+      stdout differs (tmux 157 bytes, zz 17 bytes)
+        2,10d1
+        < %end TIME ID 0
+        < %begin TIME ID 0
+        < %end TIME ID 0
+        < %begin TIME ID 0
+        < %end TIME ID 0
+        < Bad file descriptor: -
+        < %begin TIME ID 0
+        < %end TIME ID 0
+        < %exit
+      state differs
+        2c2
+        < before=yes
+        ---
+        > before=
+ok    self-check matrix-file-control-term-after: stdout execution sabotage
+ok    self-check equivalence: every sabotage withdrawn
+self-check complete: every sabotage was caught in its own channel and both equivalences passed
+EXIT 0

@@ -1,0 +1,5 @@
+The full five-package run reached a wait-exit control process still alive after more than two minutes (expected acknowledgement in about one second). Sent SIGTERM only to test child 2894031 so the test could report failure and remaining packages could finish. Will rerun the named test alone against the final build.
+
+Filtered wait_exit test child 3696462 was terminated after more than 60 seconds without exit; the test harness remains responsible for reporting the failed status.
+
+Final five-package run: wait-exit child 4083331 remained alive for two minutes after its acknowledgement. Terminated only that child, matching the separately measured inherited stall.

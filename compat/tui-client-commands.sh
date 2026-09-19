@@ -1306,6 +1306,8 @@ customize_prompt_vi_cases() {
   CASE_GRID_CELLS=0
 }
 
+# `prompt_set_options` copies `status-keys` ONCE, when the prompt is created, so
+# the sabotage has to change the option before the prompt is raised, not after.
 customize_prompt_vi_self_checks() {
   local CASE_EXPECT_EQUAL=1
   customize_scene
@@ -1314,10 +1316,12 @@ customize_prompt_vi_self_checks() {
   run_both send-keys -t PANE f a b c Escape
   self_check_run customize-prompt-vi-control display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
   self_check_expect 'both filter prompts stay open in vi command mode' exit=0 stdout=0 stderr=0 screen=0 state=0
+  run_both copy-mode -q -t PANE
   zz_command set-option -g status-keys emacs >/dev/null
-  zz_command send-keys -t "$(active_pane zz)" Escape >/dev/null
+  run_both customize-mode -t PANE
+  run_both send-keys -t PANE f a b c Escape
   self_check_run customize-prompt-vi-sabotage display-message -p -t PANE '#{pane_in_mode}/#{pane_mode}'
-  self_check_expect 'an emacs Escape cancels the filter prompt and changes the row' exit=0 stdout=0 stderr=0 screen=1 state=0
+  self_check_expect 'a filter prompt raised under emacs status-keys cancels on Escape' exit=0 stdout=0 stderr=0 screen=1 state=0
   zz_command set-option -g status-keys vi >/dev/null
   run_both copy-mode -q -t PANE
   run_on_both set-option -g status-keys emacs

@@ -1,0 +1,18 @@
+TUI-017 attempt-11 (lane `unpatch`) environment
+zz_cli: sha256 d2aa83035b9a98b417a73e35be1bbde91c13bce7b42602157ff0a8a2da14857b (target/debug/zz_cli)
+zz_cli source: worktree campaign/tui-unpatch; binary built from the unpatched tree
+  (code-removal content of f737ea6d; later commits touch tests, fixture, docs
+  and ledger only and do not change the binary)
+pin tmux: sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5 (compat/.cache/tmux-src/tmux)
+tmux -V: tmux next-3.8
+oracle pin: d77c9dc6aa021e4bc61f0da128c591af695e6466
+base revision: d03e20a0 (detached origin/main at lane start)
+os: Linux 7.2.3-1-cachyos-deckify x86_64 GNU/Linux (alienware box)
+cores: 16, memory: 15 GB
+TERM: xterm-256color, shell: /bin/bash (no tty; fixtures drive their own sizes)
+cargo: every cargo command through /tmp/zz-cargo.sh (4G cap, --jobs 2, shared flock slots)
+zig: 0.16.0 (perf lib builds)
+daemon tests: HOME=/tmp/zz-emptyhome XDG_CONFIG_HOME=/tmp/zz-emptyhome/config
+fixture homes/sockets: each fixture's own scrubbed HOME and short /tmp sockets
+credential hygiene: all fixture/probe/corpus commands run with secret-bearing
+  environment variables unset; python3 compat/evidence-secrets.py before push

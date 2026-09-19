@@ -1,0 +1,36 @@
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+ok   test_bare_number_lease_reads_as_hours
+ok   test_integrated_main_from_non_holder_is_ignored
+ok   test_records_only_merge_lands_on_the_ledger
+ok   test_release_after_candidate_frees_zones_and_goes_stale
+ok   test_repair_after_lease_expiry_frees_the_front
+ok   test_repair_dissolves_candidate_and_keeps_active_claim
+ok   test_withdraw_by_triage_holder_lands
+ok   test_withdraw_on_claimed_or_candidate_front_is_void
+ok   test_withdraw_requires_triage_hold
+........
+----------------------------------------------------------------------
+Ran 8 tests in 0.011s
+
+OK
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 0.018s
+
+OK
+verified: TUI-001, TUI-002, TUI-003, TUI-004, TUI-005, TUI-006, TUI-007, TUI-008, TUI-009, TUI-010, TUI-012, TUI-015, TUI-016
+
+every verified obligation holds up
+wire-version: 104 matches v0.11.1 and the wire is unchanged (11 sources watched)
+evidence-secrets: no credential values or environment dumps in tracked evidence
+compat/tui/campaign.json is valid and knowledge/tmux/tui-parity.md is current
+
+== proof census ==
+census: 470 corpus files under compat/scenarios, compat/attached-client.sh, compat/status-row.sh, compat/diff-scenario.sh
+options: 23 of 146 never exercised
+hooks: 8 of 68 never exercised
+formats: 11 of 198 never exercised
+format_aliases: 0 of 9 never exercised
+format_modifiers: 0 of 2 never exercised
+

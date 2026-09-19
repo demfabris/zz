@@ -17,11 +17,11 @@ The contract compares CLI stdout, stderr and exit codes exactly, and rendered ce
 
 Existing tmux gap decisions remain in `compat/tmux-gaps.json`. Accepted or closed source gaps do not establish TUI parity. Only obligations with verified proof count as complete.
 
-Fixed baseline: **11/12 verified**. Added scope: **3/6 verified**.
+Fixed baseline: **11/12 verified**. Added scope: **2/6 verified**.
 
-Status counts: unmeasured: 1, different: 0, active: 1, review: 2, blocked: 0, verified: 14.
+Status counts: unmeasured: 1, different: 0, active: 1, review: 3, blocked: 0, verified: 13.
 
-Dependency-ready obligations, by priority: TUI-013, TUI-014, TUI-018.
+Dependency-ready obligations, by priority: TUI-013, TUI-014, TUI-017, TUI-018.
 
 ## everyday: Everyday terminal use
 
@@ -53,7 +53,7 @@ Dependency-ready obligations, by priority: TUI-013, TUI-014, TUI-018.
 | TUI-014: Client mode tools in the raw TUI | active | 14 | TUI-003 |
 | TUI-015: A lock surface a client can draw | verified | 15 | none |
 | TUI-016: Server log and terminal introspection | verified | 16 | none |
-| TUI-017: Rich capture transports and the snapshot residues | verified | 17 | none |
+| TUI-017: Rich capture transports and the snapshot residues | review | 17 | none |
 | TUI-018: Caller stream forms | review | 18 | none |
 
 ## Obligation details
@@ -809,9 +809,6 @@ Sources:
 - `compat/tui/evidence/TUI-015/attempt-03/fixture-summary.json`
 - `compat/tui/evidence/TUI-015/attempt-03/self-check-summary.json`
 - `crates/zz-mux/src/command.rs`
-- `third_party/rust/libghostty-vt-sys/provenance.patch`
-- `third_party/rust/libghostty-vt/src/screen.rs`
-- `third_party/rust/libghostty-vt/src/style.rs`
 - `compat/tui/evidence/TUI-017/attempt-07/notes.md`
 - `compat/tui/evidence/TUI-017/attempt-07/environment.json`
 - `compat/tui/evidence/TUI-017/attempt-07/flipped-cases.json`
@@ -946,7 +943,7 @@ Review: `compat/tui/evidence/TUI-016/attempt-01/review.md`.
 
 ### TUI-017: Rich capture transports and the snapshot residues
 
-Status: verified.
+Status: review.
 
 Acceptance:
 
@@ -976,9 +973,6 @@ Sources:
 - `compat/tui/evidence/TUI-017/attempt-06/startup-summary.json`
 - `compat/tui/evidence/TUI-017/attempt-06/fixture-summary.json`
 - `crates/zz-mux/src/command.rs`
-- `third_party/rust/libghostty-vt-sys/provenance.patch`
-- `third_party/rust/libghostty-vt/src/screen.rs`
-- `third_party/rust/libghostty-vt/src/style.rs`
 - `compat/tui/evidence/TUI-017/attempt-07/notes.md`
 - `compat/tui/evidence/TUI-017/attempt-07/environment.json`
 - `compat/tui/evidence/TUI-017/attempt-07/flipped-cases.json`
@@ -1003,12 +997,13 @@ Sources:
 - `knowledge/designs/tui-parity.md`
 - `knowledge/tmux/divergences.md`
 - `third_party/rust/libghostty-vt-sys/build.rs`
+- `compat/tui/evidence/TUI-017/attempt-11/notes.md`
 
 Tmux gap references: `capture.rich-transports`.
 
-TAB DECISION REVISION 2026-09-18. Rebased onto origin/main 7f8d2cc4 (v0.11.0); compat/wire-version.py reports 104 matching the release with the wire unchanged. fabrico's ruling removes tab provenance from the vendored Ghostty patch and from the capture path: the tab style flag, the printSliceFill mask, the per-HT marking and the edit handling that existed only for tabs are gone, while the indexed-colour class bits stay and capture-low-indexed-colour stays asserted. Seventeen cases became records opening DECIDED 2026-09-18 (fabrico) under decided:TUI-017; nine edited-tab cases whose pin rows end up holding no tab stay asserted, and capture-edited-tab-ech-entire took a new sabotage because erasing the cells a tab produced is invisible without the literal tab. The reviewer's own workloads now run main's instruction stream: overwrite, widestops, alltabs, mixed, htsevery and reflow match main to five decimal places and only edits differs, at +1.08% and +1.29%, which the indexed-colour-only control attributes to the retained ICH hunk an asserted pin case requires; CPU medians sit inside this shared host's noise in both directions. The eight 100x30 erased-background probe differences were a detached new-session starting its pty at 80x24 whatever -x and -y asked; panes now spawn at their laid-out size, the eight cases assert with sabotages, and the attached probe reports 0 differences fixed against 8 and 7 reverted. build.rs mirrors the fetched Ghostty tree into a directory keyed by the patch hash, so an unpatched build can no longer link the patched library. Three shared runs each pass 219 assertions with 42 records, unattributed=0 and zero ordinary TUI-015 or TUI-017 records; the self-check passes 152 expectations; copy-mode is 147/0 with 27 self-check expectations, screen-diff 147/6 with 18, and the attached client passes. verify-claims re-measures both obligations and reports none of the 42 records theirs. zz-terminal, zz-mux and zz-tui pass 1136 tests with one ignored; zz-daemon passes 986 with one ignored and one failure, the ACP agent slow-client soak, which fails alone twice here and which attempt-07 reproduced on a clean unmodified baseline; no all-tests-green claim is made. Clippy over the four crates, cargo fmt, compat/check.sh, the tracker check, the evidence secret scan and the OKF validation all pass. All 254 delta rows ran with none unrun: ten failed, seven of them identically on the main 38c50df4 control and three because the harness needs a zz_cli beside the binary, which pass once it is there. Attempt-07's retained environment listings are redacted at this tip. Protocol 104 unchanged. Leave both obligations at review. GATE, 2026-09-18, cycle 11, alienware box, revision b3052c53b68a. VERIFIED. The gate re-ran every proof at its own merge revision: compat/tui-client-commands.sh three times, each `all 219 asserted comparisons identical, 42 recorded not asserted (0 for a sibling lane, owners TUI-014=6 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=23 gap:clients.interactive-refresh=8 unattributed=0)`, so this obligation owns zero ordinary records; --self-check caught every sabotage in its own channel; compat/tui-copy-mode.sh 147; compat/tui-screen-diff.sh 147 asserted with its own six records; compat/attached-client.sh PASS; verify-claims --run for both obligations answered `every verified obligation holds up`; compat/check.sh exit 0. The adversarial review of b3052c53 accepted both obligations and proved the two load-bearing claims by experiment: reverting the detached pty initial size turns exactly the four erased-background cases red, and removing the retained ICH hunk turns exactly capture-edited-tab-ich-off-line red. Performance is back to main: the overwrite workload the previous review measured at +68.33% is -0.34% and a tab stop on every column is +2.01%, with instruction counts equal to main except the +1.08% the retained ICH rule carries.
+UNPATCH 2026-09-18. TUI-017 was verified at cycle 11's residuals gate on the patched engine (proof revision 4dac2a62), and fabrico's 2026-09-18 ruling removes that basis: zz carries no patch on the vendored terminal engine, so this obligation goes back to review and must be re-gated; the proof block below stands for the patched revision only. The 171-line provenance.patch (indexed-colour class plumbing plus the ICH hunk), the build.rs machinery that applied it, the accessors and bindings that exposed it, the capture code that consumed it, and the safe wrapper vendored to reach those fields are all gone; libghostty-vt resolves to upstream uzaaft/libghostty-rs 46a9d2a and build.rs builds pristine Ghostty. The wrapper existed only for the patch fields (its UPSTREAM.md said so), so un-vendoring was exact. Two asserted cases became decisions filed under decided:TUI-017 with measured bytes: capture-low-indexed-colour (pin \033[38;5;1mRED\033[39m, zz \033[31mRED\033[39m, 24 vs 20 bytes) and capture-edited-tab-ich-off-line (row 0 is 74 spaces, C, 3 spaces, AB on the pin and 78 spaces, AB on zz). The pre-conversion baseline run turned exactly those two red out of 219 asserted, confirming the review's claim that no other asserted case depends on the patch, and both converted cases leave --self-check the way the tab and charset decisions did. compat/tui-client-commands.sh three times at this tip: all 217 asserted identical, 44 recorded (owners TUI-014=6 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=25 gap:clients.interactive-refresh=8 unattributed=0); --self-check exit 0 with 148 oks and every sabotage caught in its own channel; compat/tui-copy-mode.sh 147 agree with 0 recorded elsewhere plus its self-check; compat/tui-screen-diff.sh 147 identical with 6 recorded plus its self-check; compat/attached-client.sh PASS. Unit suites: zz-terminal 287 pass, zz-mux 536, zz-tui 208, zz-daemon 979 with switch_client_key_table_and_formats_are_client_local failing once under load and passing solo. Clippy -D warnings clean on all four crates; wire 104 unchanged. Perf: pristine vs patched ReleaseSafe libs on the reviewer's edits workload (15 ABBA pairs, pinned CPU, ASLR off) show the patched engine +1.56% (tabs) and +0.86% (spaces) CPU, matching the +1.1-1.3% instruction attribution to the ICH hunk; the overwrite control is inside noise. Delta: 172 rows, none unrun, 7 divergent after retries, all 7 byte-identical on the d03e20a0 control build (inherited 7, caused here 0). A clean sys-crate build fetches only pristine upstream Ghostty and patches nothing. verify-claims --run TUI-017 exits 0 with none of the 44 records TUI-017's. compat/check.sh exits 0.
 
-Next action: Verified at cycle 11's residuals gate. Nothing open: ordinary records are zero and the tab family is a dated 2026-09-18 decision recorded in knowledge/designs/tui-parity.md.
+Next action: Re-gate on the unpatched engine: the gate re-runs verify-claims --run TUI-017 at the merge revision and sets verified.
 
 Proof revision: `4dac2a62864034f82421c1b11f5c4b2b7b934bda`. Tmux: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 

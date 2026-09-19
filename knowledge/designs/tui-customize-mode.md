@@ -2,7 +2,7 @@
 type: Design Plan
 title: Per-pane TUI customize mode
 description: Port mode-tree.c and window-customize.c onto the server pane mode stack, and share one prompt editor between customize-mode and switch-mode.
-status: Implemented for the tree keys, prompts, array items and previews on 2026-09-17; gate review pending.
+status: Implemented for the tree keys, prompts, array items and previews on 2026-09-17 and the pointer menu on 2026-09-19; gate review pending.
 resource: crates/zz-mux/src/command/customize.rs
 timestamp: 2026-09-17T00:00:00Z
 tags: [tui, tmux, options]
@@ -106,12 +106,13 @@ three `KEYC_VI` word motions, and the daemon sends `message-command-style` in
 
 # Limits
 
-Not built: `mode_tree_display_menu` on `MouseDown3Pane` (the press selects the line on both
-binaries and only the pin then opens the menu, `semantic:mode-tree-mouse-menu`), the
-key-binding reset for keys whose default command changed in place, prompt history
-(`Up`/`Down` in an edit prompt), `Tab` completion in a command prompt, and `C-y` pasting
-the top buffer, which is also what vi `p` maps onto. Rows are rebuilt live, so an option
-changed from outside shows at once where the pin shows it after its next build.
+Not built: the key-binding reset for keys whose default command changed in place, prompt
+history (`Up`/`Down` in an edit prompt), `Tab` completion in a command prompt, and `C-y`
+pasting the top buffer, which is also what vi `p` maps onto. Rows are rebuilt live, so an
+option changed from outside shows at once where the pin shows it after its next build.
+`mode_tree_display_menu` on `MouseDown3Pane` is built since 2026-09-19: the press selects
+the line and opens the pin's menu over it on both binaries, with the release closing it
+(`semantic:mode-tree-mouse-menu` left `clients.interactive-refresh`).
 
 # Suspend
 

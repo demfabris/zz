@@ -814,10 +814,10 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   with nothing bound to them - which is the state `compat/tui-mouse.sh` reaches after its own
   binding cases and the state the pin still answers in. The replayed `DoubleClick` carries
   `m->ignore`, which drops it in `input_key_mouse` and NOT in `window_pane_key`, so the drop moved
-  out of `send-keys -M` and into the pane's own input. One row is still zz's: `MouseDown3Pane`
-  selects the line on both binaries, and only the pin then opens `mode_tree_display_menu` over it
-  (Select, Expand, Tag, Tag All, Tag None, Cancel), which is registered as
-  `semantic:mode-tree-mouse-menu`.
+  out of `send-keys -M` and into the pane's own input. Since 2026-09-19 the last row is built too:
+  `MouseDown3Pane` selects the line and opens `mode_tree_display_menu` over it (Select, Expand,
+  Tag, Tag All, Tag None, Cancel) on both binaries, and the release closes it, so
+  `semantic:mode-tree-mouse-menu` left `clients.interactive-refresh`.
 - The freeze a message raises is DERIVED in zz and LATCHED in the pin, and they part company in
   one place. `status_message_clear` only drops `TTY_FREEZE` `if (c->prompt == NULL)`, so
   clearing a message while ANY prompt is open leaves the client frozen — including a

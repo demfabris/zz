@@ -159,7 +159,20 @@ erase, line insert and delete, scrolling) had to keep the span honest. zz does n
 marker: its capture returns the cells the screen shows, the span tracking left the patch, and
 TUI-017 files each tab case under `decided:TUI-017` in `compat/tui-client-commands.sh`. The
 indexed-colour class bits stay, because they cost nothing measurable and the pin's `38;5;1` is a
-real colour class, not bookkeeping.
+real colour class, not bookkeeping. (Superseded the same day by the ruling below.)
+
+Amendment 2026-09-18 (fabrico), superseding the "keep the cheap indexed-colour bits" half of
+the tab ruling: **zz carries no patch on the vendored terminal engine.** The remaining 171
+lines went: the indexed-colour class plumbing (`fg_indexed`/`bg_indexed`) and the one ICH hunk
+that kept the pin's stale cells after an insert wider than the cells it moves. Two asserted
+cases lost their basis and are filed under `decided:TUI-017`:
+`capture-low-indexed-colour` (the pin's `capture-pane -e` re-emits the colour class, so
+`38;5;1` comes back as indexed 1 while zz returns named red, because libghostty-vt stores both
+the same way) and `capture-edited-tab-ich-off-line` (the wide insert clears differently
+without the hunk). The safe wrapper vendored to reach those fields went with them:
+`libghostty-vt` resolves to upstream again and `build.rs` builds pristine Ghostty. The
+divergence is accepted: keeping any patch means carrying a fork of the engine's grid semantics
+for two capture spellings, which fabrico ruled not justified.
 
 # Scope boundary
 

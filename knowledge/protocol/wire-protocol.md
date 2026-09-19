@@ -692,7 +692,14 @@ an empty payload at end of file, and the daemon requests the next chunk only aft
 the previous one. Unused stdin stays unread.
 `CommandInvocation::stdin_spent` uses `#[serde(skip)]` and stays inside the daemon;
 `caller_stream_spent_marker_stays_in_process` checks that absent and spent streams encode
-identically. These appends were written against an unreleased 104; zz 0.11.0 shipped 104 with
+identically. The same entry appends two `EventPayload` variants after `ChooserPresentation`:
+`CommandStdout { output: RawText }`, which releases a `cmdq_print` line to a Command client's stdout
+while its request is still running so a `split-window -I -P` line is not held until the stream ends,
+and `CommandClientExit`, the pin's `CLIENT_EXIT`, which the daemon raises when a caller stream's
+target pane disappears so the client stops the rest of its `\;` chain. Released bytes leave the
+request's own output, so the final `CommandResponse` never repeats them.
+`released_command_stdout_and_client_exit_append_after_the_chooser_presentation` pins both tags to
+the end of the enum. These appends were written against an unreleased 104; zz 0.11.0 shipped 104 with
 main's three `ServerError::Native*` variants and without them, so they moved to 105. The v103 and
 v104 entries describe released layouts and remain intact.
 

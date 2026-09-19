@@ -104,9 +104,16 @@ one. Measured against the pin on 2026-09-17: partial delivery while the writer h
 completion at EOF, a slow writer, a writer faster than the pane, split multibyte and escape
 sequences, and content retained after SIGTERM. Decided the same day under the same contract.
 
-**Cancellation** follows EOF or client disconnect. EOF completes the pending payload; the
-reader then runs on those bytes. A pane stream ends at EOF, at a read error or when the client
-disconnects; chunks already delivered stay in the pane. SIGTERM before, during or after the read exits the waiting command
+**Cancellation** follows EOF, the target's disappearance, or client disconnect. EOF completes the
+pending payload; the reader then runs on those bytes. A pane stream ends at EOF, at a read error,
+when its target pane is gone or when the client disconnects; chunks already delivered stay in the
+pane. The target's disappearance is the one ending that is not silent: `window_pane_input_callback`
+checks `wp == NULL` before it looks at end of file, so a pane killed while the stream is open sets
+`c->retval = 1` and `CLIENT_EXIT` and cancels the read. zz raises the invocation's status to 1 the
+same way, publishes a client-exit event on the Command lane, and both the daemon's own queue and the
+CLI's `\;` chain stop there: nothing queued behind the reader runs and nothing further is printed.
+Measured on 2026-09-18 for `display-message -I` and `split-window -I`, with the writer closing its
+end after the kill and with it writing more bytes first. SIGTERM before, during or after the read exits the waiting command
 client with status 0. Each command wait and each nested read saves and restores the previous
 SIGTERM disposition with `sigaction`, including read errors and cap refusals. Disconnect releases
 the daemon's file waiter and prevents pending payloads and following group members from running.
@@ -129,7 +136,12 @@ Destination validation precedes stdin acquisition. A missing `display-message -I
 without consuming the stream, a running pane rejects it, and `split-window -I` resolves its target
 and validates spawn options and layout feasibility before requesting bytes. It also creates the
 empty pane and applies the zoom transition before waiting for input; other clients can observe
-both changes while the caller's pipe remains open. Control source read failures use the same
+both changes while the caller's pipe remains open. The stream opens as soon as the created pane
+exists rather than after the whole `split-window` execution returns, so the command's own cost is
+never prepended to the caller's bytes, and a `-P` line is released to the caller's stdout before the
+stream opens, the way `cmdq_print` writes through to a command client while its item is still
+running. A pane a caller stream will fill holds no process by construction, so the `-P` path does
+not wait for a pid or a tty that can never arrive. Control source read failures use the same
 unframed `ControlSourceFile::ReadError` event for direct commands, aliases and file replay, preserving
 both continuation and the attached control client's exit status.
 

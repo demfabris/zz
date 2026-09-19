@@ -1954,6 +1954,8 @@ mod tests {
         }
         let mut receiver = super::ProtocolReceiver::new(client);
         assert_eq!(receiver.recv_decodable().unwrap(), (next, true));
+    }
+
     #[cfg(all(unix, feature = "daemon"))]
     #[test]
     #[allow(

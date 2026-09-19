@@ -1,0 +1,287 @@
+# Scenario: source-file-output
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: out: source-file -v compat/scenarios/source-file-output-root.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:1: display-message -p ROOT_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:2: source-file -v compat/scenarios/source-file-output-child.conf
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:3: display-message -p ROOT_TWO
+    ROOT_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:1: display-message -p CHILD_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:2: list-sessions -F CHILD_TWO
+    CHILD_ONE
+    CHILD_TWO
+    ROOT_TWO
+tmux stdout:
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:1: display-message -p ROOT_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:2: source-file -v compat/scenarios/source-file-output-child.conf
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:3: display-message -p ROOT_TWO
+    ROOT_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:1: display-message -p CHILD_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:2: list-sessions -F CHILD_TWO
+    CHILD_ONE
+    CHILD_TWO
+    ROOT_TWO
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: source-file -v compat/scenarios/source-file-output-child.conf compat/scenarios/source-file-output-root.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:1: display-message -p CHILD_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:2: list-sessions -F CHILD_TWO
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:1: display-message -p ROOT_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:2: source-file -v compat/scenarios/source-file-output-child.conf
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:3: display-message -p ROOT_TWO
+    CHILD_ONE
+    CHILD_TWO
+    ROOT_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:1: display-message -p CHILD_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:2: list-sessions -F CHILD_TWO
+    CHILD_ONE
+    CHILD_TWO
+    ROOT_TWO
+tmux stdout:
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:1: display-message -p CHILD_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:2: list-sessions -F CHILD_TWO
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:1: display-message -p ROOT_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:2: source-file -v compat/scenarios/source-file-output-child.conf
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:3: display-message -p ROOT_TWO
+    CHILD_ONE
+    CHILD_TWO
+    ROOT_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:1: display-message -p CHILD_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:2: list-sessions -F CHILD_TWO
+    CHILD_ONE
+    CHILD_TWO
+    ROOT_TWO
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: source-file -v compat/scenarios/source-file-output-[cr]*.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:1: display-message -p CHILD_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:2: list-sessions -F CHILD_TWO
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:1: display-message -p ROOT_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:2: source-file -v compat/scenarios/source-file-output-child.conf
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:3: display-message -p ROOT_TWO
+    CHILD_ONE
+    CHILD_TWO
+    ROOT_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:1: display-message -p CHILD_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:2: list-sessions -F CHILD_TWO
+    CHILD_ONE
+    CHILD_TWO
+    ROOT_TWO
+tmux stdout:
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:1: display-message -p CHILD_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:2: list-sessions -F CHILD_TWO
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:1: display-message -p ROOT_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:2: source-file -v compat/scenarios/source-file-output-child.conf
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-root.conf:3: display-message -p ROOT_TWO
+    CHILD_ONE
+    CHILD_TWO
+    ROOT_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:1: display-message -p CHILD_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:2: list-sessions -F CHILD_TWO
+    CHILD_ONE
+    CHILD_TWO
+    ROOT_TWO
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: source-file -v compat/scenarios/source-file-parse-assignment.conf compat/scenarios/source-file-parse-assignment-branch.conf compat/scenarios/source-file-parse-replay.conf compat/scenarios/source-file-parse-replay-branch.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-parse-assignment-branch.conf:2: display-message -p ASSIGN_VISIBLE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-parse-replay.conf:1: set-environment -g SOURCE_REPLAY_FLAG 1
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-parse-replay-branch.conf:4: display-message -p REPLAY_NOT_VISIBLE
+    ASSIGN_VISIBLE
+    REPLAY_NOT_VISIBLE
+tmux stdout:
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-parse-assignment-branch.conf:2: display-message -p ASSIGN_VISIBLE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-parse-replay.conf:1: set-environment -g SOURCE_REPLAY_FLAG 1
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-parse-replay-branch.conf:4: display-message -p REPLAY_NOT_VISIBLE
+    ASSIGN_VISIBLE
+    REPLAY_NOT_VISIBLE
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: source-file -nv compat/scenarios/source-file-parse-only-assignment.conf compat/scenarios/source-file-parse-only-branch.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-parse-only-branch.conf:4: display-message -p PARSE_ONLY_NOT_VISIBLE
+tmux stdout:
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-parse-only-branch.conf:4: display-message -p PARSE_ONLY_NOT_VISIBLE
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: set-option -s command-alias[90] 'indirect=source-file -v compat/scenarios/source-file-output-child.conf'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: source-file compat/scenarios/source-file-output-alias-root.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    ALIAS_BEFORE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:1: display-message -p CHILD_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:2: list-sessions -F CHILD_TWO
+    CHILD_ONE
+    CHILD_TWO
+    ALIAS_MIDDLE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:1: display-message -p CHILD_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:2: list-sessions -F CHILD_TWO
+    CHILD_ONE
+    CHILD_TWO
+    ALIAS_AFTER
+tmux stdout:
+    ALIAS_BEFORE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:1: display-message -p CHILD_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:2: list-sessions -F CHILD_TWO
+    CHILD_ONE
+    CHILD_TWO
+    ALIAS_MIDDLE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:1: display-message -p CHILD_ONE
+    /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/source-file-output-child.conf:2: list-sessions -F CHILD_TWO
+    CHILD_ONE
+    CHILD_TWO
+    ALIAS_AFTER
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: set-hook -g after-display-message 'source-file compat/scenarios/source-file-output-hook-child.conf'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: source-file compat/scenarios/source-file-output-hook-root.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    HOOK_TRIGGER
+    HOOK_CHILD
+    HOOK_LATER
+tmux stdout:
+    HOOK_TRIGGER
+    HOOK_CHILD
+    HOOK_LATER
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: set-hook -gu after-display-message
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: source-file compat/scenarios/source-file-output-indirect-error-root.conf
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    can't find session: missing-indirect
+tmux stderr:
+    can't find session: missing-indirect
+zz stdout:
+    ROOT_BEFORE
+    BEFORE_CHILD
+    AFTER_CHILD
+    ROOT_AFTER
+tmux stdout:
+    ROOT_BEFORE
+    BEFORE_CHILD
+    AFTER_CHILD
+    ROOT_AFTER
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: source-file compat/scenarios/source-file-output-ordered-error-root.conf
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    can't find session: missing-A-B-C-A
+    can't find session: missing-A-B-C-B
+    can't find session: missing-A-B-C-C
+tmux stderr:
+    can't find session: missing-A-B-C-A
+    can't find session: missing-A-B-C-B
+    can't find session: missing-A-B-C-C
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=12 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

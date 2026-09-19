@@ -1,0 +1,14 @@
+{
+  "source_revision": "571608659d0f8013ddb973d27f2171d9e1af224e",
+  "compared_files": 453,
+  "different_files": [
+    "crates/zz-terminal/src/session.rs",
+    "crates/zz-mux/src/command.rs"
+  ],
+  "expected_differences": [
+    "crates/zz-mux/src/command.rs",
+    "crates/zz-terminal/src/session.rs"
+  ],
+  "fixed_sha256": "2a65202c8c5dad24ae4e76cac8e9365bf232394b445f3f0346f2da778ab9d5e9",
+  "reverted_sha256": "8d5bd86d503fd181154cb8fb21962db275ac1cbf1d7827044951c32d22124153"
+}

@@ -1,0 +1,14 @@
+   Compiling libghostty-vt-sys v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt-sys)
+   Compiling libghostty-vt v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt)
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-terminal)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 01s
+     Running unittests src/terminal_core.rs (target/debug/deps/zz_terminal-668b4c4ce7e784d8)
+
+running 4 tests
+test session::tests::styled_numbered_capture_preserves_the_row_after_three_wrapped_rows ... ok
+test session::tests::styled_capture_preserves_default_padding_before_wide_wraps ... ok
+test session::tests::capture_preserves_tab_spans_and_discards_partial_overwrites ... ok
+test session::tests::capture_preserves_edited_tab_cells ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 284 filtered out; finished in 0.03s
+

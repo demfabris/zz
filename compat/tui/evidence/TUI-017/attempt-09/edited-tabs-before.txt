@@ -1,0 +1,71 @@
+      case capture-edited-tab-ich-middle
+      stdout differs
+        1c1
+        < ABC	X    DEF
+        ---
+        > ABC X    DEF
+DIFF  capture-edited-tab-ich-middle
+ok    capture-edited-tab-ich-before
+ok    capture-edited-tab-ich-head
+      case capture-edited-tab-ich-off-line
+      stdout differs
+        1c1
+        <                                                                           C   AB
+        ---
+        >                                                                               AB
+DIFF  capture-edited-tab-ich-off-line
+      case capture-edited-tab-ich-truncate
+      stdout differs
+        1c1
+        <                                                                           ABC	
+        ---
+        >                                                                           ABC
+DIFF  capture-edited-tab-ich-truncate
+      case capture-edited-tab-ich-overwrite
+      stdout differs
+        1c1
+        < ABC	X Y  DEF
+        ---
+        > ABC X Y  DEF
+DIFF  capture-edited-tab-ich-overwrite
+      case capture-edited-tab-dch-middle
+      stdout differs
+        1c1
+        < ABC	DEF
+        ---
+        > ABC    DEF
+DIFF  capture-edited-tab-dch-middle
+ok    capture-edited-tab-dch-before
+      case capture-edited-tab-dch-head
+      stdout differs
+        1c1
+        < ABCDEF
+        ---
+        > ABC    DEF
+DIFF  capture-edited-tab-dch-head
+ok    capture-edited-tab-dch-entire
+ok    capture-edited-tab-dch-off-line
+ok    capture-edited-tab-dch-overwrite
+      case capture-edited-tab-ech-middle
+      stdout differs
+        1c1
+        < ABC	  DEF
+        ---
+        > ABC     DEF
+DIFF  capture-edited-tab-ech-middle
+      case capture-edited-tab-ech-head
+      stdout differs
+        1c1
+        < ABC DEF
+        ---
+        > ABC     DEF
+DIFF  capture-edited-tab-ech-head
+ok    capture-edited-tab-ech-entire
+ok    capture-edited-tab-il-shift
+ok    capture-edited-tab-il-off-region
+ok    capture-edited-tab-dl-shift
+ok    capture-edited-tab-dl-tab
+ok    capture-edited-tab-scroll-up
+ok    capture-edited-tab-scroll-down
+ok    capture-edited-tab-scroll-off-region
+compat/tui/evidence/TUI-017/attempt-09/edited-tab-probe.sh: line 11: ASSERTED: unbound variable

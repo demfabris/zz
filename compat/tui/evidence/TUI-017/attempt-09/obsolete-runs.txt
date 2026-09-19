@@ -1,0 +1,2 @@
+Stopped the obsolete fixture sequence after the styled-overwrite follow-up; retained its partial logs.
+Stopped the obsolete copy/screen/seven-case sequence; its active copy fixture may finish and its logs remain. Fresh final binaries will rerun these checks.

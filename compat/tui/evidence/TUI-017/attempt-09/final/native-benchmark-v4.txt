@@ -1,0 +1,1 @@
+native benchmark: five alternating pairs per workload, CPU 6, 100 warm-up pairs, exit=0

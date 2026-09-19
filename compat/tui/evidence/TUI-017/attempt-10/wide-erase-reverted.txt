@@ -1,0 +1,129 @@
+ok    self-check capture-erased-100x30-line-escape exact bytes before sabotage
+      case capture-erased-100x30-line-escape-sabotage
+      stdout differs
+        2c2
+        < \033[49mNEXT
+        ---
+        > \033[49mNEXT-X
+ok    self-check capture-erased-100x30-line-escape one-sided scene change
+      case capture-erased-100x30-line-padding-equivalence
+      stdout differs
+        1,2c1,2
+        < ^[[41m                                                                                                    
+        < ^[[49mNEXT                     
+        ---
+        > ^[[41m                                                                                
+        > ^[[49mNEXT                
+FAIL  self-check capture-erased-100x30-line-padding exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-erased-100x30-line-padding-sabotage
+      stdout differs
+        1,2c1,2
+        < ^[[41m                                                                                                    
+        < ^[[49mNEXT                     
+        ---
+        > ^[[41m                                                                                
+        > ^[[49mNEXT-X              
+ok    self-check capture-erased-100x30-line-padding one-sided scene change
+ok    self-check capture-erased-100x30-display-escape exact bytes before sabotage
+      case capture-erased-100x30-display-escape-sabotage
+      stdout differs
+        2c2
+        < \033[49mNEXT\033[41m
+        ---
+        > \033[49mNEXT-X\033[41m
+ok    self-check capture-erased-100x30-display-escape one-sided scene change
+      case capture-erased-100x30-display-padding-equivalence
+      stdout differs
+        1,5c1,5
+        < ^[[41m                                                                                                    
+        < ^[[49mNEXT^[[41m                                                                                                
+        <                                                                                                     
+        <                                                                                                     
+        <                                                                                                     
+        ---
+        > ^[[41m                                                                                
+        > ^[[49mNEXT^[[41m                                                                            
+        >                                                                                 
+        >                                                                                 
+        >                                                                                 
+FAIL  self-check capture-erased-100x30-display-padding exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-erased-100x30-display-padding-sabotage
+      stdout differs
+        1,5c1,5
+        < ^[[41m                                                                                                    
+        < ^[[49mNEXT^[[41m                                                                                                
+        <                                                                                                     
+        <                                                                                                     
+        <                                                                                                     
+        ---
+        > ^[[41m                                                                                
+        > ^[[49mNEXT-X^[[41m                                                                          
+        >                                                                                 
+        >                                                                                 
+        >                                                                                 
+ok    self-check capture-erased-100x30-display-padding one-sided scene change
+ok    self-check capture-erased-100x30-clear-escape exact bytes before sabotage
+      case capture-erased-100x30-clear-escape-sabotage
+      stdout differs
+        2c2
+        < \033[49mNEXT\033[41m
+        ---
+        > \033[49mNEXT-X\033[41m
+ok    self-check capture-erased-100x30-clear-escape one-sided scene change
+      case capture-erased-100x30-clear-padding-equivalence
+      stdout differs
+        1,5c1,5
+        < ^[[41m                                                                                                    
+        < ^[[49mNEXT^[[41m                                                                                                
+        <                                                                                                     
+        <                                                                                                     
+        <                                                                                                     
+        ---
+        > ^[[41m                                                                                
+        > ^[[49mNEXT^[[41m                                                                            
+        >                                                                                 
+        >                                                                                 
+        >                                                                                 
+FAIL  self-check capture-erased-100x30-clear-padding exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-erased-100x30-clear-padding-sabotage
+      stdout differs
+        1,5c1,5
+        < ^[[41m                                                                                                    
+        < ^[[49mNEXT^[[41m                                                                                                
+        <                                                                                                     
+        <                                                                                                     
+        <                                                                                                     
+        ---
+        > ^[[41m                                                                                
+        > ^[[49mNEXT-X^[[41m                                                                          
+        >                                                                                 
+        >                                                                                 
+        >                                                                                 
+ok    self-check capture-erased-100x30-clear-padding one-sided scene change
+ok    self-check capture-erased-100x30-region-escape exact bytes before sabotage
+      case capture-erased-100x30-region-escape-sabotage
+      stdout differs
+        3c3
+        < \033[49mNEXT
+        ---
+        > \033[49mNEXT-X
+ok    self-check capture-erased-100x30-region-escape one-sided scene change
+      case capture-erased-100x30-region-padding-equivalence
+      stdout differs
+        2,3c2,3
+        < ^[[41m                                                                                                    
+        < ^[[49mNEXT                     
+        ---
+        > ^[[41m                                                                                
+        > ^[[49mNEXT                
+FAIL  self-check capture-erased-100x30-region-padding exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-erased-100x30-region-padding-sabotage
+      stdout differs
+        2,3c2,3
+        < ^[[41m                                                                                                    
+        < ^[[49mNEXT                     
+        ---
+        > ^[[41m                                                                                
+        > ^[[49mNEXT-X              
+ok    self-check capture-erased-100x30-region-padding one-sided scene change
+wide erase self-check: 4 failures

@@ -1,0 +1,269 @@
+ok    self-check capture-edited-tab-overwrite-background exact bytes before sabotage
+      case capture-edited-tab-overwrite-background-sabotage
+      stdout differs
+        1c1
+        < \033[44mABC\033[49m  \033[41mX\033[49m  \033[44mDEF\033[49m
+        ---
+        > \033[44mABC\033[49m  \033[42mX\033[49m  \033[44mDEF\033[49m
+ok    self-check capture-edited-tab-overwrite-background one-sided scene change
+      case capture-edited-tab-ich-middle-equivalence
+      stdout differs
+        1c1
+        < ABC	X    DEF
+        ---
+        > ABC X    DEF
+FAIL  self-check capture-edited-tab-ich-middle exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-edited-tab-ich-middle-sabotage
+      stdout differs
+        1c1
+        < ABC	X    DEF
+        ---
+        > ABC X   DEF
+ok    self-check capture-edited-tab-ich-middle one-sided scene change
+      case capture-edited-tab-ich-before-equivalence
+      stdout differs
+        1c1
+        < A  BC	DEF
+        ---
+        > A  BC     DEF
+FAIL  self-check capture-edited-tab-ich-before exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-edited-tab-ich-before-sabotage
+      stdout differs
+        1c1
+        < A  BC	DEF
+        ---
+        > ABC     DEF
+ok    self-check capture-edited-tab-ich-before one-sided scene change
+      case capture-edited-tab-ich-head-equivalence
+      stdout differs
+        1c1
+        < ABC 	DEF
+        ---
+        > ABC      DEF
+FAIL  self-check capture-edited-tab-ich-head exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-edited-tab-ich-head-sabotage
+      stdout differs
+        1c1
+        < ABC 	DEF
+        ---
+        > ABC     DEF
+ok    self-check capture-edited-tab-ich-head one-sided scene change
+ok    self-check capture-edited-tab-ich-off-line exact bytes before sabotage
+      case capture-edited-tab-ich-off-line-sabotage
+      stdout differs
+        1c1
+        <                                                                           C   AB
+        ---
+        >                                                                         ABC    Z
+ok    self-check capture-edited-tab-ich-off-line one-sided scene change
+      case capture-edited-tab-ich-truncate-equivalence
+      stdout differs
+        1c1
+        <                                                                           ABC	
+        ---
+        >                                                                           ABC
+FAIL  self-check capture-edited-tab-ich-truncate exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-edited-tab-ich-truncate-sabotage
+      stdout differs
+        1c1
+        <                                                                           ABC	
+        ---
+        >                                                                         ABC    Z
+ok    self-check capture-edited-tab-ich-truncate one-sided scene change
+      case capture-edited-tab-ich-overwrite-equivalence
+      stdout differs
+        1c1
+        < ABC	X Y  DEF
+        ---
+        > ABC X Y  DEF
+FAIL  self-check capture-edited-tab-ich-overwrite exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-edited-tab-ich-overwrite-sabotage
+      stdout differs
+        1c1
+        < ABC	X Y  DEF
+        ---
+        > ABC X Y DEF
+ok    self-check capture-edited-tab-ich-overwrite one-sided scene change
+      case capture-edited-tab-dch-middle-equivalence
+      stdout differs
+        1c1
+        < ABC	DEF
+        ---
+        > ABC    DEF
+FAIL  self-check capture-edited-tab-dch-middle exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-edited-tab-dch-middle-sabotage
+      stdout differs
+        1c1
+        < ABC	DEF
+        ---
+        > ABC    DEF
+ok    self-check capture-edited-tab-dch-middle one-sided scene change
+      case capture-edited-tab-dch-before-equivalence
+      stdout differs
+        1c1
+        < A	DEF
+        ---
+        > A     DEF
+FAIL  self-check capture-edited-tab-dch-before exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-edited-tab-dch-before-sabotage
+      stdout differs
+        1c1
+        < A	DEF
+        ---
+        > ABC     DEF
+ok    self-check capture-edited-tab-dch-before one-sided scene change
+      case capture-edited-tab-dch-head-equivalence
+      stdout differs
+        1c1
+        < ABCDEF
+        ---
+        > ABC    DEF
+FAIL  self-check capture-edited-tab-dch-head exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-edited-tab-dch-head-sabotage
+      stdout differs
+        1c1
+        < ABCDEF
+        ---
+        > ABC     DEF
+ok    self-check capture-edited-tab-dch-head one-sided scene change
+ok    self-check capture-edited-tab-dch-entire exact bytes before sabotage
+      case capture-edited-tab-dch-entire-sabotage
+      stdout differs
+        1c1
+        < ABCDEF
+        ---
+        > ABC     DEF
+ok    self-check capture-edited-tab-dch-entire one-sided scene change
+ok    self-check capture-edited-tab-dch-off-line exact bytes before sabotage
+      case capture-edited-tab-dch-off-line-sabotage
+      stdout differs
+        1c1
+        < 
+        ---
+        > ABC     DEF
+ok    self-check capture-edited-tab-dch-off-line one-sided scene change
+ok    self-check capture-edited-tab-dch-overwrite exact bytes before sabotage
+      case capture-edited-tab-dch-overwrite-sabotage
+      stdout differs
+        1c1
+        < ABC  X DEF
+        ---
+        > ABC  X  DEF
+ok    self-check capture-edited-tab-dch-overwrite one-sided scene change
+      case capture-edited-tab-ech-middle-equivalence
+      stdout differs
+        1c1
+        < ABC	  DEF
+        ---
+        > ABC     DEF
+FAIL  self-check capture-edited-tab-ech-middle exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-edited-tab-ech-middle-sabotage
+      stdout differs
+        1c1
+        < ABC	  DEF
+        ---
+        > ABC     DEF
+ok    self-check capture-edited-tab-ech-middle one-sided scene change
+      case capture-edited-tab-ech-head-equivalence
+      stdout differs
+        1c1
+        < ABC DEF
+        ---
+        > ABC     DEF
+FAIL  self-check capture-edited-tab-ech-head exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-edited-tab-ech-head-sabotage
+      stdout differs
+        1c1
+        < ABC DEF
+        ---
+        > ABC     DEF
+ok    self-check capture-edited-tab-ech-head one-sided scene change
+ok    self-check capture-edited-tab-ech-entire exact bytes before sabotage
+FAIL  self-check capture-edited-tab-ech-entire one-sided scene change: stdout reported 0, expected 1
+      case capture-edited-tab-il-shift-equivalence
+      stdout differs
+        3c3
+        < ABC	DEF
+        ---
+        > ABC     DEF
+FAIL  self-check capture-edited-tab-il-shift exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-edited-tab-il-shift-sabotage
+      stdout differs
+        2,3c2
+        < 
+        < ABC	DEF
+        ---
+        > ABC     DEF
+        4a4
+        > 
+ok    self-check capture-edited-tab-il-shift one-sided scene change
+ok    self-check capture-edited-tab-il-off-region exact bytes before sabotage
+      case capture-edited-tab-il-off-region-sabotage
+      stdout differs
+        3c3
+        < 
+        ---
+        > ABC     DEF
+ok    self-check capture-edited-tab-il-off-region one-sided scene change
+      case capture-edited-tab-dl-shift-equivalence
+      stdout differs
+        1c1
+        < ABC	DEF
+        ---
+        > ABC     DEF
+FAIL  self-check capture-edited-tab-dl-shift exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-edited-tab-dl-shift-sabotage
+      stdout differs
+        1c1,2
+        < ABC	DEF
+        ---
+        > TOP
+        > ABC     DEF
+        3d3
+        < 
+ok    self-check capture-edited-tab-dl-shift one-sided scene change
+ok    self-check capture-edited-tab-dl-tab exact bytes before sabotage
+      case capture-edited-tab-dl-tab-sabotage
+      stdout differs
+        1a2
+        > ABC     DEF
+        3d3
+        < 
+ok    self-check capture-edited-tab-dl-tab one-sided scene change
+      case capture-edited-tab-scroll-up-equivalence
+      stdout differs
+        2c2
+        < ABC	DEF
+        ---
+        > ABC     DEF
+FAIL  self-check capture-edited-tab-scroll-up exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-edited-tab-scroll-up-sabotage
+      stdout differs
+        2d1
+        < ABC	DEF
+        3a3
+        > ABC     DEF
+ok    self-check capture-edited-tab-scroll-up one-sided scene change
+      case capture-edited-tab-scroll-down-equivalence
+      stdout differs
+        3c3
+        < ABC	DEF
+        ---
+        > ABC     DEF
+FAIL  self-check capture-edited-tab-scroll-down exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-edited-tab-scroll-down-sabotage
+      stdout differs
+        1a2
+        > ABC     DEF
+        3d3
+        < ABC	DEF
+ok    self-check capture-edited-tab-scroll-down one-sided scene change
+ok    self-check capture-edited-tab-scroll-off-region exact bytes before sabotage
+      case capture-edited-tab-scroll-off-region-sabotage
+      stdout differs
+        2c2
+        < 
+        ---
+        > ABC     DEF
+ok    self-check capture-edited-tab-scroll-off-region one-sided scene change
+edited tabs: assertions=0 failures=0 self_check_failures=15

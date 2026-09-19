@@ -1,0 +1,19 @@
+[1;36m==>[0m delta corpus for origin/main...HEAD: 163 unique scenarios (smoke 144, changed 0, command-matched 25)
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m checking pinned plugin corpus
+[1;36m==>[0m checking out tpm at e261deb1b47614eed3400089ce7197dc68acc4eb
+[1;36m==>[0m checking out tmux-sensible at 25cb91f42d020f675bb0a2ce3fbd3a5d96119efa
+[1;36m==>[0m checking out vim-tmux-navigator at e41c431a0c7b7388ae7ba341f01a0d217eb3a432
+[1;36m==>[0m checking out tmux-yank at acfd36e4fcba99f8310a7dfb432111c242fe7392
+[1;36m==>[0m checking out tmux-resurrect at cff343cf9e81983d3da0c8562b01616f12e8d548
+[1;36m==>[0m checking out tmux-continuum at 0698e8f4b17d6454c71bf5212895ec055c578da0
+[1;36m==>[0m checking out tmux-fpp at 878302f228ee14f0fa59717f63743d396b327a21
+[1;36m==>[0m checking out oh-my-tmux at 58a3dcc0d718ec0fa1c0d5a2fddd640a1ad7a5b7
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-c11-capture-residuals/target/capture-residuals-edits/zz
+[1;36m==>[0m running alerts
+/home/demfabris/dev/zz-c11-capture-residuals/compat/diff-scenario.sh: line 1037: unexpected EOF while looking for matching `"'
+[1;33mwarn:[0m alerts failed; it is retried alone after the corpus
+[1;36m==>[0m running break-pane

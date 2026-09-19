@@ -1,0 +1,373 @@
+# Scenario: format-window-neighbour-user-options
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/format-window-neighbour-user-options.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: new-session -d -s wn -n w0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: new-window -d -t wn -n w1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: new-window -d -t wn -n w2
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: set-option -g @glob global-value
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: set-option -t wn @sess session-value
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: set-option -w -t wn:0 @local zero
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: set-option -w -t wn:1 @local one
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: set-option -w -t wn:1 @onlyone solo
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: set-option -w -t wn:2 @local two
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: set-option -w -t wn:1 @glob window-glob
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: set-option -p -t wn:1.0 @pane pane-value
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: display-message -p -t wn [#{W:<#{window_index}|#{next_@local}|#{prev_@local}>}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [<0|one|><1|two|zero><2||one>]
+tmux stdout:
+    [<0|one|><1|two|zero><2||one>]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: display-message -p -t wn [#{W:<#{next_@onlyone}|#{prev_@onlyone}>}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [<solo|><|><|solo>]
+tmux stdout:
+    [<solo|><|><|solo>]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: out: display-message -p -t wn [#{W:<#{next_@glob}|#{prev_@glob}|#{next_@sess}|#{prev_@sess}|#{next_@pane}|#{prev_@pane}>}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [<window-glob|||||><|||||><|window-glob||||>]
+tmux stdout:
+    [<window-glob|||||><|||||><|window-glob||||>]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: display-message -p -t wn [#{W:<#{window_index}|#{next_window_index}|#{prev_window_index}|#{next_window_active}|#{prev_window_active}>}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [<0|1||0|><1|2|0|0|1><2||1||0>]
+tmux stdout:
+    [<0|1||0|><1|2|0|0|1><2||1||0>]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: display-message -p -t wn [#{Wr:<#{window_index}|#{next_@local}|#{prev_@local}>}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [<2|one|><1|zero|two><0||one>]
+tmux stdout:
+    [<2|one|><1|zero|two><0||one>]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: display-message -p -t wn [#{Wn:<#{window_name}|#{next_@local}|#{prev_@local}>}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [<w0|one|><w1|two|zero><w2||one>]
+tmux stdout:
+    [<w0|one|><w1|two|zero><w2||one>]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: display-message -p -t wn [#{Wnr:<#{window_name}|#{next_@local}|#{prev_@local}>}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [<w2|one|><w1|zero|two><w0||one>]
+tmux stdout:
+    [<w2|one|><w1|zero|two><w0||one>]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: display-message -p -t wn [#{W:<#{window_index}:#{next_@local}>,(#{window_index}:#{next_@local})}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [(0:one)<1:two><2:>]
+tmux stdout:
+    [(0:one)<1:two><2:>]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: out: display-message -p -t wn [#{next_@local}|#{prev_@local}|#{@glob}|#{@local}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [||global-value|zero]
+tmux stdout:
+    [||global-value|zero]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: display-message -p -t wn [#{W:<#{next_@local}#{P:.}>}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [<one.><two.><.>]
+tmux stdout:
+    [<one.><two.><.>]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: display-message -p -t wn [#{W:<#{next_@local}#{W:(#{next_@local})}#{next_@local}>}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [<one(one)(two)()one><two(one)(two)()two><(one)(two)()>]
+tmux stdout:
+    [<one(one)(two)()one><two(one)(two)()two><(one)(two)()>]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: out: display-message -p -t wn [#{S:#{W:<#{next_@local}>}}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [<><one><two><>]
+tmux stdout:
+    [<><one><two><>]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: set-option -w -t wn:1 -u @local
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: out: display-message -p -t wn [#{W:<#{window_index}|#{next_@local}|#{prev_@local}>}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [<0||><1|two|zero><2||>]
+tmux stdout:
+    [<0||><1|two|zero><2||>]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: out: display-message -p -t wn [#{?#{next_@onlyone},set,unset}#{W:#{?#{next_@onlyone},set,unset}}]
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    [unsetsetunsetunset]
+tmux stdout:
+    [unsetsetunsetunset]
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=26 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

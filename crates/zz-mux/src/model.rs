@@ -2299,10 +2299,30 @@ impl MuxState {
         target: Option<&str>,
         current: Option<SessionId>,
     ) -> Result<SessionId, ServerError> {
+        self.resolve_session_with_pane_index(target, current, &|window, index| {
+            self.windows
+                .get(&window)?
+                .pane_order()
+                .get(usize::try_from(index).ok()?)
+                .copied()
+        })
+    }
+
+    pub(crate) fn resolve_session_with_pane_index(
+        &self,
+        target: Option<&str>,
+        current: Option<SessionId>,
+        pane_at_index: &impl Fn(WindowId, u32) -> Option<PaneId>,
+    ) -> Result<SessionId, ServerError> {
         if target.is_some_and(is_marked_target) {
             return Ok(self.windows[&self.marked_window()?].session);
         }
-        self.resolve_named_session(target, current, TargetSlot::Session)
+        self.resolve_named_session_with_pane_index(
+            target,
+            current,
+            TargetSlot::Session,
+            pane_at_index,
+        )
     }
 
     fn resolve_named_session(
@@ -2310,6 +2330,22 @@ impl MuxState {
         target: Option<&str>,
         current: Option<SessionId>,
         slot: TargetSlot,
+    ) -> Result<SessionId, ServerError> {
+        self.resolve_named_session_with_pane_index(target, current, slot, &|window, index| {
+            self.windows
+                .get(&window)?
+                .pane_order()
+                .get(usize::try_from(index).ok()?)
+                .copied()
+        })
+    }
+
+    fn resolve_named_session_with_pane_index(
+        &self,
+        target: Option<&str>,
+        current: Option<SessionId>,
+        slot: TargetSlot,
+        pane_at_index: &impl Fn(WindowId, u32) -> Option<PaneId>,
     ) -> Result<SessionId, ServerError> {
         let target = target.map(|target| {
             if target == "=" && slot != TargetSlot::PaneFallback {
@@ -2334,10 +2370,11 @@ impl MuxState {
                 } else {
                     window
                 };
-                return self.resolve_named_session(
+                return self.resolve_named_session_with_pane_index(
                     Some(&format!("{session}:{window}")),
                     current,
                     slot,
+                    pane_at_index,
                 );
             }
             let window_target = target.split_once(':').map_or(target, |(_, window)| window);
@@ -2350,9 +2387,19 @@ impl MuxState {
                 let session = if session_target.is_empty() {
                     None
                 } else {
-                    Some(self.resolve_named_session(Some(session_target), current, slot)?)
+                    Some(self.resolve_named_session_with_pane_index(
+                        Some(session_target),
+                        current,
+                        slot,
+                        pane_at_index,
+                    )?)
                 };
-                let pane = self.resolve_pane(Some(pane_target), current_window, None)?;
+                let pane = self.resolve_pane_with_index(
+                    Some(pane_target),
+                    current_window,
+                    None,
+                    pane_at_index,
+                )?;
                 let window = self
                     .window_for_pane(pane)
                     .ok_or_else(|| ServerError::PaneNotFound(pane_target.to_owned()))?;
@@ -2365,14 +2412,24 @@ impl MuxState {
                     .ok_or_else(|| ServerError::PaneNotFound(pane_target.to_owned()));
             }
             if window_target.contains('.') {
-                let pane = self.resolve_pane(Some(target), current_window, None)?;
+                let pane = self.resolve_pane_with_index(
+                    Some(target),
+                    current_window,
+                    None,
+                    pane_at_index,
+                )?;
                 let window = self
                     .window_for_pane(pane)
                     .ok_or_else(|| ServerError::PaneNotFound(target.to_owned()))?;
                 return Ok(self.windows[&window].session);
             }
             if target.contains(':') || target.starts_with(['%', '@']) {
-                let window = self.resolve_window(Some(target), current, current_window)?;
+                let window = self.resolve_window_with_pane_index(
+                    Some(target),
+                    current,
+                    current_window,
+                    pane_at_index,
+                )?;
                 return Ok(self.windows[&window].session);
             }
         }

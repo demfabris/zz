@@ -1,0 +1,21 @@
+{
+  "fixture": "fixture-rebased.txt",
+  "records": 25,
+  "reasons_matched": 21,
+  "equivalent_lock_decisions_retained": [
+    "lock-client-current",
+    "lock-server",
+    "lock-session",
+    "lock-session-current"
+  ],
+  "owners": {
+    "gap:clients.interactive-refresh": 8,
+    "decided:TUI-017": 6,
+    "decided:TUI-016": 1,
+    "TUI-014": 6,
+    "decided:TUI-015": 4
+  },
+  "unattributed": 0,
+  "ordinary_TUI_015": 0,
+  "ordinary_TUI_017": 0
+}

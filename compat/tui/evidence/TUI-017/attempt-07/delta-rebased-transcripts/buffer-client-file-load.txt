@@ -1,0 +1,49 @@
+# Scenario: buffer-client-file-load
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/buffer-client-file-load.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: out: set-environment -gu BUFFER_CLIENT_FILE_LOAD
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: run-shell 'sh ~/buffer-client-file-load.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: show-environment -g BUFFER_CLIENT_FILE_LOAD
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    BUFFER_CLIENT_FILE_LOAD=clean:7
+tmux stdout:
+    BUFFER_CLIENT_FILE_LOAD=clean:7
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=3 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

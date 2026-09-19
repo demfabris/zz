@@ -1,0 +1,315 @@
+# Scenario: split-window-zoom-hidden-width
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/split-window-zoom-hidden-width.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: new-session -d -s zhidden -x 80 -y 24
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: split-window -d -h -t zhidden:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: list-panes -t zhidden:0 -F #{pane_index}:#{pane_width}x#{pane_height}:l#{pane_left}t#{pane_top}r#{pane_right}b#{pane_bottom}:x#{pane_x}y#{pane_y}:#{pane_at_left}#{pane_at_top}#{pane_at_right}#{pane_at_bottom}:#{pane_active}#{window_zoomed_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:40x24:l0t0r39b23:x0y0:1101:10
+    1:39x24:l41t0r79b23:x41y0:0111:00
+tmux stdout:
+    0:40x24:l0t0r39b23:x0y0:1101:10
+    1:39x24:l41t0r79b23:x41y0:0111:00
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: split-window -d -hZ -t zhidden:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: list-panes -t zhidden:0 -F #{pane_index}:#{pane_width}x#{pane_height}:l#{pane_left}t#{pane_top}r#{pane_right}b#{pane_bottom}:x#{pane_x}y#{pane_y}:#{pane_at_left}#{pane_at_top}#{pane_at_right}#{pane_at_bottom}:#{pane_active}#{window_zoomed_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:80x24:l0t0r79b23:x0y0:1111:11
+    1:80x24:l0t0r79b23:x0y0:1111:01
+    2:39x24:l41t0r79b23:x41y0:0111:01
+tmux stdout:
+    0:80x24:l0t0r79b23:x0y0:1111:11
+    1:80x24:l0t0r79b23:x0y0:1111:01
+    2:39x24:l41t0r79b23:x41y0:0111:01
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: split-window -d -v -t zhidden:0.2
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: list-panes -t zhidden:0 -F #{pane_index}:#{pane_width}x#{pane_height}:l#{pane_left}t#{pane_top}r#{pane_right}b#{pane_bottom}:x#{pane_x}y#{pane_y}:#{pane_at_left}#{pane_at_top}#{pane_at_right}#{pane_at_bottom}:#{pane_active}#{window_zoomed_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:20x24:l0t0r19b23:x0y0:1101:10
+    1:19x24:l21t0r39b23:x21y0:0101:00
+    2:39x12:l41t0r79b11:x41y0:0110:00
+    3:39x11:l41t13r79b23:x41y13:0011:00
+tmux stdout:
+    0:20x24:l0t0r19b23:x0y0:1101:10
+    1:19x24:l21t0r39b23:x21y0:0101:00
+    2:39x12:l41t0r79b11:x41y0:0110:00
+    3:39x11:l41t13r79b23:x41y13:0011:00
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: resize-pane -Z -t zhidden:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: list-panes -t zhidden:0 -F #{pane_index}:#{pane_width}x#{pane_height}:l#{pane_left}t#{pane_top}r#{pane_right}b#{pane_bottom}:x#{pane_x}y#{pane_y}:#{pane_at_left}#{pane_at_top}#{pane_at_right}#{pane_at_bottom}:#{pane_active}#{window_zoomed_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:80x24:l0t0r79b23:x0y0:1111:11
+    1:19x24:l21t0r39b23:x21y0:0101:01
+    2:39x12:l41t0r79b11:x41y0:0110:01
+    3:39x11:l41t13r79b23:x41y13:0011:01
+tmux stdout:
+    0:80x24:l0t0r79b23:x0y0:1111:11
+    1:19x24:l21t0r39b23:x21y0:0101:01
+    2:39x12:l41t0r79b11:x41y0:0110:01
+    3:39x11:l41t13r79b23:x41y13:0011:01
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: resize-pane -Z -t zhidden:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: list-panes -t zhidden:0 -F #{pane_index}:#{pane_width}x#{pane_height}:#{pane_active}#{window_zoomed_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:20x24:10
+    1:19x24:00
+    2:39x12:00
+    3:39x11:00
+tmux stdout:
+    0:20x24:10
+    1:19x24:00
+    2:39x12:00
+    3:39x11:00
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: new-session -d -s zkill -x 80 -y 24
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: split-window -d -h -t zkill:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: split-window -d -hZ -t zkill:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: kill-pane -t zkill:0.2
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: list-panes -t zkill:0 -F #{pane_index}:#{pane_width}x#{pane_height}:#{pane_active}#{window_zoomed_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:20x24:10
+    1:59x24:00
+tmux stdout:
+    0:20x24:10
+    1:59x24:00
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: new-session -d -s zselect -x 80 -y 24
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: split-window -d -h -t zselect:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: split-window -d -hZ -t zselect:0.0
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: select-pane -t zselect:0.1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: list-panes -t zselect:0 -F #{pane_index}:#{pane_width}x#{pane_height}:#{pane_active}#{window_zoomed_flag}
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    0:20x24:00
+    1:19x24:10
+    2:39x24:00
+tmux stdout:
+    0:20x24:00
+    1:19x24:10
+    2:39x24:00
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=21 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

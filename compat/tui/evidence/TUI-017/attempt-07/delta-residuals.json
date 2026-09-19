@@ -1,0 +1,122 @@
+[
+  {
+    "scenario": "lane2-store.txt",
+    "steps": 193,
+    "match": false,
+    "divergences": {
+      "TOPO": 0,
+      "GEO": 0,
+      "FMT": 0,
+      "OUT": 2,
+      "WARN": 0
+    },
+    "transcript": "delta-rebased-transcripts/lane2-store.txt",
+    "owner": "TUI-015",
+    "why": "Pin configure.ac selects vlock on this box; zz retains lock -np. Historical fixture excludes the build-selected default, but the corpus bytes remain different without a new waiver."
+  },
+  {
+    "scenario": "smoke/cli-chain-parse-abort.txt",
+    "steps": 3,
+    "match": false,
+    "divergences": {
+      "TOPO": 0,
+      "GEO": 0,
+      "FMT": 0,
+      "OUT": 1,
+      "WARN": 0
+    },
+    "transcript": "delta-rebased-transcripts/smoke/cli-chain-parse-abort.txt",
+    "owner": "TUI-018",
+    "why": "CLI parse-abort counter reports broken versus clean:6; the clean pre-lane baseline reproduces the difference."
+  },
+  {
+    "scenario": "smoke/jobs-command-environment.txt",
+    "steps": 3,
+    "match": false,
+    "divergences": {
+      "TOPO": 0,
+      "GEO": 0,
+      "FMT": 0,
+      "OUT": 1,
+      "WARN": 2
+    },
+    "transcript": "delta-rebased-transcripts/smoke/jobs-command-environment.txt",
+    "owner": "TUI-018",
+    "why": "Destroyed/missing-target positive-delay jobs fail; the clean pre-lane baseline reproduces the same OUT/WARN tuple."
+  },
+  {
+    "scenario": "smoke/plugin-runtime-resurrect-restore.txt",
+    "steps": 2,
+    "match": false,
+    "divergences": {
+      "TOPO": 0,
+      "GEO": 0,
+      "FMT": 0,
+      "OUT": 1,
+      "WARN": 1
+    },
+    "transcript": "delta-rebased-transcripts/smoke/plugin-runtime-resurrect-restore.txt",
+    "owner": "TUI-011",
+    "why": "The pin side changes restored pane titles to shell-generated titles and fails its own restore assertion. The same pin-side failure occurs against the clean baseline."
+  },
+  {
+    "scenario": "smoke/source-replay-diagnostics.txt",
+    "steps": 60,
+    "match": false,
+    "divergences": {
+      "TOPO": 0,
+      "GEO": 0,
+      "FMT": 0,
+      "OUT": 1,
+      "WARN": 0
+    },
+    "transcript": "delta-rebased-transcripts/smoke/source-replay-diagnostics.txt",
+    "owner": "TUI-018",
+    "why": "Accepted confirmation source replay times out on zz with request status 124 instead of the pin error/status/event stream. It persists on retry and the clean pre-lane baseline reproduces the same timeout and OUT difference."
+  },
+  {
+    "scenario": "show-options-hooks.txt",
+    "steps": 34,
+    "match": false,
+    "divergences": {
+      "TOPO": 0,
+      "GEO": 0,
+      "FMT": 0,
+      "OUT": 7,
+      "WARN": 0
+    },
+    "transcript": "delta-rebased-transcripts/show-options-hooks.txt",
+    "owner": "TUI-015",
+    "why": "The same build-selected lock-command default differs: pin vlock versus zz lock -np."
+  },
+  {
+    "scenario": "smoke/default-client-command.txt",
+    "steps": 3,
+    "match": false,
+    "divergences": {
+      "TOPO": 0,
+      "GEO": 0,
+      "FMT": 0,
+      "OUT": 1,
+      "WARN": 2
+    },
+    "transcript": "delta-rebased-transcripts/smoke/default-client-command.txt",
+    "owner": "TUI-018",
+    "why": "Single/multiple default-client command output fails; the clean pre-lane baseline reproduces the same OUT/WARN tuple."
+  },
+  {
+    "scenario": "smoke/status-background-jobs.txt",
+    "steps": 2,
+    "match": false,
+    "divergences": {
+      "TOPO": 0,
+      "GEO": 0,
+      "FMT": 0,
+      "OUT": 1,
+      "WARN": 1
+    },
+    "transcript": "delta-rebased-transcripts/smoke/status-background-jobs.txt",
+    "owner": "TUI-004",
+    "why": "The first drawn background-job expansion is empty on zz. It persists on retry and the clean pre-lane baseline reproduces the same failure and OUT/WARN tuple."
+  }
+]

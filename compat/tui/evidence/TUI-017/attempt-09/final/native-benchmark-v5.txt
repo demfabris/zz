@@ -1,0 +1,1 @@
+native benchmark: three blocks of five alternating pairs per workload, CPU 12, ASLR disabled for each benchmark child, 100 warm-up pairs, exit=0

@@ -1,0 +1,319 @@
+# Scenario: move-swap
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/move-swap.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: new-window -d -t w -n spare
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: new-session -d -s z -n zed
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: move-window -a -s w:main -t w:spare
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: move-window -s z:zed -t w:spare
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    index in use: 1
+tmux stderr:
+    index in use: 1
+COMMAND EXIT-CLASS: both nonzero
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: move-window -k -s z:zed -t w:spare
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: move-window -r -t w
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: swap-window -s w:0 -t w:1
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: find-window -t w:0 'ma*'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: find-window -t w:0 'zzz*'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: list-clients
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: show-messages
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    01:07: device-82 command: show-messages
+    01:07: device-81 command: list-panes -t w:1 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-80 command: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-79 command: list-windows -t w -F #{window_index}:#{window_width}x#{window_height}:#{window_layout}
+    01:07: device-78 command: list-panes -t w:1 -F #{pane_index}:#{pane_active}
+    01:07: device-77 command: list-panes -t w:0 -F #{pane_index}:#{pane_active}
+    01:07: device-76 command: list-windows -t w -F #{window_index}:#{window_name}:#{window_active}:#{window_panes}
+    01:07: device-75 command: list-sessions -F #{session_name}:#{session_windows}
+    01:07: device-74 command: list-clients
+    01:07: device-73 command: list-panes -t w:1 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-72 command: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-71 command: list-windows -t w -F #{window_index}:#{window_width}x#{window_height}:#{window_layout}
+    01:07: device-70 command: list-panes -t w:1 -F #{pane_index}:#{pane_active}
+    01:07: device-69 command: list-panes -t w:0 -F #{pane_index}:#{pane_active}
+    01:07: device-68 command: list-windows -t w -F #{window_index}:#{window_name}:#{window_active}:#{window_panes}
+    01:07: device-67 command: list-sessions -F #{session_name}:#{session_windows}
+    01:07: device-66 command: find-window -t w:0 zzz*
+    01:07: device-65 command: list-panes -t w:1 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-64 command: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-63 command: list-windows -t w -F #{window_index}:#{window_width}x#{window_height}:#{window_layout}
+    01:07: device-62 command: list-panes -t w:1 -F #{pane_index}:#{pane_active}
+    01:07: device-61 command: list-panes -t w:0 -F #{pane_index}:#{pane_active}
+    01:07: device-60 command: list-windows -t w -F #{window_index}:#{window_name}:#{window_active}:#{window_panes}
+    01:07: device-59 command: list-sessions -F #{session_name}:#{session_windows}
+    01:07: device-58 command: find-window -t w:0 ma*
+    01:07: device-57 command: list-panes -t w:1 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-56 command: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-55 command: list-windows -t w -F #{window_index}:#{window_width}x#{window_height}:#{window_layout}
+    01:07: device-54 command: list-panes -t w:1 -F #{pane_index}:#{pane_active}
+    01:07: device-53 command: list-panes -t w:0 -F #{pane_index}:#{pane_active}
+    01:07: device-52 command: list-windows -t w -F #{window_index}:#{window_name}:#{window_active}:#{window_panes}
+    01:07: device-51 command: list-sessions -F #{session_name}:#{session_windows}
+    01:07: device-50 command: swap-window -s w:0 -t w:1
+    01:07: device-49 command: list-panes -t w:1 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-48 command: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-47 command: list-windows -t w -F #{window_index}:#{window_width}x#{window_height}:#{window_layout}
+    01:07: device-46 command: list-panes -t w:1 -F #{pane_index}:#{pane_active}
+    01:07: device-45 command: list-panes -t w:0 -F #{pane_index}:#{pane_active}
+    01:07: device-44 command: list-windows -t w -F #{window_index}:#{window_name}:#{window_active}:#{window_panes}
+    01:07: device-43 command: list-sessions -F #{session_name}:#{session_windows}
+    01:07: device-42 command: move-window -r -t w
+    01:07: device-41 command: list-panes -t w:2 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-40 command: list-panes -t w:1 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-39 command: list-windows -t w -F #{window_index}:#{window_width}x#{window_height}:#{window_layout}
+    01:07: device-38 command: list-panes -t w:2 -F #{pane_index}:#{pane_active}
+    01:07: device-37 command: list-panes -t w:1 -F #{pane_index}:#{pane_active}
+    01:07: device-36 command: list-windows -t w -F #{window_index}:#{window_name}:#{window_active}:#{window_panes}
+    01:07: device-35 command: list-sessions -F #{session_name}:#{session_windows}
+    01:07: device-34 command: move-window -k -s z:zed -t w:spare
+    01:07: device-33 command: list-panes -t w:2 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-32 command: list-panes -t w:1 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-31 command: list-windows -t w -F #{window_index}:#{window_width}x#{window_height}:#{window_layout}
+    01:07: device-30 command: list-panes -t w:2 -F #{pane_index}:#{pane_active}
+    01:07: device-29 command: list-panes -t w:1 -F #{pane_index}:#{pane_active}
+    01:07: device-28 command: list-windows -t w -F #{window_index}:#{window_name}:#{window_active}:#{window_panes}
+    01:07: device-27 command: list-sessions -F #{session_name}:#{session_windows}
+    01:07: device-26 message: index in use: 1
+    01:07: device-26 command: move-window -s z:zed -t w:spare
+    01:07: device-25 command: list-panes -t w:2 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-24 command: list-panes -t w:1 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-23 command: list-windows -t w -F #{window_index}:#{window_width}x#{window_height}:#{window_layout}
+    01:07: device-22 command: list-panes -t w:2 -F #{pane_index}:#{pane_active}
+    01:07: device-21 command: list-panes -t w:1 -F #{pane_index}:#{pane_active}
+    01:07: device-20 command: list-windows -t w -F #{window_index}:#{window_name}:#{window_active}:#{window_panes}
+    01:07: device-19 command: list-sessions -F #{session_name}:#{session_windows}
+    01:07: device-18 command: move-window -a -s w:main -t w:spare
+    01:07: device-17 command: list-panes -t w:1 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-16 command: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-15 command: list-windows -t w -F #{window_index}:#{window_width}x#{window_height}:#{window_layout}
+    01:07: device-14 command: list-panes -t w:1 -F #{pane_index}:#{pane_active}
+    01:07: device-13 command: list-panes -t w:0 -F #{pane_index}:#{pane_active}
+    01:07: device-12 command: list-windows -t w -F #{window_index}:#{window_name}:#{window_active}:#{window_panes}
+    01:07: device-11 command: list-sessions -F #{session_name}:#{session_windows}
+    01:07: device-10 command: new-session -d -s z -n zed
+    01:07: device-9 command: list-panes -t w:1 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-8 command: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}
+    01:07: device-7 command: list-windows -t w -F #{window_index}:#{window_width}x#{window_height}:#{window_layout}
+    01:07: device-6 command: list-panes -t w:1 -F #{pane_index}:#{pane_active}
+    01:07: device-5 command: list-panes -t w:0 -F #{pane_index}:#{pane_active}
+    01:07: device-4 command: list-windows -t w -F #{window_index}:#{window_name}:#{window_active}:#{window_panes}
+    01:07: device-3 command: list-sessions -F #{session_name}:#{session_windows}
+    01:07: device-2 command: new-window -d -t w -n spare
+    01:07: device-1 command: rename-window -t w:0 main
+    01:07: device-0 command: new-session -d -s w
+tmux stdout:
+    01:07: client-3679612 command: show-messages
+    01:07: client-3679475 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:1
+    01:07: client-3679471 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:0
+    01:07: client-3679463 command: list-windows -F "#{window_index}:#{window_width}x#{window_height}:#{window_layout}" -t w
+    01:07: client-3679039 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:1
+    01:07: client-3679034 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:0
+    01:07: client-3679025 command: list-windows -F "#{window_index}:#{window_name}:#{window_active}:#{window_panes}" -t w
+    01:07: client-3679012 command: list-sessions -F "#{session_name}:#{session_windows}"
+    01:07: client-3678392 command: list-clients
+    01:07: client-3678275 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:1
+    01:07: client-3678267 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:0
+    01:07: client-3678259 command: list-windows -F "#{window_index}:#{window_width}x#{window_height}:#{window_layout}" -t w
+    01:07: client-3677839 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:1
+    01:07: client-3677833 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:0
+    01:07: client-3677829 command: list-windows -F "#{window_index}:#{window_name}:#{window_active}:#{window_panes}" -t w
+    01:07: client-3677820 command: list-sessions -F "#{session_name}:#{session_windows}"
+    01:07: client-3677145 command: find-window -t w:0 zzz*
+    01:07: client-3677048 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:1
+    01:07: client-3677045 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:0
+    01:07: client-3677040 command: list-windows -F "#{window_index}:#{window_width}x#{window_height}:#{window_layout}" -t w
+    01:07: client-3676623 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:1
+    01:07: client-3676618 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:0
+    01:07: client-3676608 command: list-windows -F "#{window_index}:#{window_name}:#{window_active}:#{window_panes}" -t w
+    01:07: client-3676599 command: list-sessions -F "#{session_name}:#{session_windows}"
+    01:07: client-3676126 command: find-window -t w:0 ma*
+    01:07: client-3676013 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:1
+    01:07: client-3676004 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:0
+    01:07: client-3675999 command: list-windows -F "#{window_index}:#{window_width}x#{window_height}:#{window_layout}" -t w
+    01:07: client-3675579 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:1
+    01:07: client-3675569 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:0
+    01:07: client-3675561 command: list-windows -F "#{window_index}:#{window_name}:#{window_active}:#{window_panes}" -t w
+    01:07: client-3675551 command: list-sessions -F "#{session_name}:#{session_windows}"
+    01:07: client-3675148 command: swap-window -s w:0 -t w:1
+    01:07: client-3674927 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:1
+    01:07: client-3674917 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:0
+    01:07: client-3674909 command: list-windows -F "#{window_index}:#{window_width}x#{window_height}:#{window_layout}" -t w
+    01:07: client-3674551 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:1
+    01:07: client-3674542 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:0
+    01:07: client-3674537 command: list-windows -F "#{window_index}:#{window_name}:#{window_active}:#{window_panes}" -t w
+    01:07: client-3674533 command: list-sessions -F "#{session_name}:#{session_windows}"
+    01:07: client-3673904 command: move-window -r -t w
+    01:07: client-3673698 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:2
+    01:07: client-3673692 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:1
+    01:07: client-3673687 command: list-windows -F "#{window_index}:#{window_width}x#{window_height}:#{window_layout}" -t w
+    01:07: client-3673449 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:2
+    01:07: client-3673444 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:1
+    01:07: client-3673434 command: list-windows -F "#{window_index}:#{window_name}:#{window_active}:#{window_panes}" -t w
+    01:07: client-3673428 command: list-sessions -F "#{session_name}:#{session_windows}"
+    01:07: client-3673018 command: move-window -k -s z:zed -t w:spare
+    01:07: client-3672754 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:2
+    01:07: client-3672750 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:1
+    01:07: client-3672745 command: list-windows -F "#{window_index}:#{window_width}x#{window_height}:#{window_layout}" -t w
+    01:07: client-3672229 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:2
+    01:07: client-3672222 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:1
+    01:07: client-3672215 command: list-windows -F "#{window_index}:#{window_name}:#{window_active}:#{window_panes}" -t w
+    01:07: client-3672211 command: list-sessions -F "#{session_name}:#{session_windows}"
+    01:07: client-3671537 message: index in use: 1
+    01:07: client-3671537 command: move-window -s z:zed -t w:spare
+    01:07: client-3671429 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:2
+    01:07: client-3671426 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:1
+    01:07: client-3671419 command: list-windows -F "#{window_index}:#{window_width}x#{window_height}:#{window_layout}" -t w
+    01:07: client-3670995 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:2
+    01:07: client-3670989 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:1
+    01:07: client-3670986 command: list-windows -F "#{window_index}:#{window_name}:#{window_active}:#{window_panes}" -t w
+    01:07: client-3670983 command: list-sessions -F "#{session_name}:#{session_windows}"
+    01:07: client-3670497 command: move-window -a -s w:main -t w:spare
+    01:07: client-3670281 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:1
+    01:07: client-3670272 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:0
+    01:07: client-3670260 command: list-windows -F "#{window_index}:#{window_width}x#{window_height}:#{window_layout}" -t w
+    01:07: client-3669756 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:1
+    01:07: client-3669746 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:0
+    01:07: client-3669740 command: list-windows -F "#{window_index}:#{window_name}:#{window_active}:#{window_panes}" -t w
+    01:07: client-3669729 command: list-sessions -F "#{session_name}:#{session_windows}"
+    01:07: client-3668936 command: new-session -d -n zed -s z
+    01:07: client-3668640 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:1
+    01:07: client-3668634 command: list-panes -F "#{pane_index}:#{pane_width}x#{pane_height}" -t w:0
+    01:07: client-3668628 command: list-windows -F "#{window_index}:#{window_width}x#{window_height}:#{window_layout}" -t w
+    01:07: client-3668275 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:1
+    01:07: client-3668270 command: list-panes -F "#{pane_index}:#{pane_active}" -t w:0
+    01:07: client-3668260 command: list-windows -F "#{window_index}:#{window_name}:#{window_active}:#{window_panes}" -t w
+    01:07: client-3668254 command: list-sessions -F "#{session_name}:#{session_windows}"
+    01:07: client-3667641 command: new-window -d -n spare -t w
+    01:07: client-3667387 command: rename-window -t w:0 main
+    01:07: client-3667356 command: new-session -d -s w
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: start-server
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=12 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

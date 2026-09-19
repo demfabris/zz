@@ -1,0 +1,42 @@
+[
+  {
+    "name": "100x30/clear/escape",
+    "owner": "TUI-017",
+    "why": "The wider 100-column probe still differs in retained erased-background extent under unjoined escape/padding capture. This existed before the seven-case residual batch and is not counted as an asserted pass."
+  },
+  {
+    "name": "100x30/clear/padding",
+    "owner": "TUI-017",
+    "why": "The wider 100-column probe still differs in retained erased-background extent under unjoined escape/padding capture. This existed before the seven-case residual batch and is not counted as an asserted pass."
+  },
+  {
+    "name": "100x30/erase-display/escape",
+    "owner": "TUI-017",
+    "why": "The wider 100-column probe still differs in retained erased-background extent under unjoined escape/padding capture. This existed before the seven-case residual batch and is not counted as an asserted pass."
+  },
+  {
+    "name": "100x30/erase-display/padding",
+    "owner": "TUI-017",
+    "why": "The wider 100-column probe still differs in retained erased-background extent under unjoined escape/padding capture. This existed before the seven-case residual batch and is not counted as an asserted pass."
+  },
+  {
+    "name": "100x30/erase-line/escape",
+    "owner": "TUI-017",
+    "why": "The wider 100-column probe still differs in retained erased-background extent under unjoined escape/padding capture. This existed before the seven-case residual batch and is not counted as an asserted pass."
+  },
+  {
+    "name": "100x30/erase-line/padding",
+    "owner": "TUI-017",
+    "why": "The wider 100-column probe still differs in retained erased-background extent under unjoined escape/padding capture. This existed before the seven-case residual batch and is not counted as an asserted pass."
+  },
+  {
+    "name": "100x30/scroll-region/escape",
+    "owner": "TUI-017",
+    "why": "The wider 100-column probe still differs in retained erased-background extent under unjoined escape/padding capture. This existed before the seven-case residual batch and is not counted as an asserted pass."
+  },
+  {
+    "name": "100x30/scroll-region/padding",
+    "owner": "TUI-017",
+    "why": "The wider 100-column probe still differs in retained erased-background extent under unjoined escape/padding capture. This existed before the seven-case residual batch and is not counted as an asserted pass."
+  }
+]

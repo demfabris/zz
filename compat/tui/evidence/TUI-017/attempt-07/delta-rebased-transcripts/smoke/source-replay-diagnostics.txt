@@ -1,0 +1,1000 @@
+# Scenario: smoke/source-replay-diagnostics
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/smoke/source-replay-diagnostics.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: set-buffer -b zz-source-replay-if 'if-shell -F 1 "{ display-message -p quoted }"'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: save-buffer -b zz-source-replay-if /tmp/zz-source-replay-if.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: source-file /tmp/zz-source-replay-if.conf
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    /tmp/zz-source-replay-if.conf:1: syntax error
+tmux stderr:
+    /tmp/zz-source-replay-if.conf:1: syntax error
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: set-buffer -b zz-source-replay-run 'run-shell -C "{ display-message -p quoted }"'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: save-buffer -b zz-source-replay-run /tmp/zz-source-replay-run.conf
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: source-file /tmp/zz-source-replay-run.conf
+zz exit: 1
+tmux exit: 1
+zz stderr:
+    /tmp/zz-source-replay-run.conf:1: syntax error
+tmux stderr:
+    /tmp/zz-source-replay-run.conf:1: syntax error
+COMMAND EXIT-CLASS: both nonzero
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: delete-buffer -b zz-source-replay-if
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: delete-buffer -b zz-source-replay-run
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: run-shell 'rm -f /tmp/zz-source-replay-if.conf /tmp/zz-source-replay-run.conf'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: run-shell 'sh ~/source-replay-diagnostics.sh'
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+SMOKE STDOUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_DIAGNOSTICS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_DIAGNOSTICS=command:clean,argv:clean,stdin:clean
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_DIAGNOSTICS=command:clean,argv:clean,stdin:clean
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: show-environment -g SOURCE_REPLAY_ALIAS_LEAF_POLICY
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_ALIAS_LEAF_POLICY=if:clean,run:clean
+tmux stdout:
+    SOURCE_REPLAY_ALIAS_LEAF_POLICY=if:clean,run:clean
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: show-environment -g SOURCE_REPLAY_MIXED_DEPTH_ALIAS_COMMAND
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_MIXED_DEPTH_ALIAS_COMMAND=rc:1,stdout:_,stderr:<MIXED_DEPTH>:1: syntax error+<MIXED_DEPTH>:1: syntax error,state:before:yes,alias:_,same:_,later:yes
+tmux stdout:
+    SOURCE_REPLAY_MIXED_DEPTH_ALIAS_COMMAND=rc:1,stdout:_,stderr:<MIXED_DEPTH>:1: syntax error+<MIXED_DEPTH>:1: syntax error,state:before:yes,alias:_,same:_,later:yes
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: out: show-environment -g SOURCE_REPLAY_NESTED_ONLY_ALIAS_COMMAND
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_NESTED_ONLY_ALIAS_COMMAND=rc:1,stdout:_,stderr:<NESTED_ONLY>:1: syntax error,state:before:yes,alias:yes,same:yes,next:yes
+tmux stdout:
+    SOURCE_REPLAY_NESTED_ONLY_ALIAS_COMMAND=rc:1,stdout:_,stderr:<NESTED_ONLY>:1: syntax error,state:before:yes,alias:yes,same:yes,next:yes
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: show-environment -g SOURCE_REPLAY_HOOK_CALLBACKS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_HOOK_CALLBACKS=combined-command:clean,combined-argv:clean,combined-stdin:clean,hook-only-command:clean,hook-only-argv:clean,hook-only-stdin:clean
+tmux stdout:
+    SOURCE_REPLAY_HOOK_CALLBACKS=combined-command:clean,combined-argv:clean,combined-stdin:clean,hook-only-command:clean,hook-only-argv:clean,hook-only-stdin:clean
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: show-environment -g SOURCE_REPLAY_HOOK_NESTED_SOURCE
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_HOOK_NESTED_SOURCE=command:clean,argv:clean,stdin:clean
+tmux stdout:
+    SOURCE_REPLAY_HOOK_NESTED_SOURCE=command:clean,argv:clean,stdin:clean
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: show-environment -g SOURCE_REPLAY_PREPARED_RUNTIME_COMMAND
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_PREPARED_RUNTIME_COMMAND=rc:1,stdout:LATER,stderr:only one of -F or argument must be given,hook:_
+tmux stdout:
+    SOURCE_REPLAY_PREPARED_RUNTIME_COMMAND=rc:1,stdout:LATER,stderr:only one of -F or argument must be given,hook:_
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: show-environment -g SOURCE_REPLAY_PREPARED_RUNTIME_ARGV
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_PREPARED_RUNTIME_ARGV=rc:1,stderr:_,events:0:end:_;0:error:only one of -F or argument must be given;0:end:LATER
+tmux stdout:
+    SOURCE_REPLAY_PREPARED_RUNTIME_ARGV=rc:1,stderr:_,events:0:end:_;0:error:only one of -F or argument must be given;0:end:LATER
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: show-environment -g SOURCE_REPLAY_PREPARED_RUNTIME_STDIN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_PREPARED_RUNTIME_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:error:only one of -F or argument must be given;1:end:LATER;1:end:PREPARED_RUNTIME_STDIN_DONE
+tmux stdout:
+    SOURCE_REPLAY_PREPARED_RUNTIME_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:error:only one of -F or argument must be given;1:end:LATER;1:end:PREPARED_RUNTIME_STDIN_DONE
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: out: show-environment -g SOURCE_REPLAY_PREPARED_RUNTIME_ALIAS_COMMAND
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_PREPARED_RUNTIME_ALIAS_COMMAND=rc:1,stdout:ALIAS_LATER,stderr:only one of -F or argument must be given,hook:_
+tmux stdout:
+    SOURCE_REPLAY_PREPARED_RUNTIME_ALIAS_COMMAND=rc:1,stdout:ALIAS_LATER,stderr:only one of -F or argument must be given,hook:_
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 21
+COMMAND: out: show-environment -g SOURCE_REPLAY_PREPARED_RUNTIME_ALIAS_ARGV
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_PREPARED_RUNTIME_ALIAS_ARGV=rc:1,stderr:_,events:0:end:_;0:error:only one of -F or argument must be given;0:end:ALIAS_LATER
+tmux stdout:
+    SOURCE_REPLAY_PREPARED_RUNTIME_ALIAS_ARGV=rc:1,stderr:_,events:0:end:_;0:error:only one of -F or argument must be given;0:end:ALIAS_LATER
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 22
+COMMAND: out: show-environment -g SOURCE_REPLAY_PREPARED_RUNTIME_ALIAS_STDIN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_PREPARED_RUNTIME_ALIAS_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:error:only one of -F or argument must be given;1:end:ALIAS_LATER;1:end:PREPARED_RUNTIME_ALIAS_STDIN_DONE
+tmux stdout:
+    SOURCE_REPLAY_PREPARED_RUNTIME_ALIAS_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:error:only one of -F or argument must be given;1:end:ALIAS_LATER;1:end:PREPARED_RUNTIME_ALIAS_STDIN_DONE
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 23
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_RUN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_RUN=rc:1,stderr:_,events:0:end:_;0:end:OUTER_BEFORE;0:end:_;0:end:_;raw:<CALLBACK>:1: syntax error;0:end:CHILD_LATER;0:end:OUTER_AFTER
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_RUN=rc:1,stderr:_,events:0:end:_;0:end:OUTER_BEFORE;0:end:_;0:end:_;raw:<CALLBACK>:1: syntax error;0:end:CHILD_LATER;0:end:OUTER_AFTER
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 24
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_IF
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_IF=rc:1,stderr:_,events:0:end:_;0:end:OUTER_BEFORE;0:end:_;0:end:_;raw:<CALLBACK>:1: syntax error;0:end:CHILD_LATER;0:end:OUTER_AFTER
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_IF=rc:1,stderr:_,events:0:end:_;0:end:OUTER_BEFORE;0:end:_;0:end:_;raw:<CALLBACK>:1: syntax error;0:end:CHILD_LATER;0:end:OUTER_AFTER
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 25
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_ALIAS
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_ALIAS=rc:1,stderr:_,events:0:end:OUTER_BEFORE;0:end:_;0:end:_;raw:<CALLBACK>:1: syntax error;0:end:CHILD_LATER;0:end:OUTER_AFTER
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_ALIAS=rc:1,stderr:_,events:0:end:OUTER_BEFORE;0:end:_;0:end:_;raw:<CALLBACK>:1: syntax error;0:end:CHILD_LATER;0:end:OUTER_AFTER
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 26
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_UNKNOWN_ARGV
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_UNKNOWN_ARGV=rc:1,stderr:_,events:0:end:_;0:end:_;raw:<CALLBACK_UNKNOWN>:1: unknown command: wibble;0:end:CALLBACK_UNKNOWN_LATER
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_UNKNOWN_ARGV=rc:1,stderr:_,events:0:end:_;0:end:_;raw:<CALLBACK_UNKNOWN>:1: unknown command: wibble;0:end:CALLBACK_UNKNOWN_LATER
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 27
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_UNKNOWN_STDIN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_UNKNOWN_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:_;raw:<CALLBACK_UNKNOWN>:1: unknown command: wibble;1:end:CALLBACK_UNKNOWN_LATER;1:end:CALLBACK_UNKNOWN_STDIN_DONE
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_UNKNOWN_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:_;raw:<CALLBACK_UNKNOWN>:1: unknown command: wibble;1:end:CALLBACK_UNKNOWN_LATER;1:end:CALLBACK_UNKNOWN_STDIN_DONE
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 28
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_ARITY_ARGV
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_ARITY_ARGV=rc:1,stderr:_,events:0:end:_;0:end:_;raw:<CALLBACK_ARITY>:1: command set-option: too few arguments (need at least 1);0:end:CALLBACK_ARITY_LATER
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_ARITY_ARGV=rc:1,stderr:_,events:0:end:_;0:end:_;raw:<CALLBACK_ARITY>:1: command set-option: too few arguments (need at least 1);0:end:CALLBACK_ARITY_LATER
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 29
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_ARITY_STDIN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_ARITY_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:_;raw:<CALLBACK_ARITY>:1: command set-option: too few arguments (need at least 1);1:end:CALLBACK_ARITY_LATER;1:end:CALLBACK_ARITY_STDIN_DONE
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_ARITY_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:_;raw:<CALLBACK_ARITY>:1: command set-option: too few arguments (need at least 1);1:end:CALLBACK_ARITY_LATER;1:end:CALLBACK_ARITY_STDIN_DONE
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 30
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_ENVIRONMENT_ARGV
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_ENVIRONMENT_ARGV=rc:1,stderr:_,events:0:end:_;0:end:_;raw:<CALLBACK_ENVIRONMENT>:1: command set-environment: too few arguments (need at least 1);0:end:CALLBACK_ENVIRONMENT_LATER
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_ENVIRONMENT_ARGV=rc:1,stderr:_,events:0:end:_;0:end:_;raw:<CALLBACK_ENVIRONMENT>:1: command set-environment: too few arguments (need at least 1);0:end:CALLBACK_ENVIRONMENT_LATER
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 31
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_ENVIRONMENT_STDIN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_ENVIRONMENT_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:_;raw:<CALLBACK_ENVIRONMENT>:1: command set-environment: too few arguments (need at least 1);1:end:CALLBACK_ENVIRONMENT_LATER;1:end:CALLBACK_ENVIRONMENT_STDIN_DONE
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_ENVIRONMENT_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:_;raw:<CALLBACK_ENVIRONMENT>:1: command set-environment: too few arguments (need at least 1);1:end:CALLBACK_ENVIRONMENT_LATER;1:end:CALLBACK_ENVIRONMENT_STDIN_DONE
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 32
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_NESTED_STDIN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_NESTED_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:OUTER_BEFORE;1:end:_;1:end:_;raw:<CALLBACK>:1: syntax error;1:end:CHILD_LATER;1:end:OUTER_AFTER;1:end:CALLBACK_NESTED_STDIN_DONE
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_CALLBACK_NESTED_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:OUTER_BEFORE;1:end:_;1:end:_;raw:<CALLBACK>:1: syntax error;1:end:CHILD_LATER;1:end:OUTER_AFTER;1:end:CALLBACK_NESTED_STDIN_DONE
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 33
+COMMAND: out: show-environment -g SOURCE_REPLAY_MIXED_DEPTH_ALIAS_ARGV
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_MIXED_DEPTH_ALIAS_ARGV=rc:1,stderr:_,events:0:end:_;0:end:_;0:end:_;0:end:_;raw:<MIXED_DEPTH>:1: syntax error;0:error:<MIXED_DEPTH>:1: syntax error;0:end:_,state:before:yes,alias:_,same:_,later:yes
+tmux stdout:
+    SOURCE_REPLAY_MIXED_DEPTH_ALIAS_ARGV=rc:1,stderr:_,events:0:end:_;0:end:_;0:end:_;0:end:_;raw:<MIXED_DEPTH>:1: syntax error;0:error:<MIXED_DEPTH>:1: syntax error;0:end:_,state:before:yes,alias:_,same:_,later:yes
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 34
+COMMAND: out: show-environment -g SOURCE_REPLAY_MIXED_DEPTH_ALIAS_STDIN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_MIXED_DEPTH_ALIAS_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:_;1:end:_;1:end:_;raw:<MIXED_DEPTH>:1: syntax error;1:error:<MIXED_DEPTH>:1: syntax error;1:end:_;1:end:MIXED_DEPTH_STDIN_DONE,state:before:yes,alias:_,same:_,later:yes
+tmux stdout:
+    SOURCE_REPLAY_MIXED_DEPTH_ALIAS_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:_;1:end:_;1:end:_;raw:<MIXED_DEPTH>:1: syntax error;1:error:<MIXED_DEPTH>:1: syntax error;1:end:_;1:end:MIXED_DEPTH_STDIN_DONE,state:before:yes,alias:_,same:_,later:yes
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 35
+COMMAND: out: show-environment -g SOURCE_REPLAY_NESTED_ONLY_ALIAS_ARGV
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_NESTED_ONLY_ALIAS_ARGV=rc:1,stderr:_,events:0:end:_;0:end:_;0:end:_;0:error:<NESTED_ONLY>:1: syntax error;0:end:_;0:end:_;0:end:_,state:before:yes,alias:yes,same:yes,next:yes
+tmux stdout:
+    SOURCE_REPLAY_NESTED_ONLY_ALIAS_ARGV=rc:1,stderr:_,events:0:end:_;0:end:_;0:end:_;0:error:<NESTED_ONLY>:1: syntax error;0:end:_;0:end:_;0:end:_,state:before:yes,alias:yes,same:yes,next:yes
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 36
+COMMAND: out: show-environment -g SOURCE_REPLAY_NESTED_ONLY_ALIAS_STDIN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_NESTED_ONLY_ALIAS_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:_;1:end:_;1:error:<NESTED_ONLY>:1: syntax error;1:end:_;1:end:_;1:end:_;1:end:NESTED_ONLY_STDIN_DONE,state:before:yes,alias:yes,same:yes,next:yes
+tmux stdout:
+    SOURCE_REPLAY_NESTED_ONLY_ALIAS_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:_;1:end:_;1:error:<NESTED_ONLY>:1: syntax error;1:end:_;1:end:_;1:end:_;1:end:NESTED_ONLY_STDIN_DONE,state:before:yes,alias:yes,same:yes,next:yes
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 37
+COMMAND: out: show-environment -g SOURCE_REPLAY_CALLBACK_HOOK_RUN_COMMAND
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CALLBACK_HOOK_RUN_COMMAND=rc:1,stdout:CALLBACK_UNKNOWN_LATER,stderr:<CALLBACK_UNKNOWN>:1: unknown command: wibble,hook:_
+tmux stdout:
+    SOURCE_REPLAY_CALLBACK_HOOK_RUN_COMMAND=rc:1,stdout:CALLBACK_UNKNOWN_LATER,stderr:<CALLBACK_UNKNOWN>:1: unknown command: wibble,hook:_
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 38
+COMMAND: out: show-environment -g SOURCE_REPLAY_CALLBACK_HOOK_RUN_ARGV
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CALLBACK_HOOK_RUN_ARGV=rc:1,stderr:_,events:0:end:_;0:end:_;raw:<CALLBACK_UNKNOWN>:1: unknown command: wibble;0:end:CALLBACK_UNKNOWN_LATER,hook:_
+tmux stdout:
+    SOURCE_REPLAY_CALLBACK_HOOK_RUN_ARGV=rc:1,stderr:_,events:0:end:_;0:end:_;raw:<CALLBACK_UNKNOWN>:1: unknown command: wibble;0:end:CALLBACK_UNKNOWN_LATER,hook:_
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 39
+COMMAND: out: show-environment -g SOURCE_REPLAY_CALLBACK_HOOK_RUN_STDIN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CALLBACK_HOOK_RUN_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:_;raw:<CALLBACK_UNKNOWN>:1: unknown command: wibble;1:end:CALLBACK_UNKNOWN_LATER;1:end:CALLBACK_HOOK_RUN_STDIN_DONE,hook:_
+tmux stdout:
+    SOURCE_REPLAY_CALLBACK_HOOK_RUN_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:_;raw:<CALLBACK_UNKNOWN>:1: unknown command: wibble;1:end:CALLBACK_UNKNOWN_LATER;1:end:CALLBACK_HOOK_RUN_STDIN_DONE,hook:_
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 40
+COMMAND: out: show-environment -g SOURCE_REPLAY_CALLBACK_HOOK_IF_COMMAND
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CALLBACK_HOOK_IF_COMMAND=rc:1,stdout:CALLBACK_IF_UNKNOWN_LATER,stderr:<CALLBACK_IF_UNKNOWN>:1: unknown command: wibble,hook:x
+tmux stdout:
+    SOURCE_REPLAY_CALLBACK_HOOK_IF_COMMAND=rc:1,stdout:CALLBACK_IF_UNKNOWN_LATER,stderr:<CALLBACK_IF_UNKNOWN>:1: unknown command: wibble,hook:x
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 41
+COMMAND: out: show-environment -g SOURCE_REPLAY_CALLBACK_HOOK_IF_ARGV
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CALLBACK_HOOK_IF_ARGV=rc:1,stderr:_,events:0:end:_;0:error:<CALLBACK_IF_UNKNOWN>:1: unknown command: wibble;0:end:_;0:end:CALLBACK_IF_UNKNOWN_LATER,hook:x
+tmux stdout:
+    SOURCE_REPLAY_CALLBACK_HOOK_IF_ARGV=rc:1,stderr:_,events:0:end:_;0:error:<CALLBACK_IF_UNKNOWN>:1: unknown command: wibble;0:end:_;0:end:CALLBACK_IF_UNKNOWN_LATER,hook:x
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 42
+COMMAND: out: show-environment -g SOURCE_REPLAY_CALLBACK_HOOK_IF_STDIN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CALLBACK_HOOK_IF_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:error:<CALLBACK_IF_UNKNOWN>:1: unknown command: wibble;0:end:_;1:end:CALLBACK_IF_UNKNOWN_LATER;1:end:CALLBACK_HOOK_IF_STDIN_DONE,hook:x
+tmux stdout:
+    SOURCE_REPLAY_CALLBACK_HOOK_IF_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:error:<CALLBACK_IF_UNKNOWN>:1: unknown command: wibble;0:end:_;1:end:CALLBACK_IF_UNKNOWN_LATER;1:end:CALLBACK_HOOK_IF_STDIN_DONE,hook:x
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 43
+COMMAND: out: show-environment -g SOURCE_REPLAY_CALLBACK_RUNTIME_PARSE_COMMAND
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CALLBACK_RUNTIME_PARSE_COMMAND=rc:1,stdout:LATER,stderr:only one of -F or argument must be given,hook:x
+tmux stdout:
+    SOURCE_REPLAY_CALLBACK_RUNTIME_PARSE_COMMAND=rc:1,stdout:LATER,stderr:only one of -F or argument must be given,hook:x
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 44
+COMMAND: out: show-environment -g SOURCE_REPLAY_CALLBACK_RUNTIME_PARSE_ARGV
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CALLBACK_RUNTIME_PARSE_ARGV=rc:1,stderr:_,events:0:end:_;0:end:_;0:error:only one of -F or argument must be given;0:end:_;0:end:LATER,hook:x
+tmux stdout:
+    SOURCE_REPLAY_CALLBACK_RUNTIME_PARSE_ARGV=rc:1,stderr:_,events:0:end:_;0:end:_;0:error:only one of -F or argument must be given;0:end:_;0:end:LATER,hook:x
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 45
+COMMAND: out: show-environment -g SOURCE_REPLAY_CALLBACK_RUNTIME_PARSE_STDIN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CALLBACK_RUNTIME_PARSE_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:_;1:error:only one of -F or argument must be given;0:end:_;1:end:LATER;1:end:CALLBACK_RUNTIME_PARSE_STDIN_DONE,hook:x
+tmux stdout:
+    SOURCE_REPLAY_CALLBACK_RUNTIME_PARSE_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:_;1:error:only one of -F or argument must be given;0:end:_;1:end:LATER;1:end:CALLBACK_RUNTIME_PARSE_STDIN_DONE,hook:x
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 46
+COMMAND: out: show-environment -g SOURCE_REPLAY_CALLBACK_RUNTIME_FAILING_HOOK_COMMAND
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CALLBACK_RUNTIME_FAILING_HOOK_COMMAND=rc:1,stdout:LATER,stderr:only one of -F or argument must be given+only one of -F or argument must be given,hook:_
+tmux stdout:
+    SOURCE_REPLAY_CALLBACK_RUNTIME_FAILING_HOOK_COMMAND=rc:1,stdout:LATER,stderr:only one of -F or argument must be given+only one of -F or argument must be given,hook:_
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 47
+COMMAND: out: show-environment -g SOURCE_REPLAY_CALLBACK_RUNTIME_ALIAS_ARGV
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CALLBACK_RUNTIME_ALIAS_ARGV=rc:1,stderr:_,events:0:end:_;0:end:SOURCE_BEFORE;0:end:ALIAS_BEFORE;0:end:_;0:error:<CONTROL_RUNTIME_PARSE>;0:error:<CONTROL_RUNTIME_PARSE>;0:end:ALIAS_AFTER;0:end:SOURCE_AFTER;0:end:LATER
+tmux stdout:
+    SOURCE_REPLAY_CALLBACK_RUNTIME_ALIAS_ARGV=rc:1,stderr:_,events:0:end:_;0:end:SOURCE_BEFORE;0:end:ALIAS_BEFORE;0:end:_;0:error:<CONTROL_RUNTIME_PARSE>;0:error:<CONTROL_RUNTIME_PARSE>;0:end:ALIAS_AFTER;0:end:SOURCE_AFTER;0:end:LATER
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 48
+COMMAND: out: show-environment -g SOURCE_REPLAY_CALLBACK_RUNTIME_ALIAS_STDIN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CALLBACK_RUNTIME_ALIAS_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:SOURCE_BEFORE;1:end:ALIAS_BEFORE;1:end:_;1:error:<CONTROL_RUNTIME_PARSE>;0:error:<CONTROL_RUNTIME_PARSE>;1:end:ALIAS_AFTER;1:end:SOURCE_AFTER;1:end:LATER;1:end:CALLBACK_RUNTIME_ALIAS_STDIN_DONE
+tmux stdout:
+    SOURCE_REPLAY_CALLBACK_RUNTIME_ALIAS_STDIN=marker:0,rc:1,stderr:_,events:0:end:_;1:end:_;1:end:SOURCE_BEFORE;1:end:ALIAS_BEFORE;1:end:_;1:error:<CONTROL_RUNTIME_PARSE>;0:error:<CONTROL_RUNTIME_PARSE>;1:end:ALIAS_AFTER;1:end:SOURCE_AFTER;1:end:LATER;1:end:CALLBACK_RUNTIME_ALIAS_STDIN_DONE
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 49
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_RUNTIME_RUN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_RUNTIME_RUN=rc:1,stderr:_,events:0:end:_;0:end:OUTER_BEFORE;0:end:_;0:error:can't find session: missing-control-runtime;0:end:HOOK_ERROR_EVENT;0:end:CHILD_RUNTIME_LATER;0:end:OUTER_AFTER
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_RUNTIME_RUN=rc:1,stderr:_,events:0:end:_;0:end:OUTER_BEFORE;0:end:_;0:error:can't find session: missing-control-runtime;0:end:HOOK_ERROR_EVENT;0:end:CHILD_RUNTIME_LATER;0:end:OUTER_AFTER
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 50
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_RUNTIME_IF
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_RUNTIME_IF=rc:1,stderr:_,events:0:end:_;0:end:OUTER_BEFORE;0:end:_;0:error:can't find session: missing-control-runtime;0:end:HOOK_ERROR_EVENT;0:end:CHILD_RUNTIME_LATER;0:end:OUTER_AFTER
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_RUNTIME_IF=rc:1,stderr:_,events:0:end:_;0:end:OUTER_BEFORE;0:end:_;0:error:can't find session: missing-control-runtime;0:end:HOOK_ERROR_EVENT;0:end:CHILD_RUNTIME_LATER;0:end:OUTER_AFTER
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 51
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_RUNTIME_ALIAS_RUN_SHELL
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_RUNTIME_ALIAS_RUN_SHELL=rc:1,stderr:_,events:0:end:_;0:end:OUTER_BEFORE;0:end:_;0:error:can't find session: missing-control-runtime;0:end:HOOK_ERROR_EVENT;0:end:CHILD_RUNTIME_LATER;0:end:OUTER_AFTER
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_RUNTIME_ALIAS_RUN_SHELL=rc:1,stderr:_,events:0:end:_;0:end:OUTER_BEFORE;0:end:_;0:error:can't find session: missing-control-runtime;0:end:HOOK_ERROR_EVENT;0:end:CHILD_RUNTIME_LATER;0:end:OUTER_AFTER
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 52
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_READ_RUN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_READ_RUN=rc:1,stderr:_,events:0:end:_;0:end:OUTER_BEFORE;0:end:_;raw:<READ_ERROR>;0:end:OUTER_AFTER
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_READ_RUN=rc:1,stderr:_,events:0:end:_;0:end:OUTER_BEFORE;0:end:_;raw:<READ_ERROR>;0:end:OUTER_AFTER
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 53
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_READ_IF
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_READ_IF=rc:1,stderr:_,events:0:end:_;0:end:OUTER_BEFORE;0:end:_;raw:<READ_ERROR>;0:end:OUTER_AFTER
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_READ_IF=rc:1,stderr:_,events:0:end:_;0:end:OUTER_BEFORE;0:end:_;raw:<READ_ERROR>;0:end:OUTER_AFTER
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 54
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_READ_ALIAS_RUN_SHELL
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_READ_ALIAS_RUN_SHELL=rc:1,stderr:_,events:0:end:_;0:end:OUTER_BEFORE;0:end:_;raw:<READ_ERROR>;0:end:OUTER_AFTER
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_READ_ALIAS_RUN_SHELL=rc:1,stderr:_,events:0:end:_;0:end:OUTER_BEFORE;0:end:_;raw:<READ_ERROR>;0:end:OUTER_AFTER
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 55
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_MIXED_SOURCE_FIRST
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_MIXED_SOURCE_FIRST=rc:1,stderr:_,events:0:end:_;0:error:<OUTER>:1: syntax error;0:end:_;0:end:_;raw:<CHILD>:1: syntax error;0:end:_;raw:syntax error
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_MIXED_SOURCE_FIRST=rc:1,stderr:_,events:0:end:_;0:error:<OUTER>:1: syntax error;0:end:_;0:end:_;raw:<CHILD>:1: syntax error;0:end:_;raw:syntax error
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 56
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_MIXED_DIRECT_FIRST
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_MIXED_DIRECT_FIRST=rc:1,stderr:_,events:0:end:_;0:error:<OUTER>:1: syntax error;0:end:_;raw:syntax error;0:end:_;0:end:_;raw:<CHILD>:1: syntax error
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_MIXED_DIRECT_FIRST=rc:1,stderr:_,events:0:end:_;0:error:<OUTER>:1: syntax error;0:end:_;raw:syntax error;0:end:_;0:end:_;raw:<CHILD>:1: syntax error
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 57
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_PARSER
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_PARSER=rc:1,stderr:_,events:0:end:_;config:<PARSER>:1: syntax error
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_PARSER=rc:1,stderr:_,events:0:end:_;config:<PARSER>:1: syntax error
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 58
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_PARSER_NO_EXECUTE
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_PARSER_NO_EXECUTE=rc:1,stderr:_,events:0:end:_;config:<PARSER>:1: syntax error
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_PARSER_NO_EXECUTE=rc:1,stderr:_,events:0:end:_;config:<PARSER>:1: syntax error
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 59
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_DETACHED_SHUTDOWN
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_DETACHED_SHUTDOWN=flat:rc:0,stderr:_,exit:%exit,events:0:end:_;1:end:_;0:end:_;0:end:AFTER,nested:rc:0,stderr:_,exit:%exit,events:0:end:_;1:end:_;0:end:_;0:end:_;0:end:HOOK_TRIGGER;0:end:_;0:end:OUTER
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_DETACHED_SHUTDOWN=flat:rc:0,stderr:_,exit:%exit,events:0:end:_;1:end:_;0:end:_;0:end:AFTER,nested:rc:0,stderr:_,exit:%exit,events:0:end:_;1:end:_;0:end:_;0:end:_;0:end:HOOK_TRIGGER;0:end:_;0:end:OUTER
+OUT: clean
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+## Step 60
+COMMAND: out: show-environment -g SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:124,stderr:_,events:
+tmux stdout:
+    SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:1,stderr:_,events:0:end:_;0:end:_;0:end:_;0:end:_;raw:<CONFIRM_CHILD>:1: syntax error;0:end:CONFIRM_CHILD_LATER;0:end:CONFIRM_INNER_AFTER;0:end:CONFIRM_OUTER_AFTER
+OUT: divergence
+--- zz OUT step 60
++++ tmux OUT step 60
+@@ -1 +1 @@
+-SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:124,stderr:_,events:
++SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED=pty-rc:0,pty-streams:_,request-rc:1,stderr:_,events:0:end:_;0:end:_;0:end:_;0:end:_;raw:<CONFIRM_CHILD>:1: syntax error;0:end:CONFIRM_CHILD_LATER;0:end:CONFIRM_INNER_AFTER;0:end:CONFIRM_OUTER_AFTER
+SMOKE STDERR: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=60 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=1 warn_divergences=0

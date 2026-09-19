@@ -1,0 +1,32 @@
+   Compiling libghostty-vt-sys v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt-sys)
+   Compiling libghostty-vt v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt)
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-terminal)
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-protocol)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-mux)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.36s
+     Running tests/agent_soak.rs (target/debug/deps/agent_soak-f69a2a85fb6922aa)
+
+running 1 test
+test agent_stream_soak_slow_client ... FAILED
+
+failures:
+
+---- agent_stream_soak_slow_client stdout ----
+slow client: applied=1506 frames=24 lag markers=[47] terminal frames=6
+
+thread 'agent_stream_soak_slow_client' (2786992) panicked at crates/zz-daemon/tests/agent_soak.rs:594:5:
+assertion `left == right` failed: the replay converges the client on the whole transcript
+  left: Some(1501)
+ right: Some(1500)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    agent_stream_soak_slow_client
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 8.87s
+
+error: test failed, to rerun pass `-p zz-daemon --test agent_soak`
+
+EXIT=101

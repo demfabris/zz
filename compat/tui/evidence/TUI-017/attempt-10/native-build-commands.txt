@@ -1,0 +1,8 @@
+# main: the pristine Ghostty 20c3eae tree the fetched OUT_DIR holds after this branch's build.rs restored it
+cd target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src && zig build -Demit-lib-vt=true -Doptimize=ReleaseSafe -Dcpu=baseline -Demit-xcframework=false -Dapp-runtime=none --prefix <scratch>/main-install --cache-dir ../zig-cache
+# candidate: the library build.rs built from ghostty-provenance-f8f6a0352127c9a6 (provenance.patch at f1b4b408, ReleaseSafe because DEBUG=true)
+# indexed-only: provenance.patch minus its Terminal.zig (ICH) hunk, applied to a reflink copy of the same pristine tree
+cp -a --reflink=always target/debug/build/libghostty-vt-sys-c1fe482972c79b0e/out/ghostty-src target/residuals-2/ghostty-noich
+git -C target/residuals-2/ghostty-noich apply <provenance.patch without the Terminal.zig section>
+cd target/residuals-2/ghostty-noich && zig build -Demit-lib-vt=true -Doptimize=ReleaseSafe -Dcpu=baseline -Demit-xcframework=false -Dapp-runtime=none --prefix target/residuals-2/perf/noich-install --cache-dir <the same zig-cache>
+cc -O2 -Wall -Wextra -Werror compat/tui/evidence/TUI-017/attempt-10/native-perf.c -I <prefix>/include <prefix>/lib/libghostty-vt.a -pthread -lm -ldl -o target/residuals-2/perf/{main,candidate,indexed-only}

@@ -1,0 +1,89 @@
+# Scenario: update-environment
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/update-environment.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: new-session -d -s envdefault
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: show-environment -t envdefault DISPLAY
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    DISPLAY=:0
+tmux stdout:
+    DISPLAY=:0
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: set-option -g update-environment ZZ_C7_ABSENT
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: new-session -d -s envseed
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+COMMAND EXIT-CLASS: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: show-environment -t envseed
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    -ZZ_C7_ABSENT
+tmux stdout:
+    -ZZ_C7_ABSENT
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: show-options -gv update-environment
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    ZZ_C7_ABSENT
+tmux stdout:
+    ZZ_C7_ABSENT
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=6 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

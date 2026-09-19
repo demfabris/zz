@@ -1,0 +1,67 @@
+[
+  {
+    "name": "full attached reattach marker",
+    "owner": "TUI-010",
+    "why": "Three final-source full runs failed with waiting-for-frame at ATTACHED_REATTACH_MARKER. The unchanged rebased binary passes a later full run after the delta workload ends. Two clean pre-lane full runs, the full reverted-fix build, both single-change variants, --lifecycle and the bounded late-probe subset pass. No causal source change is established and no frame-delivery fix is claimed.",
+    "latest_exit": 0,
+    "earlier_exits": [
+      1,
+      1,
+      1
+    ],
+    "artifact": "attached-rebased-controlled.txt",
+    "earlier_artifacts": [
+      "attached-final.txt",
+      "attached-rebased.txt",
+      "attached-rebased-retry.txt"
+    ]
+  },
+  {
+    "name": "control return-status matrix",
+    "owner": "TUI-018",
+    "why": "The full package and serial control family fail at different marker waits. The clean baseline also fails this test at a different marker; this establishes an existing family problem without equating every timeout.",
+    "candidate_exit": 101,
+    "baseline_exit": 101,
+    "artifacts": [
+      "packages-rebased.txt",
+      "cli-control-serial.txt",
+      "baseline-cli-control-serial.txt"
+    ]
+  },
+  {
+    "name": "control wait-exit unbounded process wait",
+    "owner": "TUI-018",
+    "why": "The candidate package child and clean-baseline serial child each remained in wait_with_output for more than three minutes and were terminated by this lane. Candidate solo/serial retries pass. These interrupted tests are not counted as natural timeouts or passes.",
+    "artifacts": [
+      "packages-rebased-interruption.txt",
+      "baseline-control-interruption.txt",
+      "cli-wait-exit-solo.txt",
+      "cli-control-serial.txt"
+    ]
+  },
+  {
+    "name": "refresh-client notifications and menu sizing",
+    "owner": "TUI-018",
+    "why": "Notification and menu-sizing cases fail in the candidate serial control family but pass in the clean baseline and in the candidate refresh_client_ filter (3 passes). The earlier failures remain retained.",
+    "filtered_exit": 0,
+    "artifact": "cli-refresh-filtered.txt"
+  },
+  {
+    "name": "background inserted control flags",
+    "owner": "TUI-018",
+    "why": "The full candidate package run fails this case; the candidate serial control family and focused retry pass.",
+    "artifacts": [
+      "packages-rebased.txt",
+      "cli-control-serial.txt",
+      "cli-background-solo.txt"
+    ]
+  },
+  {
+    "name": "slow-client agent soak item count",
+    "owner": "TUI-010",
+    "why": "Candidate full and solo runs produce 1501 items against 1500 expected. A clean, independently built c550a396 baseline reproduces the same count.",
+    "candidate_exit": 101,
+    "baseline_exit": 101,
+    "artifact": "agent-soak-baseline-isolated.txt"
+  }
+]

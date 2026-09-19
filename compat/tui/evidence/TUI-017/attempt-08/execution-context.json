@@ -1,0 +1,20 @@
+{
+  "base": "38c50df4",
+  "source": "571608659d0f8013ddb973d27f2171d9e1af224e",
+  "lane": "capture-residuals",
+  "fixed_binary": "target/capture-residuals-main/zz",
+  "reverted_binary": "target/capture-residuals-main-reverted/zz",
+  "tmux_commit": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
+  "build_wrapper": "/tmp/zz-cargo.sh (unchanged 4G / jobs 2 / two shared flock slots)",
+  "production_restoration": "Rebuilt source after the reverted archive and cmp confirmed byte identity with the fixed immutable binary.",
+  "source_audit": "reverted-source-audit.json",
+  "wire": "104 inherited, no protocol payload changes",
+  "evidence_policy": "No environment dump collected.",
+  "platform": "Linux-7.2.3-1-cachyos-deckify-x86_64-with-glibc2.44",
+  "architecture": "x86_64",
+  "machine": "alienware",
+  "recorded_at": "2026-09-17T10:57:09.747230+00:00",
+  "binary_hashes": "binaries.txt",
+  "counterfactual_hashes": "reverted-source-audit.json",
+  "runtime_isolation": "Repository fixtures use temporary homes, config directories and sockets."
+}

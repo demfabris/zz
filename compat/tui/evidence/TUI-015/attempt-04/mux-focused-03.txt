@@ -1,0 +1,10 @@
+error: failed to load source for dependency `libghostty-vt`
+
+Caused by:
+  unable to update /home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt
+
+Caused by:
+  failed to parse manifest at `/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt/Cargo.toml`
+
+Caused by:
+  rust-version 0.2.1 is incompatible with the version (1.85.0) required by the specified edition (2024)

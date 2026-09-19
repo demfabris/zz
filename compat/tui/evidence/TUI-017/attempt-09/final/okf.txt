@@ -1,0 +1,4 @@
+OKF validate: 93 concept(s), 108 markdown file(s) under /home/demfabris/dev/zz-c11-capture-residuals/knowledge
+  WARN  research/: 5 concept(s) older than 7d (oldest 41d: research/2026-08-07-nvidia-cef-accelerated-osr) — drain into the owning concept or delete (knowledge/playbooks/docs-discipline.md §The one-week rule)
+
+CONFORMANT (OKF v0.1): 0 errors, 1 warning(s)

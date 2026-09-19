@@ -1,0 +1,25 @@
+new-session -d -s cli -n win
+set-option -gw pane-base-index 1
+lock-session -t 'cli:=.1'
+has-session -t 'cli:=.1'
+list-windows -t 'cli:=.1' -F '#{window_index}:#{window_name}'
+has-session -t '=cli:=.1'
+has-session -t ':=.1'
+has-session -t 'cli:=.%1'
+has-session -t 'cli:=.'
+has-session -t 'cli:=.0'
+has-session -t 'cli:=.9'
+set-option -t cli pane-base-index 2
+has-session -t 'cli:=.2'
+has-session -t 'cli:=.1'
+set-option -w -t cli:win pane-base-index 3
+has-session -t 'cli:=.3'
+has-session -t 'cli:=.2'
+has-session -t 'cli:=.%1'
+set-option -g base-index 5
+has-session -t 'cli:=.3'
+set-option -uw -t cli:win pane-base-index
+has-session -t 'cli:=.2'
+set-option -s pane-base-index 4
+has-session -t 'cli:=.4'
+has-session -t 'cli:=.2'

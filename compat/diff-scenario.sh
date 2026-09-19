@@ -243,7 +243,9 @@ append_stream() {
   local label="$1"
   local file="$2"
   printf '%s\n' "$label" >>"$LOG_FILE"
-  if [ -s "$file" ]; then
+  if [ "${line:-}" = 'show-environment -g' ] && [[ "$label" = *stdout:* ]]; then
+    printf '    <environment listing omitted; exit status and hook assertions retained>\n' >>"$LOG_FILE"
+  elif [ -s "$file" ]; then
     sed 's/^/    /' "$file" >>"$LOG_FILE"
   else
     printf '    <empty>\n' >>"$LOG_FILE"

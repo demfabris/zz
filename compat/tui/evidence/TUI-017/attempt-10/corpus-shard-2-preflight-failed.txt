@@ -1,0 +1,4 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+error: gaps[1] references a missing path: file:compat/tui/evidence/TUI-017/attempt-10/notes.md

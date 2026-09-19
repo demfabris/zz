@@ -1,0 +1,113 @@
+ok    self-check capture-edited-tab-ich-middle exact bytes before sabotage
+      case capture-edited-tab-ich-middle-sabotage
+      stdout differs
+        1c1
+        < ABC	X    DEF
+        ---
+        > ABC X   DEF
+ok    self-check capture-edited-tab-ich-middle one-sided scene change
+ok    self-check capture-edited-tab-ich-before exact bytes before sabotage
+      case capture-edited-tab-ich-before-sabotage
+      stdout differs
+        1c1
+        < A  BC	DEF
+        ---
+        > ABC	DEF
+ok    self-check capture-edited-tab-ich-before one-sided scene change
+ok    self-check capture-edited-tab-ich-head exact bytes before sabotage
+      case capture-edited-tab-ich-head-sabotage
+      stdout differs
+        1c1
+        < ABC 	DEF
+        ---
+        > ABC	DEF
+ok    self-check capture-edited-tab-ich-head one-sided scene change
+ok    self-check capture-edited-tab-ich-off-line exact bytes before sabotage
+      case capture-edited-tab-ich-off-line-sabotage
+      stdout differs
+        1c1
+        <                                                                           C   AB
+        ---
+        >                                                                         ABC	Z
+ok    self-check capture-edited-tab-ich-off-line one-sided scene change
+ok    self-check capture-edited-tab-ich-truncate exact bytes before sabotage
+      case capture-edited-tab-ich-truncate-sabotage
+      stdout differs
+        1c1
+        <                                                                           ABC	
+        ---
+        >                                                                         ABC	Z
+ok    self-check capture-edited-tab-ich-truncate one-sided scene change
+ok    self-check capture-edited-tab-ich-overwrite exact bytes before sabotage
+      case capture-edited-tab-ich-overwrite-sabotage
+      stdout differs
+        1c1
+        < ABC	X Y  DEF
+        ---
+        > ABC X Y DEF
+ok    self-check capture-edited-tab-ich-overwrite one-sided scene change
+ok    self-check capture-edited-tab-dch-middle exact bytes before sabotage
+wait that ran out: zz printed capture-edited-tab-dch-middle sabotage (case capture-edited-tab-dch-middle-equivalence)
+--- zz screen ---
+$ printf 'SCENE-%s\n' %0
+SCENE-%0
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+L0:win* 1:two
+--- zz clients ---
+cli 80x24
+--- zz panes ---
+%0 in_mode=0 mode=
+%1 in_mode=0 mode=
+%8 in_mode=0 mode=
+--- tmux screen ---
+$ printf 'SCENE-%s\n' %0
+SCENE-%0
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+L0:win* 1:two
+--- tmux clients ---
+cli 80x24
+--- tmux panes ---
+%0 in_mode=0 mode=
+%1 in_mode=0 mode=
+%8 in_mode=0 mode=
+error: zz printed capture-edited-tab-dch-middle sabotage did not happen within 10 seconds

@@ -4034,6 +4034,17 @@ impl MuxEngine {
             .copied()
     }
 
+    pub fn resolve_session(
+        &self,
+        target: Option<&str>,
+        current: Option<SessionId>,
+    ) -> Result<SessionId, ServerError> {
+        self.state
+            .resolve_session_with_pane_index(target, current, &|window, index| {
+                self.pane_at_index(window, index)
+            })
+    }
+
     pub fn resolve_window(
         &self,
         target: Option<&str>,
@@ -4348,7 +4359,6 @@ impl MuxEngine {
             let existing = match requested_name.as_deref() {
                 Some(name) => session_named(&self.state, name),
                 None => self
-                    .state
                     .resolve_session(options.value("-t"), context.session)
                     .ok(),
             };
@@ -4363,10 +4373,7 @@ impl MuxEngine {
             )));
         }
         if let Some(target) = options.value("-t")
-            && self
-                .state
-                .resolve_session(Some(target), context.session)
-                .is_err()
+            && self.resolve_session(Some(target), context.session).is_err()
         {
             tmux_clean_name(target, "session group")?;
         }
@@ -4832,7 +4839,7 @@ impl MuxEngine {
         if options.has("-A") {
             let existing = match requested_name.as_deref() {
                 Some(name) => session_named(&self.state, name),
-                None => self.state.resolve_session(None, context.session).ok(),
+                None => self.resolve_session(None, context.session).ok(),
             };
             if let Some(session) = existing {
                 if context.has_no_client() {
@@ -5105,9 +5112,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("rename-session", args)?;
         let name = exactly_one_argument("rename-session", &positional)?;
-        let session = self
-            .state
-            .resolve_session(options.value("-t"), context.session)?;
+        let session = self.resolve_session(options.value("-t"), context.session)?;
         let name = expand_format_with_hooks(
             name,
             self,
@@ -5134,9 +5139,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("kill-session", args)?;
         reject_positionals("kill-session", &positional)?;
-        let session = self
-            .state
-            .resolve_session(options.value("-t"), context.session)?;
+        let session = self.resolve_session(options.value("-t"), context.session)?;
         if options.value("-f").is_some() && (!options.has("-a") || options.has("-C")) {
             return Err(ServerError::InvalidCommand(
                 "-f only valid with -a".to_owned(),
@@ -5215,7 +5218,7 @@ impl MuxEngine {
                 (self.state.windows[&window].session, window, pane)
             }
             target => {
-                let session = self.state.resolve_session(target, context.session)?;
+                let session = self.resolve_session(target, context.session)?;
                 let window = session_active_window(&self.state, session)?;
                 let pane = window_active_pane(&self.state, window)?;
                 (session, window, pane)
@@ -5301,8 +5304,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("has-session", args)?;
         reject_positionals("has-session", &positional)?;
-        self.state
-            .resolve_session(options.value("-t"), context.session)?;
+        self.resolve_session(options.value("-t"), context.session)?;
         Ok(Execution::default())
     }
 
@@ -5498,9 +5500,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-windows", args)?;
         reject_positionals("list-windows", &positional)?;
-        let target_session = self
-            .state
-            .resolve_session(options.value("-t"), context.session)?;
+        let target_session = self.resolve_session(options.value("-t"), context.session)?;
         let sort = TmuxSort::parse(options.value("-O"), options.has("-r"), None)?;
         let session_ids = if options.has("-a") {
             self.state
@@ -5658,7 +5658,7 @@ impl MuxEngine {
         context: &ExecutionContext,
     ) -> Result<SessionId, ServerError> {
         let Some(target) = target else {
-            return self.state.resolve_session(None, context.session);
+            return self.resolve_session(None, context.session);
         };
         let window = self.resolve_window(Some(target), context.session, context.window)?;
         self.state
@@ -5674,9 +5674,7 @@ impl MuxEngine {
         args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, _) = parse_command_options("last-window", args)?;
-        let session = self
-            .state
-            .resolve_session(options.value("-t"), context.session)?;
+        let session = self.resolve_session(options.value("-t"), context.session)?;
         self.activate_last_window(context, session)
     }
 
@@ -5706,9 +5704,7 @@ impl MuxEngine {
         };
         let (options, positional) = parse_command_options(command, args)?;
         reject_positionals(command, &positional)?;
-        let session = self
-            .state
-            .resolve_session(options.value("-t"), context.session)?;
+        let session = self.resolve_session(options.value("-t"), context.session)?;
         self.step_window_in_session(context, session, direction, options.has("-a"))
     }
 
@@ -5876,9 +5872,7 @@ impl MuxEngine {
             if options.value("-s").is_some() {
                 self.resolve_window(options.value("-s"), context.session, context.window)?;
             }
-            let session = self
-                .state
-                .resolve_session(options.value("-t"), context.session)?;
+            let session = self.resolve_session(options.value("-t"), context.session)?;
             let base_index = self.base_index_for_session(session);
             self.state.renumber_windows(session, base_index)?;
             return Ok(Execution::default());
@@ -8463,7 +8457,7 @@ impl MuxEngine {
         input: &str,
     ) -> Result<String, ServerError> {
         let session_name = if input.contains("#S") {
-            let session = self.state.resolve_session(None, context.session)?;
+            let session = self.resolve_session(None, context.session)?;
             Some(
                 self.state
                     .sessions
@@ -8822,7 +8816,6 @@ impl MuxEngine {
     ) -> Option<ExecutionContext> {
         let window = if let Some((session_target, window_and_pane)) = target.split_once(':') {
             let session = self
-                .state
                 .resolve_session(
                     (!session_target.is_empty()).then_some(session_target),
                     context.session,
@@ -10892,14 +10885,10 @@ impl MuxEngine {
         let name = &positional[0];
         validate_environment_name(name)?;
         let target_session = if options.has("-g") {
-            self.state
-                .resolve_session(options.value("-t"), context.session)
+            self.resolve_session(options.value("-t"), context.session)
                 .ok()
         } else {
-            Some(
-                self.state
-                    .resolve_session(options.value("-t"), context.session)?,
-            )
+            Some(self.resolve_session(options.value("-t"), context.session)?)
         };
         let mut value = positional.get(1).cloned();
         if options.has("-F")
@@ -10968,13 +10957,11 @@ impl MuxEngine {
         }
         if options.has("-g") {
             if let Some(target) = options.value("-t") {
-                self.state.resolve_session(Some(target), context.session)?;
+                self.resolve_session(Some(target), context.session)?;
             }
             return show_environment_entries(&self.global_environment, &positional, &options);
         }
-        let session = self
-            .state
-            .resolve_session(options.value("-t"), context.session)?;
+        let session = self.resolve_session(options.value("-t"), context.session)?;
         let Some(retained) = self.session_environments.get(&session) else {
             return show_environment_entries(&EMPTY_ENVIRONMENT, &positional, &options);
         };
@@ -22498,6 +22485,91 @@ mod tests {
                 .execute(&mut context, &command("list-sessions", &["-x"]))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn session_targets_use_configured_pane_indices() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-s", "work", "-n", "win"]),
+            )
+            .unwrap();
+        let session = context.session.unwrap();
+        let pane = context.pane.unwrap();
+        for (flags, value, target) in [
+            ("-gw", "1", "=work:win.1"),
+            ("-w", "3", "=work:win.3"),
+            ("-g", "2", "=work:win.3"),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-option", &[flags, "pane-base-index", value]),
+                )
+                .unwrap();
+            for name in ["has-session", "list-windows"] {
+                engine
+                    .execute(&mut context, &command(name, &["-t", target]))
+                    .unwrap();
+                assert!(
+                    engine
+                        .execute(&mut context, &command(name, &["-t", "=work:win.0"]))
+                        .is_err()
+                );
+            }
+            let index = target.rsplit_once('.').unwrap().1;
+            for exact_target in [
+                format!("work:=.{index}"),
+                format!("=work:=.{index}"),
+                format!(":=.{index}"),
+                format!("work:=.{pane}"),
+                "work:=.".to_owned(),
+            ] {
+                assert_eq!(
+                    engine.resolve_session(Some(&exact_target), Some(session)),
+                    Ok(session),
+                    "{exact_target}"
+                );
+            }
+            assert_eq!(
+                engine.resolve_session(Some("work:=.0"), Some(session)),
+                Err(ServerError::PaneNotFound("0".to_owned()))
+            );
+            assert_eq!(
+                engine.resolve_session(Some("work:=.9"), Some(session)),
+                Err(ServerError::PaneNotFound("9".to_owned()))
+            );
+            assert_eq!(
+                engine.resolve_session(Some(&pane.to_string()), None),
+                Ok(session)
+            );
+            assert_eq!(
+                engine.resolve_session(Some(&format!("work:.{pane}")), None),
+                Ok(session)
+            );
+        }
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-uw", "pane-base-index"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.resolve_session(Some("=work:win.2"), None),
+            Ok(session)
+        );
+        assert!(engine.resolve_session(Some("=work:win.3"), None).is_err());
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "base-index", "5"]),
+            )
+            .unwrap();
+        assert_eq!(engine.resolve_session(Some("=work:0.2"), None), Ok(session));
+        assert!(engine.resolve_session(Some("=work:5.2"), None).is_err());
     }
 
     #[test]

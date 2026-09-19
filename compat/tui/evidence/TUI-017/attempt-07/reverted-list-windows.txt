@@ -1,0 +1,30 @@
+      case list-windows-base-index-equivalence
+      exit tmux: 0  zz: 1
+      stdout differs
+        1,2d0
+        < 0: win* (1 panes) [80x23] [layout ae5d,80x23,0,0,0] @0 (active)
+        < 1: two (1 panes) [80x24] [layout b25e,80x24,0,0,1] @1
+      stderr differs
+        0a1
+        > can't find pane: 1
+FAIL  self-check list-windows resolves pane-base-index 1: exit reported 1, expected 0
+      case list-windows-base-index-sabotage
+      exit tmux: 0  zz: 1
+      stdout differs
+        1,2d0
+        < 0: win* (1 panes) [80x23] [layout ae5d,80x23,0,0,0] @0 (active)
+        < 1: two (1 panes) [80x24] [layout b25e,80x24,0,0,1] @1
+      stderr differs
+        0a1
+        > can't find pane: 1
+      state differs
+        4,5c4,5
+        < P cli:0.1 mode=0/ 80x23 ptitle
+        < P cli:1.1 mode=0/ 80x24 ptitle
+        ---
+        > P cli:0.2 mode=0/ 80x23 ptitle
+        > P cli:1.2 mode=0/ 80x24 ptitle
+ok    self-check list-windows loses pane 1
+residual self-check list-windows: 1 failures
+
+EXIT=1

@@ -1,0 +1,23 @@
+   Compiling libghostty-vt-sys v0.2.1 (/tmp/zzcr-baseline.ZWe5eu/third_party/rust/libghostty-vt-sys)
+error: failed to run custom build command for `libghostty-vt-sys v0.2.1 (/tmp/zzcr-baseline.ZWe5eu/third_party/rust/libghostty-vt-sys)`
+
+Caused by:
+  process didn't exit successfully: `/home/demfabris/dev/zz-c11-capture-residuals/target/debug/build/libghostty-vt-sys-d9ba53b8d11f8067/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_OPTIMIZE
+  cargo:rerun-if-env-changed=GHOSTTY_SOURCE_DIR
+  cargo:rerun-if-env-changed=GHOSTTY_ZIG_SYSTEM_DIR
+  cargo:rerun-if-env-changed=TARGET
+  cargo:rerun-if-env-changed=HOST
+  cargo:rerun-if-env-changed=DEBUG
+  cargo:rerun-if-env-changed=OPT_LEVEL
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=/tmp/zzcr-baseline.ZWe5eu/third_party/rust/libghostty-vt-sys/provenance.patch
+
+  --- stderr
+
+  thread 'main' (3406243) panicked at third_party/rust/libghostty-vt-sys/build.rs:393:42:
+  read terminal provenance patch: Os { code: 2, kind: NotFound, message: "No such file or directory" }
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+EXIT=101

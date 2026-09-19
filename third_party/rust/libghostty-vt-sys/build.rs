@@ -107,7 +107,7 @@ fn build_vendored(link_mode: LinkMode) {
     let host = env::var("HOST").expect("HOST must be set");
 
     // Locate ghostty source: env override > fetch into OUT_DIR.
-    let ghostty_dir = match env::var("GHOSTTY_SOURCE_DIR") {
+    let source_dir = match env::var("GHOSTTY_SOURCE_DIR") {
         Ok(dir) => {
             let p = PathBuf::from(dir);
             assert!(
@@ -139,7 +139,7 @@ fn build_vendored(link_mode: LinkMode) {
         .arg(&install_prefix)
         .arg("--cache-dir")
         .arg(&zig_cache_dir)
-        .current_dir(&ghostty_dir);
+        .current_dir(&source_dir);
 
     // Package managers can provide Ghostty's Zig package cache ahead of time
     // and ask Zig to resolve packages from that immutable store path instead

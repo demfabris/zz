@@ -1,0 +1,42 @@
+{
+  "selection": "compat/run.sh --delta origin/main..HEAD plus the capture-pane, copy-mode and resize rows the batch names",
+  "rows_selected": 254,
+  "delta_rows": 221,
+  "extra_rows": 33,
+  "unrun": [],
+  "shards": ["corpus-shard-1.rows", "corpus-shard-2.rows", "corpus-shard-3.rows"],
+  "shard_exits": [1, 1, 1],
+  "failed_rows": {
+    "inherited": {
+      "rows": [
+        "lane2-store",
+        "micro-flags",
+        "show-options-hooks",
+        "smoke/cli-chain-parse-abort",
+        "smoke/default-client-command",
+        "smoke/plugin-runtime-resurrect-restore",
+        "smoke/status-background-jobs"
+      ],
+      "control": "target/capture-residuals-main-control/zz_cli at main 38c50df4",
+      "evidence": "corpus-main-control-rows.txt",
+      "result": "all seven fail on the control with the same step count and the same TOPO/GEO/FMT/OUT/WARN divergence counts as the candidate",
+      "causes": [
+        "lane2-store and show-options-hooks: this pin build defaults lock-command to vlock where zz answers \"lock -np\"",
+        "micro-flags: the pin spells the month with the host locale (18-set-26) and zz spells it 18-Sep-26",
+        "smoke/plugin-runtime-resurrect-restore: the fixture reports its own pin-side assertion failure",
+        "smoke/cli-chain-parse-abort and smoke/default-client-command: reproduced on main, carried from attempt-09",
+        "smoke/status-background-jobs: intermittent on both sides since attempt-09"
+      ]
+    },
+    "environmental": {
+      "rows": [
+        "smoke/launcher-installed-layout",
+        "smoke/config-discovery-launcher",
+        "smoke/pane-tmux-path"
+      ],
+      "why": "compat/diff-scenario.sh symlinks the installed launcher to a zz_cli beside ZZ_BIN, and the shard runs had none",
+      "result": "with the sibling in place all three run clean: corpus-launcher-rows.txt reports 7, 12 and 3 steps with no divergence"
+    },
+    "caused_here": []
+  }
+}

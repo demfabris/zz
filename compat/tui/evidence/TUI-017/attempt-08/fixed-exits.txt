@@ -1,0 +1,7 @@
+capture-low-indexed-colour 0
+capture-tab-trailing 0
+capture-tab-internal 0
+capture-tab-wide 0
+lock-session 0
+has-session 0
+list-windows 0

@@ -149,6 +149,31 @@ behaviour is reconsidered rather than imitated:
   `split-window -I` beside the `load-buffer -` pipe zz already supports. It is milestone 5 of the
   superset roadmap and the last obligation between this campaign and its twelfth item.
 
+Amendment 2026-09-18 (fabrico), under the same principle: **capture returns the spaces a tab left
+on screen.** Since tmux 3.4 the pin marks every cell a tab produced (`GRID_FLAG_TAB`) and
+`capture-pane` prints a literal tab there whatever its flags (`grid.c:1202`); once an edit removes
+the head of such a tab it also drops the padding cells left behind. Cycle 11 imitated this with tab
+spans in spare Ghostty cell bits. Review measured the cost at +68% CPU on output that overwrites
+tab-bearing rows and +33% with a tab stop on every column, and every later edit (insert, delete,
+erase, line insert and delete, scrolling) had to keep the span honest. zz does not imitate the
+marker: its capture returns the cells the screen shows, the span tracking left the patch, and
+TUI-017 files each tab case under `decided:TUI-017` in `compat/tui-client-commands.sh`. The
+indexed-colour class bits stay, because they cost nothing measurable and the pin's `38;5;1` is a
+real colour class, not bookkeeping. (Superseded the same day by the ruling below.)
+
+Amendment 2026-09-18 (fabrico), superseding the "keep the cheap indexed-colour bits" half of
+the tab ruling: **zz carries no patch on the vendored terminal engine.** The remaining 171
+lines went: the indexed-colour class plumbing (`fg_indexed`/`bg_indexed`) and the one ICH hunk
+that kept the pin's stale cells after an insert wider than the cells it moves. Two asserted
+cases lost their basis and are filed under `decided:TUI-017`:
+`capture-low-indexed-colour` (the pin's `capture-pane -e` re-emits the colour class, so
+`38;5;1` comes back as indexed 1 while zz returns named red, because libghostty-vt stores both
+the same way) and `capture-edited-tab-ich-off-line` (the wide insert clears differently
+without the hunk). The safe wrapper vendored to reach those fields went with them:
+`libghostty-vt` resolves to upstream again and `build.rs` builds pristine Ghostty. The
+divergence is accepted: keeping any patch means carrying a fork of the engine's grid semantics
+for two capture spellings, which fabrico ruled not justified.
+
 # Scope boundary
 
 This campaign covers terminal-client compatibility and composition of existing zz commands.

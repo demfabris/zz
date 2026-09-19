@@ -8,8 +8,9 @@ This directory is a source snapshot of `libghostty-vt-sys` from
 - Upstream Ghostty pin: `a887df42c56f6de86c0fe6da9c4eeca37931e083`
 - Local Ghostty pin: `20c3eae04dee606349eb21e2dd0293b203d47179`
 - License: MIT OR Apache-2.0; the upstream MIT license is retained here.
-- Local override: the workspace patches the git-sourced `libghostty-vt-sys` package to this
-  directory while leaving the safe `libghostty-vt` crate on its upstream v0.2.1 release commit.
+- Local override: the workspace patches the git-sourced sys package to this adjacent
+  snapshot from the upstream v0.2.1 release commit. The safe wrapper is not
+  vendored: `libghostty-vt` resolves to upstream from the same commit.
 
 ## Local delta
 
@@ -32,3 +33,17 @@ and updates the safe Kitty API.
 
 When replacing this snapshot, remove its git-source patch from the workspace, refresh `Cargo.lock`,
 and run the focused terminal tests plus the real macOS bundle build.
+
+## No local patch
+
+Since 2026-09-18 zz carries no patch on the vendored terminal engine (fabrico;
+see the amendment in `knowledge/designs/tui-parity.md`). The `provenance.patch`
+that retained explicit indexed foreground/background flags in spare style bits,
+the ICH hunk that kept the pin's stale cells after a wide insert, the build
+machinery that applied them, and the safe wrapper vendored to read those fields
+are all gone. `build.rs` fetches Ghostty at the pin above and builds it
+pristine; the pkg-config path accepts any installed libghostty-vt.
+
+Tabs carry no provenance. The pin prints a literal tab for every cell a tab
+produced, and fabrico decided on 2026-09-18 that zz captures the spaces on
+screen instead (see `knowledge/designs/tui-parity.md`).

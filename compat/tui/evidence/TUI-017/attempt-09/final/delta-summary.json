@@ -1,0 +1,2046 @@
+{
+  "selected": 163,
+  "completed": 163,
+  "clean": 157,
+  "differences": 6,
+  "unrun": [],
+  "rows": [
+    {
+      "row": "alerts.txt",
+      "steps": 62,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "break-pane.txt",
+      "steps": 30,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "capture-pane.txt",
+      "steps": 34,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "census-hooks.txt",
+      "steps": 152,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "command-alias.txt",
+      "steps": 16,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "command-item-format.txt",
+      "steps": 125,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "format-window-cell-metrics.txt",
+      "steps": 8,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "formats-values.txt",
+      "steps": 45,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "list-sort-filter.txt",
+      "steps": 12,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "micro-flags.txt",
+      "steps": 17,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "mru-activity.txt",
+      "steps": 11,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "native-prefix-isolation.txt",
+      "steps": 29,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "new-session-environment.txt",
+      "steps": 18,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "pane-border-span-owner.txt",
+      "steps": 10,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "pane-exact-target-prefix.txt",
+      "steps": 31,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "pane-spawn-options.txt",
+      "steps": 25,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "send-keys-reset.txt",
+      "steps": 16,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "show-options-hooks.txt",
+      "steps": 34,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 7,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/alias-group-forgery.txt",
+      "steps": 7,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/args-parse-bind-key.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/args-parse-choosers.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/args-parse-command-prompt.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/args-parse-confirm-before.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/args-parse-display-menu.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/args-parse-display-panes.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/args-parse-if-shell.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/args-parse-run-shell.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/args-parse-set-hook.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/args-parse-set-option.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/buffer-clipboard-write.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/buffer-standard-streams.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/cheap-flags.txt",
+      "steps": 22,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/chooser-buffer-confirm-flag.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/chooser-buffer-vocabulary.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/chooser-kill-keys.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/chooser-kill-on-exit.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/chooser-row-flags.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/chooser-tree-vocabulary.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/clear-history-hyperlinks.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/cli-chain-parse-abort.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 1,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/cli-output-bytes.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/client-exit-actions.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/client-non-utf8-cwd.txt",
+      "steps": 4,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/client-resized-context.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/client-utf8-sanitizer.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/command-flag-errors.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/command-prompt-chain.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/command-prompt-editing.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/command-prompt-target.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/config-alias-parse-unit.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/config-chain-parse-abort.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/config-discovery-explicit.txt",
+      "steps": 13,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/config-discovery-launcher.txt",
+      "steps": 12,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/config-discovery.txt",
+      "steps": 12,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/config-grammar.txt",
+      "steps": 17,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/config-non-utf8-byte-matrix.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/config-non-utf8-file-bytes.txt",
+      "steps": 8,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/continuum-init.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/control-alias-prepare.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/control-eof-drain.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/control-hard-loss.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/control-notify.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/control-tilde-environment.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/copy-mode-command-errors.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/copy-mode-copy-line.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/copy-mode-formats.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/copy-mode-kill-on-exit.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/copy-mode-mode-keys-tail.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/copy-mode-mode-keys.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/copy-mode-prompt-bindings.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/copy-mode-refresh.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/copy-mode-search.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/copy-mode-source-pane.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/copy-selection-clipboard-bytes.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/daemon-invalid-flags.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/default-client-command.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 1,
+        "warning": 2
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/display-menu-action-queue.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/display-menu-cell-layout.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/display-menu-mouse.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/display-menu-paste.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/display-menu-resize-lifecycle.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/display-menu-shortcut-grammar.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/display-menu-style-refresh.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/display-message-client-aliases.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/display-panes-template.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/display-popup-drag.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/display-popup-kitty-noresize.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/display-popup-kitty.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/display-popup-menu-policy.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/display-popup-menu.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/display-popup-resize-lifecycle.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/display-popup-style-refresh.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/display-popup-to-pane.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/environment-bytes.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/fixture-conf.txt",
+      "steps": 5,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/focus-follows-mouse.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/format-client-loop-context.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/format-environment-loop-context.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/format-listing.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/format-modifier-client-loop.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/format-modifier-environment-loop.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/format-modifier-interrogate.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/format-monitor-hooks.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/format-pane-process.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/format-pane-progress.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/format-trace.txt",
+      "steps": 29,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/format-window-bigger.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/fpp-init.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/hooks-pane-focus-clients.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/hooks-pane-focus.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/jobs-command-environment.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/jobs-display-popup-environment.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/jobs-shell-job-cwd.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/keys-prefix-attached.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/keys-prefix-remainder.txt",
+      "steps": 6,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/keys-prefix-stock.txt",
+      "steps": 40,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/keys-shift-attached.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/keys-table-lifecycle.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/kill-filters.txt",
+      "steps": 17,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/launcher-installed-layout.txt",
+      "steps": 7,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/oh-my-tmux.txt",
+      "steps": 15,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/own-conf.txt",
+      "steps": 6,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/pane-border-indicators.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/pane-border-lines.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/pane-border-status.txt",
+      "steps": 34,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/pane-border-zorder.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/pane-colours-palette.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/pane-engine-knobs-input.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/pane-engine-knobs.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/pane-runtime-facts.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/pane-tmux-path.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/plugin-runtime-continuum.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/plugin-runtime-fpp.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/plugin-runtime-oh-my-tmux.txt",
+      "steps": 4,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/plugin-runtime-resurrect-restore.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 1,
+        "warning": 1
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/plugin-runtime-tpm-install.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/plugin-runtime-vim-tmux-navigator.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/plugin-runtime-yank.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/positional-maximums.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/positional-minimums.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/refresh-status.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/remain-on-exit-format.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/resurrect-init.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/resurrect-save.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/send-keys-client-selection.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/send-keys-control.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/send-keys-inject.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/sensible.txt",
+      "steps": 6,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/source-file-byte-name.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/source-file-control.txt",
+      "steps": 12,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/source-file-depth.txt",
+      "steps": 4,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/source-file-diagnostics.txt",
+      "steps": 12,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/source-file-tilde.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/source-replay-diagnostics.txt",
+      "steps": 60,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 1,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/split-window-wait.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/status-background-jobs.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 1,
+        "warning": 1
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/status-keys-editor-default.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/terminal-facts.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/tpm-init.txt",
+      "steps": 5,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/tui-client-input-backpressure.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/vim-tmux-navigator.txt",
+      "steps": 8,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 2
+    },
+    {
+      "row": "smoke/yank.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "targets.txt",
+      "steps": 20,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 1
+    }
+  ],
+  "retries": [
+    {
+      "row": "smoke/cli-chain-parse-abort.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 1,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/default-client-command.txt",
+      "steps": 3,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 1,
+        "warning": 2
+      },
+      "shard": 1
+    },
+    {
+      "row": "smoke/source-replay-diagnostics.txt",
+      "steps": 60,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 1,
+        "warning": 0
+      },
+      "shard": 1
+    },
+    {
+      "row": "show-options-hooks.txt",
+      "steps": 34,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 7,
+        "warning": 0
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/plugin-runtime-resurrect-restore.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 1,
+        "warning": 1
+      },
+      "shard": 3
+    },
+    {
+      "row": "smoke/status-background-jobs.txt",
+      "steps": 2,
+      "divergences": {
+        "topology": 0,
+        "geometry": 0,
+        "format": 0,
+        "output": 0,
+        "warning": 0
+      },
+      "shard": 3
+    }
+  ],
+  "final_clean": 158,
+  "final_differences": 5,
+  "shard_exits": {
+    "1": 1,
+    "2": 0,
+    "3": 1
+  }
+}

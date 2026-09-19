@@ -1,0 +1,11 @@
+   Compiling libghostty-vt-sys v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt-sys)
+   Compiling libghostty-vt v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/third_party/rust/libghostty-vt)
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-terminal)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 53.03s
+     Running unittests src/terminal_core.rs (target/debug/deps/zz_terminal-668b4c4ce7e784d8)
+
+running 1 test
+test session::tests::styled_capture_matches_pinned_colour_and_attribute_transitions ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 287 filtered out; finished in 0.01s
+

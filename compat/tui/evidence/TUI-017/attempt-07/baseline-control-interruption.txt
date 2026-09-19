@@ -1,0 +1,4 @@
+    PID    PPID     ELAPSED COMMAND
+4153892 4046923       03:34 /home/demfabris/dev/zz-c11-capture-residuals/target/capture-residuals-baseline-build/debug/zz_cli -f /tmp/zz-cli-J9zyH7/empty.conf -S /tmp/zz-cli-J9zyH7/daemon.sock -C new-session -s wait-exit exec /bin/cat
+
+Terminated only this lane baseline wait-exit child after more than three minutes in the test unbounded wait_with_output. This is an interrupted test, not a natural timeout or an assertion pass.

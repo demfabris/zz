@@ -1,0 +1,21 @@
+run=1 marker=ready grid=23 80
+real 1.655
+user 0.000
+sys 0.374
+run=2 marker=ready grid=23 80
+real 1.510
+user 0.000
+sys 0.367
+run=3 marker=ready grid=23 80
+real 1.426
+user 0.000
+sys 0.359
+run=4 marker=ready grid=23 80
+real 1.736
+user 0.001
+sys 0.394
+run=5 marker=ready grid=23 80
+real 1.435
+user 0.000
+sys 0.366
+performance probe complete: runs=5 markers=5

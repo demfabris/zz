@@ -1,0 +1,17 @@
+ok    self-check lock-session resolves pane-base-index 1
+      case lock-session-base-index-sabotage
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > can't find pane: 1
+      state differs
+        4,5c4,5
+        < P cli:0.1 mode=0/ 80x23 ptitle
+        < P cli:1.1 mode=0/ 80x24 ptitle
+        ---
+        > P cli:0.2 mode=0/ 80x23 ptitle
+        > P cli:1.2 mode=0/ 80x24 ptitle
+ok    self-check lock-session loses pane 1
+residual self-check lock-session: 0 failures
+
+EXIT=0

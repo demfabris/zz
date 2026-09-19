@@ -1378,6 +1378,18 @@ pub struct TerminalSize {
     pub cell_height_px: u32,
 }
 
+impl TerminalSize {
+    #[must_use]
+    pub fn cells(columns: u16, rows: u16) -> Self {
+        Self {
+            columns,
+            rows,
+            cell_width_px: INITIAL_CELL_WIDTH,
+            cell_height_px: INITIAL_CELL_HEIGHT,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerminalProcessExit {
     pub code: u32,
@@ -18348,9 +18360,66 @@ mod tests {
     }
 
     #[test]
-    fn styled_capture_matches_pinned_colour_and_attribute_transitions() {
+    fn capture_returns_the_spaces_a_tab_left() {
         for (input, expected) in [
+            ("ABC\t\r\nNEXT", "ABC\nNEXT\n\n\n"),
+            ("ABC\tDEF\r\nNEXT", "ABC     DEF\nNEXT\n\n\n"),
+            ("界\t\r\nNEXT", "界\nNEXT\n\n\n"),
+            ("ABC\tDEF\r\x1b[4G\x1b[P\r\nNEXT", "ABC    DEF\nNEXT\n\n\n"),
+        ] {
+            let mut terminal = Terminal::new(TerminalOptions {
+                cols: 80,
+                rows: 24,
+                max_scrollback: 64,
+            })
+            .unwrap();
+            terminal.vt_write(input.as_bytes());
+            let options = CaptureOptions {
+                end: CaptureBoundary::Relative(4),
+                ..CaptureOptions::default()
+            };
+            assert_eq!(
+                capture_terminal(&terminal, None, options).unwrap(),
+                expected,
+                "{input:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn capture_clears_the_cells_a_wide_insert_crosses() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 80,
+            rows: 24,
+            max_scrollback: 64,
+        })
+        .unwrap();
+        terminal.vt_write(b"\x1b[71GABCDEFGHIJ\r\x1b[70G\x1b[6@\x1b[5;1HNEXT");
+        let options = CaptureOptions {
+            end: CaptureBoundary::Relative(4),
+            ..CaptureOptions::default()
+        };
+        assert_eq!(
+            capture_terminal(&terminal, None, options).unwrap(),
+            format!("{}ABCD\n\n\n\nNEXT", " ".repeat(76))
+        );
+    }
+
+    #[test]
+    fn styled_capture_emits_colour_and_attribute_transitions() {
+        for (input, expected) in [
+            (
+                "\x1b[44mABC\tDEF\x1b[0m\r\x1b[6G\x1b[41mX\x1b[0m",
+                "\x1b[44mABC\x1b[49m  \x1b[41mX\x1b[49m  \x1b[44mDEF\x1b[49m",
+            ),
             ("\x1b[31mRED\x1b[0m", "\x1b[31mRED\x1b[39m"),
+            ("\x1b[38;5;1mRED\x1b[0m", "\x1b[31mRED\x1b[39m"),
+            (
+                "\x1b[31mA\x1b[38;5;1mB\x1b[31mC\x1b[0m",
+                "\x1b[31mABC\x1b[39m",
+            ),
+            ("\x1b[48;5;1mA\x1b[41mB\x1b[0m", "\x1b[41mAB\x1b[49m"),
+            ("\x1b[48;5;1m\x1b[2K\x1b[0m", "\x1b[41m"),
             ("\x1b[38;5;196mRED\x1b[0m", "\x1b[38;5;196mRED\x1b[39m"),
             ("\x1b[38;2;1;2;3mRGB\x1b[0m", "\x1b[38;2;1;2;3mRGB\x1b[39m"),
             ("\x1b[1mBOLD\x1b[0m", "\x1b[1mBOLD\x1b[0m"),

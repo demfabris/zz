@@ -1,0 +1,137 @@
+[
+  {
+    "row": "show-options-hooks.txt",
+    "candidate": {
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 7,
+      "warning": 0
+    },
+    "main": {
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 7,
+      "warning": 0
+    },
+    "same_counts": true,
+    "main_exit": 1,
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/main-show-options-hooks.txt",
+    "why": "Seven outputs differ only in lock-command default: zz lock -np versus this pin build vlock.",
+    "diff_lines_equal": true
+  },
+  {
+    "row": "smoke/cli-chain-parse-abort.txt",
+    "candidate": {
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 1,
+      "warning": 0
+    },
+    "main": {
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 1,
+      "warning": 0
+    },
+    "same_counts": true,
+    "main_exit": 1,
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/main-cli-chain-parse-abort.txt",
+    "why": "Parse-abort fixture clean count differs: candidate reports clean:5, pin clean:6; same main result.",
+    "diff_lines_equal": true
+  },
+  {
+    "row": "smoke/default-client-command.txt",
+    "candidate": {
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 1,
+      "warning": 2
+    },
+    "main": {
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 1,
+      "warning": 2
+    },
+    "same_counts": true,
+    "main_exit": 1,
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/main-smoke-default-client-command.txt",
+    "why": "Default client command fixture marker is missing on zz; same main result.",
+    "diff_lines_equal": true
+  },
+  {
+    "row": "smoke/plugin-runtime-resurrect-restore.txt",
+    "candidate": {
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 1,
+      "warning": 1
+    },
+    "main": {
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 1,
+      "warning": 1
+    },
+    "same_counts": true,
+    "main_exit": 1,
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/main-smoke-plugin-runtime-resurrect-restore.txt",
+    "why": "Pin own restore assertion fails (failed:tmux-side-only), while zz reports restored; same main result.",
+    "diff_lines_equal": true
+  },
+  {
+    "row": "smoke/source-replay-diagnostics.txt",
+    "candidate": {
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 1,
+      "warning": 0
+    },
+    "main": {
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 1,
+      "warning": 0
+    },
+    "same_counts": true,
+    "main_exit": 1,
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/main-smoke-source-replay-diagnostics.txt",
+    "why": "Source replay diagnostics fixture marker differs; same main result.",
+    "diff_lines_equal": true
+  },
+  {
+    "row": "smoke/status-background-jobs.txt",
+    "candidate": {
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 1,
+      "warning": 1
+    },
+    "main": {
+      "topology": 0,
+      "geometry": 0,
+      "format": 0,
+      "output": 1,
+      "warning": 1
+    },
+    "same_counts": true,
+    "main_exit": 1,
+    "artifact": "compat/tui/evidence/TUI-017/attempt-09/final/main-smoke-status-background-jobs.txt",
+    "why": "First candidate and main probes differ in status job marker; automatic unchanged candidate retry passes; subsequent isolated candidate and main probes both fail with the original tuple. No causal claim.",
+    "diff_lines_equal": true,
+    "isolated_main_exit": 1,
+    "isolated_fixed_exit": 1,
+    "isolated_diff_lines_equal": true
+  }
+]

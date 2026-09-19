@@ -1,0 +1,22 @@
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/crates/zz-mux)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 24.01s
+     Running unittests src/lib.rs (target/debug/deps/zz_mux-eed3ba838a6892ab)
+
+running 1 test
+test command::tests::session_targets_use_configured_pane_indices ... FAILED
+
+failures:
+
+---- command::tests::session_targets_use_configured_pane_indices stdout ----
+
+thread 'command::tests::session_targets_use_configured_pane_indices' (2345868) panicked at crates/zz-mux/src/command.rs:22410:79:
+called `Result::unwrap()` on an `Err` value: CommandParse("unknown command: lock-session")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    command::tests::session_targets_use_configured_pane_indices
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 535 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p zz-mux --lib`

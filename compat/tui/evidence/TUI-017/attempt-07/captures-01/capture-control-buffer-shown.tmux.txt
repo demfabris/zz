@@ -1,0 +1,32 @@
+$ printf 'SCENE-%s\n' %0
+SCENE-%0
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[38;2;13;13;13m[48;2;154;205;50mL[4m0:win*[0m[38;2;13;13;13m[48;2;154;205;50m 1:two
+cursor 2,2 flag=1 pane=80x24 shape=default
+S cli 2 1
+W cli:0 win * 1
+W cli:1 two  1
+P cli:0.0 mode=0/ 80x23 ptitle
+P cli:1.0 mode=0/ 80x24 ptitle
+B zzcap 37
+C cli 80x24 0

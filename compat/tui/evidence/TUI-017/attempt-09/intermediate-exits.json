@@ -1,0 +1,98 @@
+[
+  {
+    "artifact": "tab-filter-initial.txt",
+    "exit": 143
+  },
+  {
+    "artifact": "edited-tabs-before.txt",
+    "exit": 1
+  },
+  {
+    "artifact": "pin-edits.txt",
+    "exit": 0
+  },
+  {
+    "artifact": "bench-run.txt",
+    "exit": 1
+  },
+  {
+    "artifact": "tab-filter-v2.txt",
+    "exit": 0
+  },
+  {
+    "artifact": "edited-tab-filter-01.txt",
+    "exit": 101
+  },
+  {
+    "artifact": "edited-tab-filter-02.txt",
+    "exit": 143
+  },
+  {
+    "artifact": "edited-tab-filter-03.txt",
+    "exit": 101
+  },
+  {
+    "artifact": "edited-tab-filter-04.txt",
+    "exit": 0
+  },
+  {
+    "artifact": "fmt.txt",
+    "exit": 143
+  },
+  {
+    "artifact": "fmt-requeued.txt",
+    "exit": 0
+  },
+  {
+    "artifact": "build-fixed.txt",
+    "exit": 0
+  },
+  {
+    "artifact": "packages.txt",
+    "exit": 143
+  },
+  {
+    "artifact": "native-benchmark.txt",
+    "exit": 0
+  },
+  {
+    "artifact": "packages-requeued.txt",
+    "exit": 0
+  },
+  {
+    "artifact": "edited-tabs-self-check.txt",
+    "exit": 2
+  },
+  {
+    "artifact": "clippy.txt",
+    "exit": 143
+  },
+  {
+    "artifact": "clippy-requeued.txt",
+    "exit": 143
+  },
+  {
+    "artifact": "clippy-requeued-02.txt",
+    "exit": 143
+  },
+  {
+    "artifact": "clippy-requeued-03.txt",
+    "exit": 0
+  },
+  {
+    "artifact": "edited-tabs-self-check-retry.txt",
+    "exit": 0
+  },
+  {
+    "artifact": "tab-background.txt",
+    "exit": 1
+  },
+  {
+    "artifact": "copy-mode.txt",
+    "exit": 1
+  },
+  {
+    "artifact": "tab-background-filter.txt",
+    "exit": 143
+  }
+]

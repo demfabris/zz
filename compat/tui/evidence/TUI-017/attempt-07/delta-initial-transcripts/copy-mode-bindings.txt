@@ -1,0 +1,325 @@
+# Scenario: copy-mode-bindings
+# Source: /home/demfabris/dev/zz-c11-capture-residuals/compat/scenarios/copy-mode-bindings.txt
+# Strict geometry: yes
+
+## Step 1
+COMMAND: out: list-keys -T copy-mode-vi #
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode-vi \# send-keys -FX search-backward -- "#{copy_cursor_word}"
+tmux stdout:
+    bind-key  -T copy-mode-vi \# send-keys -FX search-backward -- "#{copy_cursor_word}"
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 2
+COMMAND: out: list-keys -T copy-mode-vi *
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode-vi * send-keys -FX search-forward -- "#{copy_cursor_word}"
+tmux stdout:
+    bind-key  -T copy-mode-vi * send-keys -FX search-forward -- "#{copy_cursor_word}"
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 3
+COMMAND: out: list-keys -T copy-mode-vi /
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode-vi / command-prompt -P -T search -p "(search down)" { send-keys -X search-forward -- "%%" }
+tmux stdout:
+    bind-key  -T copy-mode-vi / command-prompt -P -T search -p "(search down)" { send-keys -X search-forward -- "%%" }
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 4
+COMMAND: out: list-keys -T copy-mode-vi ?
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode-vi ? command-prompt -P -T search -p "(search up)" { send-keys -X search-backward -- "%%" }
+tmux stdout:
+    bind-key  -T copy-mode-vi ? command-prompt -P -T search -p "(search up)" { send-keys -X search-backward -- "%%" }
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 5
+COMMAND: out: list-keys -T copy-mode-vi :
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode-vi : command-prompt -P -p "(goto line)" { send-keys -X goto-line -- "%%" }
+tmux stdout:
+    bind-key  -T copy-mode-vi : command-prompt -P -p "(goto line)" { send-keys -X goto-line -- "%%" }
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 6
+COMMAND: out: list-keys -T copy-mode-vi f
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode-vi f command-prompt -1P -p "(jump forward)" { send-keys -X jump-forward -- "%%" }
+tmux stdout:
+    bind-key  -T copy-mode-vi f command-prompt -1P -p "(jump forward)" { send-keys -X jump-forward -- "%%" }
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 7
+COMMAND: out: list-keys -T copy-mode-vi F
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode-vi F command-prompt -1P -p "(jump backward)" { send-keys -X jump-backward -- "%%" }
+tmux stdout:
+    bind-key  -T copy-mode-vi F command-prompt -1P -p "(jump backward)" { send-keys -X jump-backward -- "%%" }
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 8
+COMMAND: out: list-keys -T copy-mode-vi t
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode-vi t command-prompt -1P -p "(jump to forward)" { send-keys -X jump-to-forward -- "%%" }
+tmux stdout:
+    bind-key  -T copy-mode-vi t command-prompt -1P -p "(jump to forward)" { send-keys -X jump-to-forward -- "%%" }
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 9
+COMMAND: out: list-keys -T copy-mode-vi T
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode-vi T command-prompt -1P -p "(jump to backward)" { send-keys -X jump-to-backward -- "%%" }
+tmux stdout:
+    bind-key  -T copy-mode-vi T command-prompt -1P -p "(jump to backward)" { send-keys -X jump-to-backward -- "%%" }
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 10
+COMMAND: out: list-keys -T copy-mode C-s
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode C-s command-prompt -Pi -I "#{pane_search_string}" -T search -p "(search down)" { send-keys -X search-forward-incremental -- "%%" }
+tmux stdout:
+    bind-key  -T copy-mode C-s command-prompt -Pi -I "#{pane_search_string}" -T search -p "(search down)" { send-keys -X search-forward-incremental -- "%%" }
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 11
+COMMAND: out: list-keys -T copy-mode C-r
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode C-r command-prompt -Pi -I "#{pane_search_string}" -T search -p "(search up)" { send-keys -X search-backward-incremental -- "%%" }
+tmux stdout:
+    bind-key  -T copy-mode C-r command-prompt -Pi -I "#{pane_search_string}" -T search -p "(search up)" { send-keys -X search-backward-incremental -- "%%" }
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 12
+COMMAND: out: list-keys -T copy-mode g
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode g command-prompt -P -p "(goto line)" { send-keys -X goto-line -- "%%" }
+tmux stdout:
+    bind-key  -T copy-mode g command-prompt -P -p "(goto line)" { send-keys -X goto-line -- "%%" }
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 13
+COMMAND: out: list-keys -T copy-mode f
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode f command-prompt -1P -p "(jump forward)" { send-keys -X jump-forward -- "%%" }
+tmux stdout:
+    bind-key  -T copy-mode f command-prompt -1P -p "(jump forward)" { send-keys -X jump-forward -- "%%" }
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 14
+COMMAND: out: list-keys -T copy-mode F
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode F command-prompt -1P -p "(jump backward)" { send-keys -X jump-backward -- "%%" }
+tmux stdout:
+    bind-key  -T copy-mode F command-prompt -1P -p "(jump backward)" { send-keys -X jump-backward -- "%%" }
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 15
+COMMAND: out: list-keys -T copy-mode t
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode t command-prompt -1P -p "(jump to forward)" { send-keys -X jump-to-forward -- "%%" }
+tmux stdout:
+    bind-key  -T copy-mode t command-prompt -1P -p "(jump to forward)" { send-keys -X jump-to-forward -- "%%" }
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 16
+COMMAND: out: list-keys -T copy-mode T
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode T command-prompt -1P -p "(jump to backward)" { send-keys -X jump-to-backward -- "%%" }
+tmux stdout:
+    bind-key  -T copy-mode T command-prompt -1P -p "(jump to backward)" { send-keys -X jump-to-backward -- "%%" }
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 17
+COMMAND: out: list-keys -T copy-mode-vi n
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode-vi n send-keys -X search-again
+tmux stdout:
+    bind-key  -T copy-mode-vi n send-keys -X search-again
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 18
+COMMAND: out: list-keys -T copy-mode-vi N
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode-vi N send-keys -X search-reverse
+tmux stdout:
+    bind-key  -T copy-mode-vi N send-keys -X search-reverse
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 19
+COMMAND: out: list-keys -T copy-mode n
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode n send-keys -X search-again
+tmux stdout:
+    bind-key  -T copy-mode n send-keys -X search-again
+OUT: clean
+TOPO: clean
+GEO: clean
+
+## Step 20
+COMMAND: out: list-keys -T copy-mode N
+zz exit: 0
+tmux exit: 0
+zz stderr:
+    <empty>
+tmux stderr:
+    <empty>
+zz stdout:
+    bind-key  -T copy-mode N send-keys -X search-reverse
+tmux stdout:
+    bind-key  -T copy-mode N send-keys -X search-reverse
+OUT: clean
+TOPO: clean
+GEO: clean
+
+SUMMARY steps=20 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0

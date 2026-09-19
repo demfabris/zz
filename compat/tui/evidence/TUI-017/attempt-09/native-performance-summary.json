@@ -1,0 +1,1084 @@
+{
+  "method": "Unchanged reviewer C driver; five alternating fixed/main runs per workload; CPU 6 for both; 100 warm-up pairs before final batch. CLOCK_PROCESS_CPUTIME_ID excludes buffer/terminal creation and destruction. Shared host, no claim of exclusive CPUs.",
+  "baseline": "38c50df4c4d51401752c49b72bb689b09e33427d",
+  "baseline_audit": "main-source-audit.json",
+  "source_sha256": {
+    "native-perf.c": "585017c050d93b0a99f775761a2e6e9bd8afda50a36df245006fee3c98679fef",
+    "native-perf-spaces.c": "eebfeca028186cba74bc3120bc4701c6b24285f07137ad475e3ffcfcec621bd1"
+  },
+  "batches": {
+    "initial-unpinned": {
+      "tabs": {
+        "samples": {
+          "main": [
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.104396195,
+              "cpu_seconds": 0.103690294
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.209320113,
+              "cpu_seconds": 0.207853863
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.113633664,
+              "cpu_seconds": 0.112842524
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.203554165,
+              "cpu_seconds": 0.201946468
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.111824253,
+              "cpu_seconds": 0.111195177
+            }
+          ],
+          "fixed": [
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.123704341,
+              "cpu_seconds": 0.122868276
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.126059649,
+              "cpu_seconds": 0.125110965
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.12492638,
+              "cpu_seconds": 0.124018482
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.120223439,
+              "cpu_seconds": 0.119683088
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.11825049,
+              "cpu_seconds": 0.117441514
+            }
+          ]
+        },
+        "cpu_medians": {
+          "main": 0.112842524,
+          "fixed": 0.122868276
+        },
+        "change_percent": 8.884728597527648
+      },
+      "spaces": {
+        "samples": {
+          "main": [
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.106207067,
+              "cpu_seconds": 0.104698877
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.108168824,
+              "cpu_seconds": 0.106681025
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.127934029,
+              "cpu_seconds": 0.127269217
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.099411635,
+              "cpu_seconds": 0.099092738
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.10113611,
+              "cpu_seconds": 0.100559517
+            }
+          ],
+          "fixed": [
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.111666819,
+              "cpu_seconds": 0.111007992
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.112731189,
+              "cpu_seconds": 0.112055542
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.106374164,
+              "cpu_seconds": 0.104608984
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.149114947,
+              "cpu_seconds": 0.148223739
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.102093618,
+              "cpu_seconds": 0.101620032
+            }
+          ]
+        },
+        "cpu_medians": {
+          "main": 0.104698877,
+          "fixed": 0.111007992
+        },
+        "change_percent": 6.025962437018317
+      }
+    },
+    "direct-row": {
+      "tabs": {
+        "samples": {
+          "main": [
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.102147014,
+              "cpu_seconds": 0.101492527
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.107711546,
+              "cpu_seconds": 0.107100003
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.103234691,
+              "cpu_seconds": 0.102595168
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.107768762,
+              "cpu_seconds": 0.1069457
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.104882375,
+              "cpu_seconds": 0.104251491
+            }
+          ],
+          "fixed": [
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.11739533,
+              "cpu_seconds": 0.116594602
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.113498566,
+              "cpu_seconds": 0.112969779
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.116845922,
+              "cpu_seconds": 0.115993114
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.119313233,
+              "cpu_seconds": 0.118445829
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.113557491,
+              "cpu_seconds": 0.112930196
+            }
+          ]
+        },
+        "cpu_medians": {
+          "main": 0.104251491,
+          "fixed": 0.115993114
+        },
+        "change_percent": 11.262786639665423
+      },
+      "spaces": {
+        "samples": {
+          "main": [
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.106028877,
+              "cpu_seconds": 0.105615677
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.197059659,
+              "cpu_seconds": 0.195364933
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.105090891,
+              "cpu_seconds": 0.104316869
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.107331601,
+              "cpu_seconds": 0.106707367
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.102002178,
+              "cpu_seconds": 0.10144066
+            }
+          ],
+          "fixed": [
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.102344501,
+              "cpu_seconds": 0.101714895
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.124637959,
+              "cpu_seconds": 0.123693723
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.10465047,
+              "cpu_seconds": 0.103889647
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.10570393,
+              "cpu_seconds": 0.10492001
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.106166541,
+              "cpu_seconds": 0.105664764
+            }
+          ]
+        },
+        "cpu_medians": {
+          "main": 0.105615677,
+          "fixed": 0.10492001
+        },
+        "change_percent": -0.658677783223427
+      }
+    },
+    "packed-cells": {
+      "tabs": {
+        "samples": {
+          "main": [
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.192326558,
+              "cpu_seconds": 0.190060132
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.224678491,
+              "cpu_seconds": 0.223027653
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.247624543,
+              "cpu_seconds": 0.243597423
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.125257076,
+              "cpu_seconds": 0.124180779
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.199870149,
+              "cpu_seconds": 0.198132708
+            }
+          ],
+          "fixed": [
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.127653105,
+              "cpu_seconds": 0.12663333
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.137476888,
+              "cpu_seconds": 0.136306702
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.164155012,
+              "cpu_seconds": 0.162392981
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.20422586,
+              "cpu_seconds": 0.201545131
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.198721794,
+              "cpu_seconds": 0.197197791
+            }
+          ]
+        },
+        "cpu_medians": {
+          "main": 0.198132708,
+          "fixed": 0.162392981
+        },
+        "change_percent": -18.03827715310892
+      },
+      "spaces": {
+        "samples": {
+          "main": [
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.223098449,
+              "cpu_seconds": 0.221405199
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.237890477,
+              "cpu_seconds": 0.23597053
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.254964851,
+              "cpu_seconds": 0.25309928
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.261848499,
+              "cpu_seconds": 0.259915386
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.26330982,
+              "cpu_seconds": 0.261345749
+            }
+          ],
+          "fixed": [
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.14800012,
+              "cpu_seconds": 0.146755167
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.127471766,
+              "cpu_seconds": 0.126222875
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.255556254,
+              "cpu_seconds": 0.253763446
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.256004221,
+              "cpu_seconds": 0.253980454
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.263325015,
+              "cpu_seconds": 0.261377962
+            }
+          ]
+        },
+        "cpu_medians": {
+          "main": 0.25309928,
+          "fixed": 0.253763446
+        },
+        "change_percent": 0.26241323167732755
+      }
+    },
+    "final-warmed": {
+      "tabs": {
+        "samples": {
+          "main": [
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.268438959,
+              "cpu_seconds": 0.260874377
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.298165565,
+              "cpu_seconds": 0.265684691
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.272362102,
+              "cpu_seconds": 0.265477658
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.272362463,
+              "cpu_seconds": 0.263519327
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.279271517,
+              "cpu_seconds": 0.268450933
+            }
+          ],
+          "fixed": [
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.263732524,
+              "cpu_seconds": 0.259515183
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.311925318,
+              "cpu_seconds": 0.285710947
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.264208696,
+              "cpu_seconds": 0.259353109
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.269107217,
+              "cpu_seconds": 0.258842733
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.295981452,
+              "cpu_seconds": 0.288916001
+            }
+          ]
+        },
+        "cpu_medians": {
+          "main": 0.265477658,
+          "fixed": 0.259515183
+        },
+        "change_percent": -2.245942293192904
+      },
+      "spaces": {
+        "samples": {
+          "main": [
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.273199343,
+              "cpu_seconds": 0.252693085
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.272931796,
+              "cpu_seconds": 0.264441959
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.25425291,
+              "cpu_seconds": 0.247862627
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.266517443,
+              "cpu_seconds": 0.257982159
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.24332811,
+              "cpu_seconds": 0.232559068
+            }
+          ],
+          "fixed": [
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.278359467,
+              "cpu_seconds": 0.264940174
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.264840317,
+              "cpu_seconds": 0.2494421
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.273282866,
+              "cpu_seconds": 0.268691744
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.27365812,
+              "cpu_seconds": 0.256353908
+            },
+            {
+              "bytes": 8388600,
+              "columns": 80,
+              "rows": 23,
+              "scrollback": 2000,
+              "optimize": 1,
+              "simd": true,
+              "kitty": true,
+              "tmux": false,
+              "wall_seconds": 0.254111329,
+              "cpu_seconds": 0.246621717
+            }
+          ]
+        },
+        "cpu_medians": {
+          "main": 0.252693085,
+          "fixed": 0.256353908
+        },
+        "change_percent": 1.4487230626037961
+      }
+    }
+  },
+  "result": "Final warmed tab-heavy -2.25%; no-tab +1.45%. Initial batches retained, including the insufficient direct-row optimization."
+}

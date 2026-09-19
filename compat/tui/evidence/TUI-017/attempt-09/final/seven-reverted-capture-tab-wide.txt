@@ -1,0 +1,15 @@
+      case capture-tab-wide-equivalence
+      stdout differs
+        1c1
+        < M-gM-^UM-^L	
+        ---
+        > M-gM-^UM-^L
+FAIL  self-check capture-tab-wide exact bytes before sabotage: stdout reported 1, expected 0
+      case capture-tab-wide-sabotage
+      stdout differs
+        1c1
+        < M-gM-^UM-^L	
+        ---
+        > M-gM-^UM-^L
+ok    self-check capture-tab-wide one-sided scene change
+residual self-check capture-tab-wide: 1 failures

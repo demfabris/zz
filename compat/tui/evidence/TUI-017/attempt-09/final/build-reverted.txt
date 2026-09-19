@@ -1,0 +1,28 @@
+   Compiling libghostty-vt-sys v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/target/capture-residuals-final-reverted-source/third_party/rust/libghostty-vt-sys)
+   Compiling libghostty-vt v0.2.1 (/home/demfabris/dev/zz-c11-capture-residuals/target/capture-residuals-final-reverted-source/third_party/rust/libghostty-vt)
+   Compiling zz-terminal v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/target/capture-residuals-final-reverted-source/crates/zz-terminal)
+warning: unused variable: `indexed`
+    --> crates/zz-terminal/src/session.rs:8858:76
+     |
+8858 | fn push_capture_colour(output: &mut String, colour: StyleColor, base: u16, indexed: bool) {
+     |                                                                            ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_indexed`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `capture_has_tabs` is never used
+    --> crates/zz-terminal/src/session.rs:8634:4
+     |
+8634 | fn capture_has_tabs(
+     |    ^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling zz-protocol v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/target/capture-residuals-final-reverted-source/crates/zz-protocol)
+warning: `zz-terminal` (lib) generated 2 warnings (run `cargo fix --lib -p zz-terminal` to apply 1 suggestion)
+   Compiling zz-mux v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/target/capture-residuals-final-reverted-source/crates/zz-mux)
+   Compiling zz-client v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/target/capture-residuals-final-reverted-source/crates/zz-client)
+   Compiling zz-daemon v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/target/capture-residuals-final-reverted-source/crates/zz-daemon)
+   Compiling zz-tui v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/target/capture-residuals-final-reverted-source/crates/zz-tui)
+   Compiling zz-config v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/target/capture-residuals-final-reverted-source/crates/zz-config)
+   Compiling zz-cli v0.10.0 (/home/demfabris/dev/zz-c11-capture-residuals/target/capture-residuals-final-reverted-source/crates/zz-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 03s

@@ -1,0 +1,259 @@
+ crates/zz-daemon/src/daemon.rs           |  2 -
+ crates/zz-mux/src/command.rs             | 20 +++++-----
+ crates/zz-mux/src/command/mode_prompt.rs | 68 +++++++++++++++++++++++++++++---
+ crates/zz-mux/src/command/switch_mode.rs | 53 +++++++++++++++++++++----
+ 4 files changed, 118 insertions(+), 25 deletions(-)
+diff --git a/crates/zz-daemon/src/daemon.rs b/crates/zz-daemon/src/daemon.rs
+index 4f94c46f..264e779c 100644
+--- a/crates/zz-daemon/src/daemon.rs
++++ b/crates/zz-daemon/src/daemon.rs
+@@ -91621,7 +91621,6 @@ bind - split-window -v -c "#{pane_current_path}"
+             kill_source,
+             zoom,
+             " ",
+-            false,
+         )))
+     }
+ 
+@@ -91732,7 +91731,6 @@ bind - split-window -v -c "#{pane_current_path}"
+             false,
+             false,
+             " ",
+-            false,
+         );
+         let texts = |inner: &ServerState, mode: &zz_mux::SwitchMode| {
+             chooser_presentation::switch_matches(inner, pane, mode)
+diff --git a/crates/zz-mux/src/command.rs b/crates/zz-mux/src/command.rs
+index 2fa4eb48..928407a4 100644
+--- a/crates/zz-mux/src/command.rs
++++ b/crates/zz-mux/src/command.rs
+@@ -8520,15 +8520,17 @@ impl MuxEngine {
+         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+         Ok(Execution::effect(MuxEffect::PaneModeChanged {
+             pane,
+-            mode: Some(PaneModeRequest::Switch(Box::new(SwitchMode::new(
+-                options.has("-w"),
+-                options.value("-F").map(str::to_owned),
+-                chooser_command_template(invocation, positional_start, &positional),
+-                options.has("-k"),
+-                options.has("-Z"),
+-                self.word_separators_for_pane(pane)?,
+-                self.pane_prompt_keys_are_vi(pane),
+-            )))),
++            mode: Some(PaneModeRequest::Switch(Box::new(
++                SwitchMode::new(
++                    options.has("-w"),
++                    options.value("-F").map(str::to_owned),
++                    chooser_command_template(invocation, positional_start, &positional),
++                    options.has("-k"),
++                    options.has("-Z"),
++                    self.word_separators_for_pane(pane)?,
++                )
++                .with_status_keys(self.pane_prompt_keys_are_vi(pane)),
++            ))),
+         }))
+     }
+ 
+diff --git a/crates/zz-mux/src/command/mode_prompt.rs b/crates/zz-mux/src/command/mode_prompt.rs
+index c6b480f5..c7cd0a21 100644
+--- a/crates/zz-mux/src/command/mode_prompt.rs
++++ b/crates/zz-mux/src/command/mode_prompt.rs
+@@ -491,7 +491,7 @@ impl ModePrompt {
+             if width_so_far >= target {
+                 break;
+             }
+-            width_so_far += Self::cell(&self.buffer[index]);
++            width_so_far += Self::cell(self.buffer[index]);
+             index += 1;
+         }
+         if index == self.index {
+@@ -522,8 +522,8 @@ impl ModePrompt {
+         }
+     }
+ 
+-    fn cell(character: &char) -> usize {
+-        if (*character as u32) < 0x20 || *character == '\u{7f}' {
++    fn cell(character: char) -> usize {
++        if (character as u32) < 0x20 || character == '\u{7f}' {
+             2
+         } else {
+             character.width().unwrap_or(0)
+@@ -543,11 +543,15 @@ impl ModePrompt {
+     }
+ 
+     fn cursor_width(&self) -> usize {
+-        self.buffer[..self.index].iter().map(Self::cell).sum()
++        self.buffer[..self.index]
++            .iter()
++            .copied()
++            .map(Self::cell)
++            .sum()
+     }
+ 
+     fn buffer_width(&self) -> usize {
+-        self.buffer.iter().map(Self::cell).sum::<usize>() + usize::from(self.quote_next)
++        self.buffer.iter().copied().map(Self::cell).sum::<usize>() + usize::from(self.quote_next)
+     }
+ 
+     /// `prompt_end_word`: forward to the last character of the next word.
+@@ -664,7 +668,7 @@ impl ModePrompt {
+         if left == 0 {
+             return (text, u16::try_from(start).unwrap_or(u16::MAX));
+         }
+-        let cell = Self::cell;
++        let cell = |character: &char| Self::cell(*character);
+         let cursor = self.cursor_width();
+         let mut visible = self.buffer_width();
+         let offset = if cursor >= left {
+@@ -732,6 +736,58 @@ mod tests {
+         assert_eq!(ModeKey::parse("M--"), ModeKey::Meta('-'));
+     }
+ 
++    #[test]
++    fn a_vi_prompt_takes_escape_into_command_mode_instead_of_cancelling() {
++        let mut prompt = ModePrompt::new("(filter) ", "", "").with_status_keys(true);
++        for character in "abc".chars() {
++            assert_eq!(prompt.key(ModeKey::Char(character)), PromptOutcome::Handled);
++        }
++        assert!(!prompt.command_mode());
++        assert_eq!(
++            prompt.key(ModeKey::Char('\u{1b}')),
++            PromptOutcome::Handled,
++            "Escape closes an emacs prompt and only arms command mode in vi"
++        );
++        assert!(prompt.command_mode());
++        assert_eq!(prompt.draw(80), ("(filter) abc".to_owned(), 11));
++        prompt.key(ModeKey::Char('h'));
++        prompt.key(ModeKey::Char('x'));
++        assert_eq!(prompt.input(), "ac");
++        prompt.key(ModeKey::Char('i'));
++        assert!(!prompt.command_mode());
++        assert_eq!(prompt.key(ModeKey::Char('\r')), PromptOutcome::Done);
++    }
++
++    #[test]
++    fn the_vi_command_table_maps_the_word_motions_and_the_line_keys() {
++        let mut prompt = ModePrompt::new("(x) ", "alpha beta:gamma", " ").with_status_keys(true);
++        prompt.key(ModeKey::Char('\u{1b}'));
++        prompt.key(ModeKey::Char('0'));
++        assert_eq!(prompt.draw(80).1, 4);
++        prompt.key(ModeKey::Char('w'));
++        assert_eq!(prompt.draw(80).1, 10);
++        prompt.key(ModeKey::Char('e'));
++        assert_eq!(prompt.draw(80).1, 19);
++        prompt.key(ModeKey::Char('b'));
++        assert_eq!(prompt.draw(80).1, 10);
++        prompt.key(ModeKey::Char('D'));
++        assert_eq!(prompt.input(), "alpha ");
++        prompt.key(ModeKey::Char('A'));
++        assert!(!prompt.command_mode());
++        prompt.key(ModeKey::Char('Z'));
++        assert_eq!(prompt.input(), "alpha Z");
++    }
++
++    #[test]
++    fn a_press_on_the_prompt_row_moves_the_cursor_to_the_cell_it_landed_on() {
++        let mut prompt = ModePrompt::new("(filter) ", "abcdef", "");
++        assert_eq!(prompt.mouse(11, 80), PromptOutcome::Handled);
++        assert_eq!(prompt.draw(80).1, 11);
++        prompt.key(ModeKey::Char('Z'));
++        assert_eq!(prompt.input(), "abZcdef");
++        assert_eq!(prompt.mouse(80, 80), PromptOutcome::NotHandled);
++    }
++
+     #[test]
+     fn an_incremental_prompt_reports_edits_and_hands_movement_back() {
+         let mut prompt = ModePrompt::incremental("(search) ", "", " ");
+diff --git a/crates/zz-mux/src/command/switch_mode.rs b/crates/zz-mux/src/command/switch_mode.rs
+index ae41d996..9e468e7c 100644
+--- a/crates/zz-mux/src/command/switch_mode.rs
++++ b/crates/zz-mux/src/command/switch_mode.rs
+@@ -29,7 +29,6 @@ impl SwitchMode {
+         kill_source: bool,
+         zoom: bool,
+         word_separators: &str,
+-        vi_keys: bool,
+     ) -> Self {
+         Self {
+             windows,
+@@ -37,14 +36,21 @@ impl SwitchMode {
+             template,
+             kill_source,
+             zoom,
+-            prompt: ModePrompt::incremental("(search) ", "", word_separators)
+-                .with_status_keys(vi_keys),
++            prompt: ModePrompt::incremental("(search) ", "", word_separators),
+             filter: String::new(),
+             current: 0,
+             offset: 0,
+         }
+     }
+ 
++    /// `prompt_set_options`: the `(search)` prompt keeps the raising session's
++    /// `status-keys` for its whole life.
++    #[must_use]
++    pub fn with_status_keys(mut self, vi: bool) -> Self {
++        self.prompt = std::mem::take(&mut self.prompt).with_status_keys(vi);
++        self
++    }
++
+     pub fn set_current(&mut self, current: usize, size: usize, visible: usize) {
+         if size == 0 {
+             self.current = 0;
+@@ -84,10 +90,8 @@ impl SwitchMode {
+                     self.set_current(current - 1, size, visible);
+                 }
+             }
+-            ModeMouseKey::WheelDown => {
+-                if size != 0 && current != size - 1 {
+-                    self.set_current(current + 1, size, visible);
+-                }
++            ModeMouseKey::WheelDown if size != 0 && current != size - 1 => {
++                self.set_current(current + 1, size, visible);
+             }
+             button @ (ModeMouseKey::Down1 | ModeMouseKey::DoubleClick1) => {
+                 if y >= visible || self.offset + y >= size {
+@@ -148,9 +152,42 @@ impl SwitchMode {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn the_pointer_steps_one_row_and_runs_on_a_double_click() {
++        let mut mode = SwitchMode::new(false, None, None, false, false, " ");
++        assert_eq!(
++            mode.mouse("MouseDown1Pane", 0, 2, 4, 22, 80, 24),
++            SwitchAction::Redraw
++        );
++        assert_eq!(mode.current, 2);
++        mode.mouse("WheelUpPane", 0, 2, 4, 22, 80, 24);
++        assert_eq!(mode.current, 1);
++        mode.mouse("WheelDownPane", 0, 2, 4, 22, 80, 24);
++        assert_eq!(mode.current, 2);
++        for _ in 0..4 {
++            mode.mouse("WheelUpPane", 0, 0, 4, 22, 80, 24);
++        }
++        assert_eq!(
++            mode.current, 0,
++            "the wheel stops at the top instead of wrapping"
++        );
++        mode.mouse("MouseDown1Pane", 0, 9, 4, 22, 80, 24);
++        assert_eq!(
++            mode.current, 0,
++            "a press past the last match selects nothing"
++        );
++        assert_eq!(
++            mode.mouse("DoubleClick1Pane", 0, 3, 4, 22, 80, 24),
++            SwitchAction::Run
++        );
++        assert_eq!(mode.current, 3);
++        mode.mouse("MouseDown1Pane", 9, 23, 4, 22, 80, 24);
++        assert_eq!(mode.prompt.draw(80).1, 9, "the prompt row takes the press");
++    }
++
+     #[test]
+     fn movement_wraps_and_a_filter_edit_returns_to_the_top() {
+-        let mut mode = SwitchMode::new(false, None, None, false, false, " ", false);
++        let mut mode = SwitchMode::new(false, None, None, false, false, " ");
+         assert_eq!(mode.key("Down", 3, 22), SwitchAction::Redraw);
+         assert_eq!(mode.current, 1);
+         mode.key("C-p", 3, 22);

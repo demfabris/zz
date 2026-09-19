@@ -1,0 +1,8 @@
+tui-client-commands-run1 exit=0
+tui-client-commands-run2 exit=0
+tui-client-commands-run3 exit=0
+tui-client-commands-self-check exit=1
+CHAIN-B-DONE
+tui-client-commands-self-check exit=0
+tui-client-commands-run4 exit=0
+CHAIN-B2-DONE

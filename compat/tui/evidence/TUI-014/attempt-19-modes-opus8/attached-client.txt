@@ -1,0 +1,76 @@
+error: zz current screen did not show POPUP_C_DEAD_zz within 10 seconds
+zz screen:
+-sh-5.3$ printf "ATTACHED_MENU_UNDERLAY_%s\n" READY; saved=$(stty -g); stty -ech
+o -icanon min 1 time 0; key=$(dd bs=1 count=1 2>/dev/null); stty "$saved"; print
+f "ATTACHED_MENU_UNDERLAY_%s\n" "$key"
+ATTACHED_MENU_UNDERLAY_READY
+ATTACHED_MENU_UNDERLAY_z
+-sh-5.3$ /bin/bash -c $'\nsaved=$(stty -g)\ncleanup_underlay() {\n  printf "\\03
+3[?1000l\\033[?1006l\\033[?1004l\\033[?2004l"\n  stty "$saved"\n}\nread_decimal(
+) {\n  UNDERLAY_┌─POPUP_C_zz───────────────────┐/null | od -An -tu1 | tr -d "[:s
+pace:]")\n}\nrep│                              │_%s_%s\\r\\n" BYTE "${1:-0}"\n}\
+nread_focus() {\│                              │dinal=$3\n  read_decimal\n  firs
+t=$UNDERLAY_DECI│                              │en\n    report_byte "$first"\n
+  exit 1\n  fi\n│                              │mal\n  second=$UNDERLAY_DECIMAL\
+n  read_decimal\│                              │ty min 1 time 0\n  if [ "$second
+" != 91 ] || [ "└──────────────────────────────┘    report_byte "$first"\n    ex
+it 1\n  fi\n  printf "ATTACHED_POPUP_UNDERLAY_FOCUS_%s_%s\\r\\n" "$label" "$ordi
+nal"\n}\ntrap cleanup_underlay EXIT\nstty raw -echo min 1 time 0\nprintf "\\033[
+?1000h\\033[?1006h\\033[?1004h\\033[?2004hATTACHED_POPUP_UNDERLAY_%s\\r\\n" READ
+Y\nfocus_pairs=$1\nordinal=1\nwhile [ "$ordinal" -le "$focus_pairs" ]; do\n  rea
+d_focus 79 OUT "$ordinal"\n  read_focus 73 IN "$ordinal"\n  ordinal=$((ordinal +
+ 1))\ndone\nread_decimal\nreport_byte "$UNDERLAY_DECIMAL"\ncleanup_underlay\ntra
+p - EXIT\nprintf "ATTACHED_POPUP_UNDERLAY_%s\\n" DRAINED\n' popup-underlay 0
+ATTACHED_POPUP_UNDERLAY_READY
+
+[attached]0:prompted*                                "alienware" 19:56 18-Sep-26
+tmux screen:
+-sh-5.3$ printf ATTACHED_ROOT_OK
+ATTACHED_ROOT_OK-sh-5.3$ printf ATTACHED_PREFIX_OK
+ATTACHED_PREFIX_OK-sh-5.3$ printf ATTACHED_PREFIX2_OK
+ATTACHED_PREFIX2_OK-sh-5.3$ printf 'ATTACHED_ALERT_TIMED_OUTPUT_tmux\n'
+ATTACHED_ALERT_TIMED_OUTPUT_tmux
+-sh-5.3$ printf ATTACHED_TERMINAL_READY
+ATTACHED_TERMINAL_READY-sh-5.3$ printf 'ATTACHED_ALERT_REPEATED_OUTPUT_tmux\n'
+ATTACHED_ALERT_REPEATED_OUTPUT_tmux
+-sh-5.3$ printf ATTACHED_TERMINAL_READY
+ATTACHED_TERMINAL_READY-sh-5.3$ printf 'ATTACHED_ALERT_ZERO_OUTPUT_tmux\n'
+ATTACHED_ALERT_ZERO_OUTPUT_tmux
+-sh-5.3$ printf ATTACHED_TERMINAL_READY
+ATTACHED_TERMINAL_READY-sh-5.3$ printf "ATTACHED_CONFIRM_UNDERLAY_%s\n" READY; s
+aved=$(stty -g); stty -echo -icanon min 1 time 0; key=$(dd bs=1 count=1 2>/dev/n
+ull); stty "$saved"; printf "ATTACHED_CONFIRM_UNDERLAY_%s\n" "$key"
+ATTACHED_CONFIRM_UNDERLAY_READY
+ATTACHED_CONFIRM_UNDERLAY_z
+-sh-5.3$ printf "ATTACHED_MENU_UNDERLAY_%s\n" READY; saved=$(stty -g); stty -ech
+o -icanon min 1 time 0; key=$(dd bs=1 count=1 2>/dev/null); stty "$saved"; print
+f "ATTACHED_MENU_UNDERLAY_%s\n" "$key"
+ATTACHED_MENU_UNDERLAY_READY
+ATTACHED_MENU_UNDERLAY_z
+-sh-5.3$
+[attached]0:prompted*                                "alienware" 19:56 18-Sep-26
+zz daemon stderr:
+    [2026-09-18T22:54:34Z INFO  zz_daemon::diagnostics::appearance] loaded appearance reason=startup root=None scheme=dark supported=0 unsupported=0 invalid=0 diagnostics_dropped=0 bytes=0 hash=9356683936999949859 appearance=TerminalAppearance { color_scheme: Dark, font_families: ["Noto Sans Mono"], font_families_bold: [], font_families_italic: [], font_families_bold_italic: [], font_size_points: 13.0, font_weight: 400, font_features: [], font_synthetic_style: FontSyntheticStyle { bold: true, italic: true, bold_italic: true }, font_thicken: false, font_thicken_strength: 255, cell_height_adjustment: None, padding_left: 10.0, padding_right: 10.0, padding_top: 10.0, padding_bottom: 10.0, foreground: Color { r: 216, g: 222, b: 233 }, background: Color { r: 16, g: 19, b: 24 }, cursor_color: Color { r: 229, g: 192, b: 123 }, cursor_style: Block, selection_foreground: Color { r: 216, g: 222, b: 233 }, selection_background: AppearanceColor { r: 80, g: 125, b: 184, a: 148 }, search_match_color: AppearanceColor { r: 224, g: 171, b: 56, a: 107 }, search_current_color: AppearanceColor { r: 250, g: 194, b: 71, a: 173 }, link_color: Color { r: 77, g: 163, b: 235 }, copy_cursor_color: AppearanceColor { r: 184, g: 199, b: 224, a: 107 }, palette_hash: 2756364480396514756, minimum_contrast: 1.0, cursor_blink_policy: Terminal, cursor_blink_interval_ms: 500, rounded_selection: true, background_opacity: 1.0, palette_classes: [], default_classes: [None, None] }
+    [2026-09-18T22:54:34Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=startup-mux-replay entries=0 prefix="C-b" mode_keys="emacs"
+    [2026-09-18T22:54:34Z INFO  zz_daemon::daemon] zz daemon listening at /tmp/zza-0iQpqg.sock
+    [2026-09-18T22:54:44Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-g table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_ROOT_OK"], source: None, command_blocks: [], expanded_alias_group: false, stdin: None }])
+    [2026-09-18T22:54:44Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-b table=root decision=Prefix
+    [2026-09-18T22:54:44Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-18T22:54:44Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=x table=prefix decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_PREFIX_OK"], source: None, command_blocks: [], expanded_alias_group: false, stdin: None }])
+    [2026-09-18T22:54:44Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false
+    [2026-09-18T22:54:44Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-a table=root decision=Prefix
+    [2026-09-18T22:54:44Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-18T22:54:44Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=y table=prefix decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_PREFIX2_OK"], source: None, command_blocks: [], expanded_alias_group: false, stdin: None }])
+    [2026-09-18T22:54:44Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false
+    [2026-09-18T22:54:44Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-b table=root decision=Prefix
+    [2026-09-18T22:54:44Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-18T22:54:44Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=[ table=prefix decision=Commands([CommandInvocation { name: "copy-mode", args: [], source: None, command_blocks: [], expanded_alias_group: false, stdin: None }])
+    [2026-09-18T22:54:44Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false
+    [2026-09-18T22:54:45Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=q table=copy-mode decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cancel"], source: None, command_blocks: [], expanded_alias_group: false, stdin: None }])
+    [2026-09-18T22:54:54Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false, stdin: None }])
+    [2026-09-18T22:54:58Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false, stdin: None }])
+    [2026-09-18T22:55:07Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false, stdin: None }])
+    [2026-09-18T22:55:18Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-b table=root decision=Prefix
+    [2026-09-18T22:55:18Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-18T22:55:18Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=, table=prefix decision=Commands([CommandInvocation { name: "command-prompt", args: ["-I", "#W", "rename-window -- '%%'"], source: None, command_blocks: [], expanded_alias_group: false, stdin: None }])
+    [2026-09-18T22:55:18Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false

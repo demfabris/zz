@@ -1,0 +1,5 @@
+delta-corpus-subset exit=0
+attached-client-retry exit=0
+compat-check exit=killed-recursion
+compat-check exit=0
+verify-claims exit=0

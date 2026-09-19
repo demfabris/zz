@@ -94,7 +94,14 @@ Every fixture ran from the worktree with the frozen binary and the minimal envir
 
 - Mouse input inside switch-mode and customize-mode is unbuilt (`semantic:pane-mode-mouse`).
 - A customize edit prompt has no history (`Up`/`Down`), no `Tab` completion, no `C-y` paste from
-  the top paste buffer, and no vi `status-keys` table; the search and filter prompts are unaffected.
+  the top paste buffer, and no vi `status-keys` table.
+
+  CORRECTED 2026-09-18 by attempt-19: the last clause of that line said the search and filter
+  prompts are unaffected by `status-keys`. They are not. `mode_tree_set_prompt` builds EVERY mode
+  prompt through `prompt_set_options`, so the filter prompt is exactly where the divergence shows:
+  with `status-keys vi`, `f` pressed and `abc` typed, Escape left the pin's row `(filter) abc` in
+  vi command mode and cancelled zz's. Measured 2026-09-17 by the verifying review and again
+  2026-09-18 here; closed in attempt-19.
 - Rows are rebuilt from live state on every snapshot, so an option changed from outside the mode
   shows at once where the pin shows it after its next build.
 - The pin crashes when its customize preview draws a `pane-colours` array child

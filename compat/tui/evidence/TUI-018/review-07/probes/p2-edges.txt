@@ -1,0 +1,2147 @@
+56fcf707376c58bfcb9b08d5d193ea0272f69534e0f385046f524b655a5612a0  /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli
+df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux
+[2026-09-19T04:29:01Z INFO  zz_daemon::diagnostics::appearance] loaded appearance reason=startup root=None scheme=dark supported=0 unsupported=0 invalid=0 diagnostics_dropped=0 bytes=0 hash=9356683936999949859 appearance=TerminalAppearance { color_scheme: Dark, font_families: ["Noto Sans Mono"], font_families_bold: [], font_families_italic: [], font_families_bold_italic: [], font_size_points: 13.0, font_weight: 400, font_features: [], font_synthetic_style: FontSyntheticStyle { bold: true, italic: true, bold_italic: true }, font_thicken: false, font_thicken_strength: 255, cell_height_adjustment: None, padding_left: 10.0, padding_right: 10.0, padding_top: 10.0, padding_bottom: 10.0, foreground: Color { r: 216, g: 222, b: 233 }, background: Color { r: 16, g: 19, b: 24 }, cursor_color: Color { r: 229, g: 192, b: 123 }, cursor_style: Block, selection_foreground: Color { r: 216, g: 222, b: 233 }, selection_background: AppearanceColor { r: 80, g: 125, b: 184, a: 148 }, search_match_color: AppearanceColor { r: 224, g: 171, b: 56, a: 107 }, search_current_color: AppearanceColor { r: 250, g: 194, b: 71, a: 173 }, link_color: Color { r: 77, g: 163, b: 235 }, copy_cursor_color: AppearanceColor { r: 184, g: 199, b: 224, a: 107 }, palette_hash: 2756364480396514756, minimum_contrast: 1.0, cursor_blink_policy: Terminal, cursor_blink_interval_ms: 500, rounded_selection: true, background_opacity: 1.0, palette_classes: [], default_classes: [None, None] }
+[2026-09-19T04:29:01Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=startup-mux-replay entries=0 prefix="C-b" mode_keys="vi"
+[2026-09-19T04:29:01Z INFO  zz_daemon::daemon] zz daemon listening at /tmp/zzr7p2-Nwg26K.sock
+=== P2a kill between -P release and first chunk ===
+p2a zz rc=1 stdout=%1| stderr_bytes=0 after= panes=1
+p2a zz open-out=%1|
+p2a tmux rc=1 stdout=%1| stderr_bytes=0 after= panes=1
+p2a tmux open-out=%1|
+PASS p2a rc
+PASS p2a stdout
+PASS p2a state
+=== P2b kill after EOF, 10 trials per side ===
+trial 1 rc=0 after=yes stdout_bytes=12 stdout=%2|tail-out|
+trial 2 rc=0 after=yes stdout_bytes=12 stdout=%3|tail-out|
+trial 3 rc=0 after=yes stdout_bytes=12 stdout=%4|tail-out|
+trial 4 rc=0 after=yes stdout_bytes=12 stdout=%5|tail-out|
+trial 5 rc=0 after=yes stdout_bytes=12 stdout=%6|tail-out|
+trial 6 rc=0 after=yes stdout_bytes=12 stdout=%7|tail-out|
+trial 7 rc=0 after=yes stdout_bytes=12 stdout=%8|tail-out|
+trial 8 rc=0 after=yes stdout_bytes=12 stdout=%9|tail-out|
+trial 9 rc=0 after=yes stdout_bytes=13 stdout=%10|tail-out|
+trial 10 rc=0 after=yes stdout_bytes=13 stdout=%11|tail-out|
+p2b zz distribution:
+      8 0|yes|12
+      2 0|yes|13
+trial 1 rc=0 after=yes stdout_bytes=12 stdout=%2|tail-out|
+trial 2 rc=0 after=yes stdout_bytes=12 stdout=%3|tail-out|
+trial 3 rc=0 after=yes stdout_bytes=12 stdout=%4|tail-out|
+trial 4 rc=0 after=yes stdout_bytes=12 stdout=%5|tail-out|
+trial 5 rc=0 after=yes stdout_bytes=12 stdout=%6|tail-out|
+trial 6 rc=0 after=yes stdout_bytes=12 stdout=%7|tail-out|
+trial 7 rc=0 after=yes stdout_bytes=12 stdout=%8|tail-out|
+trial 8 rc=0 after=yes stdout_bytes=12 stdout=%9|tail-out|
+trial 9 rc=0 after=yes stdout_bytes=13 stdout=%10|tail-out|
+trial 10 rc=0 after=yes stdout_bytes=13 stdout=%11|tail-out|
+p2b tmux distribution:
+      8 0|yes|12
+      2 0|yes|13
+PASS p2b distribution
+=== P2c SIGTERM racing the kill ===
+p2c zz subshell=2628672 client=2628674
+p2c zz rc=0 stdout=%12| stderr_bytes=0 after= panes=1
+p2c tmux subshell=2628804 client=2628806
+p2c tmux rc=0 stdout=%12| stderr_bytes=0 after= panes=1
+PASS p2c rc
+PASS p2c stdout
+PASS p2c stderr
+PASS p2c state
+p2 done FAIL=0
+[2026-09-19T04:29:16Z INFO  zz_daemon::daemon] zz daemon stopped
+LAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K set-option -g automatic-rename off
++ zz set-option -g status off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock set-option -g status off
++ tm set-option -g status off
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K set-option -g status off
++ printf '=== P2a kill between -P release and first chunk ===\n'
++ for side in zz tmux
++ cleanup_window zz
++ local side=zz panes p
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' zz = zz ']'
++ zz set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock set-option -gu @p2-after
++ launch_split_print_chain zz
++ local side=zz
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/zz.rc /tmp/zzr7p2.Nwg26K/zz.out /tmp/zzr7p2.Nwg26K/zz.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' zz = zz ']'
++ LPID=2627283
++ pid=2627283
++ wait_out_nonempty zz
++ local side=zz i
++ zz split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ return 0
++ cp /tmp/zzr7p2.Nwg26K/zz.out /tmp/zzr7p2.Nwg26K/zz.open-out
++ find_pane1 zz
++ local side=zz i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
++ PANE=%1
++ '[' -n %1 ']'
++ return 0
++ '[' zz = zz ']'
++ zz kill-pane -t %1
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock kill-pane -t %1
++ exec
++ wait_client_gone 2627283
++ local pid=2627283 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2627283
++ sleep 0.05
++ echo 1
++ for i in $(seq 1 400)
++ kill -0 2627283
++ return 0
++ wait 2627283
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
++ report p2a zz
++ local label=p2a side=zz
++ local rc after panec
+++ cat /tmp/zzr7p2.Nwg26K/zz.rc
++ rc=1
++ '[' zz = zz ']'
+++ zz show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock show-options -gqv @p2-after
++ after=
+++ zz list-panes -t =cs:win -F x
+++ wc -l
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F x
++ panec=1
+++ cat /tmp/zzr7p2.Nwg26K/zz.out
+++ tr '\n' '|'
+++ cat -v
+++ wc -c
++ printf '%s %s rc=%s stdout=%s stderr_bytes=%s after=%s panes=%s\n' p2a zz 1 '%1|' 0 '' 1
++ printf '%s\n' 1
++ printf '%s|%s\n' '' 1
+++ cat /tmp/zzr7p2.Nwg26K/zz.open-out
+++ cat -v
+++ tr '\n' '|'
++ printf 'p2a %s open-out=%s\n' zz '%1|'
++ cp /tmp/zzr7p2.Nwg26K/zz.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p2a-zz.out
++ for side in zz tmux
++ cleanup_window tmux
++ local side=tmux panes p
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' tmux = zz ']'
++ tm set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K set-option -gu @p2-after
++ launch_split_print_chain tmux
++ local side=tmux
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/tmux.rc /tmp/zzr7p2.Nwg26K/tmux.out /tmp/zzr7p2.Nwg26K/tmux.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' tmux = zz ']'
++ LPID=2627377
++ pid=2627377
++ wait_out_nonempty tmux
++ local side=tmux i
++ tm split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ return 0
++ cp /tmp/zzr7p2.Nwg26K/tmux.out /tmp/zzr7p2.Nwg26K/tmux.open-out
++ find_pane1 tmux
++ local side=tmux i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
++ PANE=%1
++ '[' -n %1 ']'
++ return 0
++ '[' tmux = zz ']'
++ tm kill-pane -t %1
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K kill-pane -t %1
++ exec
++ wait_client_gone 2627377
++ local pid=2627377 i
+++ seq 1 400
++ echo 1
++ for i in $(seq 1 400)
++ kill -0 2627377
++ return 0
++ wait 2627377
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
++ report p2a tmux
++ local label=p2a side=tmux
++ local rc after panec
+++ cat /tmp/zzr7p2.Nwg26K/tmux.rc
++ rc=1
++ '[' tmux = zz ']'
+++ tm show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K show-options -gqv @p2-after
++ after=
+++ tm list-panes -t =cs:win -F x
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F x
+++ wc -l
++ panec=1
+++ cat /tmp/zzr7p2.Nwg26K/tmux.out
+++ cat -v
+++ tr '\n' '|'
+++ wc -c
++ printf '%s %s rc=%s stdout=%s stderr_bytes=%s after=%s panes=%s\n' p2a tmux 1 '%1|' 0 '' 1
++ printf '%s\n' 1
++ printf '%s|%s\n' '' 1
+++ cat /tmp/zzr7p2.Nwg26K/tmux.open-out
+++ cat -v
+++ tr '\n' '|'
++ printf 'p2a %s open-out=%s\n' tmux '%1|'
++ cp /tmp/zzr7p2.Nwg26K/tmux.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p2a-tmux.out
++ check 'p2a rc' /tmp/zzr7p2.Nwg26K/zz.rcn /tmp/zzr7p2.Nwg26K/tmux.rcn
++ local 'label=p2a rc' a=/tmp/zzr7p2.Nwg26K/zz.rcn b=/tmp/zzr7p2.Nwg26K/tmux.rcn
++ cmp -s /tmp/zzr7p2.Nwg26K/zz.rcn /tmp/zzr7p2.Nwg26K/tmux.rcn
++ printf 'PASS %s\n' 'p2a rc'
++ check 'p2a stdout' /tmp/zzr7p2.Nwg26K/zz.out /tmp/zzr7p2.Nwg26K/tmux.out
++ local 'label=p2a stdout' a=/tmp/zzr7p2.Nwg26K/zz.out b=/tmp/zzr7p2.Nwg26K/tmux.out
++ cmp -s /tmp/zzr7p2.Nwg26K/zz.out /tmp/zzr7p2.Nwg26K/tmux.out
++ printf 'PASS %s\n' 'p2a stdout'
++ check 'p2a state' /tmp/zzr7p2.Nwg26K/zz.state /tmp/zzr7p2.Nwg26K/tmux.state
++ local 'label=p2a state' a=/tmp/zzr7p2.Nwg26K/zz.state b=/tmp/zzr7p2.Nwg26K/tmux.state
++ cmp -s /tmp/zzr7p2.Nwg26K/zz.state /tmp/zzr7p2.Nwg26K/tmux.state
++ printf 'PASS %s\n' 'p2a state'
++ printf '=== P2b kill after EOF, 10 trials per side ===\n'
++ for side in zz tmux
++ :
+++ seq 1 10
++ for trial in $(seq 1 10)
++ cleanup_window zz
++ local side=zz panes p
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' zz = zz ']'
++ zz set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock set-option -gu @p2-after
++ launch_split_print_chain zz
++ local side=zz
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/zz.rc /tmp/zzr7p2.Nwg26K/zz.out /tmp/zzr7p2.Nwg26K/zz.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' zz = zz ']'
++ LPID=2627426
++ pid=2627426
++ wait_out_nonempty zz
++ local side=zz i
++ zz split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 zz
++ local side=zz i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ echo 0
++ PANE=%2
++ '[' -n %2 ']'
++ return 0
++ '[' -n %2 ']'
++ '[' zz = zz ']'
++ zz kill-pane -t %2
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock kill-pane -t %2
++ wait_client_gone 2627426
++ local pid=2627426 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2627426
++ return 0
++ wait 2627426
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/zz.rc
++ rc=0
++ '[' zz = zz ']'
+++ zz show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=12
+++ cat /tmp/zzr7p2.Nwg26K/zz.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 1 0 yes 12 '%2|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 12
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window zz
++ local side=zz panes p
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
++ panes=
++ '[' zz = zz ']'
++ zz set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock set-option -gu @p2-after
++ launch_split_print_chain zz
++ local side=zz
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/zz.rc /tmp/zzr7p2.Nwg26K/zz.out /tmp/zzr7p2.Nwg26K/zz.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' zz = zz ']'
++ LPID=2627506
++ pid=2627506
++ wait_out_nonempty zz
++ local side=zz i
++ zz split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 zz
++ local side=zz i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ echo 0
++ PANE=%3
++ '[' -n %3 ']'
++ return 0
++ '[' -n %3 ']'
++ '[' zz = zz ']'
++ zz kill-pane -t %3
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock kill-pane -t %3
++ wait_client_gone 2627506
++ local pid=2627506 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2627506
++ return 0
++ wait 2627506
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/zz.rc
++ rc=0
++ '[' zz = zz ']'
+++ zz show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=12
+++ cat /tmp/zzr7p2.Nwg26K/zz.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 2 0 yes 12 '%3|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 12
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window zz
++ local side=zz panes p
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' zz = zz ']'
++ zz set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock set-option -gu @p2-after
++ launch_split_print_chain zz
++ local side=zz
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/zz.rc /tmp/zzr7p2.Nwg26K/zz.out /tmp/zzr7p2.Nwg26K/zz.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' zz = zz ']'
++ LPID=2627605
++ pid=2627605
++ wait_out_nonempty zz
++ local side=zz i
++ zz split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 zz
++ local side=zz i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ echo 0
++ PANE=%4
++ '[' -n %4 ']'
++ return 0
++ '[' -n %4 ']'
++ '[' zz = zz ']'
++ zz kill-pane -t %4
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock kill-pane -t %4
++ wait_client_gone 2627605
++ local pid=2627605 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2627605
++ return 0
++ wait 2627605
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/zz.rc
++ rc=0
++ '[' zz = zz ']'
+++ zz show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=12
+++ cat -v
+++ cat /tmp/zzr7p2.Nwg26K/zz.out
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 3 0 yes 12 '%4|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 12
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window zz
++ local side=zz panes p
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
++ panes=
++ '[' zz = zz ']'
++ zz set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock set-option -gu @p2-after
++ launch_split_print_chain zz
++ local side=zz
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/zz.rc /tmp/zzr7p2.Nwg26K/zz.out /tmp/zzr7p2.Nwg26K/zz.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' zz = zz ']'
++ LPID=2627678
++ pid=2627678
++ wait_out_nonempty zz
++ local side=zz i
++ zz split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 zz
++ local side=zz i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
++ echo 0
++ PANE=%5
++ '[' -n %5 ']'
++ return 0
++ '[' -n %5 ']'
++ '[' zz = zz ']'
++ zz kill-pane -t %5
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock kill-pane -t %5
++ wait_client_gone 2627678
++ local pid=2627678 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2627678
++ return 0
++ wait 2627678
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/zz.rc
++ rc=0
++ '[' zz = zz ']'
+++ zz show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=12
+++ cat /tmp/zzr7p2.Nwg26K/zz.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 4 0 yes 12 '%5|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 12
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window zz
++ local side=zz panes p
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' zz = zz ']'
++ zz set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock set-option -gu @p2-after
++ launch_split_print_chain zz
++ local side=zz
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/zz.rc /tmp/zzr7p2.Nwg26K/zz.out /tmp/zzr7p2.Nwg26K/zz.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' zz = zz ']'
++ LPID=2627759
++ pid=2627759
++ wait_out_nonempty zz
++ local side=zz i
++ zz split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 zz
++ local side=zz i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ echo 0
++ PANE=%6
++ '[' -n %6 ']'
++ return 0
++ '[' -n %6 ']'
++ '[' zz = zz ']'
++ zz kill-pane -t %6
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock kill-pane -t %6
++ wait_client_gone 2627759
++ local pid=2627759 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2627759
++ return 0
++ wait 2627759
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/zz.rc
++ rc=0
++ '[' zz = zz ']'
+++ zz show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=12
+++ cat -v
+++ cat /tmp/zzr7p2.Nwg26K/zz.out
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 5 0 yes 12 '%6|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 12
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window zz
++ local side=zz panes p
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' zz = zz ']'
++ zz set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock set-option -gu @p2-after
++ launch_split_print_chain zz
++ local side=zz
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/zz.rc /tmp/zzr7p2.Nwg26K/zz.out /tmp/zzr7p2.Nwg26K/zz.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' zz = zz ']'
++ LPID=2627873
++ pid=2627873
++ wait_out_nonempty zz
++ local side=zz i
++ zz split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 zz
++ local side=zz i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
++ echo 0
++ PANE=%7
++ '[' -n %7 ']'
++ return 0
++ '[' -n %7 ']'
++ '[' zz = zz ']'
++ zz kill-pane -t %7
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock kill-pane -t %7
++ wait_client_gone 2627873
++ local pid=2627873 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2627873
++ return 0
++ wait 2627873
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/zz.rc
++ rc=0
++ '[' zz = zz ']'
+++ zz show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=12
+++ cat /tmp/zzr7p2.Nwg26K/zz.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 6 0 yes 12 '%7|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 12
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window zz
++ local side=zz panes p
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' zz = zz ']'
++ zz set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock set-option -gu @p2-after
++ launch_split_print_chain zz
++ local side=zz
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/zz.rc /tmp/zzr7p2.Nwg26K/zz.out /tmp/zzr7p2.Nwg26K/zz.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' zz = zz ']'
++ LPID=2627934
++ pid=2627934
++ wait_out_nonempty zz
++ local side=zz i
++ zz split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 zz
++ local side=zz i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ echo 0
++ PANE=%8
++ '[' -n %8 ']'
++ return 0
++ '[' -n %8 ']'
++ '[' zz = zz ']'
++ zz kill-pane -t %8
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock kill-pane -t %8
++ wait_client_gone 2627934
++ local pid=2627934 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2627934
++ return 0
++ wait 2627934
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/zz.rc
++ rc=0
++ '[' zz = zz ']'
+++ zz show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=12
+++ cat /tmp/zzr7p2.Nwg26K/zz.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 7 0 yes 12 '%8|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 12
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window zz
++ local side=zz panes p
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' zz = zz ']'
++ zz set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock set-option -gu @p2-after
++ launch_split_print_chain zz
++ local side=zz
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/zz.rc /tmp/zzr7p2.Nwg26K/zz.out /tmp/zzr7p2.Nwg26K/zz.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' zz = zz ']'
++ LPID=2628019
++ pid=2628019
++ wait_out_nonempty zz
++ local side=zz i
++ zz split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 zz
++ local side=zz i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
++ echo 0
++ PANE=%9
++ '[' -n %9 ']'
++ return 0
++ '[' -n %9 ']'
++ '[' zz = zz ']'
++ zz kill-pane -t %9
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock kill-pane -t %9
++ wait_client_gone 2628019
++ local pid=2628019 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2628019
++ return 0
++ wait 2628019
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/zz.rc
++ rc=0
++ '[' zz = zz ']'
+++ zz show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=12
+++ cat /tmp/zzr7p2.Nwg26K/zz.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 8 0 yes 12 '%9|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 12
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window zz
++ local side=zz panes p
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' zz = zz ']'
++ zz set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock set-option -gu @p2-after
++ launch_split_print_chain zz
++ local side=zz
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/zz.rc /tmp/zzr7p2.Nwg26K/zz.out /tmp/zzr7p2.Nwg26K/zz.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' zz = zz ']'
++ LPID=2628099
++ pid=2628099
++ wait_out_nonempty zz
++ local side=zz i
++ zz split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 zz
++ local side=zz i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
++ echo 0
++ PANE=%10
++ '[' -n %10 ']'
++ return 0
++ '[' -n %10 ']'
++ '[' zz = zz ']'
++ zz kill-pane -t %10
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock kill-pane -t %10
++ wait_client_gone 2628099
++ local pid=2628099 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2628099
++ return 0
++ wait 2628099
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/zz.rc
++ rc=0
++ '[' zz = zz ']'
+++ zz show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=13
+++ cat /tmp/zzr7p2.Nwg26K/zz.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 9 0 yes 13 '%10|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 13
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window zz
++ local side=zz panes p
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' zz = zz ']'
++ zz set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock set-option -gu @p2-after
++ launch_split_print_chain zz
++ local side=zz
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/zz.rc /tmp/zzr7p2.Nwg26K/zz.out /tmp/zzr7p2.Nwg26K/zz.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' zz = zz ']'
++ LPID=2628196
++ pid=2628196
++ wait_out_nonempty zz
++ local side=zz i
++ zz split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 zz
++ local side=zz i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ echo 0
++ PANE=%11
++ '[' -n %11 ']'
++ return 0
++ '[' -n %11 ']'
++ '[' zz = zz ']'
++ zz kill-pane -t %11
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock kill-pane -t %11
++ wait_client_gone 2628196
++ local pid=2628196 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2628196
++ return 0
++ wait 2628196
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/zz.rc
++ rc=0
++ '[' zz = zz ']'
+++ zz show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=13
+++ cat /tmp/zzr7p2.Nwg26K/zz.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 10 0 yes 13 '%11|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 13
++ sleep 0.2
++ sort /tmp/zzr7p2.Nwg26K/zz.trials
++ uniq -c
++ printf 'p2b %s distribution:\n' zz
++ cat /tmp/zzr7p2.Nwg26K/zz.dist
++ cp /tmp/zzr7p2.Nwg26K/zz.dist /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p2b-zz.dist
++ for side in zz tmux
++ :
+++ seq 1 10
++ for trial in $(seq 1 10)
++ cleanup_window tmux
++ local side=tmux panes p
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
++ panes=
++ '[' tmux = zz ']'
++ tm set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K set-option -gu @p2-after
++ launch_split_print_chain tmux
++ local side=tmux
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/tmux.rc /tmp/zzr7p2.Nwg26K/tmux.out /tmp/zzr7p2.Nwg26K/tmux.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' tmux = zz ']'
++ LPID=2628258
++ pid=2628258
++ wait_out_nonempty tmux
++ local side=tmux i
++ tm split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 tmux
++ local side=tmux i
+++ seq 1 100
++ echo 0
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
++ PANE=%2
++ '[' -n %2 ']'
++ return 0
++ '[' -n %2 ']'
++ '[' tmux = zz ']'
++ tm kill-pane -t %2
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K kill-pane -t %2
++ wait_client_gone 2628258
++ local pid=2628258 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2628258
++ return 0
++ wait 2628258
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/tmux.rc
++ rc=0
++ '[' tmux = zz ']'
+++ tm show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=12
+++ cat /tmp/zzr7p2.Nwg26K/tmux.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 1 0 yes 12 '%2|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 12
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window tmux
++ local side=tmux panes p
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' tmux = zz ']'
++ tm set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K set-option -gu @p2-after
++ launch_split_print_chain tmux
++ local side=tmux
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/tmux.rc /tmp/zzr7p2.Nwg26K/tmux.out /tmp/zzr7p2.Nwg26K/tmux.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' tmux = zz ']'
++ LPID=2628308
++ pid=2628308
++ wait_out_nonempty tmux
++ local side=tmux i
++ tm split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 tmux
++ local side=tmux i
+++ seq 1 100
++ echo 0
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ PANE=%3
++ '[' -n %3 ']'
++ return 0
++ '[' -n %3 ']'
++ '[' tmux = zz ']'
++ tm kill-pane -t %3
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K kill-pane -t %3
++ wait_client_gone 2628308
++ local pid=2628308 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2628308
++ return 0
++ wait 2628308
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/tmux.rc
++ rc=0
++ '[' tmux = zz ']'
+++ tm show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=12
+++ cat /tmp/zzr7p2.Nwg26K/tmux.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 2 0 yes 12 '%3|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 12
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window tmux
++ local side=tmux panes p
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' tmux = zz ']'
++ tm set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K set-option -gu @p2-after
++ launch_split_print_chain tmux
++ local side=tmux
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/tmux.rc /tmp/zzr7p2.Nwg26K/tmux.out /tmp/zzr7p2.Nwg26K/tmux.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' tmux = zz ']'
++ LPID=2628340
++ pid=2628340
++ wait_out_nonempty tmux
++ local side=tmux i
++ tm split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 tmux
++ local side=tmux i
+++ seq 1 100
++ echo 0
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ PANE=%4
++ '[' -n %4 ']'
++ return 0
++ '[' -n %4 ']'
++ '[' tmux = zz ']'
++ tm kill-pane -t %4
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K kill-pane -t %4
++ wait_client_gone 2628340
++ local pid=2628340 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2628340
++ return 0
++ wait 2628340
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/tmux.rc
++ rc=0
++ '[' tmux = zz ']'
+++ tm show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=12
+++ cat /tmp/zzr7p2.Nwg26K/tmux.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 3 0 yes 12 '%4|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 12
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window tmux
++ local side=tmux panes p
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' tmux = zz ']'
++ tm set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K set-option -gu @p2-after
++ launch_split_print_chain tmux
++ local side=tmux
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/tmux.rc /tmp/zzr7p2.Nwg26K/tmux.out /tmp/zzr7p2.Nwg26K/tmux.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' tmux = zz ']'
++ LPID=2628370
++ pid=2628370
++ wait_out_nonempty tmux
++ local side=tmux i
++ tm split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 tmux
++ local side=tmux i
++ echo 0
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
++ PANE=%5
++ '[' -n %5 ']'
++ return 0
++ '[' -n %5 ']'
++ '[' tmux = zz ']'
++ tm kill-pane -t %5
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K kill-pane -t %5
++ wait_client_gone 2628370
++ local pid=2628370 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2628370
++ return 0
++ wait 2628370
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/tmux.rc
++ rc=0
++ '[' tmux = zz ']'
+++ tm show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=12
+++ cat /tmp/zzr7p2.Nwg26K/tmux.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 4 0 yes 12 '%5|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 12
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window tmux
++ local side=tmux panes p
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' tmux = zz ']'
++ tm set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K set-option -gu @p2-after
++ launch_split_print_chain tmux
++ local side=tmux
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/tmux.rc /tmp/zzr7p2.Nwg26K/tmux.out /tmp/zzr7p2.Nwg26K/tmux.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' tmux = zz ']'
++ LPID=2628400
++ pid=2628400
++ wait_out_nonempty tmux
++ local side=tmux i
++ tm split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 tmux
++ local side=tmux i
+++ seq 1 100
++ echo 0
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ PANE=%6
++ '[' -n %6 ']'
++ return 0
++ '[' -n %6 ']'
++ '[' tmux = zz ']'
++ tm kill-pane -t %6
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K kill-pane -t %6
++ wait_client_gone 2628400
++ local pid=2628400 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2628400
++ return 0
++ wait 2628400
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/tmux.rc
++ rc=0
++ '[' tmux = zz ']'
+++ tm show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=12
+++ cat /tmp/zzr7p2.Nwg26K/tmux.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 5 0 yes 12 '%6|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 12
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window tmux
++ local side=tmux panes p
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' tmux = zz ']'
++ tm set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K set-option -gu @p2-after
++ launch_split_print_chain tmux
++ local side=tmux
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/tmux.rc /tmp/zzr7p2.Nwg26K/tmux.out /tmp/zzr7p2.Nwg26K/tmux.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' tmux = zz ']'
++ LPID=2628430
++ pid=2628430
++ wait_out_nonempty tmux
++ local side=tmux i
++ tm split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 tmux
++ local side=tmux i
+++ seq 1 100
++ echo 0
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
++ PANE=%7
++ '[' -n %7 ']'
++ return 0
++ '[' -n %7 ']'
++ '[' tmux = zz ']'
++ tm kill-pane -t %7
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K kill-pane -t %7
++ wait_client_gone 2628430
++ local pid=2628430 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2628430
++ return 0
++ wait 2628430
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/tmux.rc
++ rc=0
++ '[' tmux = zz ']'
+++ tm show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=12
+++ cat /tmp/zzr7p2.Nwg26K/tmux.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 6 0 yes 12 '%7|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 12
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window tmux
++ local side=tmux panes p
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' tmux = zz ']'
++ tm set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K set-option -gu @p2-after
++ launch_split_print_chain tmux
++ local side=tmux
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/tmux.rc /tmp/zzr7p2.Nwg26K/tmux.out /tmp/zzr7p2.Nwg26K/tmux.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' tmux = zz ']'
++ LPID=2628477
++ pid=2628477
++ wait_out_nonempty tmux
++ local side=tmux i
++ tm split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 tmux
++ local side=tmux i
+++ seq 1 100
++ echo 0
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
++ PANE=%8
++ '[' -n %8 ']'
++ return 0
++ '[' -n %8 ']'
++ '[' tmux = zz ']'
++ tm kill-pane -t %8
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K kill-pane -t %8
++ wait_client_gone 2628477
++ local pid=2628477 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2628477
++ return 0
++ wait 2628477
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/tmux.rc
++ rc=0
++ '[' tmux = zz ']'
+++ tm show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=12
+++ cat /tmp/zzr7p2.Nwg26K/tmux.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 7 0 yes 12 '%8|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 12
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window tmux
++ local side=tmux panes p
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' tmux = zz ']'
++ tm set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K set-option -gu @p2-after
++ launch_split_print_chain tmux
++ local side=tmux
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/tmux.rc /tmp/zzr7p2.Nwg26K/tmux.out /tmp/zzr7p2.Nwg26K/tmux.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' tmux = zz ']'
++ LPID=2628518
++ pid=2628518
++ wait_out_nonempty tmux
++ local side=tmux i
++ tm split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 tmux
++ local side=tmux i
+++ seq 1 100
++ echo 0
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ PANE=%9
++ '[' -n %9 ']'
++ return 0
++ '[' -n %9 ']'
++ '[' tmux = zz ']'
++ tm kill-pane -t %9
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K kill-pane -t %9
++ wait_client_gone 2628518
++ local pid=2628518 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2628518
++ return 0
++ wait 2628518
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/tmux.rc
++ rc=0
++ '[' tmux = zz ']'
+++ tm show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=12
+++ cat /tmp/zzr7p2.Nwg26K/tmux.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 8 0 yes 12 '%9|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 12
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window tmux
++ local side=tmux panes p
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' tmux = zz ']'
++ tm set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K set-option -gu @p2-after
++ launch_split_print_chain tmux
++ local side=tmux
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/tmux.rc /tmp/zzr7p2.Nwg26K/tmux.out /tmp/zzr7p2.Nwg26K/tmux.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' tmux = zz ']'
++ LPID=2628562
++ pid=2628562
++ wait_out_nonempty tmux
++ local side=tmux i
++ tm split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 tmux
++ local side=tmux i
++ echo 0
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
++ PANE=%10
++ '[' -n %10 ']'
++ return 0
++ '[' -n %10 ']'
++ '[' tmux = zz ']'
++ tm kill-pane -t %10
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K kill-pane -t %10
++ wait_client_gone 2628562
++ local pid=2628562 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2628562
++ return 0
++ wait 2628562
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/tmux.rc
++ rc=0
++ '[' tmux = zz ']'
+++ tm show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=13
+++ cat /tmp/zzr7p2.Nwg26K/tmux.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 9 0 yes 13 '%10|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 13
++ sleep 0.2
++ for trial in $(seq 1 10)
++ cleanup_window tmux
++ local side=tmux panes p
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' tmux = zz ']'
++ tm set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K set-option -gu @p2-after
++ launch_split_print_chain tmux
++ local side=tmux
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/tmux.rc /tmp/zzr7p2.Nwg26K/tmux.out /tmp/zzr7p2.Nwg26K/tmux.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' tmux = zz ']'
++ LPID=2628602
++ pid=2628602
++ wait_out_nonempty tmux
++ local side=tmux i
++ tm split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ return 0
++ printf ZZZ
++ exec
++ find_pane1 tmux
++ local side=tmux i
+++ seq 1 100
++ echo 0
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ PANE=%11
++ '[' -n %11 ']'
++ return 0
++ '[' -n %11 ']'
++ '[' tmux = zz ']'
++ tm kill-pane -t %11
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K kill-pane -t %11
++ wait_client_gone 2628602
++ local pid=2628602 i
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2628602
++ return 0
++ wait 2628602
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
+++ cat /tmp/zzr7p2.Nwg26K/tmux.rc
++ rc=0
++ '[' tmux = zz ']'
+++ tm show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K show-options -gqv @p2-after
++ after=yes
+++ wc -c
++ outbytes=13
+++ cat /tmp/zzr7p2.Nwg26K/tmux.out
+++ cat -v
+++ tr '\n' '|'
++ printf 'trial %s rc=%s after=%s stdout_bytes=%s stdout=%s\n' 10 0 yes 13 '%11|tail-out|'
++ printf '%s|%s|%s\n' 0 yes 13
++ sleep 0.2
++ sort /tmp/zzr7p2.Nwg26K/tmux.trials
++ uniq -c
++ printf 'p2b %s distribution:\n' tmux
++ cat /tmp/zzr7p2.Nwg26K/tmux.dist
++ cp /tmp/zzr7p2.Nwg26K/tmux.dist /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p2b-tmux.dist
++ check 'p2b distribution' /tmp/zzr7p2.Nwg26K/zz.dist /tmp/zzr7p2.Nwg26K/tmux.dist
++ local 'label=p2b distribution' a=/tmp/zzr7p2.Nwg26K/zz.dist b=/tmp/zzr7p2.Nwg26K/tmux.dist
++ cmp -s /tmp/zzr7p2.Nwg26K/zz.dist /tmp/zzr7p2.Nwg26K/tmux.dist
++ printf 'PASS %s\n' 'p2b distribution'
++ printf '=== P2c SIGTERM racing the kill ===\n'
++ for side in zz tmux
++ cleanup_window zz
++ local side=zz panes p
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
++ panes=
++ '[' zz = zz ']'
++ zz set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock set-option -gu @p2-after
++ launch_split_print_chain zz
++ local side=zz
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/zz.rc /tmp/zzr7p2.Nwg26K/zz.out /tmp/zzr7p2.Nwg26K/zz.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' zz = zz ']'
++ LPID=2628672
++ pid=2628672
++ wait_out_nonempty zz
++ local side=zz i
++ zz split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/zz.out ']'
++ return 0
++ find_pane1 zz
++ local side=zz i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' zz = zz ']'
+++ zz list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ PANE=%12
++ '[' -n %12 ']'
++ return 0
++ printf '\033[31mRED\033[0m'
++ sleep 0.3
++ '[' zz = zz ']'
++ zz capture-pane -p -t %12
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock capture-pane -p -t %12
++ grep -q RED
++ zz kill-pane -t %12
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock kill-pane -t %12
+++ pgrep -P 2628672
+++ head -1
++ CPID=2628674
++ printf 'p2c %s subshell=%s client=%s\n' zz 2628672 2628674
++ '[' -n 2628674 ']'
++ kill -TERM 2628674
++ exec
++ wait_client_gone 2628672
++ local pid=2628672 i
+++ seq 1 400
++ echo 0
++ for i in $(seq 1 400)
++ kill -0 2628672
++ return 0
++ wait 2628672
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
++ report p2c zz
++ local label=p2c side=zz
++ local rc after panec
+++ cat /tmp/zzr7p2.Nwg26K/zz.rc
++ rc=0
++ '[' zz = zz ']'
+++ zz show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock show-options -gqv @p2-after
++ after=
+++ zz list-panes -t =cs:win -F x
+++ wc -l
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock list-panes -t =cs:win -F x
++ panec=1
+++ cat /tmp/zzr7p2.Nwg26K/zz.out
+++ cat -v
+++ tr '\n' '|'
+++ wc -c
++ printf '%s %s rc=%s stdout=%s stderr_bytes=%s after=%s panes=%s\n' p2c zz 0 '%12|' 0 '' 1
++ printf '%s\n' 0
++ printf '%s|%s\n' '' 1
++ cp /tmp/zzr7p2.Nwg26K/zz.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p2c-zz.out
++ cp /tmp/zzr7p2.Nwg26K/zz.err /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p2c-zz.err
++ for side in zz tmux
++ cleanup_window tmux
++ local side=tmux panes p
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1!=0{print $2}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
++ panes=
++ '[' tmux = zz ']'
++ tm set-option -gu @p2-after
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K set-option -gu @p2-after
++ launch_split_print_chain tmux
++ local side=tmux
++ rm -f /tmp/zzr7p2.Nwg26K/fifo /tmp/zzr7p2.Nwg26K/tmux.rc /tmp/zzr7p2.Nwg26K/tmux.out /tmp/zzr7p2.Nwg26K/tmux.err
++ mkfifo /tmp/zzr7p2.Nwg26K/fifo
++ exec
++ '[' tmux = zz ']'
++ LPID=2628804
++ pid=2628804
++ wait_out_nonempty tmux
++ local side=tmux i
++ tm split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K split-window -I -d -P -F '#{pane_id}' -t =cs:win.0 ';' display-message -p tail-out ';' set-option -g @p2-after yes
+++ seq 1 200
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ sleep 0.02
++ for i in $(seq 1 200)
++ '[' -s /tmp/zzr7p2.Nwg26K/tmux.out ']'
++ return 0
++ find_pane1 tmux
++ local side=tmux i
+++ seq 1 100
++ for i in $(seq 1 100)
++ '[' tmux = zz ']'
+++ tm list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F '#{pane_index} #{pane_id}'
+++ awk '$1==1{print $2}'
++ PANE=%12
++ '[' -n %12 ']'
++ return 0
++ printf '\033[31mRED\033[0m'
++ sleep 0.3
++ '[' tmux = zz ']'
++ tm capture-pane -p -t %12
++ grep -q RED
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K capture-pane -p -t %12
++ tm kill-pane -t %12
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K kill-pane -t %12
+++ pgrep -P 2628804
+++ head -1
++ CPID=2628806
++ printf 'p2c %s subshell=%s client=%s\n' tmux 2628804 2628806
++ '[' -n 2628806 ']'
++ kill -TERM 2628806
++ exec
++ wait_client_gone 2628804
++ local pid=2628804 i
++ echo 0
+++ seq 1 400
++ for i in $(seq 1 400)
++ kill -0 2628804
++ return 0
++ wait 2628804
++ rm -f /tmp/zzr7p2.Nwg26K/fifo
++ report p2c tmux
++ local label=p2c side=tmux
++ local rc after panec
+++ cat /tmp/zzr7p2.Nwg26K/tmux.rc
++ rc=0
++ '[' tmux = zz ']'
+++ tm show-options -gqv @p2-after
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K show-options -gqv @p2-after
++ after=
+++ tm list-panes -t =cs:win -F x
+++ wc -l
+++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K list-panes -t =cs:win -F x
++ panec=1
+++ cat /tmp/zzr7p2.Nwg26K/tmux.out
+++ cat -v
+++ tr '\n' '|'
+++ wc -c
++ printf '%s %s rc=%s stdout=%s stderr_bytes=%s after=%s panes=%s\n' p2c tmux 0 '%12|' 0 '' 1
++ printf '%s\n' 0
++ printf '%s|%s\n' '' 1
++ cp /tmp/zzr7p2.Nwg26K/tmux.out /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p2c-tmux.out
++ cp /tmp/zzr7p2.Nwg26K/tmux.err /home/demfabris/dev/zz-c11-alias-review6/compat/tui/evidence/TUI-018/review-07/probes/p2c-tmux.err
++ check 'p2c rc' /tmp/zzr7p2.Nwg26K/zz.rcn /tmp/zzr7p2.Nwg26K/tmux.rcn
++ local 'label=p2c rc' a=/tmp/zzr7p2.Nwg26K/zz.rcn b=/tmp/zzr7p2.Nwg26K/tmux.rcn
++ cmp -s /tmp/zzr7p2.Nwg26K/zz.rcn /tmp/zzr7p2.Nwg26K/tmux.rcn
++ printf 'PASS %s\n' 'p2c rc'
++ check 'p2c stdout' /tmp/zzr7p2.Nwg26K/zz.out /tmp/zzr7p2.Nwg26K/tmux.out
++ local 'label=p2c stdout' a=/tmp/zzr7p2.Nwg26K/zz.out b=/tmp/zzr7p2.Nwg26K/tmux.out
++ cmp -s /tmp/zzr7p2.Nwg26K/zz.out /tmp/zzr7p2.Nwg26K/tmux.out
++ printf 'PASS %s\n' 'p2c stdout'
++ check 'p2c stderr' /tmp/zzr7p2.Nwg26K/zz.err /tmp/zzr7p2.Nwg26K/tmux.err
++ local 'label=p2c stderr' a=/tmp/zzr7p2.Nwg26K/zz.err b=/tmp/zzr7p2.Nwg26K/tmux.err
++ cmp -s /tmp/zzr7p2.Nwg26K/zz.err /tmp/zzr7p2.Nwg26K/tmux.err
++ printf 'PASS %s\n' 'p2c stderr'
++ check 'p2c state' /tmp/zzr7p2.Nwg26K/zz.state /tmp/zzr7p2.Nwg26K/tmux.state
++ local 'label=p2c state' a=/tmp/zzr7p2.Nwg26K/zz.state b=/tmp/zzr7p2.Nwg26K/tmux.state
++ cmp -s /tmp/zzr7p2.Nwg26K/zz.state /tmp/zzr7p2.Nwg26K/tmux.state
++ printf 'PASS %s\n' 'p2c state'
++ printf 'p2 done FAIL=%s\n' 0
++ exit 0
++ cleanup
++ set +e
++ zz kill-server
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE HOME=/tmp/zzr7p2.Nwg26K/zz-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/zz-home/config ZZ_LOG_DIR=/tmp/zzr7p2.Nwg26K/zz-logs /home/demfabris/dev/zz-c11-alias-review6/target/debug/zz_cli --socket /tmp/zzr7p2-Nwg26K.sock kill-server
++ tm kill-server
++ env -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TMUX -u TMUX_PANE TMUX_TMPDIR=/tmp HOME=/tmp/zzr7p2.Nwg26K/tmux-home XDG_CONFIG_HOME=/tmp/zzr7p2.Nwg26K/tmux-home/config /home/demfabris/dev/zz-c11-alias-review6/compat/.cache/tmux-src/tmux -L zzr7p2t-Nwg26K kill-server
++ kill 2627234
++ wait 2627234
++ rm -rf -- /tmp/zzr7p2.Nwg26K

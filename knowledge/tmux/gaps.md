@@ -4,7 +4,7 @@ title: tmux compatibility gap report
 description: "Live TODO and status report for tmux compatibility gaps, decisions, evidence, and acceptance gates."
 resource: compat/tmux-gaps.json
 tags: [tmux, compatibility, gaps, tracker]
-timestamp: 2026-09-18T00:00:00-03:00
+timestamp: 2026-09-19T00:00:00-03:00
 ---
 
 # Overview
@@ -17,17 +17,17 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **42**. Classified items: **379**.
+Tracked gap groups: **43**. Classified items: **380**.
 
-- Status: open: 2, accepted: 40.
-- Decision: adopt: 2, native: 31, never: 9.
-- Priority: now: 1, next: 1, none: 40.
+- Status: open: 3, accepted: 40.
+- Decision: adopt: 3, native: 31, never: 9.
+- Priority: now: 1, next: 2, none: 40.
 - Closed history entries: 207.
-- Surface: command: 8, flag: 23, extension-flag: 5, native-command: 32, option: 34, format: 43, key: 47, binding: 37, native-key: 91, semantic: 50, presentation: 8, protocol: 1.
+- Surface: command: 8, flag: 23, extension-flag: 5, native-command: 32, option: 34, format: 44, key: 47, binding: 37, native-key: 91, semantic: 50, presentation: 8, protocol: 1.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 84 of those commands. The registry classifies 23 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 5 zz-only flags on tmux command names, 32 native command names, 34 options absent from `BEHAVES`, 43 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 0 currently documented hook-producer gaps, 47 omitted default keys, 37 divergent shared default bindings, 91 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 84 of those commands. The registry classifies 23 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 5 zz-only flags on tmux command names, 32 native command names, 34 options absent from `BEHAVES`, 44 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 0 currently documented hook-producer gaps, 47 omitted default keys, 37 divergent shared default bindings, 91 zz-only default keys.
 
 ## Enforcement boundary
 
@@ -57,6 +57,7 @@ structure as proof.
 
 | ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| `formats.pane-current-command-empty` | Answer pane_current_command on a process-less pane | adopt | open | easy | mux | scripts, daily | none |
 | `clients.command-round-trip-latency` | Answer a command client as fast as the pin does | adopt | open | medium | daemon | daily, scripts | none |
 
 ## None
@@ -393,6 +394,26 @@ zz deliberately replaces these tmux format-driven mode and overlay producers wit
 - Acceptance:
   - `The schema-5 invariant keeps exactly 39 pinned mode-tree, prompt, message-overlay, choose-client, copy-mode, and customize producer/name tuples in the accepted-native partition.`
   - `A tuple leaves this partition only when zz exposes its tmux producer rather than merely retaining equivalent typed native UI state.`
+
+### `formats.pane-current-command-empty`: Answer pane_current_command on a process-less pane
+
+Unlike cursor_flag, which formats.terminal-runtime already declares an explicit zz placeholder, pane_current_command is a backed format with a real value, so nothing on the books covers this divergence. Found by the TUI-018 verifying review on 2026-09-19 and confirmed identical on the pre-fix binary, so it is pre-existing and was not introduced by the caller-stream pass. It produces no recorded entry in compat/tui-client-commands.sh, so it blocks neither TUI-018 nor TUI-011. Left open rather than accepted because whether zz matches the pin here is fabrico's call, not the gate's.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `next` / `easy`
+- Owner: `mux`
+- User impact: scripts, daily
+- Items: `format:pane_current_command`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-daemon/src/daemon.rs`
+  - `resource:crates/zz-mux/src/formats.rs`
+  - `file:compat/tui/evidence/TUI-018/review-07/probes/p5-wait-skip.txt`
+- Acceptance:
+  - `Measured on pinned tmux d77c9dc6 against zz at b1596c72 by the TUI-018 verifying review: on a pane with no foreground process, the pin answers #{pane_current_command} with the basename of the pane's start command and keeps that answer sticky, while zz answers the empty string. Reproduced by a plain `split-window -d -P` as well as by `split-window -I`, so no command stream is involved.`
+  - `zz-daemon terminal_current_command returns String::new() whenever the pane has no foreground pid, and zz-mux copies that straight into the format context, so the empty answer is the fallback rather than a measured value.`
+  - `Deciding this means choosing whether zz adopts the pin's sticky start-command fallback or keeps the empty answer as a declared divergence. #{pane_current_command} also feeds automatic-rename-format and window naming, so either choice has to be measured against the window-name surface and not only the format read.`
 
 ### `formats.pane-runtime`: Expose pane mode formats
 

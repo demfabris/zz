@@ -1,0 +1,30 @@
+TERM display zz: after-signal=gone rc=143 @after= pane=
+TERM display tmux: after-signal=gone rc=0 @after= pane=abc
+TERM source zz: after-signal=gone rc=143 @after= @x=
+TERM source tmux: after-signal=gone rc=0 @after= @x=
+TERM run-shell zz: after-signal=gone rc=143 @after= 
+TERM run-shell tmux: after-signal=gone rc=0 @after= 
+./m1-signals.sh: line 17: 1646742 Hangup                     ( exec env --default-signal=HUP,INT,QUIT "${A[@]}" "$@" < $P/fifo > $P/out 2> $P/err 9>&- )
+HUP display zz: after-signal=gone rc=129 @after= pane=
+HUP display tmux: after-signal=gone rc=0 @after= pane=abc
+./m1-signals.sh: line 17: 1647483 Hangup                     ( exec env --default-signal=HUP,INT,QUIT "${A[@]}" "$@" < $P/fifo > $P/out 2> $P/err 9>&- )
+HUP source zz: after-signal=gone rc=129 @after= @x=
+HUP source tmux: after-signal=gone rc=0 @after= @x=
+./m1-signals.sh: line 17: 1647979 Hangup                     ( exec env --default-signal=HUP,INT,QUIT "${A[@]}" "$@" < $P/fifo > $P/out 2> $P/err 9>&- )
+HUP run-shell zz: after-signal=gone rc=129 @after= 
+HUP run-shell tmux: after-signal=gone rc=0 @after= 
+INT display zz: after-signal=gone rc=130 @after= pane=
+INT display tmux: after-signal=alive rc=0 @after=yes pane=abcMORE
+INT source zz: after-signal=gone rc=130 @after= @x=
+INT source tmux: after-signal=alive rc=0 @after=yes @x=1
+INT run-shell zz: after-signal=gone rc=130 @after= 
+INT run-shell tmux: after-signal=alive rc=0 @after=yes 
+./m1-signals.sh: line 6: 1653355 Quit                       (core dumped) ( exec env --default-signal=HUP,INT,QUIT "${A[@]}" "$@" < $P/fifo > $P/out 2> $P/err 9>&- )
+QUIT display zz: after-signal=alive rc=131 @after= pane=
+QUIT display tmux: after-signal=alive rc=0 @after=yes pane=abcMORE
+./m1-signals.sh: line 6: 1655580 Quit                       (core dumped) ( exec env --default-signal=HUP,INT,QUIT "${A[@]}" "$@" < $P/fifo > $P/out 2> $P/err 9>&- )
+QUIT source zz: after-signal=alive rc=131 @after= @x=
+QUIT source tmux: after-signal=alive rc=0 @after=yes @x=1
+./m1-signals.sh: line 6: 1656933 Quit                       (core dumped) ( exec env --default-signal=HUP,INT,QUIT "${A[@]}" "$@" < $P/fifo > $P/out 2> $P/err 9>&- )
+QUIT run-shell zz: after-signal=alive rc=131 @after= 
+QUIT run-shell tmux: after-signal=alive rc=0 @after=yes 

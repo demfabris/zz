@@ -1,0 +1,25 @@
+##### E3 stall mid-escape then close
+zz open: AB cursor=2:0 hist=0 size=80x11 dead=0 pid=no 
+zz rc=0 out=[] err=[] after=yes
+zz final: AB cursor=2:0 hist=0 size=80x11 dead=0 pid=no 
+tmux open: AB cursor=2:0 hist=0 size=80x11 dead=0 pid=no 
+tmux rc=0 out=[] err=[] after=yes
+tmux final: AB cursor=2:0 hist=0 size=80x11 dead=0 pid=no 
+##### E3b stall mid-UTF8 then close
+zz rc=0 final: AB cursor=2:0 hist=0 size=80x11 dead=0 pid=no 
+tmux rc=0 final: AB cursor=2:0 hist=0 size=80x11 dead=0 pid=no 
+##### E5 pane killed mid-stream then more
+zz exited before close
+zz rc=0 out=[tail-out|] err=[] after=yes panes=1
+tmux exited before close
+tmux rc=1 out=[] err=[] after=invalid option: @after panes=1
+##### E5 pane killed mid-stream then close
+zz still running before close
+zz rc=0 out=[tail-out|] err=[] after=yes panes=1
+tmux still running before close
+tmux rc=1 out=[] err=[] after=invalid option: @after panes=1
+##### E5c split -I pane killed mid-stream then more
+zz exited before close
+zz rc=0 out=[tail-out|] err=[] after=yes panes=1
+tmux exited before close
+tmux rc=1 out=[] err=[] after=invalid option: @after panes=1

@@ -1,0 +1,9 @@
+display more zz: client=exited rc=0 out=[tail-out|] err=[] @after=[yes] panes=1
+display more tmux: client=exited rc=1 out=[] err=[] @after=[invalid option: @after] panes=1
+display eof zz: client=running rc=0 out=[tail-out|] err=[] @after=[yes] panes=1
+display eof tmux: client=running rc=1 out=[] err=[] @after=[invalid option: @after] panes=1
+split more zz: client=exited rc=0 out=[tail-out|] err=[] @after=[yes] panes=1
+split more tmux: client=exited rc=1 out=[] err=[] @after=[invalid option: @after] panes=1
+split eof zz: client=running rc=0 out=[tail-out|] err=[] @after=[yes] panes=1
+split eof tmux: client=running rc=1 out=[] err=[] @after=[invalid option: @after] panes=1
+DONE 0

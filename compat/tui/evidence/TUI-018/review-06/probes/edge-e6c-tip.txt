@@ -1,0 +1,22 @@
+P zz open:  cursor=5:0 hist=0 size=80x11 dead=0 pid=no  out=[] | rc=0 final out=[cs:0.1|] err=[] final: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no 
+P tmux open: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no  out=[cs:0.1|] | rc=0 final out=[cs:0.1|] err=[] final: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no 
+PF zz open:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no  out=[] | rc=0 final out=[%2|] err=[] final: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no 
+PF tmux open: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no  out=[%2|] | rc=0 final out=[%2|] err=[] final: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no 
+P-TERM zz open:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no  out=[] | rc=0 final out=[] err=[] final:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no 
+P-TERM tmux open: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no  out=[cs:0.1|] | rc=0 final out=[cs:0.1|] err=[] final: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no 
+h zz open: GREEN cursor=5:0 hist=0 size=39x24 dead=0 pid=no  out=[] | rc=0 final out=[] err=[] final: GREEN cursor=5:0 hist=0 size=39x24 dead=0 pid=no 
+h tmux open: GREEN cursor=5:0 hist=0 size=39x24 dead=0 pid=no  out=[] | rc=0 final out=[] err=[] final: GREEN cursor=5:0 hist=0 size=39x24 dead=0 pid=no 
+b zz open: GREEN cursor=5:0 hist=0 size=80x12 dead=0 pid=no  out=[] | rc=0 final out=[] err=[] final: GREEN cursor=5:0 hist=0 size=80x12 dead=0 pid=no 
+b tmux open: $ cursor=2:0 hist=0 size=80x11 dead=0 pid=yes  out=[] | rc=0 final out=[] err=[] final: $ cursor=2:0 hist=0 size=80x11 dead=0 pid=yes 
+f zz open: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no  out=[] | rc=0 final out=[] err=[] final: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no 
+f tmux open: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no  out=[] | rc=0 final out=[] err=[] final: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no 
+l zz open: GREEN cursor=5:0 hist=0 size=80x5 dead=0 pid=no  out=[] | rc=0 final out=[] err=[] final: GREEN cursor=5:0 hist=0 size=80x5 dead=0 pid=no 
+l tmux open: GREEN cursor=5:0 hist=0 size=80x5 dead=0 pid=no  out=[] | rc=0 final out=[] err=[] final: GREEN cursor=5:0 hist=0 size=80x5 dead=0 pid=no 
+Z zz open: GREEN cursor=5:0 hist=0 size=80x24 dead=0 pid=no  out=[] | rc=0 final out=[] err=[] final: GREEN cursor=5:0 hist=0 size=80x24 dead=0 pid=no 
+Z tmux open: GREEN cursor=5:0 hist=0 size=80x24 dead=0 pid=no  out=[] | rc=0 final out=[] err=[] final: GREEN cursor=5:0 hist=0 size=80x24 dead=0 pid=no 
+e zz open: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no  out=[] | rc=0 final out=[] err=[] final: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no 
+e tmux open: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no  out=[] | rc=0 final out=[] err=[] final: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no 
+c zz open: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no  out=[] | rc=0 final out=[] err=[] final: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no 
+c tmux open: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no  out=[] | rc=0 final out=[] err=[] final: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no 
+display-then-split zz open: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no  out=[x|] | rc=0 final out=[x|] err=[] final: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no 
+display-then-split tmux open: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no  out=[x|] | rc=0 final out=[x|] err=[] final: GREEN cursor=5:0 hist=0 size=80x11 dead=0 pid=no 

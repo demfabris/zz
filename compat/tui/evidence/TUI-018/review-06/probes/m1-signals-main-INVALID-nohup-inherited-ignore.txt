@@ -1,0 +1,24 @@
+TERM display zz: after-signal=gone rc=143 @after= pane=
+TERM display tmux: after-signal=gone rc=0 @after= pane=abc
+TERM source zz: after-signal=gone rc=143 @after= @x=
+TERM source tmux: after-signal=gone rc=0 @after= @x=
+TERM run-shell zz: after-signal=gone rc=143 @after= 
+TERM run-shell tmux: after-signal=gone rc=0 @after= 
+HUP display zz: after-signal=alive rc=0 @after=yes pane=abcMORE
+HUP display tmux: after-signal=gone rc=0 @after= pane=abc
+HUP source zz: after-signal=alive rc=0 @after=yes @x=1
+HUP source tmux: after-signal=gone rc=0 @after= @x=
+HUP run-shell zz: after-signal=alive rc=0 @after=yes 
+HUP run-shell tmux: after-signal=gone rc=0 @after= 
+INT display zz: after-signal=alive rc=0 @after=yes pane=abcMORE
+INT display tmux: after-signal=alive rc=0 @after=yes pane=abcMORE
+INT source zz: after-signal=alive rc=0 @after=yes @x=1
+INT source tmux: after-signal=alive rc=0 @after=yes @x=1
+INT run-shell zz: after-signal=alive rc=0 @after=yes 
+INT run-shell tmux: after-signal=alive rc=0 @after=yes 
+QUIT display zz: after-signal=alive rc=0 @after=yes pane=abcMORE
+QUIT display tmux: after-signal=alive rc=0 @after=yes pane=abcMORE
+QUIT source zz: after-signal=alive rc=0 @after=yes @x=1
+QUIT source tmux: after-signal=alive rc=0 @after=yes @x=1
+QUIT run-shell zz: after-signal=alive rc=0 @after=yes 
+QUIT run-shell tmux: after-signal=alive rc=0 @after=yes 

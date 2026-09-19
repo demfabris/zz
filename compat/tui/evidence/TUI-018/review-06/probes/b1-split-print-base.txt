@@ -1,0 +1,22 @@
+[split-window -I -d -t cs:win.0] EOF zz open@0.8s:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no  stdout=[] || rc=0 stdout=[] stderr=[] after=yes final: ^[[31mRED^[[39m cursor=0:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -t cs:win.0] EOF tmux open@0.8s: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  stdout=[] || rc=0 stdout=[] stderr=[] after=yes final: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -t cs:win.0] TERM@0.8 zz open@0.8s:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no  stdout=[] || rc=0 stdout=[] stderr=[] after= final:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -t cs:win.0] TERM@0.8 tmux open@0.8s: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  stdout=[] || rc=0 stdout=[] stderr=[] after= final: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -t cs:win.0] TERM@3 zz open@0.8s:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no  stdout=[] || rc=0 stdout=[] stderr=[] after= final:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -t cs:win.0] TERM@3 tmux open@0.8s: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  stdout=[] || rc=0 stdout=[] stderr=[] after=yes final: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -P -t cs:win.0] EOF zz open@0.8s:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no  stdout=[] || rc=0 stdout=[cs:0.1|] stderr=[] after=yes final: ^[[31mRED^[[39m cursor=0:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -P -t cs:win.0] EOF tmux open@0.8s: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  stdout=[cs:0.1|] || rc=0 stdout=[cs:0.1|] stderr=[] after=yes final: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -P -t cs:win.0] TERM@0.8 zz open@0.8s:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no  stdout=[] || rc=0 stdout=[] stderr=[] after= final:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -P -t cs:win.0] TERM@0.8 tmux open@0.8s: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  stdout=[cs:0.1|] || rc=0 stdout=[cs:0.1|] stderr=[] after= final: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -P -t cs:win.0] TERM@3 zz open@0.8s:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no  stdout=[] || rc=0 stdout=[] stderr=[] after= final:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -P -t cs:win.0] TERM@3 tmux open@0.8s: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  stdout=[cs:0.1|] || rc=0 stdout=[cs:0.1|] stderr=[] after=yes final: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -P -F #{pane_id} -t cs:win.0] EOF zz open@0.8s:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no  stdout=[] || rc=0 stdout=[%7|] stderr=[] after=yes final: ^[[31mRED^[[39m cursor=0:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -P -F #{pane_id} -t cs:win.0] EOF tmux open@0.8s: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  stdout=[%7|] || rc=0 stdout=[%7|] stderr=[] after=yes final: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -P -F #{pane_id} -t cs:win.0] TERM@0.8 zz open@0.8s:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no  stdout=[] || rc=0 stdout=[] stderr=[] after= final:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -P -F #{pane_id} -t cs:win.0] TERM@0.8 tmux open@0.8s: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  stdout=[%8|] || rc=0 stdout=[%8|] stderr=[] after= final: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -P -F #{pane_id} -t cs:win.0] TERM@3 zz open@0.8s:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no  stdout=[] || rc=0 stdout=[] stderr=[] after= final:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -P -F #{pane_id} -t cs:win.0] TERM@3 tmux open@0.8s: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no  stdout=[%9|] || rc=0 stdout=[%9|] stderr=[] after= final: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+zz split-window -I -P: GREEN first visible after ~33600 ms
+zz split-window -d -P '' (no -I) took ~2500 ms
+tmux split-window -I -P: GREEN first visible after ~000 ms
+tmux split-window -d -P '' (no -I) took ~000 ms

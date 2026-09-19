@@ -1,0 +1,5 @@
+daemon rss_kb_before=60252 tmux-server rss_kb=4628
+zz 64MiB rc=0 ms=10166 client_VmHWM_kb=25892 writer_wchan= client_wchan=unix_stream_read_generic last=8388608
+daemon rss_kb_after=61516 hwm=115860
+tmux 64MiB rc=0 ms=10305 client_VmHWM_kb=69712 writer_wchan= client_wchan=poll_schedule_timeout.constprop.0 last=8388608
+tmux-server rss_kb_after=5000

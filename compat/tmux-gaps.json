@@ -1,7 +1,7 @@
 {
   "schema": 3,
   "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
-  "updated_on": "2026-09-18",
+  "updated_on": "2026-09-19",
   "gaps": [
     {
       "id": "aliases.remote-client-preflight",
@@ -453,6 +453,34 @@
       ],
       "depends_on": [],
       "reason": "zz deliberately replaces these tmux format-driven mode and overlay producers with typed client state and native rendering. The explicit accepted partition prevents their 54 source tuples from being mistaken for either implemented tmux contexts or unclassified omissions. Ten tuples left on 2026-09-02, all `window-copy.c:window_copy_formats`: copy_cursor_line, copy_cursor_word, copy_cursor_x, copy_cursor_y, scroll_position, selection_end_x, selection_end_y, selection_present, selection_start_x and selection_start_y are now produced by the daemon from the per-client copy session rather than replaced by native UI state, which is exactly the second clause's exit, so they moved to the mux-owned partition and the invariant fell from 54 to 44. The rest of that producer's vocabulary stays here: copy_cursor_hyperlink, copy_position, copy_position_limit, rectangle_toggle, search_count, search_count_partial, search_match, search_present, search_timed_out, selection_active, selection_mode and top_line_time are still unproduced, and search_present and search_match in particular need the pin's searchmark array, which zz's search state does not model. Five more tuples left on 2026-09-02, all `window-copy.c:window_copy_formats` again and all through the second clause's exit rather than around it: search_present, search_match, search_count, search_count_partial and search_timed_out are now produced by the daemon off the per-client copy session, because copy-mode text search became a daemon action instead of a client surface. The old reason said search_present and search_match \"need the pin's searchmark array, which zz's search state does not model\"; measured on both binaries with one attached pty client on a pane holding `alpha beta gamma`, `delta alpha epsilon` and `zeta alpha` echoed twice, the two names need only what the marks are asked for. At copy-mode entry the pin answers search_present=0, search_count=0, search_count_partial=0, search_timed_out=0 and an empty search_match, because `window_copy_init` zeroes searchcount and leaves searchmark NULL. `search-forward alpha` answers present=1, match=alpha and count=6, which is every match on the whole backing and not the visible screen. A failed search answers present=0 with search_count and search_count_partial both gone, because `window_copy_clear_marks` puts -1 in searchcount and `window_copy_formats` publishes neither name while it is -1; but a failed search on a mode that never laid marks down runs no clear at all, because `window_copy_search` only clears when `data->searchmark != NULL`, so the entry value 0 survives it. `window_copy_match_at_cursor` steps one position back before giving up, which is why the emacs placement one cell past a match still answers that match. zz models the marks as the view's match list plus a bit on the copy session saying the mode owns them, which answers all five, and the invariant fell from 44 to 39. compat/scenarios/smoke/copy-mode-search.txt asserts those 26 rows on both binaries."
+    },
+    {
+      "id": "formats.pane-current-command-empty",
+      "title": "Answer pane_current_command on a process-less pane",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "next",
+      "ease": "easy",
+      "impact": [
+        "scripts",
+        "daily"
+      ],
+      "owner": "mux",
+      "items": [
+        "format:pane_current_command"
+      ],
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-mux/src/formats.rs",
+        "file:compat/tui/evidence/TUI-018/review-07/probes/p5-wait-skip.txt"
+      ],
+      "acceptance": [
+        "Measured on pinned tmux d77c9dc6 against zz at b1596c72 by the TUI-018 verifying review: on a pane with no foreground process, the pin answers #{pane_current_command} with the basename of the pane's start command and keeps that answer sticky, while zz answers the empty string. Reproduced by a plain `split-window -d -P` as well as by `split-window -I`, so no command stream is involved.",
+        "zz-daemon terminal_current_command returns String::new() whenever the pane has no foreground pid, and zz-mux copies that straight into the format context, so the empty answer is the fallback rather than a measured value.",
+        "Deciding this means choosing whether zz adopts the pin's sticky start-command fallback or keeps the empty answer as a declared divergence. #{pane_current_command} also feeds automatic-rename-format and window naming, so either choice has to be measured against the window-name surface and not only the format read."
+      ],
+      "depends_on": [],
+      "reason": "Unlike cursor_flag, which formats.terminal-runtime already declares an explicit zz placeholder, pane_current_command is a backed format with a real value, so nothing on the books covers this divergence. Found by the TUI-018 verifying review on 2026-09-19 and confirmed identical on the pre-fix binary, so it is pre-existing and was not introduced by the caller-stream pass. It produces no recorded entry in compat/tui-client-commands.sh, so it blocks neither TUI-018 nor TUI-011. Left open rather than accepted because whether zz matches the pin here is fabrico's call, not the gate's."
     },
     {
       "id": "formats.pane-runtime",

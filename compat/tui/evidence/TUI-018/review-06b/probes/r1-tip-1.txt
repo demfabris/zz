@@ -1,0 +1,9 @@
+[split-window -I -d -t cs:win.0] EOF zz OPEN: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no out=[] || rc=0 out=[] err=[] FINAL: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -t cs:win.0] EOF tmux OPEN: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no out=[] || rc=0 out=[] err=[] FINAL: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -t cs:win.0] TERM zz OPEN: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no out=[] || rc=0 out=[] err=[] FINAL: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -t cs:win.0] TERM tmux OPEN: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no out=[] || rc=0 out=[] err=[] FINAL: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -P -t cs:win.0] EOF zz OPEN:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no out=[] || rc=0 out=[cs:0.1|] err=[] FINAL: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -P -t cs:win.0] EOF tmux OPEN: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no out=[cs:0.1|] || rc=0 out=[cs:0.1|] err=[] FINAL: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -P -t cs:win.0] TERM zz OPEN:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no out=[] || rc=0 out=[] err=[] FINAL:  cursor=0:0 hist=0 size=80x11 dead=0 pid=no 
+[split-window -I -d -P -t cs:win.0] TERM tmux OPEN: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no out=[cs:0.1|] || rc=0 out=[cs:0.1|] err=[] FINAL: ^[[31mRED^[[39m cursor=3:0 hist=0 size=80x11 dead=0 pid=no 
+DONE 0

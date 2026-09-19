@@ -1,0 +1,15 @@
+TUI-014 attempt-20-modes-muse9 environment (cycle 11, 2026-09-19)
+box: Alienware, Linux 7.2.3-1-cachyos-deckify x86_64
+rustc: 1.97.0 (2d8144b78 2026-07-07)
+base: origin/main d03e20a0 (Verify TUI-015 and TUI-017 at the residuals gate)
+branch: campaign/tui-customize-6
+run binary: target/debug/zz_cli
+  sha256 db2811c43eced9b7955fc4445351452e0ffd879d368ba5bb4e5482c7f570093c
+  built 2026-09-19 02:21 -0300, after the last source edit
+pinned tmux: next-3.8 d77c9dc6aa021e4bc61f0da128c591af695e6466
+  sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+cargo: every invocation through /tmp/zz-cargo.sh (4G cap, 2 jobs, 2 shared flock slots)
+daemon tests: HOME=/tmp/zz-emptyhome, XDG_CONFIG_HOME=/tmp/zz-emptyhome/config
+fixtures: ZZ_BIN=$PWD/target/debug/zz_cli, TMUX_BIN from compat/fetch-tmux.sh
+delta: ZZ_COMPAT_ZZ=$PWD/target/debug/zz_cli compat/run.sh --delta origin/main...HEAD <15 rows>
+wire: 105 unreleased (v0.11.1 shipped 104); this pass appends nothing

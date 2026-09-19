@@ -858,8 +858,6 @@ rich_capture_case() {
     self_check_expect "$name exact bytes before sabotage" exit=0 stdout=0 stderr=0
     if [ "$name" = capture-edited-tab-overwrite-background ]; then
       changed="${payload/41m/42m}"
-    elif [[ "$name" == capture-edited-tab-ich-* ]]; then
-      changed="${payload/@/m}"
     elif [[ "$name" == capture-edited-tab-dch-* ]]; then
       changed="${payload/\\033\[P/\\033[m}"
       changed="${changed/2P/2m}"

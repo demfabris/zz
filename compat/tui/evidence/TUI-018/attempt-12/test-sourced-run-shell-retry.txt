@@ -1,0 +1,66 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.46s
+     Running tests/cli_binary.rs (target/debug/deps/cli_binary-0eafd60eec1da26c)
+
+running 1 test
+test daemon_autostart::control_mode::control_sourced_run_shell_closes_before_raw_output_and_same_line_continues ... FAILED
+
+failures:
+
+---- daemon_autostart::control_mode::control_sourced_run_shell_closes_before_raw_output_and_same_line_continues stdout ----
+
+thread 'daemon_autostart::control_mode::control_sourced_run_shell_closes_before_raw_output_and_same_line_continues' (1136475) panicked at crates/zz-cli/tests/cli_binary.rs:5694:56:
+guard before raw child output
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    daemon_autostart::control_mode::control_sourced_run_shell_closes_before_raw_output_and_same_line_continues
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 135 filtered out; finished in 0.86s
+
+error: test failed, to rerun pass `-p zz-cli --test cli_binary`
+DONE 101
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.33s
+     Running tests/cli_binary.rs (target/debug/deps/cli_binary-0eafd60eec1da26c)
+
+running 1 test
+test daemon_autostart::control_mode::control_sourced_run_shell_closes_before_raw_output_and_same_line_continues ... FAILED
+
+failures:
+
+---- daemon_autostart::control_mode::control_sourced_run_shell_closes_before_raw_output_and_same_line_continues stdout ----
+
+thread 'daemon_autostart::control_mode::control_sourced_run_shell_closes_before_raw_output_and_same_line_continues' (1136579) panicked at crates/zz-cli/tests/cli_binary.rs:5694:56:
+guard before raw child output
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    daemon_autostart::control_mode::control_sourced_run_shell_closes_before_raw_output_and_same_line_continues
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 135 filtered out; finished in 0.79s
+
+error: test failed, to rerun pass `-p zz-cli --test cli_binary`
+DONE 101
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.33s
+     Running tests/cli_binary.rs (target/debug/deps/cli_binary-0eafd60eec1da26c)
+
+running 1 test
+test daemon_autostart::control_mode::control_sourced_run_shell_closes_before_raw_output_and_same_line_continues ... FAILED
+
+failures:
+
+---- daemon_autostart::control_mode::control_sourced_run_shell_closes_before_raw_output_and_same_line_continues stdout ----
+
+thread 'daemon_autostart::control_mode::control_sourced_run_shell_closes_before_raw_output_and_same_line_continues' (1136640) panicked at crates/zz-cli/tests/cli_binary.rs:5694:56:
+guard before raw child output
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    daemon_autostart::control_mode::control_sourced_run_shell_closes_before_raw_output_and_same_line_continues
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 135 filtered out; finished in 0.88s
+
+error: test failed, to rerun pass `-p zz-cli --test cli_binary`
+DONE 101

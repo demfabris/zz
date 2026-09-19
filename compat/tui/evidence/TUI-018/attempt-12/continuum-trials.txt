@@ -1,0 +1,23 @@
+trial1 final smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 1 WARN divergence(s)
+trial1 final     -CONTINUUM_SAVE_PANES=pane	continuum-runtime	0	1	:*	0	CONTINUUM	:<DIR>	0	sh	:
+trial1 final     +CONTINUUM_SAVE_PANES=pane	continuum-runtime	0	1	:*	0	CONTINUUM	:<DIR>	0	sleep	:
+trial1 final      pane	continuum-runtime	0	1	:*	1	<HOST>	:<DIR>	1	sleep	:
+trial1 final smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 1 WARN divergence(s)
+trial1 final     -CONTINUUM_SAVE_PANES=pane	continuum-runtime	0	1	:*	0	CONTINUUM	:<DIR>	0	sh	:
+trial1 final     +CONTINUUM_SAVE_PANES=pane	continuum-runtime	0	1	:*	0	CONTINUUM	:<DIR>	0	sleep	:
+trial1 final      pane	continuum-runtime	0	1	:*	1	<HOST>	:<DIR>	1	sleep	:
+trial1 base smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+trial2 final smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+trial2 base smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+trial3 final smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+trial3 base smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+trial4 final smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+trial4 base smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+trial5 final smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+trial5 base smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+trial6 final smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+trial6 base smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 1 WARN divergence(s)
+trial6 base smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 1 WARN divergence(s)
+trial7 final smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+trial7 base smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 1 WARN divergence(s)
+trial7 base smoke/plugin-runtime-continuum: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)

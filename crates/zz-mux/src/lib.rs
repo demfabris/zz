@@ -21,15 +21,16 @@ mod tmux_options;
 
 pub use command::TMUX_OPTION_CONSUMERS as BEHAVES;
 pub use command::{
-    AgentOptions, CommandAliasBodyError, CommandAliasResolution, CommandPromptStep,
-    CommandPromptTemplate, CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachRequest, DetachScope,
-    Execution, ExecutionContext, FormatFacts, FormatMonitor, FormatMonitorScope,
-    FormatMonitorTarget, MAX_WORD_SEPARATORS_BYTES, MenuOptions, ModeKey, ModePrompt,
-    MouseEventTarget, MuxEffect, MuxEngine, PaneBorderStyleValues, PaneModeRequest,
+    AgentOptions, CUSTOMIZE_MENU_ITEMS, CUSTOMIZE_OUTSIDE_MENU_ITEMS, CommandAliasBodyError,
+    CommandAliasResolution, CommandPromptStep, CommandPromptTemplate, CopyModeStyleValues,
+    CustomizeMenu, CustomizeMenuItem, CustomizeMode, CustomizeResult, DEFAULT_BUFFER_LIMIT,
+    DetachRequest, DetachScope, Execution, ExecutionContext, FormatFacts, FormatMonitor,
+    FormatMonitorScope, FormatMonitorTarget, MAX_WORD_SEPARATORS_BYTES, MenuOptions, ModeKey,
+    ModePrompt, MouseEventTarget, MuxEffect, MuxEngine, PaneBorderStyleValues, PaneModeRequest,
     PaneRuntimeFacts, PopupOptions, PromptOutcome, RetainedJobEnvironment, SourceStream,
     StatusRowVariables, SwitchAction, SwitchMode, TMUX_OPTION_CONSUMERS, TerminalWorkerOptions,
-    WindowStyleValues, copy_mode_action_is_read_only_safe, format_command, hook_format_variables,
-    if_shell_truthy, mouse_key_is_a_replayed_double_click, parse_tmux_key,
+    WindowStyleValues, copy_mode_action_is_read_only_safe, customize_menu_feed, format_command,
+    hook_format_variables, if_shell_truthy, mouse_key_is_a_replayed_double_click, parse_tmux_key,
     resolve_invoking_mouse_targets, send_keys_is_read_only_safe, send_keys_target_client,
     validate_static_command_chain,
 };

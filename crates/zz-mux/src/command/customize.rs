@@ -160,6 +160,95 @@ impl ModePromptOptions {
 pub struct CustomizeResult {
     pub close: bool,
     pub commands: Vec<CommandInvocation>,
+    pub menu: Option<CustomizeMenu>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CustomizeMenu {
+    pub line: usize,
+    pub outside: bool,
+    pub name: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CustomizeMenuItem {
+    pub name: &'static str,
+    pub key: &'static str,
+    pub annotation: &'static str,
+    pub feed: &'static str,
+}
+
+pub const CUSTOMIZE_MENU_ITEMS: [Option<CustomizeMenuItem>; 8] = [
+    Some(CustomizeMenuItem {
+        name: "Select",
+        key: "Enter",
+        annotation: "Enter",
+        feed: "Enter",
+    }),
+    Some(CustomizeMenuItem {
+        name: "Expand",
+        key: "Right",
+        annotation: "Right",
+        feed: "Right",
+    }),
+    None,
+    Some(CustomizeMenuItem {
+        name: "Tag",
+        key: "t",
+        annotation: "t",
+        feed: "t",
+    }),
+    Some(CustomizeMenuItem {
+        name: "Tag All",
+        key: "[DC4]",
+        annotation: "[DC4]",
+        feed: "\x14",
+    }),
+    Some(CustomizeMenuItem {
+        name: "Tag None",
+        key: "T",
+        annotation: "T",
+        feed: "T",
+    }),
+    None,
+    Some(CustomizeMenuItem {
+        name: "Cancel",
+        key: "q",
+        annotation: "q",
+        feed: "q",
+    }),
+];
+
+pub const CUSTOMIZE_OUTSIDE_MENU_ITEMS: [Option<CustomizeMenuItem>; 4] = [
+    Some(CustomizeMenuItem {
+        name: "Scroll Left",
+        key: "<",
+        annotation: "<",
+        feed: "<",
+    }),
+    Some(CustomizeMenuItem {
+        name: "Scroll Right",
+        key: ">",
+        annotation: ">",
+        feed: ">",
+    }),
+    None,
+    Some(CustomizeMenuItem {
+        name: "Cancel",
+        key: "q",
+        annotation: "q",
+        feed: "q",
+    }),
+];
+
+#[must_use]
+pub fn customize_menu_feed(outside: bool, index: usize) -> Option<&'static str> {
+    let items: &[Option<CustomizeMenuItem>] = if outside {
+        &CUSTOMIZE_OUTSIDE_MENU_ITEMS
+    } else {
+        &CUSTOMIZE_MENU_ITEMS
+    };
+    items.get(index).and_then(|item| item.map(|item| item.feed))
 }
 
 impl CustomizeResult {
@@ -167,6 +256,7 @@ impl CustomizeResult {
         Self {
             close: false,
             commands: Vec::new(),
+            menu: None,
         }
     }
 }
@@ -1056,6 +1146,7 @@ impl MuxEngine {
             return CustomizeResult {
                 close: true,
                 commands: Vec::new(),
+                menu: None,
             };
         };
         if let Some((prompt, _)) = &mut mode.prompt {
@@ -1117,6 +1208,7 @@ impl MuxEngine {
             return CustomizeResult {
                 close: true,
                 commands: Vec::new(),
+                menu: None,
             };
         };
         let columns = self.customize_screen_columns(pane);
@@ -1138,10 +1230,24 @@ impl MuxEngine {
         if mode.help {
             return CustomizeResult::stay();
         }
-        if x > columns || y > mode.height || mode.offset + y >= size {
-            return CustomizeResult::stay();
-        }
         let button = ModeMouseKey::parse(name);
+        if x > columns || y > mode.height {
+            if button != ModeMouseKey::Down3 {
+                return CustomizeResult::stay();
+            }
+            let line = if mode.offset + y < size {
+                mode.offset + y
+            } else {
+                mode.current
+            };
+            return self.customize_menu_result(pane, mode, line, true, expand);
+        }
+        if mode.offset + y >= size {
+            if button != ModeMouseKey::Down3 {
+                return CustomizeResult::stay();
+            }
+            return self.customize_menu_result(pane, mode, mode.current, false, expand);
+        }
         if matches!(
             button,
             ModeMouseKey::Down1 | ModeMouseKey::Down3 | ModeMouseKey::DoubleClick1
@@ -1151,7 +1257,57 @@ impl MuxEngine {
         if button == ModeMouseKey::DoubleClick1 {
             return self.customize_tree_key(pane, mode, ModeKey::Char('\r'), size, expand);
         }
-        CustomizeResult::stay()
+        if button != ModeMouseKey::Down3 {
+            return CustomizeResult::stay();
+        }
+        self.customize_menu_result(pane, mode, mode.current, false, expand)
+    }
+
+    pub fn customize_menu_choice(
+        &self,
+        pane: PaneId,
+        mode: &mut CustomizeMode,
+        line: usize,
+        name: &str,
+        expand: &mut CustomizeExpand<'_>,
+    ) -> CustomizeResult {
+        let Some(size) = self.customize_ready(pane, mode, expand) else {
+            return CustomizeResult {
+                close: true,
+                commands: Vec::new(),
+                menu: None,
+            };
+        };
+        if line >= size {
+            return CustomizeResult::stay();
+        }
+        mode.current = line;
+        self.customize_key(pane, mode, name, expand)
+    }
+
+    fn customize_menu_result(
+        &self,
+        pane: PaneId,
+        mode: &CustomizeMode,
+        line: usize,
+        outside: bool,
+        expand: &mut CustomizeExpand<'_>,
+    ) -> CustomizeResult {
+        let rows = self.customize_rows(pane, mode, expand);
+        let lines = customize_lines(&rows, mode);
+        let name = lines
+            .get(line)
+            .and_then(|index| rows.get(*index))
+            .map_or_else(String::new, |row| row.name.clone());
+        CustomizeResult {
+            close: false,
+            commands: Vec::new(),
+            menu: Some(CustomizeMenu {
+                line,
+                outside,
+                name,
+            }),
+        }
     }
 
     fn customize_tree_key(
@@ -1168,6 +1324,7 @@ impl MuxEngine {
             return CustomizeResult {
                 close: true,
                 commands: Vec::new(),
+                menu: None,
             };
         }
         let mut key = key;
@@ -1187,6 +1344,7 @@ impl MuxEngine {
                 return CustomizeResult {
                     close: true,
                     commands: Vec::new(),
+                    menu: None,
                 };
             }
             ModeKey::F1 | ModeKey::Ctrl('h') => mode.help = true,
@@ -1512,6 +1670,7 @@ impl MuxEngine {
         CustomizeResult {
             close: false,
             commands,
+            menu: None,
         }
     }
 
@@ -2458,6 +2617,138 @@ mod tests {
                 .to_lowercase()
                 .contains("mouse")
         );
+    }
+
+    #[test]
+    fn customize_menu_feed_answers_each_row() {
+        assert_eq!(customize_menu_feed(false, 0), Some("Enter"));
+        assert_eq!(customize_menu_feed(false, 1), Some("Right"));
+        assert_eq!(customize_menu_feed(false, 2), None);
+        assert_eq!(customize_menu_feed(false, 3), Some("t"));
+        assert_eq!(customize_menu_feed(false, 4), Some("\x14"));
+        assert_eq!(customize_menu_feed(false, 5), Some("T"));
+        assert_eq!(customize_menu_feed(false, 6), None);
+        assert_eq!(customize_menu_feed(false, 7), Some("q"));
+        assert_eq!(customize_menu_feed(false, 8), None);
+        assert_eq!(customize_menu_feed(true, 0), Some("<"));
+        assert_eq!(customize_menu_feed(true, 1), Some(">"));
+        assert_eq!(customize_menu_feed(true, 2), None);
+        assert_eq!(customize_menu_feed(true, 3), Some("q"));
+        assert_eq!(customize_menu_feed(true, 4), None);
+        let tag_all = CUSTOMIZE_MENU_ITEMS
+            .iter()
+            .flatten()
+            .find(|item| item.name == "Tag All")
+            .unwrap();
+        assert_eq!(tag_all.key, "[DC4]");
+        assert_eq!(tag_all.annotation, "[DC4]");
+        assert_eq!(tag_all.feed, "\x14");
+    }
+
+    #[test]
+    fn customize_mouse_down3_selects_and_requests_the_line_menu() {
+        let (engine, _, pane) = engine_with_session();
+        let mut mode = CustomizeMode::default();
+        engine.customize_height(pane, &mut mode);
+        let mut expand = customize_expand;
+        let result = engine.customize_mouse(pane, &mut mode, "MouseDown1Pane", 3, 2, &mut expand);
+        assert!(!result.close);
+        assert!(result.menu.is_none());
+        let result = engine.customize_mouse(pane, &mut mode, "MouseDown3Pane", 3, 2, &mut expand);
+        assert!(!result.close);
+        assert_eq!(mode.current, 2);
+        let menu = result.menu.expect("a menu request");
+        assert!(!menu.outside);
+        assert_eq!(menu.line, 2);
+        let rows = engine.customize_rows(pane, &mode, &mut expand);
+        let lines = customize_lines(&rows, &mode);
+        assert_eq!(menu.name, rows[lines[2]].name);
+        let result = engine.customize_mouse(pane, &mut mode, "WheelUpPane", 3, 2, &mut expand);
+        assert!(!result.close);
+        assert!(result.menu.is_none());
+    }
+
+    #[test]
+    fn customize_mouse_down3_outside_requests_the_outside_menu() {
+        let (engine, _, pane) = engine_with_session();
+        let mut mode = CustomizeMode::default();
+        engine.customize_height(pane, &mut mode);
+        let mut expand = customize_expand;
+        let rows = engine.customize_rows(pane, &mode, &mut expand);
+        let size = customize_lines(&rows, &mode).len();
+        let below = size.max(mode.height) + 5;
+        let result =
+            engine.customize_mouse(pane, &mut mode, "MouseDown3Pane", 3, below, &mut expand);
+        assert!(!result.close);
+        assert_eq!(mode.current, 0);
+        let menu = result.menu.expect("a menu request");
+        assert!(menu.outside);
+        assert_eq!(menu.line, 0);
+        let columns = engine.customize_screen_columns(pane);
+        let result = engine.customize_mouse(
+            pane,
+            &mut mode,
+            "MouseDown3Pane",
+            columns + 1,
+            1,
+            &mut expand,
+        );
+        assert!(result.menu.is_some_and(|menu| menu.outside));
+        let result =
+            engine.customize_mouse(pane, &mut mode, "MouseDown1Pane", 3, below, &mut expand);
+        assert!(result.menu.is_none());
+    }
+
+    #[test]
+    fn customize_mouse_down3_below_the_lines_keeps_the_current_line() {
+        let (engine, _, pane) = engine_with_session();
+        let mut mode = CustomizeMode::default();
+        engine.customize_height(pane, &mut mode);
+        let mut expand = customize_expand;
+        let rows = engine.customize_rows(pane, &mode, &mut expand);
+        let size = customize_lines(&rows, &mode).len();
+        mode.height = size + 4;
+        mode.current = 1;
+        let result =
+            engine.customize_mouse(pane, &mut mode, "MouseDown3Pane", 3, size, &mut expand);
+        assert!(!result.close);
+        assert_eq!(mode.current, 1);
+        let menu = result.menu.expect("a menu request");
+        assert!(!menu.outside);
+        assert_eq!(menu.line, 1);
+    }
+
+    #[test]
+    fn customize_menu_choice_runs_the_key_on_the_menu_line() {
+        let (engine, _, pane) = engine_with_session();
+        let mut mode = CustomizeMode::default();
+        engine.customize_height(pane, &mut mode);
+        mode.expanded.insert("options:0".to_owned());
+        let mut expand = customize_expand;
+        let rows = engine.customize_rows(pane, &mode, &mut expand);
+        let lines = customize_lines(&rows, &mode);
+        let option = 1;
+        assert_eq!(rows[lines[option]].depth, 1);
+        mode.current = 0;
+        let result = engine.customize_menu_choice(pane, &mut mode, option, "t", &mut expand);
+        assert!(!result.close);
+        assert_eq!(mode.current, option);
+        assert!(mode.tagged.contains(&rows[lines[option]].id));
+        let tagged = mode.tagged.clone();
+        let result = engine.customize_menu_choice(pane, &mut mode, option, "\x14", &mut expand);
+        assert!(!result.close);
+        assert_eq!(mode.current, option);
+        assert_eq!(mode.tagged, tagged);
+        let result = engine.customize_menu_choice(pane, &mut mode, option, "T", &mut expand);
+        assert!(!result.close);
+        assert!(mode.tagged.is_empty());
+        let result =
+            engine.customize_menu_choice(pane, &mut mode, lines.len() + 4, "t", &mut expand);
+        assert!(!result.close);
+        assert_eq!(mode.current, option);
+        assert!(mode.tagged.is_empty());
+        let closed = engine.customize_menu_choice(pane, &mut mode, option, "q", &mut expand);
+        assert!(closed.close);
     }
 
     #[test]

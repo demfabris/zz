@@ -23,16 +23,17 @@ use parking_lot::{Condvar, Mutex};
 mod chooser_presentation;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
-    CellLayout, CommandAliasResolution, CommandPromptStep, CommandPromptTemplate, ConfigDiagnostic,
-    CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
-    FormatClient, FormatMonitorScope, FormatMonitorTarget, KeyDecision, KeyEngine, KeyTables,
-    MouseEventTarget, MuxEffect, MuxEngine, PaneKind, PaneModeRequest, PaneRuntimeFacts,
-    ParsedConfig, ParsedConfigBytes, RetainedJobEnvironment, SourceStream, StatusHooks,
-    SwitchAction, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize, canonical_command,
-    command_block_body, copy_mode_action_is_read_only_safe, expand_format_bytes,
-    expand_format_values, expand_status, format_command, format_true, hook_format_variables,
-    if_shell_truthy, parse_tmux_colour, sanitize_client_output, send_keys_is_read_only_safe,
-    send_keys_target_client, validate_static_command_chain,
+    CUSTOMIZE_MENU_ITEMS, CUSTOMIZE_OUTSIDE_MENU_ITEMS, CellLayout, CommandAliasResolution,
+    CommandPromptStep, CommandPromptTemplate, ConfigDiagnostic, CopyModeStyleValues, CustomizeMenu,
+    CustomizeMenuItem, CustomizeMode, CustomizeResult, DEFAULT_BUFFER_LIMIT, DetachScope,
+    Execution, ExecutionContext, FormatClient, FormatMonitorScope, FormatMonitorTarget,
+    KeyDecision, KeyEngine, KeyTables, MouseEventTarget, MuxEffect, MuxEngine, PaneKind,
+    PaneModeRequest, PaneRuntimeFacts, ParsedConfig, ParsedConfigBytes, RetainedJobEnvironment,
+    SourceStream, StatusHooks, SwitchAction, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize,
+    canonical_command, command_block_body, copy_mode_action_is_read_only_safe, customize_menu_feed,
+    expand_format_bytes, expand_format_values, expand_status, format_command, format_true,
+    hook_format_variables, if_shell_truthy, parse_tmux_colour, sanitize_client_output,
+    send_keys_is_read_only_safe, send_keys_target_client, validate_static_command_chain,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
@@ -16259,6 +16260,7 @@ impl Shared {
                     commands,
                     target,
                     popup_owner: false,
+                    mode_tree: None,
                     styles: OverlayStyleOverrides {
                         style: parsed.style.clone(),
                         selected_style: parsed.selected_style.clone(),
@@ -18366,6 +18368,123 @@ impl Shared {
                     styles: OverlayStyleOverrides::default(),
                     waiter: None,
                     popup_owner: true,
+                    mode_tree: None,
+                },
+            );
+        }
+        self.publish_to_client(client, EventPayload::Menu { state: Some(state) });
+    }
+
+    fn raise_mode_tree_menu(
+        &self,
+        client: ClientId,
+        pane: PaneId,
+        menu: &CustomizeMenu,
+        x: usize,
+        y: usize,
+    ) {
+        let state = {
+            let inner = self.inner.lock();
+            if inner.menus.contains_key(&client) {
+                return;
+            }
+            let Ok(Some(geometry)) = popup_client_geometry(&inner, client) else {
+                return;
+            };
+            let table: &[Option<CustomizeMenuItem>] = if menu.outside {
+                &CUSTOMIZE_OUTSIDE_MENU_ITEMS
+            } else {
+                &CUSTOMIZE_MENU_ITEMS
+            };
+            let row_room = usize::from(geometry.columns.saturating_sub(MENU_ROW_MARGIN));
+            let mut items: Vec<Option<MenuItem>> = Vec::new();
+            for entry in table {
+                let Some(item) = entry else {
+                    items.push(None);
+                    continue;
+                };
+                let layout = layout_menu_row(item.name, Some(item.annotation), row_room);
+                items.push(Some(MenuItem {
+                    name: layout.name,
+                    key: Some(item.key.to_owned()),
+                    annotation: layout.annotation,
+                    enabled: true,
+                }));
+            }
+            let title = if menu.outside {
+                String::new()
+            } else {
+                format!("#[align=centre]{}", menu.name)
+            };
+            let width = items
+                .iter()
+                .flatten()
+                .map(|item| menu_row_cells(&item.name, item.annotation.as_deref()))
+                .max()
+                .unwrap_or_default()
+                .max(menu_row_width(&title))
+                .saturating_add(usize::from(MENU_ROW_MARGIN));
+            let height = items.len().saturating_add(2);
+            let (Ok(width), Ok(height)) = (u16::try_from(width), u16::try_from(height)) else {
+                return;
+            };
+            if width > geometry.columns || height > geometry.rows {
+                return;
+            }
+            let Some(window) = client_overlay_style_window(&inner, client)
+                .or_else(|| inner.engine.state.window_for_pane(pane))
+            else {
+                return;
+            };
+            let Ok(defaults) = inner.engine.menu_options_for_window(window) else {
+                return;
+            };
+            let left = u16::try_from(x.saturating_sub(usize::from(width) / 2)).unwrap_or(u16::MAX);
+            let top = u16::try_from(y).unwrap_or(u16::MAX);
+            let left = overlay_origin_for_viewport(left, width, geometry.columns);
+            let top = overlay_origin_for_viewport(top, height, geometry.rows);
+            MenuState {
+                left,
+                top,
+                width,
+                height,
+                client_columns: geometry.columns,
+                client_rows: geometry.rows,
+                cell_width_px: geometry.cell_width_px,
+                cell_height_px: geometry.cell_height_px,
+                title,
+                style: overlay_style(&defaults.style, None),
+                selected_style: overlay_style(&defaults.selected_style, None),
+                border_style: overlay_style(&defaults.border_style, None),
+                border_lines: defaults.border_lines,
+                items,
+                selected: None,
+                stay_open: false,
+                mouse_keys: true,
+            }
+        };
+        {
+            let mut inner = self.inner.lock();
+            if inner.menus.contains_key(&client) {
+                return;
+            }
+            let Some(target) = ExecutionContext::for_pane(&inner.engine.state, pane) else {
+                return;
+            };
+            inner.menus.insert(
+                client,
+                MenuSession {
+                    state: state.clone(),
+                    commands: vec![None; state.items.len()],
+                    target,
+                    styles: OverlayStyleOverrides::default(),
+                    waiter: None,
+                    popup_owner: false,
+                    mode_tree: Some(ModeTreeMenu {
+                        pane,
+                        line: menu.line,
+                        outside: menu.outside,
+                    }),
                 },
             );
         }
@@ -18553,6 +18672,10 @@ impl Shared {
             {
                 self.popup_menu_choice(client, &key);
             }
+            return;
+        }
+        if let Some(owner) = session.mode_tree {
+            self.mode_tree_menu_choice(client, context, &owner, index);
             return;
         }
         let Some(command) = usize::try_from(index)
@@ -19569,41 +19692,12 @@ impl Shared {
                         }
                     }
                 };
+                if let PaneModeInput::Pointer { x, y, .. } = input
+                    && let Some(menu) = &result.menu
                 {
-                    let mut inner = self.inner.lock();
-                    if let Some(modes) = inner.pane_modes.get_mut(&pane) {
-                        modes.pop();
-                        modes.push(PaneModeRequest::Customize(mode));
-                    }
+                    self.raise_mode_tree_menu(client, pane, menu, x, y);
                 }
-                for command in &result.commands {
-                    let _ = self.execute(client, ClientKind::Interactive, context, command);
-                }
-                {
-                    let mut inner = self.inner.lock();
-                    let mut current =
-                        match inner.pane_modes.get(&pane).and_then(|modes| modes.last()) {
-                            Some(PaneModeRequest::Customize(mode)) => Some(mode.clone()),
-                            _ => None,
-                        };
-                    if let Some(mode) = current.as_mut() {
-                        let facts = format_hook_facts(&inner);
-                        let mut expand = customize_expander(&inner, pane, &facts);
-                        inner.engine.customize_finish(pane, mode, &mut expand);
-                    }
-                    if let (Some(mode), Some(modes)) = (current, inner.pane_modes.get_mut(&pane))
-                        && matches!(modes.last(), Some(PaneModeRequest::Customize(_)))
-                    {
-                        modes.pop();
-                        modes.push(PaneModeRequest::Customize(mode));
-                    }
-                }
-                if result.close {
-                    pop_pane_mode(&mut self.inner.lock(), pane);
-                    self.reap_pane_mode_kill_panes(client, ClientKind::Interactive, context);
-                    self.publish_snapshot();
-                }
-                self.publish_mux_snapshots();
+                self.apply_customize_result(client, context, pane, mode, &result);
                 true
             }
             PaneModeRequest::Switch(mut mode) => {
@@ -19670,6 +19764,85 @@ impl Shared {
                 true
             }
         }
+    }
+
+    fn apply_customize_result(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &mut ExecutionContext,
+        pane: PaneId,
+        mode: Box<CustomizeMode>,
+        result: &CustomizeResult,
+    ) {
+        {
+            let mut inner = self.inner.lock();
+            if let Some(modes) = inner.pane_modes.get_mut(&pane) {
+                modes.pop();
+                modes.push(PaneModeRequest::Customize(mode));
+            }
+        }
+        for command in &result.commands {
+            let _ = self.execute(client, ClientKind::Interactive, context, command);
+        }
+        {
+            let mut inner = self.inner.lock();
+            let mut current = match inner.pane_modes.get(&pane).and_then(|modes| modes.last()) {
+                Some(PaneModeRequest::Customize(mode)) => Some(mode.clone()),
+                _ => None,
+            };
+            if let Some(mode) = current.as_mut() {
+                let facts = format_hook_facts(&inner);
+                let mut expand = customize_expander(&inner, pane, &facts);
+                inner.engine.customize_finish(pane, mode, &mut expand);
+            }
+            if let (Some(mode), Some(modes)) = (current, inner.pane_modes.get_mut(&pane))
+                && matches!(modes.last(), Some(PaneModeRequest::Customize(_)))
+            {
+                modes.pop();
+                modes.push(PaneModeRequest::Customize(mode));
+            }
+        }
+        if result.close {
+            pop_pane_mode(&mut self.inner.lock(), pane);
+            self.reap_pane_mode_kill_panes(client, ClientKind::Interactive, context);
+            self.publish_snapshot();
+        }
+        self.publish_mux_snapshots();
+    }
+
+    fn mode_tree_menu_choice(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &ExecutionContext,
+        owner: &ModeTreeMenu,
+        index: u32,
+    ) {
+        let Some(feed) = usize::try_from(index)
+            .ok()
+            .and_then(|index| customize_menu_feed(owner.outside, index))
+        else {
+            return;
+        };
+        let Some(PaneModeRequest::Customize(mut mode)) = self
+            .inner
+            .lock()
+            .pane_modes
+            .get(&owner.pane)
+            .and_then(|modes| modes.last())
+            .cloned()
+        else {
+            return;
+        };
+        let result = {
+            let inner = self.inner.lock();
+            let facts = format_hook_facts(&inner);
+            let mut expand = customize_expander(&inner, owner.pane, &facts);
+            inner
+                .engine
+                .customize_menu_choice(owner.pane, &mut mode, owner.line, feed, &mut expand)
+        };
+        let mut context = context.clone();
+        self.apply_customize_result(client, &mut context, owner.pane, mode, &result);
     }
 
     /// `server_client_key_callback`'s mouse half. A decoded pointer event the
@@ -32618,6 +32791,13 @@ struct MenuSession {
     /// `pd->md` rather than on the client, and `popup_menu_done` switches on
     /// the chosen row's key instead of running a command.
     popup_owner: bool,
+    mode_tree: Option<ModeTreeMenu>,
+}
+
+struct ModeTreeMenu {
+    pane: PaneId,
+    line: usize,
+    outside: bool,
 }
 
 struct MenuWaiter {

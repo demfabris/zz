@@ -1,7 +1,10 @@
 mod customize;
 mod mode_prompt;
 mod switch_mode;
-pub use customize::CustomizeMode;
+pub use customize::{
+    CUSTOMIZE_MENU_ITEMS, CUSTOMIZE_OUTSIDE_MENU_ITEMS, CustomizeMenu, CustomizeMenuItem,
+    CustomizeMode, CustomizeResult, customize_menu_feed,
+};
 pub use mode_prompt::{ModeKey, ModePrompt, PromptOutcome};
 pub use switch_mode::{SwitchAction, SwitchMode};
 

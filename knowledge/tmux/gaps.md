@@ -23,11 +23,11 @@ Tracked gap groups: **43**. Classified items: **354**.
 - Decision: adopt: 3, native: 31, never: 9.
 - Priority: now: 1, next: 2, none: 40.
 - Closed history entries: 210.
-- Surface: command: 3, flag: 23, extension-flag: 5, native-command: 32, option: 31, format: 44, key: 28, binding: 37, native-key: 91, semantic: 51, presentation: 8, protocol: 1.
+- Surface: command: 3, flag: 23, extension-flag: 5, native-command: 32, option: 31, format: 43, key: 28, binding: 37, native-key: 91, semantic: 52, presentation: 8, protocol: 1.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 89 of those commands. The registry classifies 23 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 5 zz-only flags on tmux command names, 32 native command names, 31 options absent from `BEHAVES`, 44 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 0 currently documented hook-producer gaps, 28 omitted default keys, 37 divergent shared default bindings, 91 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 89 of those commands. The registry classifies 23 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 5 zz-only flags on tmux command names, 32 native command names, 31 options absent from `BEHAVES`, 43 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 0 currently documented hook-producer gaps, 28 omitted default keys, 37 divergent shared default bindings, 91 zz-only default keys.
 
 ## Enforcement boundary
 
@@ -399,14 +399,14 @@ zz deliberately replaces these tmux format-driven mode and overlay producers wit
 
 ### `formats.pane-current-command-empty`: Answer pane_current_command on a process-less pane
 
-Unlike cursor_flag, which formats.terminal-runtime already declares an explicit zz placeholder, pane_current_command is a backed format with a real value, so nothing on the books covers this divergence. Found by the TUI-018 verifying review on 2026-09-19 and confirmed identical on the pre-fix binary, so it is pre-existing and was not introduced by the caller-stream pass. It produces no recorded entry in compat/tui-client-commands.sh, so it blocks neither TUI-018 nor TUI-011. Left open rather than accepted because whether zz matches the pin here is fabrico's call, not the gate's.
+Unlike cursor_flag, which formats.terminal-runtime already declares an explicit zz placeholder, pane_current_command is a backed format with a real value, so nothing on the books covers this divergence. Found by the TUI-018 verifying review on 2026-09-19 and confirmed identical on the pre-fix binary, so it is pre-existing and was not introduced by the caller-stream pass. It produces no recorded entry in compat/tui-client-commands.sh, so it blocks neither TUI-018 nor TUI-011. Left open rather than accepted because whether zz matches the pin here is fabrico's call, not the gate's. Filed as a semantic item rather than a format: item: crates/zz-mux/src/compat_manifest_tests.rs asserts that every tracked format: item names a constant-backed placeholder, and pane_current_command is genuinely backed, so the divergence is in its semantics for a process-less pane and not in the variable being unbacked.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `next` / `easy`
 - Owner: `mux`
 - User impact: scripts, daily
-- Items: `format:pane_current_command`
+- Items: `semantic:pane-current-command-empty`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-daemon/src/daemon.rs`

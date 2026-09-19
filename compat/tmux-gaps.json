@@ -465,7 +465,7 @@
       ],
       "owner": "mux",
       "items": [
-        "format:pane_current_command"
+        "semantic:pane-current-command-empty"
       ],
       "evidence": [
         "resource:crates/zz-daemon/src/daemon.rs",
@@ -478,7 +478,7 @@
         "Deciding this means choosing whether zz adopts the pin's sticky start-command fallback or keeps the empty answer as a declared divergence. #{pane_current_command} also feeds automatic-rename-format and window naming, so either choice has to be measured against the window-name surface and not only the format read."
       ],
       "depends_on": [],
-      "reason": "Unlike cursor_flag, which formats.terminal-runtime already declares an explicit zz placeholder, pane_current_command is a backed format with a real value, so nothing on the books covers this divergence. Found by the TUI-018 verifying review on 2026-09-19 and confirmed identical on the pre-fix binary, so it is pre-existing and was not introduced by the caller-stream pass. It produces no recorded entry in compat/tui-client-commands.sh, so it blocks neither TUI-018 nor TUI-011. Left open rather than accepted because whether zz matches the pin here is fabrico's call, not the gate's."
+      "reason": "Unlike cursor_flag, which formats.terminal-runtime already declares an explicit zz placeholder, pane_current_command is a backed format with a real value, so nothing on the books covers this divergence. Found by the TUI-018 verifying review on 2026-09-19 and confirmed identical on the pre-fix binary, so it is pre-existing and was not introduced by the caller-stream pass. It produces no recorded entry in compat/tui-client-commands.sh, so it blocks neither TUI-018 nor TUI-011. Left open rather than accepted because whether zz matches the pin here is fabrico's call, not the gate's. Filed as a semantic item rather than a format: item: crates/zz-mux/src/compat_manifest_tests.rs asserts that every tracked format: item names a constant-backed placeholder, and pane_current_command is genuinely backed, so the divergence is in its semantics for a process-less pane and not in the variable being unbacked."
     },
     {
       "id": "formats.pane-runtime",

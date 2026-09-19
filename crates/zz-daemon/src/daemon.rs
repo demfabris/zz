@@ -25103,9 +25103,7 @@ impl Shared {
                 _ => false,
             }
         };
-        if announce
-            && let Some(writer) = self.client_writers.lock().get(&client).cloned()
-        {
+        if announce && let Some(writer) = self.client_writers.lock().get(&client).cloned() {
             Self::send_event(&writer, EventPayload::CommandClientExit);
         }
     }

@@ -4911,9 +4911,7 @@ mod tests {
     fn released_command_stdout_and_client_exit_append_after_the_chooser_presentation() {
         let presentation = super::Event {
             sequence: 0,
-            payload: super::EventPayload::ChooserPresentation {
-                presentation: None,
-            },
+            payload: super::EventPayload::ChooserPresentation { presentation: None },
         };
         let tag = postcard::to_stdvec(&presentation).expect("encode chooser presentation")[1];
         let released = super::Event {

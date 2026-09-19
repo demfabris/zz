@@ -1174,7 +1174,8 @@ fn run_command_mode(
         command_chain,
         |command| client.execute_streams(command.clone()),
         |_command, outcome| {
-            let status = print_chain_output(&outcome.stdout, raw_command_output(outcome.stdout_claim));
+            let status =
+                print_chain_output(&outcome.stdout, raw_command_output(outcome.stdout_claim));
             print_command_error(&outcome.stderr);
             status
         },

@@ -8703,7 +8703,6 @@ fn capture_styled_terminal(
                 CellContentTag::BgColorPalette => {
                     style.bg_color =
                         StyleColor::Palette(cell.bg_color_palette().map_err(capture_failure)?);
-                    style.bg_indexed = cell.bg_indexed().map_err(capture_failure)?;
                 }
                 CellContentTag::BgColorRgb => {
                     style.bg_color = StyleColor::Rgb(cell.bg_color_rgb().map_err(capture_failure)?);
@@ -8806,37 +8805,18 @@ fn push_capture_sgr(
         output.push_str(&attributes.join(";"));
         output.push('m');
     }
-    for (old, new, old_indexed, indexed, base) in [
-        (
-            previous.fg_color,
-            style.fg_color,
-            previous.fg_indexed,
-            style.fg_indexed,
-            30,
-        ),
-        (
-            previous.bg_color,
-            style.bg_color,
-            previous.bg_indexed,
-            style.bg_indexed,
-            40,
-        ),
-        (
-            previous.underline_color,
-            style.underline_color,
-            true,
-            true,
-            50,
-        ),
+    for (old, new, base) in [
+        (previous.fg_color, style.fg_color, 30),
+        (previous.bg_color, style.bg_color, 40),
+        (previous.underline_color, style.underline_color, 50),
     ] {
-        if (reset && new != StyleColor::None) || (!reset && (old != new || old_indexed != indexed))
-        {
-            push_capture_colour(output, new, base, indexed);
+        if (reset && new != StyleColor::None) || (!reset && old != new) {
+            push_capture_colour(output, new, base);
         }
     }
 }
 
-fn push_capture_colour(output: &mut String, colour: StyleColor, base: u16, indexed: bool) {
+fn push_capture_colour(output: &mut String, colour: StyleColor, base: u16) {
     use std::fmt::Write as _;
 
     match colour {
@@ -8844,10 +8824,10 @@ fn push_capture_colour(output: &mut String, colour: StyleColor, base: u16, index
         StyleColor::None => {
             let _ = write!(output, "\x1b[{}m", base + 9);
         }
-        StyleColor::Palette(index) if !indexed && base != 50 && index.0 < 8 => {
+        StyleColor::Palette(index) if base != 50 && index.0 < 8 => {
             let _ = write!(output, "\x1b[{}m", base + u16::from(index.0));
         }
-        StyleColor::Palette(index) if !indexed && base != 50 && index.0 < 16 => {
+        StyleColor::Palette(index) if base != 50 && index.0 < 16 => {
             let _ = write!(output, "\x1b[{}m", base + 60 + u16::from(index.0) - 8);
         }
         StyleColor::Palette(index) => {

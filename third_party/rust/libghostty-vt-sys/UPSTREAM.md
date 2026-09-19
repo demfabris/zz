@@ -8,8 +8,9 @@ This directory is a source snapshot of `libghostty-vt-sys` from
 - Upstream Ghostty pin: `a887df42c56f6de86c0fe6da9c4eeca37931e083`
 - Local Ghostty pin: `20c3eae04dee606349eb21e2dd0293b203d47179`
 - License: MIT OR Apache-2.0; the upstream MIT license is retained here.
-- Local override: the workspace patches both git-sourced wrapper packages to adjacent
-  snapshots from the same upstream v0.2.1 release commit.
+- Local override: the workspace patches the git-sourced sys package to this adjacent
+  snapshot from the upstream v0.2.1 release commit. The safe wrapper is not
+  vendored: `libghostty-vt` resolves to upstream from the same commit.
 
 ## Local delta
 
@@ -33,30 +34,16 @@ and updates the safe Kitty API.
 When replacing this snapshot, remove its git-source patch from the workspace, refresh `Cargo.lock`,
 and run the focused terminal tests plus the real macOS bundle build.
 
-## Capture provenance
+## No local patch
 
-`provenance.patch` retains explicit indexed foreground/background flags in the
-style's spare bits, including erased backgrounds, which spare cell bits carry
-for background-only cells. The cell and style allocations keep their existing
-size. The C style uses its trailing padding for two booleans; cell queries
-append tag 12. The adjacent safe wrapper exposes these fields. Both wrappers
-must accompany this patch; a stock prebuilt libghostty-vt does not implement the
-new query.
-
-ICH clears only the cells it moved when the insert count exceeds them, as the
-pin's `grid_view_insert_cells` does; the stale cells it leaves show on the pin's
-screen and in its captures alike.
+Since 2026-09-18 zz carries no patch on the vendored terminal engine (fabrico;
+see the amendment in `knowledge/designs/tui-parity.md`). The `provenance.patch`
+that retained explicit indexed foreground/background flags in spare style bits,
+the ICH hunk that kept the pin's stale cells after a wide insert, the build
+machinery that applied them, and the safe wrapper vendored to read those fields
+are all gone. `build.rs` fetches Ghostty at the pin above and builds it
+pristine; the pkg-config path accepts any installed libghostty-vt.
 
 Tabs carry no provenance. The pin prints a literal tab for every cell a tab
 produced, and fabrico decided on 2026-09-18 that zz captures the spaces on
 screen instead (see `knowledge/designs/tui-parity.md`).
-
-The build never edits the Ghostty source it fetches or is given. It mirrors
-that tree into `OUT_DIR/ghostty-provenance-<hash>`, hard-linking every file but
-the ones the patch touches, applies the patch there and installs into a sibling
-directory keyed by the same hash of the patch and the Ghostty commit, so an
-unpatched or differently patched build in the same target never reuses it. A
-fetched tree an older build patched in place is restored first; an explicit
-`GHOSTTY_SOURCE_DIR` carrying such a patch is refused. The pkg-config path
-accepts only packages declaring `zz_capture_provenance=1`; it falls back to the
-patched source build for an unmarked library.

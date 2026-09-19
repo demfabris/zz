@@ -461,8 +461,8 @@ strict-key-validation
 update-environment
 
 === smoke/plugin-runtime-oh-my-tmux, runs 2 and 3 at the rebased tip ===
-/tmp/claude-1000/-home-demfabris-dev-zz/80358f5e-93dc-42ea-aa68-fbfa217d5c38/scratchpad/omt-run2.txt:| smoke/plugin-runtime-oh-my-tmux | 4 | yes | 0 | yes | yes | yes |
-/tmp/claude-1000/-home-demfabris-dev-zz/80358f5e-93dc-42ea-aa68-fbfa217d5c38/scratchpad/omt-run3.txt:| smoke/plugin-runtime-oh-my-tmux | 4 | yes | 0 | yes | yes | yes |
+<scratchpad> smoke/plugin-runtime-oh-my-tmux | 4 | yes | 0 | yes | yes | yes |
+<scratchpad> smoke/plugin-runtime-oh-my-tmux | 4 | yes | 0 | yes | yes | yes |
 
 === smoke/args-parse-bind-key, run 2 at the rebased tip ===
 | smoke/args-parse-bind-key | 3 | yes | 0 | yes | yes | yes |

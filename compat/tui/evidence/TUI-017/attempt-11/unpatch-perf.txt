@@ -1,0 +1,19 @@
+building pristine lib...
+building patched lib...
+both libs built
+both drivers linked
+warmup done
+samples done: 120
+edits/tabs/pristine: n=15 median_cpu=0.159074 min=0.152928
+edits/tabs/patched: n=15 median_cpu=0.161548 min=0.156770
+edits/tabs: patched-vs-pristine +1.56%
+edits/spaces/pristine: n=15 median_cpu=0.131290 min=0.125698
+edits/spaces/patched: n=15 median_cpu=0.132417 min=0.128391
+edits/spaces: patched-vs-pristine +0.86%
+overwrite/tabs/pristine: n=15 median_cpu=0.055244 min=0.052578
+overwrite/tabs/patched: n=15 median_cpu=0.054152 min=0.053055
+overwrite/tabs: patched-vs-pristine -1.98%
+overwrite/spaces/pristine: n=15 median_cpu=0.030419 min=0.027533
+overwrite/spaces/patched: n=15 median_cpu=0.029932 min=0.028454
+overwrite/spaces: patched-vs-pristine -1.60%
+PERF-DONE

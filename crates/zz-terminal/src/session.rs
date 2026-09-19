@@ -18386,7 +18386,7 @@ mod tests {
     }
 
     #[test]
-    fn capture_keeps_the_cells_a_wide_insert_leaves_behind() {
+    fn capture_clears_the_cells_a_wide_insert_crosses() {
         let mut terminal = Terminal::new(TerminalOptions {
             cols: 80,
             rows: 24,
@@ -18400,28 +18400,28 @@ mod tests {
         };
         assert_eq!(
             capture_terminal(&terminal, None, options).unwrap(),
-            format!("{}E ABCD\n\n\n\nNEXT", " ".repeat(74))
+            format!("{}ABCD\n\n\n\nNEXT", " ".repeat(76))
         );
     }
 
     #[test]
-    fn styled_capture_matches_pinned_colour_and_attribute_transitions() {
+    fn styled_capture_emits_colour_and_attribute_transitions() {
         for (input, expected) in [
             (
                 "\x1b[44mABC\tDEF\x1b[0m\r\x1b[6G\x1b[41mX\x1b[0m",
                 "\x1b[44mABC\x1b[49m  \x1b[41mX\x1b[49m  \x1b[44mDEF\x1b[49m",
             ),
             ("\x1b[31mRED\x1b[0m", "\x1b[31mRED\x1b[39m"),
-            ("\x1b[38;5;1mRED\x1b[0m", "\x1b[38;5;1mRED\x1b[39m"),
+            ("\x1b[38;5;1mRED\x1b[0m", "\x1b[31mRED\x1b[39m"),
             (
                 "\x1b[31mA\x1b[38;5;1mB\x1b[31mC\x1b[0m",
-                "\x1b[31mA\x1b[38;5;1mB\x1b[31mC\x1b[39m",
+                "\x1b[31mABC\x1b[39m",
             ),
             (
                 "\x1b[48;5;1mA\x1b[41mB\x1b[0m",
-                "\x1b[48;5;1mA\x1b[41mB\x1b[49m",
+                "\x1b[41mAB\x1b[49m",
             ),
-            ("\x1b[48;5;1m\x1b[2K\x1b[0m", "\x1b[48;5;1m"),
+            ("\x1b[48;5;1m\x1b[2K\x1b[0m", "\x1b[41m"),
             ("\x1b[38;5;196mRED\x1b[0m", "\x1b[38;5;196mRED\x1b[39m"),
             ("\x1b[38;2;1;2;3mRGB\x1b[0m", "\x1b[38;2;1;2;3mRGB\x1b[39m"),
             ("\x1b[1mBOLD\x1b[0m", "\x1b[1mBOLD\x1b[0m"),

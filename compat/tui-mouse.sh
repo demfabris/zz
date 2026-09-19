@@ -1453,20 +1453,21 @@ case_paste_into_prompt() {
 }
 case_paste_under_menu() {
   CASE_LABEL=paste-under-menu
+  respawn_program_both sh -c "printf 'MENUPROG\n'; stty -echo -icanon min 1 time 0; exec cat"
+  both_screen_has MENUPROG 'the paste program'
   run_on_both set-option -gu @menupick
   run_on_both bind-key -T prefix E display-menu -x 4 -y 8 -T PASTEMENU \
     'Alpha item' a 'set-option -g @menupick alpha' \
     'Beta item' b 'set-option -g @menupick beta'
-  mark_both pastemenu
   send_bytes zz $'\002'
   send_bytes tmux $'\002'
   send_bytes zz 'E'
   send_bytes tmux 'E'
   both_screen_has PASTEMENU 'the paste menu'
-  settle_both MARK-pastemenu 'the paste menu'
+  settle_pointer
   send_bytes zz "$(paste_bytes_for zz)"
   send_bytes tmux "$(paste_bytes_for tmux)"
-  settle_both MARK-pastemenu 'the paste under the menu'
+  settle_pointer
   check_screen PASTE_MENU paste-under-menu/screen
   assert_value paste-under-menu/option \
     "$(option_value zz @menupick)" "$(option_value tmux @menupick)"
@@ -1475,6 +1476,8 @@ case_paste_under_menu() {
   both_screen_lacks PASTEMENU 'the paste menu closed'
   run_on_both unbind-key -T prefix E
   run_on_both set-option -gu @menupick
+  respawn_shell_both
+  settle_both '$' 'the shell after the paste menu'
 }
 
 FOCUS_BYTES=$'\033[O\033[I'
@@ -1705,6 +1708,166 @@ client_session() {
 client_session_is() {
   [ "$(client_session "$1")" = "$2" ]
 }
+MENU_RELEASE_SABOTAGE_SIDE=""
+MENU_DRAG_SABOTAGE=""
+MENU_TAGALL_SABOTAGE=""
+menu_press_both() {
+  local button="$1" column="$2" row="$3" side aimed aimed_row
+  for side in zz tmux; do
+    aimed="$column"
+    aimed_row="$row"
+    if [ "$side" = "$CLICK_SABOTAGE_SIDE" ]; then
+      [ -n "$CLICK_SABOTAGE_COLUMN" ] && aimed="$CLICK_SABOTAGE_COLUMN"
+      [ -n "$CLICK_SABOTAGE_ROW" ] && aimed_row="$CLICK_SABOTAGE_ROW"
+    fi
+    send_mouse "$side" "$button" "$aimed" "$aimed_row" M
+  done
+}
+menu_release_both() {
+  local button="$1" column="$2" row="$3" side
+  for side in zz tmux; do
+    [ "$side" = "$MENU_RELEASE_SABOTAGE_SIDE" ] && continue
+    send_mouse "$side" "$button" "$column" "$row" m
+  done
+}
+menu_drag_both() {
+  local press_column="$1" press_row="$2" column="$3" row="$4" side
+  for side in zz tmux; do
+    if [ "$side" = zz ] && [ -n "$MENU_DRAG_SABOTAGE" ]; then
+      send_mouse "$side" 34 "$press_column" "$press_row" M
+    else
+      send_mouse "$side" 34 "$column" "$row" M
+    fi
+  done
+}
+menu_drag_release_both() {
+  local press_column="$1" press_row="$2" column="$3" row="$4" side
+  for side in zz tmux; do
+    if [ "$side" = zz ] && [ -n "$MENU_DRAG_SABOTAGE" ]; then
+      send_mouse "$side" 2 "$press_column" "$press_row" m
+    else
+      send_mouse "$side" 2 "$column" "$row" m
+    fi
+  done
+}
+case_customize_mouse_menu() {
+  CASE_LABEL=customize-mouse-menu
+  local left top column row
+  customize_open_both
+  left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
+  top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  column="$((left + 4))"
+  row="$((top + 3))"
+  menu_press_both 2 "$column" "$row"
+  both_screen_has 'Tag All' 'the tree menu'
+  settle_pointer
+  check_screen MODE_POINTER customize-mouse-menu-open/screen
+  menu_release_both 2 "$column" "$row"
+  settle_pointer
+  check_screen MODE_POINTER customize-mouse-menu-release/screen
+  CLICK_SABOTAGE_SIDE=""
+  CLICK_SABOTAGE_COLUMN=""
+  CLICK_SABOTAGE_ROW=""
+  MENU_RELEASE_SABOTAGE_SIDE=""
+  send_mouse_both 2 "$column" "$row" m
+  settle_pointer
+  menu_press_both 2 "$column" "$((top + 1))"
+  both_screen_has 'Tag All' 'the tree menu for Expand'
+  settle_pointer
+  send_bytes zz $'\033[C'
+  send_bytes tmux $'\033[C'
+  both_screen_lacks 'Tag All' 'the tree menu after Expand'
+  settle_pointer
+  check_screen MODE_POINTER customize-mouse-menu-expand/screen
+  row="$((top + 2))"
+  menu_press_both 2 "$column" "$row"
+  both_screen_has 'Tag All' 'the tree menu for Tag'
+  settle_pointer
+  menu_drag_both "$column" "$row" "$((column - 1))" "$((row + 4))"
+  menu_drag_release_both "$column" "$row" "$((column - 1))" "$((row + 4))"
+  both_screen_lacks 'Tag All' 'the tree menu after Tag'
+  settle_pointer
+  check_screen MODE_POINTER customize-mouse-menu-tag/screen
+  menu_press_both 2 "$column" "$row"
+  both_screen_has 'Tag All' 'the tree menu for Tag None'
+  settle_pointer
+  send_bytes zz 'T'
+  send_bytes tmux 'T'
+  both_screen_lacks 'Tag All' 'the tree menu after Tag None'
+  settle_pointer
+  check_screen MODE_POINTER customize-mouse-menu-tag-none/screen
+  menu_press_both 2 "$column" "$row"
+  both_screen_has 'Tag All' 'the tree menu for control T'
+  settle_pointer
+  send_bytes zz $'\024'
+  send_bytes tmux $'\024'
+  both_screen_has 'Tag All' 'the tree menu kept by control T'
+  settle_pointer
+  check_screen MODE_POINTER customize-mouse-menu-tag-ctrl/screen
+  menu_release_both 2 "$column" "$row"
+  settle_pointer
+  menu_press_both 2 "$column" "$row"
+  both_screen_has 'Tag All' 'the tree menu for Tag All'
+  settle_pointer
+  if [ -n "$MENU_TAGALL_SABOTAGE" ]; then
+    send_mouse zz 34 "$((column - 1))" "$((row + 4))" M
+    send_mouse zz 2 "$((column - 1))" "$((row + 4))" m
+  else
+    send_mouse zz 34 "$((column - 1))" "$((row + 5))" M
+    send_mouse zz 2 "$((column - 1))" "$((row + 5))" m
+  fi
+  send_mouse tmux 34 "$((column - 1))" "$((row + 5))" M
+  send_mouse tmux 2 "$((column - 1))" "$((row + 5))" m
+  both_screen_lacks 'Tag All' 'the tree menu after Tag All'
+  settle_pointer
+  check_screen MODE_POINTER customize-mouse-menu-tag-all/screen
+  menu_press_both 2 "$column" "$row"
+  both_screen_has 'Tag All' 'the tree menu for Select'
+  settle_pointer
+  send_bytes zz $'\r'
+  send_bytes tmux $'\r'
+  both_screen_lacks 'Tag All' 'the tree menu after Select'
+  settle_pointer
+  check_screen MODE_POINTER customize-mouse-menu-select/screen
+  send_to_pane_both "=$INNER_SESSION:0.0" Escape
+  settle_pointer
+  menu_press_both 2 "$column" "$row"
+  both_screen_has 'Tag All' 'the tree menu for Cancel'
+  settle_pointer
+  send_bytes zz 'q'
+  send_bytes tmux 'q'
+  wait_for 'the pin left its pane mode' pane_in_mode_is tmux "=$INNER_SESSION:0.0" 0
+  wait_for 'zz left its pane mode' pane_in_mode_is zz "=$INNER_SESSION:0.0" 0
+  settle_pointer
+  check_screen MODE_POINTER customize-mouse-menu-cancel/screen
+}
+case_customize_mouse_menu_outside() {
+  CASE_LABEL=customize-mouse-menu-outside
+  local left top column row
+  customize_open_both
+  left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
+  top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  column="$((left + 4))"
+  row="$((top + 19))"
+  menu_press_both 2 "$column" "$row"
+  both_screen_has 'Scroll Left' 'the outside menu'
+  settle_pointer
+  check_screen MODE_POINTER customize-mouse-menu-outside-open/screen
+  send_bytes zz '<'
+  send_bytes tmux '<'
+  both_screen_lacks 'Scroll Left' 'the outside menu after Scroll Left'
+  settle_pointer
+  check_screen MODE_POINTER customize-mouse-menu-outside-scroll/screen
+  menu_press_both 2 "$column" "$row"
+  both_screen_has 'Scroll Left' 'the outside menu for Cancel'
+  settle_pointer
+  send_bytes zz 'q'
+  send_bytes tmux 'q'
+  wait_for 'the pin left its pane mode' pane_in_mode_is tmux "=$INNER_SESSION:0.0" 0
+  wait_for 'zz left its pane mode' pane_in_mode_is zz "=$INNER_SESSION:0.0" 0
+  settle_pointer
+  check_screen MODE_POINTER customize-mouse-menu-outside-cancel/screen
+}
 
 # --- dispositions ----------------------------------------------------------
 #
@@ -1775,6 +1938,8 @@ run_cases() {
   case_customize_mouse_quiet
   case_customize_mouse_prompt
   case_switch_mouse
+  case_customize_mouse_menu
+  case_customize_mouse_menu_outside
 
   printf '%s asserted checks, %s recorded checks\n' "$CHECKS" "$RECORDS"
   if [ "$FAILURES" -ne 0 ]; then
@@ -2086,6 +2251,54 @@ sc_one_sided_switch_wheel() {
   case_switch_mouse
   WHEEL_SABOTAGE_SIDE=""
 }
+sc_one_sided_customize_menu_row() {
+  mode_pointer_scene
+  mode_leave_both
+  CLICK_SABOTAGE_SIDE=zz
+  CLICK_SABOTAGE_ROW=$(($(pane_field tmux "=$INNER_SESSION:0.0" 2) + 4))
+  case_customize_mouse_menu
+  CLICK_SABOTAGE_SIDE=""
+  CLICK_SABOTAGE_ROW=""
+}
+sc_one_sided_customize_menu_column() {
+  mode_pointer_scene
+  mode_leave_both
+  CLICK_SABOTAGE_SIDE=zz
+  CLICK_SABOTAGE_COLUMN=$(($(pane_field tmux "=$INNER_SESSION:0.0" 1) + 21))
+  case_customize_mouse_menu
+  CLICK_SABOTAGE_SIDE=""
+  CLICK_SABOTAGE_COLUMN=""
+}
+sc_one_sided_customize_menu_release() {
+  mode_pointer_scene
+  mode_leave_both
+  MENU_RELEASE_SABOTAGE_SIDE=zz
+  case_customize_mouse_menu
+  MENU_RELEASE_SABOTAGE_SIDE=""
+}
+sc_one_sided_customize_menu_drag() {
+  mode_pointer_scene
+  mode_leave_both
+  MENU_DRAG_SABOTAGE=1
+  case_customize_mouse_menu
+  MENU_DRAG_SABOTAGE=""
+}
+sc_one_sided_customize_menu_tagall() {
+  mode_pointer_scene
+  mode_leave_both
+  MENU_TAGALL_SABOTAGE=1
+  case_customize_mouse_menu
+  MENU_TAGALL_SABOTAGE=""
+}
+sc_one_sided_customize_menu_outside_column() {
+  mode_pointer_scene
+  mode_leave_both
+  CLICK_SABOTAGE_SIDE=zz
+  CLICK_SABOTAGE_COLUMN=$(($(pane_field tmux "=$INNER_SESSION:0.0" 1) + 25))
+  case_customize_mouse_menu_outside
+  CLICK_SABOTAGE_SIDE=""
+  CLICK_SABOTAGE_COLUMN=""
+}
 
 run_self_check() {
   start_both
@@ -2155,6 +2368,18 @@ run_self_check() {
     sc_one_sided_customize_click
   self_check_case "switch-mode's wheel held back on zz only" catches \
     sc_one_sided_switch_wheel
+  self_check_case "zz's tree menu press aimed one row lower" catches \
+    sc_one_sided_customize_menu_row
+  self_check_case "zz's tree menu press aimed seventeen cells right" catches \
+    sc_one_sided_customize_menu_column
+  self_check_case "zz's tree menu release held back" catches \
+    sc_one_sided_customize_menu_release
+  self_check_case "zz's tree menu drag released on the press cell" catches \
+    sc_one_sided_customize_menu_drag
+  self_check_case "zz's Tag All drag released on the Tag row" catches \
+    sc_one_sided_customize_menu_tagall
+  self_check_case "zz's outside menu press aimed twenty cells right" catches \
+    sc_one_sided_customize_menu_outside_column
 
   if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
     printf '%s self-check cases did not behave as required\n' "$SELF_CHECK_FAILURES"

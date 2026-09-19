@@ -18417,10 +18417,7 @@ mod tests {
                 "\x1b[31mA\x1b[38;5;1mB\x1b[31mC\x1b[0m",
                 "\x1b[31mABC\x1b[39m",
             ),
-            (
-                "\x1b[48;5;1mA\x1b[41mB\x1b[0m",
-                "\x1b[41mAB\x1b[49m",
-            ),
+            ("\x1b[48;5;1mA\x1b[41mB\x1b[0m", "\x1b[41mAB\x1b[49m"),
             ("\x1b[48;5;1m\x1b[2K\x1b[0m", "\x1b[41m"),
             ("\x1b[38;5;196mRED\x1b[0m", "\x1b[38;5;196mRED\x1b[39m"),
             ("\x1b[38;2;1;2;3mRGB\x1b[0m", "\x1b[38;2;1;2;3mRGB\x1b[39m"),

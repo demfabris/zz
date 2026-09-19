@@ -1347,7 +1347,10 @@
           "compat/tui/evidence/TUI-018/attempt-12/fmt-check.txt",
           "compat/tui/evidence/TUI-018/attempt-12/compat-check.txt",
           "compat/tui/evidence/TUI-018/attempt-12/new-cases-final-binary.txt",
-          "compat/tui/evidence/TUI-018/attempt-12/streams-final.txt"
+          "compat/tui/evidence/TUI-018/attempt-12/streams-final.txt",
+          "compat/tui/evidence/TUI-018/attempt-12/clippy-final-tip.txt",
+          "compat/tui/evidence/TUI-018/attempt-12/compat-check-final-tip.txt",
+          "compat/tui/evidence/TUI-018/attempt-12/fmt-check-final-tip.txt"
         ],
         "review": "compat/tui/evidence/TUI-018/attempt-12/gate-handoff.md"
       }

@@ -157,3 +157,10 @@ source-file,load-buffer,display-message,split-window,run-shell,send-text,agent-s
   pane runtime facts outside `split-window -I`, and the scenario uses no `-I`. It belongs on the
   inherited list as a second intermittent of this box, beside
   `smoke/status-background-jobs`.
+
+## At the final tip
+
+`cargo fmt --all -- --check`, `clippy -p zz-protocol -p zz-client -p zz-daemon -p zz-cli
+--all-targets --all-features -D warnings` and `compat/check.sh` were re-run after the reflow, at the
+tip this branch pushes, and all three exit 0 (fmt-check-final-tip.txt, clippy-final-tip.txt,
+compat-check-final-tip.txt).

@@ -1,0 +1,8 @@
+fmt exit=0
+tests-mux-protocol-tui exit=0
+tests-daemon exit=101
+tests-daemon-solo exit=0
+clippy exit=0
+fmt-check exit=0
+CHAIN-C2-DONE
+tests-daemon-solo2 exit=0

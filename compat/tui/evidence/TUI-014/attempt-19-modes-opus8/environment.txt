@@ -1,0 +1,14 @@
+zz binary: target/debug/zz_cli built at f888ecd32d242bbcbdf939b6a4bca6e464602e3e, copied to target/lane/zz_cli-final before any run
+zz sha256: 89620dec52d5b7a98afe5cddae7aed2805b0418d107d8344fbbb7a3ec3030ad2
+zz revision: f888ecd32d242bbcbdf939b6a4bca6e464602e3e (worktree clean except this evidence directory)
+base: origin/main 394ef850e2909280ad84803461b0e7209d0c6b42 (release: zz 0.11.1)
+branch: campaign/tui-customize-4 rebased onto that base, pushed as campaign/tui-customize-5
+pin: tmux next-3.8 d77c9dc6aa021e4bc61f0da128c591af695e6466
+pin sha256: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+os: Linux 7.2.3-1-cachyos-deckify x86_64 GNU/Linux
+cpus: 16
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+cargo: cargo 1.97.0 (c980f4866 2026-06-30), always through /tmp/zz-cargo.sh (4G cap, --jobs 2, two shared flock slots)
+fixture environment: env -i with PATH=/usr/local/bin:/usr/bin:/bin HOME=/tmp/zz-emptyhome SHELL=/bin/sh TERM=xterm-256color LANG=C.UTF-8 LC_ALL=C.UTF-8 and ZZ_BIN, TMUX_BIN, ZZ_COMPAT_TMUX only; attached-client.sh adds USER and LOGNAME for its identity facts. No credential variable is in any fixture, probe or corpus environment, and no environment dump is committed.
+outer terminal: every TUI fixture drives its own outer pinned tmux at 80x24 on a throwaway /tmp socket
+PROTOCOL_VERSION: 105, unchanged by this pass; compat/wire-version.py reads "105 is unreleased (v0.11.1 shipped 104); appends are free"

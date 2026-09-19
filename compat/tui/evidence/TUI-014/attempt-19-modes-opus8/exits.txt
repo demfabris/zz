@@ -1,0 +1,12 @@
+tui-mouse exit=1
+tui-mouse-self-check exit=0
+tui-choosers exit=0
+tui-choosers-self-check exit=0
+tui-overlays exit=0
+tui-overlays-self-check exit=0
+tui-screen-diff exit=0
+tui-screen-diff-self-check exit=0
+tui-copy-mode exit=0
+tui-copy-mode-self-check exit=0
+attached-client exit=1
+CHAIN-A-DONE

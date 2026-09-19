@@ -1,0 +1,65 @@
+== build ==
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.50s
+== client-commands 1 ==
+ok    suspend-client
+all 536 asserted comparisons identical, 42 recorded not asserted (0 for a sibling lane, owners decided:TUI-014=3 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=25 gap:clients.interactive-refresh=8 gap:protocol.socket-acl=1 unattributed=0)
+== client-commands 2 ==
+ok    suspend-client
+all 536 asserted comparisons identical, 42 recorded not asserted (0 for a sibling lane, owners decided:TUI-014=3 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=25 gap:clients.interactive-refresh=8 gap:protocol.socket-acl=1 unattributed=0)
+== client-commands 3 ==
+ok    suspend-client
+all 536 asserted comparisons identical, 42 recorded not asserted (0 for a sibling lane, owners decided:TUI-014=3 decided:TUI-015=4 decided:TUI-016=1 decided:TUI-017=25 gap:clients.interactive-refresh=8 gap:protocol.socket-acl=1 unattributed=0)
+== client-commands self-check ==
+ok    self-check equivalence: every sabotage withdrawn
+self-check complete: every sabotage was caught in its own channel and both equivalences passed
+== mouse 1 ==
+67 asserted checks, 0 recorded checks
+all 67 asserted checks identical
+== mouse 2 ==
+67 asserted checks, 0 recorded checks
+all 67 asserted checks identical
+== mouse 3 ==
+67 asserted checks, 0 recorded checks
+all 67 asserted checks identical
+== mouse self-check ==
+ok    self-check zz's outside menu press aimed twenty cells right: caught
+self-check: every sabotage caught in its own channel
+== command-streams ==
+note  source-file-over-the-cap-value decided, not asserted: pinned tmux accumulates a source-file or load-buffer payload in 16 KiB chunks with no total limit and zz refuses one larger than MAX_AGENT_SEND_BYTES (1048576) at the reader, before the daemon sees a byte: bulk file transfer through a command client is a workload zz does not serve, because an unbounded stream lets one caller grow daemon memory without limit; decided 2026-09-14 by the orchestrator under fabrico's TUI parity contract of 2026-09-09; reversible
+all 208 asserted comparisons identical, 0 recorded not asserted, 5 decided (0 for a sibling lane)
+== copy-mode ==
+all 147 cases agree on every channel they assert, 0 recorded a difference elsewhere
+147 of those cases assert at least one channel; 0 assert none and are recorded in full
+== screen-diff ==
+ok    120x24-sidebar sidebar-withdrawn
+all 147 asserted checkpoints identical, 6 recorded not asserted
+== choosers ==
+ok    tall-closed
+all 78 asserted comparisons identical, 0 recorded not asserted (0 for a sibling lane)
+== overlays ==
+ok    panes-coloured-selected
+all 48 asserted comparisons identical, 0 recorded not asserted
+== superset ==
+ok    clients browser-screenshot-without-the-app
+all 197 asserted cases hold, 0 recorded not asserted
+== attached ==
+command-output tmux: rebound-q
+attached-client compatibility: PASS
+== verify-claims (all verified) ==
+
+every verified obligation holds up
+-- TUI-015 --
+every verified obligation holds up
+-- TUI-017 --
+every verified obligation holds up
+-- TUI-018 --
+every verified obligation holds up
+== clippy ==
+    Checking plist v1.10.1
+    Checking zz-xtask v0.11.1 (/home/demfabris/dev/zz-c11-modes-final/crates/zz-xtask)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7m 34s
+== fmt ==
+fmt clean
+== check.sh ==
+check exit=101
+GATE-DONE

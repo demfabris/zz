@@ -1,0 +1,6 @@
+2026-09-19, alienware Linux x86_64 (cachyos 7.2.3), Rust 1.97.0.
+Revision: 9cd1ae57b47475a3e2be297ebed9ab2f58929d28
+Pinned tmux: /home/demfabris/dev/zz-c11-modes-final/compat/.cache/tmux-src/tmux tmux next-3.8
+tmux_commit: d77c9dc6aa021e4bc61f0da128c591af695e6466
+zz_cli sha256: 237e7c0437a6eb616339c185a305233492d3eaddf8e8ec990b3eb44448c36603
+Engine: pristine upstream libghostty-vt, no vendored patch.

@@ -57,15 +57,14 @@ macro_rules! remote_path_fallback {
 // Runs under `sh -lc` so `zz` resolves through the login shell's PATH; the sentinel prefixes
 // let the parser skip whatever a login profile prints around the probe's own output.
 pub(crate) fn remote_socket_probe() -> String {
-    let desktop_dev_socket = if zz_protocol::app_identity::DEVELOPMENT {
-        "elif [ \"$(uname -s)\" = Darwin ] && [ -S \"/tmp/zz-dev-$USER/default.sock\" ]; \
-         then zz_dir=\"/tmp/zz-dev-$USER\"; "
-    } else {
-        ""
-    };
+    let desktop_socket = format!(
+        "elif [ \"$(uname -s)\" = Darwin ] && [ -S \"/tmp/{name}-$USER/default.sock\" ]; \
+         then zz_dir=\"/tmp/{name}-$USER\"; ",
+        name = zz_protocol::app_identity::DIRECTORY,
+    );
     shell_quote(&format!(
         "{fallback}if [ -n \"$XDG_RUNTIME_DIR\" ]; then zz_dir=\"$XDG_RUNTIME_DIR/{name}\"; \
-         {desktop_dev_socket}else zz_tmp=\"$TMPDIR\"; \
+         {desktop_socket}else zz_tmp=\"$TMPDIR\"; \
          if [ -z \"$zz_tmp\" ]; then zz_tmp=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null); fi; \
          case \"$zz_tmp\" in /*) ;; *) zz_tmp=/tmp ;; esac; \
          zz_dir=\"${{zz_tmp%/}}/{name}-$USER\"; fi; \
@@ -2164,7 +2163,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn remote_socket_probe_dev_prefers_existing_macos_desktop_socket() {
+    fn remote_socket_probe_prefers_existing_macos_desktop_socket() {
         let name = zz_protocol::app_identity::DIRECTORY;
         let desktop = tempfile::Builder::new()
             .prefix(&format!("{name}-"))
@@ -2195,12 +2194,16 @@ mod tests {
             ("USER", Some(user)),
             ("PATH", Some(path.as_str())),
         ];
-        let expected = if zz_protocol::app_identity::DEVELOPMENT {
-            &desktop_socket
-        } else {
-            &ssh_socket
-        };
-        assert_eq!(probe_socket_path(&environment), expected.to_str().unwrap());
+        assert_eq!(
+            probe_socket_path(&environment),
+            desktop_socket.to_str().unwrap()
+        );
+        environment[1].1 = None;
+        assert_eq!(
+            probe_socket_path(&environment),
+            desktop_socket.to_str().unwrap()
+        );
+        environment[1].1 = temporary.path().to_str();
         environment[0].1 = Some("/run/zz-test-runtime");
         assert_eq!(
             probe_socket_path(&environment),

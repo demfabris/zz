@@ -148,14 +148,30 @@ fn matches_pane(tmux: &str, pane: &str) -> bool {
         .is_some_and(|(_, suffix)| suffix == pane)
 }
 
-pub(crate) fn record_for_pane<'a>(records: &'a [PeerRecord], pane: &str) -> Option<&'a PeerRecord> {
+pub(crate) fn record_for_pane<'a>(
+    records: &'a [PeerRecord],
+    pane: &str,
+    pane_pid: Option<u32>,
+) -> Option<&'a PeerRecord> {
     let now = now_ms();
-    records.iter().find(|record| {
-        matches_pane(&record.tmux, pane)
-            && pid_alive(record.pid)
-            && now.abs_diff(record.updated_at) <= 24 * 60 * 60 * 1000
-            && !record.messaging_socket_path.as_os_str().is_empty()
-    })
+    let mut candidates = records
+        .iter()
+        .filter(|record| {
+            matches_pane(&record.tmux, pane)
+                && pid_alive(record.pid)
+                && now.abs_diff(record.updated_at) <= 24 * 60 * 60 * 1000
+                && !record.messaging_socket_path.as_os_str().is_empty()
+        })
+        .peekable();
+    candidates.peek()?;
+    let pids = pane_process_ids(&process_parents().ok()?, pane_pid?);
+    candidates.find(|record| pids.contains(&record.pid))
+}
+
+pub(crate) fn pane_process_ids(parents: &[(u32, u32)], pane_pid: u32) -> Vec<u32> {
+    let mut pids = descendants_by_depth(parents, pane_pid);
+    pids.insert(0, pane_pid);
+    pids
 }
 
 pub(crate) fn peer_name(pane: &str, name: Option<&str>) -> String {
@@ -865,6 +881,26 @@ mod tests {
         assert!(!matches_pane("work:@0.%13", "%3"));
         assert!(!matches_pane("work:@0.%3.extra", "%3"));
         assert!(!matches_pane("%3", "%3"));
+    }
+
+    #[test]
+    fn pane_records_must_live_inside_the_pane_process_tree() {
+        let me = std::process::id();
+        let record = |pid| PeerRecord {
+            pid,
+            tmux: "other:@0.%0".to_owned(),
+            messaging_socket_path: PathBuf::from("/tmp/cc-socks/peer.sock"),
+            updated_at: now_ms(),
+            ..PeerRecord::default()
+        };
+        let foreign = [record(std::os::unix::process::parent_id())];
+        assert!(record_for_pane(&foreign, "%0", Some(me)).is_none());
+        let own = [record(me)];
+        assert_eq!(
+            record_for_pane(&own, "%0", Some(me)).map(|record| record.pid),
+            Some(me)
+        );
+        assert!(record_for_pane(&own, "%0", None).is_none());
     }
 
     #[test]

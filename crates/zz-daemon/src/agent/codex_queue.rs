@@ -76,8 +76,8 @@ pub(crate) fn pane_runs_codex(pane_pid: u32) -> bool {
     let Ok(parents) = claude_peers::process_parents() else {
         return false;
     };
-    std::iter::once(pane_pid)
-        .chain(claude_peers::descendants_by_depth(&parents, pane_pid))
+    claude_peers::pane_process_ids(&parents, pane_pid)
+        .into_iter()
         .any(|pid| {
             #[cfg(target_os = "linux")]
             let executable = std::fs::read_link(format!("/proc/{pid}/exe")).ok();

@@ -13456,9 +13456,17 @@ impl Shared {
                     inner.engine.state.pane(pane).map(|pane| &pane.kind),
                     Some(PaneKind::Terminal)
                 )
-                .then_some(pane)
+                .then(|| {
+                    (
+                        pane,
+                        inner
+                            .engine
+                            .pane_runtime_facts(pane)
+                            .and_then(|runtime| runtime.pid),
+                    )
+                })
             };
-            if let Some(pane) = target {
+            if let Some((pane, pane_pid)) = target {
                 let codex = self.codex_terminal_context(pane);
                 let mut records = claude_peers::read_records().unwrap_or_else(|error| {
                     log::warn!(target: "zz::agent", "could not read Claude peers: {error}");
@@ -13467,7 +13475,9 @@ impl Shared {
                 if codex.is_some() {
                     records.retain(|record| record.zz.is_none());
                 }
-                if let Some(record) = claude_peers::record_for_pane(&records, &pane.to_string()) {
+                if let Some(record) =
+                    claude_peers::record_for_pane(&records, &pane.to_string(), pane_pid)
+                {
                     let (name, socket) = {
                         let peers = self.agent_peers.lock();
                         match context.pane.and_then(|pane| peers.get(&pane)) {
@@ -28649,8 +28659,15 @@ impl Shared {
                 .windows
                 .values()
                 .flat_map(|window| window.panes.iter())
-                .filter_map(|(pane, state)| {
-                    matches!(state.kind, PaneKind::Terminal).then_some(*pane)
+                .filter(|(_, state)| matches!(state.kind, PaneKind::Terminal))
+                .map(|(pane, _)| {
+                    (
+                        *pane,
+                        inner
+                            .engine
+                            .pane_runtime_facts(*pane)
+                            .and_then(|runtime| runtime.pid),
+                    )
                 })
                 .collect::<Vec<_>>()
         };
@@ -28658,9 +28675,9 @@ impl Shared {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        for pane in panes {
+        for (pane, pane_pid) in panes {
             let target = pane.to_string();
-            let value = claude_peers::record_for_pane(&records, &target)
+            let value = claude_peers::record_for_pane(&records, &target, pane_pid)
                 .filter(|record| {
                     let updated_at = if record.status_updated_at == 0 {
                         record.updated_at
@@ -28789,7 +28806,7 @@ impl Shared {
             }
         };
         records.retain(|record| record.zz.is_none());
-        if claude_peers::record_for_pane(&records, &pane.to_string()).is_some() {
+        if claude_peers::record_for_pane(&records, &pane.to_string(), metadata.pid).is_some() {
             peers.remove(&pane);
             return;
         }

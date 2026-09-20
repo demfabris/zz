@@ -20,8 +20,11 @@ not published the registry shape as a stable contract.
 
 `agent-send -t %N TEXT` first resolves the target pane. For a terminal pane, the daemon looks for
 a Claude Code registry record whose `tmux` field ends in the exact pane component `%N`, whose pid
-is alive, and whose `updatedAt` falls within 24 hours. If it finds one, it posts the existing
-command payload to that record's socket. Stdin, the `--context` header, and the 1 MiB payload
+is alive, and whose `updatedAt` falls within 24 hours. The record's pid must also be the pane's
+shell or one of its descendants: pane ids repeat across zz daemons and real tmux servers, so the
+suffix alone once routed a test daemon's fixture greetings into a Claude session that happened to
+sit in real tmux pane `%0`. If it finds one, it posts the existing command payload to that
+record's socket. Stdin, the `--context` header, and the 1 MiB payload
 limit retain their existing command behavior.
 
 Claude Code fills its `tmux` field by running `tmux display-message` itself, so zz's tmux wrapper

@@ -13,17 +13,18 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `crates/zz-client` — sans-IO client core: protocol reduction, chrome keymap, daemon-backed convergence simulator
 - `crates/zz-config` - renderer-free application config, settings actions, preference persistence, and update checks
 - `crates/zz-client-ffi` — C ABI over the client core (`include/zz-client.h`, link-verified by a C integration client)
+- `crates/zz-cli` — headless `zz_cli` binary: the CLI, raw-terminal attach, and the ssh-side entry point
 - `crates/zz-terminal` — terminal engine: PTY sessions, libghostty-vt state, frame snapshots
 - `crates/zz-browser` — CEF off-screen-rendering browser runtime
 - `crates/zz-chrome-import` — Chrome profile, cookie, and history import
 - `crates/zz-ui` — widget layer: a maintained full fork of gpui-component
-- `crates/zz-tui` — raw-terminal attach client
+- `crates/zz-tui` — raw-terminal attach client as a library (the binary lives in `zz-cli`)
 - `crates/zz-web` - local HTTP/WebSocket gateway for browser clients
 - `clients/web` - full-page GPUI/WASM client using zz-ui and zz-client, with its own Cargo workspace
 - `clients/ios` — adaptive SwiftUI/UIKit iPhone and iPad app over `zz-client-ffi`
 - `crates/zz-xtask` — build tooling: CEF bundling, packaging (`cargo xtask`)
 - `compat/` — tmux compat campaign: differential harness (`run.sh`), gap registry (`tmux-gaps.json`), dispatch-board client (`board.py`), progress meter, orchestration handoff (`orchestration/`)
-- `compat/tui/` — TUI parity campaign: proof ledger (`campaign.json`), validator and report generator (`tracker.py`), cycle runner (`run-1.js`)
+- `compat/tui/` — TUI parity campaign: proof ledger (`campaign.json`), validator and report generator (`tracker.py`), cycle runners (`run-N.js`); closed 2026-09-20 at 18/18
 - `knowledge/` — OKF knowledge bundle for the whole system (start at `index.md`)
 - `scripts/` — build, packaging, profiling, and fork-maintenance scripts (`forks.conf`)
 - `bench/` — terminal throughput benchmark harness

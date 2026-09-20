@@ -78,10 +78,11 @@ against every obligation mapped to that fixture rather than sliding past one.
 
 ## State
 
-The count is **11/12 baseline verified** (TUI-001 to TUI-010 and TUI-012; only TUI-011 is open, at
-review), added scope **1/6** with TUI-016 verified, at wire protocol 103 (unreleased). Main is green
-on the ubuntu box: build, workspace clippy, rustfmt, `compat/attached-client.sh` and every fixture
-the day's gates ran.
+The count is **12/12 baseline verified** and **6/6 added scope verified**, at wire protocol 105
+(unreleased): every obligation in the ledger holds a proof block. The last one, TUI-013, closed on the
+macbook on 2026-09-20 (see "Launching the deferred macOS run" below). The paragraphs that follow are the
+campaign's history as it stood on 2026-09-15 and 2026-09-19; `HANDOFF.md` is the resume point if the
+campaign reopens.
 
 The 2026-09-15 day on the ubuntu box closed cycle 9 (the introspection landing, `627e717a`) and landed
 cycle 10's stream lane (`7e7cb1ee`, TUI-018 at review), then the menus second half together with the
@@ -165,3 +166,18 @@ override (see `M` at its top).
 
 A single unattended session can run the same loop by hand: claim the front, follow the runner's
 worker prompt in a worktree, get an independent review, run the gate stages, ledger, release.
+
+### Close-out, 2026-09-20 (macbook)
+
+Ran by hand in one session: `run-2.js` failed `lint-runner.py` at launch (13 of its 16 rules,
+including the wire rule at 99 against the tree's 105, agent concurrency and the cargo caps), so
+the recipe above was followed without the runner. An attested `target/debug/zz_cli` at `04a39258` (equal to
+`origin/main`, clean tree) passed `compat/tui-pane-geometry.sh` three of three in 5.5, 5.5 and
+5.4 seconds against the 10 second bound with every asserted measurement identical, on the
+platform that recorded the expiry; `compat/status-row.sh` exit 0 at 14 identical (the alienware
+`%b` red was `LC_TIME`, unset here); `smoke/tui-client-input-backpressure` clean on every
+channel. The recorded expiry is bounded to an unattested binary that no longer exists and no
+defect is named for it; the fixture's retained dump makes any recurrence self-documenting.
+Evidence and the independent review are under `evidence/TUI-013/attempt-01/`. **TUI-013 verified;
+the ledger is 12/12 and 6/6.** The lock front `F-TUI-MACOS-TIMEOUT` was minted, held and
+integrated on the board.

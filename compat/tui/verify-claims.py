@@ -47,6 +47,7 @@ FIXTURES = {
     "TUI-010": ["compat/tui-output-backpressure.sh"],
     "TUI-011": ["compat/tui-client-commands.sh"],
     "TUI-012": ["compat/tui-superset.sh"],
+    "TUI-013": ["compat/tui-pane-geometry.sh"],
     "TUI-014": ["compat/tui-client-commands.sh", "compat/tui-choosers.sh"],
     "TUI-015": ["compat/tui-client-commands.sh"],
     "TUI-016": ["compat/tui-client-commands.sh"],

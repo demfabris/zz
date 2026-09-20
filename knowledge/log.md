@@ -1,5 +1,8 @@
 # Update Log
 
+## 2026-09-20
+* **Update**: TUI parity campaign complete: TUI-013, the recorded macOS geometry-report timeout, verified on the macbook. An attested `zz_cli` at `04a39258` passed `compat/tui-pane-geometry.sh` three of three in about 5.5 seconds a run, `status-row.sh` and the backpressure smoke scenario were clean, and the 2026-09-09 expiry is bounded to an unattested binary that no longer exists with no defect named. The ledger reads 12/12 baseline and 6/6 added scope with no open obligation. `run-2.js` was not launched: it fails 13 of `lint-runner.py`'s 16 rules, so the loop ran by hand with an independent review.
+
 ## 2026-09-16
 * **Update**: Fixed BH-001 prompt replay for both providers, BH-002 inline-code fragment fills, and BH-004 synchronized terminal publication with a one-second timeout. Added regression coverage; BH-003 resize history corruption remains under investigation.
 * **Creation**: Recorded the interactive bughunt: both-provider Agent message loss, inline-code wrapping, resize corruption in Claude terminals, partial recovery after pane movement, and isolated synchronized-output reproduction. Corrected Agent transcript retention documentation; no product fixes.

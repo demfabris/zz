@@ -4,7 +4,7 @@ title: "TUI parity campaign"
 description: "TUI parity obligations, their proof status, and progress against the fixed baseline."
 resource: compat/tui/campaign.json
 tags: [tmux, tui, compatibility, campaign]
-timestamp: 2026-09-19T00:00:00Z
+timestamp: 2026-09-20T00:00:00Z
 ---
 
 # TUI parity campaign
@@ -17,11 +17,11 @@ The contract compares CLI stdout, stderr and exit codes exactly, and rendered ce
 
 Existing tmux gap decisions remain in `compat/tmux-gaps.json`. Accepted or closed source gaps do not establish TUI parity. Only obligations with verified proof count as complete.
 
-Fixed baseline: **12/12 verified**. Added scope: **5/6 verified**.
+Fixed baseline: **12/12 verified**. Added scope: **6/6 verified**.
 
-Status counts: unmeasured: 1, different: 0, active: 0, review: 0, blocked: 0, verified: 17.
+Status counts: unmeasured: 0, different: 0, active: 0, review: 0, blocked: 0, verified: 18.
 
-Dependency-ready obligations, by priority: TUI-013.
+Dependency-ready obligations, by priority: none.
 
 ## everyday: Everyday terminal use
 
@@ -31,7 +31,7 @@ Dependency-ready obligations, by priority: TUI-013.
 | TUI-002: Complete screen and interaction comparison | verified | 2 | TUI-001 |
 | TUI-003: Stock launcher, command and key behavior | verified | 3 | TUI-002 |
 | TUI-004: Default canvas, status and pane borders | verified | 4 | TUI-002 |
-| TUI-013: Recorded macOS geometry-report timeout | unmeasured | 13 | none |
+| TUI-013: Recorded macOS geometry-report timeout | verified | 13 | none |
 
 ## interactive: Interactive surfaces
 
@@ -738,7 +738,7 @@ Review: `compat/tui/evidence/TUI-012/attempt-01/review.md`.
 
 ### TUI-013: Recorded macOS geometry-report timeout
 
-Status: unmeasured.
+Status: verified.
 
 Acceptance:
 
@@ -753,9 +753,25 @@ Sources:
 
 Tmux gap references: `harness.proof-holes`, `tui.client-input-backpressure`.
 
-SPLIT FROM TUI-001 CLAUSE 2 on 2026-09-09 (decided 2026-09-09 by fabrico, relayed in-session: 'can we continue for now and record that test for later'; reversible). THE RECORD: an exploratory run on 2026-09-09 on the macbook exited 2 with 'zz geometry report did not happen within 10 seconds' from an unattested, never-rebuilt target/debug/zz whose revision is unrecoverable. ALREADY KNOWN: the stale-pre-fix-binary explanation is refuted twice by tui.client-input-backpressure's resolution (the fixture exited 0 at pre-fix 012b4dcc, and the outer pinned tmux drains continuously so the stalled backpressure can never build in this fixture on any platform); cycle 1 made compat/tui-pane-geometry.sh retain the full timeout dump on every expiry, proven by sabotage (see compat/tui/evidence/TUI-001/attempt-01/timeout-diagnostics/), so any macOS recurrence self-documents; an attested Linux build passes six of six runs in 4-5s against the 10s bound. WHAT THIS NEEDS: one attested build and three fixture runs on the macbook.
+MEASURED 2026-09-20 on the macbook (macOS 27.0 build 26A428, Apple M4 Max, 16 cores), the platform that recorded the expiry, from the shared checkout /Users/demfabris/dev/zz at 04a39258974fed54a067df5ed27425b9faf128b4 (equal to origin/main), clean apart from this attempt's evidence directory. The binary is target/debug/zz_cli (since the 2026-09-16 binary split the CLI and daemon live in crates/zz-cli; no target/debug/zz exists in this checkout today), built there by cargo build -p zz-cli, zz 0.11.1, sha256 e4e85474cef55166008164fb3cfdbed9d76f8a1a8b3b96a4283b3222188214a4; the hash identifies the artifact, the revision plus the clean tree attest it. Pin compat/.cache/tmux-src/tmux at d77c9dc6, verified by compat/fetch-tmux.sh, tmux -V next-3.8. bash 5.3.20 first on PATH (/bin/bash is 3.2), TERM=xterm-ghostty, LANG and LC_ALL en_US.UTF-8, LC_TIME unset. CLAUSE 1: compat/tui-pane-geometry.sh exits 0 THREE times out of three, consecutive, in 5.5 s, 5.5 s and 5.4 s against its own 10 second bound; each run 'all 6 asserted measurements identical': 80x24 both 80 columns, 100x24 both 100, 120x24 both 120, rows 23 on both sides at every size; stderr empty on all three and no /tmp/zzgeo-diag.* directory left, so no wait fired and there is no timeout dump to read. The wait that fired in the record is measure()'s and it answers in well under a second here. CLAUSE 2, THE BOUNDED EXPLANATION: the recorded expiry does not reproduce on its own platform under an attested build. The record was an exploratory run on 2026-09-09 on this machine that exited 2 on 'zz geometry report did not happen within 10 seconds' from a target/debug/zz that was unattested, not rebuilt before that run and overwritten the same evening, so its revision is unrecoverable and nothing about it can be measured now. The one mechanism ever proposed for it, a stale binary still carrying the pre-fix flush_output stall, is refuted by tui.client-input-backpressure's own resolution (the fixture exited 0 at pre-fix 012b4dcc, and its inner clients run inside an outer pinned tmux that drains them continuously, so that stall cannot build in this fixture on any platform), and that stall is measurably absent on this box at this revision: compat/run.sh --strict-geometry smoke/tui-client-input-backpressure exits 0, 2 steps, 0 divergences on every channel. An attested build at this revision passes three of three on the platform that recorded the expiry. Since cycle 1 the fixture retains its full dump on any expiry (which wait fired, both outer screens, both servers' client and pane lists, the daemon's stdout and stderr, each client's stderr), proven by sabotage under TUI-001's attempt-01, so a recurrence self-documents and opens a new obligation with that dump attached. This bounds the recorded expiry to the state of an unattested binary that no longer exists; what defect, if any, it carried is not evidenced and this record names none. STATUS ROW, retained as the lane's step (e): compat/status-row.sh exits 0 here, all 14 comparisons identical, none recorded. The %b divergence TUI-001 recorded on alienware came from LC_TIME=pt_BR.UTF-8; this box runs LC_ALL=en_US.UTF-8 with LC_TIME unset, so both binaries print English month names. A measurement of the locale, not evidence that divergence is fixed: crates/zz-mux/src/formats.rs still expands %b through chrono. HOW THIS RAN: compat/tui/run-2.js failed compat/tui/lint-runner.py at launch (13 of its 16 rules fail, including the wire rule at 99 against the tree's 105, agent concurrency and the cargo caps), so the loop ran by hand in one session as compat/tui/README.md allows: the measurements above, an independent adversarial review (review.md), both trackers and compat/check.sh, one records commit on main. Board front F-TUI-MACOS-TIMEOUT minted under TRIAGE and held for the run. compat/tui/verify-claims.py maps TUI-013 to compat/tui-pane-geometry.sh from this commit on, so the guard re-measures it like every other verified obligation (verify-claims.txt).
 
-Next action: Whenever fabrico is next on the macbook: follow compat/tui/README.md 'Launching the deferred macOS run' (mint F-TUI-MACOS-TIMEOUT, launch compat/tui/run-2.js). Nothing blocks on this meanwhile.
+Next action: none: verified on the platform that recorded the expiry. A future macOS expiry of compat/tui-pane-geometry.sh is self-documenting through the fixture's retained dump and opens a new obligation carrying that dump.
+
+Proof revision: `04a39258974fed54a067df5ed27425b9faf128b4`. Tmux: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
+
+Environment: macbook, macOS 27.0 build 26A428, Darwin 27.0.0 arm64, Apple M4 Max, 16 cores, 48 GB, rustc 1.97.0; bash 5.3.20 from /opt/homebrew/bin first on PATH (/bin/bash is 3.2), TERM=xterm-ghostty, LANG and LC_ALL en_US.UTF-8, LC_TIME unset. Shared checkout /Users/demfabris/dev/zz at 04a39258974fed54a067df5ed27425b9faf128b4, equal to origin/main, clean apart from this attempt's evidence directory. zz_cli built there by cargo build -p zz-cli --jobs 12 (warm target, 35 s), zz 0.11.1, sha256 e4e85474cef55166008164fb3cfdbed9d76f8a1a8b3b96a4283b3222188214a4; the hash identifies the artifact, the revision plus the clean tree attest it. Pin compat/.cache/tmux-src/tmux at d77c9dc6aa021e4bc61f0da128c591af695e6466 verified by compat/fetch-tmux.sh, tmux -V next-3.8, sha256 f9f20dd7bbba3dc4d3ff833dc35d2d43d207715d2c8463c73c3ae6707dbe2617 (the pin's macOS build; the Linux gates' df2cafcb is the same commit built there). Isolated homes, config roots and short /tmp sockets are the fixtures' own. The records commit after this revision touches only the ledger, its generated report, the evidence directory and the campaign docs, so no run below is stale. Full capture: compat/tui/evidence/TUI-013/attempt-01/environment.txt
+
+Proof commands:
+
+- `PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_TMUX=/Users/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=/Users/demfabris/dev/zz/compat/.cache/plugins compat/tui-pane-geometry.sh /Users/demfabris/dev/zz/target/debug/zz_cli /Users/demfabris/dev/zz/compat/.cache/tmux-src/tmux -> exit 0 three consecutive times (5.5 s, 5.5 s, 5.4 s against the fixture's own 10 s bound), each 'all 6 asserted measurements identical': 80x24 both 80, 100x24 both 100, 120x24 both 120 columns, rows 23 on both sides at every size; stderr empty, no /tmp/zzgeo-diag.* directory left`
+- `PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_TMUX=... ZZ_COMPAT_CORPUS=... compat/status-row.sh /Users/demfabris/dev/zz/target/debug/zz_cli /Users/demfabris/dev/zz/compat/.cache/tmux-src/tmux -> exit 0 in 14.8 s, 'all 14 comparisons identical, none recorded'`
+- `PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_ZZ=/Users/demfabris/dev/zz/target/debug/zz_cli ZZ_COMPAT_TMUX=... ZZ_COMPAT_CORPUS=... compat/run.sh --strict-geometry smoke/tui-client-input-backpressure -> exit 0, 2 steps, 0 TOPO, 0 GEO, 0 FMT, 0 OUT and 0 WARN divergences, 'Nothing failed on the first pass': the one named candidate cause of the recorded expiry is measurably absent on this platform at this revision`
+- `ZZ_COMPAT_TMUX=... python3 compat/tui/verify-claims.py --run TUI-013 --zz /Users/demfabris/dev/zz/target/debug/zz_cli -> exit 0, 'all 6 asserted measurements identical', 'every verified obligation holds up'; compat/tui/verify-claims.py gained the TUI-013 -> compat/tui-pane-geometry.sh mapping in this records commit because compat/check.sh refuses a verified obligation it cannot re-measure`
+- `python3 compat/tui/tracker.py check -> exit 0; python3 compat/tui/tracker.py write-report; python3 compat/tmux-tracker.py check -> exit 0; PATH=/opt/homebrew/bin:$PATH compat/check.sh -> exit 0`
+
+Artifacts: `compat/tui/evidence/TUI-013/attempt-01/environment.txt`, `compat/tui/evidence/TUI-013/attempt-01/notes.md`, `compat/tui/evidence/TUI-013/attempt-01/geometry-run-1.stdout.txt`, `compat/tui/evidence/TUI-013/attempt-01/geometry-run-2.stdout.txt`, `compat/tui/evidence/TUI-013/attempt-01/geometry-run-3.stdout.txt`, `compat/tui/evidence/TUI-013/attempt-01/status-row.stdout.txt`, `compat/tui/evidence/TUI-013/attempt-01/smoke-tui-client-input-backpressure.stdout.txt`, `compat/tui/evidence/TUI-013/attempt-01/verify-claims.txt`.
+
+Review: `compat/tui/evidence/TUI-013/attempt-01/review.md`.
 
 ### TUI-014: Client mode tools in the raw TUI
 

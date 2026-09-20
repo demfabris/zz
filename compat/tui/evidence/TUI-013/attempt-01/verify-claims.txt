@@ -1,0 +1,7 @@
+verified: TUI-001, TUI-002, TUI-003, TUI-004, TUI-005, TUI-006, TUI-007, TUI-008, TUI-009, TUI-010, TUI-011, TUI-012, TUI-013, TUI-014, TUI-015, TUI-016, TUI-017, TUI-018
+re-measuring: TUI-013
+  comparing /Users/demfabris/dev/zz/target/debug/zz_cli
+  running compat/tui-pane-geometry.sh for TUI-013 ...
+    all 6 asserted measurements identical
+
+every verified obligation holds up

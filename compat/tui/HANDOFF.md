@@ -10,7 +10,7 @@ box reads origin before it decides anything. The resume point is the branch tabl
 | Fact | Value |
 | --- | --- |
 | `origin/main` | `10779511` at the wrap-up (the menus-3 plus mouse-context landing); any later commit came from a lane named below |
-| Ledger | **11/12 baseline verified** (only TUI-011 open, at review); added scope: TUI-016 verified, TUI-018 at review, TUI-014 and TUI-017 active, TUI-015 unmeasured on main (at review on its branch), TUI-013 unmeasured (needs macOS) |
+| Ledger | **11/12 baseline verified** (only TUI-011 open, at review); added scope: TUI-016 verified, TUI-018 at review, TUI-014 and TUI-017 active, TUI-015 unmeasured on main (at review on its branch), TUI-013 unmeasured (needs macOS). **Superseded 2026-09-19 and 2026-09-20: TUI-011 closed on the alienware gate (`04a39258`) and TUI-013 verified on the macbook, so the ledger is 12/12 and 6/6 with no open obligation; the rest of this file is history** |
 | `PROTOCOL_VERSION` | **103 SHIPPED in v0.10.0** (tagged 2026-09-16 00:28, now `origin/main` at `be5709df`), so 103 is frozen and **cycle 11's first wire append opens 104**; `compat/wire-version.py` enforces it inside `compat/check.sh` |
 | Board | `F-TUI-CYCLE-9-LANES` released at the wrap-up; MAIN and TRIAGE free; issue 7 carries every gate note of the day |
 | Workers | Claude agents (Agent tool, `model: opus`) until 14:30, then Codex CLI lanes (`codex exec`, gpt-6-astra, reasoning high) on fabrico's instruction; the same prompts, zones, proofs and JSON reports for both |
@@ -61,7 +61,7 @@ verified (its record says so in its own words). Today's position:
   imitate customize-mode and suspend-client under the superset principle; amend TUI-014's clauses to
   a measured refusal carrying the decision sentence). fabrico was asked twice on 2026-09-15 and had
   not decided at the wrap-up. Do not make that call in a lane.
-- TUI-013 needs a macOS box (`run-2.js`).
+- TUI-013 needed a macOS box; verified there on 2026-09-20 (`compat/tui/evidence/TUI-013/attempt-01/`).
 
 ## What each gate must know
 
@@ -166,4 +166,4 @@ verified (its record says so in its own words). Today's position:
 5. In parallel: the TUI-018 fix pass (three blockers above), the capture re-review or its next lane,
    the modes re-review; gate each with the trimmed protocol; the last gate verifies TUI-011 if all
    five children are verified and then runs the close-out sweep and the corpus restamp for CI.
-6. A macOS box unblocks TUI-013 (`run-2.js`, recipe in `compat/tui/README.md`).
+6. TUI-013 verified on the macbook on 2026-09-20; nothing in the ledger is open.

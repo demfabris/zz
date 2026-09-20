@@ -1,0 +1,43 @@
+TUI-013 attempt-01 environment
+captured: 2026-09-20T14:16:45-0300
+
+[binaries]
+zz_cli: e4e85474cef55166008164fb3cfdbed9d76f8a1a8b3b96a4283b3222188214a4  target/debug/zz_cli
+zz_cli built: 2026-09-20 14:16:20.563024482 -0300 by cargo build -p zz-cli --jobs 12 (warm target, 35.4s)
+zz_cli --version: zz 0.11.1
+tmux (pin, shared cache): f9f20dd7bbba3dc4d3ff833dc35d2d43d207715d2c8463c73c3ae6707dbe2617  compat/.cache/tmux-src/tmux
+tmux -V: tmux next-3.8
+pin commit (ledger tmux_commit): d77c9dc6aa021e4bc61f0da128c591af695e6466
+pin commit (checked out): d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/fetch-tmux.sh: cache verified, no rebuild
+
+[source revision]
+worktree: /Users/demfabris/dev/zz
+git rev-parse HEAD: 04a39258974fed54a067df5ed27425b9faf128b4
+origin/main: 04a39258974fed54a067df5ed27425b9faf128b4
+git status --short:
+?? compat/tui/evidence/TUI-013/
+(end git status)
+
+[host]
+uname -a: Darwin macbook 27.0.0 Darwin Kernel Version 27.0.0: Tue Aug 11 21:05:48 PDT 2026; root:xnu-13432.1.9~1/RELEASE_ARM64_T6041 arm64 arm Darwin
+sw_vers: ProductName:		macOS ProductVersion:		27.0 BuildVersion:		26A428 
+hardware: Apple M4 Max, 16 cores, 48 GB
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+TERM: xterm-ghostty
+SHELL: /opt/homebrew/bin/bash
+bash on PATH: /opt/homebrew/bin/bash -- GNU bash, version 5.3.20(1)-release (aarch64-apple-darwin27.0.0)
+/bin/bash: GNU bash, version 3.2.57(1)-release (arm64-apple-darwin26)
+sh on PATH: /bin/sh
+outer tmux driver sizes used by tui-pane-geometry.sh: 80x24, 100x24, 120x24
+outer tmux driver size used by status-row.sh: 80x24 and 100x24 band, then 79x24
+
+[locale, as the fixtures inherit it]
+LANG=en_US.UTF-8
+LC_ALL=en_US.UTF-8
+LC_TIME=<unset>
+XDG_STATE_HOME=<unset>
+ZZ_LOG_DIR=<unset>
+TMUX=<unset>
+ZZ_SOCKET=<unset>
+note: the fixture scrubs TMUX, ZZ_SOCKET, XDG_STATE_HOME and ZZ_LOG_DIR itself and pins HOME/XDG_CONFIG_HOME to its scratch tree

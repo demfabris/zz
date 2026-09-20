@@ -1682,7 +1682,16 @@ impl SettingsView {
                             .children(self.terminal_preview.clone())
                     })
                     .when(kind == ConfigFileKind::Mux, |page| {
-                        page.child(self.mux_splits_section(cx))
+                        page.child(
+                            SettingsStack::titled("Navigation").child(Self::boolean_setting(
+                                ConfigKey::PickerFocusSidebar,
+                                "Focus sidebar for session and window pickers",
+                                "Prefix + s and Prefix + w focus the sidebar instead of opening the picker.",
+                                config::resolved_config(cx).picker_focus_sidebar,
+                                cx,
+                            )),
+                        )
+                        .child(self.mux_splits_section(cx))
                     })
                     .child(self.file_options_section(kind, cx))
                     .child(self.file_import_section(kind, cx))
@@ -2409,6 +2418,7 @@ fn refresh_settings_preview(key: ConfigKey, cx: &mut App) {
                 | ConfigKey::PaletteWindowLayout
                 | ConfigKey::PaletteHostPrefix
                 | ConfigKey::PaletteShowKeys
+                | ConfigKey::PickerFocusSidebar
                 | ConfigKey::StatusShowSession
                 | ConfigKey::StatusBadges
                 | ConfigKey::StatusAgents
@@ -2522,6 +2532,7 @@ fn numeric_config_value(config: &AppConfig, key: ConfigKey) -> f32 {
         | ConfigKey::PaletteWindowLayout
         | ConfigKey::PaletteHostPrefix
         | ConfigKey::PaletteShowKeys
+        | ConfigKey::PickerFocusSidebar
         | ConfigKey::WindowBackgroundBlur
         | ConfigKey::Animations
         | ConfigKey::Tray

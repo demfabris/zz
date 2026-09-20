@@ -5805,6 +5805,7 @@ impl Shared {
             inner.client_kinds.remove(&client);
             inner.client_terminals.remove(&client);
             inner.native_terminal_search_clients.remove(&client);
+            inner.native_chooser_clients.remove(&client);
             inner.utf8_clients.remove(&client);
             inner.client_features.remove(&client);
             inner.client_terminal_types.remove(&client);
@@ -30627,6 +30628,7 @@ struct ServerState {
     client_kinds: BTreeMap<ClientId, ClientKind>,
     client_terminals: BTreeSet<ClientId>,
     native_terminal_search_clients: BTreeSet<ClientId>,
+    native_chooser_clients: BTreeSet<ClientId>,
     /// The clients that raised tmux's `CLIENT_UTF8`. A client not in here is
     /// one `server_client_print` sanitizes its output for.
     utf8_clients: BTreeSet<ClientId>,
@@ -31679,7 +31681,7 @@ fn choose_tree_kill_prompt(engine: &MuxEngine, target: ChooseTreeTarget) -> Opti
 /// active pane and a window row to its own active pane, which is the pane
 /// `server_set_marked` takes.
 fn hold_chooser_zoom(inner: &mut ServerState, client: ClientId, pane: PaneId, zoom: bool) -> bool {
-    if !zoom {
+    if !zoom || inner.native_chooser_clients.contains(&client) {
         return false;
     }
     let Some(window) = inner.engine.state.window_for_pane(pane) else {
@@ -43485,6 +43487,14 @@ fn handle_connection<S: TransportStream>(
             })
         {
             inner.native_terminal_search_clients.insert(client);
+        }
+        if hello.kind == ClientKind::Interactive
+            && hello
+                .capabilities
+                .iter()
+                .any(|capability| capability == ClientHello::CLIENT_NATIVE_CHOOSER_CAPABILITY)
+        {
+            inner.native_chooser_clients.insert(client);
         }
         if client_nested_fact(&hello.capabilities) {
             inner.nested_clients.insert(client);
@@ -101418,6 +101428,119 @@ bind - split-window -v -c "#{pane_current_path}"
             DaemonError::Server(ServerError::InvalidCommand(message))
                 if message.contains("interactive client")
         ));
+    }
+
+    #[test]
+    fn chooser_zoom_applies_only_to_raw_terminal_clients_and_preserves_existing_zoom() {
+        for native_chooser in [false, true] {
+            for initially_zoomed in [false, true] {
+                let shared = Arc::new(Shared::new(1));
+                let mailbox = OutboundMailbox::new();
+                let (client, _) = shared.register_subscribed(
+                    ClientKind::Interactive,
+                    None,
+                    None,
+                    Arc::clone(&mailbox),
+                );
+                let (session, window, pane) = {
+                    let mut inner = shared.inner.lock();
+                    if native_chooser {
+                        inner.native_chooser_clients.insert(client);
+                    }
+                    let (session, window, pane) =
+                        inner.engine.state.create_session("work").expect("session");
+                    inner
+                        .engine
+                        .state
+                        .split_pane(pane, zz_protocol::Axis::Horizontal, PaneKind::Terminal)
+                        .expect("split pane");
+                    if initially_zoomed {
+                        inner.engine.state.toggle_zoom(pane).expect("zoom pane");
+                    }
+                    (session, window, pane)
+                };
+                let mut context =
+                    ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+                        .expect("command context");
+                shared.attach(client, session).expect("attach session");
+                shared
+                    .execute(
+                        client,
+                        ClientKind::Interactive,
+                        &mut context,
+                        &CommandInvocation::new("set-buffer", ["chooser payload"]),
+                    )
+                    .expect("set buffer");
+
+                for (command, flag, close) in [
+                    (
+                        "choose-tree",
+                        "-Zs",
+                        InputMessage::ChooseTree {
+                            action: ChooseTreeAction::Close,
+                        },
+                    ),
+                    (
+                        "choose-tree",
+                        "-Zw",
+                        InputMessage::ChooseTree {
+                            action: ChooseTreeAction::Close,
+                        },
+                    ),
+                    (
+                        "choose-buffer",
+                        "-Z",
+                        InputMessage::ChooseBuffer {
+                            action: ChooseBufferAction::Close,
+                        },
+                    ),
+                ] {
+                    let generation = shared.inner.lock().engine.state.generation();
+                    let temporary_zoom = !native_chooser && !initially_zoomed;
+                    shared
+                        .execute(
+                            client,
+                            ClientKind::Interactive,
+                            &mut context,
+                            &CommandInvocation::new(command, [flag]),
+                        )
+                        .expect("open chooser");
+                    {
+                        let inner = shared.inner.lock();
+                        assert_eq!(
+                            inner.engine.state.windows[&window].zoomed_pane,
+                            (initially_zoomed || temporary_zoom).then_some(pane),
+                        );
+                        assert_eq!(inner.chooser_zooms.contains_key(&client), temporary_zoom);
+                        assert_eq!(
+                            inner.engine.state.generation(),
+                            generation + u64::from(temporary_zoom),
+                        );
+                        assert!(
+                            inner.choose_trees.contains_key(&client)
+                                || inner.choose_buffers.contains_key(&client)
+                        );
+                    }
+                    shared
+                        .input(client, ClientKind::Interactive, &mut context, close)
+                        .expect("close chooser");
+                    let inner = shared.inner.lock();
+                    assert_eq!(
+                        inner.engine.state.windows[&window].zoomed_pane,
+                        initially_zoomed.then_some(pane),
+                    );
+                    assert_eq!(
+                        inner.engine.state.generation(),
+                        generation + 2 * u64::from(temporary_zoom),
+                    );
+                    assert!(!inner.chooser_zooms.contains_key(&client));
+                    assert!(!inner.choose_trees.contains_key(&client));
+                    assert!(!inner.choose_buffers.contains_key(&client));
+                }
+                shared.unregister(client);
+                assert!(!shared.inner.lock().native_chooser_clients.contains(&client));
+            }
+        }
     }
 
     #[test]

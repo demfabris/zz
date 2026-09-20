@@ -105,6 +105,7 @@ pub enum ConfigKey {
     PaletteWindowLayout,
     PaletteHostPrefix,
     PaletteShowKeys,
+    PickerFocusSidebar,
     UseSystemTitlebar,
     WindowCornerRadius,
     WindowBackgroundBlur,
@@ -153,6 +154,7 @@ impl ConfigKey {
             Self::PaletteWindowLayout => "palette-window-layout",
             Self::PaletteHostPrefix => "palette-host-prefix",
             Self::PaletteShowKeys => "palette-show-keys",
+            Self::PickerFocusSidebar => "picker-focus-sidebar",
             Self::UseSystemTitlebar => "use-system-titlebar",
             Self::WindowCornerRadius => "window-corner-radius",
             Self::WindowBackgroundBlur => "window-background-blur",
@@ -202,6 +204,7 @@ impl ConfigKey {
             "palette-window-layout" => Some(Self::PaletteWindowLayout),
             "palette-host-prefix" => Some(Self::PaletteHostPrefix),
             "palette-show-keys" => Some(Self::PaletteShowKeys),
+            "picker-focus-sidebar" => Some(Self::PickerFocusSidebar),
             "use-system-titlebar" => Some(Self::UseSystemTitlebar),
             "window-corner-radius" => Some(Self::WindowCornerRadius),
             "window-background-blur" => Some(Self::WindowBackgroundBlur),
@@ -266,6 +269,7 @@ impl ConfigKey {
             | Self::PaletteWindowLayout
             | Self::PaletteHostPrefix
             | Self::PaletteShowKeys
+            | Self::PickerFocusSidebar
             | Self::WindowBackgroundBlur
             | Self::Animations
             | Self::Tray
@@ -412,6 +416,7 @@ pub struct AppConfig {
     pub palette_window_layout: ConfigValue<PaletteWindowLayout>,
     pub palette_host_prefix: ConfigValue<PaletteHostPrefix>,
     pub palette_show_keys: ConfigValue<bool>,
+    pub picker_focus_sidebar: ConfigValue<bool>,
     pub use_system_titlebar: ConfigValue<bool>,
     pub window_corner_radius: ConfigValue<f32>,
     pub window_background_blur: ConfigValue<bool>,
@@ -460,6 +465,7 @@ impl Default for AppConfig {
             palette_window_layout: ConfigValue::from_default(PaletteWindowLayout::Grouped),
             palette_host_prefix: ConfigValue::from_default(PaletteHostPrefix::Tilde),
             palette_show_keys: ConfigValue::from_default(true),
+            picker_focus_sidebar: ConfigValue::from_default(false),
             use_system_titlebar: ConfigValue::from_default(DEFAULT_USE_SYSTEM_TITLEBAR),
             window_corner_radius: ConfigValue::from_default(DEFAULT_WINDOW_CORNER_RADIUS),
             window_background_blur: ConfigValue::from_default(DEFAULT_WINDOW_BACKGROUND_BLUR),
@@ -515,6 +521,7 @@ impl AppConfig {
     fn boolean_value_mut(&mut self, key: ConfigKey) -> Option<&mut ConfigValue<bool>> {
         match key {
             ConfigKey::PaletteShowKeys => Some(&mut self.palette_show_keys),
+            ConfigKey::PickerFocusSidebar => Some(&mut self.picker_focus_sidebar),
             ConfigKey::UseSystemTitlebar => Some(&mut self.use_system_titlebar),
             ConfigKey::WindowBackgroundBlur => Some(&mut self.window_background_blur),
             ConfigKey::Animations => Some(&mut self.animations),
@@ -1089,6 +1096,7 @@ pub fn parse_config(source: &str, system_font_family: &str) -> ParsedConfig {
             | ConfigKey::PaletteWindowLayout
             | ConfigKey::PaletteHostPrefix
             | ConfigKey::PaletteShowKeys
+            | ConfigKey::PickerFocusSidebar
             | ConfigKey::WindowBackgroundBlur
             | ConfigKey::Animations
             | ConfigKey::Tray

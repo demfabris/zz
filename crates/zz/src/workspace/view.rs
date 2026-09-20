@@ -78,7 +78,7 @@ use crate::{
         },
         hosts::HostId,
         nav::{TreeTarget, kill_target_command, select_window_command, split_picker_command},
-        prefix::{PrefixClaim, PressDisposition, terminal_key_input},
+        prefix::{PrefixClaim, PressDisposition, is_sidebar_picker_input, terminal_key_input},
     },
     pane::display::DisplayPanesView,
     pane::layout::{SeparatorSide, pane_separator},
@@ -994,13 +994,29 @@ impl AppView {
                         "prefix_claim_stale_entry keystroke={keystroke} armed={armed} pane={pane}"
                     );
                 }
+                let input = terminal_key_input(keystroke, TerminalKeyAction::Press);
+                if armed
+                    && cx
+                        .try_global::<config::AppConfig>()
+                        .is_some_and(|config| config.picker_focus_sidebar.value)
+                    && is_sidebar_picker_input(self.mux.read(cx).prefix_bindings(), &input)
+                {
+                    self.prefix_claim.suppress_release(keystroke);
+                    self.mux.update(cx, |mux, _| {
+                        if mux.send_prefix_cancel().is_some() {
+                            mux.execute(CommandInvocation::new("focus-sidebar", [] as [&str; 0]));
+                        }
+                    });
+                    cx.stop_propagation();
+                    return;
+                }
                 log::info!(
                     target: "zz::diagnostics::input",
                     "prefix_key_forwarded keystroke={keystroke} armed={armed} pane={pane}"
                 );
                 self.mux.read(cx).send_input(InputMessage::Key {
                     pane,
-                    input: terminal_key_input(keystroke, TerminalKeyAction::Press),
+                    input,
                     text_follows: false,
                 });
             }
@@ -1034,6 +1050,10 @@ impl AppView {
     /// Forward a claimed key's release to the daemon and stop it reaching the
     /// widget that never saw the press.
     pub fn on_claim_key_up(&mut self, event: &KeyUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.prefix_claim.consume_local_release(&event.keystroke) {
+            cx.stop_propagation();
+            return;
+        }
         if !self.prefix_claim.consume_release(&event.keystroke) {
             return;
         }

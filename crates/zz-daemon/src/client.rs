@@ -1702,6 +1702,7 @@ fn connect_stream_with_startup_owner<S: TransportStream>(
             EndpointFactsScope::None | EndpointFactsScope::LocalHostWorkingDirectory
         ) {
             capabilities.push(ClientHello::CLIENT_NATIVE_TERMINAL_SEARCH_CAPABILITY.to_owned());
+            capabilities.push(ClientHello::CLIENT_NATIVE_CHOOSER_CAPABILITY.to_owned());
         }
     }
     terminal_facts_capabilities(
@@ -2288,7 +2289,7 @@ mod tests {
 
     #[cfg(all(unix, feature = "daemon"))]
     #[test]
-    fn handshake_advertises_native_terminal_search_only_for_graphical_terminal_clients() {
+    fn handshake_advertises_native_ui_only_for_graphical_terminal_clients() {
         use super::{ProtocolReceiver, ProtocolSender, connect_stream};
         use crate::transport::{LocalTransport, Transport, TransportListener};
         use zz_protocol::{CommandResponse, ProtocolMessage, ServerError};
@@ -2377,6 +2378,13 @@ mod tests {
             assert_eq!(
                 hello.capabilities.iter().any(|capability| capability
                     == ClientHello::CLIENT_NATIVE_TERMINAL_SEARCH_CAPABILITY),
+                expected,
+            );
+            assert_eq!(
+                hello
+                    .capabilities
+                    .iter()
+                    .any(|capability| capability == ClientHello::CLIENT_NATIVE_CHOOSER_CAPABILITY),
                 expected,
             );
             assert_eq!(

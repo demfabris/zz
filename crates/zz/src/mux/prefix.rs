@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use gpui::Keystroke;
 use zz_client::ChromeKey;
+use zz_protocol::{Binding, KeyBindingSnapshot, KeyTables, TmuxOption};
 use zz_terminal::{KeyAction, KeyCode, KeyInput, Modifiers as TerminalModifiers};
 
 /// Whether a GPUI keystroke spells the given canonical tmux key.
@@ -20,6 +21,43 @@ pub(crate) fn keystroke_is(keystroke: &Keystroke, canonical: &str) -> bool {
 pub(crate) fn display_keystroke(canonical: &str) -> Option<Keystroke> {
     let key = ChromeKey::parse(canonical)?;
     Keystroke::parse(&crate::keymap::gpui_source(&key)?).ok()
+}
+
+pub(crate) fn is_sidebar_picker_input(bindings: &[KeyBindingSnapshot], input: &KeyInput) -> bool {
+    let mut tables = KeyTables::empty();
+    for binding in bindings {
+        tables.bind(
+            "prefix",
+            &binding.key,
+            Binding {
+                commands: binding.commands.clone(),
+                repeat: binding.repeat,
+                note: None,
+            },
+        );
+    }
+    let Some(binding) = tables.resolve_input("prefix", input) else {
+        return false;
+    };
+    let [command] = binding.commands.as_slice() else {
+        return false;
+    };
+    if command.name != "choose-tree" {
+        return false;
+    }
+    let Some(spec) = zz_protocol::command_spec(&command.name) else {
+        return false;
+    };
+    let Ok(parsed) = zz_protocol::parse_tmux_command_options(spec, command) else {
+        return false;
+    };
+    parsed.positionals.is_empty()
+        && (parsed.options.contains(&TmuxOption::Flag("-s"))
+            ^ parsed.options.contains(&TmuxOption::Flag("-w")))
+        && parsed
+            .options
+            .iter()
+            .all(|option| matches!(option, TmuxOption::Flag("-s" | "-w" | "-Z")))
 }
 
 /// What to do with a claimed key press.
@@ -39,6 +77,7 @@ pub(crate) enum PressDisposition {
 #[derive(Debug, Default)]
 pub(crate) struct PrefixClaim {
     held: HashSet<String>,
+    local_releases: HashSet<String>,
 }
 
 impl PrefixClaim {
@@ -48,8 +87,21 @@ impl PrefixClaim {
         if is_held {
             return PressDisposition::Autorepeat;
         }
+        self.local_releases.remove(&keystroke.key);
         let stale = !self.held.insert(keystroke.key.clone());
         PressDisposition::Forward { stale }
+    }
+
+    pub(crate) fn suppress_release(&mut self, keystroke: &Keystroke) {
+        self.local_releases.insert(keystroke.key.clone());
+    }
+
+    pub(crate) fn consume_local_release(&mut self, keystroke: &Keystroke) -> bool {
+        if !self.local_releases.remove(&keystroke.key) {
+            return false;
+        }
+        self.held.remove(&keystroke.key);
+        true
     }
 
     /// Whether this release pairs with a claimed press and must be swallowed.
@@ -60,6 +112,7 @@ impl PrefixClaim {
     /// Drop held-key state when the window loses focus.
     pub(crate) fn clear(&mut self) {
         self.held.clear();
+        self.local_releases.clear();
     }
 }
 
@@ -124,6 +177,92 @@ mod tests {
     use gpui::Modifiers;
 
     use super::*;
+
+    #[test]
+    fn local_shortcut_releases_never_reach_the_daemon_or_swallow_a_later_press() {
+        let stroke = keystroke("s", Modifiers::default());
+        let mut claim = PrefixClaim::default();
+        claim.press(&stroke, false);
+        claim.suppress_release(&stroke);
+        assert!(claim.consume_local_release(&stroke));
+        assert!(!claim.consume_release(&stroke));
+        claim.press(&stroke, false);
+        claim.suppress_release(&stroke);
+        claim.press(&stroke, false);
+        assert!(!claim.consume_local_release(&stroke));
+        assert!(claim.consume_release(&stroke));
+        claim.press(&stroke, false);
+        claim.suppress_release(&stroke);
+        claim.clear();
+        assert!(!claim.consume_local_release(&stroke));
+        assert!(!claim.consume_release(&stroke));
+    }
+
+    #[test]
+    fn sidebar_picker_input_follows_default_and_rebound_picker_commands() {
+        let tables = KeyTables::default().snapshot();
+        let bindings = &tables
+            .iter()
+            .find(|table| table.name == "prefix")
+            .unwrap()
+            .bindings;
+        for key in ["s", "w"] {
+            let input = terminal_key_input(&keystroke(key, Modifiers::default()), KeyAction::Press);
+            assert!(is_sidebar_picker_input(bindings, &input));
+        }
+        let mut binding = bindings
+            .iter()
+            .find(|binding| binding.key == "s")
+            .unwrap()
+            .clone();
+        binding.key = "?".to_owned();
+        let mut stroke = keystroke(
+            "/",
+            Modifiers {
+                shift: true,
+                ..Modifiers::default()
+            },
+        );
+        stroke.key_char = Some("?".to_owned());
+        let input = terminal_key_input(&stroke, KeyAction::Press);
+        assert!(is_sidebar_picker_input(&[binding.clone()], &input));
+        binding.commands = vec![zz_protocol::CommandInvocation::new(
+            "choose-tree",
+            ["-Z", "-w"],
+        )];
+        assert!(is_sidebar_picker_input(&[binding], &input));
+    }
+
+    #[test]
+    fn sidebar_picker_input_preserves_custom_commands_filters_and_templates() {
+        let input = terminal_key_input(&keystroke("s", Modifiers::default()), KeyAction::Press);
+        for (name, args) in [
+            ("resize-pane", vec!["-Z"]),
+            ("choose-tree", vec![]),
+            ("choose-tree", vec!["-Zsw"]),
+            ("choose-tree", vec!["-Zs", "-f", "#{session_attached}"]),
+            ("choose-tree", vec!["-Zw", "select-window -t %%"]),
+            ("choose-tree", vec!["-Zw", "-t", "%1"]),
+        ] {
+            let binding = KeyBindingSnapshot {
+                key: "s".to_owned(),
+                commands: vec![zz_protocol::CommandInvocation::new(name, args)],
+                repeat: false,
+                note: None,
+            };
+            assert!(!is_sidebar_picker_input(&[binding], &input), "{name}");
+        }
+        let binding = KeyBindingSnapshot {
+            key: "s".to_owned(),
+            commands: vec![
+                zz_protocol::CommandInvocation::new("choose-tree", ["-Zs"]),
+                zz_protocol::CommandInvocation::new("display-message", ["custom"]),
+            ],
+            repeat: false,
+            note: None,
+        };
+        assert!(!is_sidebar_picker_input(&[binding], &input));
+    }
 
     fn keystroke(key: &str, modifiers: Modifiers) -> Keystroke {
         Keystroke {

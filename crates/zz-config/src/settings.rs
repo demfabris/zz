@@ -38,6 +38,10 @@ fn value(parsed: &ParsedConfig, key: ConfigKey) -> (Value, ConfigProvenance) {
             let setting = &parsed.config.palette_host_prefix;
             (json!(setting.value.as_str()), setting.provenance)
         }
+        ConfigKey::PickerFocusSidebar => {
+            let setting = &parsed.config.picker_focus_sidebar;
+            (json!(setting.value), setting.provenance)
+        }
         ConfigKey::PaletteShowKeys => {
             let setting = &parsed.config.palette_show_keys;
             (json!(setting.value), setting.provenance)
@@ -250,6 +254,7 @@ fn choices(key: ConfigKey) -> Vec<Choice> {
 }
 fn section(key: ConfigKey) -> &'static str {
     match key {
+        ConfigKey::PickerFocusSidebar => "multiplexer",
         ConfigKey::StatusShowSession
         | ConfigKey::StatusBadges
         | ConfigKey::StatusAgents
@@ -285,6 +290,7 @@ fn section(key: ConfigKey) -> &'static str {
 }
 fn title(key: ConfigKey) -> String {
     match key {
+        ConfigKey::PickerFocusSidebar => "Focus sidebar for session and window pickers".to_owned(),
         ConfigKey::UiFontFamily => "Interface font".to_owned(),
         ConfigKey::ChromeContrast => "Contrast".to_owned(),
         ConfigKey::PaneGlowStrength => "Selected pane glow".to_owned(),
@@ -312,6 +318,7 @@ pub fn settings(parsed: &ParsedConfig) -> Vec<Setting> {
         ConfigKey::PaletteWindowLayout,
         ConfigKey::PaletteHostPrefix,
         ConfigKey::PaletteShowKeys,
+        ConfigKey::PickerFocusSidebar,
         ConfigKey::UseSystemTitlebar,
         ConfigKey::WindowCornerRadius,
         ConfigKey::WindowBackgroundBlur,
@@ -756,6 +763,73 @@ impl SettingsModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn picker_sidebar_preference_defaults_off_persists_and_resets() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config");
+        let mut model = SettingsModel::new("System".to_owned(), Some(path.clone()), None);
+        assert_eq!(
+            model.parsed.config.picker_focus_sidebar,
+            ConfigValue::from_default(false)
+        );
+        model
+            .action(
+                SettingsAction::Set {
+                    key: "picker-focus-sidebar".to_owned(),
+                    value: json!(true),
+                },
+                &[],
+            )
+            .unwrap();
+        let loaded = load_config(&path, "System").unwrap();
+        assert!(loaded.config.picker_focus_sidebar.value);
+        assert!(loaded.daemon_entries.is_empty());
+        let setting = settings(&loaded)
+            .into_iter()
+            .find(|setting| setting.key == "picker-focus-sidebar")
+            .unwrap();
+        assert_eq!(setting.section, "multiplexer");
+        assert_eq!(setting.control, "boolean");
+        assert_eq!(setting.value, json!(true));
+        assert_eq!(setting.default_value, json!(false));
+        assert!(setting.overridden);
+        assert!(
+            model
+                .action(
+                    SettingsAction::Set {
+                        key: "picker-focus-sidebar".to_owned(),
+                        value: json!("sometimes"),
+                    },
+                    &[],
+                )
+                .is_err()
+        );
+        assert!(
+            load_config(&path, "System")
+                .unwrap()
+                .config
+                .picker_focus_sidebar
+                .value
+        );
+        model
+            .action(
+                SettingsAction::Reset {
+                    key: "picker-focus-sidebar".to_owned(),
+                },
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            model.parsed.config.picker_focus_sidebar,
+            ConfigValue::from_default(false)
+        );
+        assert!(
+            !std::fs::read_to_string(path)
+                .unwrap()
+                .contains("picker-focus-sidebar")
+        );
+    }
 
     #[test]
     fn titlebar_settings_exclude_clock_and_alignment() {

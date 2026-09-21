@@ -501,13 +501,13 @@ fn agent_stream_soak() {
     );
     assert_eq!(
         items,
-        u64::try_from(SOAK_ITEMS + 2).unwrap_or(u64::MAX),
-        "the turn is its start, every streamed update, and the item that closes it"
+        u64::try_from(SOAK_ITEMS + 3).unwrap_or(u64::MAX),
+        "the turn includes its start, user prompt, streamed updates, and finish"
     );
     assert_eq!(
         kinds.get("update").copied(),
-        Some(SOAK_ITEMS),
-        "every streamed update reached the client exactly once"
+        Some(SOAK_ITEMS + 1),
+        "the user prompt and every streamed update reached the client exactly once"
     );
     assert!(
         ratio >= 20.0,
@@ -593,13 +593,17 @@ fn agent_stream_soak_slow_client() {
     );
     assert_eq!(
         transcript.kinds().get("update").copied(),
-        Some(SLOW_ITEMS),
-        "the replay converges the client on the whole transcript"
+        Some(SLOW_ITEMS + 1),
+        "the replay includes the user prompt and every streamed update"
     );
     assert_eq!(
         applied,
         u64::try_from(transcript.applied.len()).unwrap_or(u64::MAX),
         "and leaves it gapless"
+    );
+    assert!(
+        transcript.applied == witnessed.applied,
+        "the replay matches the transcript received by the client that kept reading"
     );
 
     let captured = soak

@@ -5732,9 +5732,11 @@ mod daemon_autostart {
                 .position(|line| *line == "CHILD")
                 .unwrap_or_else(|| panic!("missing raw child output: {text}"));
             assert_eq!(lines[child + 1], "'printf CHILD; exit 3' returned 3");
-            let end = marker(lines[child - 1], "%end").expect("guard before raw child output");
+            let before = next_block_guard(lines[..child].iter().rev().copied());
+            let end = marker(before, "%end").expect("guard before raw child output");
             assert_eq!(end.2, 1);
-            let begin = marker(lines[child + 2], "%begin").expect("guard after raw diagnostic");
+            let after = next_block_guard(lines[child + 2..].iter().copied());
+            let begin = marker(after, "%begin").expect("guard after raw diagnostic");
             assert_eq!(begin.2, 1);
 
             let stream = parse_stream_allow_gaps(&output.stdout, false);

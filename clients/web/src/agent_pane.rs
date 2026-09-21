@@ -2284,8 +2284,10 @@ impl Render for AgentPane {
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.connection.update(cx, |connection, cx| {
                                         connection.command(
-                                            "split-picker",
+                                            "split-window",
                                             vec![
+                                                "--kind".into(),
+                                                "picker".into(),
                                                 flag.to_owned(),
                                                 "-t".to_owned(),
                                                 this.pane.to_string(),

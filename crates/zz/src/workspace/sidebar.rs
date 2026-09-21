@@ -49,7 +49,7 @@ use crate::{
         nav::{
             HostIndicator, MuxTreeHost, MuxTreeModel, MuxTreePaneKind, MuxTreeWindow, TreeNode,
             TreeNodeKind, TreeTarget, activate_nav as activate_sidebar, active_tree_target,
-            expand_path_to, kill_target_command, new_window_command, split_picker_command,
+            expand_path_to, kill_target_command, new_window_command, picker_split_command,
         },
     },
     window::{corners::WindowCorners, drag::window_drag_handle},
@@ -1512,7 +1512,7 @@ fn render_window_layout_action(
         move |horizontal, _, cx| {
             mux.read(cx).execute_on_host(
                 host,
-                split_picker_command(
+                picker_split_command(
                     active_pane,
                     if horizontal {
                         Axis::Horizontal
@@ -3087,12 +3087,12 @@ mod tests {
             CommandInvocation::new("kill-pane", ["-t", "%21"])
         );
         assert_eq!(
-            split_picker_command(PaneId(21), Axis::Horizontal),
-            CommandInvocation::new("split-picker", ["-h", "-t", "%21"])
+            picker_split_command(PaneId(21), Axis::Horizontal),
+            CommandInvocation::new("split-window", ["--kind", "picker", "-h", "-t", "%21"])
         );
         assert_eq!(
-            split_picker_command(PaneId(21), Axis::Vertical),
-            CommandInvocation::new("split-picker", ["-v", "-t", "%21"])
+            picker_split_command(PaneId(21), Axis::Vertical),
+            CommandInvocation::new("split-window", ["--kind", "picker", "-v", "-t", "%21"])
         );
     }
 

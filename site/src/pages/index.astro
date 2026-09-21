@@ -416,8 +416,8 @@ const featPoints = [
 		<section class="sec sec-center">
 			<h2>Chromium is a pane</h2>
 			<p>
-				Split a real Chromium next to the shell you are working in. Open one with your prefix key
-				or from a script. It answers the same keys, resizes with the same drag, and reattaches on
+				Split a real Chromium next to the shell you are working in. Open one from a script or
+				choose Browser in Settings → Multiplexer for your split shortcut. It resizes with the same drag and reattaches on
 				the same URL.
 			</p>
 
@@ -430,9 +430,9 @@ const featPoints = [
 							<span class="zz-line"
 								><span class="zz-fg-green">macbook</span><span class="zz-fg-black-b">:</span><span
 									class="zz-fg-blue-b">~/dev/zz</span
-								> $ zz split-browser</span
+								> $ zz split-window --kind browser -P -F '#&#123;pane_id&#125;'</span
 							>
-							<span class="zz-line zz-fg-black-b">opened %3</span>
+							<span class="zz-line zz-fg-black-b">%3</span>
 							<span class="zz-line"> </span>
 							<span class="zz-line"
 								><span class="zz-fg-green">macbook</span><span class="zz-fg-black-b">:</span><span
@@ -502,8 +502,8 @@ const featPoints = [
 						<span class="donor-target">zz/mux.conf</span>
 					</div>
 					<div class="donor-keys">
-						<div class="donor-row"><Kbd>^a</Kbd><Kbd>%</Kbd><span>split-picker -h</span></div>
-						<div class="donor-row"><Kbd>^a</Kbd><Kbd>"</Kbd><span>split-picker -v</span></div>
+						<div class="donor-row"><Kbd>^a</Kbd><Kbd>%</Kbd><span>split-window -h</span></div>
+						<div class="donor-row"><Kbd>^a</Kbd><Kbd>"</Kbd><span>split-window -v</span></div>
 						<div class="donor-row"><Kbd>^a</Kbd><Kbd>[</Kbd><span>copy-mode</span></div>
 						<div class="donor-row"><Kbd>^a</Kbd><Kbd>z</Kbd><span>resize-pane -Z</span></div>
 					</div>

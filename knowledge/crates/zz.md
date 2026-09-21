@@ -632,7 +632,7 @@ imports reload the page.
 - `workspace/sidebar.rs` builds a `MuxTreeModel` (session → window → pane, pane order taken from
   each window's `LayoutNode`) from `MuxSnapshot`, renders it as a full-height indented
   `uniform_list` tree whose top strip **is** the window's title bar (traffic lights, drag region,
-  double-click), and issues `CommandInvocation`s (`new-session`, `split-picker`,
+  double-click), and issues `CommandInvocation`s (`new-session`, `split-window --kind picker`,
   `kill-session`/`kill-window`/`kill-pane`) from hover-revealed row actions. A host reveals one
   new-session plus button, the final muted row opens Add host, a session keeps new-window and delete
   buttons, and a window folds split-right, split-bottom, and delete into one overflow menu. Row labels

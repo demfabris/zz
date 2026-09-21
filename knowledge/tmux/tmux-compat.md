@@ -21,8 +21,8 @@ The product target is a **compatible enough CLI plus a native superset**:
 1. A tmux command spelling means what it means in tmux.
 2. If zz cannot honor that meaning, it returns a loud error. It does not reuse the spelling for a
    different GUI action.
-3. Native behavior uses zz-only verbs such as `split-picker`, `split-browser`, `focus-sidebar`,
-   `agent-send`, and `capture-browser`.
+3. Native behavior uses explicit long options such as `split-window --kind picker` and
+   `split-window --kind browser`, or zz-only verbs such as `focus-sidebar`, `agent-send`, and `capture-browser`.
 4. zz's default bindings may call those native verbs. A binding imported from tmux that names
    `split-window` still creates a terminal split.
 

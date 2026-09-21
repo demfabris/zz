@@ -59,8 +59,8 @@ then reduced it to 106 across 25. Pane-local `-e` and empty-pane `-E` on `new-wi
 `split-window` removed four more pairs, and `last-pane -d/-e` removed two more. Four micro flags,
 three `list-keys` selectors, and creation-time `new-session -e/-E` removed the next nine pairs.
 `set-buffer -n`, `source-file -F`, `split-window -Z`, and `break-pane -a/-b` removed five more;
-adding `move-pane -l` removed one more, leaving 85 across 23. The zz-only `split-picker` contributes another 19 markers to a raw catalog
-grep and is deliberately excluded from tmux compatibility counts. Later bounded slices brought the
+adding `move-pane -l` removed one more, leaving 85 across 23. The former picker command contributed another 19 markers to a raw catalog
+grep and was excluded from tmux compatibility counts. Later bounded slices brought the
 live ledger to 75; closing `attach-session -f` and `new-session -f` on 2026-08-27 leaves 73, and
 closing `resize-window -A/-a` later that day leaves 71.
 
@@ -651,8 +651,8 @@ The catalog count does not include syntax zz accepts or parses before diverging:
 
 - The default prefix table has 60 bindings against the pin's 92, with 59 overlapping keys. zz
   adds `e -> send-last-output` and omits 33 stock keys. `%`/`"` and `s`/`w` ran the native
-  `split-picker` and `focus-sidebar` until 2026-09-09 and now run the pinned `split-window` and
-  `choose-tree`; both native verbs remain bindable. Explicit imported commands retain tmux meaning;
+  picker command and `focus-sidebar` until 2026-09-09 and now run the pinned `split-window` and
+  `choose-tree`; use `split-window --kind picker` or `focus-sidebar` in custom bindings. Explicit imported commands retain tmux meaning;
   the exact default delta lives in [key tables](/tmux/key-tables.md).
 - `refresh-client` bare and `-S` refresh the selected client's cached status jobs. The pan
   family `-c -D -L -R -U -l -r` and optional adjustment positional remain refused.

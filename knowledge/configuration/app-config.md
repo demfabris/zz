@@ -111,7 +111,7 @@ The client-local schema includes these scalar settings and chrome colors.
 | `status-agents` | `true` | `true` or `false` | Whether the bar shows Agent activity in the attached session |
 | `status-host` | `true` | `true` or `false` | Whether the bar shows the host name while attached to a remote host. Local attachment has no host item |
 | `status-update` | `true` | `true` or `false` | Whether an available release appears in the bar with its version and an install action. `check-for-updates` separately controls the release check |
-| `experimental-agent-pane` | `true` | `true` or `false` | Whether new Agent panes can be created at all . picker row, palette completion, and the daemon's `split-agent` and `select-pane-kind agent` |
+| `experimental-agent-pane` | `true` | `true` or `false` | Whether new Agent panes can be created at all . picker row, palette completion, and the daemon's `split-window --kind agent` and `select-pane-kind agent` |
 | `experimental-editor-pane` | `false` | `true` or `false` | Whether new Editor panes can be created at all . picker row, palette completion, and the daemon's `select-pane-kind editor` |
 | `pane-gaps` | `false` | `true` or `false` | Whether panes use the gapped border, radius, surface ring, and divider treatment |
 | `pane-background-opacity` | `0.5` | `0..=1` | Pane and Agent composer background strength; Panes settings display 0–100%. Browser panes apply it only to the toolbar |
@@ -272,7 +272,7 @@ consumers of the same config entry. Client-side they gate the pane picker rows (
 hotkeys) in `pane::picker::choices` plus the palette's `select-pane-kind` completions.
 Daemon-side the entries are forwarded through the config-override push (they are also
 `MuxOptionKey`s), and the mux engine rejects `select-pane-kind … agent|editor` while the flag is
-off. Turning the agent flag off also blocks `split-agent`. To enable it again, run
+off. Turning the agent flag off also blocks `split-window --kind agent`. To enable it again, run
 `set-option -g experimental-agent-pane on` in `mux.conf` or at runtime. This changes the daemon
 gate directly; the picker row follows the `zz/config` entry, not the mux option. Panes that already exist keep rendering on reattach when the switch is off;
 flipping it never destroys pane state.
@@ -461,7 +461,7 @@ second-prefix arming and `send-prefix -2`; a reload reapplies them exactly like 
 | `set-clipboard` | `external` | `on`, `external`, or `off` |
 | `buffer-limit` | `50` | integer `1..=2147483647`; updates automatic paste-buffer eviction |
 | `synchronize-panes` | `off` | `on` or `off`; controls global synchronized input inheritance |
-| `experimental-agent-pane` | `on` | flag value (`on`/`off`/`true`/`false`/…); gates `split-agent` and `select-pane-kind agent` in the engine |
+| `experimental-agent-pane` | `on` | flag value (`on`/`off`/`true`/`false`/…); gates `split-window --kind agent` and `select-pane-kind agent` in the engine |
 | `experimental-editor-pane` | `off` | flag value; gates `select-pane-kind editor` in the engine |
 | `history-trickle` | `2000` | integer `0..=10000`; background scrollback backfill budget. `0` disables trickle and leaves scroll-driven prefetch intact |
 | `agent-command` | `npx -y @agentclientprotocol/codex-acp@1.11.0` | Nonempty command string or an `AcpAgentConfig` JSON object (`{"command", "args", "env"}`), up to 4 KiB; what the daemon spawns for a Codex pane |
@@ -649,8 +649,8 @@ Renaming also unbinds the previous key; an occupied destination key is rejected.
 in the trailing generated split-binding group when users change selections again. Simple direction
 flags and `-c "#{pane_current_path}"` map to the dropdown only for the matching direction; opposite-direction bindings, other arguments, or command chains show
 **Custom** and remain editable in the text editor. Shortcut changes retain command arguments,
-repeat settings, and notes. Pane-type changes use the corresponding `split-picker`, `split-window`,
-or `split-browser` command; terminal and picker commands inherit the source terminal directory.
+repeat settings, and notes. Pane-type changes use `split-window --kind terminal|picker|browser`; terminal and picker
+commands inherit the source terminal directory.
 The controls require a connected local session and a clean editor. They check for external file edits
 before saving and wait for the daemon to publish the changed binding before accepting another edit.
 If the daemon does not confirm within five seconds, Settings refreshes the rows from the effective

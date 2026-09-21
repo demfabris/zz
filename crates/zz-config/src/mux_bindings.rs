@@ -17,20 +17,34 @@ pub enum SplitPaneKind {
 }
 
 impl SplitPaneKind {
-    fn command(self) -> &'static str {
-        match self {
-            Self::Picker => "split-picker",
-            Self::Terminal => "split-window",
-            Self::Browser => "split-browser",
-        }
+    fn command(self) -> CommandInvocation {
+        let kind = match self {
+            Self::Picker => "picker",
+            Self::Terminal => "terminal",
+            Self::Browser => "browser",
+        };
+        CommandInvocation::new("split-window", ["--kind", kind])
     }
 }
 
 fn command_kind(command: &CommandInvocation) -> Option<SplitPaneKind> {
-    match canonical_command(&command.name) {
-        "split-picker" => Some(SplitPaneKind::Picker),
-        "split-window" => Some(SplitPaneKind::Terminal),
-        "split-browser" => Some(SplitPaneKind::Browser),
+    if canonical_command(&command.name) != "split-window" {
+        return None;
+    }
+    let parsed = parse_tmux_command_options(command_spec(&command.name)?, command).ok()?;
+    match parsed
+        .options
+        .iter()
+        .rev()
+        .find_map(|option| match option {
+            TmuxOption::Value("--kind", kind) => Some(*kind),
+            _ => None,
+        })
+        .unwrap_or("terminal")
+    {
+        "picker" => Some(SplitPaneKind::Picker),
+        "terminal" => Some(SplitPaneKind::Terminal),
+        "browser" => Some(SplitPaneKind::Browser),
         _ => None,
     }
 }
@@ -85,12 +99,14 @@ pub fn split_binding_kind(
         && parsed.options.contains(&TmuxOption::Flag("-v")))
         || !parsed.positionals.is_empty()
         || parsed.options.iter().any(|option| {
-            !matches!(option, TmuxOption::Flag("-h" | "-v"))
-                && !matches!(
-                    option,
-                    TmuxOption::Value("-c", "#{pane_current_path}")
-                        if kind != SplitPaneKind::Browser
-                )
+            !matches!(
+                option,
+                TmuxOption::Flag("-h" | "-v") | TmuxOption::Value("--kind", _)
+            ) && !matches!(
+                option,
+                TmuxOption::Value("-c", "#{pane_current_path}")
+                    if kind != SplitPaneKind::Browser
+            )
         })
     {
         return None;
@@ -184,7 +200,9 @@ pub fn update_split_binding(
             SplitDirection::Horizontal => "-h",
             SplitDirection::Vertical => "-v",
         };
-        CommandInvocation::new(kind.command(), [flag])
+        let mut command = kind.command();
+        command.args.push(flag.into());
+        command
     };
     let updated = KeyBindingSnapshot {
         key,
@@ -265,10 +283,10 @@ mod tests {
         assert_eq!(split_binding_kind(&current, SplitDirection::Vertical), None);
         current = binding("-", "split-window", &["-dv"]);
         assert_eq!(split_binding_kind(&current, SplitDirection::Vertical), None);
-        for name in ["split-window", "split-picker", "split-browser"] {
-            current = binding("-", name, &["-hv"]);
+        for kind in ["terminal", "picker", "browser"] {
+            current = binding("-", "split-window", &["--kind", kind, "-hv"]);
             assert_eq!(split_binding_kind(&current, SplitDirection::Vertical), None);
-            current = binding("-", name, &["-h", "-v"]);
+            current = binding("-", "split-window", &["--kind", kind, "-h", "-v"]);
             assert_eq!(split_binding_kind(&current, SplitDirection::Vertical), None);
         }
         current
@@ -278,9 +296,63 @@ mod tests {
     }
 
     #[test]
+    fn kind_choices_round_trip_through_prefix_bindings() {
+        for kind in [
+            SplitPaneKind::Terminal,
+            SplitPaneKind::Picker,
+            SplitPaneKind::Browser,
+        ] {
+            let source =
+                update_split_binding("", &[], None, SplitDirection::Horizontal, "%", kind).unwrap();
+            assert!(source.contains("--kind"));
+            let parsed =
+                zz_mux::MuxEngine::parse_config_without_variable_expansion("test", &source);
+            assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+            assert_eq!(parsed.commands.len(), 1);
+            assert_eq!(parsed.commands[0].name, "bind-key");
+            let mut engine = zz_mux::MuxEngine::default();
+            let mut context = zz_mux::ExecutionContext::default();
+            for command in &parsed.commands {
+                engine.execute(&mut context, command).unwrap();
+            }
+            let tables = engine.keys.snapshot();
+            let saved = tables
+                .iter()
+                .find(|table| table.name == "prefix")
+                .unwrap()
+                .bindings
+                .iter()
+                .find(|binding| binding.key == "%")
+                .unwrap();
+            assert_eq!(
+                split_binding_kind(saved, SplitDirection::Horizontal),
+                Some(kind)
+            );
+        }
+    }
+
+    #[test]
+    fn kind_options_reject_custom_profiles_providers_and_unknown_kinds() {
+        for args in [
+            vec!["--kind", "browser", "--profile", "work"],
+            vec!["--kind", "picker", "--provider", "codex"],
+            vec!["--kind", "agent"],
+            vec!["--kind", "unknown"],
+        ] {
+            let current = binding("-", "split-window", &args);
+            assert_eq!(split_binding_kind(&current, SplitDirection::Vertical), None);
+        }
+        let current = binding("-", "splitw", &[]);
+        assert_eq!(
+            split_binding_kind(&current, SplitDirection::Vertical),
+            Some(SplitPaneKind::Terminal)
+        );
+    }
+
+    #[test]
     fn prefers_user_split_keys_and_reads_clustered_direction() {
         let bindings = [
-            binding("%", "split-picker", &["-h"]),
+            binding("%", "split-window", &["--kind", "picker", "-h"]),
             binding("|", "split-window", &["-dh"]),
         ];
         assert_eq!(
@@ -320,11 +392,11 @@ mod tests {
         let current = binding("-", "split-window", &["-v"]);
         let source = "# original\nbind - split-window -v\n";
         let first = apply(source, &current, "-", SplitPaneKind::Picker);
-        let picker = binding("-", "split-picker", &["-v"]);
+        let picker = binding("-", "split-window", &["--kind", "picker", "-v"]);
         let second = apply(&first, &picker, "-", SplitPaneKind::Browser);
         assert!(second.starts_with(source));
         assert_eq!(first.lines().count(), second.lines().count());
-        assert!(!second.contains("split-picker"));
+        assert!(!second.contains("--kind picker"));
     }
 
     #[test]
@@ -343,7 +415,7 @@ mod tests {
             SplitPaneKind::Picker,
         )
         .unwrap();
-        let picker = binding("-", "split-picker", &["-v"]);
+        let picker = binding("-", "split-window", &["--kind", "picker", "-v"]);
         let third = apply(&second, &picker, "-", SplitPaneKind::Browser);
         assert!(third.starts_with(source));
         assert_eq!(second.lines().count(), third.lines().count());

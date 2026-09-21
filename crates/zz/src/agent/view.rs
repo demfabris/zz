@@ -59,7 +59,7 @@ use crate::{
     },
     config::pane_content_radii,
     file_picker::{DirectoryCatalog, directory_picker_root},
-    mux::{client::MuxClient, hosts::HostId, nav::split_picker_command},
+    mux::{client::MuxClient, hosts::HostId, nav::picker_split_command},
     window::corners::{WindowCorners, round_div_radii},
 };
 
@@ -2713,7 +2713,7 @@ impl Render for AgentView {
                     pane_header_icon_button((id, pane.0), icon, mux.read(cx).is_connected(), cx)
                         .tooltip(label)
                         .on_click(move |_, _, cx| {
-                            mux.read(cx).execute(split_picker_command(pane, axis));
+                            mux.read(cx).execute(picker_split_command(pane, axis));
                             cx.stop_propagation();
                         })
                 }),

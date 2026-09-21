@@ -223,13 +223,12 @@ mode.
 
 ## Picking what goes in a pane
 
-<kbd>C-b</kbd> <kbd>%</kbd> does not open a shell. It opens a **picker**: an
-empty pane asking what you want in it. Press <kbd>t</kbd> for a terminal or
-<kbd>b</kbd> for a browser. <kbd>Escape</kbd> closes the pane again.
+<kbd>C-b</kbd> <kbd>%</kbd> and <kbd>C-b</kbd> <kbd>"</kbd> split a shell by default,
+just like tmux. To open a **picker**, choose Pane picker in Settings → Multiplexer
+or add `bind % split-window --kind picker -h` to `mux.conf`.
 
-That is zz's default binding, which names the zz-native `split-picker` command.
-`split-window` itself — from a shell, a script, or your own `.tmux.conf`
-bindings — always gives you a plain terminal, exactly like tmux.
+In the picker, press <kbd>t</kbd> for a terminal or <kbd>b</kbd> for a browser.
+<kbd>Escape</kbd> closes the pane again.
 
 A browser pane runs a real Chromium off-screen and draws onto the same GPU
 surface as your terminals. It takes the browser chords you already know:

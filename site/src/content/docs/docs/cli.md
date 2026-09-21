@@ -21,11 +21,11 @@ pane's lifetime, visible in `choose-tree` and `display-panes`.
 
 | Command | What it does |
 | --- | --- |
-| `zz new-browser [URL]` | new window with a browser pane |
-| `zz split-browser [-p profile] [URL]` | split into a browser pane |
+| `zz new-window --kind browser [--profile NAME] [URL]` | new window with a browser pane |
+| `zz split-window --kind browser [--profile NAME] [URL]` | split into a browser pane |
 | `zz set-browser-url -t %N URL` | navigate a browser pane |
 | `zz capture-browser -t %N -o /tmp/out.png` | screenshot a browser pane (absolute path) |
-| `zz split-picker [-h\|-v]` | split into an empty pane and pick its type |
+| `zz split-window --kind picker [-h\|-v]` | split into an empty pane and pick its type |
 | `zz tools` | the command catalog written for agents |
 
 Two more verbs, `zz agent-send` and `zz send-last-output`, talk to an Agent

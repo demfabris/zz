@@ -1199,14 +1199,16 @@ fn top_level_help() -> String {
 
     let mut help = String::from("usage: zz [global flags] <command> [flags]\n\nzz verbs\n");
     for name in zz_protocol::NATIVE_COMMAND_NAMES {
-        if let Some(spec) = catalog_command_spec(name) {
+        if let Some(spec) = catalog_command_spec(name)
+            && !spec.is_internal()
+        {
             let _ = writeln!(help, "  {}  {}", spec.name, spec.description);
         }
     }
     help.push_str("\ntmux commands\n");
-    for spec in zz_protocol::command_specs()
-        .filter(|spec| !zz_protocol::NATIVE_COMMAND_NAMES.contains(&spec.name))
-    {
+    for spec in zz_protocol::command_specs().filter(|spec| {
+        !spec.is_internal() && !zz_protocol::NATIVE_COMMAND_NAMES.contains(&spec.name)
+    }) {
         let _ = writeln!(help, "  {}{}", spec.name, help_aliases(spec));
     }
     help.push_str("\nnot implemented\n");
@@ -2973,12 +2975,12 @@ mod tests {
     #[test]
     fn agent_permission_commands_pass_preflight_and_route_stdin() {
         let send = CommandInvocation::new("agent-send", ["--wait", "--on-block", "fail"]);
-        let show = CommandInvocation::new("show-agent-permission", ["-t", "%1"]);
+        let inspect = CommandInvocation::new("inspect", ["-t", "%1", "--json"]);
         let respond = CommandInvocation::new("agent-respond", ["-t", "%1", "--allow"]);
         assert!(command_reads_stdin(&send).is_some());
-        assert!(command_reads_stdin(&show).is_none());
+        assert!(command_reads_stdin(&inspect).is_none());
         assert!(command_reads_stdin(&respond).is_none());
-        zz_mux::validate_static_command_chain(&[send, show, respond]).expect("native preflight");
+        zz_mux::validate_static_command_chain(&[send, inspect, respond]).expect("native preflight");
         assert!(
             command_reads_stdin(&CommandInvocation::new(
                 "agent-send",

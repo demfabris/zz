@@ -7,7 +7,7 @@ extension ZZStore {
     }
 
     func splitPane(_ pane: UInt64, horizontal: Bool) {
-        _ = execute("split-picker", args: ["-t", "%\(pane)", horizontal ? "-h" : "-v"])
+        _ = execute("split-window", args: ["--kind", "picker", "-t", "%\(pane)", horizontal ? "-h" : "-v"])
     }
 
     func togglePaneZoom(_ pane: UInt64) {

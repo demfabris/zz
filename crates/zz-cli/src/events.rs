@@ -301,7 +301,7 @@ pub(crate) fn progress_target(arguments: &[RawText]) -> Result<Option<String>, &
             "--progress" => progress = true,
             "--wait" => wait = true,
             _ => {
-                for name in ["-t", "--target", "--timeout", "--context", "--on-block"] {
+                for name in ["-t", "--timeout", "--context", "--on-block"] {
                     let value = if argument == name {
                         index += 1;
                         arguments.get(index).map(RawText::as_str)
@@ -315,7 +315,7 @@ pub(crate) fn progress_target(arguments: &[RawText]) -> Result<Option<String>, &
                             .and_then(|value| value.strip_prefix('='))
                     };
                     if let Some(value) = value {
-                        if matches!(name, "-t" | "--target") {
+                        if name == "-t" {
                             target = Some(value.to_owned());
                             explicit = true;
                         }
@@ -687,6 +687,10 @@ mod tests {
                 Ok(None)
             );
         }
+        assert!(
+            progress_target(&["--wait", "--progress", "--target", "%7"].map(RawText::from))
+                .is_err()
+        );
         for target in ["%", "%x", "%1:2", "work", "@1"] {
             assert!(
                 progress_target(&["--wait", "--progress", "-t", target].map(RawText::from))

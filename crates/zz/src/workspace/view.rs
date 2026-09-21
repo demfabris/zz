@@ -77,7 +77,7 @@ use crate::{
             SshPromptRequest,
         },
         hosts::HostId,
-        nav::{TreeTarget, kill_target_command, select_window_command, split_picker_command},
+        nav::{TreeTarget, kill_target_command, picker_split_command, select_window_command},
         prefix::{PrefixClaim, PressDisposition, is_sidebar_picker_input, terminal_key_input},
     },
     pane::display::DisplayPanesView,
@@ -2583,10 +2583,10 @@ impl AppView {
                         move |action, _, cx| {
                             let command = match action {
                                 TerminalPaneAction::SplitBottom => {
-                                    split_picker_command(pane, Axis::Vertical)
+                                    picker_split_command(pane, Axis::Vertical)
                                 }
                                 TerminalPaneAction::SplitRight => {
-                                    split_picker_command(pane, Axis::Horizontal)
+                                    picker_split_command(pane, Axis::Horizontal)
                                 }
                                 TerminalPaneAction::Close => {
                                     kill_target_command(TreeTarget::Pane(pane))

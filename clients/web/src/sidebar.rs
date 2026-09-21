@@ -538,8 +538,10 @@ fn render_row(entry: &TreeRow, active: bool, runtime: &Runtime, cx: &mut App) ->
             move |horizontal, _, cx| {
                 connection.update(cx, |connection, cx| {
                     connection.command(
-                        "split-picker",
+                        "split-window",
                         vec![
+                            "--kind".into(),
+                            "picker".into(),
                             if horizontal { "-h" } else { "-v" }.into(),
                             "-t".into(),
                             pane.to_string(),

@@ -173,8 +173,8 @@ That command keeps its own `-N`; otherwise the engine inserts separate `-N <coun
 the argument containing `-X`. Other commands and later actions stay unchanged. A binding of
 `split-window` (or `splitw`), whether imported from a
 tmux config or typed at `prefix :`, creates a plain terminal split like tmux, and since 2026-09-09
-so do zz's *default* `%`/`"` bindings: the zz-native `split-picker` verb stays a command anyone can
-bind, it is no longer what a stock key runs.
+so do zz's *default* `%`/`"` bindings. Select Pane picker in Settings → Multiplexer or use
+`bind % split-window --kind picker -h` to bind a picker split.
 
 # Default bindings (seeded in `KeyTables::default`)
 

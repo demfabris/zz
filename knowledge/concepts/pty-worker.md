@@ -99,7 +99,7 @@ sidebar pane label) describes `npm run dev` while that command owns the PTY. Uns
 macOS's legacy `/bin/bash` use the unchanged default-shell path. `ZZ_SHELL_INTEGRATION=none` disables
 the injection without preventing applications from publishing OSC 0/2 themselves.
 
-`split-picker` (bound on zz's default `%`/`"` keys) creates `PaneKind::Picker` with no
+`split-window --kind picker` creates `PaneKind::Picker` with no
 `TerminalSession` and remembers the donor pane only so a later Terminal selection can inherit the
 same live cwd. `PaneMaterialized{Terminal}` follows the spawn pipeline above, while a Browser
 selection creates no daemon-side runtime. `split-window` — key-bound, CLI, or command-prompt —

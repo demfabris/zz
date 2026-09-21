@@ -96,7 +96,7 @@ profiles. See [remote browser egress](/designs/remote-browser-egress.md).
 
 # Selecting a profile
 
-- `new-browser -p Work [URL]` and `split-browser -p Work [URL]` persist `Work` in
+- `new-window --kind browser --profile Work [URL]` and `split-window --kind browser --profile Work [URL]` persist `Work` in
   the pane's `BrowserDescriptor`.
 - The browser menu displays the current profile. Its **Switch profile** submenu
   offers the default zz profile plus stable Google Chrome profiles detected from

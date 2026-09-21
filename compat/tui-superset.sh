@@ -885,7 +885,7 @@ run_picker_verbs() {
   fresh_group picker 0
   attach_default_clients
 
-  accepts direct split-picker
+  accepts direct split-window --kind picker
   wait_for 'the picker pane' pane_count_is zz 2
   screen_has card zz "$PICKER_MARKER"
   screen_has card-terminal zz 'Terminal (t)'
@@ -907,7 +907,7 @@ run_picker_verbs() {
   wait_for 'the picker cancelled' pane_count_is zz 1
   screen_lacks cancelled zz "$PICKER_MARKER"
 
-  bind_and_press F7 split-picker
+  bind_and_press F7 split-window --kind picker
   wait_for 'the picker pane through a binding' pane_count_is zz 2
   screen_has binding zz "$PICKER_MARKER"
   press Enter
@@ -929,7 +929,7 @@ run_picker_verbs() {
     select-pane-kind -t "$terminal_pane" editor
   refuses kind-on-a-pane-not-awaiting-one "pane $terminal_pane is not awaiting a type selection" \
     select-pane-kind -t "$terminal_pane" browser
-  accepts split-again split-picker
+  accepts split-again split-window --kind picker
   wait_for 'the picker pane again' pane_count_is zz 2
   picker_pane="$(active_pane zz)"
   accepts kind-browser select-pane-kind -t "$picker_pane" browser
@@ -949,7 +949,7 @@ run_browser_verbs() {
   refuses profile-needs-a-value 'set-browser-profile needs exactly one profile name' set-browser-profile
   refuses capture-needs-a-path 'capture-browser needs an output path (-o)' capture-browser
 
-  accepts split split-browser
+  accepts split split-window --kind browser
   wait_for 'the browser pane' pane_count_is zz 2
   browser_pane="$(active_pane zz)"
   screen_has card zz 'Browser'
@@ -969,9 +969,9 @@ run_browser_verbs() {
   bind_and_press F5 set-browser-url -t "$browser_pane" https://bound.invalid/
   screen_has binding zz 'https://bound.invalid/'
 
-  accepts new-window new-browser
+  accepts new-window new-window --kind browser
   wait_for 'the browser window' window_count_is zz 2
-  pass new-browser-adds-a-window
+  pass browser-adds-a-window
   run_zz kill-window -t "=$INNER_SESSION:1"
   wait_for 'the browser window killed' window_count_is zz 1
   run_zz kill-pane -t "$browser_pane"
@@ -986,16 +986,10 @@ run_agent_verbs() {
   refuses send-needs-text 'agent-send needs text on the command line or on standard input' agent-send
   refuses respond-needs-a-choice 'agent-respond needs exactly one of --allow, --deny, or --option ID' agent-respond
   refuses provider-needs-a-value 'set-agent-provider needs exactly one provider' set-agent-provider
-  refuses session-needs-a-value 'set-agent-session needs exactly one ACP session ID' set-agent-session
-  # With no agent pane in the window the target resolution is the declared
-  # refusal, and it does not depend on an agent runtime being reachable.
-  refuses permission-without-an-agent-pane \
-    "invalid target: $(first_pane zz) is not an agent pane" \
-    show-agent-permission -t "$(first_pane zz)"
   refuses restart-on-another-kind "pane $(first_pane zz) is not an agent" \
     restart-agent-pane -t "$(first_pane zz)"
 
-  accepts split split-agent
+  accepts split split-window --kind agent
   wait_for 'the agent pane' pane_count_is zz 2
   agent_pane="$(active_pane zz)"
   screen_has card zz 'Agent'
@@ -1006,7 +1000,6 @@ run_agent_verbs() {
   screen_has card-after-restart zz 'Agent'
   accepts provider set-agent-provider -t "$agent_pane" claude
   screen_has card-follows-provider zz 'Claude Code'
-  accepts session set-agent-session -t "$agent_pane" superset-session
   bind_and_press F4 set-agent-provider -t "$agent_pane" codex
   screen_has binding zz 'Codex'
 
@@ -1163,14 +1156,11 @@ run_binding_pass() {
   bind_the_key show-last-output -t "$pane"
   message_row_is_truncated show-last-output zz "$(marks_message "$pane" show-last-output)"
   bound_message set-agent-provider 'set-agent-provider needs exactly one provider' set-agent-provider
-  bound_message set-agent-session 'set-agent-session needs exactly one ACP session ID' set-agent-session
   bound_message set-browser-profile 'set-browser-profile needs exactly one profile name' set-browser-profile
   bound_message set-browser-tabs 'set-browser-tabs needs at least one URL' set-browser-tabs
   bound_message set-browser-url 'set-browser-url needs a URL' set-browser-url
   bound_message set-editor-path "pane $pane is not an editor" \
     set-editor-path -t "$pane" /tmp/zz-superset-editor.txt
-  bound_message show-agent-permission "invalid target: $pane is not an agent pane" \
-    show-agent-permission -t "$pane"
 
   bind_the_key send-text -t "$pane" BOUNDPASSTEXT
   if wait_for_quietly pane_grid_has zz "$pane" BOUNDPASSTEXT; then
@@ -1187,28 +1177,28 @@ run_binding_pass() {
   press Escape
   wait_for 'the overlay closed' overlay_closed
 
-  bound_screen split-picker "$PICKER_MARKER" split-picker
+  bound_screen picker-split "$PICKER_MARKER" split-window --kind picker
   wait_for 'the bound picker pane' pane_count_is zz 2
   picker_pane="$(active_pane zz)"
   press Escape
   wait_for 'the bound picker cancelled' pane_count_is zz 1
 
-  bound_screen split-browser 'about:blank' split-browser
+  bound_screen browser-split 'about:blank' split-window --kind browser
   wait_for 'the bound browser pane' pane_count_is zz 2
   browser_pane="$(active_pane zz)"
   run_zz kill-pane -t "$browser_pane"
   wait_for 'the bound browser pane killed' pane_count_is zz 1
 
-  bound_screen split-agent 'Agent' split-agent
+  bound_screen agent-split 'Agent' split-window --kind agent
   wait_for 'the bound agent pane' pane_count_is zz 2
   run_zz kill-pane -t "$(active_pane zz)"
   wait_for 'the bound agent pane killed' pane_count_is zz 1
 
-  bind_the_key new-browser
+  bind_the_key new-window --kind browser
   if wait_for_quietly window_count_is zz 2; then
-    pass new-browser
+    pass browser-window
   else
-    fail new-browser 'the bound new-browser added no window'
+    fail browser-window 'the bound new-window --kind browser added no window'
   fi
   run_zz kill-window -t "=$INNER_SESSION:1"
   wait_for 'the bound browser window killed' window_count_is zz 1
@@ -1306,13 +1296,13 @@ run_terminal_around_the_sidebar() {
 # both sides afterwards.
 run_terminal_around_a_pane_surface() {
   local label="$1"
-  local verb="$2"
+  local kind="$2"
   local marker="$3"
   fresh_group "around-$label" 1
   attach_default_clients
   canvas_is_the_pin baseline
 
-  side_command zz "$verb" -t "=$INNER_SESSION:0.0" || die "zz refused $verb"
+  side_command zz split-window --kind "$kind" -t "=$INNER_SESSION:0.0" || die "zz refused a $kind split"
   side_command tmux split-window -v -t "=$INNER_SESSION:0.0" "$INNER_SHELL" ||
     die "tmux refused split-window"
   screen_has surface zz "$marker"
@@ -1429,7 +1419,7 @@ run_second_client() {
   # Neither draws a frame, because no Kitty graphics reach a pane inside the
   # pinned tmux, and the screenshot verb says so in the message a raw TUI gives.
   local browser_pane
-  side_command zz split-browser -t "=$INNER_SESSION:0.0" || die 'zz refused split-browser'
+  side_command zz split-window --kind browser -t "=$INNER_SESSION:0.0" || die 'zz refused split-window --kind browser'
   wait_for 'the browser pane' pane_count_is zz 2
   browser_pane="$(active_pane zz)"
   screen_has browser-card-on-the-first-client zz "$CARD_FOOTER"
@@ -1570,9 +1560,9 @@ run_group output run_output_verbs
 run_group misc run_misc_verbs
 run_group bindings run_binding_pass
 run_group around-sidebar run_terminal_around_the_sidebar
-run_group around-picker run_terminal_around_a_pane_surface picker split-picker "$PICKER_MARKER"
-run_group around-browser run_terminal_around_a_pane_surface browser split-browser "$CARD_FOOTER"
-run_group around-agent run_terminal_around_a_pane_surface agent split-agent "$CARD_FOOTER"
+run_group around-picker run_terminal_around_a_pane_surface picker picker "$PICKER_MARKER"
+run_group around-browser run_terminal_around_a_pane_surface browser browser "$CARD_FOOTER"
+run_group around-agent run_terminal_around_a_pane_surface agent agent "$CARD_FOOTER"
 run_group around-overlay run_terminal_around_the_overlay
 run_group clients run_second_client
 

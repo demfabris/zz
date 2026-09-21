@@ -8,8 +8,8 @@ same GPU surface as your terminals: Metal and IOSurface on macOS, wgpu on
 Linux, D3D11 on Windows. It splits, zooms, focuses, and targets like any other pane:
 
 ```sh
-zz new-browser https://crates.io
-zz split-browser -h                  # split the current pane
+zz new-window --kind browser https://crates.io
+zz split-window --kind browser -h    # split the current pane
 zz set-browser-url -t %3 https://docs.rs
 ```
 
@@ -20,7 +20,8 @@ when the window has none.
 
 ## Profiles
 
-Every pane runs a named, persistent, zz-owned profile. Cookies, cache, and
+Use `--profile NAME` with `new-window --kind browser` or `split-window --kind browser`
+to choose a profile. Every pane runs a named, persistent, zz-owned profile. Cookies, cache, and
 storage are shared between panes with the same profile name and isolated
 across names. zz never touches your Chrome profile.
 

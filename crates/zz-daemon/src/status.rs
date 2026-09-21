@@ -2394,7 +2394,11 @@ mod tests {
             &mut context,
             &["set-option", "-g", "experimental-agent-pane", "on"],
         );
-        execute(&mut engine, &mut context, &["split-picker"]);
+        execute(
+            &mut engine,
+            &mut context,
+            &["split-window", "--kind", "picker"],
+        );
         execute(&mut engine, &mut context, &["select-pane-kind", "agent"]);
         let pane = context.pane.expect("agent");
         for (phase, expected) in [

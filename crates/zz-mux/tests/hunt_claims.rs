@@ -88,7 +88,7 @@ fn attaching_client_flag_values_reach_the_daemon_effect_without_mux_interpretati
 
 #[test]
 fn catalog_covers_the_options_the_handlers_read() {
-    assert_eq!(COMMAND_SPECS.len(), 84);
+    assert_eq!(COMMAND_SPECS.len(), 79);
     for name in ["kill-session", "kill-window", "kill-pane"] {
         let spec = COMMAND_SPECS
             .iter()
@@ -669,7 +669,10 @@ fn split_picker_dash_p_gives_the_new_pane_that_share() {
         .unwrap();
     let target = context.pane.unwrap();
     engine
-        .execute(&mut context, &command("split-picker", &["-h", "-p", "25"]))
+        .execute(
+            &mut context,
+            &command("split-window", &["--kind", "picker", "-h", "-p", "25"]),
+        )
         .unwrap();
     let created = context.pane.unwrap();
     assert_eq!(pane_size(&engine, target), (59, 24));
@@ -864,7 +867,10 @@ fn split_picker_rejects_positional_arguments() {
     let error = engine
         .execute(
             &mut context,
-            &command("split-picker", &["printf", "not-a-shell-command"]),
+            &command(
+                "split-window",
+                &["--kind", "picker", "printf", "not-a-shell-command"],
+            ),
         )
         .unwrap_err();
     assert!(

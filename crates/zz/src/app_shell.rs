@@ -141,7 +141,7 @@ impl AppShell {
     fn split_menu_pane(&self, axis: zz_protocol::Axis, cx: &App) {
         let mux = self.mux.read(cx);
         if let Some(pane) = mux.active_pane() {
-            mux.execute(crate::mux::nav::split_picker_command(pane, axis));
+            mux.execute(crate::mux::nav::picker_split_command(pane, axis));
         }
     }
 
@@ -347,12 +347,12 @@ impl Render for AppShell {
                 }))
                 .when(crate::browser::controller::is_available(cx), |shell| {
                     shell.on_action(cx.listener(|shell, _: &menus::NewBrowserPane, _, cx| {
-                        shell.pane_menu_command("split-browser", &[], cx);
+                        shell.pane_menu_command("split-window", &["--kind", "browser"], cx);
                     }))
                 })
                 .when(crate::config::agent_pane_enabled(cx), |shell| {
                     shell.on_action(cx.listener(|shell, _: &menus::NewAgentPane, _, cx| {
-                        shell.pane_menu_command("split-agent", &[], cx);
+                        shell.pane_menu_command("split-window", &["--kind", "agent"], cx);
                     }))
                 })
                 .on_action(cx.listener(|shell, action: &menus::SwitchSession, _, cx| {

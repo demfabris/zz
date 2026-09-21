@@ -97,8 +97,7 @@ fn split_controls_follow_wire_bindings_preserve_drafts_and_keep_renamed_keys(
     cx.executor().allow_parking();
     cx.update(zz_ui::init);
     cx.update(|cx| config::set_fleet_hosts_for_test(Vec::new(), cx));
-    let source =
-        "# fixture\nbind - split-window -v -c '#{pane_current_path}'\nbind | split-picker -h\n";
+    let source = "# fixture\nbind - split-window -v -c '#{pane_current_path}'\nbind | split-window --kind picker -h\n";
     let (client, server) = test_server(key_tables(source));
     let path = server.directory.path().join("mux.conf");
     std::fs::write(&path, source).unwrap();

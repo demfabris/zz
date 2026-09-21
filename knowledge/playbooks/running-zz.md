@@ -417,7 +417,7 @@ browser split at its loopback address:
 cargo run -p zz --bin zz_browser_fixture
 
 # terminal 2 (Linux launcher; use the bundled executable on macOS/Windows)
-cargo run -p zz -- split-browser -h http://127.0.0.1:9324
+cargo run -p zz -- split-window --kind browser -h http://127.0.0.1:9324
 cargo run -p zz
 ```
 

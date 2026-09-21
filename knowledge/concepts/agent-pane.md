@@ -36,20 +36,21 @@ The whole runtime sits behind `zz-daemon`'s `agent` cargo feature, which is on b
 (`default = ["daemon", "agent"]`); `zz-tui` and `zz-client-ffi` link `zz-daemon` with
 `default-features = false` and never pull in `agent-client-protocol` at all.
 
-`split-picker` still creates a runtime-free picker first. Choosing **Agent**, or issuing
+`split-window --kind picker` still creates a runtime-free picker first. Choosing **Agent**, or issuing
 `select-pane-kind -t %N agent`, materializes that leaf in place, preserving its `%pane` ID and split
 geometry. On the local host, the picker passes `agent-working-directory` through
 `select-pane-kind -c` when configured. That explicit directory wins. A remote host never receives
 the desktop machine's configured path; its daemon resolves the picker donor's current terminal
 working directory and records it in the new `AgentDescriptor`.
 
-`split-agent [-dhv] [-p provider] [-c start-directory] [-P [-F format]] [-t target-pane]`
+`split-window --kind agent [-dhv] [--provider provider] [-c start-directory] [-P [-F format]] [-t target-pane]`
 creates an agent pane directly, with Codex as the default provider. An explicit absolute `-c`
-directory wins over the target's cwd donor. `split-agent`, `split-browser`, and `split-picker`
-accept `-P` to print the new pane ID; `-F` overrides the output format.
+directory wins over the target's cwd donor. All pane kinds use tmux split placement, including
+`-l`/`-p`, `-b`, `-f`, and `-Z`. A successful split clears existing zoom unless `-Z` restores it.
+`-P` prints the tmux target; add `-F '#{pane_id}'` to print the new pane ID.
 
 Agent panes default on in both the mux engine and the client config. Setting
-`experimental-agent-pane` off blocks `split-agent` and `select-pane-kind … agent` from every
+`experimental-agent-pane` off blocks `split-window --kind agent` and `select-pane-kind … agent` from every
 route: picker, palette, CLI, and `mux.conf` bindings. The runtime flag is now the only gate a
 normal build has: `crates/zz/Cargo.toml`
 sets `default = ["desktop", "agent-pane"]`, so a stock `cargo build` and every packaged release ship
@@ -111,8 +112,7 @@ connection produces leaves through one sink that journals it and hands it to the
    session ID. Routing is installed before the load request so replay notifications are retained.
 4. If load is unsupported or fails, create a new session in the resolved absolute working
    directory. The daemon adopts the returned opaque session ID and actual cwd into mux state
-   itself (`adopt_agent_session`), then publishes the changed snapshot; the GUI's old
-   `set-agent-session -t %N -c /path ID` round trip is gone.
+   itself (`adopt_agent_session`), then publishes the changed snapshot.
 5. Send prompts as text content blocks, plus one `ContentBlock::Image` per attachment. Images
    cross the wire as `AgentImage { format, data }` and become content blocks daemon-side, so
    `gpui::Image` never leaves the client. Prompt requests run concurrently with the runtime
@@ -317,11 +317,11 @@ reply text. Starting idle without observing work for 15 seconds exits 124, as do
 the overall timeout. `failed` exits 1; `blocked` keeps waiting unless `--on-block fail`
 requests exit 3. An unset state exits 1 before sending.
 
-`show-agent-permission [-t %N]` prints the oldest pending `AgentPermissionWire` as JSON:
-`request_id` identifies the request, and `payload` contains a JSON string with `toolCall` and
-`options`. With no pending request it prints nothing to stdout, reports `no pending permission:
-%N` on stderr, and exits 1. An explicit non-agent target fails; an omitted target selects the
-window's most recent agent pane.
+Read a pane's pending request with `zz inspect -t %N --json | jq .permission`.
+The `permission` field holds a nested `{"request_id":N,"tool_call":{...},"options":[...]}`
+object, or `null` when no request is pending. Text output prints compact JSON on the
+`permission:` line, or an empty value. `inspect` accepts every pane kind and uses the
+current pane when you omit the target.
 
 `agent-respond [-t %N] (--allow | --deny | --option ID) [REQUEST_ID]` answers the oldest request
 unless you name one. `--allow` prefers the first allow-once option over allow-always; `--deny`
@@ -330,7 +330,7 @@ chosen option ID and exits 0. Missing requests, unknown request IDs, and invalid
 1; an invalid option lists the valid IDs. Interactive clients cannot invoke this command.
 
 `agent-send --wait --on-block wait|fail` defaults to `wait`, which keeps waiting through a
-permission request. With `fail`, it prints the same JSON as `show-agent-permission`, writes the
+permission request. With `fail`, it prints the same JSON as the `permission` object in `inspect --json`, writes the
 pane ID to stderr, and exits 3. The turn keeps running. Use `agent-respond` to answer it; a later
 `agent-send --wait` queues behind that turn and receives only its own reply.
 

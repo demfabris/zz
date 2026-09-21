@@ -67,6 +67,9 @@ fn catalog_help_is_available_without_a_daemon() {
         let help = String::from_utf8(output.stdout).expect("UTF-8 help");
         if arguments.len() == 1 {
             assert!(help.contains("agent-send"));
+            for name in zz_protocol::INTERNAL_COMMAND_NAMES {
+                assert!(!help.contains(name), "advertised {name}");
+            }
             assert!(help.contains("tmux commands"));
             assert!(help.contains("not implemented"));
         } else {
@@ -74,6 +77,24 @@ fn catalog_help_is_available_without_a_daemon() {
             assert!(help.contains("-F"));
             assert!(help.contains("--json"));
         }
+        assert!(!socket.exists());
+    }
+}
+
+#[test]
+fn internal_command_help_remains_available_without_a_daemon() {
+    for name in zz_protocol::INTERNAL_COMMAND_NAMES {
+        let (home, mut zz) = isolated_zz();
+        let socket = home.path().join("absent.sock");
+        let output = zz
+            .arg("-S")
+            .arg(&socket)
+            .args([name, "--help"])
+            .output()
+            .expect("run internal command help");
+        assert_eq!(output.status.code(), Some(0), "{name}");
+        assert!(output.stderr.is_empty());
+        assert!(String::from_utf8_lossy(&output.stdout).contains(name));
         assert!(!socket.exists());
     }
 }
@@ -555,6 +576,12 @@ mod daemon_autostart {
         assert_eq!(row["pane_id"], "%0");
         assert_eq!(row["pane_kind"], "terminal");
         assert!(
+            !row["verbs"]
+                .as_array()
+                .unwrap()
+                .contains(&"select-pane-kind".into())
+        );
+        assert!(
             row["verbs"]
                 .as_array()
                 .unwrap()
@@ -566,7 +593,7 @@ mod daemon_autostart {
                 .unwrap()
                 .contains(&"pane-exited".into())
         );
-        assert_eq!(row.as_object().unwrap().len(), 29);
+        assert_eq!(row.as_object().unwrap().len(), 30);
         for (key, value) in row.as_object().unwrap() {
             if matches!(key.as_str(), "verbs" | "events") {
                 assert!(
@@ -576,6 +603,8 @@ mod daemon_autostart {
                         .iter()
                         .all(serde_json::Value::is_string)
                 );
+            } else if key == "permission" {
+                assert!(value.is_null());
             } else {
                 assert!(value.is_string(), "{key}");
             }
@@ -630,7 +659,8 @@ mod daemon_autostart {
                 &["set-option", "-a", "experimental-agent-pane", "on"][..],
                 2,
             ),
-            (&["split-browser", "-Q"][..], 2),
+            (&["split-window", "--kind", "browser", "-I"][..], 2),
+            (&["split-window", "--profile", "x"][..], 2),
             (&["agent-catalog", "-Q"][..], 2),
             (&["agent-catalog", "claude", "not-a-number"][..], 2),
             (&["set-browser-url"][..], 2),

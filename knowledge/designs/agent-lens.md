@@ -2,7 +2,7 @@
 type: Design Plan
 title: Agent lens - a rich view over the real CLI
 description: Decision record and plan for replacing the ACP agent pane with a read-only rich view of a Claude Code, Codex, or pi session that runs unmodified in an ordinary terminal pane - the transcript file the CLI already writes is the source, three small readers built from the vendors' own code are the translation layer, and input goes back through the pane.
-status: Proposed (2026-09-17, readers not started)
+status: Abandoned (2026-09-21; the lens branch was built, then deleted unmerged; the ACP agent pane stays)
 tags:
 - agent
 - agent-pane

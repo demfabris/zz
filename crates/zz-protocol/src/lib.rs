@@ -16,9 +16,9 @@ mod terminal_codec;
 pub use catalog::{
     COMMAND_ARGS_PARSE_BEHAVES, COMMAND_ARGS_PARSE_SPECS, COMMAND_SPECS, CommandArgsParseRule,
     CommandArgsParseSpec, CommandOptionSpec, CommandResolution, CommandSpec, CommandValueKind,
-    DAEMON_COMMAND_SPECS, NATIVE_COMMAND_NAMES, POSITIONAL_MINIMUMS, TmuxOption, TmuxOptionParse,
-    canonical_command, catalog_command_spec, command_spec, command_specs,
-    parse_tmux_command_options, parse_tmux_options, resolve_command,
+    DAEMON_COMMAND_SPECS, INTERNAL_COMMAND_NAMES, NATIVE_COMMAND_NAMES, POSITIONAL_MINIMUMS,
+    TmuxOption, TmuxOptionParse, canonical_command, catalog_command_spec, command_spec,
+    command_specs, parse_tmux_command_options, parse_tmux_options, resolve_command,
     unimplemented_tmux_command_spec,
 };
 pub use framing::{MAX_ENCODED_FRAME_BYTES, MAX_FRAME_BYTES, ProtocolError};

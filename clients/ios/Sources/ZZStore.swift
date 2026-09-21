@@ -1362,24 +1362,20 @@ final class ZZStore: ObservableObject {
                 return
             }
             created = execute(
-                "if-shell",
-                args: [
-                    "-F",
-                    "1",
-                    "split-picker -t %\(target) ; select-pane-kind agent",
-                ]
+                "split-window",
+                args: ["--kind", "agent", "-t", "%\(target)"]
             )
         case .picker:
             guard let target = session.activeWindow?.activePane ?? session.panes.first?.id else {
                 actionError = "Create a terminal before adding a pane."
                 return
             }
-            created = execute("split-picker", args: ["-t", "%\(target)"])
+            created = execute("split-window", args: ["--kind", "picker", "-t", "%\(target)"])
         case .browser:
             if let target = session.activeWindow?.activePane {
-                created = execute("split-browser", args: ["-t", "%\(target)", "about:blank"])
+                created = execute("split-window", args: ["--kind", "browser", "-t", "%\(target)", "about:blank"])
             } else {
-                created = execute("new-browser", args: ["about:blank"])
+                created = execute("new-window", args: ["--kind", "browser", "about:blank"])
             }
         case .editor:
             actionError = "That pane type isn’t available in the iPad app yet."

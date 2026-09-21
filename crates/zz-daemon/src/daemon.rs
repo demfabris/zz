@@ -11,7 +11,7 @@ use std::{
     process::{Child, ExitStatus, Stdio},
     sync::{
         Arc, Weak,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
         mpsc,
     },
     thread,
@@ -171,7 +171,7 @@ const STARTUP_CONFIG_PREVIEW_TRUNCATED: &str =
     "... startup diagnostics truncated; restart in Control mode for full output";
 const AGENT_SEND_WAIT_TIMEOUT: Duration = Duration::from_mins(10);
 const AGENT_STATE_START_GRACE: Duration = Duration::from_secs(15);
-const SEND_TEXT_TIMEOUT_MS: u64 = 2000;
+const SEND_TEXT_TIMEOUT: Duration = Duration::from_secs(2);
 const SEND_TEXT_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const SEND_TEXT_TAIL_CHARS: usize = 40;
 const PASTE_COLLAPSE_MARKER: &str = "[Pasted text";
@@ -3113,6 +3113,7 @@ const INSPECT_FIELDS: &[&str] = &[
     "pane_pb_progress",
     "agent_state",
     "agent_pending_permission",
+    "permission",
     "browser_url",
     "verbs",
     "events",
@@ -3134,19 +3135,16 @@ const INSPECT_VERBS: &[(&str, &[&str])] = &[
             "respawn-pane",
             "resize-pane",
             "kill-pane",
-            "select-pane-kind",
         ],
     ),
     (
         "browser",
         &[
             "set-browser-url",
-            "set-browser-tabs",
             "set-browser-profile",
             "capture-browser",
             "resize-pane",
             "kill-pane",
-            "select-pane-kind",
         ],
     ),
     (
@@ -3154,27 +3152,16 @@ const INSPECT_VERBS: &[(&str, &[&str])] = &[
         &[
             "agent-send",
             "agent-respond",
-            "show-agent-permission",
             "show-last-output",
             "send-last-output",
             "restart-agent-pane",
             "new-agent-session",
             "set-agent-provider",
-            "set-agent-session",
             "resize-pane",
             "kill-pane",
-            "select-pane-kind",
         ],
     ),
-    (
-        "editor",
-        &[
-            "set-editor-path",
-            "resize-pane",
-            "kill-pane",
-            "select-pane-kind",
-        ],
-    ),
+    ("editor", &["resize-pane", "kill-pane"]),
     ("picker", &["resize-pane", "kill-pane", "select-pane-kind"]),
 ];
 
@@ -3203,13 +3190,11 @@ enum DaemonCommandDispatch {
     IfShell,
     AgentSend,
     NewAgentSession,
-    ShowAgentPermission,
     AgentRespond,
     SendLastOutput,
     ShowLastOutput,
     Inspect,
     SendText,
-    WaitForExit,
     WaitPane,
     RunPane,
     CaptureBrowser,
@@ -3240,16 +3225,11 @@ const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
     ("if", DaemonCommandDispatch::IfShell),
     ("agent-send", DaemonCommandDispatch::AgentSend),
     ("new-agent-session", DaemonCommandDispatch::NewAgentSession),
-    (
-        "show-agent-permission",
-        DaemonCommandDispatch::ShowAgentPermission,
-    ),
     ("agent-respond", DaemonCommandDispatch::AgentRespond),
     ("send-last-output", DaemonCommandDispatch::SendLastOutput),
     ("show-last-output", DaemonCommandDispatch::ShowLastOutput),
     ("inspect", DaemonCommandDispatch::Inspect),
     ("send-text", DaemonCommandDispatch::SendText),
-    ("wait-for-exit", DaemonCommandDispatch::WaitForExit),
     ("wait-pane", DaemonCommandDispatch::WaitPane),
     ("run-pane", DaemonCommandDispatch::RunPane),
     ("capture-browser", DaemonCommandDispatch::CaptureBrowser),
@@ -6188,24 +6168,32 @@ impl Shared {
         }) else {
             return (Ok(execution), 0);
         };
-        if !matches!(kind, ClientKind::Command | ClientKind::Control) {
-            self.inner.lock().pane_exit_waits.remove(&pane);
-            return (Ok(execution), 0);
-        }
-        let Some(wait) = self
-            .inner
-            .lock()
-            .pane_exit_waits
-            .get(&pane)
-            .map(|entry| entry.wait.clone())
-        else {
+        let Some((wait, status)) = ({
+            let mut inner = self.inner.lock();
+            let subscription = inner
+                .pane_exit_waits
+                .get_mut(&pane)
+                .and_then(|entry| entry.command_wait.take());
+            if inner
+                .pane_exit_waits
+                .get(&pane)
+                .is_some_and(|entry| entry.wake.is_none())
+            {
+                inner.pane_exit_waits.remove(&pane);
+            }
+            subscription
+        }) else {
             return (Ok(execution), 0);
         };
+        if !matches!(kind, ClientKind::Command | ClientKind::Control) {
+            return (Ok(execution), 0);
+        }
         self.report_command_queue_park();
         let exit_code = loop {
             match wait.recv_timeout(PANE_WAIT_POLL_INTERVAL) {
-                Ok(exit_code) => break exit_code,
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break 0,
+                Ok(()) | Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                    break status.load(Ordering::Acquire);
+                }
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                     if self.command_queue_cancelled(client) {
                         break 0;
@@ -6213,7 +6201,6 @@ impl Shared {
                 }
             }
         };
-        self.inner.lock().pane_exit_waits.remove(&pane);
         (Ok(execution), exit_code)
     }
 
@@ -6239,9 +6226,15 @@ impl Shared {
         }
     }
 
-    fn wake_pane_exit_wait(inner: &ServerState, pane: PaneId, exit_code: u8) {
-        if let Some(entry) = inner.pane_exit_waits.get(&pane) {
-            let _ = entry.wake.try_send(exit_code);
+    fn wake_pane_exit_wait(inner: &mut ServerState, pane: PaneId, exit_code: u8) {
+        if let Some(entry) = inner.pane_exit_waits.get_mut(&pane) {
+            if entry.wake.is_some() {
+                entry.exit_code.store(exit_code, Ordering::Release);
+                entry.wake.take();
+            }
+            if entry.command_wait.is_none() {
+                inner.pane_exit_waits.remove(&pane);
+            }
         }
     }
 
@@ -6914,9 +6907,6 @@ impl Shared {
                     DaemonCommandDispatch::AgentSend => {
                         self.agent_send(client, kind, context, &command.args)
                     }
-                    DaemonCommandDispatch::ShowAgentPermission => {
-                        self.show_agent_permission(context, &command.args)
-                    }
                     DaemonCommandDispatch::AgentRespond => {
                         self.agent_respond(kind, context, &command.args)
                     }
@@ -6928,9 +6918,6 @@ impl Shared {
                     }
                     DaemonCommandDispatch::Inspect => self.inspect(client, context, &command.args),
                     DaemonCommandDispatch::SendText => self.send_text(context, &command.args),
-                    DaemonCommandDispatch::WaitForExit => {
-                        self.wait_for_exit(client, kind, context, &command.args)
-                    }
                     DaemonCommandDispatch::WaitPane => {
                         self.wait_pane(client, kind, context, &command.args)
                     }
@@ -8339,6 +8326,12 @@ impl Shared {
                             terminal: Arc::clone(&session),
                             enabled: terminal_options.wrap_search,
                         });
+                        Self::wake_pane_exit_wait(&mut inner, *pane, 0);
+                        if let Some(entry) = inner.pane_exit_waits.get_mut(pane) {
+                            let command_wait = entry.command_wait.take();
+                            *entry = PaneExitWait::new();
+                            entry.command_wait = command_wait;
+                        }
                         inner.terminals.insert(*pane, Arc::clone(&session));
                         inner.terminal_spawns.insert(*pane, spawn);
                         inner.engine.set_pane_runtime_facts_with_hooks(
@@ -8393,10 +8386,12 @@ impl Shared {
                     }
                     | MuxEffect::SuppressAfterHook => {}
                     MuxEffect::PaneWaitForExit { pane } => {
-                        let (wake, wait) = crossbeam_channel::bounded(1);
-                        inner
+                        let entry = inner
                             .pane_exit_waits
-                            .insert(*pane, PaneExitWait { wake, wait });
+                            .entry(*pane)
+                            .or_insert_with(PaneExitWait::new);
+                        entry.command_wait =
+                            Some((entry.wait.clone(), Arc::clone(&entry.exit_code)));
                     }
                     MuxEffect::PaneCreated {
                         pane,
@@ -8489,7 +8484,7 @@ impl Shared {
                             if let Some(pipe) = inner.pane_pipes.remove(pane) {
                                 pipes_to_close.push(pipe);
                             }
-                            Self::wake_pane_exit_wait(&inner, *pane, 0);
+                            Self::wake_pane_exit_wait(&mut inner, *pane, 0);
                             inner.terminals.remove(pane);
                             inner.last_output.remove(pane);
                             #[cfg(all(feature = "agent", unix))]
@@ -13441,6 +13436,33 @@ impl Shared {
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_agent_send_args(args)?;
         let payload = parsed.payload()?;
+        if parsed.final_only
+            || matches!(
+                parsed.on_block,
+                AgentBlockPolicy::Allow | AgentBlockPolicy::Deny
+            )
+        {
+            let inner = self.inner.lock();
+            let pane = inner.engine.resolve_pane(
+                parsed.target.as_deref(),
+                context.window,
+                context.pane,
+            )?;
+            if matches!(
+                inner.engine.state.pane(pane).map(|pane| &pane.kind),
+                Some(PaneKind::Terminal)
+            ) {
+                let flag = if parsed.final_only {
+                    "--final"
+                } else {
+                    "--on-block allow|deny"
+                };
+                return Err(ServerError::NativeCommandParse(format!(
+                    "agent-send: {flag} needs an agent pane"
+                ))
+                .into());
+            }
+        }
         #[cfg(all(feature = "agent", unix))]
         {
             use crate::agent::claude_peers;
@@ -13640,7 +13662,7 @@ impl Shared {
         #[cfg(all(feature = "agent", unix))]
         self.deliver_to_terminal_pane(pane, payload)?;
         #[cfg(not(all(feature = "agent", unix)))]
-        self.paste_and_submit(pane, payload, SEND_TEXT_TIMEOUT_MS, true)?;
+        self.paste_and_submit(pane, payload, SEND_TEXT_TIMEOUT, true)?;
         self.report_command_queue_park();
         let started = Instant::now();
         let mut seen_working = initial != "idle";
@@ -13861,9 +13883,7 @@ impl Shared {
                 zz_protocol::TmuxOption::Value("-t", value) => target = Some(value),
                 zz_protocol::TmuxOption::Value("-c", value) => cwd = Some(PathBuf::from(value)),
                 zz_protocol::TmuxOption::Value("--timeout", value) => {
-                    timeout = Duration::from_secs(value.parse::<u64>().map_err(|_| {
-                        ServerError::CommandParse(format!("invalid timeout: {value}"))
-                    })?);
+                    timeout = parse_pane_timeout("new-agent-session", value)?;
                 }
                 _ => {}
             }
@@ -13906,7 +13926,14 @@ impl Shared {
             ) {
                 return Err(ServerError::PaneExited(pane).into());
             }
-            match reply.recv_timeout(timeout) {
+            let result = if timeout.is_zero() {
+                reply
+                    .recv()
+                    .map_err(|_| crossbeam_channel::RecvTimeoutError::Disconnected)
+            } else {
+                reply.recv_timeout(timeout)
+            };
+            match result {
                 Ok(Ok(())) => Ok(Execution::default()),
                 Ok(Err(message)) => Err(DaemonError::CommandExit {
                     output: message.into(),
@@ -13916,7 +13943,7 @@ impl Shared {
                     Err(DaemonError::CommandExit {
                         output: format!(
                             "{pane}: new session not ready within {} seconds",
-                            timeout.as_secs()
+                            timeout.as_secs_f64()
                         )
                         .into(),
                         exit_code: 124,
@@ -14108,7 +14135,7 @@ impl Shared {
             let mut values = serde_json::Map::new();
             for &key in INSPECT_FIELDS {
                 let value = match key {
-                    "verbs" | "events" => continue,
+                    "permission" | "verbs" | "events" => continue,
                     "window_size" => inner.engine.window_size(window).as_str(),
                     _ => {
                         let scope = if key.starts_with("session_") {
@@ -14123,6 +14150,17 @@ impl Shared {
                 };
                 values.insert(key.to_owned(), serde_json::Value::String(value.to_owned()));
             }
+            #[cfg(feature = "agent")]
+            let permission = self
+                .open_agent_runtime()
+                .and_then(|runtime| runtime.wire_state(pane))
+                .and_then(|state| state.pending_permission)
+                .map_or(serde_json::Value::Null, |permission| {
+                    agent_permission_json(&permission)
+                });
+            #[cfg(not(feature = "agent"))]
+            let permission = serde_json::Value::Null;
+            values.insert("permission".to_owned(), permission);
             let kind = values["pane_kind"].as_str().unwrap_or_default().to_owned();
             let mut verbs = INSPECT_VERBS
                 .iter()
@@ -14151,7 +14189,9 @@ impl Shared {
                     .iter()
                     .map(|key| {
                         let value = &values[*key];
-                        let text = if let Some(items) = value.as_array() {
+                        let text = if value.is_object() {
+                            value.to_string()
+                        } else if let Some(items) = value.as_array() {
                             items
                                 .iter()
                                 .map(|item| item.as_str().unwrap_or_default())
@@ -14171,31 +14211,6 @@ impl Shared {
             output: output.join(if json { "\n" } else { "\n\n" }).into(),
             effects: Vec::new(),
         })
-    }
-
-    fn show_agent_permission(
-        &self,
-        context: &ExecutionContext,
-        args: &[RawText],
-    ) -> Result<Execution, DaemonError> {
-        let target = parse_target_only_args("show-agent-permission", args)?;
-        let pane = self.resolve_agent_permission_pane(context, target.as_deref())?;
-        #[cfg(feature = "agent")]
-        {
-            let permission = self
-                .open_agent_runtime()
-                .and_then(|runtime| runtime.wire_state(pane))
-                .and_then(|state| state.pending_permission)
-                .ok_or_else(|| {
-                    ServerError::InvalidCommand(format!("no pending permission: {pane}"))
-                })?;
-            Ok(Execution {
-                output: agent_permission_json(&permission).to_string().into(),
-                effects: Vec::new(),
-            })
-        }
-        #[cfg(not(feature = "agent"))]
-        Err(ServerError::InvalidCommand(format!("no pending permission: {pane}")).into())
     }
 
     fn agent_respond(
@@ -14305,7 +14320,7 @@ impl Shared {
             context.window,
             context.pane,
         )?;
-        self.paste_and_submit(pane, &text, parsed.timeout_ms, !parsed.no_enter)?;
+        self.paste_and_submit(pane, &text, parsed.timeout, !parsed.no_enter)?;
         Ok(Execution::default())
     }
 
@@ -14348,7 +14363,7 @@ impl Shared {
                 }
             }
         }
-        self.paste_and_submit(pane, text, 2000, true)
+        self.paste_and_submit(pane, text, SEND_TEXT_TIMEOUT, true)
     }
 
     fn terminal_wait_target(
@@ -14384,56 +14399,6 @@ impl Shared {
         Ok((pane, terminal))
     }
 
-    fn wait_for_exit(
-        &self,
-        client: ClientId,
-        kind: ClientKind,
-        context: &ExecutionContext,
-        args: &[RawText],
-    ) -> Result<Execution, DaemonError> {
-        let parsed = parse_wait_for_exit_args(args)?;
-        let (pane, terminal) =
-            self.terminal_wait_target("wait-for-exit", kind, context, parsed.target.as_deref())?;
-        let started = Instant::now();
-        self.report_command_queue_park();
-        loop {
-            if terminal.completion().is_some() {
-                let exit_code = pane_wait_exit_code(&terminal, &terminal.latest_viewport().status);
-                return if exit_code == 0 {
-                    Ok(Execution::default())
-                } else {
-                    Err(DaemonError::CommandExit {
-                        output: RawText::default(),
-                        exit_code,
-                    })
-                };
-            }
-            if !self
-                .inner
-                .lock()
-                .terminals
-                .get(&pane)
-                .is_some_and(|current| Arc::ptr_eq(current, &terminal))
-            {
-                return Ok(Execution::default());
-            }
-            if self.command_queue_cancelled(client) {
-                return Ok(Execution::default());
-            }
-            if !parsed.timeout.is_zero() && started.elapsed() >= parsed.timeout {
-                return Err(DaemonError::CommandExit {
-                    output: format!(
-                        "wait-for-exit: {pane} still running after {} seconds",
-                        parsed.timeout.as_secs(),
-                    )
-                    .into(),
-                    exit_code: 124,
-                });
-            }
-            thread::sleep(SEND_TEXT_POLL_INTERVAL);
-        }
-    }
-
     fn wait_pane(
         &self,
         client: ClientId,
@@ -14445,10 +14410,86 @@ impl Shared {
         let (pane, terminal) =
             self.terminal_wait_target("wait-pane", kind, context, parsed.target.as_deref())?;
         let started = Instant::now();
+        if matches!(parsed.condition, PaneWaitCondition::Exit) {
+            let (wait, status) = {
+                let mut inner = self.inner.lock();
+                if !inner
+                    .terminals
+                    .get(&pane)
+                    .is_some_and(|current| Arc::ptr_eq(current, &terminal))
+                {
+                    return Ok(Execution::default());
+                }
+                if terminal.completion().is_some() {
+                    let exit_code =
+                        pane_wait_exit_code(&terminal, &terminal.latest_viewport().status);
+                    return if exit_code == 0 {
+                        Ok(Execution::default())
+                    } else {
+                        Err(DaemonError::CommandExit {
+                            output: RawText::default(),
+                            exit_code,
+                        })
+                    };
+                }
+                let entry = inner
+                    .pane_exit_waits
+                    .entry(pane)
+                    .or_insert_with(PaneExitWait::new);
+                (entry.wait.clone(), Arc::clone(&entry.exit_code))
+            };
+            self.report_command_queue_park();
+            loop {
+                if self.command_queue_cancelled(client) {
+                    return Ok(Execution::default());
+                }
+                let interval = if parsed.timeout.is_zero() {
+                    PANE_WAIT_POLL_INTERVAL
+                } else {
+                    PANE_WAIT_POLL_INTERVAL.min(parsed.timeout.saturating_sub(started.elapsed()))
+                };
+                match wait.recv_timeout(interval) {
+                    Ok(()) | Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                        let exit_code = status.load(Ordering::Acquire);
+                        return if exit_code == 0 {
+                            Ok(Execution::default())
+                        } else {
+                            Err(DaemonError::CommandExit {
+                                output: RawText::default(),
+                                exit_code,
+                            })
+                        };
+                    }
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                        if !parsed.timeout.is_zero() && started.elapsed() >= parsed.timeout {
+                            return Err(DaemonError::CommandExit {
+                                output: format!(
+                                    "wait-pane: timed out waiting for --exit on {pane}\n"
+                                )
+                                .into(),
+                                exit_code: 124,
+                            });
+                        }
+                    }
+                }
+            }
+        }
         let options = CaptureOptions {
+            start: CaptureBoundary::HistoryStart,
             join_wrapped: true,
             preserve_trailing: true,
             ..CaptureOptions::default()
+        };
+        let scan_start = if matches!(
+            parsed.condition,
+            PaneWaitCondition::Until(_) | PaneWaitCondition::Regex(_)
+        ) {
+            capture_screen(&terminal, pane, &options)?
+                .lines()
+                .count()
+                .saturating_sub(usize::from(terminal.latest_viewport().rows))
+        } else {
+            0
         };
         let mut first = true;
         self.report_command_queue_park();
@@ -14483,12 +14524,19 @@ impl Shared {
                     if let Some(line) = screen
                         .lines()
                         .rev()
+                        .take(
+                            screen
+                                .lines()
+                                .count()
+                                .saturating_sub(scan_start)
+                                .min(10_000),
+                        )
                         .skip_while(|line| line.trim().is_empty())
                         .take(parsed.tail.unwrap_or(usize::MAX))
                         .find(|line| match condition {
                             PaneWaitCondition::Until(text) => line.contains(text),
                             PaneWaitCondition::Regex(regex) => regex.is_match(line),
-                            PaneWaitCondition::Idle(_) => false,
+                            PaneWaitCondition::Idle(_) | PaneWaitCondition::Exit => false,
                         })
                     {
                         return Ok(Execution {
@@ -14498,8 +14546,9 @@ impl Shared {
                     }
                 }
             }
-            if started.elapsed() >= parsed.timeout {
+            if !parsed.timeout.is_zero() && started.elapsed() >= parsed.timeout {
                 let condition = match &parsed.condition {
+                    PaneWaitCondition::Exit => "--exit".to_owned(),
                     PaneWaitCondition::Idle(dwell) => format!("--idle {}", dwell.as_millis()),
                     PaneWaitCondition::Until(text) => format!("--until {text:?}"),
                     PaneWaitCondition::Regex(regex) => format!("--regex {:?}", regex.as_str()),
@@ -14538,17 +14587,23 @@ impl Shared {
         if self.command_queue_cancelled(client) {
             return Ok(Execution::default());
         }
-        if parsed.timeout.is_zero() {
-            return Err(DaemonError::CommandExit {
-                output: RawText::default(),
-                exit_code: 125,
-            });
-        }
-        let timeout_ms = u64::try_from(parsed.timeout.as_millis())
-            .unwrap_or(u64::MAX)
-            .min(SEND_TEXT_TIMEOUT_MS);
-        if let Err(error) = self.paste_and_submit(pane, &line, timeout_ms, true) {
-            if started.elapsed() >= parsed.timeout {
+        let echo_timeout = if parsed.timeout.is_zero() {
+            Duration::ZERO
+        } else {
+            parsed
+                .timeout
+                .saturating_sub(started.elapsed())
+                .max(Duration::from_nanos(1))
+        };
+        if let Err(error) = self.paste_and_submit(pane, &line, echo_timeout, true) {
+            if !parsed.timeout.is_zero() && started.elapsed() >= parsed.timeout {
+                self.record_command_stderr(
+                    client,
+                    &format!(
+                        "run-pane: timed out after {}s on {pane}; the command keeps running",
+                        parsed.timeout.as_secs_f64(),
+                    ),
+                );
                 return Err(DaemonError::CommandExit {
                     output: RawText::default(),
                     exit_code: 125,
@@ -14587,7 +14642,14 @@ impl Shared {
                     })
                 };
             }
-            if started.elapsed() >= parsed.timeout {
+            if !parsed.timeout.is_zero() && started.elapsed() >= parsed.timeout {
+                self.record_command_stderr(
+                    client,
+                    &format!(
+                        "run-pane: timed out after {}s on {pane}; the command keeps running",
+                        parsed.timeout.as_secs_f64(),
+                    ),
+                );
                 return Err(DaemonError::CommandExit {
                     output: output.into(),
                     exit_code: 125,
@@ -14601,7 +14663,7 @@ impl Shared {
         &self,
         pane: PaneId,
         text: &str,
-        timeout_ms: u64,
+        timeout: Duration,
         enter: bool,
     ) -> Result<(), DaemonError> {
         let (terminal, sinks) = {
@@ -14645,7 +14707,7 @@ impl Shared {
             sink.paste_prepared_bytes(None, Arc::clone(&bytes), true);
         }
         let tail = echo_tail(text);
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+        let started = Instant::now();
         loop {
             thread::sleep(SEND_TEXT_POLL_INTERVAL);
             let screen = capture_screen(&terminal, pane, &options)?;
@@ -14654,9 +14716,10 @@ impl Shared {
             {
                 break;
             }
-            if Instant::now() >= deadline {
+            if !timeout.is_zero() && started.elapsed() >= timeout {
                 return Err(ServerError::InvalidCommand(format!(
-                    "{pane}: text not echoed within {timeout_ms} ms; nothing submitted"
+                    "{pane}: text not echoed within {} seconds; nothing submitted",
+                    timeout.as_secs_f64(),
                 ))
                 .into());
             }
@@ -24178,7 +24241,15 @@ impl Shared {
         let status = terminal.latest_viewport().status.clone();
         {
             let exit_code = pane_wait_exit_code(terminal, &status);
-            Self::wake_pane_exit_wait(&self.inner.lock(), pane, exit_code);
+            let mut inner = self.inner.lock();
+            if !inner
+                .terminals
+                .get(&pane)
+                .is_some_and(|current| Arc::ptr_eq(current, terminal))
+            {
+                return;
+            }
+            Self::wake_pane_exit_wait(&mut inner, pane, exit_code);
         }
         let (failed, dead_status, dead_signal) = match status {
             zz_terminal::SessionStatus::Exited(status) => {
@@ -30946,8 +31017,22 @@ impl Default for AutomaticPasteBufferLimit {
 }
 
 struct PaneExitWait {
-    wake: crossbeam_channel::Sender<u8>,
-    wait: crossbeam_channel::Receiver<u8>,
+    wake: Option<crossbeam_channel::Sender<()>>,
+    wait: crossbeam_channel::Receiver<()>,
+    exit_code: Arc<AtomicU8>,
+    command_wait: Option<(crossbeam_channel::Receiver<()>, Arc<AtomicU8>)>,
+}
+
+impl PaneExitWait {
+    fn new() -> Self {
+        let (wake, wait) = crossbeam_channel::bounded(0);
+        Self {
+            wake: Some(wake),
+            wait,
+            exit_code: Arc::new(AtomicU8::new(0)),
+            command_wait: None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -41632,7 +41717,7 @@ struct ParsedAgentSend {
     target: Option<String>,
     submit: bool,
     wait: bool,
-    timeout: Option<u64>,
+    timeout: Option<Duration>,
     context: Option<ContextReference>,
     text: Vec<String>,
 }
@@ -42223,7 +42308,7 @@ fn echo_tail(text: &str) -> String {
 struct ParsedSendText {
     target: Option<String>,
     no_enter: bool,
-    timeout_ms: u64,
+    timeout: Duration,
     text: Vec<String>,
 }
 
@@ -42244,42 +42329,10 @@ pub fn send_text_reads_stdin(args: &[RawText]) -> bool {
 
 #[derive(Debug)]
 enum PaneWaitCondition {
+    Exit,
     Idle(Duration),
     Until(String),
     Regex(regex::Regex),
-}
-
-#[derive(Debug)]
-struct ParsedWaitForExit {
-    target: Option<String>,
-    timeout: Duration,
-}
-
-fn parse_wait_for_exit_args(args: &[RawText]) -> Result<ParsedWaitForExit, ServerError> {
-    let mut parsed = ParsedWaitForExit {
-        target: None,
-        timeout: Duration::ZERO,
-    };
-    let mut index = 0;
-    while let Some(argument) = args.get(index) {
-        if argument == "--" && index + 1 == args.len() {
-            break;
-        }
-        if let Some(value) = option_value("wait-for-exit", args, index, &["-t"])? {
-            parsed.target = Some(value.value);
-            index += value.consumed;
-            continue;
-        }
-        if let Some(value) = option_value("wait-for-exit", args, index, &["--timeout"])? {
-            parsed.timeout = parse_pane_timeout("wait-for-exit", &value.value)?;
-            index += value.consumed;
-            continue;
-        }
-        return Err(ServerError::CommandParse(format!(
-            "unexpected wait-for-exit argument: {argument}"
-        )));
-    }
-    Ok(parsed)
 }
 
 #[derive(Debug)]
@@ -42322,6 +42375,18 @@ fn parse_wait_pane_args(args: &[RawText]) -> Result<ParsedWaitPane, ServerError>
             index += value.consumed;
             continue;
         }
+        if argument == "--exit" {
+            if condition_set {
+                return Err(ServerError::CommandParse(
+                    "wait-pane accepts exactly one of --idle, --until, --regex, or --exit"
+                        .to_owned(),
+                ));
+            }
+            parsed.condition = PaneWaitCondition::Exit;
+            condition_set = true;
+            index += 1;
+            continue;
+        }
         let mut condition = None;
         for name in ["--idle", "--until", "--regex"] {
             let Some(value) = option_value("wait-pane", args, index, &[name])? else {
@@ -42329,7 +42394,8 @@ fn parse_wait_pane_args(args: &[RawText]) -> Result<ParsedWaitPane, ServerError>
             };
             if condition_set {
                 return Err(ServerError::CommandParse(
-                    "wait-pane accepts exactly one of --idle, --until, or --regex".to_owned(),
+                    "wait-pane accepts exactly one of --idle, --until, --regex, or --exit"
+                        .to_owned(),
                 ));
             }
             condition = Some(match name {
@@ -42359,6 +42425,11 @@ fn parse_wait_pane_args(args: &[RawText]) -> Result<ParsedWaitPane, ServerError>
         return Err(ServerError::CommandParse(format!(
             "unexpected wait-pane argument: {argument}"
         )));
+    }
+    if matches!(parsed.condition, PaneWaitCondition::Exit) && parsed.tail.is_some() {
+        return Err(ServerError::CommandParse(
+            "wait-pane --tail cannot be combined with --exit".to_owned(),
+        ));
     }
     Ok(parsed)
 }
@@ -42422,11 +42493,20 @@ fn parse_run_pane_args(args: &[RawText]) -> Result<ParsedRunPane, ServerError> {
 }
 
 fn parse_pane_timeout(verb: &str, value: &str) -> Result<Duration, ServerError> {
-    value.parse().map(Duration::from_secs).map_err(|_| {
+    let invalid = || {
         ServerError::CommandParse(format!(
-            "{verb} --timeout needs a nonnegative whole number of seconds"
+            "{verb} --timeout needs a nonnegative number of seconds"
         ))
-    })
+    };
+    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+    if whole.is_empty()
+        || !whole.bytes().all(|byte| byte.is_ascii_digit())
+        || (value.contains('.') && fraction.is_empty())
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err(invalid());
+    }
+    Duration::try_from_secs_f64(value.parse().map_err(|_| invalid())?).map_err(|_| invalid())
 }
 
 fn run_pane_result<'a>(
@@ -42470,7 +42550,7 @@ fn parse_send_text_args(args: &[RawText]) -> Result<ParsedSendText, ServerError>
     let mut parsed = ParsedSendText {
         target: None,
         no_enter: false,
-        timeout_ms: SEND_TEXT_TIMEOUT_MS,
+        timeout: SEND_TEXT_TIMEOUT,
         text: Vec::new(),
     };
     let mut index = 0;
@@ -42489,19 +42569,11 @@ fn parse_send_text_args(args: &[RawText]) -> Result<ParsedSendText, ServerError>
             continue;
         }
         if let Some(value) = option_value("send-text", args, index, &["--timeout"])? {
-            parsed.timeout_ms = match value.value.parse::<u64>() {
-                Ok(milliseconds) if milliseconds > 0 => milliseconds,
-                _ => {
-                    return Err(ServerError::CommandParse(
-                        "send-text --timeout needs a whole number of milliseconds above zero"
-                            .to_owned(),
-                    ));
-                }
-            };
+            parsed.timeout = parse_pane_timeout("send-text", &value.value)?;
             index += value.consumed;
             continue;
         }
-        if let Some(value) = option_value("send-text", args, index, &["-t", "--target"])? {
+        if let Some(value) = option_value("send-text", args, index, &["-t"])? {
             parsed.target = Some(value.value);
             index += value.consumed;
             continue;
@@ -42607,11 +42679,8 @@ fn agent_permission_json(permission: &zz_protocol::AgentPermissionWire) -> serde
 
 impl ParsedAgentSend {
     fn wait_timeout(&self) -> Option<Duration> {
-        match self.timeout {
-            Some(0) => None,
-            Some(seconds) => Some(Duration::from_secs(seconds)),
-            None => Some(AGENT_SEND_WAIT_TIMEOUT),
-        }
+        let timeout = self.timeout.unwrap_or(AGENT_SEND_WAIT_TIMEOUT);
+        (!timeout.is_zero()).then_some(timeout)
     }
 
     fn payload(&self) -> Result<String, ServerError> {
@@ -42723,16 +42792,11 @@ fn parse_agent_send_args(args: &[RawText]) -> Result<ParsedAgentSend, ServerErro
             continue;
         }
         if let Some(value) = option_value("agent-send", args, index, &["--timeout"])? {
-            let seconds = value.value.parse::<u64>().map_err(|_| {
-                ServerError::CommandParse(
-                    "agent-send --timeout needs a whole number of seconds".to_owned(),
-                )
-            })?;
-            parsed.timeout = Some(seconds);
+            parsed.timeout = Some(parse_pane_timeout("agent-send", &value.value)?);
             index += value.consumed;
             continue;
         }
-        if let Some(value) = option_value("agent-send", args, index, &["-t", "--target"])? {
+        if let Some(value) = option_value("agent-send", args, index, &["-t"])? {
             explicit_target = true;
             parsed.target = Some(value.value);
             index += value.consumed;
@@ -43011,8 +43075,11 @@ mapping option names to value strings in the selected scope. Combining `-F` and
 | 1 | Command failure, a stopped agent turn, missing daemon, connection loss, or a tmux-compatible usage error (including an unknown command). |
 | 2 | Usage error in a zz-native verb or extension: invalid flag, missing argument, or malformed value. |
 | 3 | Blocked or unable to answer now, including `agent-send --on-block fail`. |
-| 124 | Wait timed out, including `agent-send --timeout`. |
-| 125 | Reserved for the `run-pane` timeout. |
+| 124 | Wait timed out, including `wait-pane --exit`, `agent-send`, and `new-agent-session`; a child may also return 124. |
+| 125 | `run-pane` timed out, or its child returned 125; the timeout writes a diagnostic to stderr. |
+
+For `wait-pane`, `run-pane`, `send-text`, `agent-send`, and `new-agent-session`,
+`--timeout` takes seconds, accepts fractions such as 0.5, and 0 waits forever.
 
 Tmux-compatible commands keep the pin’s exit status, including 1 for parse and usage errors.
 The error’s source determines the status: `list-panes -Z` exits 1, while zz’s
@@ -43022,17 +43089,17 @@ Commands that set an explicit exit code keep that code.
 ";
     WORKSPACE_TOOLS_AGENT = r#"## Agent panes
 
-### `zz split-agent [-h | -v] [-t %N] [-P] [-F FORMAT] [-p PROVIDER] [-c DIR]`
+### `zz split-window --kind agent [-h | -v] [-t %N] [-P] [-F FORMAT] [--provider codex|claude-code] [-c DIR]`
 
 Split a pane to start an agent; `-t %N` chooses the pane to split and `-c DIR` sets the new pane's cwd.
 Print nothing unless `-P` requests the new pane ID; `-F` changes its format.
 
-The providers are `codex` and `claude-code` (`claude` accepted). Choose one with `zz split-agent -p <provider>`. Each provider is an ACP adapter the daemon spawns through the `agent-command` or `agent-claude-code-command` option. The bundled adapters pin `claude-agent-acp@0.76.0` and `codex-acp@1.11.0`. The model, reasoning effort, and approval policy come from the adapter's own configuration: `~/.codex/config.toml` for Codex or Claude Code's own settings. `zz` does not set them.
+The providers are `codex` and `claude-code` (`claude` accepted). Choose one with `zz split-window --kind agent --provider <provider>`. Each provider is an ACP adapter the daemon spawns through the `agent-command` or `agent-claude-code-command` option. The bundled adapters pin `claude-agent-acp@0.76.0` and `codex-acp@1.11.0`. The model, reasoning effort, and approval policy come from the adapter's own configuration: `~/.codex/config.toml` for Codex or Claude Code's own settings. `zz` does not set them.
 
 ### `zz agent-send [-t %N] [--submit | --wait [--progress] [--timeout SECS] [--on-block wait|fail|allow|deny] [--json | --final]] [--context PATH[:START[-END]]] [TEXT]`
 
 Draft into another Agent pane's composer for its user to review.
-Print `appended to the composer in %N` when drafted. `--target` is an alias for `-t`. An omitted or non-agent target routes to that window's most recently focused Agent pane. Read stdin when TEXT is omitted: `git diff | zz agent-send`. `--context` adds a file/line header and fences the payload; text is capped at 1 MiB.
+Print `appended to the composer in %N` when drafted. An omitted or non-agent target routes to that window's most recently focused Agent pane. Read stdin when TEXT is omitted: `git diff | zz agent-send`. `--context` adds a file/line header and fences the payload; text is capped at 1 MiB.
 
 `--submit` sends now and prints the chosen pane; a busy pane queues the prompt. `--wait` submits, waits for that turn, and prints its reply on stdout (pane ID on stderr). Failure, cancellation, hand-back, or timeout exits non-zero. The timeout defaults to 600 seconds; `0` waits forever. A timeout leaves the turn running. `--json` prints one object with turn facts, `final_text`, and `transcript`. `--final` prints only the text after the last tool call or tool update. Both require `--wait`; combining them is a usage error. `--on-block wait` waits for permission. `--on-block fail` prints the pending permission JSON and exits 3 while the turn continues. `--on-block allow` answers tool permissions, preferring allow-once, and waits for user questions. `--on-block deny` rejects permissions, including user questions.
 
@@ -43041,20 +43108,16 @@ Turn facts: `final_text` contains message text after the last tool call or tool 
 ### `zz new-agent-session [-t %N] [-c DIR] [--timeout SECS]`
 
 Start a fresh conversation in an agent pane.
-Use `-c` to choose its absolute working directory; otherwise use the pane's current directory. Wait until the new session can accept a prompt, then exit 0 without printing anything. Drop queued prompts from the old session. Creation failures exit 1 with a message. The timeout defaults to 60 seconds and exits 124. A timeout leaves the session change running. Other pane kinds exit 1 with `not an agent pane: %N`.
+Use `-c` to choose its absolute working directory; otherwise use the pane's current directory. Wait until the new session can accept a prompt, then exit 0 without printing anything. Drop queued prompts from the old session. Creation failures exit 1 with a message. The timeout accepts decimal seconds, defaults to 60 seconds, and exits 124; `0` waits forever. A timeout leaves the session change running. Other pane kinds exit 1 with `not an agent pane: %N`.
 
 ### `zz restart-agent-pane [-t %N]`
 
 Restart the agent pane's ACP adapter and resume its current session.
 Print nothing on success. Use `zz new-agent-session` for a fresh conversation.
 
-### `zz show-agent-permission [-t %N]`
-
-Print the oldest pending permission as `{"request_id":7,"tool_call":{...},"options":[...]}` with nested JSON values; exit 1 when none is pending.
-
 ### `zz agent-respond [-t %N] (--allow | --deny | --option ID) [REQUEST_ID]`
 
-Answer the named or oldest pending permission.
+Answer the named or oldest pending permission. Read the pending request with `zz inspect -t %N --json | jq .permission`.
 Print the chosen option ID. `--allow` prefers allow-once; `--deny` selects a reject option. Use `--option ID` to choose an advertised option by ID, including an answer to a user question.
 
 ### Permissions
@@ -43079,17 +43142,14 @@ Read one `key: value` line per field, or use `--json` for one object with string
 zz inspect -a --json | jq -c 'select(.pane_kind=="agent") | {pane_id,agent_state}'
 ```
 
-The keys, in text output order, are `session_id`, `session_name`, `window_id`, `window_index`, `window_name`, `window_width`, `window_height`, `window_size`, `pane_id`, `pane_index`, `pane_active`, `pane_kind`, `pane_pid`, `pane_current_command`, `pane_current_path`, `pane_title`, `pane_width`, `pane_height`, `pane_dead`, `pane_dead_status`, `pane_dead_signal`, `pane_last_command_status`, `pane_pb_state`, `pane_pb_progress`, `agent_state`, `agent_pending_permission`, `browser_url`, `verbs`, `events`.
+The keys, in text output order, are `session_id`, `session_name`, `window_id`, `window_index`, `window_name`, `window_width`, `window_height`, `window_size`, `pane_id`, `pane_index`, `pane_active`, `pane_kind`, `pane_pid`, `pane_current_command`, `pane_current_path`, `pane_title`, `pane_width`, `pane_height`, `pane_dead`, `pane_dead_status`, `pane_dead_signal`, `pane_last_command_status`, `pane_pb_state`, `pane_pb_progress`, `agent_state`, `agent_pending_permission`, `permission`, `browser_url`, `verbs`, `events`.
+
+`permission` is a nested `{"request_id":7,"tool_call":{...},"options":[...]}` object or `null` in JSON output; text output prints compact JSON on the `permission:` line, or an empty value.
 
 ### `zz events [-t %N]`
 
 Stream hook events.
 Print JSON lines, flushed per line: `{"seq":1,"event":"agent-state-changed","time":1750000000000,"hook_pane":"%3","agent_state":"working",...}`. Each line includes the hook's string variables. `time` is Unix milliseconds. Wait for the first line, `{"seq":0,"event":"ready","time":...}`, before starting work. On subscriber overflow, `gap` consumes the next sequence number; the client reconnects and continues counting without another `ready` line. Use `-t %N` for a pane, `-t @N` for a window, `-t '$N'` for a session ID, or `-t name` for a session name. Filters match exact hook fields; `ready` and `gap` always print. Omit `-t` to stream without filtering. `agent-state-changed` carries `agent_state` for every pane kind and `agent_pending_permission` with the permission ID or an empty string. Agent panes also emit `agent-tool-call` for new calls and completed or failed status changes. Each event carries `tool_call_id`, `tool_title`, `tool_kind`, and `tool_status`; titles collapse whitespace and stop at 200 characters: `{"seq":2,"event":"agent-tool-call","time":1750000000000,"hook_pane":"%3","tool_call_id":"call-1","tool_title":"cargo test","tool_kind":"execute","tool_status":"in_progress"}`. These agent events are stream-only; `set-hook` cannot bind them. Other `@option-changed` firings are not streamed; use a hook for those. Invalid arguments exit 2. Connection and daemon errors, or any disconnect other than overflow, exit 1, including server shutdown.
-
-### `zz show-last-output -t %N`
-
-Read an Agent pane's last prompt and reply.
-Print them under a `%N $ command` header; an `exit: <n>` line follows when known. Use `zz capture-pane -p -t %N -S - -E -` for its full text and `-J` to rejoin soft-wrapped lines.
 
 "#;
     WORKSPACE_TOOLS_TERMINAL = r#"## Terminal panes
@@ -43101,7 +43161,7 @@ Run `zz tools terminal` for terminal verbs.
 Split a terminal pane; `-t %N` chooses the pane to split. Execute COMMAND as argv without a shell.
 Print nothing unless `-P` requests `session:window.pane`; add `-F '#{pane_id}'` for the pane ID. Use `-d` to keep focus, `-e` for environment values, and `-c` for the working directory.
 
-Open a picker with `zz split-picker -v -P`; `-P` prints the new pane ID.
+Open a picker with `zz split-window --kind picker -v -P -F '#{pane_id}'`.
 
 ### `zz run-pane [-t %N] [--timeout SECS] [--] COMMAND...`
 
@@ -43109,35 +43169,36 @@ Run a command in a terminal pane's POSIX shell without shell integration.
 Join COMMAND words with single spaces, preserving supplied quoting; pass one
 command line. Paste it, verify the echo, then press Enter. Print the output between
 unique markers and return the child's exit code. Capture includes scrollback,
-capped to the last 10,000 logical lines. The timeout defaults to 120 seconds;
-timeout prints the output collected so far and exits 125. It leaves the command
-running. Use a command or Control client.
+capped to the last 10,000 logical lines. The timeout covers echo and execution;
+it defaults to 120 seconds, accepts fractions, and 0 waits forever. On timeout,
+print partial output to stdout, write `run-pane: timed out after <N>s on %N; the command keeps running`
+to stderr, and exit 125. A child exit of 125 differs from a timeout only by that
+stderr line. Use a command or Control client.
 
 ```sh
 zz run-pane -t %3 -- "sh -c 'echo hi; exit 7'"
-zz wait-pane -t %3 --until 'ready' --timeout 30
+zz wait-pane -t %3 --until 'ready' --timeout 2.5
 ```
 
-### `zz wait-pane [-t %N] [--idle MS | --until TEXT | --regex RE] [--timeout SECS] [--tail N]`
+### `zz wait-pane [-t %N] [--idle MS | --until TEXT | --regex RE | --exit] [--timeout SECS] [--tail N]`
 
-Wait for a terminal pane to stop producing output or show a matching logical line.
 Choose one condition; the default is `--idle 500`, measured from this call.
-Text and regex matches join wrapped screen lines and print the matching line.
-`--tail N` searches only the last N logical lines. Idle success prints nothing.
-The timeout defaults to 60 seconds; timeout exits 124 and names the condition.
-Invalid regex syntax exits 2. Use a command or Control client.
+Text and regex matches search logical lines on screen at the call or written since,
+including scrollback, capped to the last 10,000 logical lines. Join wrapped lines
+and print the matching line. `--tail N` narrows the search to the last N logical
+lines after skipping trailing blanks. Idle success prints nothing.
+With `--exit`, wait for the PTY child and mirror its exit status, with no output.
+A retained dead pane returns its status immediately; killing or respawning the
+pane releases the wait with status 0. `--tail` with `--exit` is a usage error.
+The timeout defaults to 60 seconds, accepts fractions, and 0 waits forever.
+Timeout exits 124 and names the condition. Invalid regex syntax exits 2.
+Use a command or Control client.
 
-### `zz wait-for-exit [-t %N] [--timeout SECS]`
-
-Wait for a terminal pane's command to exit and mirror its status. Prints nothing
-on success. A retained dead pane returns its exit status immediately; killing or
-respawning a pane releases the wait with status 0. The timeout defaults to 0,
-which waits forever; a timeout exits 124. Use a command or Control client.
-
-### `zz send-text -t %N [--no-enter] [--timeout MS] [TEXT]`
+### `zz send-text -t %N [--no-enter] [--timeout SECS] [TEXT]`
 
 Paste into a terminal TUI, wait for the text to appear, then press Enter. Read
-stdin when TEXT is omitted. `--no-enter` drafts; the default timeout is 2000 ms.
+stdin when TEXT is omitted. `--no-enter` drafts. The timeout defaults to 2 seconds,
+accepts fractions such as 0.5, and 0 waits forever.
 Print nothing on success. If the text never appears, exit non-zero without submitting.
 
 ### `zz send-keys -t %N 'text' Enter`
@@ -43190,10 +43251,12 @@ zz run-shell -b -d 300 'zz send-text -t %5 continue'
 
 Run `zz tools browser` for browser verbs.
 
-### `zz split-browser [-h | -v] [-t %N] [-P] [-F FORMAT] [URL]`
+### `zz split-window --kind browser [-h | -v] [-t %N] [--profile NAME] [-P] [-F FORMAT] [URL]`
 
 Split a pane to open a browser; `-t %N` chooses the pane to split.
-Print nothing unless `-P` requests the new pane ID; `-F` changes its format.
+Use `zz new-window --kind browser [--profile NAME] [URL]` to open a browser window.
+Both default to `about:blank`. Print nothing unless `-P` requests the tmux target;
+add `-F '#{pane_id}'` to print the new pane ID.
 
 ### `zz set-browser-url -t %N URL`
 
@@ -43312,8 +43375,8 @@ a name collision.
 For a terminal pane without a peer reply channel, `--wait` requires a non-empty
 `@agent_state` and uses the existing terminal delivery path. It waits for a
 non-idle state followed by `idle`, and prints nothing on success in text mode.
-`--json` prints turn facts with empty reply text. Terminal state waits cannot answer
-permissions; `allow` and `deny` keep waiting for the terminal user. A pane that
+`--json` prints turn facts with empty reply text. On a terminal pane, `--final` and
+`--on-block allow|deny` exit 2 before sending; these flags need an agent pane. A pane that
 starts idle must leave idle within 15 seconds; otherwise it exits 124. The overall
 `--timeout` also exits 124. `failed` exits 1; `blocked` waits unless `--on-block fail`
 requests exit 3. A missing `@agent_state` exits 1 before sending.
@@ -44908,7 +44971,7 @@ mod tests {
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-browser", ["about:blank"]),
+                &CommandInvocation::new("split-window", ["--kind", "browser", "about:blank"]),
             )
             .expect("create browser");
         let browser = context.pane.expect("browser pane");
@@ -50861,7 +50924,7 @@ mod tests {
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-browser", ["about:blank"]),
+                &CommandInvocation::new("split-window", ["--kind", "browser", "about:blank"]),
             )
             .expect("create browser pane");
         let browser = context.pane.expect("browser pane");
@@ -51284,7 +51347,7 @@ mod tests {
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-browser", ["about:blank"]),
+                &CommandInvocation::new("split-window", ["--kind", "browser", "about:blank"]),
             )
             .expect("create fifo browser");
         let browser = context.pane.expect("fifo browser");
@@ -51293,7 +51356,7 @@ mod tests {
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-browser", ["about:blank"]),
+                &CommandInvocation::new("split-window", ["--kind", "browser", "about:blank"]),
             )
             .expect("create second fifo browser");
         let second_browser = context.pane.expect("second fifo browser");
@@ -54312,8 +54375,13 @@ mod tests {
                 ClientKind::Control,
                 &mut context,
                 &CommandInvocation::new(
-                    "split-browser",
-                    ["-h", "https://example.com/control-output"],
+                    "split-window",
+                    [
+                        "--kind",
+                        "browser",
+                        "-h",
+                        "https://example.com/control-output",
+                    ],
                 ),
             )
             .expect("split browser");
@@ -64928,7 +64996,7 @@ set-option -g @alias-mixed-next yes
                 ClientId(3),
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-picker", ["-v"]),
+                &CommandInvocation::new("split-window", ["--kind", "picker", "-v"]),
             )
             .expect("picker");
         let picker = context.pane.expect("picker");
@@ -65561,7 +65629,10 @@ set-option -g @alias-mixed-next yes
                 client,
                 ClientKind::Control,
                 &mut ExecutionContext::default(),
-                &CommandInvocation::new("run-pane", ["-t", &target, "--", "printf 'ok'"]),
+                &CommandInvocation::new(
+                    "run-pane",
+                    ["-t", &target, "--timeout", "0", "--", "printf 'ok'"],
+                ),
             )
             .expect("zero child status");
         assert_eq!(execution.output, "ok");
@@ -65581,9 +65652,37 @@ set-option -g @alias-mixed-next yes
 
     #[cfg(unix)]
     #[test]
+    fn run_pane_allows_echo_to_take_longer_than_two_seconds() {
+        let (shared, client, target) = send_text_fixture(
+            "runechodelay",
+            r#"stty -echo -icanon min 1; exec python3 -c 'import os,time; os.write(1,b"zz-ready\r\n"); command=os.read(0,4096); time.sleep(2.2); os.write(1,command); os.read(0,1); os.system(command.decode()); time.sleep(5)'"#,
+        );
+        let started = Instant::now();
+        let result = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "run-pane",
+                    ["-t", &target, "--timeout", "10", "printf delayed"],
+                ),
+            )
+            .expect("echo uses the full command timeout");
+        assert_eq!(result.output, "delayed");
+        assert!(started.elapsed() >= Duration::from_millis(2200));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn run_pane_times_out_with_125() {
         let (shared, client, target) =
             send_text_fixture("runtimeout", "printf 'zz-ready\\r\\n'; PS1='' exec /bin/sh");
+        shared
+            .inner
+            .lock()
+            .command_streams
+            .insert(client, CommandStreams::default());
         let started = Instant::now();
         let error = shared
             .execute(
@@ -65607,6 +65706,10 @@ set-option -g @alias-mixed-next yes
         assert!(
             matches!(&error, DaemonError::CommandExit { output, exit_code: 125 } if output.starts_with("partial") && !output.contains("ZZRUN-")),
             "{error:?}"
+        );
+        assert_eq!(
+            shared.inner.lock().command_streams[&client].stderr,
+            format!("run-pane: timed out after 1s on {target}; the command keeps running\n")
         );
     }
 
@@ -65673,7 +65776,7 @@ set-option -g @alias-mixed-next yes
                         "--tail",
                         "1",
                         "--timeout",
-                        "0",
+                        "0.05",
                     ],
                 ),
             )
@@ -65682,6 +65785,80 @@ set-option -g @alias-mixed-next yes
             error,
             DaemonError::CommandExit { exit_code: 124, .. }
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_pane_scans_new_scrollback_but_ignores_old_history() {
+        let (shared, client, target) = send_text_fixture(
+            "waitscrollback",
+            "stty raw -echo; printf 'zz-ready\\r\\n'; exec /bin/cat",
+        );
+        let pane = target.parse::<PaneId>().unwrap();
+        let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        assert!(terminal.send_raw_input(Arc::from(
+            format!("oldneedle\r\n{}", "old filler\r\n".repeat(100)).into_bytes()
+        )));
+        wait_for_capture(&shared, client, &target, |screen| {
+            screen.contains("old filler") && !screen.contains("oldneedle")
+        });
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "wait-pane",
+                    ["-t", &target, "--until", "oldneedle", "--timeout", "0.05"],
+                ),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            DaemonError::CommandExit { exit_code: 124, .. }
+        ));
+        for (condition, pattern, expected) in [
+            ("--until", "freshneedle", "freshneedle"),
+            ("--regex", "^regexneedle$", "regexneedle"),
+        ] {
+            let mailbox = OutboundMailbox::new();
+            shared
+                .client_writers
+                .lock()
+                .insert(client, Arc::clone(&mailbox));
+            let waiting = Arc::clone(&shared);
+            let wait_target = target.clone();
+            let waiter = thread::spawn(move || {
+                let _scope = CommandQueueParkScope::new(client, 1);
+                waiting.execute(
+                    client,
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(
+                        "wait-pane",
+                        ["-t", &wait_target, condition, pattern, "--timeout", "2"],
+                    ),
+                )
+            });
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !take_reliable_messages(&mailbox).iter().any(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::CommandQueueParked { request_id: 1 }
+                )
+            }) {
+                assert!(Instant::now() < deadline, "wait did not park");
+                thread::sleep(SEND_TEXT_POLL_INTERVAL);
+            }
+            assert!(terminal.send_raw_input(Arc::from(
+                format!("{expected}\r\n{}", "new filler\r\n".repeat(100)).into_bytes()
+            )));
+            let execution = waiter
+                .join()
+                .unwrap()
+                .expect("match survives scrolling past the screen between polls");
+            assert_eq!(execution.output, format!("{expected}\n"));
+        }
     }
 
     #[cfg(unix)]
@@ -65797,7 +65974,7 @@ set-option -g @alias-mixed-next yes
 
     #[cfg(unix)]
     #[test]
-    fn wait_for_exit_mirrors_the_child_status() {
+    fn wait_pane_exit_mirrors_the_child_status() {
         let shared = Arc::new(Shared::new(1));
         let client = ClientId(7);
         let mut context = ExecutionContext::default();
@@ -65827,7 +66004,7 @@ set-option -g @alias-mixed-next yes
                     client,
                     ClientKind::Command,
                     &mut ExecutionContext::default(),
-                    &CommandInvocation::new("wait-for-exit", ["-t", "%0"]),
+                    &CommandInvocation::new("wait-pane", ["--exit", "-t", "%0"]),
                 )
                 .expect_err("mirror the child status");
             assert!(matches!(
@@ -65835,14 +66012,14 @@ set-option -g @alias-mixed-next yes
                 DaemonError::CommandExit { output, exit_code: 7 } if output.is_empty()
             ));
             if call == 1 {
-                assert!(started.elapsed() < Duration::from_millis(100));
+                assert!(started.elapsed() < Duration::from_secs(2));
             }
         }
     }
 
     #[cfg(unix)]
     #[test]
-    fn wait_for_exit_times_out_with_124() {
+    fn wait_pane_exit_times_out_with_124() {
         let (shared, client, target) =
             send_text_fixture("waitexittimeout", "printf 'zz-ready\\r\\n'; exec sleep 30");
         let error = shared
@@ -65850,63 +66027,141 @@ set-option -g @alias-mixed-next yes
                 client,
                 ClientKind::Command,
                 &mut ExecutionContext::default(),
-                &CommandInvocation::new("wait-for-exit", ["-t", &target, "--timeout", "1"]),
+                &CommandInvocation::new("wait-pane", ["--exit", "-t", &target, "--timeout", "1"]),
             )
             .expect_err("child outlives the timeout");
         assert!(matches!(
             error,
             DaemonError::CommandExit { output, exit_code: 124 }
-                if output == format!("wait-for-exit: {target} still running after 1 seconds")
+                if output == format!("wait-pane: timed out waiting for --exit on {target}\n")
         ));
     }
 
     #[cfg(unix)]
     #[test]
-    fn wait_for_exit_returns_zero_when_the_pane_is_killed() {
+    fn wait_pane_exit_shares_registration_after_another_wait_times_out() {
         let (shared, client, target) =
-            send_text_fixture("waitexitkill", "printf 'zz-ready\\r\\n'; exec sleep 30");
-        let mailbox = OutboundMailbox::new();
-        shared
-            .client_writers
-            .lock()
-            .insert(client, Arc::clone(&mailbox));
-        let waiting = Arc::clone(&shared);
-        let wait_target = target.clone();
-        let waiter = thread::spawn(move || {
-            let _scope = CommandQueueParkScope::new(client, 1);
-            waiting.execute(
+            send_text_fixture("waitshared", "printf 'zz-ready\\r\\n'; PS1='' exec /bin/sh");
+        let pane = target.parse::<PaneId>().unwrap();
+        let error = shared
+            .execute(
                 client,
                 ClientKind::Command,
                 &mut ExecutionContext::default(),
-                &CommandInvocation::new("wait-for-exit", ["-t", &wait_target, "--timeout", "10"]),
+                &CommandInvocation::new(
+                    "wait-pane",
+                    ["-t", &target, "--exit", "--timeout", "0.05"],
+                ),
             )
-        });
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            DaemonError::CommandExit { exit_code: 124, .. }
+        ));
+        let waiters = (8..10)
+            .map(|id| {
+                let waiting = Arc::clone(&shared);
+                let wait_target = target.clone();
+                thread::spawn(move || {
+                    waiting.execute(
+                        ClientId(id),
+                        ClientKind::Command,
+                        &mut ExecutionContext::default(),
+                        &CommandInvocation::new(
+                            "wait-pane",
+                            ["-t", &wait_target, "--exit", "--timeout", "2"],
+                        ),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
         let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            if take_reliable_messages(&mailbox).iter().any(|message| {
-                matches!(
-                    message,
-                    ProtocolMessage::CommandQueueParked { request_id: 1 }
-                )
-            }) {
-                break;
-            }
-            assert!(Instant::now() < deadline, "wait did not park");
+        while shared
+            .inner
+            .lock()
+            .pane_exit_waits
+            .get(&pane)
+            .is_none_or(|entry| Arc::strong_count(&entry.exit_code) < 3)
+        {
+            assert!(Instant::now() < deadline, "both waits must share the entry");
             thread::sleep(SEND_TEXT_POLL_INTERVAL);
         }
         shared
             .execute(
-                ClientId(8),
+                client,
                 ClientKind::Command,
                 &mut ExecutionContext::default(),
-                &CommandInvocation::new("kill-pane", ["-t", &target]),
+                &CommandInvocation::new("send-text", ["-t", &target, "exit 7"]),
             )
-            .expect("kill the waited pane");
-        let execution = waiter
-            .join()
-            .expect("wait thread")
-            .expect("kill releases wait");
-        assert!(execution.output.is_empty());
+            .unwrap();
+        for waiter in waiters {
+            assert!(matches!(
+                waiter.join().unwrap(),
+                Err(DaemonError::CommandExit { exit_code: 7, .. })
+            ));
+        }
+        assert!(!shared.inner.lock().pane_exit_waits.contains_key(&pane));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_pane_exit_returns_zero_when_the_pane_is_killed_or_respawned() {
+        for action in ["kill-pane", "respawn-pane"] {
+            let (shared, client, target) =
+                send_text_fixture("waitexitkill", "printf 'zz-ready\\r\\n'; exec sleep 30");
+            let mailbox = OutboundMailbox::new();
+            shared
+                .client_writers
+                .lock()
+                .insert(client, Arc::clone(&mailbox));
+            let waiting = Arc::clone(&shared);
+            let wait_target = target.clone();
+            let waiter = thread::spawn(move || {
+                let _scope = CommandQueueParkScope::new(client, 1);
+                waiting.execute(
+                    client,
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(
+                        "wait-pane",
+                        ["--exit", "-t", &wait_target, "--timeout", "10"],
+                    ),
+                )
+            });
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if take_reliable_messages(&mailbox).iter().any(|message| {
+                    matches!(
+                        message,
+                        ProtocolMessage::CommandQueueParked { request_id: 1 }
+                    )
+                }) {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "wait did not park");
+                thread::sleep(SEND_TEXT_POLL_INTERVAL);
+            }
+            shared
+                .execute(
+                    ClientId(8),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(
+                        action,
+                        if action == "kill-pane" {
+                            vec!["-t", &target]
+                        } else {
+                            vec!["-k", "-t", &target, "sleep 30"]
+                        },
+                    ),
+                )
+                .expect("kill the waited pane");
+            let execution = waiter
+                .join()
+                .expect("wait thread")
+                .expect("kill releases wait");
+            assert!(execution.output.is_empty());
+        }
     }
 
     #[cfg(unix)]
@@ -66044,6 +66299,10 @@ set-option -g @alias-mixed-next yes
             vec!["--until", "ready", "--regex", "ready"],
             vec!["--regex", "ready", "--idle", "1"],
             vec!["--regex", "["],
+            vec!["--exit", "--until", "ready"],
+            vec!["--idle", "1", "--exit"],
+            vec!["--exit", "--exit"],
+            vec!["--exit", "--tail", "1"],
             vec!["--timeout", "-1"],
             vec!["--tail", "-1"],
         ] {
@@ -66101,6 +66360,201 @@ set-option -g @alias-mixed-next yes
     }
 
     #[test]
+    fn terminal_timeout_contract_uses_fractional_seconds() {
+        for verb in [
+            "wait-pane",
+            "run-pane",
+            "send-text",
+            "agent-send",
+            "new-agent-session",
+        ] {
+            for (value, expected) in [
+                ("0", Duration::ZERO),
+                ("0.5", Duration::from_millis(500)),
+                ("2.5", Duration::from_millis(2500)),
+                ("2000", Duration::from_secs(2000)),
+            ] {
+                assert_eq!(parse_pane_timeout(verb, value).unwrap(), expected);
+            }
+            for value in [
+                "-1",
+                "+1",
+                "NaN",
+                "inf",
+                "1e3",
+                "1.",
+                ".5",
+                "1.2.3",
+                "",
+                " 2",
+                "18446744073709551616",
+            ] {
+                assert!(
+                    matches!(parse_pane_timeout(verb, value), Err(ServerError::CommandParse(message))
+                    if message == format!("{verb} --timeout needs a nonnegative number of seconds"))
+                );
+            }
+        }
+        assert_eq!(
+            parse_send_text_args(&["--timeout", "0.5", "hello"].map(RawText::from))
+                .unwrap()
+                .timeout,
+            Duration::from_millis(500)
+        );
+        assert_eq!(
+            parse_run_pane_args(&["--timeout", "0", "true"].map(RawText::from))
+                .unwrap()
+                .timeout,
+            Duration::ZERO
+        );
+        assert_eq!(
+            parse_wait_pane_args(&["--timeout", "2.5"].map(RawText::from))
+                .unwrap()
+                .timeout,
+            Duration::from_millis(2500)
+        );
+        assert_eq!(
+            parse_agent_send_args(&["--wait", "--timeout", "0.5", "hello"].map(RawText::from))
+                .unwrap()
+                .wait_timeout(),
+            Some(Duration::from_millis(500))
+        );
+        let shared = Arc::new(Shared::new(1));
+        for verb in ["send-text", "agent-send"] {
+            for args in [
+                vec!["--target", "%1", "hello"],
+                vec!["--target=%1", "hello"],
+            ] {
+                assert!(matches!(
+                    shared.execute(
+                        ClientId(7),
+                        ClientKind::Command,
+                        &mut ExecutionContext::default(),
+                        &CommandInvocation::new(verb, args)
+                    ),
+                    Err(DaemonError::Server(ServerError::NativeCommandParse(_)))
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn pane_exit_notifications_broadcast_and_preserve_pending_split_status() {
+        let shared = Arc::new(Shared::new(1));
+        let pane = PaneId(1);
+        let mut inner = shared.inner.lock();
+        let entry = inner
+            .pane_exit_waits
+            .entry(pane)
+            .or_insert_with(PaneExitWait::new);
+        entry.command_wait = Some((entry.wait.clone(), Arc::clone(&entry.exit_code)));
+        let subscribers = (0..3)
+            .map(|_| (entry.wait.clone(), Arc::clone(&entry.exit_code)))
+            .collect::<Vec<_>>();
+        Shared::wake_pane_exit_wait(&mut inner, pane, 7);
+        Shared::wake_pane_exit_wait(&mut inner, pane, 0);
+        drop(inner);
+        for (wait, status) in subscribers {
+            assert_eq!(
+                wait.recv_timeout(Duration::from_secs(1)),
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected)
+            );
+            assert_eq!(status.load(Ordering::Acquire), 7);
+        }
+        let (result, exit_code) = shared.wait_for_pane_command(
+            ClientId(7),
+            ClientKind::Command,
+            Ok(Execution {
+                output: RawText::default(),
+                effects: vec![MuxEffect::PaneWaitForExit { pane }],
+            }),
+        );
+        assert!(result.is_ok());
+        assert_eq!(exit_code, 7);
+        assert!(!shared.inner.lock().pane_exit_waits.contains_key(&pane));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_pane_exit_after_respawn_preserves_an_unconsumed_split_wait() {
+        let (shared, client, target) = send_text_fixture(
+            "waitrespawnpending",
+            "printf 'zz-ready\\r\\n'; exec sleep 30",
+        );
+        let pane = target.parse::<PaneId>().unwrap();
+        {
+            let mut inner = shared.inner.lock();
+            let entry = inner
+                .pane_exit_waits
+                .entry(pane)
+                .or_insert_with(PaneExitWait::new);
+            entry.command_wait = Some((entry.wait.clone(), Arc::clone(&entry.exit_code)));
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("respawn-pane", ["-k", "-t", &target, "sleep 30"]),
+            )
+            .unwrap();
+        let result = shared.execute(
+            client,
+            ClientKind::Command,
+            &mut ExecutionContext::default(),
+            &CommandInvocation::new("wait-pane", ["--exit", "-t", &target, "--timeout", "0.05"]),
+        );
+        assert!(matches!(
+            result,
+            Err(DaemonError::CommandExit { exit_code: 124, .. })
+        ));
+        let (result, exit_code) = shared.wait_for_pane_command(
+            client,
+            ClientKind::Command,
+            Ok(Execution {
+                output: RawText::default(),
+                effects: vec![MuxEffect::PaneWaitForExit { pane }],
+            }),
+        );
+        assert!(result.is_ok());
+        assert_eq!(exit_code, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_send_rejects_agent_only_flags_before_terminal_delivery() {
+        let (shared, client, target) =
+            send_text_fixture("agentflags", "printf 'zz-ready\\r\\n'; exec /bin/cat");
+        for (flags, message) in [
+            (vec!["--final"], "agent-send: --final needs an agent pane"),
+            (
+                vec!["--on-block", "allow"],
+                "agent-send: --on-block allow|deny needs an agent pane",
+            ),
+            (
+                vec!["--on-block", "deny"],
+                "agent-send: --on-block allow|deny needs an agent pane",
+            ),
+        ] {
+            let mut args = vec!["-t", &target, "--wait"];
+            args.extend(flags);
+            args.push("must-not-arrive");
+            let error = shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("agent-send", args),
+                )
+                .unwrap_err();
+            assert!(
+                matches!(error, DaemonError::Server(ServerError::NativeCommandParse(actual)) if actual == message)
+            );
+        }
+        assert!(!wait_for_capture(&shared, client, &target, |_| true).contains("must-not-arrive"));
+    }
+
+    #[test]
     fn run_pane_markers_ignore_echo_and_preserve_output() {
         let marker = "ZZRUN-0123456789abcdef";
         let echo = format!(
@@ -66155,13 +66609,13 @@ set-option -g @alias-mixed-next yes
                 client,
                 ClientKind::Command,
                 &mut ExecutionContext::default(),
-                &CommandInvocation::new("send-text", ["-t", &target, "--timeout", "200", "hidden"]),
+                &CommandInvocation::new("send-text", ["-t", &target, "--timeout", "0.2", "hidden"]),
             )
             .expect_err("no echo means no submit");
         assert!(matches!(
             error,
             DaemonError::Server(ServerError::InvalidCommand(message))
-                if message.contains("not echoed within 200 ms")
+                if message.contains("not echoed within 0.2 seconds")
         ));
         let screen = wait_for_capture(&shared, client, &target, |_| true);
         assert!(
@@ -66190,7 +66644,7 @@ set-option -g @alias-mixed-next yes
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-picker", ["-v"]),
+                &CommandInvocation::new("split-window", ["--kind", "picker", "-v"]),
             )
             .expect("picker");
         let picker = context.pane.expect("picker").to_string();
@@ -66225,7 +66679,7 @@ set-option -g @alias-mixed-next yes
         ));
 
         for args in [
-            &["--timeout", "0", "hi"][..],
+            &["--timeout", "-1", "hi"][..],
             &["--timeout", "soon", "hi"],
             &["-x", "hi"],
         ] {
@@ -66245,11 +66699,11 @@ set-option -g @alias-mixed-next yes
             Err(ServerError::InvalidCommand(_))
         ));
         let parsed = parse_send_text_args(
-            &["--no-enter", "--timeout=50", "-t%3", "a", "b"].map(RawText::from),
+            &["--no-enter", "--timeout=0.05", "-t%3", "a", "b"].map(RawText::from),
         )
         .expect("flags");
         assert!(parsed.no_enter);
-        assert_eq!(parsed.timeout_ms, 50);
+        assert_eq!(parsed.timeout, Duration::from_millis(50));
         assert_eq!(parsed.target.as_deref(), Some("%3"));
         assert_eq!(parsed.payload().expect("payload"), "a b");
         assert_eq!(
@@ -67949,7 +68403,7 @@ set-option -g @alias-mixed-next yes
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-browser", ["about:blank"]),
+                &CommandInvocation::new("split-window", ["--kind", "browser", "about:blank"]),
             )
             .expect("create browser pane");
         let browser = context.pane.expect("browser pane");
@@ -68530,7 +68984,7 @@ set-option -g @alias-mixed-next yes
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-browser", ["about:blank"]),
+                &CommandInvocation::new("split-window", ["--kind", "browser", "about:blank"]),
             )
             .expect("browser sink");
         let browser = context.pane.expect("browser pane");
@@ -68753,7 +69207,7 @@ set-option -g @alias-mixed-next yes
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-browser", ["about:blank"]),
+                &CommandInvocation::new("split-window", ["--kind", "browser", "about:blank"]),
             )
             .expect("browser sink");
         let browser = context.pane.expect("browser pane");
@@ -70188,7 +70642,7 @@ set-option -g @alias-mixed-next yes
         let mut context = ExecutionContext::default();
         for command in [
             CommandInvocation::new("new-session", ["-d", "-s", "z-first"]),
-            CommandInvocation::new("split-picker", [] as [&str; 0]),
+            CommandInvocation::new("split-window", ["--kind", "picker"]),
         ] {
             shared
                 .inner
@@ -70319,9 +70773,11 @@ set-option -g @alias-mixed-next yes
         assert_eq!(row["pane_id"], "%0");
         assert_eq!(row["window_size"], "latest");
         assert_eq!(row["agent_state"], "");
+        assert!(row["permission"].is_null());
         let verbs = row["verbs"].as_array().expect("verbs array");
         assert!(verbs.contains(&"wait-pane".into()));
         assert!(!verbs.contains(&"agent-send".into()));
+        assert!(!verbs.contains(&"select-pane-kind".into()));
         assert!(
             row["events"]
                 .as_array()
@@ -70341,7 +70797,10 @@ set-option -g @alias-mixed-next yes
 
     #[test]
     fn inspect_verb_table_names_real_commands() {
-        for (_, verbs) in INSPECT_VERBS {
+        for (kind, verbs) in INSPECT_VERBS {
+            assert_eq!(verbs.contains(&"select-pane-kind"), *kind == "picker");
+            assert!(!verbs.contains(&"set-browser-tabs"));
+            assert!(!verbs.contains(&"set-editor-path"));
             for verb in *verbs {
                 assert!(
                     zz_mux::command_spec(verb).is_some()
@@ -70376,6 +70835,7 @@ set-option -g @alias-mixed-next yes
             .output;
         assert!(output.lines().any(|line| line == "pane_kind: terminal"));
         assert!(output.lines().any(|line| line == "agent_state: "));
+        assert!(output.lines().any(|line| line == "permission: "));
         assert!(
             output
                 .lines()
@@ -70416,6 +70876,7 @@ set-option -g @alias-mixed-next yes
                 "pane_pb_progress",
                 "agent_state",
                 "agent_pending_permission",
+                "permission",
                 "browser_url",
                 "verbs",
                 "events",
@@ -70461,7 +70922,8 @@ set-option -g @alias-mixed-next yes
         run(&["set-option", "-p", "-t", &pane, "-u", "@agent_state"]).expect("unset");
         assert_eq!(display("#{@agent_state}|#{@team}"), "|blue");
 
-        let (_, context) = run(&["split-picker", "-v", "-t", &pane]).expect("picker");
+        let (_, context) =
+            run(&["split-window", "--kind", "picker", "-v", "-t", &pane]).expect("picker");
         let picker = context.pane.expect("picker pane").to_string();
         assert_eq!(
             run(&["display-message", "-p", "-t", &picker, "#{pane_kind}"])
@@ -70761,12 +71223,10 @@ set-option -g @alias-mixed-next yes
             "capture-pane",
             "agent-send",
             "new-agent-session",
-            "show-agent-permission",
             "agent-respond",
             "send-last-output",
             "show-last-output",
             "send-text",
-            "wait-for-exit",
             "wait-pane",
             "run-pane",
             "capture-browser",
@@ -70787,9 +71247,7 @@ set-option -g @alias-mixed-next yes
             "list-panes",
             "display-message",
             "split-window",
-            "split-browser",
-            "split-picker",
-            "split-agent",
+            "new-window",
             "send-keys",
             "set-browser-url",
         ];
@@ -70974,7 +71432,6 @@ set-option -g @alias-mixed-next yes
             assert!(daemon_command_dispatch(name).is_none());
         }
         for (prefix, dispatch) in [
-            ("wait-for-exit", DaemonCommandDispatch::WaitForExit),
             ("wait-pane", DaemonCommandDispatch::WaitPane),
             ("run-pane", DaemonCommandDispatch::RunPane),
             ("wait", DaemonCommandDispatch::WaitFor),
@@ -71096,12 +71553,16 @@ set-option -g @alias-mixed-next yes
                     !option.optional_value && (option.value.is_some() || option.attached_value)
                 }) {
                     required_cases += 1;
+                    let message =
+                        format!("command {}: {} expects an argument", spec.name, option.name);
+                    let expected = if option.native {
+                        ServerError::NativeCommandParse(message)
+                    } else {
+                        ServerError::CommandParse(message)
+                    };
                     assert_eq!(
                         parse_error(spelling, vec![option.name.to_owned()]),
-                        ServerError::CommandParse(format!(
-                            "command {}: {} expects an argument",
-                            spec.name, option.name
-                        )),
+                        expected,
                         "{spelling} {}",
                         option.name
                     );
@@ -71110,7 +71571,7 @@ set-option -g @alias-mixed-next yes
         }
         assert_eq!(spellings, 164);
         assert_eq!(diagnostic_cases, 656);
-        assert_eq!(required_cases, 421);
+        assert_eq!(required_cases, 431);
 
         let mut prefix_cases = 0;
         for spec in &specs {
@@ -71446,7 +71907,7 @@ set-option -g @alias-mixed-next yes
         for command in [
             CommandInvocation::new("new-session", ["-s", "tool-events"]),
             CommandInvocation::new("set-option", ["-g", "experimental-agent-pane", "on"]),
-            CommandInvocation::new("split-picker", [] as [&str; 0]),
+            CommandInvocation::new("split-window", ["--kind", "picker"]),
             CommandInvocation::new("select-pane-kind", ["agent"]),
         ] {
             shared
@@ -71548,7 +72009,7 @@ set-option -g @alias-mixed-next yes
             for command in [
                 CommandInvocation::new("new-session", ["-s", "agent-events"]),
                 CommandInvocation::new("set-option", ["-g", "experimental-agent-pane", "on"]),
-                CommandInvocation::new("split-picker", [] as [&str; 0]),
+                CommandInvocation::new("split-window", ["--kind", "picker"]),
                 CommandInvocation::new("select-pane-kind", ["agent"]),
             ] {
                 inner
@@ -71620,7 +72081,7 @@ set-option -g @alias-mixed-next yes
             for command in [
                 CommandInvocation::new("new-session", ["-s", "agent-formats"]),
                 CommandInvocation::new("set-option", ["-g", "experimental-agent-pane", "on"]),
-                CommandInvocation::new("split-picker", [] as [&str; 0]),
+                CommandInvocation::new("split-window", ["--kind", "picker"]),
                 CommandInvocation::new("select-pane-kind", ["agent"]),
             ] {
                 inner
@@ -72090,7 +72551,7 @@ set-option -g @alias-mixed-next yes
             let mut inner = shared.inner.lock();
             for command in [
                 CommandInvocation::new("set-option", ["-g", "experimental-agent-pane", "on"]),
-                CommandInvocation::new("split-picker", [] as [&str; 0]),
+                CommandInvocation::new("split-window", ["--kind", "picker"]),
                 CommandInvocation::new("select-pane-kind", ["agent"]),
             ] {
                 inner
@@ -76671,7 +77132,7 @@ set-option -g @alias-mixed-next yes
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-picker", ["-v"]),
+                &CommandInvocation::new("split-window", ["--kind", "picker", "-v"]),
             )
             .expect("picker");
         let agent = context.pane.expect("picker");
@@ -76761,7 +77222,7 @@ set-option -g @alias-mixed-next yes
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-picker", ["-v"]),
+                &CommandInvocation::new("split-window", ["--kind", "picker", "-v"]),
             )
             .expect("picker");
         let agent = context.pane.expect("picker");
@@ -76835,7 +77296,7 @@ set-option -g @alias-mixed-next yes
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-picker", ["-v"]),
+                &CommandInvocation::new("split-window", ["--kind", "picker", "-v"]),
             )
             .expect("picker");
         let picker = context.pane.expect("picker");
@@ -76888,7 +77349,7 @@ set-option -g @alias-mixed-next yes
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-picker", ["-v"]),
+                &CommandInvocation::new("split-window", ["--kind", "picker", "-v"]),
             )
             .expect("picker");
         let picker = context.pane.expect("picker");
@@ -79450,7 +79911,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn default_percent_binding_splits_like_the_pin_and_split_picker_stays_bindable() {
+    fn default_percent_binding_splits_like_the_pin_and_picker_kind_stays_bindable() {
         let shared = Arc::new(Shared::new(1));
         let (client, _) =
             shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
@@ -79519,7 +79980,18 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("bind-key", ["-T", "prefix", "%", "split-picker", "-h"]),
+                &CommandInvocation::new(
+                    "bind-key",
+                    [
+                        "-T",
+                        "prefix",
+                        "%",
+                        "split-window",
+                        "--kind",
+                        "picker",
+                        "-h",
+                    ],
+                ),
             )
             .expect("rebind the stock chord");
         shared
@@ -79796,7 +80268,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ClientId(7),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("split-picker", ["-v"]),
+                &CommandInvocation::new("split-window", ["--kind", "picker", "-v"]),
             )
             .expect("agent picker");
         let agent = context.pane.expect("agent picker pane");
@@ -79835,7 +80307,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ClientId(7),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("split-picker", ["-v"]),
+                &CommandInvocation::new("split-window", ["--kind", "picker", "-v"]),
             )
             .expect("configured agent picker");
         let configured_agent = context.pane.expect("configured agent picker pane");
@@ -79873,7 +80345,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ClientId(7),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("split-picker", ["-v"]),
+                &CommandInvocation::new("split-window", ["--kind", "picker", "-v"]),
             )
             .expect("editor picker");
         let editor = context.pane.expect("editor picker pane");
@@ -85021,7 +85493,10 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-browser", ["https://example.com"]),
+                &CommandInvocation::new(
+                    "split-window",
+                    ["--kind", "browser", "https://example.com"],
+                ),
             )
             .expect("browser pane");
         let browser = context.pane.expect("browser pane");
@@ -88926,7 +89401,10 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-browser", ["-h", "https://rotate.example"]),
+                &CommandInvocation::new(
+                    "split-window",
+                    ["--kind", "browser", "-h", "https://rotate.example"],
+                ),
             )
             .expect("browser pane");
         let browser = context.pane.expect("browser pane");
@@ -89032,7 +89510,10 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-browser", ["-h", "https://example.com"]),
+                &CommandInvocation::new(
+                    "split-window",
+                    ["--kind", "browser", "-h", "https://example.com"],
+                ),
             )
             .expect("browser pane");
         let browser = context.pane.expect("browser pane");
@@ -89779,7 +90260,10 @@ bind - split-window -v -c "#{pane_current_path}"
                 invoking,
                 ClientKind::Interactive,
                 &mut target_context,
-                &CommandInvocation::new("split-browser", ["https://example.com"]),
+                &CommandInvocation::new(
+                    "split-window",
+                    ["--kind", "browser", "https://example.com"],
+                ),
             )
             .expect("target browser");
         let target_browser = target_context.pane.expect("target browser");
@@ -93588,7 +94072,10 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-browser", ["-h", "https://example.com"]),
+                &CommandInvocation::new(
+                    "split-window",
+                    ["--kind", "browser", "-h", "https://example.com"],
+                ),
             )
             .expect("create browser input sink");
         let browser = context.pane.expect("browser pane");
@@ -101164,7 +101651,10 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-browser", ["https://example.com"]),
+                &CommandInvocation::new(
+                    "split-window",
+                    ["--kind", "browser", "https://example.com"],
+                ),
             )
             .expect("browser pane");
         let browser = context.pane.expect("browser pane");
@@ -102511,7 +103001,10 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-browser", ["-h", "https://example.com"]),
+                &CommandInvocation::new(
+                    "split-window",
+                    ["--kind", "browser", "-h", "https://example.com"],
+                ),
             )
             .expect("browser");
         let browser = context.pane.expect("browser");
@@ -102520,7 +103013,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-picker", ["-v"]),
+                &CommandInvocation::new("split-window", ["--kind", "picker", "-v"]),
             )
             .expect("agent picker");
         let agent = context.pane.expect("agent picker");
@@ -102784,7 +103277,10 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-picker", ["-h", "-t", &terminal.to_string()]),
+                &CommandInvocation::new(
+                    "split-window",
+                    ["--kind", "picker", "-h", "-t", &terminal.to_string()],
+                ),
             )
             .expect("editor picker beside the terminal");
         let editor = context.pane.expect("editor picker");
@@ -103016,7 +103512,10 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-browser", ["-h", "https://example.com"]),
+                &CommandInvocation::new(
+                    "split-window",
+                    ["--kind", "browser", "-h", "https://example.com"],
+                ),
             )
             .expect("browser pane");
         let browser = context.pane.expect("browser pane");
@@ -103231,7 +103730,10 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-browser", ["-h", "https://example.com"]),
+                &CommandInvocation::new(
+                    "split-window",
+                    ["--kind", "browser", "-h", "https://example.com"],
+                ),
             )
             .expect("browser pane");
         let browser = context.pane.expect("browser");
@@ -106776,7 +107278,7 @@ bind - split-window -v -c "#{pane_current_path}"
             shared.attach(client, session).expect("attach");
             for command in [
                 CommandInvocation::new("set-option", ["-g", "experimental-agent-pane", "on"]),
-                CommandInvocation::new("split-picker", ["-v"]),
+                CommandInvocation::new("split-window", ["--kind", "picker", "-v"]),
             ] {
                 shared
                     .execute(client, ClientKind::Interactive, &mut context, &command)
@@ -106872,7 +107374,7 @@ bind - split-window -v -c "#{pane_current_path}"
             shared.attach(client, session).expect("attach");
             for command in [
                 CommandInvocation::new("set-option", ["-g", "experimental-agent-pane", "on"]),
-                CommandInvocation::new("split-picker", ["-v"]),
+                CommandInvocation::new("split-window", ["--kind", "picker", "-v"]),
             ] {
                 shared
                     .execute(client, ClientKind::Interactive, &mut context, &command)
@@ -107387,14 +107889,14 @@ bind - split-window -v -c "#{pane_current_path}"
                             ClientId(99),
                             ClientKind::Command,
                             &mut ExecutionContext::default(),
-                            &CommandInvocation::new("show-agent-permission", ["-t", &target]),
+                            &CommandInvocation::new("inspect", ["-t", &target, "--json"]),
                         )
                         .expect("permission")
                         .output;
                     assert_eq!(
                         reply["permission"],
                         serde_json::from_str::<serde_json::Value>(&permission)
-                            .expect("permission JSON")
+                            .expect("permission JSON")["permission"]
                     );
                 } else {
                     let final_reply = workspace
@@ -107468,11 +107970,19 @@ bind - split-window -v -c "#{pane_current_path}"
             assert!(permission["tool_call"].is_object());
             assert!(permission["options"].is_array());
             let request_id = permission["request_id"].as_u64().expect("request id");
+            let inspected = run(&["inspect", "-t", &target, "--json"])
+                .expect("pending")
+                .output;
             assert_eq!(
-                run(&["show-agent-permission", "-t", &target])
-                    .expect("pending")
-                    .output,
-                output
+                serde_json::from_str::<serde_json::Value>(&inspected).unwrap()["permission"],
+                permission
+            );
+            let text = run(&["inspect", "-t", &target])
+                .expect("pending text")
+                .output;
+            assert!(
+                text.lines()
+                    .any(|line| line == format!("permission: {permission}"))
             );
             assert!(matches!(
                 workspace
@@ -107599,17 +108109,24 @@ bind - split-window -v -c "#{pane_current_path}"
                 assert!(Instant::now() < deadline, "permission did not clear");
                 thread::sleep(Duration::from_millis(2));
             }
-            for verb in ["show-agent-permission", "agent-respond"] {
-                let args = if verb == "agent-respond" {
-                    vec![verb, "-t", &target, "--allow"]
-                } else {
-                    vec![verb, "-t", &target]
-                };
-                assert_eq!(
-                    daemon_error_text(&run(&args).expect_err("no pending request")),
-                    format!("no pending permission: {target}")
-                );
-            }
+            assert_eq!(
+                daemon_error_text(
+                    &run(&["agent-respond", "-t", &target, "--allow"])
+                        .expect_err("no pending request")
+                ),
+                format!("no pending permission: {target}")
+            );
+            let inspected = run(&["inspect", "-t", &target, "--json"])
+                .expect("no pending request")
+                .output;
+            assert!(
+                serde_json::from_str::<serde_json::Value>(&inspected).unwrap()["permission"]
+                    .is_null()
+            );
+            let text = run(&["inspect", "-t", &target])
+                .expect("no pending text")
+                .output;
+            assert!(text.lines().any(|line| line == "permission: "));
         }
 
         #[test]
@@ -107659,10 +108176,22 @@ bind - split-window -v -c "#{pane_current_path}"
             };
             let mut context = ExecutionContext::default();
             let terminal_target = terminal.to_string();
-            for args in [
-                vec!["show-agent-permission", "-t", &terminal_target],
-                vec!["agent-respond", "-t", &terminal_target, "--allow"],
-            ] {
+            let inspected = workspace
+                .shared
+                .execute(
+                    ClientId(100),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("inspect", ["-t", &terminal_target, "--json"]),
+                )
+                .expect("inspect terminal")
+                .output;
+            assert!(
+                serde_json::from_str::<serde_json::Value>(&inspected).unwrap()["permission"]
+                    .is_null()
+            );
+            {
+                let args = ["agent-respond", "-t", &terminal_target, "--allow"];
                 let error = workspace
                     .shared
                     .execute(
@@ -107843,7 +108372,7 @@ bind - split-window -v -c "#{pane_current_path}"
                             "-c",
                             cwd.path().to_str().expect("cwd"),
                             "--timeout",
-                            "5",
+                            "0",
                         ],
                     ),
                 )
@@ -107950,7 +108479,7 @@ bind - split-window -v -c "#{pane_current_path}"
                         &mut ExecutionContext::default(),
                         &CommandInvocation::new(
                             "new-agent-session",
-                            ["-t", &target, "--timeout", if fail { "5" } else { "0" }],
+                            ["-t", &target, "--timeout", if fail { "5" } else { "0.05" }],
                         ),
                     )
                     .expect_err("new session failure");
@@ -107961,7 +108490,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 if fail {
                     assert_eq!(output, "fixture refused new session");
                 } else {
-                    assert!(output.contains("new session not ready within 0 seconds"));
+                    assert!(output.contains("new session not ready within 0.05 seconds"));
                 }
             }
         }

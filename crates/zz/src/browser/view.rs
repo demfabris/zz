@@ -74,7 +74,7 @@ use crate::{
     keymap::ChromeChord,
     mux::{
         client::MuxClient,
-        nav::{TreeTarget, kill_target_command, split_picker_command},
+        nav::{TreeTarget, kill_target_command, picker_split_command},
         prefix::terminal_key_input,
     },
     window::corners::{WindowCorners, round_div_radii},
@@ -3499,7 +3499,7 @@ impl Render for BrowserChromeView {
                         browser.update(cx, |view, cx| {
                             let command = axis.map_or_else(
                                 || kill_target_command(TreeTarget::Pane(view.pane)),
-                                |axis| split_picker_command(view.pane, axis),
+                                |axis| picker_split_command(view.pane, axis),
                             );
                             view.mux.read(cx).execute(command);
                         });

@@ -1083,12 +1083,14 @@ impl WebClient {
                                 return;
                             }
                             let (name, mut args) = match action {
-                                TerminalPaneAction::SplitBottom => {
-                                    ("split-picker", vec!["-v".into()])
-                                }
-                                TerminalPaneAction::SplitRight => {
-                                    ("split-picker", vec!["-h".into()])
-                                }
+                                TerminalPaneAction::SplitBottom => (
+                                    "split-window",
+                                    vec!["--kind".into(), "picker".into(), "-v".into()],
+                                ),
+                                TerminalPaneAction::SplitRight => (
+                                    "split-window",
+                                    vec!["--kind".into(), "picker".into(), "-h".into()],
+                                ),
                                 TerminalPaneAction::Close => ("kill-pane", Vec::new()),
                             };
                             args.extend(["-t".into(), pane_id.to_string()]);

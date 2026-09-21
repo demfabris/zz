@@ -819,7 +819,17 @@ fn activate_sidebar_target(
             Ok(InputOutcome::Repaint)
         }
         SidebarTarget::NewPane(target) => {
-            execute_target(client, "split-picker", target.to_string())?;
+            client
+                .execute(CommandInvocation::new(
+                    "split-window",
+                    [
+                        "--kind".to_owned(),
+                        "picker".to_owned(),
+                        "-t".to_owned(),
+                        target.to_string(),
+                    ],
+                ))
+                .map_err(|error| error.to_string())?;
             model.sidebar.focused = false;
             Ok(InputOutcome::Repaint)
         }

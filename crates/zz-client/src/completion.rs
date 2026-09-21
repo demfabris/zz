@@ -21,21 +21,12 @@ const KEY_TABLES: &[&str] = &[
     "choose-tree",
     "choose-buffer",
 ];
-const BROWSER_COMMANDS: &[&str] = &[
-    "capture-browser",
-    "new-browser",
-    "split-browser",
-    "set-browser-url",
-    "set-browser-tabs",
-    "set-browser-profile",
-];
+const BROWSER_COMMANDS: &[&str] = &["capture-browser", "set-browser-url", "set-browser-profile"];
 const AGENT_COMMANDS: &[&str] = &[
     "agent-send",
     "restart-agent-pane",
     "send-last-output",
     "set-agent-provider",
-    "set-agent-session",
-    "split-agent",
 ];
 const SET_OPTIONS: &[&str] = &[
     "base-index",
@@ -152,6 +143,10 @@ pub fn complete_command(
         return finish(ranked);
     };
 
+    if spec.is_internal() {
+        return Vec::new();
+    }
+
     let previous = &segment[1..active_index.min(segment.len())];
     let context = argument_context(spec, previous);
     if let Some(kind) = context.value_kind {
@@ -264,7 +259,14 @@ fn add_history(
     let query = input[..cursor].trim();
     let mut seen = BTreeSet::new();
     for (order, entry) in history.iter().rev().enumerate() {
-        if entry.is_empty() || !seen.insert(entry.as_str()) {
+        if entry.is_empty()
+            || !seen.insert(entry.as_str())
+            || tokenize(entry)
+                .split(|token| token.value == ";")
+                .filter_map(|segment| segment.first())
+                .filter_map(|token| catalog_command_spec(&token.value))
+                .any(CommandSpec::is_internal)
+        {
             continue;
         }
         let Some(mut rank) = text_rank(entry, query, order) else {
@@ -292,7 +294,7 @@ fn add_commands(
     availability: PaneKindAvailability,
 ) {
     for (order, spec) in command_specs().enumerate() {
-        if !availability.allows_command(spec.name) {
+        if spec.is_internal() || !availability.allows_command(spec.name) {
             continue;
         }
         let Some((rank, matched_alias)) = command_rank(spec, query, order) else {
@@ -427,12 +429,12 @@ fn values_for_kind(
                 (name.clone(), name, "Layout".to_owned())
             })
             .collect(),
-        CommandValueKind::PaneKind => ["terminal", "browser", "agent", "editor"]
+        CommandValueKind::PaneKind => ["terminal", "browser", "picker", "agent"]
             .into_iter()
             .filter(|kind| match *kind {
                 "browser" => availability.browser,
-                "agent" => availability.agent,
-                "editor" => availability.editor,
+                "picker" => spec.name == "split-window",
+                "agent" => spec.name == "split-window" && availability.agent,
                 _ => true,
             })
             .map(|kind| (kind.to_owned(), kind.to_owned(), "Pane kind".to_owned()))
@@ -976,8 +978,8 @@ mod tests {
         assert_eq!(discovery[0].label, "kill-session");
 
         let pane_kinds = complete_command(
-            "select-pane-kind ",
-            17,
+            "split-window --kind ",
+            "split-window --kind ".len(),
             &[],
             &snapshot(),
             PaneKindAvailability::default(),
@@ -988,13 +990,13 @@ mod tests {
                 .filter(|completion| completion.detail == "Pane kind")
                 .map(|completion| completion.label.as_str())
                 .collect::<BTreeSet<_>>(),
-            BTreeSet::from(["browser", "terminal"]),
+            BTreeSet::from(["browser", "picker", "terminal"]),
             "gated pane kinds must not be advertised"
         );
 
         let pane_kinds = complete_command(
-            "select-pane-kind ",
-            17,
+            "split-window --kind ",
+            "split-window --kind ".len(),
             &[],
             &snapshot(),
             PaneKindAvailability {
@@ -1009,21 +1011,27 @@ mod tests {
                 .filter(|completion| completion.detail == "Pane kind")
                 .map(|completion| completion.label.as_str())
                 .collect::<BTreeSet<_>>(),
-            BTreeSet::from(["agent", "browser", "editor", "terminal"])
+            BTreeSet::from(["agent", "browser", "picker", "terminal"])
         );
 
         let unavailable = PaneKindAvailability {
             browser: false,
             ..PaneKindAvailability::default()
         };
-        let pane_kinds = complete_command("select-pane-kind ", 17, &[], &snapshot(), unavailable);
+        let pane_kinds = complete_command(
+            "split-window --kind ",
+            "split-window --kind ".len(),
+            &[],
+            &snapshot(),
+            unavailable,
+        );
         assert_eq!(
             pane_kinds
                 .iter()
                 .filter(|completion| completion.detail == "Pane kind")
                 .map(|completion| completion.label.as_str())
                 .collect::<BTreeSet<_>>(),
-            BTreeSet::from(["terminal"])
+            BTreeSet::from(["picker", "terminal"])
         );
         for command in BROWSER_COMMANDS {
             let commands = complete_command(command, command.len(), &[], &snapshot(), unavailable);
@@ -1065,7 +1073,7 @@ mod tests {
             &snapshot(),
             available,
         );
-        for option in ["--context", "--submit", "--target"] {
+        for option in ["--context", "--submit", "--timeout"] {
             assert!(
                 agent_options
                     .iter()
@@ -1073,6 +1081,12 @@ mod tests {
                 "missing {option}"
             );
         }
+
+        assert!(
+            agent_options
+                .iter()
+                .all(|completion| completion.label != "--target")
+        );
 
         let targets = complete_command(
             "capture-browser -t ",
@@ -1091,12 +1105,7 @@ mod tests {
             agent: false,
             editor: false,
         };
-        for command in [
-            "agent-send",
-            "split-agent",
-            "send-last-output",
-            "capture-browser",
-        ] {
+        for command in ["agent-send", "send-last-output", "capture-browser"] {
             let completions =
                 complete_command(command, command.len(), &[], &snapshot(), unavailable);
             assert!(
@@ -1106,21 +1115,6 @@ mod tests {
                 "advertised unavailable {command}"
             );
         }
-        let available = PaneKindAvailability {
-            agent: true,
-            ..unavailable
-        };
-        assert!(
-            complete_command(
-                "split-agent",
-                "split-agent".len(),
-                &[],
-                &snapshot(),
-                available
-            )
-            .iter()
-            .any(|completion| completion.label == "split-agent")
-        );
         for command in ["debug-marker", "tools"] {
             let completions =
                 complete_command(command, command.len(), &[], &snapshot(), unavailable);
@@ -1131,6 +1125,46 @@ mod tests {
                 "hid available {command}"
             );
         }
+    }
+
+    #[test]
+    fn internal_commands_are_hidden_in_catalog_history_and_arguments() {
+        for command in zz_protocol::INTERNAL_COMMAND_NAMES {
+            let history = vec![format!("list-panes ; {command}")];
+            for input in [(*command).to_owned(), format!("{command} ")] {
+                let completions = complete_command(
+                    &input,
+                    input.len(),
+                    &history,
+                    &snapshot(),
+                    PaneKindAvailability::default(),
+                );
+                assert!(completions.iter().all(|item| !item.label.contains(command)));
+            }
+        }
+    }
+
+    #[test]
+    fn new_window_only_completes_supported_kinds() {
+        let input = "new-window --kind ";
+        let completions = complete_command(
+            input,
+            input.len(),
+            &[],
+            &snapshot(),
+            PaneKindAvailability {
+                browser: true,
+                agent: true,
+                editor: true,
+            },
+        );
+        assert_eq!(
+            completions
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["browser", "terminal"]),
+        );
     }
 
     #[test]

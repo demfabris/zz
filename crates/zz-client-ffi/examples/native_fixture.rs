@@ -43,7 +43,10 @@ fn main() {
                             "set-option",
                             ["-g", "agent-command", adapter.as_str()],
                         ),
-                        CommandInvocation::new("split-picker", ["-t", "native-fixture:", "-h"]),
+                        CommandInvocation::new(
+                            "split-window",
+                            ["--kind", "picker", "-t", "native-fixture:", "-h"],
+                        ),
                         CommandInvocation::new(
                             "select-pane-kind",
                             ["-t", "native-fixture:", "-c", "/tmp", "agent"],

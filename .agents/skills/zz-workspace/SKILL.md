@@ -68,8 +68,11 @@ mapping option names to value strings in the selected scope. Combining `-F` and
 | 1 | Command failure, a stopped agent turn, missing daemon, connection loss, or a tmux-compatible usage error (including an unknown command). |
 | 2 | Usage error in a zz-native verb or extension: invalid flag, missing argument, or malformed value. |
 | 3 | Blocked or unable to answer now, including `agent-send --on-block fail`. |
-| 124 | Wait timed out, including `agent-send --timeout`. |
-| 125 | Reserved for the `run-pane` timeout. |
+| 124 | Wait timed out, including `wait-pane --exit`, `agent-send`, and `new-agent-session`; a child may also return 124. |
+| 125 | `run-pane` timed out, or its child returned 125; the timeout writes a diagnostic to stderr. |
+
+For `wait-pane`, `run-pane`, `send-text`, `agent-send`, and `new-agent-session`,
+`--timeout` takes seconds, accepts fractions such as 0.5, and 0 waits forever.
 
 Tmux-compatible commands keep the pin’s exit status, including 1 for parse and usage errors.
 The error’s source determines the status: `list-panes -Z` exits 1, while zz’s
@@ -78,17 +81,17 @@ Commands that set an explicit exit code keep that code.
 
 ## Agent panes
 
-### `zz split-agent [-h | -v] [-t %N] [-P] [-F FORMAT] [-p PROVIDER] [-c DIR]`
+### `zz split-window --kind agent [-h | -v] [-t %N] [-P] [-F FORMAT] [--provider codex|claude-code] [-c DIR]`
 
 Split a pane to start an agent; `-t %N` chooses the pane to split and `-c DIR` sets the new pane's cwd.
 Print nothing unless `-P` requests the new pane ID; `-F` changes its format.
 
-The providers are `codex` and `claude-code` (`claude` accepted). Choose one with `zz split-agent -p <provider>`. Each provider is an ACP adapter the daemon spawns through the `agent-command` or `agent-claude-code-command` option. The bundled adapters pin `claude-agent-acp@0.76.0` and `codex-acp@1.11.0`. The model, reasoning effort, and approval policy come from the adapter's own configuration: `~/.codex/config.toml` for Codex or Claude Code's own settings. `zz` does not set them.
+The providers are `codex` and `claude-code` (`claude` accepted). Choose one with `zz split-window --kind agent --provider <provider>`. Each provider is an ACP adapter the daemon spawns through the `agent-command` or `agent-claude-code-command` option. The bundled adapters pin `claude-agent-acp@0.76.0` and `codex-acp@1.11.0`. The model, reasoning effort, and approval policy come from the adapter's own configuration: `~/.codex/config.toml` for Codex or Claude Code's own settings. `zz` does not set them.
 
 ### `zz agent-send [-t %N] [--submit | --wait [--progress] [--timeout SECS] [--on-block wait|fail|allow|deny] [--json | --final]] [--context PATH[:START[-END]]] [TEXT]`
 
 Draft into another Agent pane's composer for its user to review.
-Print `appended to the composer in %N` when drafted. `--target` is an alias for `-t`. An omitted or non-agent target routes to that window's most recently focused Agent pane. Read stdin when TEXT is omitted: `git diff | zz agent-send`. `--context` adds a file/line header and fences the payload; text is capped at 1 MiB.
+Print `appended to the composer in %N` when drafted. An omitted or non-agent target routes to that window's most recently focused Agent pane. Read stdin when TEXT is omitted: `git diff | zz agent-send`. `--context` adds a file/line header and fences the payload; text is capped at 1 MiB.
 
 `--submit` sends now and prints the chosen pane; a busy pane queues the prompt. `--wait` submits, waits for that turn, and prints its reply on stdout (pane ID on stderr). Failure, cancellation, hand-back, or timeout exits non-zero. The timeout defaults to 600 seconds; `0` waits forever. A timeout leaves the turn running. `--json` prints one object with turn facts, `final_text`, and `transcript`. `--final` prints only the text after the last tool call or tool update. Both require `--wait`; combining them is a usage error. `--on-block wait` waits for permission. `--on-block fail` prints the pending permission JSON and exits 3 while the turn continues. `--on-block allow` answers tool permissions, preferring allow-once, and waits for user questions. `--on-block deny` rejects permissions, including user questions.
 
@@ -97,20 +100,16 @@ Turn facts: `final_text` contains message text after the last tool call or tool 
 ### `zz new-agent-session [-t %N] [-c DIR] [--timeout SECS]`
 
 Start a fresh conversation in an agent pane.
-Use `-c` to choose its absolute working directory; otherwise use the pane's current directory. Wait until the new session can accept a prompt, then exit 0 without printing anything. Drop queued prompts from the old session. Creation failures exit 1 with a message. The timeout defaults to 60 seconds and exits 124. A timeout leaves the session change running. Other pane kinds exit 1 with `not an agent pane: %N`.
+Use `-c` to choose its absolute working directory; otherwise use the pane's current directory. Wait until the new session can accept a prompt, then exit 0 without printing anything. Drop queued prompts from the old session. Creation failures exit 1 with a message. The timeout accepts decimal seconds, defaults to 60 seconds, and exits 124; `0` waits forever. A timeout leaves the session change running. Other pane kinds exit 1 with `not an agent pane: %N`.
 
 ### `zz restart-agent-pane [-t %N]`
 
 Restart the agent pane's ACP adapter and resume its current session.
 Print nothing on success. Use `zz new-agent-session` for a fresh conversation.
 
-### `zz show-agent-permission [-t %N]`
-
-Print the oldest pending permission as `{"request_id":7,"tool_call":{...},"options":[...]}` with nested JSON values; exit 1 when none is pending.
-
 ### `zz agent-respond [-t %N] (--allow | --deny | --option ID) [REQUEST_ID]`
 
-Answer the named or oldest pending permission.
+Answer the named or oldest pending permission. Read the pending request with `zz inspect -t %N --json | jq .permission`.
 Print the chosen option ID. `--allow` prefers allow-once; `--deny` selects a reject option. Use `--option ID` to choose an advertised option by ID, including an answer to a user question.
 
 ### Permissions
@@ -135,17 +134,14 @@ Read one `key: value` line per field, or use `--json` for one object with string
 zz inspect -a --json | jq -c 'select(.pane_kind=="agent") | {pane_id,agent_state}'
 ```
 
-The keys, in text output order, are `session_id`, `session_name`, `window_id`, `window_index`, `window_name`, `window_width`, `window_height`, `window_size`, `pane_id`, `pane_index`, `pane_active`, `pane_kind`, `pane_pid`, `pane_current_command`, `pane_current_path`, `pane_title`, `pane_width`, `pane_height`, `pane_dead`, `pane_dead_status`, `pane_dead_signal`, `pane_last_command_status`, `pane_pb_state`, `pane_pb_progress`, `agent_state`, `agent_pending_permission`, `browser_url`, `verbs`, `events`.
+The keys, in text output order, are `session_id`, `session_name`, `window_id`, `window_index`, `window_name`, `window_width`, `window_height`, `window_size`, `pane_id`, `pane_index`, `pane_active`, `pane_kind`, `pane_pid`, `pane_current_command`, `pane_current_path`, `pane_title`, `pane_width`, `pane_height`, `pane_dead`, `pane_dead_status`, `pane_dead_signal`, `pane_last_command_status`, `pane_pb_state`, `pane_pb_progress`, `agent_state`, `agent_pending_permission`, `permission`, `browser_url`, `verbs`, `events`.
+
+`permission` is a nested `{"request_id":7,"tool_call":{...},"options":[...]}` object or `null` in JSON output; text output prints compact JSON on the `permission:` line, or an empty value.
 
 ### `zz events [-t %N]`
 
 Stream hook events.
 Print JSON lines, flushed per line: `{"seq":1,"event":"agent-state-changed","time":1750000000000,"hook_pane":"%3","agent_state":"working",...}`. Each line includes the hook's string variables. `time` is Unix milliseconds. Wait for the first line, `{"seq":0,"event":"ready","time":...}`, before starting work. On subscriber overflow, `gap` consumes the next sequence number; the client reconnects and continues counting without another `ready` line. Use `-t %N` for a pane, `-t @N` for a window, `-t '$N'` for a session ID, or `-t name` for a session name. Filters match exact hook fields; `ready` and `gap` always print. Omit `-t` to stream without filtering. `agent-state-changed` carries `agent_state` for every pane kind and `agent_pending_permission` with the permission ID or an empty string. Agent panes also emit `agent-tool-call` for new calls and completed or failed status changes. Each event carries `tool_call_id`, `tool_title`, `tool_kind`, and `tool_status`; titles collapse whitespace and stop at 200 characters: `{"seq":2,"event":"agent-tool-call","time":1750000000000,"hook_pane":"%3","tool_call_id":"call-1","tool_title":"cargo test","tool_kind":"execute","tool_status":"in_progress"}`. These agent events are stream-only; `set-hook` cannot bind them. Other `@option-changed` firings are not streamed; use a hook for those. Invalid arguments exit 2. Connection and daemon errors, or any disconnect other than overflow, exit 1, including server shutdown.
-
-### `zz show-last-output -t %N`
-
-Read an Agent pane's last prompt and reply.
-Print them under a `%N $ command` header; an `exit: <n>` line follows when known. Use `zz capture-pane -p -t %N -S - -E -` for its full text and `-J` to rejoin soft-wrapped lines.
 
 ## Etiquette
 

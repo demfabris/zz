@@ -8,7 +8,9 @@ use gpui::{
     ParentElement as _, Render, Styled as _, Window, div, prelude::*, px,
 };
 use zz_client::{ChromeAction, UI_TABLE};
-use zz_protocol::{CommandInvocation, KeyBindingSnapshot};
+use zz_protocol::{
+    CommandInvocation, KeyBindingSnapshot, TmuxOption, command_spec, parse_tmux_command_options,
+};
 use zz_ui::{
     ActiveTheme as _, Colorize as _, Sizable as _,
     button::{Button, ButtonVariants as _},
@@ -61,12 +63,7 @@ const BINDINGS: [BindingHint; 5] = [
             key: "%",
             label: "Split right",
         },
-        matches: |command| {
-            matches!(
-                command.name.as_str(),
-                "split-picker" | "split-window" | "splitw"
-            ) && command.args.iter().any(|arg| arg == "-h")
-        },
+        matches: |command| split_hint_matches(command, true),
     },
     BindingHint {
         hint: Hint {
@@ -74,12 +71,7 @@ const BINDINGS: [BindingHint; 5] = [
             key: "\"",
             label: "Split down",
         },
-        matches: |command| {
-            matches!(
-                command.name.as_str(),
-                "split-picker" | "split-window" | "splitw"
-            ) && command.args.iter().all(|arg| arg != "-h")
-        },
+        matches: |command| split_hint_matches(command, false),
     },
     BindingHint {
         hint: Hint {
@@ -98,6 +90,29 @@ const BINDINGS: [BindingHint; 5] = [
         matches: |command| command.name == "list-keys",
     },
 ];
+
+fn split_hint_matches(command: &CommandInvocation, horizontal: bool) -> bool {
+    if !matches!(command.name.as_str(), "split-window" | "splitw") {
+        return false;
+    }
+    let Some(spec) = command_spec(&command.name) else {
+        return false;
+    };
+    let Ok(parsed) = parse_tmux_command_options(spec, command) else {
+        return false;
+    };
+    let kind = parsed
+        .options
+        .iter()
+        .rev()
+        .find_map(|option| match option {
+            TmuxOption::Value("--kind", kind) => Some(*kind),
+            _ => None,
+        })
+        .unwrap_or("terminal");
+    matches!(kind, "terminal" | "picker")
+        && parsed.options.contains(&TmuxOption::Flag("-h")) == horizontal
+}
 
 fn resolve_binding_key(
     hint: &BindingHint,
@@ -405,17 +420,47 @@ mod tests {
     }
 
     #[test]
+    fn split_hints_match_only_terminal_and_picker_kinds() {
+        for name in ["split-window", "splitw"] {
+            for kind in ["terminal", "picker", "browser", "agent"] {
+                for (flag, horizontal) in [("-h", true), ("-v", false)] {
+                    let command = CommandInvocation::new(name, ["--kind", kind, flag]);
+                    assert_eq!(
+                        split_hint_matches(&command, horizontal),
+                        matches!(kind, "terminal" | "picker")
+                    );
+                    assert!(!split_hint_matches(&command, !horizontal));
+                }
+            }
+            assert!(split_hint_matches(
+                &CommandInvocation::new(name, ["-h"]),
+                true
+            ));
+            assert!(split_hint_matches(
+                &CommandInvocation::new(name, [] as [&str; 0]),
+                false
+            ));
+        }
+    }
+
+    #[test]
     fn non_stock_binding_is_preferred_over_stock() {
         let bindings = [
             KeyBindingSnapshot {
                 key: "%".to_owned(),
-                commands: vec![CommandInvocation::new("split-picker", ["-h"])],
+                commands: vec![CommandInvocation::new(
+                    "split-window",
+                    ["--kind", "picker", "-h"],
+                )],
                 repeat: false,
                 note: None,
             },
             KeyBindingSnapshot {
                 key: "|".to_owned(),
-                commands: vec![CommandInvocation::new("split-picker", ["-h"])],
+                commands: vec![CommandInvocation::new(
+                    "split-window",
+                    ["--kind", "picker", "-h"],
+                )],
                 repeat: false,
                 note: None,
             },
@@ -451,7 +496,10 @@ mod tests {
     fn unparseable_binding_uses_the_stock_key() {
         let bindings = [KeyBindingSnapshot {
             key: String::new(),
-            commands: vec![CommandInvocation::new("split-picker", ["-h"])],
+            commands: vec![CommandInvocation::new(
+                "split-window",
+                ["--kind", "picker", "-h"],
+            )],
             repeat: false,
             note: None,
         }];

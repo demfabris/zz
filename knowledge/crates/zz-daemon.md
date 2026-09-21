@@ -542,9 +542,9 @@ the option is enabled.
 
 `execute_key_commands` executes the commands stored in each `Binding`, except a vi numeric-count
 path may inject `-N <count>` into the first qualifying copy action. A key-bound
-`split-window`/`splitw` creates a terminal like tmux, from defaults and imported configs alike.
-The pane-kind picker is reached only through the zz-native `split-picker` verb, which zz's default
-`%`/`"` bindings name directly.
+`split-window`/`splitw` creates a terminal like tmux unless `--kind` selects another pane type.
+The default `%`/`"` bindings create shells. To open a picker, choose Pane picker in Settings →
+Multiplexer or bind `split-window --kind picker` to a key.
 
 Terminal panes receive the daemon’s private `tmux` wrapper directory first on `PATH`,
 including after `respawn-pane`. The daemon also supplies `ZZ_TMUX_EXECUTABLE`, `TMUX`,

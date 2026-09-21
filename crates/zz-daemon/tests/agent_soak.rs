@@ -127,8 +127,8 @@ impl Soak {
         let terminal = *before.first().expect("the session's terminal pane");
         commands
             .execute(CommandInvocation::new(
-                "split-picker",
-                ["-v", "-t", &terminal.to_string()],
+                "split-window",
+                ["--kind", "picker", "-v", "-t", &terminal.to_string()],
             ))
             .expect("split a pane for the agent");
         let agent = *panes(&mut commands)

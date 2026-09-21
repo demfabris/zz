@@ -82,7 +82,7 @@ without parsing status text. Protocol v95 then appended the window's pane border
 `window_pane_index` counts) and `pane_z_order` (which of two panes owns a border cell they both
 touch).
 
-`Picker` is a durable, runtime-free pane state used by the native split-picker flow. It occupies a real
+`Picker` is a durable, runtime-free pane state used by the native split-window --kind picker flow. It occupies a real
 layout leaf and survives GUI detach/reattach, but the daemon owns no PTY and the GUI owns no CEF
 session for it. `select-pane-kind` with `terminal`, `browser`, `agent`, or `editor` materializes the
 same `PaneId` and advances the snapshot generation.

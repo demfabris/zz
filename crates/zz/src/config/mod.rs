@@ -2816,16 +2816,29 @@ mod tests {
     fn fresh_write_path_prefers_xdg_then_home_config() {
         let xdg = absolute_test_root("write-xdg");
         let home = absolute_test_root("write-home");
+        let candidates = |xdg_config_home| {
+            config_candidates_for(
+                ConfigPlatform::Unix,
+                ConfigEnvironment {
+                    xdg_config_home,
+                    home: Some(&home),
+                    ..ConfigEnvironment::default()
+                },
+            )
+        };
 
         assert_eq!(
-            preferred_config_creation_path(Some(&xdg), Some(&home)),
-            Some(expected_config_path(&xdg))
+            config_write_path(&candidates(Some(&xdg))).unwrap(),
+            expected_config_path(&xdg)
         );
         assert_eq!(
-            preferred_config_creation_path(Some(Path::new("relative")), Some(&home)),
-            Some(expected_config_path(&home.join(".config")))
+            config_write_path(&candidates(Some(Path::new("relative")))).unwrap(),
+            expected_config_path(&home.join(".config"))
         );
-        assert_eq!(preferred_config_creation_path(None, None), None);
+        assert_eq!(
+            config_write_path(&[]).unwrap_err().kind(),
+            ErrorKind::NotFound
+        );
     }
 
     #[test]

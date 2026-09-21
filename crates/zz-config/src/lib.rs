@@ -768,32 +768,19 @@ pub fn discover_config_path(candidates: &[PathBuf]) -> Option<PathBuf> {
         .cloned()
 }
 
-pub fn preferred_config_creation_path(
-    xdg_config_home: Option<&Path>,
-    home: Option<&Path>,
-) -> Option<PathBuf> {
-    let mut candidates = Vec::new();
-    push_config_candidate(&mut candidates, xdg_config_home);
-    if candidates.is_empty() {
-        push_home_config_candidate(&mut candidates, home);
-    }
-    candidates.into_iter().next()
+pub fn config_path_for_write() -> io::Result<PathBuf> {
+    config_write_path(&config_candidates())
 }
 
-pub fn config_path_for_write() -> io::Result<PathBuf> {
-    let candidates = config_candidates();
-    if let Some(path) = discover_config_path(&candidates) {
-        return Ok(path);
-    }
-
-    let xdg_config_home = nonempty_env("XDG_CONFIG_HOME");
-    let home = nonempty_env("HOME");
-    preferred_config_creation_path(xdg_config_home.as_deref(), home.as_deref()).ok_or_else(|| {
-        io::Error::new(
-            ErrorKind::NotFound,
-            "cannot create zz/config because neither XDG_CONFIG_HOME nor HOME is available",
-        )
-    })
+pub fn config_write_path(candidates: &[PathBuf]) -> io::Result<PathBuf> {
+    discover_config_path(candidates)
+        .or_else(|| candidates.first().cloned())
+        .ok_or_else(|| {
+            io::Error::new(
+                ErrorKind::NotFound,
+                "cannot create configuration because no absolute platform configuration directory is available",
+            )
+        })
 }
 
 pub fn import_target_path() -> io::Result<PathBuf> {
@@ -2000,6 +1987,110 @@ mod tests {
     }
 
     #[test]
+    fn windows_config_write_uses_native_roots_without_unix_home() {
+        let root = tempfile::tempdir().unwrap();
+        let xdg = root.path().join("xdg");
+        let roaming = root.path().join("roaming");
+        let local = root.path().join("local");
+        let profile = root.path().join("profile");
+        for (environment, expected_root) in [
+            (
+                ConfigEnvironment {
+                    xdg_config_home: Some(&xdg),
+                    appdata: Some(&roaming),
+                    ..ConfigEnvironment::default()
+                },
+                xdg.clone(),
+            ),
+            (
+                ConfigEnvironment {
+                    appdata: Some(&roaming),
+                    local_appdata: Some(&local),
+                    user_profile: Some(&profile),
+                    ..ConfigEnvironment::default()
+                },
+                roaming.clone(),
+            ),
+            (
+                ConfigEnvironment {
+                    appdata: Some(Path::new("relative")),
+                    local_appdata: Some(&local),
+                    user_profile: Some(&profile),
+                    ..ConfigEnvironment::default()
+                },
+                local.clone(),
+            ),
+            (
+                ConfigEnvironment {
+                    user_profile: Some(&profile),
+                    ..ConfigEnvironment::default()
+                },
+                profile.join(".config"),
+            ),
+        ] {
+            let candidates = config_candidates_for(ConfigPlatform::Windows, environment);
+            let path = config_write_path(&candidates).unwrap();
+            assert_eq!(
+                path,
+                expected_root
+                    .join(CONFIG_DIRECTORY_NAME)
+                    .join(CONFIG_FILE_NAME)
+            );
+            write_config_edit_at(&path, "picker-focus-sidebar", Some("true")).unwrap();
+            write_config_edit_at(&path, "picker-focus-sidebar", Some("false")).unwrap();
+            assert_eq!(
+                read_config_source(&path).unwrap(),
+                "picker-focus-sidebar = false\n"
+            );
+            assert_eq!(discover_config_path(&candidates), Some(path));
+        }
+    }
+
+    #[test]
+    fn config_write_keeps_an_existing_lower_priority_file() {
+        let root = tempfile::tempdir().unwrap();
+        let roaming = root.path().join("roaming");
+        let local = root.path().join("local");
+        let candidates = config_candidates_for(
+            ConfigPlatform::Windows,
+            ConfigEnvironment {
+                appdata: Some(&roaming),
+                local_appdata: Some(&local),
+                ..ConfigEnvironment::default()
+            },
+        );
+        let existing = &candidates[1];
+        fs::create_dir_all(existing.parent().unwrap()).unwrap();
+        fs::write(existing, "# keep this\npicker-focus-sidebar = true\n").unwrap();
+        let path = config_write_path(&candidates).unwrap();
+        assert_eq!(&path, existing);
+        write_config_edit_at(&path, "picker-focus-sidebar", Some("false")).unwrap();
+        assert_eq!(
+            read_config_source(existing).unwrap(),
+            "# keep this\npicker-focus-sidebar = false\n"
+        );
+        assert!(!candidates[0].exists());
+    }
+
+    #[test]
+    fn config_write_rejects_missing_or_relative_roots() {
+        for environment in [
+            ConfigEnvironment::default(),
+            ConfigEnvironment {
+                appdata: Some(Path::new("relative")),
+                user_profile: Some(Path::new("relative")),
+                ..ConfigEnvironment::default()
+            },
+        ] {
+            let candidates = config_candidates_for(ConfigPlatform::Windows, environment);
+            assert_eq!(
+                config_write_path(&candidates).unwrap_err().kind(),
+                ErrorKind::NotFound
+            );
+        }
+    }
+
+    #[test]
     fn configuration_discovery_keeps_build_identities_separate() {
         let root = tempfile::tempdir().unwrap();
         let other = if zz_protocol::app_identity::DEVELOPMENT {
@@ -2024,7 +2115,7 @@ mod tests {
             },
         );
         assert_eq!(discover_config_path(&candidates), None);
-        let own = preferred_config_creation_path(None, Some(home)).unwrap();
+        let own = config_write_path(&candidates).unwrap();
         fs::create_dir_all(own.parent().unwrap()).unwrap();
         fs::write(&own, "pane-margin = 2\n").unwrap();
         assert_eq!(discover_config_path(&candidates), Some(own));

@@ -222,32 +222,19 @@ fn discover_config_path(candidates: &[PathBuf]) -> Option<PathBuf> {
         .cloned()
 }
 
-fn preferred_config_creation_path(
-    xdg_config_home: Option<&Path>,
-    home: Option<&Path>,
-) -> Option<PathBuf> {
-    let mut candidates = Vec::new();
-    push_config_candidate(&mut candidates, xdg_config_home);
-    if candidates.is_empty() {
-        push_home_config_candidate(&mut candidates, home);
-    }
-    candidates.into_iter().next()
+fn config_path_for_write() -> io::Result<PathBuf> {
+    config_write_path(&config_candidates())
 }
 
-fn config_path_for_write() -> io::Result<PathBuf> {
-    let candidates = config_candidates();
-    if let Some(path) = discover_config_path(&candidates) {
-        return Ok(path);
-    }
-
-    let xdg_config_home = nonempty_env("XDG_CONFIG_HOME");
-    let home = nonempty_env("HOME");
-    preferred_config_creation_path(xdg_config_home.as_deref(), home.as_deref()).ok_or_else(|| {
-        io::Error::new(
-            ErrorKind::NotFound,
-            "cannot create zz/config because neither XDG_CONFIG_HOME nor HOME is available",
-        )
-    })
+fn config_write_path(candidates: &[PathBuf]) -> io::Result<PathBuf> {
+    discover_config_path(candidates)
+        .or_else(|| candidates.first().cloned())
+        .ok_or_else(|| {
+            io::Error::new(
+                ErrorKind::NotFound,
+                "cannot create configuration because no absolute platform configuration directory is available",
+            )
+        })
 }
 
 fn nonempty_env(name: &str) -> Option<PathBuf> {
@@ -584,6 +571,36 @@ mod tests {
 
         let error = read_config_source(&path).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn windows_config_write_uses_native_roots_and_preserves_existing_files() {
+        let root = tempfile::tempdir().unwrap();
+        let roaming = root.path().join("roaming");
+        let local = root.path().join("local");
+        let candidates = config_candidates_for(
+            ConfigPlatform::Windows,
+            ConfigEnvironment {
+                appdata: Some(&roaming),
+                local_appdata: Some(&local),
+                ..ConfigEnvironment::default()
+            },
+        );
+        assert_eq!(
+            config_write_path(&candidates).unwrap(),
+            expected_config_path(&roaming)
+        );
+        let existing = expected_config_path(&local);
+        write_fleet_host_at(&existing, "box", "ssh://old").unwrap();
+        let path = config_write_path(&candidates).unwrap();
+        assert_eq!(path, existing);
+        write_fleet_host_at(&path, "box", "ssh://new").unwrap();
+        assert_eq!(read_config_source(&path).unwrap(), "host-box = ssh://new\n");
+        assert!(!expected_config_path(&roaming).exists());
+        assert_eq!(
+            config_write_path(&[]).unwrap_err().kind(),
+            ErrorKind::NotFound
+        );
     }
 
     #[test]

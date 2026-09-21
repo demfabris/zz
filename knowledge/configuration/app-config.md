@@ -65,9 +65,11 @@ are removed while retaining precedence. A missing file or unavailable configurat
 selects built-in defaults. Other I/O or UTF-8 errors warn and select defaults. Reads are capped at
 64 KiB before parsing so an accidentally large file cannot create unbounded configuration work.
 
-When a settings edit must create the file, it uses `$XDG_CONFIG_HOME/zz/config` when the root is
-absolute, otherwise `$HOME/.config/zz/config`, creating parent directories as needed. Once any
-candidate exists, edits continue to target the first existing file selected by normal discovery.
+When a settings edit must create the file, it uses the first available absolute root in the
+platform search order above and creates parent directories as needed. On Windows without an
+`XDG_CONFIG_HOME` override, this normally means `%APPDATA%\zz\config`; `HOME` is not required.
+Once any candidate exists, edits continue to target the first existing file selected by normal
+discovery. Fleet-host edits use the same rule.
 
 # Schema
 

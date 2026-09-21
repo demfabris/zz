@@ -107,6 +107,7 @@ Install [just](https://github.com/casey/just)
 - Zig 0.16.0
 - CMake 3.21+ and Ninja: the CEF C++ wrapper is compiled from source.
 - Linux: `cmake curl desktop-file-utils ninja-build libfontconfig-dev libwayland-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev`.
+- Windows x64: Git for Windows (including Git Bash), the MSVC Rust toolchain, and Visual Studio 2022 Build Tools with the C++ tools and a Windows SDK.
 
 ```sh
 just [build|install] [mac|linux]
@@ -114,6 +115,23 @@ just dmg
 just pacman-[package|install]
 just deb-[package|install]
 ```
+
+On Windows, build from PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build-windows.ps1
+```
+
+The script loads the x64 Visual Studio environment and selects Microsoft's linker explicitly
+to avoid Git Bash's `link.exe`. It runs `just build windows`, producing the complete app at
+`dist/zz/zz.exe`. Keep the adjacent DLLs and resources with the executable. To package the bundle:
+
+```powershell
+powershell -File scripts/package-windows.ps1 dist/zz dist/zz-windows.zip
+```
+
+Before rebuilding an existing bundle, close its app and stop its daemon after finishing your
+sessions: Windows cannot replace DLLs that those processes have loaded.
 
 # Connecting
 

@@ -1,8 +1,8 @@
 ---
 type: Design Plan
 title: Native Apple client
-description: Adaptive native iPhone and iPad client over zz-client-ffi, with floating iPad controls, a settings sidebar, Agent conversations, and WebKit browser panes through SSH with automatic localhost service forwarding.
-status: Floating iPad controls and annotated settings changes implemented 2026-09-14 with simulator verification and a connected physical iPad launch; WebKit localhost forwarding verified on physical iPad 2026-09-13; Editor panes remain future work
+description: Adaptive native iPhone and iPad client over zz-client-ffi, with a native iPad sidebar and simplified terminal settings, Agent conversations, and WebKit browser panes through SSH with automatic localhost service forwarding.
+status: Persistent iPad sidebar with footer actions, full-height panes, matching headers, and selected-pane glow implemented 2026-09-21; WebKit localhost forwarding verified on physical iPad 2026-09-13; Editor panes remain future work
 tags:
 - ios
 - iphone
@@ -12,7 +12,7 @@ tags:
 - uikit
 - client
 - ffi
-timestamp: 2026-09-14T00:00:00-03:00
+timestamp: 2026-09-21T00:00:00-03:00
 ---
 
 # Overview
@@ -24,8 +24,8 @@ backend remains in the workspace.
 
 Compact widths keep the phone interaction: one session at a time, uniform pane cards, one pane
 fullscreen, and a horizontally scrollable session selector. Regular widths use a
-workspace with a collapsible session, window, and pane tree beside live panes at the daemon's split
-ratios. A floating pill carries navigation and workspace actions. Both modes share one bundle,
+workspace with a persistent sidebar containing an expandable session, window, and pane tree beside
+live panes at the daemon's split ratios. Workspace actions sit at the bottom of the sidebar. Both modes share one bundle,
 store, FFI connection, terminal renderer, and input owner.
 
 # Experience
@@ -83,9 +83,8 @@ This slice deliberately selects one host at a time. It does not reproduce the de
 or aggregate sessions from several daemons. `ZZ_SOCKET` remains the simulator override and bypasses
 saved-host setup for the local development loop.
 
-Since 2026-09-11 the daemon loads `zz/mux.conf` or explicit `-f` files. The iPad keeps its own
-`mux.conf` in Application Support and applies its parsed preferences through the connected daemon.
-Editing that file does not copy it to the host's filesystem. Desktop Settings and the CLI also
+Since 2026-09-11 the daemon loads `zz/mux.conf` or explicit `-f` files. The iPad follows the host's
+multiplexer configuration and never applies its legacy local `mux.conf`. Desktop Settings and the CLI
 expose `import-tmux-config [path]` to copy a donor into the host's `zz/mux.conf` and reload it.
 
 ## Pane overview
@@ -107,26 +106,17 @@ expose `import-tmux-config [path]` to copy a donor into the host's `zz/mux.conf`
 
 ## iPad workspace
 
-The regular-width workspace has no titlebar. `IPadWorkspace` places the session tree beside
-`IPadPaneWorkspace` and provides explicit sidebar visibility controls. The sidebar expands sessions
-into all of their windows and panes. Tapping
-a pane attaches its session when necessary, selects its window and pane through daemon commands, and
-waits for the next reduced snapshot as confirmation.
+`IPadWorkspace` uses `NavigationSplitView` for the session sidebar and pane workspace. The system
+provides column sizing and sidebar list surfaces. The sidebar stays visible at regular widths with
+no collapse button. Both navigation bars are hidden. The outline expands sessions into windows and panes. Selecting a pane attaches its session when necessary,
+selects its window and pane through daemon commands, and waits for a reduced snapshot.
 
-The outline follows the Swift Playgrounds source-list grammar: each session is a strong section row,
-each window is nested one level below its session, and each pane is nested one more level below its
-window. Branch chevrons stay on the trailing edge and the whole 44-point row toggles with a short
-expand animation. Pane labels sit next to their icons and do not use state dots. A long press on a
-window or pane row offers Close Window or Close Pane through a context menu, each confirmed by a
-destructive alert because closing stops the running processes. Only the selected pane
-receives the Playgrounds-matched full-width source-list capsule; the attached session's active pane
-is the visual fallback before an explicit pane selection exists. The tree stays beside the workspace
-at regular widths. Its header contains a neutral Hide Sidebar button. New Session stays in More.
-
-With the sidebar open, a floating pill below the tree provides Panorama, New Pane, Settings, and More,
-with connection status above it. Retracting the sidebar moves the pill to the bottom center of the
-workspace and adds Show Sidebar, the session menu, window tabs, and New Window. The system status
-area remains visible above the panes. Both modes keep their controls available during Panorama.
+The sidebar uses native `List(selection:)` highlighting and row spacing. The attached session's active
+pane is the selection fallback. Long-press menus offer Close Window and Close Pane with destructive
+confirmation. Connection status sits below the list; bell and Agent attention appear on pane rows.
+The sidebar footer contains Panorama, Add, Settings, and More beneath the connection label. Add includes New
+Window and pane creation. More includes New Session, Help with Keyboard Bindings, and connection
+actions. These actions remain available during Panorama; there is no floating bottom toolbar.
 
 The C ABI projects every window and pane from `MuxSnapshot` and returns each visible pane's normalized
 rectangle. The rectangle solver lives in `zz-client`; Swift multiplies those values by the detail
@@ -143,8 +133,8 @@ leaves the other panes live but non-keyboard-owning. When a prefix binding chang
 active pane, the next snapshot transfers that existing selection and input ownership. Panorama's
 empty selection remains unchanged. Removing the selected pane transfers input to the replacement
 active pane chosen by the daemon.
-The floating pill provides New Pane, Settings, reconnect, and host actions. Its More menu also
-provides New Session in both sidebar modes. The New Pane menu offers Terminal, Browser, Agent,
+The sidebar footer provides New Pane, Settings, reconnect, and host actions. Its More menu also
+provides New Session. The Add menu offers New Window, Terminal, Browser, Agent,
 and Choose Pane Type. `PaneKindPicker` materializes an existing picker with
 `select-pane-kind -t %pane terminal|agent`; the daemon preserves the pane ID and inherited working
 directory. Agent creation requires `experimental-agent-pane` on the host. Browser panes use native
@@ -160,61 +150,42 @@ geometry. Close Pane requires confirmation. Terminal actions also expose Prefix,
 bindings, Copy Mode, and Paste Buffer. These controls live in
 `clients/ios/Sources/PaneControls.swift` (`PaneActionsMenu`, `PaneResizeSheet`).
 
-Terminal headers and padding use the current frame's background color and the same combined opacity
-as the terminal grid. The padding fill excludes the grid bounds to avoid applying transparency
-twice. Background observation stays local to each pane.
-
-The collapsed-sidebar pill uses a session menu and scrollable window capsules around the active
-window, plus an overflow menu for other windows. Device preferences control session visibility, bell
-and Agent indicators, the optional host label, and an Agent pane menu. Swift derives pane and window
-state from snapshots and the host from the current connection. It does not expand custom
-`status-left` or `status-right` formats. Navigation uses the attachment and exact-pane paths.
+Terminal headers and padding use the current frame's opaque background color. The header also uses
+the frame's foreground color, so its controls remain readable independently of app appearance.
+`IPadPaneHeader` observes its pane-local frame slot without invalidating the whole workspace. Other
+pane headers match their native content surfaces. Tiles use 6-point gaps, 14-point corners, and a
+1-point outline with a subtle accent on the selected pane. The selected pane also has a fixed 5%
+edge glow made from broad elliptical accent gradients. There is no inactive dimming.
+The detail area extends behind the home indicator; sidebar actions stay within its safe area.
+Container insets are ignored only at the bottom, preserving keyboard avoidance.
 
 ### Client settings
 
-Settings presents Appearance, Terminal, Panes, Status Bar, and Multiplexer sections. At regular
-widths, `ClientSettingsSidebar` overlays the right edge without resizing or replacing the live panes.
-A capsule of five icon buttons selects sections, and Done closes the panel. Each section retains native
-forms and detail navigation; switching sections returns to that section's root. Appearance includes
-a terminal preview. At compact widths, `ClientSettingsView` keeps the navigation-list sheet.
-`ContentView` owns presentation outside the workspace size-class branch and releases terminal input
-when opening settings.
+`ClientSettingsView` presents one native grouped form on iPhone and iPad: Appearance (System, Light,
+Dark), Font, Text Size, and Color Theme, with a terminal preview. `ContentView` owns sheet presentation outside the size-class branch
+and releases terminal input when opening settings. The sheet leaves the pane hierarchy mounted.
 
-`ZZClientSettings` retains native appearance, terminal font and base size, cursor blinking, and the
-home-indicator option in `UserDefaults`. `ZZSharedSettings` uses the shared Rust settings model with
-Application Support `zz/config` and `zz/mux.conf`. The device has the same bundled terminal theme
-catalog as desktop, separate light and dark theme choices, custom chrome colors, terminal palette
-and cursor controls, padding, and font weight. Appearance uses capsule choices for System, Dark,
-and Light, followed by animations and background, foreground, and accent colors. Desktop chrome
-presets, interface font, contrast, widget radius, and shadow controls are omitted from the mobile
-form. Font choices include
-System Mono, Menlo, Courier New, and bundled Fira Code, Geist Mono, and 0xProto. Per-pane pinch zoom
-remains an in-memory offset from the base font size.
+App chrome defaults to system appearance, with a persisted Light or Dark override. It uses semantic
+colors, system typography, and tint. Motion follows Reduce Motion. There are no pane decoration settings, status
+settings, multiplexer settings, or raw configuration editors. Panorama previews retain rounded clips
+and inset outlines with transparent window backings.
 
-The pane settings control gaps, margins, corner radius, background opacity, selected-pane glow, and
-inactive pane dimming. Corner radius has three choices: 0, 13.5, and 24 points. Gaps enable a fixed
-1-point border; the selected pane's glow also works without gaps. Four broad elliptical gradients
-spread it unevenly along the edges and fade at the corners. Their combined opacity is capped at
-5% at default strength. Opacity and glow use whole
-percentages with 1-percent steps, direct numeric entry, and steppers. Terminal horizontal and vertical
-padding are capped at 16 points in both the form and rendering, including imported config values.
-Numeric config serialization always uses a dot, independent of the device locale.
-Status settings control the pill navigation described above. The animation
-preference disables workspace animations and uses Panorama's reduced-motion path. Platform-only
-settings such as desktop update indicators do not appear in the mobile pages.
+`ZZClientSettings` persists appearance, terminal font, and base size. Font choices include System Mono, Menlo,
+Courier New, and bundled Fira Code, Geist Mono, and 0xProto. Per-pane pinch zoom remains an in-memory
+offset from the base size. Terminal padding is fixed at 8 points and opacity at 1. Cursor shape and
+blink requests come from the terminal program. ANSI blinking text remains independent of the cursor.
 
-Terminal color choices belong to this client. The Rust FFI applies the local terminal appearance to
-an acquired viewport before UIKit draws its render-ready cells. It preserves terminal semantics,
-selection, and explicit cell colors without a Swift VT parser or a daemon-wide palette override.
-Cursor blink preferences preserve ANSI blinking text. In a live split, the selected pane animates
-its cursor while other panes may still animate blinking text.
+`ZZSharedSettings` retains the shared Rust terminal theme catalog and device-local `zz/config`.
+Before applying local appearance to FFI viewports, it removes legacy terminal configuration except
+`font-family`, `font-size`, and `theme`, preserving their original value lines. This also removes
+unexposed palette and cursor overrides. If migration fails, settings report the error and rendering
+falls back to the daemon viewport instead of applying those overrides. Legacy app decoration keys
+are ignored. The app neither edits nor applies the old device `mux.conf`; the connected host owns
+prefix keys, bindings, mouse behavior, and other multiplexer preferences.
 
-Mux preferences have different scope. `ZZStore.applyMuxPreferences` asks
-`zz_settings_model_mobile_apply` to parse and execute the device's `mux.conf` through the connected
-daemon, and repeats the application after attachment. Prefix and key bindings, mouse behavior,
-copy-mode key style, history limits, and window/pane defaults use the same settings metadata as
-desktop. The file belongs to this device; commands with daemon or session scope affect shared state
-and other attached clients. This is not a per-client key-table profile or a remote file editor.
+The Rust FFI applies the selected terminal theme to acquired viewports before UIKit draws their
+render-ready cells. It preserves terminal semantics, selection, and explicit cell colors without a
+Swift VT parser or a daemon-wide palette override.
 
 `third_party/rootshell-reference/UPSTREAM.md` records what rootshell settled for the grouped
 settings, bundled fonts, and pane controls, and where to clone it. Its split-view implementation
@@ -630,6 +601,48 @@ clipboard, and Agent symbols, kills the attached session, reattaches a survivor 
 viewport, then frees and reconnects against a real daemon. Rust unit tests cover Agent attention
 edges and SSH prompt and failure classification.
 
+Sidebar and pane appearance verification on 2026-09-21:
+
+- `ZZ_IOS_REUSE_CLIENT_CORE=1 just ipad-test` passed all 81 unit tests.
+- All three `IPadAcceptanceTests` flows passed across the final UI run and a focused rerun. They
+  cover persistent portrait sidebar controls, window creation, split/close, appearance persistence,
+  font/theme selection, pane resizing, copy/search, and keyboard bindings.
+- The pane-height assertion measures the terminal viewport, verifying that it extends behind the
+  home indicator. The restored clipped glow extends the tile's accessibility bounds, so those
+  bounds cannot measure visible pane edges.
+- Simulator screenshots verify matching terminal header/background colors, sidebar footer actions
+  without a floating toolbar or collapse button, full-height panes, and subtle selected-pane glow.
+
+Simplified iPad settings verification on 2026-09-20:
+
+- The subsequent Appearance picker passed all 81 unit tests and the focused settings/Help UI flow.
+  System, Light, and Dark selections apply immediately; Dark persists after reopening Settings.
+  Simulator screenshots verify dark system surfaces, and the dev app was left in Dark mode.
+
+- `ZZ_IOS_REUSE_CLIENT_CORE=1 just ipad-test` passed all 81 unit tests using the freshly built dev
+  archive from the preceding native-chrome pass. Migration coverage preserves font, size, and theme,
+  removes legacy terminal overrides, and leaves the local mux file unchanged.
+- `testSettingsPickerResizeAndCopyMode` passed against an isolated daemon: no workspace navigation
+  bar, window creation from Add, sidebar navigation, font/theme selection, splits, resize, copy/search,
+  and keyboard bindings.
+- After the header contrast and form-sheet changes, `testPaneHeaderCloseAndPortraitSettings` and
+  `testSimplifiedSettingsAndHelp` passed. They cover sidebar selection and collapse, split/close
+  confirmation, portrait settings, the three-control form, and the Help sheet.
+- Exported simulator screenshots confirm system pane headers and the smaller native settings form.
+  The updated dev app was relaunched against the normal dev daemon. No physical-device run was made.
+
+Earlier native iPad chrome verification on 2026-09-20:
+
+- A fresh `just ipad-test` passed all 86 unit tests. The browser UI fixture was not part of this run.
+- `testAnnotatedSettingsAndPaneAppearance` passed with the native settings tabs and forms,
+  terminal controls, and all three pane-corner choices.
+- `testPaneHeaderCloseAndPortraitSettings` passed with native sidebar selection, split/close
+  actions and confirmation, sidebar collapse/expansion, and the portrait settings sheet.
+- `testSettingsPickerResizeAndCopyMode` passed with native window navigation and settings tabs,
+  font/theme selection, pane creation, resize, copy mode, search, and keyboard bindings.
+- Simulator screenshots confirm system sidebar surfaces, elevated settings forms, and rounded
+  Panorama panes without a square black backing. Physical-device checks remain outside this pass.
+
 iPad shell verification completed on 2026-09-14:
 
 - `env -u ZZ_IOS_REUSE_CLIENT_CORE just ipad-build` passed; a fresh `just ipad-test` rebuilt
@@ -724,8 +737,7 @@ Browser verification completed on 2026-09-13:
 
 The Swift suite covers host endpoint normalization, live and keyboard-sized grid calculation, stable
 reconnect selection, bounded backoff, deduplicated layout updates, exclusive input ownership,
-modifier locking, known deep-link routes, persisted client settings including the home-indicator
-option, per-pane Agent drafts, thread receipts, transcript cursor rules, markdown block parsing
+modifier locking, known deep-link routes, persisted font and theme choices and legacy preference migration, per-pane Agent drafts, thread receipts, transcript cursor rules, markdown block parsing
 (adjacent and longer fences, streaming fences, GFM tables with alignment, task lists, quotes, nested
 lists), tool-call delta merging, config, mode, and session parsing, and composer action policy,
 global font size plus per-pane zoom, and cursor blink policy.
@@ -744,8 +756,8 @@ global font size plus per-pane zoom, and cursor blink policy.
 | `clients/ios/Sources/SSHPromptBroker.swift` | Synchronous C callback bridge to native trust and secret prompts. |
 | `clients/ios/Sources/AgentNotifications.swift` | Local Agent attention notifications and exact-pane routing. |
 | `clients/ios/Sources/AppIntents.swift` | Open, reconnect, and Agent-attention App Shortcuts. |
-| `clients/ios/Sources/ClientSettings.swift` | Persisted appearance, terminal, and iPad layout settings. |
-| `clients/ios/Sources/ClientSettingsView.swift` | Adaptive section navigation, native settings controls, themes, and config editors. |
+| `clients/ios/Sources/ClientSettings.swift` | Persisted terminal font and size with fixed native presentation defaults. |
+| `clients/ios/Sources/ClientSettingsView.swift` | Single native settings form, font controls, terminal preview, and theme picker. |
 | `clients/ios/Sources/SharedSettings.swift` | Rust settings model, local config paths, terminal appearance, and theme catalog. |
 | `clients/ios/Sources/PaneControls.swift` | Pane picker, command actions, and cell-based resize controls. |
 | `clients/ios/Sources/TmuxControls.swift` | Copy-mode controls, terminal search, key tables, and daemon overlays. |

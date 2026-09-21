@@ -170,7 +170,7 @@ succeeded. Unlock it, launch again, and verify the UI before reporting runtime s
 | Keyboard, focus, safe area, rendering, Panorama | simulator and physical-device visual interaction |
 
 `ZZMobileTests` covers Swift policies. `ZZMobileUITests` also runs
-`Tests/UI/IPadAcceptanceTests.swift` against an isolated daemon. The UI test opens settings sections,
+`Tests/UI/IPadAcceptanceTests.swift` against an isolated daemon. The UI test opens the simplified settings form,
 chooses a bundled font and theme, materializes a picker, checks pane resizing, opens copy/search
 controls, and inspects published key tables. It captures screenshots and the accessibility tree.
 It skips on iPhone and when `ZZ_IOS_UI_TEST_SOCKET` is absent.

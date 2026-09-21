@@ -10,9 +10,11 @@ Agent panes, settings, reconnect presentation, or accessibility.
 - `ZZMobileApp` owns `ZZStore` and `ZZClientSettings`. The device owns its presentation config.
   The Rust FFI applies the local terminal theme to acquired viewport cells before UIKit draws them;
   it does not change other clients' terminal palettes.
-- Keep Settings presentation outside the size-class branch. Regular widths use a right-side overlay
-  with section icons; compact widths use a navigation-list sheet. Opening Settings releases terminal
-  input and must not replace or resize the iPad pane hierarchy.
+- Keep Settings sheet presentation outside the size-class branch. Both widths use one native form
+  with Appearance (System, Light, Dark), Font, Text Size, and Color Theme. Opening Settings
+  releases terminal input and keeps the pane hierarchy mounted underneath.
+- Use system surfaces, typography, and tint for app chrome. Desktop chrome presets, overrides, and
+  contrast do not style the mobile interface. Terminal themes still apply to terminal contents.
 
 ## Compact phone shell
 
@@ -40,17 +42,17 @@ Agent panes, settings, reconnect presentation, or accessibility.
 
 ## Regular iPad workspace
 
-- `IPadWorkspace` places a collapsible tree beside the pane workspace without a titlebar. Preserve
-  the sidebar hierarchy as session, every window in that session, then every pane in that window.
-  The sidebar header owns a neutral Hide Sidebar control; the collapsed pill owns Show Sidebar.
-  New Session remains in the pill's More menu in both modes.
+- `IPadWorkspace` uses `NavigationSplitView` with both navigation bars hidden. Preserve the sidebar
+  hierarchy as session, every window, then every pane. Keep the sidebar visible at regular widths;
+  omit collapse controls and floating toolbars. Its footer provides Panorama, Add, Settings, and More.
+  Add contains New Window; More contains New Session and Help.
 - A row in another session or inactive window routes through `ZZNavigationTarget`. The store issues
   attach/window/pane commands and waits for reduced snapshots; a local selection highlight cannot
   replace that convergence.
 - The attached session's active pane is the visual fallback until the user makes an explicit pane
   selection.
-- Sidebar rows remain full-width 44-point buttons. Window chevrons stay trailing, pane labels sit
-  beside their icons, and only the selected pane receives the selection capsule and trait.
+- Sidebar rows use native list spacing and `List(selection:)` highlighting. Window chevrons stay
+  trailing and pane labels sit beside their icons.
 - `IPadPaneWorkspace` mounts panes whose snapshot layout is present. Zoom-hidden siblings stay in the
   sidebar but do not mount without rectangles.
 - `IPadPaneSplitLayout` multiplies the normalized rectangles supplied by `zz-client` by current detail
@@ -58,26 +60,26 @@ Agent panes, settings, reconnect presentation, or accessibility.
 - Every visible terminal tile in the regular split workspace may stay live. `ZZStore.terminalInput`
   still owns at most one pane, and tapping a tile transfers both UIKit first responder and daemon
   pane focus through the store.
-- `IPadStatusBar` provides the collapsed pill's session menu and window tabs from snapshot state.
-  Local status preferences control session, badges, agents, and the optional host label.
-  Do not imitate daemon-expanded custom status text until the FFI exports that payload.
+- Connection status belongs below the sidebar list. Pane rows show bells and Agent attention without
+  visibility preferences. Session and window navigation live in the sidebar.
 - `PaneActionsMenu` sends daemon commands for picker splits, zoom, named layouts, and directional
-  cell-based resizing. Keep the actions reachable when pane gaps are disabled. Closing requires
-  confirmation; a successful write still needs snapshot convergence.
-- Apply the device's pane gaps, margin, opacity, and dimming preferences to native tiles. Pane
-  corners use 0, 13.5, or 24 points with a fixed 1-point border when gaps are enabled. Selected-pane
-  glow uses broad, asymmetric elliptical gradients along the edges, capped at 5% opacity at default
-  strength, with faded corners. It remains visible without gaps.
-- Keep the detail titlebar absent in both modes. The pill sits below the sidebar tree when expanded
-  and at the workspace's bottom center when collapsed. Panorama, New Pane, Settings, and More remain
-  reachable in both modes; collapsed mode adds session/window navigation and New Window.
+  cell-based resizing. Closing requires confirmation; a successful write still needs snapshot
+  convergence.
+- Tiles use fixed 6-point gaps, 14-point corners, opaque surfaces, and 1-point outlines. The selected
+  pane has a subtle accent outline and a fixed 5% elliptical accent glow along its edges. No inactive
+  dimming. Extend the detail area behind the
+  home indicator by ignoring only the bottom container safe area; preserve keyboard avoidance.
+- The sidebar footer remains reachable during Panorama and stays within the safe area.
 - Pane headers use flat, dimmed Split Down, Split Right, Pane Actions, and Close controls. Keep
   44-point targets and the menu fallback for narrow tiles. Close requires confirmation.
-- Terminal headers and padding use the acquired frame's background and the same combined opacity
-  as the grid. Observe frames locally; do not publish their colors through the workspace store.
-  Paint the padding outside the grid only, so translucent backgrounds are not applied twice.
+- Terminal headers and padding match the acquired frame's opaque background. Header controls use
+  its foreground color. Other headers match their native pane surfaces. Observe frames locally; do
+  not publish their colors through the workspace store. Paint the padding outside the grid only.
 
 ## Panorama
+
+- Clip each preview pane and its inset outline to the same rounded shape. Leave the window backing
+  transparent so square black corners cannot surround rounded panes.
 
 - Panorama expresses the mux hierarchy directly: one horizontally arranged column per session, the
   session name, its vertically scrolling windows, then each window's pane topology.
@@ -104,7 +106,7 @@ Agent panes, settings, reconnect presentation, or accessibility.
   resizing live pane views. Lock the destination card rectangle before movement starts. During exit,
   mount the live workspace only after it completes. Neither transition changes a navigation bar.
 - Preserve Reduce Motion with target alignment and a short crossfade without scale or blur movement.
-  The device's disabled-animation preference uses the same path and disables workspace animations.
+
 
 ## Terminal rendering and input
 
@@ -154,8 +156,7 @@ Agent panes, settings, reconnect presentation, or accessibility.
   when input leaves. Floating keyboards stay overlays.
 - Backgrounding keeps the FFI client, reduced core, and retained frames alive while it releases
   focus. Reconnecting uses the stable keyboard-hidden geometry.
-- Cursor-blink preference can steady a cursor that requests blinking. It must not disable ANSI
-  blinking text.
+- Preserve terminal-program cursor blink requests and independent ANSI blinking text.
 
 ## Agent panes, settings, and reconnects
 
@@ -190,21 +191,14 @@ Agent panes, settings, reconnect presentation, or accessibility.
 - Agent creation requires the connected daemon to enable `experimental-agent-pane`.
 - Preserve the known URL routes and App Shortcuts through the shared exact-pane navigation path.
   Reject unknown routes instead of interpreting arbitrary URLs or commands.
-- Persist native appearance, terminal font family, 9 through 23 point base size, cursor blinking,
-  and the home-indicator extension in `UserDefaults`. Per-pane zoom stays in memory and survives
-  automatic reconnect.
-- `ZZSharedSettings` owns Application Support `zz/config` and `zz/mux.conf` through the shared Rust
-  settings model. Use desktop metadata and the bundled theme catalog for supported knobs.
-- Appearance exposes System/Dark/Light, animations, and custom background/foreground/accent colors.
-  The iPad section selector and appearance choices use capsules. Desktop chrome presets, interface
-  font, contrast, widget radius, and shadow controls stay out of the mobile form.
-- Opacity and glow use whole percentages with 1-percent steps, direct numeric entry, and steppers.
-  Clamp terminal padding to 0 through 16 points in controls and rendering, including imported config.
-  Serialize numeric config values with a dot regardless of the device locale.
-- Local terminal and chrome settings affect this device. Apply parsed mux preferences through
-  `zz_settings_model_mobile_apply` after attachment and edits; this does not upload the local file.
-  Daemon/session-scoped mux commands affect other attached clients, so do not describe them as
-  independent per-client bindings. Keep parsing and key-table semantics in Rust.
+- Persist terminal font and 9 through 23 point base size; retain the device-local terminal theme.
+  Per-pane zoom stays in memory and survives automatic reconnect. Persist the System/Light/Dark
+  appearance choice, defaulting to System, and honor Reduce Motion. Use fixed 8-point terminal padding and opaque backgrounds.
+- `ZZSharedSettings` owns the shared Rust settings model and bundled theme catalog. Before local
+  appearance reaches FFI frames, migrate terminal config to only font-family, font-size, and theme.
+  If migration fails, report the error and render daemon viewports without the old local overrides.
+- Do not apply legacy local mux.conf on attachment or edits. The host owns multiplexer configuration;
+  keep Keyboard Bindings as a read-only reference under More > Help and in terminal pane actions.
 - With no retained sessions, reconnect uses a full page. With retained sessions, keep the frozen
   workspace and show the banner. Both surfaces display the last transport error through the next
   automatic attempt.

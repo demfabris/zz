@@ -5,9 +5,9 @@ struct ContentView: View {
     @EnvironmentObject private var store: ZZStore
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(ZZClientSettings.self) private var settings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var paneTransition
     @State private var showsSettings = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Group {
@@ -100,28 +100,18 @@ struct ContentView: View {
             TmuxOverlay(store: store)
         }
         .transaction { transaction in
-            if settings.shared?.bool("animations", fallback: true) == false {
+            if reduceMotion {
                 transaction.disablesAnimations = true
                 transaction.animation = nil
             }
         }
-        .overlay(alignment: .trailing) {
-            if showsSettings, horizontalSizeClass == .regular {
-                GeometryReader { geometry in
-                    ClientSettingsSidebar(isPresented: $showsSettings)
-                        .frame(width: min(400, geometry.size.width - 24))
-                        .padding(8)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                }
-                .transition(.move(edge: .trailing).combined(with: .opacity))
+        .sheet(isPresented: $showsSettings) {
+            if horizontalSizeClass == .regular {
+                ClientSettingsView()
+                    .presentationSizing(.form)
+            } else {
+                ClientSettingsView()
             }
-        }
-        .animation(reduceMotion || settings.shared?.bool("animations", fallback: true) == false ? nil : .easeInOut(duration: 0.22), value: showsSettings)
-        .sheet(isPresented: Binding(
-            get: { showsSettings && horizontalSizeClass != .regular },
-            set: { showsSettings = $0 }
-        )) {
-            ClientSettingsView()
         }
     }
 
@@ -506,112 +496,93 @@ private struct ConnectionFailure: View {
 
 private struct IPadWorkspace: View {
     @EnvironmentObject private var store: ZZStore
-    @Environment(ZZClientSettings.self) private var settings
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let showSettings: () -> Void
-    @State private var showsSidebar = true
     @State private var expandedSessions: Set<UInt64> = []
     @State private var expandedWindows: Set<IPadSidebarWindowKey> = []
     @State private var panoramaRequest = 0
+    @State private var showsBindings = false
 
     var body: some View {
-        GeometryReader { geometry in
-            let sidebarWidth = min(290, max(240, geometry.size.width * 0.32))
-            HStack(spacing: 0) {
-                if showsSidebar {
-                    VStack(spacing: 0) {
-                        HStack(spacing: 8) {
-                            Text("Sessions")
-                                .font(.title3.bold())
-                            Spacer(minLength: 0)
-                            Button("Hide Sidebar", systemImage: "sidebar.left", action: toggleSidebar)
-                                .font(.system(size: 17, weight: .medium))
-                                .frame(width: 44, height: 44)
-                                .foregroundStyle(settings.chromeForeground)
-                                .background(settings.chromeForeground.opacity(0.08), in: Circle())
-                                .accessibilityIdentifier("ipad-sidebar-toggle")
-                        }
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 8)
-                        IPadSessionSidebar(
-                            expandedSessions: $expandedSessions,
-                            expandedWindows: $expandedWindows
+        NavigationSplitView(columnVisibility: .constant(.all)) {
+            IPadSessionSidebar(
+                expandedSessions: $expandedSessions,
+                expandedWindows: $expandedWindows
+            )
+            .toolbarVisibility(.hidden, for: .navigationBar)
+            .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 320)
+            .toolbar(removing: .sidebarToggle)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 8) {
+                    Label(
+                        URLComponents(string: store.hostEndpoint)?.host.map { "\($0) · ssh" } ?? "Local",
+                        systemImage: store.isConnected ? "network" : "network.slash"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    HStack(spacing: 0) {
+                        IPadWorkspaceActions(
+                            showPanorama: { panoramaRequest += 1 },
+                            showSettings: showSettings,
+                            showBindings: {
+                                store.releaseTerminalInput()
+                                showsBindings = true
+                            }
                         )
                     }
-                    .padding(.bottom, 100)
-                    .frame(width: sidebarWidth)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 18))
+                    .padding(.horizontal, 12)
                 }
-                GeometryReader { detail in
-                    IPadPaneWorkspace(panoramaRequest: panoramaRequest)
-                        .frame(width: detail.size.width, height: detail.size.height)
-                }
+                .padding(.vertical, 8)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("ipad-sidebar-footer")
             }
-            .overlay(alignment: showsSidebar ? .bottomLeading : .bottom) {
-                VStack(alignment: .leading, spacing: 12) {
-                    if showsSidebar {
-                        HStack(spacing: 8) {
-                            Circle().fill(store.isConnected ? Color.green : Color.orange)
-                                .frame(width: 7, height: 7)
-                            Text(URLComponents(string: store.hostEndpoint)?.host.map { "\($0) · ssh" } ?? "Local")
-                                .font(.caption)
-                                .foregroundStyle(settings.chromeSecondaryForeground)
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 12)
-                    }
-                    IPadControlPill(
-                        showsNavigation: !showsSidebar,
-                        showSidebar: toggleSidebar,
-                        showPanorama: { panoramaRequest += 1 },
-                        showSettings: showSettings
-                    )
-                }
-                .padding(.horizontal, showsSidebar ? 20 : 12)
-                .padding(.bottom, 12)
-                .frame(width: showsSidebar ? sidebarWidth : min(760, geometry.size.width))
-            }
+        } detail: {
+            IPadPaneWorkspace(panoramaRequest: panoramaRequest)
+                .toolbarVisibility(.hidden, for: .navigationBar)
+                .toolbar(removing: .sidebarToggle)
+                .ignoresSafeArea(.container, edges: .bottom)
         }
-        .foregroundStyle(settings.chromeForeground)
-        .background(settings.chromeBackground)
+        .navigationSplitViewStyle(.balanced)
         .coordinateSpace(.named(IPadPanoramaCoordinateSpace.name))
-    }
-
-    private func toggleSidebar() {
-        withAnimation(reduceMotion || settings.shared?.bool("animations", fallback: true) == false ? nil : .easeInOut(duration: 0.22)) {
-            showsSidebar.toggle()
+        .sheet(isPresented: $showsBindings) {
+            NavigationStack {
+                TmuxBindingsView(store: store)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showsBindings = false }
+                        }
+                    }
+            }
         }
     }
 }
 
-private struct IPadControlPill: View {
+private struct IPadWorkspaceActions: View {
     @EnvironmentObject private var store: ZZStore
-    @Environment(ZZClientSettings.self) private var settings
-    let showsNavigation: Bool
-    let showSidebar: () -> Void
     let showPanorama: () -> Void
     let showSettings: () -> Void
+    let showBindings: () -> Void
 
     var body: some View {
-        HStack(spacing: showsNavigation ? 2 : 12) {
-            if showsNavigation {
-                Button("Show Sidebar", systemImage: "sidebar.left", action: showSidebar)
-                    .accessibilityIdentifier("ipad-sidebar-toggle")
-                Divider().frame(height: 24).padding(.horizontal, 6)
-                IPadStatusBar()
-                Button("New Window", systemImage: "plus") {
+        Group {
+            Button(action: showPanorama) {
+                Image(systemName: "rectangle.grid.2x2")
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(.rect)
+            }
+            .accessibilityLabel("Show Panorama")
+            .accessibilityIdentifier("ipad-panorama-toggle")
+            Menu {
+                Button("New Window", systemImage: "macwindow.badge.plus") {
                     if let session = store.selectedSession {
                         _ = store.execute("new-window", args: ["-t", "$\(session.id)"])
                     }
                 }
-                .disabled(!store.isConnected || store.selectedSession == nil)
                 .accessibilityIdentifier("ipad-new-window")
-                Divider().frame(height: 24).padding(.horizontal, 6)
-            }
-            Button("Show Panorama", systemImage: "rectangle.grid.2x2", action: showPanorama)
-                .accessibilityIdentifier("ipad-panorama-toggle")
-            Menu {
+                Divider()
                 Button("Choose Pane Type", systemImage: ZZPaneKind.picker.symbol) { store.newPane(kind: .picker) }
                 Button("Browser", systemImage: "globe") { store.newPane(kind: .browser) }
                 Button("Terminal", systemImage: "terminal") { store.newPane(kind: .terminal) }
@@ -619,14 +590,22 @@ private struct IPadControlPill: View {
             } label: {
                 Image(systemName: "plus.rectangle.on.rectangle").frame(minWidth: 44, minHeight: 44)
             }
-            .accessibilityLabel("New Pane")
+            .accessibilityLabel("Add")
             .disabled(!store.isConnected || store.selectedSession == nil)
             .accessibilityIdentifier("ipad-new-pane-menu")
-            Button("Settings", systemImage: "gearshape", action: showSettings)
-                .accessibilityIdentifier("settings")
+            Button(action: showSettings) {
+                Image(systemName: "gearshape")
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(.rect)
+            }
+            .accessibilityLabel("Settings")
+            .accessibilityIdentifier("settings")
             Menu {
                 Button("New Session", systemImage: "plus", action: store.newSession)
                     .disabled(!store.isConnected || store.isCreatingSession)
+                Menu("Help", systemImage: "questionmark.circle") {
+                    Button("Keyboard Bindings", systemImage: "keyboard", action: showBindings)
+                }
                 Button("Refresh Connection", systemImage: "arrow.clockwise", action: store.retry)
                 if store.canConfigureHost {
                     Button("Change Host", systemImage: "server.rack", action: store.showHostSetup)
@@ -638,37 +617,20 @@ private struct IPadControlPill: View {
             .accessibilityIdentifier("ipad-overflow-menu")
         }
         .labelStyle(.iconOnly)
-        .buttonStyle(IPadPillButtonStyle())
-        .font(.system(size: 16, weight: .medium))
-        .padding(6)
-        .background(.regularMaterial, in: Capsule())
-        .overlay { Capsule().stroke(settings.chromeBorder, lineWidth: 1) }
-        .shadow(color: .black.opacity(settings.shadowOpacity), radius: 20, y: 6)
-        .contrast(settings.chromeContrast)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("ipad-control-pill")
-    }
-}
+        .frame(maxWidth: .infinity, minHeight: 44)
 
-private struct IPadPillButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .frame(minWidth: 44, minHeight: 44)
-            .background(.primary.opacity(configuration.isPressed ? 0.12 : 0), in: Capsule())
-            .contentShape(Capsule())
     }
 }
 
 private struct IPadSessionSidebar: View {
     @EnvironmentObject private var store: ZZStore
-    @Environment(ZZClientSettings.self) private var settings
     @Binding var expandedSessions: Set<UInt64>
     @Binding var expandedWindows: Set<IPadSidebarWindowKey>
     @State private var paneToClose: ZZPane?
     @State private var windowToClose: ZZWindow?
 
     var body: some View {
-        List {
+        List(selection: selectedPane) {
             if store.sessions.isEmpty {
                 ContentUnavailableView(
                     "No Sessions",
@@ -688,12 +650,6 @@ private struct IPadSessionSidebar: View {
             }
         }
         .listStyle(.sidebar)
-        .contentMargins(.top, 0, for: .scrollContent)
-        .scrollContentBackground(.hidden)
-        .background(settings.chromeBackground)
-        .foregroundStyle(settings.chromeForeground)
-        .contrast(settings.chromeContrast)
-        .environment(\.defaultMinListRowHeight, 1)
         .alert(
             "Close pane?",
             isPresented: Binding(
@@ -738,6 +694,21 @@ private struct IPadSessionSidebar: View {
         }
     }
 
+    private var selectedPane: Binding<UInt64?> {
+        Binding(
+            get: { store.selectedPaneID ?? store.selectedSession?.activeWindow?.panes.first(where: \.isActive)?.id },
+            set: { paneID in
+                guard let paneID else { return }
+                for session in store.sessions {
+                    if let pane = session.allPanes.first(where: { $0.id == paneID }) {
+                        store.selectPane(pane, in: session)
+                        return
+                    }
+                }
+            }
+        )
+    }
+
     private func sessionButton(_ session: ZZSession) -> some View {
         let expanded = expandedSessions.contains(session.id)
         return Button {
@@ -752,9 +723,7 @@ private struct IPadSessionSidebar: View {
             )
         }
         .buttonStyle(.plain)
-        .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 0, trailing: 0))
-        .listRowSeparator(.hidden)
-        .listRowBackground(Color.clear)
+        .selectionDisabled(true)
         .accessibilityLabel("Session \(session.name)")
         .accessibilityValue(
             session.isAttached
@@ -770,32 +739,33 @@ private struct IPadSessionSidebar: View {
 
     private func itemButton(_ item: IPadSidebarItem) -> some View {
         let row = rowModel(for: item)
-        return Button {
-            activate(item)
-        } label: {
-            IPadSidebarTreeRow(
-                title: row.title,
-                symbol: row.symbol,
-                level: row.level,
-                selected: row.selected,
-                emphasized: row.emphasized,
-                iconColor: row.iconColor,
-                isExpanded: row.isExpanded,
-                badgeSymbol: row.badgeSymbol,
-                badgeColor: row.badgeColor
-            )
+        return Group {
+            if case let .pane(_, _, pane) = item {
+                sidebarRow(row)
+                    .tag(pane.id)
+            } else {
+                Button { activate(item) } label: { sidebarRow(row) }
+                    .buttonStyle(.plain)
+                    .selectionDisabled(true)
+            }
         }
-        .buttonStyle(.plain)
-        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-        .listRowSeparator(.hidden)
-        .listRowBackground(Color.clear)
-        .contextMenu {
-            itemMenu(for: item)
-        }
+        .contextMenu { itemMenu(for: item) }
         .accessibilityLabel(row.accessibilityLabel)
         .accessibilityValue(row.accessibilityValue)
-        .accessibilityAddTraits(row.selected ? .isSelected : [])
         .accessibilityIdentifier(row.accessibilityIdentifier)
+    }
+
+    private func sidebarRow(_ row: IPadSidebarRowModel) -> some View {
+        IPadSidebarTreeRow(
+            title: row.title,
+            symbol: row.symbol,
+            level: row.level,
+            emphasized: row.emphasized,
+            iconColor: row.iconColor,
+            isExpanded: row.isExpanded,
+            badgeSymbol: row.badgeSymbol,
+            badgeColor: row.badgeColor
+        )
     }
 
     @ViewBuilder
@@ -908,9 +878,8 @@ private struct IPadSessionSidebar: View {
                 title: title,
                 symbol: "macwindow",
                 level: 1,
-                selected: false,
                 emphasized: window.isCurrent,
-                iconColor: window.isCurrent ? .accentColor : .secondary,
+                iconColor: .secondary,
                 isExpanded: expandedWindows.contains(key),
                 badgeSymbol: window.zoomedPane == nil
                     ? nil
@@ -929,16 +898,16 @@ private struct IPadSessionSidebar: View {
                     && window.isCurrent
                     && pane.isActive)
             let title = pane.title.isEmpty ? pane.kind.label : pane.title
+            let attention = store.agentAttention.first { $0.pane == pane.id }
             return IPadSidebarRowModel(
                 title: title,
                 symbol: pane.kind.symbol,
                 level: 2,
-                selected: selected,
                 emphasized: pane.isActive || selected,
                 iconColor: pane.hasBell ? .orange : .secondary,
                 isExpanded: nil,
-                badgeSymbol: nil,
-                badgeColor: .secondary,
+                badgeSymbol: attention?.kind.symbol ?? (pane.hasBell ? "bell.fill" : nil),
+                badgeColor: attention?.kind == .failed ? .red : .orange,
                 accessibilityLabel: "Pane \(title)",
                 accessibilityValue: pane.isActive ? "Active" : "",
                 accessibilityIdentifier: "ipad-pane-\(pane.id)"
@@ -975,7 +944,6 @@ private struct IPadSidebarRowModel {
     let title: String
     let symbol: String?
     let level: Int
-    let selected: Bool
     let emphasized: Bool
     let iconColor: Color
     let isExpanded: Bool?
@@ -987,18 +955,9 @@ private struct IPadSidebarRowModel {
 }
 
 private struct IPadSidebarTreeRow: View {
-    private static let selectionBackground = Color(
-        .sRGB,
-        red: 77.0 / 255.0,
-        green: 164.0 / 255.0,
-        blue: 1,
-        opacity: 1
-    )
-
     let title: String
     let symbol: String?
     let level: Int
-    var selected = false
     var emphasized = false
     var iconColor: Color = .secondary
     let isExpanded: Bool?
@@ -1010,7 +969,7 @@ private struct IPadSidebarTreeRow: View {
             if let symbol {
                 Image(systemName: symbol)
                     .frame(width: 20)
-                    .foregroundStyle(selected ? Color.white : iconColor)
+                    .foregroundStyle(iconColor)
                     .accessibilityHidden(true)
             }
             Text(title)
@@ -1019,23 +978,21 @@ private struct IPadSidebarTreeRow: View {
             if let badgeSymbol {
                 Image(systemName: badgeSymbol)
                     .font(.caption2)
-                    .foregroundStyle(selected ? Color.white : badgeColor)
+                    .foregroundStyle(badgeColor)
                     .accessibilityHidden(true)
             }
             if let isExpanded {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(selected ? Color.white : Color.secondary)
+                    .foregroundStyle(Color.secondary)
                     .frame(width: 18)
                     .accessibilityHidden(true)
             }
         }
         .font(symbol == nil ? .headline : .body.weight(emphasized ? .semibold : .regular))
-        .padding(.leading, 8 + CGFloat(level) * 22)
+        .padding(.leading, CGFloat(level) * 16)
         .padding(.trailing, 8)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .foregroundStyle(selected ? Color.white : Color.primary)
-        .background(selected ? Self.selectionBackground : Color.clear, in: Capsule())
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
     }
 }
@@ -1072,12 +1029,11 @@ private struct IPadPaneWorkspace: View {
     @State private var panoramaEntranceArmed = false
 
     private var reduceMotion: Bool {
-        systemReduceMotion || settings.shared?.bool("animations", fallback: true) == false
+        systemReduceMotion
     }
 
     private var paneSpacing: CGFloat {
-        settings.shared?.bool("pane-gaps", fallback: true) == false
-            ? 0 : CGFloat(settings.shared?.number("pane-margin", fallback: 5) ?? 5)
+        6
     }
 
     fileprivate static let entranceDuration = 0.30
@@ -1171,10 +1127,6 @@ private struct IPadPaneWorkspace: View {
             }
         }
         .background(settings.chromeBackground)
-        .ignoresSafeArea(
-            .container,
-            edges: settings.extendPanesUnderHomeIndicator ? .bottom : []
-        )
         .onChange(of: panoramaRequest) {
             if showsPanorama {
                 dismissPanorama(toward: selectedWindowKey)
@@ -1520,191 +1472,6 @@ private struct IPadPaneWorkspace: View {
     private static let fullLayout = ZZPaneLayout(x: 0, y: 0, width: 1, height: 1)
 }
 
-private struct IPadStatusBar: View {
-    @EnvironmentObject private var store: ZZStore
-    @Environment(ZZClientSettings.self) private var settings
-
-    private var showsBadges: Bool { settings.shared?.bool("status-badges", fallback: true) ?? true }
-
-    var body: some View {
-        if let session = store.selectedSession, !session.windows.isEmpty {
-            HStack(spacing: 8) {
-                if settings.shared?.bool("status-show-session", fallback: true) != false {
-                    sessionMenu(session)
-                }
-
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal) {
-                        HStack(spacing: 4) {
-                            ForEach(visibleWindows(in: session)) { window in
-                                Button {
-                                    open(window, in: session)
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Text(windowTitle(window)).lineLimit(1)
-                                        if windowMenuSymbol(window) != "macwindow" {
-                                            Image(systemName: windowMenuSymbol(window))
-                                                .font(.caption)
-                                        }
-                                    }
-                                    .padding(.horizontal, 14)
-                                    .frame(minHeight: 44)
-                                    .background(settings.chromeForeground.opacity(window.id == session.activeWindowID ? 0.2 : 0), in: Capsule())
-                                }
-                                .buttonStyle(.plain)
-                                .id(window.id)
-                                .accessibilityLabel(windowAccessibilityValue(window))
-                                .accessibilityAddTraits(window.id == session.activeWindowID ? .isSelected : [])
-                                .accessibilityIdentifier("ipad-window-\(window.id)")
-                            }
-                        }
-                    }
-                    .scrollIndicators(.hidden)
-                    .defaultScrollAnchor(.center)
-                    .frame(maxWidth: .infinity)
-                    .onChange(of: session.activeWindowID, initial: true) {
-                        proxy.scrollTo(session.activeWindowID, anchor: .center)
-                    }
-                }
-                .layoutPriority(1)
-
-                let overflow = overflowWindows(in: session)
-                if !overflow.isEmpty {
-                    Menu {
-                        ForEach(overflow) { window in
-                            Button {
-                                open(window, in: session)
-                            } label: {
-                                Label(
-                                    windowTitle(window),
-                                    systemImage: windowMenuSymbol(window)
-                                )
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .frame(width: 28, height: 28)
-                    }
-                    .accessibilityLabel("More windows")
-                }
-
-                if settings.shared?.bool("status-agents", fallback: true) != false {
-                    let agents = session.allPanes.filter { $0.kind == .agent }
-                    if !agents.isEmpty {
-                        Menu {
-                            ForEach(agents) { pane in
-                                Button(pane.title.isEmpty ? "Agent" : pane.title) {
-                                    store.open(ZZNavigationTarget(session: session.id, pane: pane.id))
-                                }
-                            }
-                        } label: {
-                            Label("\(agents.count)", systemImage: "sparkles")
-                        }
-                        .accessibilityLabel("\(agents.count) Agent panes")
-                    }
-                }
-                if settings.shared?.bool("status-host", fallback: false) == true {
-                    Text(URLComponents(string: store.hostEndpoint)?.host ?? "Local")
-                        .font(.caption)
-                        .lineLimit(1)
-                        .frame(minWidth: 36, maxWidth: 70)
-                        .accessibilityLabel("Host")
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("tmux status, session \(session.name)")
-            .foregroundStyle(settings.chromeForeground)
-            .contrast(settings.chromeContrast)
-        }
-    }
-
-    private func sessionMenu(_ session: ZZSession) -> some View {
-        Menu {
-            ForEach(store.sessions) { candidate in
-                Button {
-                    store.selectSession(candidate)
-                } label: {
-                    Label(
-                        candidate.name,
-                        systemImage: candidate.id == session.id
-                            ? "checkmark"
-                            : "square.stack.3d.up"
-                    )
-                }
-            }
-        } label: {
-            Label {
-                Text(session.name)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            } icon: {
-                Image(systemName: "square.stack.3d.up")
-            }
-            .labelStyle(.titleAndIcon)
-        }
-        .frame(minWidth: 70, maxWidth: 120)
-        .layoutPriority(1)
-        .accessibilityLabel("Session")
-        .accessibilityValue(session.name)
-    }
-
-    private func windowAccessibilityValue(_ window: ZZWindow) -> String {
-        var parts = ["Window \(window.index)"]
-        if !window.name.isEmpty {
-            parts.append(window.name)
-        }
-        if window.panes.contains(where: { $0.kind == .agent }) {
-            parts.append("Agent")
-        }
-        if window.panes.contains(where: \.hasBell) {
-            parts.append("bell")
-        }
-        if window.zoomedPane != nil {
-            parts.append("zoomed")
-        }
-        return parts.joined(separator: ", ")
-    }
-
-    private func windowMenuSymbol(_ window: ZZWindow) -> String {
-        if showsBadges, window.panes.contains(where: \.hasBell) {
-            return "bell.fill"
-        }
-        if showsBadges, settings.shared?.bool("status-agents", fallback: true) != false,
-           window.panes.contains(where: { $0.kind == .agent }) {
-            return "sparkles"
-        }
-        if window.zoomedPane != nil {
-            return "arrow.up.left.and.arrow.down.right"
-        }
-        return "macwindow"
-    }
-
-    private func visibleWindows(in session: ZZSession) -> [ZZWindow] {
-        let limit = 3
-        let windows = session.windows
-        guard windows.count > limit else {
-            return windows
-        }
-        let current = windows.firstIndex(where: \.isCurrent) ?? 0
-        let start = min(max(current - limit / 2, 0), windows.count - limit)
-        return Array(windows[start..<(start + limit)])
-    }
-
-    private func overflowWindows(in session: ZZSession) -> [ZZWindow] {
-        let visible = Set(visibleWindows(in: session).map(\.id))
-        return session.windows.filter { !visible.contains($0.id) }
-    }
-
-    private func windowTitle(_ window: ZZWindow) -> String {
-        "\(window.index) \(window.name.isEmpty ? "Window" : window.name)"
-    }
-
-    private func open(_ window: ZZWindow, in session: ZZSession) {
-        store.open(ZZNavigationTarget(session: session.id, pane: window.activePane))
-    }
-}
-
 private struct IPadPaneTile: View {
     @EnvironmentObject private var store: ZZStore
     @Environment(ZZClientSettings.self) private var settings
@@ -1715,68 +1482,26 @@ private struct IPadPaneTile: View {
     private var selected: Bool {
         pane.id == store.selectedPaneID || (store.selectedPaneID == nil && pane.isActive)
     }
-    private var gaps: Bool { settings.shared?.bool("pane-gaps", fallback: true) ?? true }
-    private var cornerRadius: CGFloat {
-        gaps ? settings.paneCornerRadius : 0
-    }
-    private var borderWidth: CGFloat {
-        gaps ? 1 : 0
-    }
+    private var cornerRadius: CGFloat { 14 }
+    private var borderWidth: CGFloat { 1 }
 
     var body: some View {
         VStack(spacing: 0) {
-            GeometryReader { geometry in
-                HStack(spacing: 0) {
-                    Button {
-                        store.selectPane(pane, in: session)
-                    } label: {
-                        Label(paneLabel, systemImage: pane.kind.symbol)
-                            .font(.system(size: 13, weight: .medium))
-                            .lineLimit(1)
-                            .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(settings.chromeSecondaryForeground)
-                    HStack(spacing: 0) {
-                        if geometry.size.width >= 280 {
-                            splitButton(horizontal: false)
-                            splitButton(horizontal: true)
-                        }
-                        paneMenu
-                        closeButton
-                    }
-                    .foregroundStyle(settings.chromeForeground.opacity(0.45))
-                    .buttonStyle(.plain)
-                    .font(.system(size: 14))
-                }
-                .padding(.leading, 12)
-                .padding(.trailing, 2)
-            }
-            .frame(height: 44)
-            .contrast(settings.chromeContrast)
-            .background {
-                if pane.kind == .terminal {
-                    LiveTerminalBackground(store: store, pane: pane.id, opacity: settings.terminalPresentation.backgroundOpacity)
-                } else {
-                    settings.chromeSurface.opacity(settings.shared?.number("pane-background-opacity", fallback: 1) ?? 1)
-                }
-            }
+            IPadPaneHeader(store: store, pane: pane, session: session, confirmsClose: $confirmsClose)
             paneContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(settings.chromeBackground.opacity(settings.shared?.number("pane-background-opacity", fallback: 1) ?? 1))
+            .background(settings.chromeBackground)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(
-                        selected ? settings.chromeTint.opacity(0.9) : settings.chromeBorder,
+                        selected ? settings.chromeTint.opacity(0.55) : settings.chromeBorder,
                         lineWidth: borderWidth
                     )
                     .allowsHitTesting(false)
                 if selected {
-                    let strength = settings.shared?.number("pane-glow-strength", fallback: 1) ?? 1
                     GeometryReader { geometry in
                         let size = geometry.size
                         let depth = min(110, min(size.width, size.height) * 0.25)
@@ -1799,14 +1524,13 @@ private struct IPadPaneTile: View {
                                 .opacity(0.5)
                         }
                         .compositingGroup()
-                        .opacity(0.05 * strength)
+                        .opacity(0.05)
                     }
                         .clipShape(.rect(cornerRadius: cornerRadius))
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
             }
-            .opacity(selected ? 1 : settings.shared?.number("pane-inactive-opacity", fallback: 1) ?? 1)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Pane \(paneLabel)")
             .accessibilityIdentifier("ipad-pane-tile-\(pane.id)")
@@ -1820,36 +1544,6 @@ private struct IPadPaneTile: View {
             .accessibilityAction(named: "Select Pane") {
                 store.selectPane(pane, in: session)
             }
-    }
-
-    private var paneMenu: some View {
-        PaneActionsMenu(pane: pane, headerStyle: true)
-    }
-
-    private func splitButton(horizontal: Bool) -> some View {
-        Button {
-            store.splitPane(pane.id, horizontal: horizontal)
-        } label: {
-            Image(systemName: horizontal ? "rectangle.split.2x1" : "rectangle.split.1x2")
-                .frame(width: 44, height: 44)
-                .contentShape(.rect)
-        }
-        .disabled(!store.isConnected)
-        .accessibilityLabel(horizontal ? "Split Right" : "Split Down")
-        .accessibilityIdentifier("pane-split-\(horizontal ? "right" : "down")-\(pane.id)")
-    }
-
-    private var closeButton: some View {
-        Button {
-            confirmsClose = true
-        } label: {
-            Image(systemName: "xmark")
-                .frame(width: 44, height: 44)
-                .contentShape(.rect)
-        }
-        .disabled(!store.isConnected)
-        .accessibilityLabel("Close Pane")
-        .accessibilityIdentifier("pane-close-\(pane.id)")
     }
 
     private var paneLabel: String {
@@ -1893,6 +1587,113 @@ private struct IPadPaneTile: View {
                 }
         }
     }
+}
+
+private struct IPadPaneHeader: View {
+    @EnvironmentObject private var store: ZZStore
+    @Environment(ZZClientSettings.self) private var settings
+    @ObservedObject private var frameSlot: TerminalFrameSlot
+    @Binding private var confirmsClose: Bool
+    let pane: ZZPane
+    let session: ZZSession
+
+    init(store: ZZStore, pane: ZZPane, session: ZZSession, confirmsClose: Binding<Bool>) {
+        _frameSlot = ObservedObject(wrappedValue: store.frameSlot(for: pane.id))
+        _confirmsClose = confirmsClose
+        self.pane = pane
+        self.session = session
+    }
+
+    private var background: Color {
+        if pane.kind == .terminal, let frame = frameSlot.frame {
+            Color(terminalColor: frame.background)
+        } else if pane.kind == .terminal {
+            .zzCard
+        } else if pane.kind == .agent {
+            .zzAgentCanvasTop
+        } else if pane.kind == .browser {
+            Color(uiColor: .systemBackground)
+        } else {
+            settings.chromeBackground
+        }
+    }
+
+    private var foreground: Color {
+        if pane.kind == .terminal, let frame = frameSlot.frame {
+            Color(terminalColor: frame.foreground)
+        } else {
+            settings.chromeForeground
+        }
+    }
+
+    private var paneLabel: String {
+        pane.title.isEmpty ? pane.kind.label : pane.title
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                Button {
+                    store.selectPane(pane, in: session)
+                } label: {
+                    Label(paneLabel, systemImage: pane.kind.symbol)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                        .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .opacity(0.7)
+                HStack(spacing: 0) {
+                    if geometry.size.width >= 280 {
+                        splitButton(horizontal: false)
+                        splitButton(horizontal: true)
+                    }
+                    paneMenu
+                    closeButton
+                }
+                .opacity(0.6)
+                .buttonStyle(.plain)
+                .font(.system(size: 14))
+            }
+            .padding(.leading, 12)
+            .padding(.trailing, 2)
+        }
+        .frame(height: 44)
+        .foregroundStyle(foreground)
+        .background(background)
+    }
+
+    private var paneMenu: some View {
+        PaneActionsMenu(pane: pane, headerStyle: true)
+    }
+
+    private func splitButton(horizontal: Bool) -> some View {
+        Button {
+            store.splitPane(pane.id, horizontal: horizontal)
+        } label: {
+            Image(systemName: horizontal ? "rectangle.split.2x1" : "rectangle.split.1x2")
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
+        }
+        .disabled(!store.isConnected)
+        .accessibilityLabel(horizontal ? "Split Right" : "Split Down")
+        .accessibilityIdentifier("pane-split-\(horizontal ? "right" : "down")-\(pane.id)")
+    }
+
+    private var closeButton: some View {
+        Button {
+            confirmsClose = true
+        } label: {
+            Image(systemName: "xmark")
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
+        }
+        .disabled(!store.isConnected)
+        .accessibilityLabel("Close Pane")
+        .accessibilityIdentifier("pane-close-\(pane.id)")
+    }
+
 }
 
 private struct IPadPaneLayoutValueKey: LayoutValueKey {
@@ -2235,11 +2036,11 @@ private struct IPadPanoramaWorkspaceSnapshot: View {
                             agentState: agentStates[pane.id]
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.black.opacity(0.38))
+                        .background(Color(uiColor: .secondarySystemGroupedBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                .strokeBorder(Color(uiColor: .separator), lineWidth: 1)
                         }
                         .layoutValue(
                             key: IPadPaneLayoutValueKey.self,
@@ -2251,7 +2052,6 @@ private struct IPadPanoramaWorkspaceSnapshot: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.black.opacity(0.92))
         .allowsHitTesting(false)
     }
 
@@ -2304,7 +2104,6 @@ private struct IPadPanoramaWindowPreview: View {
         }
         .aspectRatio(16.0 / 10.0, contentMode: .fit)
         .frame(maxWidth: .infinity)
-        .background(Color.black.opacity(0.5))
     }
 
     private static let fullLayout = ZZPaneLayout(x: 0, y: 0, width: 1, height: 1)
@@ -2336,14 +2135,14 @@ private struct IPadPanoramaPanePreview: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .allowsHitTesting(false)
-            .background(Color.black.opacity(0.38))
+            .background(Color(uiColor: .secondarySystemGroupedBackground))
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(
+                    .strokeBorder(
                         isFocusedPane
                             ? Color.accentColor.opacity(0.92)
-                            : Color.white.opacity(0.1),
+                            : Color(uiColor: .separator),
                         lineWidth: isFocusedPane ? 1.5 : 1
                     )
             }
@@ -4627,7 +4426,6 @@ private struct TerminalShortcutButton: View {
                     .stroke(settings.chromeBorder, lineWidth: 1)
             }
             .shadow(color: .black.opacity(settings.shadowOpacity), radius: 3, y: 1)
-            .contrast(settings.chromeContrast)
         }
         .buttonStyle(.plain)
         .accessibilityValue(locked ? "Locked" : selected ? "Once" : "Off")
@@ -4662,7 +4460,6 @@ private struct CommandPromptSheet: View {
                         RoundedRectangle(cornerRadius: settings.widgetCornerRadius)
                             .stroke(settings.chromeBorder, lineWidth: 1)
                     }
-                    .contrast(settings.chromeContrast)
                     .accessibilityIdentifier("command-prompt-field")
                 Spacer()
             }

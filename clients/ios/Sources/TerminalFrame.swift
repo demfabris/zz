@@ -40,7 +40,7 @@ final class TerminalFrame {
     @MainActor
     init?(client: OpaquePointer, pane: UInt64, damage: TerminalDamage, settings: ZZSharedSettings? = nil) {
         let acquired: OpaquePointer?
-        if let settings {
+        if let settings, settings.terminalPreferencesReady {
             acquired = settings.themeDirectory.withCString {
                 zz_settings_model_viewport_acquire(settings.handle, client, pane, $0, settings.dark)
             }

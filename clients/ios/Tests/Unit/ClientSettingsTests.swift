@@ -8,11 +8,9 @@ final class ClientSettingsTests: XCTestCase {
         withDefaults { defaults in
             let settings = ZZClientSettings(defaults: defaults)
 
-            XCTAssertEqual(settings.appearance, .dark)
+            XCTAssertEqual(settings.appearance, .system)
             XCTAssertEqual(settings.terminalFont, .systemMono)
             XCTAssertEqual(settings.terminalFontSize, 13)
-            XCTAssertTrue(settings.cursorBlinking)
-            XCTAssertFalse(settings.extendPanesUnderHomeIndicator)
             XCTAssertEqual(settings.terminalPresentation, .default)
         }
     }
@@ -21,18 +19,14 @@ final class ClientSettingsTests: XCTestCase {
     func testPersistsEverySetting() {
         withDefaults { defaults in
             let settings = ZZClientSettings(defaults: defaults)
-            settings.appearance = .light
+            settings.appearance = .dark
             settings.terminalFont = .menlo
             settings.terminalFontSize = 19
-            settings.cursorBlinking = false
-            settings.extendPanesUnderHomeIndicator = true
 
             let reloaded = ZZClientSettings(defaults: defaults)
-            XCTAssertEqual(reloaded.appearance, .light)
+            XCTAssertEqual(reloaded.appearance, .dark)
             XCTAssertEqual(reloaded.terminalFont, .menlo)
             XCTAssertEqual(reloaded.terminalFontSize, 19)
-            XCTAssertFalse(reloaded.cursorBlinking)
-            XCTAssertTrue(reloaded.extendPanesUnderHomeIndicator)
         }
     }
 
@@ -46,11 +40,9 @@ final class ClientSettingsTests: XCTestCase {
             defaults.set("sometimes", forKey: "zz.client.ipad.extend-panes-under-home-indicator")
 
             let settings = ZZClientSettings(defaults: defaults)
-            XCTAssertEqual(settings.appearance, .dark)
+            XCTAssertEqual(settings.appearance, .system)
             XCTAssertEqual(settings.terminalFont, .systemMono)
             XCTAssertEqual(settings.terminalFontSize, 23)
-            XCTAssertTrue(settings.cursorBlinking)
-            XCTAssertFalse(settings.extendPanesUnderHomeIndicator)
 
             settings.terminalFontSize = -20
             XCTAssertEqual(settings.terminalFontSize, 9)
@@ -58,27 +50,6 @@ final class ClientSettingsTests: XCTestCase {
 
             defaults.set("giant", forKey: "zz.client.terminal.font-size")
             XCTAssertEqual(ZZClientSettings(defaults: defaults).terminalFontSize, 13)
-        }
-    }
-
-    @MainActor
-    func testRestoreDefaults() {
-        withDefaults { defaults in
-            let settings = ZZClientSettings(defaults: defaults)
-            settings.appearance = .system
-            settings.terminalFont = .courierNew
-            settings.terminalFontSize = 21
-            settings.cursorBlinking = false
-            settings.extendPanesUnderHomeIndicator = true
-
-            settings.restoreDefaults()
-
-            XCTAssertEqual(settings.appearance, .dark)
-            XCTAssertEqual(settings.terminalFont, .systemMono)
-            XCTAssertEqual(settings.terminalFontSize, 13)
-            XCTAssertTrue(settings.cursorBlinking)
-            XCTAssertFalse(settings.extendPanesUnderHomeIndicator)
-            XCTAssertEqual(ZZClientSettings(defaults: defaults).terminalPresentation, .default)
         }
     }
 
@@ -115,103 +86,69 @@ final class ClientSettingsTests: XCTestCase {
     }
 
     @MainActor
-    func testLocalTerminalAndMuxSettingsPersistIndependently() throws {
+    func testLegacyPreferencesKeepOnlyFontSizeAndThemeWithoutChangingMuxFile() throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let config = directory.appending(path: "config")
+        let mux = directory.appending(path: "mux.conf")
+        let muxSource = "set -g prefix C-a\nbind x split-window\n"
+        try muxSource.write(to: mux, atomically: true, encoding: .utf8)
+        try """
+        font-family = Fira Code
+        font-size = 19
+        theme = Dracula
+        background = #ff0000
+        foreground = #00ff00
+        palette = 0=#ff0000
+        cursor-style = bar
+        cursor-style-blink = off
+        background-opacity = 0.25
+        window-padding-x = 64
+        pane-background-opacity = 0.2
+        pane-glow-strength = 3
+        """.write(to: config, atomically: true, encoding: .utf8)
         let shared = ZZSharedSettings(directory: directory)
-        let prefix = try XCTUnwrap(shared.snapshot?.settings.first { $0.key == "prefix" })
-        shared.set(prefix, .string("C-a"))
+        XCTAssertTrue(shared.terminalPreferencesReady)
         XCTAssertNil(shared.error)
-        let padding = try XCTUnwrap(shared.snapshot?.settings.first { $0.key == "window-padding-x" })
-        shared.set(padding, .number(18))
-        XCTAssertNil(shared.error)
-        let reloaded = ZZSharedSettings(directory: directory)
-        XCTAssertEqual(reloaded.text("prefix"), "C-a")
-        XCTAssertEqual(reloaded.number("window-padding-x"), 18)
-        XCTAssertEqual(reloaded.mobileAppearance?.padding[1], 18)
-        XCTAssertTrue((try String(contentsOf: directory.appending(path: "mux.conf"), encoding: .utf8)).contains("C-a"))
-        reloaded.set(prefix, .null)
-        XCTAssertEqual(reloaded.value("prefix"), prefix.default_value)
-    }
-
-    @MainActor
-    func testFontControlsAndConfigEditorUseTheSamePreferences() {
-        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        withDefaults { defaults in
-            defaults.set("menlo", forKey: "zz.client.terminal.font")
-            defaults.set(16, forKey: "zz.client.terminal.font-size")
-            let settings = ZZClientSettings(defaults: defaults, configDirectory: directory)
-            XCTAssertEqual(settings.terminalFont, .menlo)
-            XCTAssertEqual(settings.terminalFontSize, 16)
-            settings.terminalFont = .firaCode
-            settings.terminalFontSize = 19
-            XCTAssertEqual(settings.shared?.text("font-family"), "Fira Code")
-            XCTAssertEqual(settings.shared?.number("font-size"), 19)
-            XCTAssertEqual(settings.shared?.action("save-terminal", [
-                "source": "font-family = Menlo\nfont-size = 17\n",
-            ]), true)
-            XCTAssertEqual(settings.terminalFont, .menlo)
-            XCTAssertEqual(settings.terminalFontSize, 17)
-            XCTAssertEqual(settings.terminalPresentation.pointSize, 17)
-        }
-    }
-
-    @MainActor
-    func testMobilePaddingClampsImportedValuesAndKeepsOpacityPrecision() throws {
-        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let settings = ZZClientSettings(configDirectory: directory)
-        let shared = try XCTUnwrap(settings.shared)
-        XCTAssertTrue(shared.action("save-terminal", [
-            "source": "window-padding-x = 22\nwindow-padding-y = 64\nbackground-opacity = 0.53\n",
-        ]))
-        let paneOpacity = try XCTUnwrap(shared.snapshot?.settings.first { $0.key == "pane-background-opacity" })
-        shared.set(paneOpacity, .number(1))
-        XCTAssertEqual(settings.terminalPresentation.paddingX, 16)
-        XCTAssertEqual(settings.terminalPresentation.paddingY, 16)
-        XCTAssertEqual(settings.terminalPresentation.backgroundOpacity, 0.53, accuracy: 0.001)
-        let opacity = try XCTUnwrap(shared.snapshot?.settings.first { $0.key == "background-opacity" })
-        shared.set(opacity, .number(0.54))
-        XCTAssertNil(shared.error)
-        XCTAssertEqual(settings.terminalPresentation.backgroundOpacity, 0.54, accuracy: 0.001)
-        XCTAssertTrue(try String(contentsOf: directory.appending(path: "config"), encoding: .utf8).contains("0.54"))
-    }
-
-    @MainActor
-    func testMobilePaneRadiusUsesThreeSizes() throws {
-        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let settings = ZZClientSettings(configDirectory: directory)
-        let shared = try XCTUnwrap(settings.shared)
-        let radius = try XCTUnwrap(shared.snapshot?.settings.first { $0.key == "pane-corner-radius" })
-        for value in ZZClientSettings.paneCornerRadii {
-            shared.set(radius, .number(value))
-            XCTAssertEqual(settings.paneCornerRadius, value)
-        }
-        shared.set(radius, .number(16))
-        XCTAssertEqual(settings.paneCornerRadius, 13.5)
-    }
-
-    @MainActor
-    func testExplicitCursorPolicyOverridesMigratedPreference() {
-        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        XCTAssertEqual(shared.text("font-family"), "Fira Code")
+        XCTAssertEqual(shared.number("font-size"), 19)
+        XCTAssertEqual(shared.text("theme"), "Dracula")
+        XCTAssertFalse(shared.snapshot?.terminal_source?.contains("cursor-style") ?? true)
+        XCTAssertFalse(shared.snapshot?.terminal_source?.contains("palette") ?? true)
+        let theme = try XCTUnwrap(shared.themes.first { $0.name == "Dracula" })
+        XCTAssertEqual(shared.mobileAppearance?.background, UInt32(theme.background.dropFirst(), radix: 16))
+        XCTAssertEqual(try String(contentsOf: mux, encoding: .utf8), muxSource)
         withDefaults { defaults in
             defaults.set(false, forKey: "zz.client.terminal.cursor-blinking")
+            defaults.set(true, forKey: "zz.client.ipad.extend-panes-under-home-indicator")
+            defaults.set("dark", forKey: "zz.client.appearance")
             let settings = ZZClientSettings(defaults: defaults, configDirectory: directory)
-            XCTAssertFalse(settings.cursorBlinking)
-            XCTAssertEqual(settings.shared?.text("cursor-style-blink"), "off")
-            XCTAssertEqual(settings.shared?.action("set-appearance", [
-                "key": "cursor-style-blink", "value": "on",
-            ]), true)
-            XCTAssertTrue(settings.cursorBlinking)
-            XCTAssertEqual(settings.shared?.action("set-appearance", [
-                "key": "cursor-style-blink", "value": "terminal",
-            ]), true)
-            XCTAssertTrue(settings.cursorBlinking)
-            settings.cursorBlinking = false
-            XCTAssertEqual(settings.shared?.text("cursor-style-blink"), "off")
+            XCTAssertEqual(settings.terminalFont, .firaCode)
+            XCTAssertEqual(settings.terminalFontSize, 19)
+            XCTAssertEqual(settings.terminalPresentation.backgroundOpacity, 1)
+            XCTAssertEqual(settings.terminalPresentation.paddingX, 8)
+            XCTAssertEqual(settings.terminalPresentation.paddingY, 8)
+            XCTAssertTrue(settings.terminalPresentation.cursorBlinking)
+            XCTAssertNil(settings.terminalPresentation.cursorStyle)
+        }
+        let migrated = try String(contentsOf: config, encoding: .utf8)
+        _ = ZZSharedSettings(directory: directory)
+        XCTAssertEqual(try String(contentsOf: config, encoding: .utf8), migrated)
+    }
+
+    @MainActor
+    func testFontControlsPersistThroughSharedSettings() {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        withDefaults { defaults in
+            let settings = ZZClientSettings(defaults: defaults, configDirectory: directory)
+            settings.terminalFont = .firaCode
+            settings.terminalFontSize = 19
+            let reloaded = ZZClientSettings(defaults: defaults, configDirectory: directory)
+            XCTAssertEqual(reloaded.terminalFont, .firaCode)
+            XCTAssertEqual(reloaded.terminalFontSize, 19)
+            XCTAssertEqual(reloaded.terminalPresentation.pointSize, 19)
         }
     }
 

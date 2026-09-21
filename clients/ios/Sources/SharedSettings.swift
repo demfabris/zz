@@ -34,58 +34,18 @@ enum ZZSettingValue: Codable, Equatable {
     var bool: Bool? { if case .boolean(let value) = self { value } else { nil } }
 }
 
-struct ZZSetting: Decodable, Identifiable {
-    var id: String { "\(section):\(key)" }
+struct ZZSetting: Decodable {
     let key: String
-    let title: String
-    let section: String
     let value: ZZSettingValue
-    let default_value: ZZSettingValue
     let overridden: Bool
-    let enabled: Bool
-    let control: String
-    let range: [Double]?
-    let choices: [Choice]
-
-    struct Choice: Decodable, Identifiable {
-        var id: String { value }
-        let value: String
-        let title: String
-    }
 }
 
 struct ZZSettingsSnapshot: Decodable {
     let revision: UInt64
     let settings: [ZZSetting]
     let terminal_source: String?
-    let mux_source: String?
     let editor_error: String?
     let error: String?
-    let prefix_bindings: [KeyBinding]
-    let presets: [ChromePreset]
-    let horizontal: SplitBinding
-    let vertical: SplitBinding
-
-    struct SplitBinding: Decodable {
-        let key: String?
-        let kind: String?
-        let editable: Bool
-    }
-
-    struct ChromePreset: Decodable, Identifiable {
-        let id: String
-        let name: String
-        let dark: Bool
-        let background: String
-        let foreground: String
-        let accent: String
-    }
-
-    struct KeyBinding: Decodable, Identifiable {
-        var id: String { key }
-        let key: String
-        let command: String
-    }
 }
 
 struct ZZTerminalTheme: Decodable, Identifiable {
@@ -126,16 +86,12 @@ final class ZZSharedSettings {
     private(set) var snapshot: ZZSettingsSnapshot?
     private(set) var mobileAppearance: ZZMobileTerminalAppearance?
     private(set) var themes: [ZZTerminalTheme] = []
-    private(set) var prefixBindings: [ZZSettingsSnapshot.KeyBinding] = []
-    private(set) var horizontalBinding: ZZSettingsSnapshot.SplitBinding?
-    private(set) var verticalBinding: ZZSettingsSnapshot.SplitBinding?
     private(set) var error: String?
-    private(set) var muxRevision: UInt64 = 0
+    private(set) var terminalPreferencesReady = false
     var dark = true {
         didSet { if dark != oldValue { refreshAppearance() } }
     }
     @ObservationIgnored private let storage: ZZSettingsHandle
-    @ObservationIgnored private var previousMuxSource: String?
     let directory: URL
     let themeDirectory: String
     var handle: OpaquePointer? { storage.pointer }
@@ -154,6 +110,18 @@ final class ZZSharedSettings {
         do { try FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true) }
         catch { self.error = error.localizedDescription }
         refresh()
+        if let source = snapshot?.terminal_source {
+            let retained = source.split(separator: "\n", omittingEmptySubsequences: false).filter { line in
+                let key = line.split(separator: "=", maxSplits: 1).first?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return ["font-family", "font-size", "theme"].contains(key)
+            }.joined(separator: "\n")
+            terminalPreferencesReady = source.trimmingCharacters(in: .whitespacesAndNewlines) == retained
+                || action("save-terminal", ["source": retained])
+        } else {
+            terminalPreferencesReady = error == nil
+        }
+        refreshAppearance()
         themes = themeDirectory.withCString {
             decode(zz_settings_model_themes_json(handle, $0, dark), as: [ZZTerminalTheme].self)
         } ?? []
@@ -162,63 +130,37 @@ final class ZZSharedSettings {
     func value(_ key: String) -> ZZSettingValue {
         snapshot?.settings.first(where: { $0.key == key })?.value ?? .null
     }
-    func bool(_ key: String, fallback: Bool = false) -> Bool { value(key).bool ?? fallback }
     func number(_ key: String, fallback: Double = 0) -> Double { value(key).number ?? fallback }
     func text(_ key: String) -> String { value(key).text }
 
-    func refresh(client: OpaquePointer? = nil) {
-        guard let next = decode(zz_settings_model_snapshot(handle, client), as: ZZSettingsSnapshot.self) else { return }
-        if client != nil {
-            prefixBindings = next.prefix_bindings
-            horizontalBinding = next.horizontal
-            verticalBinding = next.vertical
-        }
-        if previousMuxSource != next.mux_source {
-            previousMuxSource = next.mux_source
-            muxRevision &+= 1
-        }
+    func refresh() {
+        guard let next = decode(zz_settings_model_snapshot(handle, nil), as: ZZSettingsSnapshot.self) else { return }
         snapshot = next
         error = next.error ?? next.editor_error
         refreshAppearance()
     }
 
     func refreshAppearance() {
+        guard terminalPreferencesReady else {
+            mobileAppearance = nil
+            return
+        }
         mobileAppearance = themeDirectory.withCString {
             decode(zz_settings_model_terminal_appearance_json(handle, $0, dark), as: ZZMobileTerminalAppearance.self)
         }
     }
 
     @discardableResult
-    func action(_ name: String, _ fields: [String: Any] = [:], client: OpaquePointer? = nil) -> Bool {
+    func action(_ name: String, _ fields: [String: Any] = [:]) -> Bool {
         var object = fields
         object["action"] = name
         guard let data = try? JSONSerialization.data(withJSONObject: object),
               let source = String(data: data, encoding: .utf8) else { return false }
         let success = source.withCString {
-            if let client { zz_settings_model_mobile_action(handle, client, $0) }
-            else { zz_settings_model_action(handle, nil, nil, $0) }
+            zz_settings_model_action(handle, nil, nil, $0)
         }
-        refresh(client: client)
+        refresh()
         return success
-    }
-
-    func set(_ setting: ZZSetting, _ value: ZZSettingValue) {
-        if setting.section == "terminal" {
-            action("set-appearance", ["key": setting.key, "value": value == .null ? NSNull() : value.text as Any])
-        } else if ["mux", "multiplexer"].contains(setting.section) {
-            action("set-mux", ["key": setting.key, "value": value == .null ? NSNull() : value.text as Any])
-        } else if value == .null {
-            action("reset", ["key": setting.key])
-        } else if let data = try? JSONEncoder().encode(value),
-                  let object = try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed) {
-            action("set", ["key": setting.key, "value": object])
-        }
-    }
-
-    func restoreDefaults() {
-        for setting in snapshot?.settings ?? [] where setting.overridden {
-            set(setting, .null)
-        }
     }
 
     private func decode<T: Decodable>(_ json: OpaquePointer?, as type: T.Type) -> T? {

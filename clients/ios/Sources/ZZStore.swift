@@ -1539,7 +1539,6 @@ final class ZZStore: ObservableObject {
                 refreshTmuxKeyTables()
             case ZZ_EVENT_ATTACHED:
                 _ = zz_client_set_focused(client, sceneIsActive)
-                applyMuxPreferences()
                 refreshTmuxKeyTables()
                 if terminalPreviewRequested {
                     _ = zz_client_set_terminal_preview(client, true)
@@ -1602,12 +1601,9 @@ final class ZZStore: ObservableObject {
                 refreshPrefixState()
                 if event.kind == ZZ_EVENT_KEY_TABLES_CHANGED {
                     refreshTmuxKeyTables()
-                    settings?.shared?.refresh(client: client)
                 }
             case ZZ_EVENT_APPEARANCE_CHANGED:
                 refreshTerminalPreferences()
-            case ZZ_EVENT_OTHER:
-                settings?.shared?.refresh(client: client)
             case ZZ_EVENT_SERVER_STOPPING, ZZ_EVENT_DISCONNECTED:
                 disconnected = true
             default:
@@ -1623,15 +1619,6 @@ final class ZZStore: ObservableObject {
         }
         drainTmuxCommands()
         refreshTmuxState()
-    }
-
-    func applyMuxPreferences() {
-        guard let client, let shared = settings?.shared else { return }
-        if !zz_settings_model_mobile_apply(shared.handle, client) {
-            shared.refresh(client: client)
-            actionError = shared.error ?? "Could not apply multiplexer preferences."
-        }
-        shared.refresh(client: client)
     }
 
     func refreshTerminalPreferences() {

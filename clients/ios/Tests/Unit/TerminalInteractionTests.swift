@@ -950,12 +950,6 @@ final class TerminalInteractionTests: XCTestCase {
         XCTAssertEqual(ZZReconnectPolicy.thawGraceSeconds, 5)
     }
 
-    func testForcedAppearanceReachesTheWindowTraitCollection() {
-        XCTAssertEqual(ZZAppAppearance.system.interfaceStyle, .unspecified)
-        XCTAssertEqual(ZZAppAppearance.dark.interfaceStyle, .dark)
-        XCTAssertEqual(ZZAppAppearance.light.interfaceStyle, .light)
-    }
-
     func testModifierTapIsOneShotAndDoubleTapLocks() {
         let control: UInt8 = 1 << 1
         var state = TerminalModifierLatchState()

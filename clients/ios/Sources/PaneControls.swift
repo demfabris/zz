@@ -84,7 +84,6 @@ struct PaneKindPicker: View {
             .frame(maxWidth: .infinity)
         }
         .defaultScrollAnchor(.center)
-        .contrast(settings.chromeContrast)
         .disabled(!store.isConnected)
         .accessibilityIdentifier("pane-kind-picker-\(pane.id)")
     }

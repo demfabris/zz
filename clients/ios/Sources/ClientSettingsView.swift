@@ -1,178 +1,41 @@
 import SwiftUI
 
-private enum ZZSettingsSection: String, CaseIterable, Identifiable {
-    case appearance, terminal, panes, status, mux
-    var id: Self { self }
-    var title: String {
-        switch self {
-        case .appearance: "Appearance"
-        case .terminal: "Terminal"
-        case .panes: "Panes"
-        case .status: "Status Bar"
-        case .mux: "Multiplexer"
-        }
-    }
-    var symbol: String {
-        switch self {
-        case .appearance: "paintpalette"
-        case .terminal: "terminal"
-        case .panes: "rectangle.split.2x2"
-        case .status: "rectangle.bottomthird.inset.filled"
-        case .mux: "command"
-        }
-    }
-}
-
 struct ClientSettingsView: View {
     @Environment(ZZClientSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
-    @State private var restoring = false
-
-    var body: some View {
-        NavigationStack {
-            List {
-                ForEach(ZZSettingsSection.allCases) { item in
-                    NavigationLink {
-                        SettingsSectionPage(section: item)
-                    } label: {
-                        Label(item.title, systemImage: item.symbol)
-                    }
-                    .accessibilityIdentifier("settings-section-\(item.rawValue)")
-                }
-                Section {
-                    Button("Restore Defaults", systemImage: "arrow.counterclockwise") {
-                        restoring = true
-                    }
-                }
-            }
-            .navigationTitle("Settings")
-            .toolbar { doneButton }
-        }
-        .confirmationDialog("Restore device preferences?", isPresented: $restoring) {
-            Button("Restore Defaults", role: .destructive) { settings.restoreDefaults() }
-        }
-    }
-
-    @ToolbarContentBuilder private var doneButton: some ToolbarContent {
-        ToolbarItem(placement: .confirmationAction) {
-            Button("Done") { dismiss() }
-                .accessibilityIdentifier("settings-done")
-        }
-    }
-}
-
-struct ClientSettingsSidebar: View {
-    @Environment(ZZClientSettings.self) private var settings
-    @Binding var isPresented: Bool
-    @State private var section: ZZSettingsSection = .appearance
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Settings").font(.title3.bold())
-                Spacer()
-                Button("Done") { isPresented = false }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(settings.chromeTint)
-                    .frame(minHeight: 44)
-                    .padding(.horizontal, 16)
-                    .background(settings.chromeForeground.opacity(0.08), in: Capsule())
-                    .accessibilityIdentifier("settings-done")
-            }
-            .padding(16)
-            HStack(spacing: 2) {
-                ForEach(ZZSettingsSection.allCases) { item in
-                    Button {
-                        section = item
-                    } label: {
-                        Image(systemName: item.symbol)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(settings.chromeForeground.opacity(section == item ? 0.16 : 0), in: Capsule())
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(item.title)
-                    .accessibilityAddTraits(section == item ? .isSelected : [])
-                    .accessibilityIdentifier("settings-section-\(item.rawValue)")
-                }
-            }
-            .padding(4)
-            .background(settings.chromeForeground.opacity(0.06), in: Capsule())
-            .padding(.horizontal, 12)
-            NavigationStack {
-                SettingsSectionPage(section: section, sidebar: true)
-            }
-            .id(section)
-        }
-        .foregroundStyle(settings.chromeForeground)
-        .background(settings.chromeSurface.overlay(settings.chromeForeground.opacity(0.07)))
-        .clipShape(.rect(cornerRadius: 22))
-        .overlay { RoundedRectangle(cornerRadius: 22).stroke(settings.chromeBorder, lineWidth: 1) }
-        .shadow(color: .black.opacity(settings.shadowOpacity), radius: 20, x: -4, y: 4)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("ipad-settings-sidebar")
-    }
-}
-
-private struct SettingsSectionPage: View {
-    let section: ZZSettingsSection
-    var sidebar = false
-    @Environment(ZZClientSettings.self) private var settings
-    @State private var restoring = false
 
     var body: some View {
         @Bindable var settings = settings
-        Form {
-            if section == .appearance {
-                Section("App Appearance") {
-                    HStack(spacing: 2) {
+        NavigationStack {
+            Form {
+                Section("Appearance") {
+                    Picker("Appearance", selection: $settings.appearance) {
                         ForEach(ZZAppAppearance.allCases) { appearance in
-                            Button {
-                                settings.appearance = appearance
-                            } label: {
-                                Text(appearance.label)
-                                    .font(.subheadline.weight(.medium))
-                                    .frame(maxWidth: .infinity, minHeight: 44)
-                                    .background(settings.chromeForeground.opacity(settings.appearance == appearance ? 0.16 : 0), in: Capsule())
-                                    .contentShape(Capsule())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityAddTraits(settings.appearance == appearance ? .isSelected : [])
-                            .accessibilityIdentifier("settings-appearance-\(appearance.rawValue)")
+                            Text(appearance.label)
+                                .tag(appearance)
+                                .accessibilityIdentifier("settings-appearance-\(appearance.rawValue)")
                         }
                     }
-                    .padding(4)
-                    .background(settings.chromeForeground.opacity(0.06), in: Capsule())
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel("Appearance")
+                    .pickerStyle(.segmented)
                 }
-            }
-            if section == .terminal {
-                Section("Preview") {
+                Section {
                     TerminalSettingsPreview()
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                 }
-                Section("Font") {
-                    Picker("Typeface", selection: $settings.terminalFont) {
+                Section("Terminal") {
+                    Picker("Font", selection: $settings.terminalFont) {
                         ForEach(ZZTerminalFont.allCases) { font in
                             Text(font.label).font(font.swiftUIFont(size: 16)).tag(font)
                         }
                     }
                     .accessibilityIdentifier("settings-typeface")
                     Stepper(value: $settings.terminalFontSize, in: ZZClientSettings.terminalFontSizeRange) {
-                        LabeledContent("Size", value: "\(settings.terminalFontSize) pt")
+                        LabeledContent("Text Size", value: "\(settings.terminalFontSize) pt")
                     }
                     .accessibilityLabel("Terminal font size")
                     .accessibilityValue("\(settings.terminalFontSize) points")
-                    if settings.shared == nil {
-                        Toggle("Blink cursor", isOn: $settings.cursorBlinking)
-                    }
-                }
-                if let shared = settings.shared {
-                    Section("Colors") {
+                    if let shared = settings.shared {
                         NavigationLink {
                             TerminalThemePicker(shared: shared)
                         } label: {
@@ -181,341 +44,23 @@ private struct SettingsSectionPage: View {
                         .accessibilityIdentifier("settings-color-theme")
                     }
                 }
-            }
-            if let shared = settings.shared {
-                SharedSettingsSection(shared: shared, section: section)
-                if section == .terminal || section == .mux {
-                    Section {
-                        NavigationLink(section == .mux ? "Edit mux.conf" : "Edit terminal config") {
-                            SettingsSourceEditor(shared: shared, mux: section == .mux)
-                        }
-                        if section == .mux {
-                            NavigationLink("Split Key Bindings") { MuxSplitBindingsView(shared: shared) }
-                            NavigationLink("Key Bindings") { MuxKeyBindingsView(shared: shared) }
-                        }
-                    } footer: {
-                        Text(section == .mux
-                             ? "Preferences are saved on this device and applied to the connected multiplexer. Session settings affect other clients attached to the same session."
-                             : "Terminal appearance is saved on this device.")
-                    }
-                }
-                if let error = shared.error {
+                if let error = settings.shared?.error {
                     Section("Could Not Save Settings") {
                         Text(error).foregroundStyle(.red).textSelection(.enabled)
                     }
                 }
             }
-            if section == .panes {
-                Section("iPad Layout") {
-                    Toggle("Draw Behind Home Indicator", isOn: $settings.extendPanesUnderHomeIndicator)
-                }
-            }
-            if section == .appearance {
-                Section("Live Preview") {
-                    TerminalSettingsPreview()
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                }
-                Section {
-                    Button("Restore Defaults", systemImage: "arrow.counterclockwise") { restoring = true }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .accessibilityIdentifier("settings-done")
                 }
             }
         }
-        .scrollContentBackground(sidebar ? .hidden : .automatic)
-        .background {
-            if sidebar {
-                settings.chromeSurface.overlay(settings.chromeForeground.opacity(0.07))
-            }
-        }
-        .contrast(settings.chromeContrast)
-        .navigationTitle(sidebar ? "" : section.title)
-        .toolbarVisibility(sidebar ? .hidden : .automatic, for: .navigationBar)
-        .navigationBarTitleDisplayMode(.inline)
-        .confirmationDialog("Restore device preferences?", isPresented: $restoring) {
-            Button("Restore Defaults", role: .destructive) { settings.restoreDefaults() }
-        }
-    }
-}
-
-private struct SharedSettingsSection: View {
-    let shared: ZZSharedSettings
-    let section: ZZSettingsSection
-
-    private var rows: [ZZSetting] {
-        (shared.snapshot?.settings ?? []).filter { row in
-            if section == .appearance {
-                return ["animations", "chrome-background", "chrome-foreground", "chrome-accent"].contains(row.key)
-            }
-            guard row.section == section.rawValue || (section == .mux && row.section == "multiplexer") else { return false }
-            return !["theme", "font-family", "font-size", "status-update", "pane-border-width"].contains(row.key)
-        }
-    }
-
-    var body: some View {
-        if !rows.isEmpty {
-            Section {
-                ForEach(rows) { row in
-                    SharedSettingRow(shared: shared, setting: row)
-                }
-            }
-        }
-    }
-}
-
-private struct SharedSettingRow: View {
-    let shared: ZZSharedSettings
-    let setting: ZZSetting
-    @Environment(ZZClientSettings.self) private var settings
-
-    private var resolvedColor: Color {
-        switch setting.key {
-        case "chrome-accent": settings.chromeTint
-        case "chrome-background": settings.chromeBackground
-        case "chrome-foreground": settings.chromeForeground
-        case "background": Color(zzRGB: shared.mobileAppearance?.background ?? 0)
-        case "foreground": Color(zzRGB: shared.mobileAppearance?.foreground ?? 0xFFFFFF)
-        case "cursor-color": Color(zzRGB: shared.mobileAppearance?.cursor_color ?? 0xFFFFFF)
-        default: Color(zzHex: setting.value.text)
-        }
-    }
-
-    var body: some View {
-        control
-            .disabled(!setting.enabled)
-            .contextMenu {
-                if setting.overridden {
-                    Button("Restore Default", systemImage: "arrow.counterclockwise") { shared.set(setting, .null) }
-                }
-            }
-    }
-
-    @ViewBuilder private var control: some View {
-        if setting.control == "color" {
-            ColorPicker(setting.title, selection: Binding(
-                get: { resolvedColor },
-                set: { shared.set(setting, .string($0.zzHex)) }
-            ), supportsOpacity: false)
-        } else if setting.control == "boolean" {
-            Toggle(setting.title, isOn: Binding(
-                get: { setting.value.bool ?? ["on", "true", "1"].contains(setting.value.text) },
-                set: { shared.set(setting, .boolean($0)) }
-            ))
-        } else if !setting.choices.isEmpty {
-            Picker(setting.title, selection: Binding(
-                get: { setting.value.text },
-                set: { shared.set(setting, $0.isEmpty ? .null : .string($0)) }
-            )) {
-                Text("Default").tag("")
-                ForEach(setting.choices) { choice in Text(choice.title).tag(choice.value) }
-            }
-        } else if setting.key == "pane-corner-radius" {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(setting.title)
-                Picker(setting.title, selection: Binding(
-                    get: { Double(settings.paneCornerRadius) },
-                    set: { shared.set(setting, .number($0)) }
-                )) {
-                    ForEach(ZZClientSettings.paneCornerRadii, id: \.self) { radius in
-                        Text(radius.formatted()).tag(radius)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityIdentifier("setting-pane-corner-radius")
-            }
-        } else if setting.control == "number", let bounds = setting.range, bounds.count == 2, bounds[1] <= 100 {
-            SettingsNumberRow(shared: shared, setting: setting, bounds: bounds[0]...bounds[1])
-        } else {
-            NavigationLink {
-                SettingsValueEditor(shared: shared, setting: setting)
-            } label: {
-                LabeledContent(setting.title, value: setting.value.text.isEmpty ? "Default" : setting.value.text)
-            }
-        }
-    }
-}
-
-private struct SettingsNumberRow: View {
-    let shared: ZZSharedSettings
-    let setting: ZZSetting
-    let bounds: ClosedRange<Double>
-
-    private var percentage: Bool {
-        setting.key.hasSuffix("opacity") || setting.key == "pane-glow-strength"
-    }
-
-    private var scale: Double { percentage ? 100 : 1 }
-
-    private var range: ClosedRange<Double> {
-        if ["window-padding-x", "window-padding-y"].contains(setting.key) {
-            return ZZClientSettings.terminalPaddingRange
-        }
-        return (bounds.lowerBound * scale)...(bounds.upperBound * scale)
-    }
-
-    private var value: Binding<Double> {
-        Binding(
-            get: { min(range.upperBound, max(range.lowerBound, (setting.value.number ?? bounds.lowerBound) * scale)) },
-            set: { shared.set(setting, .number(min(range.upperBound, max(range.lowerBound, $0.rounded())) / scale)) }
-        )
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(setting.title)
-                Spacer(minLength: 8)
-                TextField(setting.title, value: value, format: .number.precision(.fractionLength(0)))
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.trailing)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 60)
-                    .accessibilityIdentifier("setting-value-\(setting.key)")
-                if percentage { Text("%").foregroundStyle(.secondary) }
-            }
-            HStack(spacing: 12) {
-                Slider(value: value, in: range, step: 1)
-                    .accessibilityLabel(setting.title)
-                    .accessibilityValue("\(Int(value.wrappedValue))\(percentage ? " percent" : "")")
-                    .accessibilityIdentifier("setting-slider-\(setting.key)")
-                Stepper(setting.title, value: value, in: range, step: 1)
-                    .labelsHidden()
-                    .fixedSize()
-                    .accessibilityIdentifier("setting-stepper-\(setting.key)")
-            }
-        }
-    }
-}
-
-private struct SettingsValueEditor: View {
-    let shared: ZZSharedSettings
-    let setting: ZZSetting
-    @Environment(\.dismiss) private var dismiss
-    @State private var draft = ""
-
-    var body: some View {
-        Form {
-            TextField(setting.title, text: $draft)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(setting.control == "number" ? .numbersAndPunctuation : .default)
-            Button("Save") {
-                shared.set(setting, .string(draft))
-                if shared.error == nil { dismiss() }
-            }
-            Button("Restore Default") { shared.set(setting, .null); dismiss() }
-            if let error = shared.error { Text(error).foregroundStyle(.red) }
-        }
-        .navigationTitle(setting.title)
-        .onAppear { draft = setting.value.text }
-    }
-}
-
-private struct SettingsSourceEditor: View {
-    let shared: ZZSharedSettings
-    let mux: Bool
-    @State private var draft = ""
-    @State private var saved = ""
-
-    var body: some View {
-        VStack(alignment: .leading) {
-            TextEditor(text: $draft)
-                .font(.system(.body, design: .monospaced))
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .accessibilityLabel(mux ? "Multiplexer configuration" : "Terminal configuration")
-            if let error = shared.error { Text(error).foregroundStyle(.red).padding() }
-        }
-        .navigationTitle(mux ? "mux.conf" : "Terminal Config")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Save") {
-                    if shared.action(mux ? "save-mux" : "save-terminal", ["source": draft]) { saved = draft }
-                }
-                .disabled(draft == saved)
-            }
-        }
-        .onAppear {
-            draft = (mux ? shared.snapshot?.mux_source : shared.snapshot?.terminal_source) ?? ""
-            saved = draft
-        }
-    }
-}
-
-private struct MuxSplitBindingsView: View {
-    let shared: ZZSharedSettings
-    @EnvironmentObject private var store: ZZStore
-    @State private var horizontalKey = ""
-    @State private var verticalKey = ""
-    @State private var horizontalKind = "picker"
-    @State private var verticalKind = "picker"
-
-    var body: some View {
-        Form {
-            Section("Side by Side") {
-                TextField("Prefix key", text: $horizontalKey)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                kindPicker(selection: $horizontalKind)
-                Button("Save Side by Side Binding") { save(horizontal: true) }
-                    .disabled(store.client == nil || shared.horizontalBinding?.editable == false)
-            }
-            Section("Top and Bottom") {
-                TextField("Prefix key", text: $verticalKey)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                kindPicker(selection: $verticalKind)
-                Button("Save Top and Bottom Binding") { save(horizontal: false) }
-                    .disabled(store.client == nil || shared.verticalBinding?.editable == false)
-            }
-            Section {
-                Text("Keys follow the multiplexer prefix. Choose Picker to select the new pane type, or Terminal to split immediately.")
-                if shared.horizontalBinding?.editable == false || shared.verticalBinding?.editable == false {
-                    Text("A custom command uses one of these bindings. Edit mux.conf to change it.")
-                }
-                if let error = shared.error { Text(error).foregroundStyle(.red) }
-            }
-        }
-        .navigationTitle("Split Key Bindings")
-        .onAppear {
-            shared.refresh(client: store.client)
-            horizontalKey = shared.horizontalBinding?.key ?? "%"
-            verticalKey = shared.verticalBinding?.key ?? "\""
-            horizontalKind = shared.horizontalBinding?.kind ?? "picker"
-            verticalKind = shared.verticalBinding?.kind ?? "picker"
-        }
-    }
-
-    private func kindPicker(selection: Binding<String>) -> some View {
-        Picker("New Pane", selection: selection) {
-            Text("Picker").tag("picker")
-            Text("Terminal").tag("terminal")
-            if selection.wrappedValue == "browser" { Text("Browser (host binding)").tag("browser") }
-        }
-    }
-
-    private func save(horizontal: Bool) {
-        shared.action("split-binding", [
-            "horizontal": horizontal,
-            "key": horizontal ? horizontalKey : verticalKey,
-            "kind": horizontal ? horizontalKind : verticalKind,
-        ], client: store.client)
-    }
-}
-
-private struct MuxKeyBindingsView: View {
-    let shared: ZZSharedSettings
-    var body: some View {
-        List {
-            Section {
-                Text("Use Prefix to enter the multiplexer key table. Hardware keyboards send the same keys as the desktop terminal.")
-            }
-            Section("Prefix Bindings") {
-                if shared.prefixBindings.isEmpty { Text("Connect to a host to see its active bindings.").foregroundStyle(.secondary) }
-                ForEach(shared.prefixBindings) { binding in
-                    LabeledContent(binding.key, value: binding.command)
-                        .font(.system(.body, design: .monospaced))
-                }
-            }
-        }
-        .navigationTitle("Key Bindings")
+        .preferredColorScheme(settings.appearance.colorScheme)
+        .accessibilityIdentifier("ipad-settings")
     }
 }
 
@@ -564,6 +109,7 @@ private struct TerminalThemePicker: View {
 
 private struct TerminalSettingsPreview: View {
     @Environment(ZZClientSettings.self) private var settings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var foreground: Color { Color(zzRGB: settings.shared?.mobileAppearance?.foreground ?? 0xD8DEE9) }
     private var background: Color { Color(zzRGB: settings.shared?.mobileAppearance?.background ?? 0x101014) }
@@ -580,7 +126,7 @@ private struct TerminalSettingsPreview: View {
                 Text("attached to zz").foregroundStyle(foreground.opacity(0.72))
                 Rectangle().fill(foreground)
                     .frame(width: 8, height: CGFloat(settings.terminalFontSize))
-                    .phaseAnimator(settings.cursorBlinking ? [true, false] : [true]) { content, visible in
+                    .phaseAnimator(reduceMotion ? [true] : [true, false]) { content, visible in
                         content.opacity(visible ? 1 : 0.28)
                     } animation: { _ in .linear(duration: 0.55) }
                     .accessibilityHidden(true)

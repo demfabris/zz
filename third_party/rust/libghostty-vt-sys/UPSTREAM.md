@@ -24,6 +24,9 @@ The vendored build passes `-Dcpu=baseline` so Zig does not require the build mac
 extensions. The Linux x86_64 v0.6.0 release emitted AVX-512 instructions in a memory-fill routine
 that crashed with `SIGILL` on a Ryzen 7 5700X3D. Keep this CPU setting when updating the snapshot.
 
+The build script maps arm64 iOS devices to `aarch64-ios-none` and arm64/x86_64
+iOS simulators to Zig's `ios-simulator` targets for the GPUI mobile prototype.
+
 The migrated C API changes the Kitty temporary-file medium option from a boolean to a restricted
 directory string. `zz-terminal` enables the wrapper's `kitty-graphics` feature but does not call
 `is_kitty_image_from_temp_file_allowed` or `set_kitty_image_from_temp_file_allowed`; those v0.2.1

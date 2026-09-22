@@ -79,7 +79,7 @@ Dev builds use `zz-dev` wherever installed builds use `zz` for configuration, br
 agent preferences, window state, and daemon journals. On macOS the bundle ID is `dev.zz.app.dev`;
 on Linux the application and tray ID is `zz-dev`. Update checks are disabled for dev builds.
 
-Dev icons use an orange logo in the Dock, tray, iPhone/iPad app icon, and browser favicon.
+Dev icons use an orange logo in the Dock, tray, and browser favicon.
 The macOS tray uses a color image; ordinary zz keeps its system-colored template image. Linux dev
 runs register `zz-dev.desktop` and an orange SVG under the user data directory so Wayland taskbars
 can resolve the dev app ID. The X11 window icon and tray pixmap also use the orange mark.
@@ -110,15 +110,9 @@ The other development recipes share this identity:
 - `just web`, `just web-build`, and `just web-serve` use dev assets in `clients/web/dist-dev`,
   port 8081, separate browser preferences, and the existing dev daemon. `web-serve --socket PATH`
   overrides the socket. `web-build-release` retains ordinary release assets in `clients/web/dist`.
-- `just ios`, `just ipad`, their build/test recipes, and `just ios-device` build **zz Dev** with
-  bundle ID `dev.zz.ios.dev` and URL scheme `zz-dev`. Its app container, saved host, and SSH key
-  are separate from the installed app. Simulator launches use the desktop dev socket;
-  `ZZ_DEV_SOCKET=/absolute/path just ios` selects an explicit socket.
-- Physical Apple devices connect over SSH to the remote dev executable and daemon. An explicit
-  `ssh://user@host/absolute/dev/socket` also works and disables daemon auto-start. It still needs
-  the matching `zz-dev` CLI on the remote host.
-- `just ios-preview` keeps the production bundle ID and Rust identity. Optimized local device
-  builds (`ZZ_IOS_CONFIGURATION=Release just ios-device`) still use the dev identity.
+
+`just ios-gpui` runs the experimental GPUI terminal with its own app identity. It finds an existing
+dev socket or accepts `ZZ_GPUI_ENDPOINT` and `ZZ_DEV_SOCKET`; see `clients/ios-gpui/README.md`.
 
 `just build` and package installation keep their existing identity and destinations. Brew/AUR
 beta selection is independent of development isolation. Plain Cargo builds do not enable the

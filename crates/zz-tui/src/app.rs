@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use zz_client::{ClientCore, CoreEvent, Outbound};
+use zz_client::{ClientCore, CoreEvent, InputEvent, Outbound, PrefixView};
 use zz_daemon::{Endpoint, HostEntry, InteractiveClient};
 use zz_protocol::{
     BrowserCommand, BrowserDescriptor, ClientExitAction, CommandInvocation, CommandResponse,
@@ -690,6 +690,16 @@ pub(crate) fn run(
                 if probe_update.consumed {
                     continue;
                 }
+                let prefix = if let TerminalEvent::Key(event) = &event {
+                    let input = input::key_input(*event);
+                    let core = lock_core(&core);
+                    PrefixView {
+                        armed: core.prefix_armed(),
+                        claimed: core.claims_prefix_input(&input),
+                    }
+                } else {
+                    PrefixView::default()
+                };
                 match input::handle(
                     &mut model,
                     &client,
@@ -697,6 +707,7 @@ pub(crate) fn run(
                     event,
                     pixel_mouse,
                     key_releases,
+                    prefix,
                 )? {
                     InputOutcome::None => {}
                     InputOutcome::Repaint => renderer
@@ -1692,6 +1703,7 @@ fn handle_core_event(
             }
         }
         CoreEvent::PaneRemoved { pane } => {
+            model.input_event(InputEvent::PaneRemoved(pane));
             model.viewports.remove(&pane);
             Ok(ProtocolOutcome::RepaintAll)
         }
@@ -1700,6 +1712,7 @@ fn handle_core_event(
             by: _,
             action,
         } if model.attached_session == Some(session) => {
+            model.input_event(InputEvent::Detached);
             let core = lock_core(core);
             let exit = if let ClientExitAction::Exec { command, shell } = action {
                 TuiExit::Exec { command, shell }

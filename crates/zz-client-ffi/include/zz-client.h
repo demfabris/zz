@@ -19,6 +19,7 @@ typedef struct zz_viewport zz_viewport;
 typedef struct zz_agent_state zz_agent_state;
 typedef struct zz_clipboard zz_clipboard;
 typedef struct zz_chrome_keymap zz_chrome_keymap;
+typedef struct zz_input_router zz_input_router;
 typedef struct zz_json zz_json;
 zz_json *zz_client_tmux_state_json(const zz_client *client);
 zz_json *zz_client_key_tables_json(const zz_client *client);
@@ -95,6 +96,83 @@ zz_bytes zz_chrome_keymap_resolve(const zz_chrome_keymap *keymap,
                                   uint32_t codepoint, uint8_t function,
                                   uint32_t action, uint8_t modifiers,
                                   const char *text);
+
+typedef enum zz_surface_kind {
+    ZZ_SURFACE_TERMINAL = 0,
+    ZZ_SURFACE_BROWSER = 1,
+    ZZ_SURFACE_OTHER = 2,
+} zz_surface_kind;
+
+typedef enum zz_owner_kind {
+    ZZ_OWNER_NONE = 0,
+    ZZ_OWNER_PANE = 1,
+    ZZ_OWNER_SIDEBAR = 2,
+    ZZ_OWNER_OVERLAY = 3,
+    ZZ_OWNER_NATIVE_EDITOR = 4,
+} zz_owner_kind;
+
+typedef struct zz_input_owner {
+    zz_owner_kind kind;
+    uint64_t pane;
+    zz_surface_kind surface;
+} zz_input_owner;
+
+typedef enum zz_input_event_kind {
+    ZZ_INPUT_ACTIVATE_PANE = 0,
+    ZZ_INPUT_SET_ACTIVE_PANE = 1,
+    ZZ_INPUT_FOCUS_SIDEBAR = 2,
+    ZZ_INPUT_FOCUS_NATIVE_EDITOR = 3,
+    ZZ_INPUT_OVERLAY_OPENED = 4,
+    ZZ_INPUT_OVERLAY_CLOSED = 5,
+    ZZ_INPUT_NATIVE_FOCUS_OBSERVED = 6,
+    ZZ_INPUT_PANE_REMOVED = 7,
+    ZZ_INPUT_DETACHED = 8,
+    ZZ_INPUT_WINDOW_DEACTIVATED = 9,
+} zz_input_event_kind;
+
+typedef enum zz_input_effect_kind {
+    ZZ_EFFECT_FORWARD_KEY = 0,
+    ZZ_EFFECT_CHROME = 1,
+    ZZ_EFFECT_REQUEST_FOCUS = 2,
+} zz_input_effect_kind;
+
+typedef struct zz_input_key {
+    uint32_t code;
+    uint32_t codepoint;
+    uint32_t unshifted_codepoint;
+    uint8_t function;
+    uint32_t action;
+    uint8_t modifiers;
+    zz_bytes text;
+} zz_input_key;
+
+typedef struct zz_input_effect {
+    zz_input_effect_kind kind;
+    uint64_t pane;
+    zz_input_key key;
+    zz_bytes action;
+    zz_input_owner owner;
+} zz_input_effect;
+
+/* The router takes ownership of the keymap; do not free it afterwards. */
+zz_input_router *zz_input_router_new(zz_chrome_keymap *keymap);
+void zz_input_router_free(zz_input_router *router);
+size_t zz_input_router_unbind_action(zz_input_router *router, const char *action);
+zz_input_owner zz_input_router_owner(const zz_input_router *router);
+void zz_input_router_event(zz_input_router *router, zz_input_event_kind kind,
+                           zz_input_owner owner);
+/* Returns 1 when the router consumed the key, 0 when the caller handles it
+   natively. `unshifted_codepoint` (0 = none) is the physical key's unshifted
+   character; releases pair with presses through it. `prefix_armed` and
+   `prefix_claimed` come from zz_client_prefix_armed and
+   zz_client_claims_prefix_key. */
+uint32_t zz_input_router_key(zz_input_router *router, uint32_t code,
+                            uint32_t codepoint, uint32_t unshifted_codepoint,
+                            uint8_t function, uint32_t action, uint8_t modifiers,
+                            const char *text, bool prefix_armed, bool prefix_claimed);
+/* Effect payloads stay valid until the next zz_input_router_next_effect call
+   or zz_input_router_free. */
+bool zz_input_router_next_effect(zz_input_router *router, zz_input_effect *out);
 
 typedef struct zz_pane_rect {
     float x;
@@ -250,6 +328,7 @@ zz_client *zz_client_connect_endpoint_interactive(
 size_t zz_client_ssh_public_key(char *buf, size_t capacity);
 void zz_client_free(zz_client *client);
 bool zz_client_claims_prefix_key(const zz_client *client, uint32_t code, uint32_t scalar, uint8_t function, uint8_t modifiers);
+bool zz_client_prefix_armed(const zz_client *client);
 bool zz_client_cancel_prefix(const zz_client *client, uint64_t request);
 
 /* Readable whenever events are queued. Poll it, then drain
@@ -266,8 +345,12 @@ bool zz_client_send_text(zz_client *client, uint64_t pane, const char *text);
  * added only when the pane's program enabled DECSET 2004. Use this for
  * clipboard and drag-and-drop text; zz_client_send_text is for typing. */
 bool zz_client_paste(zz_client *client, uint64_t pane, const char *text);
+/* `unshifted_codepoint` (0 = none) is the physical key's unshifted character;
+   the terminal engine needs it to encode control chords, so pass it whenever
+   the toolkit can tell you (desktop and TUI clients always do). */
 bool zz_client_send_key(zz_client *client, uint64_t pane, uint32_t code,
-                        uint32_t codepoint, uint8_t function, uint32_t action,
+                        uint32_t codepoint, uint32_t unshifted_codepoint,
+                        uint8_t function, uint32_t action,
                         uint8_t modifiers, const char *text,
                         bool text_follows);
 /* Execute a tmux-style command and throw the reply away. */

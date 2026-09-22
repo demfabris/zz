@@ -559,10 +559,9 @@ egress itself is current: a client-local `browser-egress` key in `zz/config` poi
 time, and the daemon's frame supersession now happens entirely in the outbound mailbox (see
 [zz-daemon](/crates/zz-daemon.md)).
 
-When a remote connection dies, the GPUI client backs off for 1, 2, 4, 8, 16, then 30 seconds. The
-native Apple client uses 1, 2, 4, 8, then a 16-second cap and starts the next attempt when network
-service returns. Both retain the intended session and guard connection attempts so a stale timer
-cannot replace a newer connection. The daemon sees an ordinary disconnect followed by an ordinary
+When a remote connection dies, the desktop GPUI client backs off for 1, 2, 4, 8, 16, then 30
+seconds. It retains the intended session and guards connection attempts so a stale timer cannot
+replace a newer connection. The daemon sees an ordinary disconnect followed by an ordinary
 attach.
 
 # Appearance and mux overrides with provenance

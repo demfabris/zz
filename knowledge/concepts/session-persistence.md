@@ -146,9 +146,7 @@ of its own.
 Client-window focus is transient event input, not daemon-retained presence state. The desktop
 client caches the latest desired state and replays it once after each `Attached` event. A rejected
 same-connection session switch restores the retained session's focus epoch and flushes a desired
-state that changed while the request was pending. The iPhone client waits for `ZZ_EVENT_ATTACHED`
-before sending its current scene state, covering initial, selected-session, recovery, and
-recreated-session attachments. The TUI assumes its outer terminal starts focused when it enables
+state that changed while the request was pending. The TUI assumes its outer terminal starts focused when it enables
 focus reporting, caches outer focus changes while attachment is pending, and replays the latest
 client-window focus once after each `Attached` event. A rejected sidebar session switch restores the
 retained session epoch, and repeated focus reports with the same value do not send another signal.

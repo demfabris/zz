@@ -8491,6 +8491,7 @@ dependencies = [
  "anyhow",
  "async-channel",
  "gpui",
+ "image",
  "log",
  "markdown",
  "merman",

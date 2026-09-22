@@ -59,37 +59,8 @@ install platform *args:
     @just build mac {{ args }}
     @scripts/install-macos.sh
 
-ios:
-    @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios requires macOS" >&2; exit 2; fi
-    @scripts/ios-sim.sh
-
-ios-build:
-    @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios-build requires macOS" >&2; exit 2; fi
-    @scripts/ios-sim.sh --build-only
-
-ios-test:
-    @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios-test requires macOS" >&2; exit 2; fi
-    @scripts/ios-sim.sh --test
-
-ipad:
-    @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ipad requires macOS" >&2; exit 2; fi
-    @ZZ_IOS_SIMULATOR_FAMILY=iPad scripts/ios-sim.sh
-
-ipad-build:
-    @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ipad-build requires macOS" >&2; exit 2; fi
-    @ZZ_IOS_SIMULATOR_FAMILY=iPad scripts/ios-sim.sh --build-only
-
-ipad-test:
-    @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ipad-test requires macOS" >&2; exit 2; fi
-    @ZZ_IOS_SIMULATOR_FAMILY=iPad scripts/ios-sim.sh --test
-
-ios-device device="iphone":
-    @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios-device requires macOS" >&2; exit 2; fi
-    @scripts/ios-device.sh {{ device }}
-
-ios-preview build="":
-    @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios-preview requires macOS" >&2; exit 2; fi
-    @scripts/ios-testflight.sh "{{ build }}"
+ios-gpui family="iPad" mode="run":
+    @scripts/ios-gpui.sh {{ family }} {{ mode }}
 
 # Build a release-optimized macOS bundle with matching source-level dSYMs.
 profile-build platform:

@@ -10,7 +10,7 @@
 use std::{collections::BTreeMap, rc::Rc};
 
 use gpui::{App, Global, KeyBinding, Keystroke};
-use zz_client::{CHROME_TABLES, ChromeAction, ChromeKey, ChromeKeymap, UI_TABLE};
+use zz_client::{CHROME_TABLES, ChromeAction, ChromeKey, ChromeKeymap, InputRouter};
 use zz_terminal::KeyAction;
 
 use crate::mux::prefix::terminal_key_input;
@@ -66,19 +66,6 @@ impl Global for ChromeState {}
 pub(crate) fn install(overrides: &[ChromeOverride], element_selector_hotkey: &str, cx: &mut App) {
     let keymap = zz_config::keymap::configured_keymap(overrides, element_selector_hotkey);
 
-    let removed_app_bindings = chords(cx, UI_TABLE)
-        .into_iter()
-        .filter(|chord| chord.live && keymap.action_for(UI_TABLE, &chord.key) != Some(chord.action))
-        .filter_map(|chord| {
-            let binding = app_key_binding(&chord)?;
-            Some(KeyBinding::new(
-                &chord.source,
-                gpui::Unbind(binding.action().name().into()),
-                None,
-            ))
-        })
-        .collect::<Vec<_>>();
-    cx.bind_keys(removed_app_bindings);
     let bound = bound_chords(&keymap);
     let dropped: Vec<_> = cx
         .try_global::<ChromeState>()
@@ -103,28 +90,6 @@ pub(crate) fn install(overrides: &[ChromeOverride], element_selector_hotkey: &st
         bound,
         dropped,
     });
-    apply(cx, UI_TABLE, app_key_bindings);
-}
-
-fn app_key_bindings(chords: &[ChromeChord]) -> Vec<KeyBinding> {
-    chords
-        .iter()
-        .filter(|chord| chord.live)
-        .filter_map(app_key_binding)
-        .collect()
-}
-
-fn app_key_binding(chord: &ChromeChord) -> Option<KeyBinding> {
-    Some(match chord.action() {
-        ChromeAction::NewSession => chord.binding(crate::menus::NewSession, None),
-        ChromeAction::NewWindow => chord.binding(crate::menus::NewWindow, None),
-        ChromeAction::SplitRight => chord.binding(crate::menus::SplitRight, None),
-        ChromeAction::SplitDown => chord.binding(crate::menus::SplitDown, None),
-        ChromeAction::Detach => chord.binding(crate::menus::Detach, None),
-        ChromeAction::ToggleSidebar => chord.binding(crate::menus::ToggleSidebar, None),
-        ChromeAction::OpenCommandPalette => chord.binding(crate::menus::OpenCommandPalette, None),
-        _ => return None,
-    })
 }
 
 /// Bind one chrome table into the gpui keymap and keep it in step with the
@@ -172,6 +137,26 @@ pub(crate) fn chord_for(cx: &App, table: &str, action: ChromeAction) -> Option<S
         .into_iter()
         .find(|(_, bound)| *bound == action)
         .and_then(|(key, _)| gpui_source(&key))
+}
+
+pub(crate) fn input_router(cx: &mut App) -> InputRouter {
+    if cx.try_global::<ChromeState>().is_none() {
+        install(
+            &[],
+            crate::config::DEFAULT_BROWSER_ELEMENT_SELECTOR_HOTKEY,
+            cx,
+        );
+    }
+    let keymap = keymap(cx).expect("chrome keymap installed before workspace");
+    let mut router = InputRouter::new(ChromeKeymap::clone(&keymap));
+    for action in [
+        ChromeAction::UiZoomIn,
+        ChromeAction::UiZoomOut,
+        ChromeAction::UiZoomReset,
+    ] {
+        router.unbind_action(action);
+    }
+    router
 }
 
 fn keymap(cx: &App) -> Option<Rc<ChromeKeymap>> {

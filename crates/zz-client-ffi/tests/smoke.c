@@ -335,7 +335,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "smoke: send failed\n");
         return 1;
     }
-    if (!zz_client_send_key(client, pane, ZZ_KEY_ENTER, 0, 0, ZZ_KEY_PRESS,
+    if (!zz_client_send_key(client, pane, ZZ_KEY_ENTER, 0, 0, 0, ZZ_KEY_PRESS,
                             0, NULL, false)) {
         fprintf(stderr, "smoke: raw enter failed\n");
         return 1;

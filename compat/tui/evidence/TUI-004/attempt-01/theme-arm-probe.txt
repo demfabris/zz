@@ -38,7 +38,7 @@ WHY THE ARM DID NOT LAND, measured rather than argued:
   3. The wire is postcard, which is not self-describing, so an appended StatusLine field is not
      tolerated by an older decoder and PROTOCOL_VERSION 99 to 100 is mandatory rather than
      optional. The version reaches clients/web, which is a SEPARATE cargo workspace with its own
-     lockfile, and clients/ios and clients/macos through crates/zz-client-ffi and
+     lockfile, and [retired native client paths removed] through crates/zz-client-ffi and
      include/zz-client.h. None of those is built by this lane proof set, so a bump landed here
      could not be shown not to break them.
 

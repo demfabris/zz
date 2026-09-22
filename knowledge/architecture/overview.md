@@ -1,7 +1,7 @@
 ---
 type: Architecture
 title: zz system overview
-description: zz multiplexes terminal, Chromium browser, and Agent panes over a persistent daemon shared by desktop, native Apple, and terminal clients.
+description: zz multiplexes terminal, Chromium browser, and Agent panes over a persistent daemon shared by desktop, web, mobile GPUI, and terminal clients.
 resource: crates/zz/src/lib.rs
 tags: [architecture, overview, gpui, multiplexer, daemon]
 timestamp: 2026-08-31T00:00:00-03:00
@@ -9,7 +9,7 @@ timestamp: 2026-08-31T00:00:00-03:00
 
 # Overview
 
-`zz` is a multiplexer with a GPUI desktop client, a native Swift client for iPhone and iPad, and a
+`zz` is a multiplexer with GPUI desktop and web clients, an experimental GPUI iOS client, and a
 raw-terminal client over one persistent daemon. Its model contains three pane surfaces:
 
 - a **live local terminal** powered by `libghostty-vt` and a daemon-owned PTY worker
@@ -31,7 +31,7 @@ resize, navigation, and cursor state travel through browser-neutral types.
 
 Sessions, windows, and binary split-pane layouts live in a **persistent daemon**
 ([server](/crates/zz-daemon.md)) reached over owner-only local IPC. Desktop clients reach a remote
-daemon through an OpenSSH `ssh -L` Unix-socket forward. The native Apple client uses in-process
+daemon through an OpenSSH `ssh -L` Unix-socket forward. The GPUI iOS client uses in-process
 `russh` and carries the protocol through `zz proxy` over SSH channel stdio. Every device the user
 owns can attach to one session at the same time, each with its own viewport, scroll position, and
 focused window, while the layout tree, pane focus, and PTYs stay shared. Closing every GPUI window
@@ -66,22 +66,21 @@ stream.
 | [zz-client](/crates/zz-client.md) | sans-IO protocol reduction and client-local chrome key tables shared by client shells |
 | [zz-client-ffi](/crates/zz-client-ffi.md) | Unix C ABI proof surface over the shared client core |
 | [zz](/crates/zz.md) | long-lived GPUI mux client; reconciles layouts; hosts terminal and CEF runtimes and the Agent pane's viewport |
-| [native Apple client](/designs/ios-client.md) | Adaptive SwiftUI/UIKit shell over `zz-client-ffi`; compact phone navigation and a regular-width iPad workspace |
+| `zz-gpui-ios` | Experimental UIKit GPUI backend and live terminal using the shared client core and renderer |
 | [zz-chrome-import](/crates/zz-chrome-import.md) | Chrome profile discovery, cookie decryption, read-only history extraction |
 | [zz-xtask](/crates/zz-xtask.md) | builds and validates platform CEF bundles |
 
 Workspace members without a dedicated page here: `zz-ui` (widget fork) and `zz-tui` (`zz attach`).
-The native Apple app lives outside the Cargo workspace under `clients/ios`. See
-[crates](/crates/index.md).
+The GPUI iOS backend lives in `crates/zz-gpui-ios`, with launch resources in `clients/ios-gpui`.
+See [crates](/crates/index.md).
 
 # Platform status
 
 Linux/Wayland remains the most extensively runtime-validated host. On macOS, the release CEF bundle
 and daemon PTY detach/reattach lifecycle are runtime-validated; full interactive GUI PTY/browser
 validation remains outstanding. Windows maps the protocol to a local named pipe and has CI bundle
-coverage, but full host validation remains outstanding. As of 2026-08-31, the native Apple app is
-runtime-validated on iPhone and iPad simulators, and remote SSH attach is verified on a physical
-iPad against a live macOS daemon.
+coverage, but full host validation remains outstanding. The experimental GPUI iOS terminal runs
+on iPhone and iPad simulators; physical-device validation remains outstanding.
 
 # External pins
 

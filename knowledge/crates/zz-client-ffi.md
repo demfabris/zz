@@ -10,8 +10,8 @@ timestamp: 2026-09-08T02:00:00Z
 # Overview
 
 `zz-client-ffi` exports a Unix C ABI over `ClientCore` and `InteractiveClient`. It builds as a Rust
-library, static library, and dynamic library. The native Apple app links the static library and
-imports the hand-maintained `include/zz-client.h` contract through a Swift bridging header.
+library, static library, and dynamic library. C consumers import the hand-maintained
+`include/zz-client.h` contract.
 
 One `zz_client` owns the daemon connection, blocking reader thread, reduced core, event queue, and
 one end of a nonblocking Unix socket pair. Native main loops poll `zz_client_event_fd()`, drain
@@ -89,8 +89,8 @@ Graphical clients should consume the cell/style/grapheme planes directly.
 # Scope boundary
 
 The default ABI includes Agent transcript reduction, ordered replay, preferences,
-completion, config/settings, prefix claims, and chrome-keymap resolution. Swift
-consumes these through `zz_agent_model`, `zz_settings_model`, and `zz_chrome_keymap`.
+completion, config/settings, prefix claims, and chrome-keymap resolution through
+`zz_agent_model`, `zz_settings_model`, and `zz_chrome_keymap`.
 
 Browser panes are not part of the C ABI; the native macOS client that used a CEF surface here was retired 2026-09-14, tag `archive/macos-native`.
 
@@ -121,8 +121,7 @@ command puts the client on `copy-mode-vi`, typed bytes and an Escape vanish whil
 and only the byte typed after `zz_client_cancel_command_output()` reaches a raw-mode probe pane.
 
 Rust tests cover endpoint failure classification, SSH prompt mapping, normalized split geometry,
-interned graphemes, wide-cell spacers, UTF-8-safe truncation, and the real-daemon link boundary. The
-Apple build cross-compiles the crate for `aarch64-apple-ios-sim` on every Xcode build.
+interned graphemes, wide-cell spacers, UTF-8-safe truncation, and the real-daemon link boundary.
 
 # Key files
 
@@ -136,10 +135,8 @@ Apple build cross-compiles the crate for `aarch64-apple-ios-sim` on every Xcode 
 | `crates/zz-client-ffi/tests/smoke.rs` | Harness that compiles, links, and runs the C client. |
 | `crates/zz-client-ffi/tests/paste.rs` | Byte-level proof of the paste encoding against a live daemon. |
 | `crates/zz-client-ffi/tests/command_output.rs` | Byte-level proof that cancelling the output view returns a vi pane's input. |
-| `clients/ios/Support/ZZ-Bridging-Header.h` | Swift import point for the ABI. |
 
 # Related
 
 - [zz-client](/crates/zz-client.md) supplies the reduced state and event model.
-- [Native Apple client](/designs/ios-client.md) is the first graphical consumer.
 - [Packed terminal lanes](/protocol/terminal-lanes.md) describe the viewport representation.

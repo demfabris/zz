@@ -21,8 +21,7 @@ consume `StatusLine`, parse tmux styles, recognize powerline separators, or map 
 icons. The raw-terminal attach client keeps the daemon-expanded tmux rows and renders them with the
 shared cell composer.
 
-Desktop and web share the status widgets. Native Apple titlebars also use left alignment and omit
-time and date; the shared session and activity menus belong to the GPUI clients.
+Desktop and web share the status widgets, session menus, and activity menus.
 
 # Data and presentation
 

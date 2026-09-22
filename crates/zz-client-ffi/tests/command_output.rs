@@ -249,6 +249,7 @@ fn cancelling_the_output_view_gives_a_vi_pane_its_input_back() {
                 0,
                 0,
                 0,
+                0,
                 std::ptr::null(),
                 false,
             )

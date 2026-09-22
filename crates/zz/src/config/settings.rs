@@ -12,9 +12,8 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, App, ClipboardItem, Context, Entity, FocusHandle, Focusable, IntoElement,
-    KeyBinding, Render, SharedString, Subscription, Window, WindowControlArea, div, img,
-    prelude::*, px,
+    AnyElement, App, ClipboardItem, Context, Entity, FocusHandle, Focusable, IntoElement, Render,
+    SharedString, Subscription, Window, WindowControlArea, div, img, prelude::*, px,
 };
 use zz_ui::{
     ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, IndexPath, Sizable as _,
@@ -38,7 +37,6 @@ use crate::{
         remove_config_key, set_chrome_preset, set_config_key,
     },
     diagnostics,
-    keymap::ChromeChord,
     mux::{
         client::MuxClient,
         hosts::{HostId, HostState},
@@ -50,7 +48,6 @@ use crate::{
     workspace::add_host,
 };
 use zz_browser::SearchProvider;
-use zz_client::{ChromeAction, UI_TABLE};
 use zz_protocol::ConfigOverrideEntry;
 use zz_terminal::{TerminalColorScheme, discover_ghostty_config};
 use zz_ui::feedback::import_configuration_file_alert;
@@ -82,20 +79,6 @@ const ABOUT_LOGO_SIZE: f32 = 88.0;
 const REPOSITORY_URL: &str = "https://github.com/demfabris/zz";
 const RELEASES_URL: &str = "https://github.com/demfabris/zz/releases";
 const ISSUES_URL: &str = "https://github.com/demfabris/zz/issues/new";
-
-pub fn init(cx: &mut App) {
-    crate::keymap::bind(cx, UI_TABLE, key_bindings);
-}
-
-fn key_bindings(chords: &[ChromeChord]) -> Vec<KeyBinding> {
-    chords
-        .iter()
-        .filter_map(|chord| match chord.action() {
-            ChromeAction::OpenSettings => Some(chord.binding(OpenSettings, None)),
-            _ => None,
-        })
-        .collect()
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum ConfigFileKind {

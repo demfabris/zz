@@ -1,6 +1,6 @@
 # AGENTS.md
 
-zz is a tmux-superset terminal multiplexer that ships as a native GPU desktop app: a Rust workspace built on gpui (Zed's UI framework, consumed through a patched fork), a persistent daemon that owns sessions and PTYs, Chromium browser panes (CEF off-screen rendering), agent panes (ACP), and remote hosts over plain ssh. Targets macOS and Linux (Wayland), with experimental Windows/WSL, a native Swift iPhone and iPad client, and a raw-terminal attach client.
+zz is a tmux-superset terminal multiplexer that ships as a native GPU desktop app: a Rust workspace built on gpui (Zed's UI framework, consumed through a patched fork), a persistent daemon that owns sessions and PTYs, Chromium browser panes (CEF off-screen rendering), agent panes (ACP), and remote hosts over plain ssh. Targets macOS and Linux (Wayland), with experimental Windows/WSL and GPUI iOS clients, and a raw-terminal attach client.
 
 Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (see `mise.toml`).
 
@@ -21,7 +21,7 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `crates/zz-tui` — raw-terminal attach client as a library (the binary lives in `zz-cli`)
 - `crates/zz-web` - local HTTP/WebSocket gateway for browser clients
 - `clients/web` - full-page GPUI/WASM client using zz-ui and zz-client, with its own Cargo workspace
-- `clients/ios` — adaptive SwiftUI/UIKit iPhone and iPad app over `zz-client-ffi`
+- `crates/zz-gpui-ios` and `clients/ios-gpui` - experimental UIKit GPUI backend and live Ghostty terminal client with hardware keyboard input (`just ios-gpui`)
 - `crates/zz-xtask` — build tooling: CEF bundling, packaging (`cargo xtask`)
 - `compat/` — tmux compat campaign: differential harness (`run.sh`), gap registry (`tmux-gaps.json`), dispatch-board client (`board.py`), progress meter, orchestration handoff (`orchestration/`)
 - `compat/tui/` — TUI parity campaign: proof ledger (`campaign.json`), validator and report generator (`tracker.py`), cycle runners (`run-N.js`); closed 2026-09-20 at 18/18
@@ -54,7 +54,7 @@ Run `just` recipes from the repo root; `just --list` shows everything.
 | `just watch <platform>` | Rebuild and relaunch on source change |
 | `just build <platform>` | Release bundle into `dist/zz` (wraps `cargo xtask bundle-cef`) |
 | `just install mac` | Build and swap `/Applications/zz.app`; the daemon survives the swap |
-| `just ios` / `just ipad` / `just ios-build` / `just ipad-build` / `just ios-test` / `just ipad-test` / `just ios-device [name]` | Native Apple client on iPhone or iPad simulator / build only / simulator tests / physical device |
+| `just ios-gpui [iPad\|iPhone] [run\|build]` | Experimental GPUI terminal on an Apple simulator |
 | `just forks` / `just fork-rebase <name>` | Carried-patch fork status / rebase |
 | `just site` | Docs site dev server with live reload |
 | `just web` / `web-setup` / `web-build[-release]` / `web-serve` | Browser client dev loop / toolchain / assets / local gateway |
@@ -84,7 +84,7 @@ A few `zz-daemon` tests are timing-sensitive and only fail under full-workspace 
 
 - The daemon outlives the app: after installing a new build, existing sessions keep running the old daemon binary until it restarts. Don't chase "missing" behavior in a stale daemon.
 - `just run` / `just watch` build zz Dev with `ZZ_DEV_BUILD=1`, clear inherited daemon/pane context, and use `zz-dev` config/data/socket paths. The macOS bundle is `dist/zz-dev/zz Dev.app` (`dev.zz.app.dev`); Linux launches `target/debug/zz-dev`. Installed and beta packages keep their existing behavior.
-- `just web` / `web-build` / `web-serve` use dev assets and port 8081. iPhone/iPad dev recipes install `zz Dev` (`dev.zz.ios.dev`); simulators use the dev socket (`ZZ_DEV_SOCKET` overrides it). Dev SSH selects `zz-dev`, linked by desktop dev runs into `~/.local/bin`. `ios-preview` and `web-build-release` retain production identity.
+- `just web` / `web-build` / `web-serve` use dev assets and port 8081. Dev SSH selects `zz-dev`, linked by desktop dev runs into `~/.local/bin`. `web-build-release` retains production identity. `just ios-gpui` runs the experimental GPUI terminal; see `clients/ios-gpui/README.md` for its endpoint selection.
 - `ZZ_SOCKET` overrides the socket the app dials. Unix socket paths have a low length cap (`sun_path`); put test sockets directly under `/tmp`.
 - Recipes live in `knowledge/playbooks/running-zz.md`.
 </important>

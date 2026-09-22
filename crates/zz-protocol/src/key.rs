@@ -36,7 +36,7 @@ impl Binding {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct KeyTables {
     prefix: String,
     prefix2: Option<String>,

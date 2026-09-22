@@ -252,7 +252,6 @@ fn run_app(
             browser::recent_pages::init(cx);
             zz_ui::init(cx);
             ui_scale::init(cx);
-            config::settings::init(cx);
             browser::view::init(cx);
             editor::init(cx);
             terminal::view::init(cx);

@@ -65,10 +65,7 @@ each face.
 
 | Font | Ships in | Copyright |
 | --- | --- | --- |
-| [0xProto](https://github.com/0xType/0xProto) | iPhone and iPad client | 0xType Project Authors |
-| [Fira Code](https://github.com/tonsky/FiraCode) | iPhone and iPad client | The Fira Code Project Authors |
-| [Geist Mono](https://github.com/vercel/geist-font) | iPhone and iPad client | The Geist Project Authors (Vercel) |
-| [Lilex](https://github.com/mishamyrt/Lilex) | Browser client | The Lilex Project Authors |
+| [Lilex](https://github.com/mishamyrt/Lilex) | Browser and GPUI iOS clients | The Lilex Project Authors |
 | [Inter](https://github.com/rsms/inter) | Browser client | The Inter Project Authors |
 | [Fantasque Sans Mono](https://github.com/belluzj/fantasque-sans) | zzmux.sh | Jany Belluz |
 
@@ -82,11 +79,6 @@ The desktop clients ship no fonts; they render with the system text stack.
 | [Simple Icons](https://simpleicons.org) | The vendor brand marks `openai.svg` and `claude.svg`. | CC0-1.0 |
 
 ## Color schemes
-
-**Terminal themes.** The iPhone and iPad client bundles 451 terminal color schemes in Ghostty's
-theme format, from [iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes)
-(MIT, © 2011 to present Mark Badolato). License retained at
-[`clients/ios/Resources/Licenses/iTerm2-Color-Schemes.txt`](clients/ios/Resources/Licenses/iTerm2-Color-Schemes.txt).
 
 **Chrome presets.** The 34 window-chrome presets in `crates/zz-client/src/chrome_palette.rs`
 take their names and starting colors from published community palettes, then nudge each one in
@@ -136,7 +128,6 @@ Read, pinned, and cited. None of it is compiled, linked, or shipped.
 | tmux plugin corpus: [tpm](https://github.com/tmux-plugins/tpm), [tmux-sensible](https://github.com/tmux-plugins/tmux-sensible), [vim-tmux-navigator](https://github.com/christoomey/vim-tmux-navigator), [tmux-yank](https://github.com/tmux-plugins/tmux-yank), [tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect), [tmux-continuum](https://github.com/tmux-plugins/tmux-continuum), [tmux-fpp](https://github.com/tmux-plugins/tmux-fpp), [Oh My Tmux](https://github.com/gpakosz/.tmux) | The alias compatibility suite runs real plugin initialization against zz at immutable revisions. | MIT, except Oh My Tmux which is MIT and WTFPLv2. Originals retained in [`third_party/tmux-plugin-corpus/`](third_party/tmux-plugin-corpus/UPSTREAM.md) |
 | [Ghostty](https://github.com/ghostty-org/ghostty), [kitty](https://github.com/kovidgoyal/kitty), [Alacritty](https://github.com/alacritty/alacritty), [cmux](https://github.com/manaflow-ai/cmux) | Throughput and rendering baselines in `bench/`. | Respective upstream licenses |
 | [DOOM-fire-zig](https://github.com/const-void/DOOM-fire-zig) | One of the benchmark fixtures, cloned at a pinned revision into a gitignored cache by `bench/gen-fixtures.sh`. | Upstream license |
-| [rootshell](https://github.com/demfabris/rootshell) | Grouped settings, bundled fonts, and pane controls on the iPad client, read at `a5c318c5`. Its split view commits terminal-cell resizes to tmux; zz keeps that division through its own daemon commands. | MIT, © 2026 Rootshell LLC, Kit Knox, retained at [`third_party/rootshell-reference/`](third_party/rootshell-reference/UPSTREAM.md) |
 
 ## Prior art
 

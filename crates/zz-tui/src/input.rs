@@ -1,6 +1,8 @@
 use std::time::{Duration, Instant};
 
-use zz_client::{ChromeAction, MenuKeyResult, MenuPointerKind, SIDEBAR_TABLE, resolve_menu_key};
+use zz_client::{
+    ChromeAction, Disposition, Effect, MenuKeyResult, MenuPointerKind, PrefixView, resolve_menu_key,
+};
 use zz_daemon::{
     Endpoint, InteractiveClient, configured_fleet_hosts, validate_fleet_host, write_fleet_host,
 };
@@ -49,6 +51,7 @@ pub(crate) fn handle(
     event: TerminalEvent,
     pixel_mouse: bool,
     key_releases: bool,
+    prefix: PrefixView,
 ) -> Result<InputOutcome, String> {
     crate::overlay::dismiss_client_message(model, client, &event)?;
     let menu_box = model.menu_box();
@@ -203,7 +206,7 @@ pub(crate) fn handle(
             Ok(InputOutcome::None)
         }
         TerminalEvent::Mouse(event) => handle_mouse(model, client, browser, event, pixel_mouse),
-        TerminalEvent::Key(event) => handle_key(model, client, browser, event),
+        TerminalEvent::Key(event) => handle_key(model, client, browser, event, prefix),
     }
 }
 
@@ -505,12 +508,10 @@ fn handle_key(
     client: &InteractiveClient,
     browser: &mut BrowserState,
     event: KeyEvent,
+    prefix: PrefixView,
 ) -> Result<InputOutcome, String> {
     if model.sidebar_edit.is_some() && model.command_output_focus().is_none() {
         return handle_sidebar_edit_key(model, client, event);
-    }
-    if model.sidebar.focused && model.command_output_focus().is_none() {
-        return handle_sidebar_key(model, client, event);
     }
 
     if model.command_prompt.is_some() {
@@ -585,35 +586,86 @@ fn handle_key(
         return handle_picker_key(model, client, pane, event);
     }
 
-    let Some(pane) = model.active_pane() else {
-        return Ok(InputOutcome::None);
-    };
-    if event.kind == KeyEventKind::Press
-        && let Some(step) = match model.chrome.resolve("browser", &key_input(event)) {
-            Some(ChromeAction::BrowserZoomIn) => Some(BrowserZoomStep::In),
-            Some(ChromeAction::BrowserZoomOut) => Some(BrowserZoomStep::Out),
-            Some(ChromeAction::BrowserZoomReset) => Some(BrowserZoomStep::Reset),
-            _ => None,
+    handle_routed_key(
+        model,
+        browser,
+        event,
+        prefix,
+        |input| client.send_input(input).map_err(|error| error.to_string()),
+        |model, target| activate_sidebar_target(model, client, target),
+    )
+}
+
+fn handle_routed_key(
+    model: &mut Model,
+    browser: &mut BrowserState,
+    event: KeyEvent,
+    prefix: PrefixView,
+    mut send: impl FnMut(InputMessage) -> Result<(), String>,
+    mut activate: impl FnMut(&mut Model, SidebarTarget) -> Result<InputOutcome, String>,
+) -> Result<InputOutcome, String> {
+    let input = key_input(event);
+    let disposition = model.router.key(&input, prefix);
+    let mut outcome = InputOutcome::None;
+    let mut forward = disposition == Disposition::Native && !model.sidebar_focused();
+    for effect in model.router.drain_effects() {
+        match effect {
+            Effect::ForwardKey { pane, input } => send(InputMessage::Key {
+                pane,
+                input,
+                text_follows: false,
+            })?,
+            Effect::RequestFocus(owner) => model.apply_input_focus(owner),
+            Effect::Chrome(action) => {
+                outcome = InputOutcome::Repaint;
+                match action {
+                    ChromeAction::SidebarSelectUp => model.move_sidebar_selection(-1),
+                    ChromeAction::SidebarSelectDown => model.move_sidebar_selection(1),
+                    ChromeAction::SidebarConfirm => {
+                        if let Some(target) = model.selected_sidebar_target() {
+                            outcome = activate(model, target)?;
+                        }
+                    }
+                    ChromeAction::SidebarRename => model.begin_sidebar_rename(),
+                    ChromeAction::SidebarCancel => model.focus_active_pane(),
+                    ChromeAction::ToggleSidebar => {
+                        if model.hide_sidebar() {
+                            outcome = InputOutcome::RepaintAll;
+                        }
+                    }
+                    ChromeAction::BrowserZoomIn
+                    | ChromeAction::BrowserZoomOut
+                    | ChromeAction::BrowserZoomReset => {
+                        let step = match action {
+                            ChromeAction::BrowserZoomIn => BrowserZoomStep::In,
+                            ChromeAction::BrowserZoomOut => BrowserZoomStep::Out,
+                            _ => BrowserZoomStep::Reset,
+                        };
+                        forward = event.kind != KeyEventKind::Press
+                            || !model
+                                .active_pane()
+                                .is_some_and(|pane| browser.zoom(pane, step));
+                        outcome = InputOutcome::None;
+                    }
+                    _ => outcome = InputOutcome::None,
+                }
+            }
         }
-        && browser.zoom(pane, step)
-    {
-        return Ok(InputOutcome::None);
     }
-    let kitty_keyboard = model
-        .viewports
-        .get(&pane)
-        .is_some_and(|viewport| viewport.kitty_keyboard);
-    if !should_forward_key(event.kind, browser.has_surface(pane), kitty_keyboard) {
-        return Ok(InputOutcome::None);
+    if forward && let Some(pane) = model.active_pane() {
+        let kitty_keyboard = model
+            .viewports
+            .get(&pane)
+            .is_some_and(|viewport| viewport.kitty_keyboard);
+        if should_forward_key(event.kind, browser.has_surface(pane), kitty_keyboard) {
+            send(InputMessage::Key {
+                pane,
+                input,
+                text_follows: false,
+            })?;
+        }
     }
-    client
-        .send_input(InputMessage::Key {
-            pane,
-            input: key_input(event),
-            text_follows: false,
-        })
-        .map_err(|error| error.to_string())?;
-    Ok(InputOutcome::None)
+    Ok(outcome)
 }
 
 fn command_output_key_input(pane: zz_protocol::PaneId, event: KeyEvent) -> Option<InputMessage> {
@@ -763,76 +815,52 @@ const fn should_forward_key(
     !matches!(kind, KeyEventKind::Release) || browser_surface || kitty_keyboard
 }
 
-fn handle_sidebar_key(
-    model: &mut Model,
-    client: &InteractiveClient,
-    event: KeyEvent,
-) -> Result<InputOutcome, String> {
-    if event.kind == KeyEventKind::Release {
-        return Ok(InputOutcome::None);
-    }
-    let Some(action) = model.chrome.resolve(SIDEBAR_TABLE, &key_input(event)) else {
-        return Ok(InputOutcome::None);
-    };
-    match action {
-        ChromeAction::SidebarSelectUp => model.move_sidebar_selection(-1),
-        ChromeAction::SidebarSelectDown => model.move_sidebar_selection(1),
-        ChromeAction::SidebarConfirm => {
-            if let Some(target) = model.selected_sidebar_target() {
-                return activate_sidebar_target(model, client, target);
-            }
-        }
-        ChromeAction::SidebarRename => model.begin_sidebar_rename(),
-        ChromeAction::SidebarCancel => model.sidebar.focused = false,
-        ChromeAction::ToggleSidebar => {
-            return Ok(if model.hide_sidebar() {
-                InputOutcome::RepaintAll
-            } else {
-                InputOutcome::Repaint
-            });
-        }
-        _ => return Ok(InputOutcome::None),
-    }
-    Ok(InputOutcome::Repaint)
-}
-
 fn activate_sidebar_target(
     model: &mut Model,
     client: &InteractiveClient,
     target: SidebarTarget,
 ) -> Result<InputOutcome, String> {
+    apply_sidebar_target(model, target, |target| match target {
+        SidebarTarget::Session(session) => client
+            .attach(session.to_string())
+            .map(drop)
+            .map_err(|error| error.to_string()),
+        SidebarTarget::Window(window) => {
+            execute_target(client, "select-window", window.to_string())
+        }
+        SidebarTarget::Pane(pane) => execute_target(client, "select-pane", pane.to_string()),
+        SidebarTarget::NewPane(target) => client
+            .execute(CommandInvocation::new(
+                "split-window",
+                [
+                    "--kind".to_owned(),
+                    "picker".to_owned(),
+                    "-t".to_owned(),
+                    target.to_string(),
+                ],
+            ))
+            .map(drop)
+            .map_err(|error| error.to_string()),
+        _ => Ok(()),
+    })
+}
+
+fn apply_sidebar_target(
+    model: &mut Model,
+    target: SidebarTarget,
+    send: impl FnOnce(SidebarTarget) -> Result<(), String>,
+) -> Result<InputOutcome, String> {
+    send(target)?;
     match target {
-        SidebarTarget::Session(session) => {
-            client
-                .attach(session.to_string())
-                .map_err(|error| error.to_string())?;
+        SidebarTarget::Session(_) => {
             model.begin_client_focus_attach();
             Ok(InputOutcome::AttachRequested)
         }
-        SidebarTarget::Window(window) => {
-            execute_target(client, "select-window", window.to_string())?;
+        SidebarTarget::Pane(pane) | SidebarTarget::NewPane(pane) => {
+            model.activate_pane(pane);
             Ok(InputOutcome::Repaint)
         }
-        SidebarTarget::Pane(pane) => {
-            focus_pane(client, pane)?;
-            model.sidebar.focused = false;
-            Ok(InputOutcome::Repaint)
-        }
-        SidebarTarget::NewPane(target) => {
-            client
-                .execute(CommandInvocation::new(
-                    "split-window",
-                    [
-                        "--kind".to_owned(),
-                        "picker".to_owned(),
-                        "-t".to_owned(),
-                        target.to_string(),
-                    ],
-                ))
-                .map_err(|error| error.to_string())?;
-            model.sidebar.focused = false;
-            Ok(InputOutcome::Repaint)
-        }
+        SidebarTarget::Window(_) => Ok(InputOutcome::Repaint),
         SidebarTarget::LocalHost | SidebarTarget::FleetHost(_) => Ok(model
             .host_switch(target)
             .map_or(InputOutcome::Repaint, InputOutcome::SwitchHost)),
@@ -1076,7 +1104,7 @@ fn handle_paste(
         edit.insert_text(&text);
         return Ok(InputOutcome::Repaint);
     }
-    if model.sidebar.focused || model.active_picker().is_some() {
+    if model.sidebar_focused() || model.active_picker().is_some() {
         return Ok(InputOutcome::None);
     }
     if let Some(state) = model.command_prompt.as_mut() {
@@ -1184,9 +1212,9 @@ fn handle_mouse(
         MouseKeyRoute::Native => {}
     }
     let sidebar_focus_changed =
-        model.sidebar.focused && matches!(event.kind, MouseEventKind::Down(MouseButton::Left));
+        model.sidebar_focused() && matches!(event.kind, MouseEventKind::Down(MouseButton::Left));
     if sidebar_focus_changed {
-        model.sidebar.focused = false;
+        model.focus_active_pane();
     }
     if let Some(index) = model.status_row_at(global_row) {
         let (status_x, _) = model.status_area();
@@ -1213,7 +1241,7 @@ fn handle_mouse(
     let content = entry.content();
     if !content.contains(global_column, global_row) {
         if matches!(event.kind, MouseEventKind::Down(_)) {
-            focus_pane(client, entry.pane)?;
+            focus_pane(model, client, entry.pane)?;
         }
         return Ok(if sidebar_focus_changed {
             InputOutcome::Repaint
@@ -1223,7 +1251,7 @@ fn handle_mouse(
     }
     if browser.has_surface(entry.pane) {
         if matches!(event.kind, MouseEventKind::Down(_)) {
-            focus_pane(client, entry.pane)?;
+            focus_pane(model, client, entry.pane)?;
         }
         let input = browser_pointer_input(
             event,
@@ -1242,7 +1270,7 @@ fn handle_mouse(
     }
     let Some(viewport) = model.viewports.get(&entry.pane) else {
         if matches!(event.kind, MouseEventKind::Down(_)) {
-            focus_pane(client, entry.pane)?;
+            focus_pane(model, client, entry.pane)?;
         }
         return Ok(if sidebar_focus_changed {
             InputOutcome::Repaint
@@ -1250,13 +1278,14 @@ fn handle_mouse(
             InputOutcome::None
         });
     };
-    if matches!(event.kind, MouseEventKind::Moved) && !viewport.mouse_tracking {
+    let mouse_tracking = viewport.mouse_tracking;
+    if matches!(event.kind, MouseEventKind::Moved) && !mouse_tracking {
         return Ok(InputOutcome::None);
     }
     if matches!(event.kind, MouseEventKind::Down(_)) {
-        focus_pane(client, entry.pane)?;
+        focus_pane(model, client, entry.pane)?;
     }
-    let force_selection = event.modifiers.contains(KeyModifiers::SHIFT) || !viewport.mouse_tracking;
+    let force_selection = event.modifiers.contains(KeyModifiers::SHIFT) || !mouse_tracking;
     if let Some(action) = pane_mouse_action(
         &model.size,
         event,
@@ -1766,7 +1795,7 @@ const fn mouse_button_index(button: MouseButton) -> u8 {
 /// happens whether or not `mouse` is on and whatever the pane under the pointer
 /// asked for; a drag reports as `MOUSEDRAG` and never switches.
 fn pointer_focus_follows_mouse(
-    model: &Model,
+    model: &mut Model,
     client: &InteractiveClient,
     event: MouseEvent,
     global_column: u16,
@@ -1783,7 +1812,7 @@ fn pointer_focus_follows_mouse(
     {
         return Ok(());
     }
-    focus_pane(client, entry.pane)
+    focus_pane(model, client, entry.pane)
 }
 
 /// Every pointer event a popup is up for. tmux runs the border, drag, and menu
@@ -1972,14 +2001,20 @@ fn pane_mouse_action(
     }
 }
 
-fn focus_pane(client: &InteractiveClient, pane: zz_protocol::PaneId) -> Result<(), String> {
+fn focus_pane(
+    model: &mut Model,
+    client: &InteractiveClient,
+    pane: zz_protocol::PaneId,
+) -> Result<(), String> {
     client
         .execute(CommandInvocation::new(
             "select-pane",
             ["-t".to_owned(), pane.to_string()],
         ))
         .map(drop)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    model.activate_pane(pane);
+    Ok(())
 }
 
 fn send_focus(model: &mut Model, client: &InteractiveClient, focused: bool) -> Result<(), String> {
@@ -2122,7 +2157,7 @@ const fn mouse_button(button: MouseButton) -> TerminalMouseButton {
     }
 }
 
-fn key_input(event: KeyEvent) -> KeyInput {
+pub(crate) fn key_input(event: KeyEvent) -> KeyInput {
     let key = key_code(event.code);
     let event_modifiers = if matches!(event.code, TerminalKeyCode::BackTab) {
         event.modifiers | KeyModifiers::SHIFT
@@ -2228,7 +2263,304 @@ mod tests {
     }
 
     use super::*;
+    use zz_client::{ClientCore, InputEvent, InputOwner, SIDEBAR_TABLE, SurfaceKind};
     use zz_protocol::{MenuItem, PopupBorderLines, PopupState};
+
+    fn routing_model() -> Model {
+        use zz_protocol::{
+            LayoutNode, MuxSnapshot, PaneId, PaneSnapshot, SessionId, SessionSnapshot, WindowId,
+            WindowSnapshot,
+        };
+
+        let mut model = popup_model(PopupBorderLines::Single, false);
+        model.popup = None;
+        model.viewports.clear();
+        model.size.columns = 120;
+        model.attached_session = Some(SessionId(1));
+        let panes = [
+            (PaneId(1), PaneKindSnapshot::Terminal),
+            (
+                PaneId(2),
+                PaneKindSnapshot::Browser(zz_protocol::BrowserDescriptor::single(
+                    "about:blank".to_owned(),
+                    "default".to_owned(),
+                )),
+            ),
+        ]
+        .into_iter()
+        .map(|(id, kind)| {
+            (
+                id,
+                PaneSnapshot {
+                    id,
+                    title: id.to_string(),
+                    kind,
+                    synchronized_input: false,
+                    bell: false,
+                    dead: false,
+                    dead_status: None,
+                    border_colour: None,
+                    active_border_colour: None,
+                    border_status_text: String::new(),
+                    mode: None,
+                },
+            )
+        })
+        .collect();
+        model.update_snapshot(std::sync::Arc::new(MuxSnapshot {
+            generation: 1,
+            sessions: vec![SessionSnapshot {
+                id: SessionId(1),
+                name: "session".to_owned(),
+                active_window: WindowId(1),
+                windows: vec![WindowSnapshot {
+                    id: WindowId(1),
+                    index: 0,
+                    name: "window".to_owned(),
+                    automatic_rename: true,
+                    active_pane: PaneId(1),
+                    zoomed_pane: None,
+                    layout: LayoutNode::Pane(PaneId(1)),
+                    panes,
+                    layout_dump: String::new(),
+                    visible_layout_dump: String::new(),
+                    status_label: String::new(),
+                    activity: false,
+                    pane_border_status: zz_protocol::PaneBorderStatus::Off,
+                    pane_border_lines: zz_protocol::PaneBorderLines::Single,
+                    pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
+                    pane_order: vec![PaneId(1), PaneId(2)],
+                    pane_z_order: Vec::new(),
+                }],
+                viewers: Vec::new(),
+            }],
+            focused_window: Some(WindowId(1)),
+        }));
+        model
+    }
+
+    fn route_test_key(model: &mut Model, event: KeyEvent, prefix: PrefixView) -> Vec<InputMessage> {
+        let mut sent = Vec::new();
+        handle_routed_key(
+            model,
+            &mut BrowserState::new(None),
+            event,
+            prefix,
+            |input| {
+                sent.push(input);
+                Ok(())
+            },
+            |model, target| apply_sidebar_target(model, target, |_| Ok(())),
+        )
+        .unwrap();
+        sent
+    }
+
+    #[test]
+    fn sidebar_down_moves_selection_and_unbound_keys_stay_local() {
+        let mut model = routing_model();
+        model.focus_sidebar();
+        let selected = model.sidebar.selected;
+        assert!(
+            route_test_key(
+                &mut model,
+                KeyEvent::new(TerminalKeyCode::Down, KeyModifiers::NONE),
+                PrefixView::default()
+            )
+            .is_empty()
+        );
+        assert_eq!(model.sidebar.selected, selected + 1);
+        assert!(
+            route_test_key(
+                &mut model,
+                KeyEvent::new(TerminalKeyCode::Char('x'), KeyModifiers::NONE),
+                PrefixView::default()
+            )
+            .is_empty()
+        );
+        assert_eq!(model.sidebar.selected, selected + 1);
+        assert_eq!(model.router.owner(), InputOwner::Sidebar);
+    }
+
+    #[test]
+    fn pane_plain_key_forwards_but_unclaimed_release_keeps_the_kitty_gate() {
+        let mut model = routing_model();
+        let mut event = KeyEvent::new(TerminalKeyCode::Char('x'), KeyModifiers::NONE);
+        assert_eq!(
+            route_test_key(&mut model, event, PrefixView::default()),
+            vec![InputMessage::Key {
+                pane: zz_protocol::PaneId(1),
+                input: key_input(event),
+                text_follows: false,
+            }]
+        );
+        event.kind = KeyEventKind::Release;
+        assert!(route_test_key(&mut model, event, PrefixView::default()).is_empty());
+    }
+
+    #[test]
+    fn prefix_claim_precedes_sidebar_and_pairs_release_without_kitty_keyboard() {
+        let mut model = routing_model();
+        model.focus_sidebar();
+        let selected = model.sidebar.selected;
+        let mut core = ClientCore::new();
+        core.handle_message(zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+            sequence: 1,
+            payload: zz_protocol::EventPayload::PrefixArmed { armed: true },
+        }));
+        let mut event = KeyEvent::new(TerminalKeyCode::Down, KeyModifiers::NONE);
+        for (kind, forwards) in [(KeyEventKind::Press, true), (KeyEventKind::Repeat, false)] {
+            event.kind = kind;
+            let input = key_input(event);
+            let prefix = PrefixView {
+                armed: core.prefix_armed(),
+                claimed: core.claims_prefix_input(&input),
+            };
+            assert!(prefix.armed && prefix.claimed);
+            let sent = route_test_key(&mut model, event, prefix);
+            if forwards {
+                assert_eq!(
+                    sent,
+                    vec![InputMessage::Key {
+                        pane: zz_protocol::PaneId(1),
+                        input,
+                        text_follows: false
+                    }]
+                );
+            } else {
+                assert!(sent.is_empty());
+            }
+        }
+        assert_eq!(model.sidebar.selected, selected);
+        model.activate_pane(zz_protocol::PaneId(2));
+        event.kind = KeyEventKind::Release;
+        assert_eq!(
+            route_test_key(&mut model, event, PrefixView::default()),
+            vec![InputMessage::Key {
+                pane: zz_protocol::PaneId(1),
+                input: key_input(event),
+                text_follows: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn sidebar_confirm_keeps_window_focus_and_activates_pane_targets() {
+        let mut model = routing_model();
+        for (target, owner) in [
+            (
+                SidebarTarget::Window(zz_protocol::WindowId(1)),
+                InputOwner::Sidebar,
+            ),
+            (
+                SidebarTarget::Pane(zz_protocol::PaneId(2)),
+                InputOwner::Pane(zz_protocol::PaneId(2), SurfaceKind::Browser),
+            ),
+            (
+                SidebarTarget::NewPane(zz_protocol::PaneId(1)),
+                InputOwner::Pane(zz_protocol::PaneId(1), SurfaceKind::Terminal),
+            ),
+        ] {
+            model.focus_sidebar();
+            model.sidebar.selected = model
+                .sidebar_rows()
+                .iter()
+                .position(|row| row.target == Some(target))
+                .unwrap();
+            let mut activated = Vec::new();
+            let mut sent = Vec::new();
+            handle_routed_key(
+                &mut model,
+                &mut BrowserState::new(None),
+                KeyEvent::new(TerminalKeyCode::Enter, KeyModifiers::NONE),
+                PrefixView::default(),
+                |input| {
+                    sent.push(input);
+                    Ok(())
+                },
+                |model, target| {
+                    apply_sidebar_target(model, target, |target| {
+                        activated.push(target);
+                        Ok(())
+                    })
+                },
+            )
+            .unwrap();
+            assert!(sent.is_empty());
+            assert_eq!(activated, vec![target]);
+            assert_eq!(model.router.owner(), owner);
+        }
+    }
+
+    #[test]
+    fn snapshot_changes_preserve_sidebar_owner_and_update_pane_surface() {
+        let mut model = routing_model();
+        model.focus_sidebar();
+        let mut snapshot = (*model.snapshot).clone();
+        snapshot.sessions[0].windows[0].active_pane = zz_protocol::PaneId(2);
+        model.update_snapshot(std::sync::Arc::new(snapshot));
+        assert_eq!(model.router.owner(), InputOwner::Sidebar);
+        assert_eq!(
+            model.router.active_pane(),
+            Some((zz_protocol::PaneId(2), SurfaceKind::Browser))
+        );
+        model.focus_active_pane();
+        let mut snapshot = (*model.snapshot).clone();
+        snapshot.sessions[0].windows[0].active_pane = zz_protocol::PaneId(1);
+        model.update_snapshot(std::sync::Arc::new(snapshot));
+        assert_eq!(
+            model.router.owner(),
+            InputOwner::Pane(zz_protocol::PaneId(1), SurfaceKind::Terminal)
+        );
+    }
+
+    #[test]
+    fn focus_loss_pane_removal_and_detach_clear_claimed_releases() {
+        for event in [
+            InputEvent::WindowDeactivated,
+            InputEvent::PaneRemoved(zz_protocol::PaneId(1)),
+            InputEvent::Detached,
+        ] {
+            let mut model = routing_model();
+            let mut key = KeyEvent::new(TerminalKeyCode::Char('a'), KeyModifiers::CONTROL);
+            assert_eq!(
+                route_test_key(
+                    &mut model,
+                    key,
+                    PrefixView {
+                        armed: true,
+                        claimed: true
+                    }
+                )
+                .len(),
+                1
+            );
+            if event == InputEvent::WindowDeactivated {
+                model.client_focus_changed(false);
+            } else {
+                model.input_event(event);
+            }
+            key.kind = KeyEventKind::Release;
+            assert!(route_test_key(&mut model, key, PrefixView::default()).is_empty());
+        }
+    }
+
+    #[test]
+    fn unavailable_browser_zoom_forwards_the_key() {
+        let mut model = routing_model();
+        let mut snapshot = (*model.snapshot).clone();
+        snapshot.sessions[0].windows[0].active_pane = zz_protocol::PaneId(2);
+        model.update_snapshot(std::sync::Arc::new(snapshot));
+        let event = KeyEvent::new(TerminalKeyCode::Char('='), KeyModifiers::CONTROL);
+        assert_eq!(
+            route_test_key(&mut model, event, PrefixView::default()),
+            vec![InputMessage::Key {
+                pane: zz_protocol::PaneId(2),
+                input: key_input(event),
+                text_follows: false,
+            }]
+        );
+    }
 
     fn popup_model(border_lines: PopupBorderLines, mouse_tracking: bool) -> Model {
         let core = zz_client::ClientCore::new();
@@ -3613,6 +3945,18 @@ mod tests {
     #[test]
     fn chrome_leaves_every_pane_key_to_the_daemon() {
         let chrome = zz_client::ChromeKeymap::new();
+        assert!(chrome.bindings().iter().all(|(_, _, action)| matches!(
+            action,
+            ChromeAction::SidebarSelectUp
+                | ChromeAction::SidebarSelectDown
+                | ChromeAction::SidebarConfirm
+                | ChromeAction::SidebarRename
+                | ChromeAction::SidebarCancel
+                | ChromeAction::ToggleSidebar
+                | ChromeAction::BrowserZoomIn
+                | ChromeAction::BrowserZoomOut
+                | ChromeAction::BrowserZoomReset
+        )));
         for event in [
             KeyEvent::new(TerminalKeyCode::Char('\\'), KeyModifiers::CONTROL),
             KeyEvent::new(TerminalKeyCode::Char('s'), KeyModifiers::ALT),

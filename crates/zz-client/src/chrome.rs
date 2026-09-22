@@ -528,7 +528,7 @@ const DESKTOP_CONTROL_DEFAULTS: &[ChromeDefault] = &[
 /// model and resolution semantics the daemon uses for pane input, instantiated
 /// over chrome tables that never cross the wire. Defaults are data; overrides
 /// arrive through [`ChromeKeymap::bind`]/[`ChromeKeymap::unbind`].
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ChromeKeymap {
     tables: KeyTables,
 }

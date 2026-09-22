@@ -1730,7 +1730,7 @@ tmux anchors, and gate output. If review fixes land, rerun the focused and commo
 obtain a clean follow-up verdict before closing the tranche.
 
 The final campaign handoff also runs the CI surfaces outside those common gates: native and
-nightly-wasm UI showcase checks, release-profile `zz-mux`, `just ios-test`, macOS CEF release
+nightly-wasm UI showcase checks, release-profile `zz-mux`, macOS CEF release
 bundling, DMG packaging, and the hardware smokes below. Linux and Windows runtime and
 packaging proof require remote CI. The workflow has no manual dispatch, so without later
 commit and push authorization the final report records those platforms as pending rather

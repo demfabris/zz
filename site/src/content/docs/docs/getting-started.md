@@ -417,7 +417,7 @@ first argument.
 
 **The daemon holds everything.** It owns the mux tree, every PTY, and the frame
 fanout, and it is the only thing that knows what your sessions look like. The
-window, the TUI client, and the native iPhone client are all clients of it, attaching over
+desktop window, the TUI, and the GPUI mobile client all attach over
 the same socket with the same protocol. Several can attach to one session at
 once, each with its own scroll position, selection, and copy-mode cursor over
 shared panes.

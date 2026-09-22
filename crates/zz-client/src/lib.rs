@@ -13,6 +13,7 @@ pub mod agent_transcript;
 mod chrome;
 pub mod completion;
 mod core;
+mod input;
 mod layout;
 mod menu;
 pub mod navigation;
@@ -26,6 +27,9 @@ pub use chrome::{
 pub use core::{
     AgentAttentionEdge, AgentAttentionStatus, ClientCore, CoreEvent, Outbound, ViewportDamage,
     agent_attention_status,
+};
+pub use input::{
+    Disposition, Effect, InputEvent, InputOwner, InputRouter, PrefixView, SurfaceKind,
 };
 pub use layout::{
     DropZone, NormalizedPaneRect, PaneRect, coerced_drop_zone, drop_preview_bounds, drop_zone_at,

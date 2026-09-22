@@ -1,0 +1,35 @@
+[package]
+name = "zz-gpui-ios"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
+
+[lints.clippy]
+type_complexity = "allow"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+accesskit_ios = "0.1.2"
+anyhow = "1"
+async-task = "4.7"
+dispatch2 = "0.3.1"
+futures = "0.3"
+gpui.workspace = true
+gpui_wgpu = { git = "https://github.com/demfabris/zed", rev = "7bdd43258b8389d8d609ae7d4f92707d192cbeaa" }
+log.workspace = true
+objc = "0.2"
+parking_lot.workspace = true
+raw-window-handle.workspace = true
+uuid = "1"
+
+[dev-dependencies]
+gpui.workspace = true
+zz-client = { path = "../zz-client" }
+zz-daemon = { path = "../zz-daemon", default-features = false }
+zz-protocol = { path = "../zz-protocol" }
+env_logger.workspace = true
+zz-terminal = { path = "../zz-terminal", default-features = false }
+zz-ui = { path = "../zz-ui" }

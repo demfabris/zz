@@ -15,8 +15,7 @@
 <!-- okf:listing:end -->
 
 Workspace members without a crate page here: `zz-ui` (maintained gpui-component fork), `zz-tui`
-(the library behind `zz attach`). The native Swift iPhone client lives under `clients/ios`, outside
-the Cargo workspace.
+(the library behind `zz attach`), and `zz-gpui-ios` (experimental UIKit GPUI backend and terminal).
 `zz-web` serves the [browser client](/playbooks/browser-client.md), whose GPUI/WASM frontend lives
 in the separate `clients/web` workspace.
 The map in

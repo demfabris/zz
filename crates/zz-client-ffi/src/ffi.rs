@@ -8,6 +8,8 @@ mod chrome;
 pub use chrome::*;
 mod gui;
 pub use gui::*;
+mod input;
+pub use input::*;
 
 use std::{
     collections::VecDeque,
@@ -1172,6 +1174,7 @@ pub unsafe extern "C" fn zz_client_send_key(
     pane: u64,
     code: u32,
     codepoint: u32,
+    unshifted_codepoint: u32,
     function: u8,
     action: u32,
     modifiers: u8,
@@ -1205,7 +1208,8 @@ pub unsafe extern "C" fn zz_client_send_key(
                 key,
                 modifiers,
                 text,
-                unshifted_codepoint: None,
+                unshifted_codepoint: char::from_u32(unshifted_codepoint)
+                    .filter(|_| unshifted_codepoint != 0),
             },
             text_follows,
         })
@@ -1761,6 +1765,11 @@ pub struct ZzPrefixSnapshot {
 
 fn prefix_binding_at(snapshot: &ZzPrefixSnapshot, binding: usize) -> Option<&KeyBindingSnapshot> {
     snapshot.bindings.get(binding)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_prefix_armed(client: *const ZzClient) -> bool {
+    unsafe { client.as_ref() }.is_some_and(|client| lock(&client.core).prefix_armed())
 }
 
 /// One binding's command line for help surfaces: the first command's name

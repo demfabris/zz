@@ -6,6 +6,7 @@ members = [
     "crates/zz-cli",
     "crates/zz-client",
     "crates/zz-config",
+    "crates/zz-gpui-ios",
     "crates/zz-client-ffi",
     "crates/zz-daemon",
     "crates/zz-mux",

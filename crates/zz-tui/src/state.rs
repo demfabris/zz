@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use zz_client::ClientCore;
+use zz_client::{ClientCore, Effect, InputEvent, InputOwner, InputRouter, SurfaceKind};
 use zz_daemon::{Endpoint, HostEntry};
 use zz_protocol::{
     ChooseBufferState, ChooseTreeState, ChooserPresentation, CommandPromptState, ConfirmState,
@@ -115,7 +115,7 @@ pub(crate) struct Model {
     pub confirm_reply_pending: bool,
     pub confirm_swallowed_key: Option<KeyCode>,
     pub client_message: Option<ClientMessage>,
-    pub chrome: zz_client::ChromeKeymap,
+    pub router: InputRouter,
     pub sidebar: sidebar::State,
     pub sidebar_edit: Option<SidebarEdit>,
     pub picker_pane: Option<PaneId>,
@@ -203,7 +203,7 @@ impl Model {
         local_endpoint: Endpoint,
         fleet_hosts: Vec<HostEntry>,
     ) -> Self {
-        Self {
+        let mut model = Self {
             host_label,
             current_endpoint,
             snapshot: Arc::clone(core.snapshot()),
@@ -242,7 +242,7 @@ impl Model {
             confirm_reply_pending: false,
             confirm_swallowed_key: None,
             client_message: None,
-            chrome: zz_client::ChromeKeymap::new(),
+            router: InputRouter::new(zz_client::ChromeKeymap::new()),
             sidebar: sidebar::State::default(),
             sidebar_edit: None,
             picker_pane: None,
@@ -266,12 +266,15 @@ impl Model {
             local_host_label,
             local_endpoint,
             fleet_hosts,
-        }
+        };
+        model.sync_input_pane();
+        model
     }
 
     /// Reseeds the caches from a freshly handshaken core and drops the
     /// presentation state that belonged to the previous connection.
     pub fn reset_connection(&mut self, core: &ClientCore) {
+        self.input_event(InputEvent::Detached);
         self.reset_client_focus_attach();
         self.snapshot = Arc::clone(core.snapshot());
         self.attached_session = core.attached_session();
@@ -307,6 +310,7 @@ impl Model {
         self.last_sent_geometry.clear();
         self.last_sent_command_output_geometry = None;
         self.layout = ResolvedLayout::default();
+        self.sync_input_pane();
         self.clamp_sidebar();
     }
 
@@ -354,6 +358,9 @@ impl Model {
     }
 
     pub fn client_focus_changed(&mut self, focused: bool) -> Option<InputMessage> {
+        if !focused {
+            self.input_event(InputEvent::WindowDeactivated);
+        }
         self.client_focus.focused = focused;
         self.pending_client_focus()
     }
@@ -369,6 +376,7 @@ impl Model {
 
     pub fn update_snapshot(&mut self, snapshot: Arc<MuxSnapshot>) {
         self.snapshot = snapshot;
+        self.sync_input_pane();
         let active_picker = self.active_picker();
         if active_picker != self.picker_pane {
             self.picker_selection = 0;
@@ -380,9 +388,11 @@ impl Model {
 
     pub fn set_size(&mut self, size: TerminalSize) {
         self.size = size;
-        self.sidebar.reconcile_width(size.columns);
         if !self.sidebar_visible() {
             self.sidebar_edit = None;
+            if self.sidebar_focused() {
+                self.focus_active_pane();
+            }
         }
         self.clamp_sidebar();
         self.recompute_layout();
@@ -628,6 +638,65 @@ impl Model {
             .cloned()
     }
 
+    pub fn sidebar_focused(&self) -> bool {
+        self.router.owner() == InputOwner::Sidebar
+    }
+
+    pub fn input_event(&mut self, event: InputEvent) {
+        self.router.event(event);
+        for effect in self.router.drain_effects() {
+            if let Effect::RequestFocus(owner) = effect {
+                self.apply_input_focus(owner);
+            }
+        }
+    }
+
+    pub fn apply_input_focus(&mut self, owner: InputOwner) {
+        if owner == InputOwner::Sidebar {
+            self.sidebar.focus(self.size.columns);
+        }
+        self.router.event(InputEvent::NativeFocusObserved(owner));
+    }
+
+    pub fn activate_pane(&mut self, pane: PaneId) {
+        self.input_event(InputEvent::ActivatePane(pane, self.surface_kind(pane)));
+    }
+
+    pub fn focus_active_pane(&mut self) {
+        if let Some(pane) = self.active_pane() {
+            self.activate_pane(pane);
+        } else {
+            self.input_event(InputEvent::NativeFocusObserved(InputOwner::None));
+        }
+    }
+
+    fn surface_kind(&self, pane: PaneId) -> SurfaceKind {
+        match self
+            .snapshot
+            .sessions
+            .iter()
+            .flat_map(|session| &session.windows)
+            .find_map(|window| window.panes.get(&pane))
+            .map(|pane| &pane.kind)
+        {
+            Some(PaneKindSnapshot::Terminal) => SurfaceKind::Terminal,
+            Some(PaneKindSnapshot::Browser(_)) => SurfaceKind::Browser,
+            _ => SurfaceKind::Other,
+        }
+    }
+
+    fn sync_input_pane(&mut self) {
+        if let Some(pane) = self.active_pane() {
+            let kind = self.surface_kind(pane);
+            self.input_event(InputEvent::SetActivePane(pane, kind));
+            if matches!(self.router.owner(), InputOwner::None | InputOwner::Pane(..)) {
+                self.input_event(InputEvent::NativeFocusObserved(InputOwner::Pane(
+                    pane, kind,
+                )));
+            }
+        }
+    }
+
     pub fn sidebar_visible(&self) -> bool {
         self.sidebar.visible(self.size.columns)
     }
@@ -649,7 +718,9 @@ impl Model {
 
     pub fn focus_sidebar(&mut self) -> bool {
         let was_visible = self.sidebar_visible();
-        self.sidebar.focus(self.size.columns);
+        if self.size.columns >= sidebar::MIN_MANUAL_COLUMNS {
+            self.input_event(InputEvent::FocusSidebar);
+        }
         let changed = was_visible != self.sidebar_visible();
         if changed {
             self.recompute_layout();
@@ -660,6 +731,7 @@ impl Model {
     pub fn hide_sidebar(&mut self) -> bool {
         let was_visible = self.sidebar_visible();
         self.sidebar.hide();
+        self.focus_active_pane();
         let changed = was_visible != self.sidebar_visible();
         if changed {
             self.recompute_layout();

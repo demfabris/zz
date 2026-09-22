@@ -19,7 +19,6 @@ pub(crate) const STATUS_ROWS: u16 = 3;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct State {
-    pub focused: bool,
     pub selected: usize,
     pub scroll: usize,
     shown: bool,
@@ -32,22 +31,13 @@ impl State {
 
     pub fn focus(&mut self, columns: u16) {
         if columns < MIN_MANUAL_COLUMNS {
-            self.focused = false;
             return;
         }
         self.shown = true;
-        self.focused = true;
     }
 
     pub fn hide(&mut self) {
-        self.focused = false;
         self.shown = false;
-    }
-
-    pub fn reconcile_width(&mut self, columns: u16) {
-        if !self.visible(columns) {
-            self.focused = false;
-        }
     }
 
     pub fn clamp(&mut self, row_count: usize, viewport_height: u16) {

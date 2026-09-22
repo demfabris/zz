@@ -1939,7 +1939,7 @@ impl Renderer {
             self.place_sidebar_edit_cursor(model);
             return;
         }
-        if model.sidebar.focused {
+        if model.sidebar_focused() {
             self.hide_cursor();
             return;
         }
@@ -2346,7 +2346,7 @@ fn sidebar_rows(model: &Model) -> Vec<PaintedSidebarRow> {
         };
         rows.push(PaintedSidebarRow {
             text: padded_styled(&StyledLine::plain(&text), sidebar::WIDTH, ' '),
-            selected: model.sidebar.focused && index == model.sidebar.selected,
+            selected: model.sidebar_focused() && index == model.sidebar.selected,
             status: false,
         });
     }
@@ -4064,14 +4064,14 @@ mod tests {
         renderer.place_active_cursor(&model);
         assert_eq!(renderer.output, b"\x1b[?25l");
 
-        model.sidebar.focused = false;
+        model.focus_active_pane();
         assert!(model.sidebar_visible());
         renderer.output.clear();
         renderer.place_active_cursor(&model);
         assert!(renderer.output.ends_with(b"\x1b[?25h"));
 
         assert!(!model.focus_sidebar());
-        assert!(model.sidebar.focused);
+        assert!(model.sidebar_focused());
         assert!(model.sidebar_visible());
         assert_eq!(model.status_area(), (29, 91));
         renderer.output.clear();
@@ -4079,7 +4079,7 @@ mod tests {
         assert_eq!(renderer.output, b"\x1b[?25l");
 
         assert!(model.hide_sidebar());
-        assert!(!model.sidebar.focused);
+        assert!(!model.sidebar_focused());
         assert!(!model.sidebar_visible());
         assert_eq!(model.status_area(), (0, 120));
         renderer.output.clear();

@@ -19,8 +19,9 @@ use gpui::{
 #[cfg(test)]
 use zz_client::pane_swap_command;
 use zz_client::{
-    DropZone, MenuPointerKind, NormalizedPaneRect, PaneRect, coerced_drop_zone,
-    drop_preview_bounds, drop_zone_at, pane_drop_command, pane_rects, predicted_drop_layout,
+    ChromeAction, Disposition, DropZone, Effect, InputEvent, InputRouter, MenuPointerKind,
+    NormalizedPaneRect, PaneRect, PrefixView, SurfaceKind, coerced_drop_zone, drop_preview_bounds,
+    drop_zone_at, pane_drop_command, pane_rects, predicted_drop_layout,
 };
 use zz_mux::display_width;
 use zz_protocol::{
@@ -78,7 +79,7 @@ use crate::{
         },
         hosts::HostId,
         nav::{TreeTarget, kill_target_command, picker_split_command, select_window_command},
-        prefix::{PrefixClaim, PressDisposition, is_sidebar_picker_input, terminal_key_input},
+        prefix::{is_sidebar_picker_input, terminal_key_input},
     },
     pane::display::DisplayPanesView,
     pane::layout::{SeparatorSide, pane_separator},
@@ -618,7 +619,7 @@ pub struct AppView {
     pane_drop_preview: Rc<Cell<DropPreviewFrame>>,
     pane_layout_override: Option<PaneLayoutOverride>,
     pane_canvas_bounds: Rc<Cell<Bounds<Pixels>>>,
-    prefix_claim: PrefixClaim,
+    input_router: InputRouter,
     dialog_prefix_cancel_sent: bool,
     dialog_prefix_cancel_pending: Option<u64>,
     synchronized_signature: Option<SynchronizeSignature>,
@@ -638,6 +639,11 @@ impl AppView {
                 mux.set_client_window_focused(true);
             });
         }
+        let input_router = crate::keymap::input_router(cx);
+        cx.observe_global::<crate::keymap::ChromeState>(|view, cx| {
+            view.input_router = crate::keymap::input_router(cx);
+        })
+        .detach();
         let mut observed_revision = AppRevision::for_mux(mux.read(cx));
         let mut observed_snapshot = mux.read(cx).snapshot();
         let mut observed_palette_fleet: Vec<(
@@ -652,12 +658,31 @@ impl AppView {
             let snapshot = mux.read(cx).snapshot();
             let snapshot_arrived = !Arc::ptr_eq(&snapshot, &observed_snapshot);
             if snapshot_arrived {
+                let panes = snapshot
+                    .sessions
+                    .iter()
+                    .flat_map(|session| &session.windows)
+                    .flat_map(|window| window.panes.keys())
+                    .copied()
+                    .collect::<BTreeSet<_>>();
+                for pane in observed_snapshot
+                    .sessions
+                    .iter()
+                    .flat_map(|session| &session.windows)
+                    .flat_map(|window| window.panes.keys())
+                    .filter(|pane| !panes.contains(pane))
+                {
+                    view.input_router.event(InputEvent::PaneRemoved(*pane));
+                }
                 observed_snapshot = snapshot;
                 view.snapshot_revision = view.snapshot_revision.wrapping_add(1).max(1);
             }
             let revision = AppRevision::for_mux(mux.read(cx));
             let revision_changed = revision != observed_revision;
             if revision_changed {
+                if observed_revision.attached.is_some() && revision.attached.is_none() {
+                    view.input_router.event(InputEvent::Detached);
+                }
                 observed_revision = revision;
                 view.register_agent_panes(cx);
             }
@@ -724,7 +749,7 @@ impl AppView {
             view.mux.update(cx, |mux, _| {
                 mux.set_client_window_focused(window_active);
             });
-            view.prefix_claim.clear();
+            view.input_router.event(InputEvent::WindowDeactivated);
             if !window_active && view.pane_drag.take().is_some() {
                 cx.stop_active_drag(window);
                 cx.notify();
@@ -838,7 +863,7 @@ impl AppView {
         cx.subscribe(&sidebar, |_, _, _: &SidebarModeChanged, cx| cx.notify())
             .detach();
         cx.subscribe(&sidebar, |view, _, _: &SidebarRouteChanged, cx| {
-            view.prefix_claim.clear();
+            view.input_router.event(InputEvent::WindowDeactivated);
             cx.notify();
         })
         .detach();
@@ -891,7 +916,7 @@ impl AppView {
             pane_drop_preview: Rc::new(Cell::new(DropPreviewFrame::default())),
             pane_layout_override: None,
             pane_canvas_bounds: Rc::new(Cell::new(Bounds::default())),
-            prefix_claim: PrefixClaim::default(),
+            input_router,
             dialog_prefix_cancel_sent: false,
             dialog_prefix_cancel_pending: None,
             synchronized_signature: None,
@@ -912,37 +937,16 @@ impl AppView {
         if self.reconcile_dialog_prefix(window, cx) {
             return;
         }
-        let chrome_action = crate::keymap::resolve(cx, zz_client::UI_TABLE, &event.keystroke);
-        if chrome_action == Some(zz_client::ChromeAction::OpenCommandPalette) {
-            self.open_command_palette(None, window, cx);
-            cx.stop_propagation();
-            return;
-        }
-        if self.popup.is_some() || self.menu.is_some() || self.confirm.is_some() {
-            return;
-        }
-        if self.command_palette.as_ref().is_some_and(|palette| {
-            palette.read(cx).is_local() || palette.read(cx).is_window_chooser()
-        }) {
-            return;
-        }
-        if self.sidebar.read(cx).route() == WorkspaceRoute::Settings {
-            return;
-        }
-        if let Some(zz_client::ChromeAction::SelectWindow(position)) = chrome_action {
-            let mux = self.mux.read(cx);
-            if mux.is_connected()
-                && let Some(target) =
-                    window_at_position(&mux.snapshot(), mux.attached_session(), position)
-            {
-                mux.execute(select_window_command(target));
-                self.focus_active_pane(window, cx);
-            }
-            cx.stop_propagation();
-            return;
-        }
         let keystroke = &event.keystroke;
-        if keystroke.key == "escape"
+        let overlay_open = self.popup.is_some()
+            || self.menu.is_some()
+            || self.confirm.is_some()
+            || self.command_palette.as_ref().is_some_and(|palette| {
+                palette.read(cx).is_local() || palette.read(cx).is_window_chooser()
+            })
+            || self.sidebar.read(cx).route() == WorkspaceRoute::Settings;
+        if !overlay_open
+            && keystroke.key == "escape"
             && self
                 .pane_drag
                 .as_ref()
@@ -954,74 +958,151 @@ impl AppView {
             cx.stop_propagation();
             return;
         }
-        if keystroke.modifiers.platform || keystroke.modifiers.function {
-            return;
-        }
-        if self.dialog_prefix_cancel_pending.is_some() {
+        if !overlay_open
+            && self.dialog_prefix_cancel_pending.is_some()
+            && !keystroke.modifiers.platform
+            && !keystroke.modifiers.function
+        {
             cx.stop_propagation();
             return;
         }
-        let (armed, claimed) = {
+        let input = terminal_key_input(
+            keystroke,
+            if event.is_held {
+                TerminalKeyAction::Repeat
+            } else {
+                TerminalKeyAction::Press
+            },
+        );
+        let (prefix, active) = {
             let mux = self.mux.read(cx);
-            let input = terminal_key_input(keystroke, TerminalKeyAction::Press);
-            (mux.prefix_armed(), mux.claims_prefix_input(&input))
+            let active = mux.active_pane().and_then(|id| {
+                let snapshot = mux.snapshot();
+                snapshot
+                    .sessions
+                    .iter()
+                    .filter(|session| Some(session.id) == mux.attached_session())
+                    .flat_map(|session| &session.windows)
+                    .find_map(|window| window.panes.get(&id))
+                    .map(|pane| {
+                        (
+                            id,
+                            match pane.kind {
+                                PaneKindSnapshot::Terminal => SurfaceKind::Terminal,
+                                PaneKindSnapshot::Browser(_) => SurfaceKind::Browser,
+                                _ => SurfaceKind::Other,
+                            },
+                        )
+                    })
+            });
+            (
+                PrefixView {
+                    armed: mux.prefix_armed(),
+                    claimed: !overlay_open
+                        && !keystroke.modifiers.platform
+                        && !keystroke.modifiers.function
+                        && mux.claims_prefix_input(&input),
+                },
+                active,
+            )
         };
-        if !claimed {
-            return;
-        }
-        if armed && keystroke.key == "escape" && self.pane_drag.take().is_some() {
+        let armed = prefix.armed;
+        if prefix.claimed && armed && keystroke.key == "escape" && self.pane_drag.take().is_some() {
             cx.stop_active_drag(window);
             cx.notify();
         }
-        let Some(pane) = self.active_pane(cx) else {
+        if active != self.input_router.active_pane() {
+            if let Some((pane, kind)) = active {
+                self.input_router
+                    .event(InputEvent::SetActivePane(pane, kind));
+            } else {
+                self.input_router.event(InputEvent::Detached);
+            }
+        }
+        let disposition = self.input_router.key(&input, prefix);
+        let effects = self.input_router.drain_effects();
+        if prefix.claimed && disposition == Disposition::Native && active.is_none() {
             log::warn!(
                 target: "zz::diagnostics::input",
                 "prefix_key_dropped keystroke={keystroke} armed={armed} reason=no_active_pane"
             );
-            return;
-        };
-        match self.prefix_claim.press(keystroke, event.is_held) {
-            PressDisposition::Autorepeat => {
-                log::debug!(
-                    target: "zz::diagnostics::input",
-                    "prefix_key_autorepeat_swallowed keystroke={keystroke} armed={armed} pane={pane}"
-                );
-            }
-            PressDisposition::Forward { stale } => {
-                if stale {
-                    log::warn!(
-                        target: "zz::diagnostics::input",
-                        "prefix_claim_stale_entry keystroke={keystroke} armed={armed} pane={pane}"
-                    );
+        }
+        if prefix.claimed
+            && event.is_held
+            && effects.is_empty()
+            && let Some((pane, _)) = active
+        {
+            log::debug!(
+                target: "zz::diagnostics::input",
+                "prefix_key_autorepeat_swallowed keystroke={keystroke} armed={armed} pane={pane}"
+            );
+        }
+        for effect in effects {
+            match effect {
+                Effect::Chrome(ChromeAction::OpenCommandPalette) => {
+                    self.open_command_palette(None, window, cx);
                 }
-                let input = terminal_key_input(keystroke, TerminalKeyAction::Press);
-                if armed
-                    && cx
-                        .try_global::<config::AppConfig>()
-                        .is_some_and(|config| config.picker_focus_sidebar.value)
-                    && is_sidebar_picker_input(self.mux.read(cx).prefix_bindings(), &input)
-                {
-                    self.prefix_claim.suppress_release(keystroke);
-                    self.mux.update(cx, |mux, _| {
-                        if mux.send_prefix_cancel().is_some() {
-                            mux.execute(CommandInvocation::new("focus-sidebar", [] as [&str; 0]));
-                        }
-                    });
-                    cx.stop_propagation();
-                    return;
+                Effect::Chrome(ChromeAction::SelectWindow(position)) => {
+                    let mux = self.mux.read(cx);
+                    if mux.is_connected()
+                        && let Some(target) =
+                            window_at_position(&mux.snapshot(), mux.attached_session(), position)
+                    {
+                        mux.execute(select_window_command(target));
+                        self.focus_active_pane(window, cx);
+                    }
                 }
-                log::info!(
-                    target: "zz::diagnostics::input",
-                    "prefix_key_forwarded keystroke={keystroke} armed={armed} pane={pane}"
-                );
-                self.mux.read(cx).send_input(InputMessage::Key {
-                    pane,
-                    input,
-                    text_follows: false,
-                });
+                Effect::Chrome(action) => {
+                    let action: Box<dyn gpui::Action> = match action {
+                        ChromeAction::NewSession => Box::new(crate::menus::NewSession),
+                        ChromeAction::NewWindow => Box::new(crate::menus::NewWindow),
+                        ChromeAction::SplitRight => Box::new(crate::menus::SplitRight),
+                        ChromeAction::SplitDown => Box::new(crate::menus::SplitDown),
+                        ChromeAction::Detach => Box::new(crate::menus::Detach),
+                        ChromeAction::ToggleSidebar => Box::new(crate::menus::ToggleSidebar),
+                        ChromeAction::OpenSettings => Box::new(config::settings::OpenSettings),
+                        _ => continue,
+                    };
+                    window.dispatch_action(action, cx);
+                }
+                Effect::ForwardKey { pane, input } => {
+                    if armed
+                        && cx
+                            .try_global::<config::AppConfig>()
+                            .is_some_and(|config| config.picker_focus_sidebar.value)
+                        && is_sidebar_picker_input(self.mux.read(cx).prefix_bindings(), &input)
+                    {
+                        self.input_router.suppress_release(
+                            input
+                                .unshifted_codepoint
+                                .map_or(input.key, zz_terminal::KeyCode::Character),
+                        );
+                        self.mux.update(cx, |mux, _| {
+                            if mux.send_prefix_cancel().is_some() {
+                                mux.execute(CommandInvocation::new(
+                                    "focus-sidebar",
+                                    [] as [&str; 0],
+                                ));
+                            }
+                        });
+                    } else {
+                        log::info!(
+                            target: "zz::diagnostics::input",
+                            "prefix_key_forwarded keystroke={keystroke} armed={armed} pane={pane}"
+                        );
+                        self.mux.read(cx).send_input(InputMessage::Key {
+                            pane,
+                            input,
+                            text_follows: false,
+                        });
+                    }
+                }
+                Effect::RequestFocus(_) => {}
             }
         }
-        cx.stop_propagation();
+        if disposition == Disposition::Consumed {
+            cx.stop_propagation();
+        }
     }
 
     fn reconcile_dialog_prefix(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -1050,21 +1131,20 @@ impl AppView {
     /// Forward a claimed key's release to the daemon and stop it reaching the
     /// widget that never saw the press.
     pub fn on_claim_key_up(&mut self, event: &KeyUpEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if self.prefix_claim.consume_local_release(&event.keystroke) {
+        let input = terminal_key_input(&event.keystroke, TerminalKeyAction::Release);
+        let disposition = self.input_router.key(&input, PrefixView::default());
+        for effect in self.input_router.drain_effects() {
+            if let Effect::ForwardKey { pane, input } = effect {
+                self.mux.read(cx).send_input(InputMessage::Key {
+                    pane,
+                    input,
+                    text_follows: false,
+                });
+            }
+        }
+        if disposition == Disposition::Consumed {
             cx.stop_propagation();
-            return;
         }
-        if !self.prefix_claim.consume_release(&event.keystroke) {
-            return;
-        }
-        if let Some(pane) = self.active_pane(cx) {
-            self.mux.read(cx).send_input(InputMessage::Key {
-                pane,
-                input: terminal_key_input(&event.keystroke, TerminalKeyAction::Release),
-                text_follows: false,
-            });
-        }
-        cx.stop_propagation();
     }
 
     fn active_pane(&self, cx: &App) -> Option<PaneId> {
@@ -4044,6 +4124,209 @@ mod tests {
             colour: None,
             active_colour: None,
         }
+    }
+
+    #[cfg(unix)]
+    struct InputTestServer {
+        stream: std::os::unix::net::UnixStream,
+        thread: Option<std::thread::JoinHandle<()>>,
+        _directory: tempfile::TempDir,
+    }
+
+    #[cfg(unix)]
+    impl Drop for InputTestServer {
+        fn drop(&mut self) {
+            let _ = self.stream.shutdown(std::net::Shutdown::Both);
+            self.thread.take().unwrap().join().unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    fn input_test_client() -> Option<(zz_daemon::InteractiveClient, InputTestServer)> {
+        use zz_protocol::{ProtocolMessage, read_protocol_message, write_protocol_message};
+
+        let directory = tempfile::Builder::new()
+            .prefix("zz-input-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let socket = directory.path().join("s");
+        let listener = match std::os::unix::net::UnixListener::bind(&socket) {
+            Ok(listener) => listener,
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!(
+                    "SKIPPED: input routing fixture requires a Unix protocol socket: {error}"
+                );
+                return None;
+            }
+            Err(error) => panic!("bind input routing fixture: {error}"),
+        };
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert!(matches!(
+                read_protocol_message(&mut stream).unwrap(),
+                ProtocolMessage::ClientHello(_)
+            ));
+            sender.send(stream.try_clone().unwrap()).unwrap();
+            let mut mux_options = zz_protocol::MuxOptions::default();
+            mux_options.set(
+                zz_protocol::MuxOptionKey::Prefix,
+                "C-a",
+                zz_protocol::MuxOptionSource::RuntimeCommand,
+            );
+            write_protocol_message(
+                &mut stream,
+                &ProtocolMessage::ServerHello(zz_protocol::ServerHello {
+                    protocol_version: PROTOCOL_VERSION,
+                    server_id: 1,
+                    client_id: zz_protocol::ClientId(1),
+                    client_instance_id: zz_protocol::ClientInstanceId(1),
+                    capabilities: Vec::new(),
+                    appearance: zz_terminal::TerminalAppearance::default(),
+                    appearance_provenance: zz_terminal::AppearanceProvenance::default(),
+                    mux_options,
+                    status: zz_protocol::StatusLine::default(),
+                    key_tables: zz_protocol::KeyTables::default().snapshot(),
+                }),
+            )
+            .unwrap();
+            while read_protocol_message(&mut stream).is_ok() {}
+        });
+        let client = zz_daemon::InteractiveClient::connect(&socket).unwrap();
+        let stream = receiver.recv().unwrap();
+        Some((
+            client,
+            InputTestServer {
+                stream,
+                thread: Some(thread),
+                _directory: directory,
+            },
+        ))
+    }
+
+    #[cfg(unix)]
+    fn input_test_workspace(
+        cx: &mut TestAppContext,
+        client: zz_daemon::InteractiveClient,
+    ) -> (Entity<AppView>, &mut gpui::VisualTestContext) {
+        cx.update(zz_ui::init);
+        let workspace_slot = Rc::new(RefCell::new(None));
+        let captured_workspace = Rc::clone(&workspace_slot);
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                BrowserController::new(Err(zz_browser::BrowserError::AlreadyShutdown), cx)
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| MuxClient::new(Ok(client), zz_daemon::default_socket_path(), cx));
+            let workspace = cx.new(|cx| {
+                AppView::new(
+                    controller.clone(),
+                    agent_controller.clone(),
+                    mux,
+                    window,
+                    cx,
+                )
+            });
+            captured_workspace.replace(Some(workspace.clone()));
+            let shell = cx.new(|cx| {
+                crate::app_shell::AppShell::new(workspace, controller, agent_controller, window, cx)
+            });
+            crate::build_root(shell, window, cx)
+        });
+        let workspace = workspace_slot.borrow().clone().unwrap();
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), one_pane_snapshot(1), cx);
+        });
+        cx.run_until_parked();
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.focus_active_pane(window, cx);
+        });
+        (workspace, cx)
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn ui_chord_bound_to_the_prefix_opens_palette_without_arming(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        let Some((client, _server)) = input_test_client() else {
+            return;
+        };
+        let (workspace, cx) = input_test_workspace(cx, client);
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+        cx.update(|_, cx| {
+            crate::keymap::install(
+                &[crate::keymap::ChromeOverride::Bind {
+                    table: zz_client::UI_TABLE,
+                    key: "C-a".to_owned(),
+                    action: ChromeAction::OpenCommandPalette.name().to_owned(),
+                }],
+                config::DEFAULT_BROWSER_ELEMENT_SELECTOR_HOTKEY,
+                cx,
+            );
+        });
+        let stroke = Keystroke::parse("ctrl-a").unwrap();
+        assert!(mux.read_with(cx, |mux, _| {
+            mux.claims_prefix_input(&terminal_key_input(&stroke, TerminalKeyAction::Press))
+        }));
+        cx.simulate_keystrokes("ctrl-a");
+        cx.simulate_event(KeyUpEvent { keystroke: stroke });
+        cx.run_until_parked();
+        assert!(workspace.read_with(cx, |workspace, _| workspace.command_palette.is_some()));
+        assert!(!mux.read_with(cx, |mux, _| mux.prefix_armed()));
+        assert!(
+            !input
+                .borrow()
+                .iter()
+                .any(|message| matches!(message, InputMessage::Key { .. }))
+        );
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn claimed_press_and_release_reach_mux_without_terminal_key_down(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        let Some((client, _server)) = input_test_client() else {
+            return;
+        };
+        let (workspace, cx) = input_test_workspace(cx, client);
+        let (mux, terminal) = workspace.read_with(cx, |workspace, _| {
+            (
+                workspace.mux.clone(),
+                workspace.terminals[&PaneId(0)].clone(),
+            )
+        });
+        assert!(cx.update(|window, cx| terminal.read(cx).focus().is_focused(window)));
+        let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+        let stroke = Keystroke::parse("ctrl-a").unwrap();
+        cx.simulate_event(gpui::KeyDownEvent {
+            keystroke: stroke.clone(),
+            is_held: false,
+            prefer_character_input: false,
+        });
+        cx.simulate_event(KeyUpEvent {
+            keystroke: stroke.clone(),
+        });
+        assert_eq!(
+            input.borrow().as_slice(),
+            &[
+                InputMessage::Key {
+                    pane: PaneId(0),
+                    input: terminal_key_input(&stroke, TerminalKeyAction::Press),
+                    text_follows: false
+                },
+                InputMessage::Key {
+                    pane: PaneId(0),
+                    input: terminal_key_input(&stroke, TerminalKeyAction::Release),
+                    text_follows: false
+                },
+            ]
+        );
+        assert_eq!(
+            workspace.read_with(cx, |workspace, _| workspace.input_router.owner()),
+            zz_client::InputOwner::None
+        );
     }
 
     #[gpui::test]

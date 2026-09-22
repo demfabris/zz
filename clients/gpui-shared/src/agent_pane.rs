@@ -1,39 +1,46 @@
 use std::{
-    collections::{HashMap, VecDeque},
-    path::PathBuf,
+    collections::{BTreeSet, HashMap, HashSet},
+    path::{Path, PathBuf},
+    rc::Rc,
     sync::Arc,
     time::Duration,
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use gpui::{
-    AnyElement, App, Context, Entity, FocusHandle, Focusable, IntoElement, ListAlignment,
-    ListState, MouseButton, Render, Subscription, Window, div, prelude::*, px,
+    AnyElement, App, Context, Corners, Entity, FocusHandle, Focusable, IntoElement, ListAlignment,
+    ListState, MouseButton, Pixels, Render, Subscription, Window, div, prelude::*, px,
 };
 use serde_json::Value;
 use zz_client::agent_completion::{
     AgentCommand, CommandCompletion, active_command_hint, bare_command_name, completion_query,
-    meaningful_command_description, ranked_completions,
+    completion_score, meaningful_command_description, ranked_completions,
 };
 use zz_client::agent_config::{
     AgentCatalogCache, AgentSettingsApply, AgentSettingsSelection, config_option_models,
+    rendered_error,
+};
+use zz_client::agent_transcript::{
+    AgentPermissionKind, AgentThreadEntry, AgentToolKindModel, AgentToolStatusModel,
+    AgentTranscript, ToolPayload,
 };
 use zz_protocol::{
     AgentConnectionPhase, AgentDescriptor, AgentImage, AgentSessionOpKind, PaneId, ProtocolMessage,
+    agent_stream::AgentSessionSummary,
 };
 use zz_ui::{
-    ActiveTheme as _, Colorize as _, Disableable as _, IconName, Sizable as _,
+    ActiveTheme as _, Colorize as _, Disableable as _, ElementExt as _, IconName, Sizable as _,
+    StyledExt as _,
     agent::{
         AgentEntry, AgentMarkdown, AgentTimeline, AgentTimelineStore, AgentToolEntry,
-        AgentToolKind, AgentToolPayload, AgentToolStatus, COMPOSER_ATTACHMENT, MarkdownSlot,
-        TimelineRow, TimelineStick, agent_attachment_thumbnail, agent_jump_to_bottom_button,
-        agent_pane_header,
+        AgentToolKind, AgentToolPayload, AgentToolStatus, AgentToolText, COMPOSER_ATTACHMENT,
+        MarkdownSlot, TimelineRow, TimelineStick, agent_attachment_thumbnail,
+        agent_jump_to_bottom_button, agent_pane_header,
         composer::{AgentComposer, COMPOSER_OUTER_PADDING},
         controls::{
             AgentControlChoice, AgentControlSelection, ComposerAction, agent_chrome_button,
-            agent_config_picker, agent_directory_button, agent_header_icon_button,
-            agent_model_picker, composer_action, composer_action_button, context_usage_meter,
-            git_summary_footer,
+            agent_config_picker, agent_directory_button, agent_model_picker, composer_action,
+            composer_action_button, context_usage_meter, git_summary_footer,
         },
         fold_timeline_rows,
         presentation::{
@@ -43,8 +50,8 @@ use zz_ui::{
     },
     button::{Button, ButtonVariants as _},
     input::{IndentInline, InputEvent, InputState, MoveDown, MoveUp},
-    pane::pane_header_icon_button,
-    scroll::Scrollbar,
+    pane::{PaneDrag, pane_drag_button, pane_header_icon_button},
+    scroll::{ScrollableElement as _, Scrollbar},
 };
 
 use crate::connection::Connection;
@@ -81,24 +88,27 @@ pub(super) struct AgentPane {
     lifecycle_generation: u64,
     permission_request_id: Option<u64>,
     permission_selected: usize,
-    permission_answered: bool,
+    permission_answered: HashSet<u64>,
     usage: Option<(u64, u64)>,
     history_open: bool,
-    history_all_projects: bool,
+    history_compact: bool,
+    project_directory: Option<PathBuf>,
+    project_hovered: Option<PathBuf>,
+    project_focus: bool,
+    project_scroll: gpui::UniformListScrollHandle,
     history_selected: usize,
     history_delete: Option<String>,
-    directory_open: bool,
-    directory_input: Entity<InputState>,
-    directory_selected: usize,
     picker_scroll: gpui::UniformListScrollHandle,
     history_supported: bool,
     history_input: Entity<InputState>,
     history_loading: bool,
     history_error: Option<String>,
-    sessions: Vec<SessionSummary>,
+    sessions: Vec<AgentSessionSummary>,
     next_cursor: Option<String>,
     transcript_dirty: bool,
-    local_sequence: u64,
+    header_drag_handler: Option<Rc<dyn Fn(&PaneDrag, &mut Window, &mut App)>>,
+    header_touch_drag_handler: Option<Rc<dyn Fn(&gpui::TouchDragEvent, &mut Window, &mut App)>>,
+    corner_radii: Corners<Pixels>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -117,20 +127,12 @@ impl AgentPane {
                 .submit_on_enter(true)
                 .context_menu(true)
         });
-        let history_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Search by title or project…"));
+        let history_input = cx
+            .new(|cx| InputState::new(window, cx).placeholder("Search directories and sessions…"));
         let history_changes = cx.subscribe(&history_input, |this: &mut Self, _, event, cx| {
             if matches!(event, InputEvent::Change) {
                 this.history_selected = 0;
-                cx.notify();
-            }
-        });
-        let directory_input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Choose the agent's working directory")
-        });
-        let directory_changes = cx.subscribe(&directory_input, |this: &mut Self, _, event, cx| {
-            if matches!(event, InputEvent::Change) {
-                this.directory_selected = 0;
+                this.reconcile_project(cx);
                 cx.notify();
             }
         });
@@ -142,7 +144,8 @@ impl AgentPane {
                 this.settings_apply = None;
                 this.catalogs = AgentCatalogCache::default();
                 this.lifecycle_pending = false;
-                this.permission_answered = false;
+                this.permission_answered.clear();
+                this.history_loading = false;
                 cx.notify();
             }
             if this.settings_apply.is_some() {
@@ -183,7 +186,7 @@ impl AgentPane {
                         {
                             this.catalogs.receive(catalog);
                         } else {
-                            this.receive_sessions(result);
+                            this.receive_sessions(result, cx);
                         }
                         cx.notify();
                     }
@@ -198,14 +201,25 @@ impl AgentPane {
                 }
             },
         );
-        let subscription = cx.subscribe_in(&input, window, |this, _, event, window, cx| {
-            if matches!(event, InputEvent::PressEnter { shift: false }) {
-                this.enter(window, cx);
-            } else if matches!(event, InputEvent::Change) {
-                this.draft_error = None;
-                cx.notify();
-            }
-        });
+        let subscription =
+            cx.subscribe_in(&input, window, |this, _, event, window, cx| match event {
+                InputEvent::PressEnter { shift: false, .. } => this.enter(window, cx),
+                InputEvent::Change => {
+                    this.draft_error = None;
+                    cx.notify();
+                }
+                InputEvent::PasteImages(images) => this.attach_images(
+                    images
+                        .iter()
+                        .map(|image| AgentImage {
+                            format: image.format.mime_type().to_owned(),
+                            data: image.bytes.clone(),
+                        })
+                        .collect(),
+                    cx,
+                ),
+                _ => {}
+            });
         let input_observer = cx.observe(&input, |this, _, cx| {
             if this.synchronize_completions(cx) {
                 cx.notify();
@@ -258,15 +272,16 @@ impl AgentPane {
             lifecycle_generation: 0,
             permission_request_id: None,
             permission_selected: 0,
-            permission_answered: false,
+            permission_answered: HashSet::new(),
             usage: None,
             history_open: false,
-            history_all_projects: false,
+            history_compact: true,
+            project_directory: None,
+            project_hovered: None,
+            project_focus: false,
+            project_scroll: gpui::UniformListScrollHandle::new(),
             history_selected: 0,
             history_delete: None,
-            directory_open: false,
-            directory_input,
-            directory_selected: 0,
             picker_scroll: gpui::UniformListScrollHandle::new(),
             history_supported: false,
             history_input,
@@ -275,16 +290,60 @@ impl AgentPane {
             sessions: Vec::new(),
             next_cursor: None,
             transcript_dirty: false,
-            local_sequence: 0,
+            header_drag_handler: None,
+            header_touch_drag_handler: None,
+            corner_radii: Corners::default(),
             _subscriptions: vec![
                 observation,
                 events,
                 subscription,
                 history_changes,
-                directory_changes,
                 timeline_observer,
                 input_observer,
             ],
+        }
+    }
+
+    pub(super) fn set_header_drag_handler(
+        &mut self,
+        handler: impl Fn(&PaneDrag, &mut Window, &mut App) + 'static,
+    ) {
+        self.header_drag_handler = Some(Rc::new(handler));
+    }
+
+    pub(super) fn set_header_touch_drag_handler(
+        &mut self,
+        handler: impl Fn(&gpui::TouchDragEvent, &mut Window, &mut App) + 'static,
+    ) {
+        self.header_touch_drag_handler = Some(Rc::new(handler));
+    }
+
+    fn synchronize_timeline_context(&self, cx: &mut Context<Self>) {
+        let running = self
+            .connection
+            .read(cx)
+            .core
+            .agent_state(self.pane)
+            .is_some_and(|state| {
+                matches!(
+                    state.phase,
+                    AgentConnectionPhase::Running | AgentConnectionPhase::AwaitingPermission
+                )
+            });
+        let streaming = running
+            .then(|| self.transcript.entries.last().map(AgentEntry::id))
+            .flatten();
+        let cwd = self.descriptor.cwd.clone();
+        self.timeline.update(cx, |timeline, cx| {
+            timeline.set_streaming(streaming, cx);
+            timeline.set_cwd(cwd, cx);
+        });
+    }
+
+    pub(super) fn set_corner_radii(&mut self, radii: Corners<Pixels>, cx: &mut Context<Self>) {
+        if self.corner_radii != radii {
+            self.corner_radii = radii;
+            cx.notify();
         }
     }
 
@@ -296,6 +355,12 @@ impl AgentPane {
         if self.descriptor != *descriptor {
             if self.descriptor.cwd != descriptor.cwd {
                 self.settings_apply = None;
+            }
+            if self.descriptor.provider != descriptor.provider {
+                self.sessions.clear();
+                self.next_cursor = None;
+                self.history_loading = false;
+                self.history_error = None;
             }
             self.descriptor = descriptor.clone();
             self.drive_settings_apply(cx);
@@ -318,8 +383,7 @@ impl AgentPane {
             self.completion_dismissed = false;
         }
         self.commands = commands;
-        self.completions = if self.completion_dismissed || self.history_open || self.directory_open
-        {
+        self.completions = if self.completion_dismissed || self.history_open {
             Arc::from([])
         } else {
             completion_query(&self.last_input, self.last_cursor).map_or_else(
@@ -475,8 +539,9 @@ impl AgentPane {
             && connection.core.agent_state(self.pane).is_some_and(|state| {
                 matches!(
                     state.phase,
-                    AgentConnectionPhase::Ready | AgentConnectionPhase::Running
-                ) && state.pending_permission.is_none()
+                    AgentConnectionPhase::Running | AgentConnectionPhase::AwaitingPermission
+                ) || (state.phase == AgentConnectionPhase::Ready
+                    && state.pending_permission.is_none())
             });
         let text = self.input.read(cx).value().to_string();
         if !allowed || (text.trim().is_empty() && self.attachments.is_empty()) {
@@ -500,10 +565,21 @@ impl AgentPane {
         if !self.connection.read(cx).connected {
             return;
         }
-        self.local_sequence = self.local_sequence.wrapping_add(1);
-        self.transcript
-            .local_prompt(u64::MAX - self.local_sequence, &text, &self.attachments);
-        self.transcript_dirty = true;
+        let queueing = self
+            .connection
+            .read(cx)
+            .core
+            .agent_state(self.pane)
+            .is_some_and(|state| {
+                matches!(
+                    state.phase,
+                    AgentConnectionPhase::Running | AgentConnectionPhase::AwaitingPermission
+                )
+            });
+        if !queueing {
+            self.transcript.local_prompt(&text, &self.attachments);
+            self.transcript_dirty = true;
+        }
         self.attachments.clear();
         self.draft_error = None;
         self.input
@@ -761,18 +837,14 @@ impl AgentPane {
             && !self.settings_busy;
         config_controls(&state.config_options, &state.modes)
             .into_iter()
-            .filter(|option| !matches!(option.category.as_str(), "model" | "thought_level"))
+            .filter(|option| option.category == "mode")
+            .take(1)
             .map(|option| {
                 let view = cx.entity();
                 let selected = option.clone();
                 agent_config_picker(
                     format!("agent-config-picker-{}-{}", self.pane.0, option.id),
-                    match option.category.as_str() {
-                        "mode" => IconName::Check,
-                        "model" => IconName::Asterisk,
-                        "thought_level" => IconName::Cpu,
-                        _ => IconName::Settings,
-                    },
+                    IconName::Check,
                     &option.current_value,
                     &option.name,
                     option.description.as_deref().unwrap_or(&option.name),
@@ -793,6 +865,7 @@ impl AgentPane {
             .and_then(|events| events.last())
             .map_or(0, |(sequence, _)| *sequence);
         if newest == self.last_sequence && !self.transcript_dirty {
+            self.synchronize_timeline_context(cx);
             self.drive_settings_apply(cx);
             return;
         }
@@ -824,6 +897,15 @@ impl AgentPane {
                     .map(|value| (*sequence, value))
             })
             .collect();
+        let conversation_changed = updates.iter().any(|(_, update)| {
+            matches!(
+                update.get("item").and_then(Value::as_str),
+                Some("sessionReset" | "sessionSwitched")
+            )
+        });
+        if conversation_changed {
+            self.permission_answered.clear();
+        }
         for (sequence, update) in updates {
             self.restore_prompts(&update, window, cx);
             if sequence > self.control_sequence {
@@ -840,11 +922,13 @@ impl AgentPane {
             }
             self.transcript.apply(sequence, &update);
         }
-        self.transcript.prune();
+        self.transcript.synchronize();
         self.last_sequence = newest;
         self.transcript_dirty = false;
+        self.synchronize_timeline_context(cx);
         self.rows = fold_timeline_rows(&self.transcript.entries).rows;
-        if self.transcript.entries.first().map(AgentEntry::id) != old_first
+        if conversation_changed
+            || self.transcript.entries.first().map(AgentEntry::id) != old_first
             || self.rows.len() < old_count
         {
             self.scroll.reset(self.rows.len());
@@ -939,48 +1023,35 @@ impl AgentPane {
             let _ = this.update_in(cx, |this, _, cx| {
                 this.choosing_images = false;
                 match images {
-                    Ok(images) => {
-                        let mut combined = this.attachments.clone();
-                        combined.extend(images);
-                        match crate::attachments::validate_images(
-                            &this.input.read(cx).value(),
-                            &combined,
-                        ) {
-                            Ok(()) => {
-                                this.attachments = combined;
-                                this.draft_error = None;
-                            }
-                            Err(error) => this.draft_error = Some(error),
-                        }
+                    Ok(images) => this.attach_images(images, cx),
+                    Err(error) => {
+                        this.draft_error = Some(error);
+                        cx.notify();
                     }
-                    Err(error) => this.draft_error = Some(error),
                 }
-                cx.notify();
             });
         })
         .detach();
     }
 
-    fn list_sessions(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.history_supported {
+    fn attach_images(&mut self, images: Vec<AgentImage>, cx: &mut Context<Self>) {
+        let mut combined = self.attachments.clone();
+        combined.extend(images);
+        match crate::attachments::validate_images(&self.input.read(cx).value(), &combined) {
+            Ok(()) => {
+                self.attachments = combined;
+                self.draft_error = None;
+            }
+            Err(error) => self.draft_error = Some(error),
+        }
+        cx.notify();
+    }
+
+    fn list_sessions(&mut self, replace: bool, _window: &mut Window, cx: &mut Context<Self>) {
+        if !self.history_supported || self.history_loading {
             return;
         }
-        if !self.history_open {
-            self.history_input
-                .update(cx, |input, cx| input.set_value("", window, cx));
-            self.history_input
-                .read(cx)
-                .focus_handle(cx)
-                .focus(window, cx);
-        }
-        self.directory_open = false;
-        self.history_open = true;
-        self.completions = Arc::from([]);
-        self.completion_selected = None;
         self.history_delete = None;
-        if replace {
-            self.history_selected = 0;
-        }
         self.history_loading = true;
         self.history_error = None;
         let cursor = if replace {
@@ -993,11 +1064,7 @@ impl AgentPane {
                 ProtocolMessage::AgentSessionOp {
                     pane: self.pane,
                     op: AgentSessionOpKind::List {
-                        cwd: if self.history_all_projects {
-                            None
-                        } else {
-                            self.descriptor.cwd.clone()
-                        },
+                        cwd: None,
                         cursor,
                         replace,
                     },
@@ -1008,7 +1075,12 @@ impl AgentPane {
         cx.notify();
     }
 
-    fn receive_sessions(&mut self, result: &str) {
+    fn receive_sessions(&mut self, result: &str, cx: &App) {
+        let selected = self
+            .history_results(cx)
+            .get(self.history_selected)
+            .and_then(|index| self.sessions.get(*index))
+            .map(|session| session.session_id.clone());
         self.history_loading = false;
         let result = serde_json::from_str::<Value>(result).unwrap_or_default();
         if result.get("item").and_then(Value::as_str) == Some("sessionDeleted") {
@@ -1018,7 +1090,7 @@ impl AgentPane {
             }
             self.history_selected = self
                 .history_selected
-                .min(self.sessions.len().saturating_sub(1));
+                .min(self.history_results(cx).len().saturating_sub(1));
             return;
         }
         if result.get("item").and_then(Value::as_str) != Some("sessionsListed") {
@@ -1045,7 +1117,7 @@ impl AgentPane {
             .into_iter()
             .flatten()
         {
-            if let Ok(session) = serde_json::from_value::<SessionSummary>(session.clone())
+            if let Ok(session) = serde_json::from_value::<AgentSessionSummary>(session.clone())
                 && !self
                     .sessions
                     .iter()
@@ -1054,6 +1126,14 @@ impl AgentPane {
                 self.sessions.push(session);
             }
         }
+        self.reconcile_project(cx);
+        self.history_selected = selected
+            .and_then(|id| {
+                self.history_results(cx)
+                    .iter()
+                    .position(|index| self.sessions[*index].session_id == id)
+            })
+            .unwrap_or_default();
         self.next_cursor = result
             .get("next_cursor")
             .or_else(|| result.get("nextCursor"))
@@ -1062,25 +1142,9 @@ impl AgentPane {
     }
 
     fn history_results(&self, cx: &App) -> Vec<usize> {
-        let query = self.history_input.read(cx).value().to_lowercase();
-        self.sessions
-            .iter()
-            .enumerate()
-            .filter(|(_, session)| {
-                query.is_empty()
-                    || session
-                        .title
-                        .as_deref()
-                        .unwrap_or(&session.session_id)
-                        .to_lowercase()
-                        .contains(&query)
-                    || session
-                        .cwd
-                        .to_string_lossy()
-                        .to_lowercase()
-                        .contains(&query)
-            })
-            .map(|(index, _)| index)
+        ranked_session_indices(&self.sessions, &self.history_input.read(cx).value())
+            .into_iter()
+            .filter(|index| Some(&self.sessions[*index].cwd) == self.project_directory.as_ref())
             .collect()
     }
 
@@ -1168,11 +1232,10 @@ impl AgentPane {
     }
 
     fn history(&self, ready: bool, cx: &mut Context<Self>) -> AnyElement {
-        use zz_ui::agent::controls::agent_chrome_button;
         use zz_ui::command::palette_shortcut_hint;
         use zz_ui::picker::{
-            history_row, picker_empty, picker_footer, picker_header, picker_list, picker_modal,
-            picker_overlay, picker_search,
+            picker_empty, picker_footer, picker_header, picker_list, picker_modal_sized,
+            picker_overlay, picker_row, picker_search,
         };
         let results = self.history_results(cx);
         let count = results.len();
@@ -1189,192 +1252,257 @@ impl AgentPane {
             .read(cx)
             .agent_session_delete_supported(self.pane);
         let loading = self.history_loading;
+        let compact = self.history_compact;
+        let layout_view = cx.entity();
         let view = cx.entity();
-        let rows = gpui::uniform_list("web-agent-history-rows", count, move |range, _, cx| {
-            range
-                .filter_map(|index| {
-                    let session = sessions.get(*results.get(index)?)?;
-                    let current = current.as_deref() == Some(session.session_id.as_str());
-                    let open = view.clone();
-                    let hover = view.clone();
-                    let delete = view.clone();
-                    let session_id = session.session_id.clone();
-                    Some(
-                        history_row(
-                            ("web-agent-history-row", index),
-                            session
-                                .title
-                                .clone()
-                                .unwrap_or_else(|| directory_label(&session.cwd)),
-                            directory_label(&session.cwd),
-                            session
-                                .updated_at
-                                .as_deref()
-                                .map(history_timestamp)
-                                .map(Into::into),
-                            selected == index,
-                            current,
-                            cx,
-                        )
-                        .on_mouse_move(move |_, _, cx| {
-                            hover.update(cx, |this, cx| {
-                                if this.history_selected != index {
-                                    this.history_selected = index;
-                                    cx.notify();
-                                }
-                            });
-                        })
-                        .on_click(move |_, window, cx| {
-                            if ready {
-                                open.update(cx, |this, cx| {
-                                    this.open_history_result(index, window, cx);
-                                });
-                            }
-                            cx.stop_propagation();
-                        })
-                        .when(can_delete && !current, |row| {
-                            row.child(
-                                Button::compact_icon(
-                                    ("web-agent-history-delete", index),
-                                    IconName::Xmark,
+        let pane = self.pane;
+        let rows = gpui::uniform_list(
+            ("agent-history-rows", pane.0),
+            count,
+            move |range, _, cx| {
+                range
+                    .filter_map(|index| {
+                        let session = sessions.get(*results.get(index)?)?;
+                        let current = current.as_deref() == Some(session.session_id.as_str());
+                        let open = view.clone();
+                        let hover = view.clone();
+                        let delete = view.clone();
+                        let session_id = session.session_id.clone();
+                        let detail = if selected == index {
+                            cx.theme().foreground
+                        } else {
+                            cx.theme().foreground.muted()
+                        };
+                        Some(
+                            picker_row(("agent-history-row", index), selected == index, cx)
+                                .h(px(26.0))
+                                .menu_item_corners(px(26.0), cx)
+                                .px_2()
+                                .text_size(zz_ui::rems_from_px(12.0))
+                                .line_height(px(16.0))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .overflow_hidden()
+                                        .text_ellipsis()
+                                        .whitespace_nowrap()
+                                        .child(
+                                            session
+                                                .title
+                                                .clone()
+                                                .unwrap_or_else(|| directory_label(&session.cwd)),
+                                        ),
                                 )
-                                .tooltip("Delete this session")
-                                .disabled(loading || !ready)
-                                .on_click(move |_, _, cx| {
-                                    delete.update(cx, |this, cx| {
-                                        if this.session_is_open(&session_id, cx) {
-                                            this.history_error =
-                                                Some("This conversation is already open.".into());
-                                        } else {
-                                            this.history_delete = Some(session_id.clone());
+                                .when(current, |row| {
+                                    row.child(
+                                        zz_ui::Icon::new(IconName::Check)
+                                            .size(px(12.0))
+                                            .text_color(detail),
+                                    )
+                                })
+                                .when(!(can_delete && !current && selected == index), |row| {
+                                    row.when_some(
+                                        session.updated_at.as_deref().map(history_timestamp),
+                                        |row, timestamp| {
+                                            row.child(
+                                                div()
+                                                    .flex_none()
+                                                    .text_size(zz_ui::rems_from_px(11.0))
+                                                    .text_color(detail)
+                                                    .child(timestamp),
+                                            )
+                                        },
+                                    )
+                                })
+                                .on_mouse_move(move |_, _, cx| {
+                                    hover.update(cx, |this, cx| {
+                                        if this.history_selected != index || this.project_focus {
+                                            this.history_selected = index;
+                                            this.project_focus = false;
+                                            cx.notify();
                                         }
-                                        cx.notify();
                                     });
+                                })
+                                .on_click(move |_, window, cx| {
+                                    if ready {
+                                        open.update(cx, |this, cx| {
+                                            this.open_history_result(index, window, cx);
+                                        });
+                                    }
                                     cx.stop_propagation();
+                                })
+                                .when(can_delete && !current && selected == index, |row| {
+                                    row.child(
+                                        agent_chrome_button(("agent-history-delete", index))
+                                            .icon(IconName::Xmark)
+                                            .label("Delete")
+                                            .tooltip("Delete this session")
+                                            .disabled(loading || !ready)
+                                            .on_click(move |_, _, cx| {
+                                                delete.update(cx, |this, cx| {
+                                                    if this.session_is_open(&session_id, cx) {
+                                                        this.history_error = Some(
+                                                            "This conversation is already open."
+                                                                .into(),
+                                                        );
+                                                    } else {
+                                                        this.history_delete =
+                                                            Some(session_id.clone());
+                                                    }
+                                                    cx.notify();
+                                                });
+                                                cx.stop_propagation();
+                                            }),
+                                    )
                                 }),
-                            )
-                        }),
-                    )
-                })
-                .collect::<Vec<_>>()
-        })
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            },
+        )
         .flex_1()
+        .w_full()
         .track_scroll(&self.picker_scroll);
         let footer = if self.history_delete.is_some() {
             picker_footer(cx)
                 .min_h(px(52.0))
+                .flex_wrap()
                 .border_color(cx.theme().danger.outline())
                 .bg(cx.theme().danger.fill())
-                .child("Permanently delete this session from the agent’s local store?")
-                .child(div().flex_1())
                 .child(
-                    agent_chrome_button("web-history-cancel-delete")
-                        .label("Cancel")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.history_delete = None;
-                            cx.notify();
-                        })),
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .when(compact, |this| this.w_full().flex_none())
+                        .child("Permanently delete this session from the agent’s local store?"),
                 )
                 .child(
-                    agent_chrome_button("web-history-confirm-delete")
-                        .danger()
-                        .label("Delete")
-                        .disabled(loading)
-                        .on_click(cx.listener(|this, _, _, cx| this.delete_history(cx))),
+                    zz_ui::h_flex()
+                        .flex_none()
+                        .gap(px(zz_ui::CHROME_GAP))
+                        .child(
+                            agent_chrome_button("agent-history-delete-cancel")
+                                .label("Cancel")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.history_delete = None;
+                                    cx.notify();
+                                    cx.stop_propagation();
+                                })),
+                        )
+                        .child(
+                            agent_chrome_button("agent-history-delete-confirm")
+                                .danger()
+                                .label("Delete")
+                                .disabled(loading)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.delete_history(cx);
+                                    cx.stop_propagation();
+                                })),
+                        ),
                 )
         } else {
             picker_footer(cx)
-                .when_some(self.history_error.clone(), |footer, error| {
-                    footer.child(div().text_color(cx.theme().danger).child(error))
+                .flex_wrap()
+                .when_some(self.history_error.as_deref(), |footer, error| {
+                    footer.child(
+                        div()
+                            .min_w_0()
+                            .text_color(cx.theme().danger)
+                            .child(rendered_error(error)),
+                    )
                 })
                 .when(loading, |footer| footer.child("Loading sessions…"))
-                .when(!loading && self.history_error.is_none(), |footer| {
-                    footer
-                        .child(palette_shortcut_hint(["up", "down"], "select"))
-                        .child(palette_shortcut_hint(["enter"], "open"))
-                        .child(palette_shortcut_hint(["escape"], "close"))
-                })
+                .when(
+                    !compact && !loading && self.history_error.is_none(),
+                    |footer| {
+                        footer
+                            .child(palette_shortcut_hint(["up", "down"], "select"))
+                            .child(palette_shortcut_hint(["enter"], "open"))
+                            .child(palette_shortcut_hint(["tab"], "column"))
+                            .when(can_delete, |footer| {
+                                footer.child(palette_shortcut_hint(["delete"], "delete"))
+                            })
+                            .child(palette_shortcut_hint(["escape"], "close"))
+                    },
+                )
                 .child(div().flex_1())
                 .when(self.next_cursor.is_some(), |footer| {
                     footer.child(
-                        agent_chrome_button("web-history-more")
+                        agent_chrome_button("agent-history-more")
                             .label("Load more")
                             .disabled(loading)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.list_sessions(false, window, cx);
+                                cx.stop_propagation();
                             })),
                     )
                 })
+                .child(
+                    agent_chrome_button("agent-project-new")
+                        .accent()
+                        .text_color(cx.theme().foreground)
+                        .min_w_0()
+                        .max_w_full()
+                        .child(
+                            div()
+                                .min_w_0()
+                                .max_w(px(240.0))
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .child(self.project_directory.as_ref().map_or_else(
+                                    || "New session".to_owned(),
+                                    |path| format!("New session in {}", directory_label(path)),
+                                )),
+                        )
+                        .disabled(!ready || self.project_directory.is_none())
+                        .tooltip("Start a new session in the selected directory (Cmd/Ctrl+Enter)")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.start_new_session(window, cx);
+                            cx.stop_propagation();
+                        })),
+                )
         };
-        picker_overlay("web-agent-history-overlay", cx)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    this.close_history(window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .child(
-                picker_modal("web-agent-history-modal", cx)
-                    .child(
-                        picker_header(cx)
-                            .child(picker_search(&self.history_input, cx))
-                            .child(
-                                zz_ui::h_flex()
-                                    .gap(px(zz_ui::CHROME_GAP))
-                                    .child(
-                                        agent_chrome_button("web-history-scope")
-                                            .secondary()
-                                            .icon(if self.history_all_projects {
-                                                IconName::Globe
-                                            } else {
-                                                IconName::Folder
-                                            })
-                                            .label(if self.history_all_projects {
-                                                "All projects"
-                                            } else {
-                                                "This project"
-                                            })
-                                            .disabled(loading)
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.history_all_projects =
-                                                    !this.history_all_projects;
-                                                this.list_sessions(true, window, cx);
-                                            })),
-                                    )
-                                    .child(
-                                        agent_chrome_button("web-history-refresh")
-                                            .icon(IconName::Redo2)
-                                            .label("Refresh")
-                                            .disabled(loading)
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.list_sessions(true, window, cx);
-                                            })),
-                                    ),
-                            ),
-                    )
-                    .child(picker_list().child(rows).when(count == 0, |list| {
-                        list.child(picker_empty(
-                            if loading {
+        picker_overlay(("agent-history-overlay", pane.0), cx).p_2()
+            .track_focus(&self.history_input.read(cx).focus_handle(cx))
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                this.close_history(window, cx); cx.stop_propagation();
+            }))
+            .child(picker_modal_sized(("agent-history-modal", pane.0), 920.0, cx)
+                .map_element(|modal| modal.w_full().min_w_0().min_h_0())
+                .child(picker_header(cx).child(picker_search(&self.history_input, cx)))
+                .child(zz_ui::h_flex().relative().flex_1().min_h_0().min_w_0().items_stretch()
+                    .when(compact, gpui::Styled::flex_col)
+                    .on_prepaint(move |bounds, _, cx| {
+                        layout_view.update(cx, |this, cx| {
+                            let compact = bounds.size.width < px(560.0);
+                            if this.history_compact != compact { this.history_compact = compact; cx.notify(); }
+                        });
+                    })
+                    .child(self.project_directories(cx))
+                    .child(zz_ui::v_flex().flex_1().min_w_0().min_h_0().pt(px(zz_ui::CHROME_GAP))
+                        .child(zz_ui::h_flex().h(px(26.0)).flex_none().gap_2().px_3()
+                            .text_size(zz_ui::rems_from_px(11.0)).line_height(px(16.0)).text_color(cx.theme().foreground.muted())
+                            .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap()
+                                .child(self.project_directory.as_ref().map_or_else(String::new, |path| path.display().to_string())))
+                            .when(self.history_supported, |row| row.child(agent_chrome_button("agent-history-refresh").icon(IconName::Redo2)
+                                .label("Refresh").disabled(loading)
+                                .on_click(cx.listener(|this, _, window, cx| { this.list_sessions(true, window, cx); cx.stop_propagation(); })))))
+                        .child(picker_list().p(px(zz_ui::CHROME_GAP)).pt_0().pr_0()
+                            .child(zz_ui::v_flex().relative().flex_1().min_h_0().overflow_hidden()
+                                .pr(zz_ui::scroll::GUTTER_WIDTH).child(rows).vertical_scrollbar(&self.picker_scroll))
+                            .when(count == 0, |list| list.child(picker_empty(if loading {
                                 "Loading sessions…"
-                            } else if self.history_input.read(cx).value().is_empty() {
-                                "No sessions found for this scope."
-                            } else {
-                                "No sessions match that search."
-                            },
-                            cx,
-                        ))
-                    }))
-                    .child(footer),
-            )
-            .into_any_element()
+                            } else if !self.history_supported { "This agent does not provide session history."
+                            } else if self.project_directory.is_none() { "Choose a directory or enter a full path."
+                            } else if self.history_input.read(cx).value().is_empty() { "No sessions in this directory."
+                            } else { "No sessions match that search." }, cx))))))
+                .child(footer)).into_any_element()
     }
 
-    fn directory_results(&self, cx: &App) -> Vec<PathBuf> {
-        let mut paths = Vec::new();
-        paths.extend(self.descriptor.cwd.clone());
-        paths.extend(self.sessions.iter().map(|session| session.cwd.clone()));
-        for pane in self
+    fn directory_results(&self, cx: &App) -> Vec<ProjectDirectory> {
+        let paths = self
             .connection
             .read(cx)
             .core
@@ -1383,50 +1511,68 @@ impl AgentPane {
             .iter()
             .flat_map(|session| &session.windows)
             .flat_map(|window| window.panes.values())
+            .filter_map(|pane| match &pane.kind {
+                zz_protocol::PaneKindSnapshot::Agent(descriptor) => descriptor.cwd.clone(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        project_directory_rows(
+            self.descriptor.cwd.as_deref(),
+            &self.sessions,
+            &paths,
+            &self.history_input.read(cx).value(),
+        )
+    }
+
+    fn reconcile_project(&mut self, cx: &App) {
+        let directories = self.directory_results(cx);
+        if !directories
+            .iter()
+            .any(|row| Some(&row.path) == self.project_directory.as_ref())
         {
-            if let zz_protocol::PaneKindSnapshot::Agent(descriptor) = &pane.kind {
-                paths.extend(descriptor.cwd.clone());
-            }
+            self.project_directory = directories.first().map(|row| row.path.clone());
+            self.history_selected = 0;
         }
-        paths.sort();
-        paths.dedup();
-        let query = self.directory_input.read(cx).value().to_string();
-        paths.retain(|path| {
-            path.to_string_lossy()
-                .to_lowercase()
-                .contains(&query.to_lowercase())
-        });
-        if let Some(typed) = absolute_daemon_directory(&query)
-            && !paths.contains(&typed)
-        {
-            paths.insert(0, typed);
-        }
-        paths
+    }
+
+    fn select_project(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.project_directory = Some(path);
+        self.project_focus = true;
+        self.history_selected = 0;
+        self.history_delete = None;
+        self.picker_scroll
+            .scroll_to_item(0, gpui::ScrollStrategy::Nearest);
+        cx.notify();
     }
 
     fn open_directory(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.can_change_session(cx) {
             return;
         }
-        self.history_open = false;
-        self.directory_open = true;
+        self.history_open = true;
+        self.project_hovered = None;
+        self.project_directory = self.descriptor.cwd.clone();
+        self.project_focus = false;
         self.completions = Arc::from([]);
         self.completion_selected = None;
-        self.directory_selected = 0;
-        self.directory_input
+        self.history_selected = 0;
+        self.history_delete = None;
+        self.history_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.directory_input
+        self.reconcile_project(cx);
+        self.history_input
             .read(cx)
             .focus_handle(cx)
             .focus(window, cx);
+        self.list_sessions(true, window, cx);
         cx.notify();
     }
 
-    fn choose_directory(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+    fn start_new_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.can_change_session(cx) {
             return;
         }
-        let Some(cwd) = self.directory_results(cx).get(index).cloned() else {
+        let Some(cwd) = self.project_directory.clone() else {
             return;
         };
         self.connection.update(cx, |connection, cx| {
@@ -1438,77 +1584,123 @@ impl AgentPane {
                 cx,
             );
         });
-        self.directory_open = false;
-        self.input.read(cx).focus_handle(cx).focus(window, cx);
-        cx.notify();
+        self.close_history(window, cx);
     }
 
-    fn directory_picker(&self, cx: &mut Context<Self>) -> AnyElement {
-        use zz_ui::command::palette_shortcut_hint;
-        use zz_ui::picker::{
-            directory_row, picker_empty, picker_footer, picker_header, picker_list, picker_modal,
-            picker_overlay, picker_search,
-        };
-        let paths = self.directory_results(cx);
-        let count = paths.len();
-        let selected = self.directory_selected;
+    fn project_directories(&self, cx: &Context<Self>) -> AnyElement {
+        let directories = self.directory_results(cx);
+        let recent = directories.iter().take_while(|row| row.recent).count();
+        let mut entries = Vec::new();
+        for index in 0..directories.len() {
+            if index == 0 || index == recent {
+                entries.push(None);
+            }
+            entries.push(Some(index));
+        }
+        let selected = self.project_directory.clone();
+        let hovered = self.project_hovered.clone();
         let view = cx.entity();
-        let rows = gpui::uniform_list("web-directory-rows", count, move |range, _, cx| {
-            range
-                .filter_map(|index| {
-                    let path = paths.get(index)?;
-                    let click = view.clone();
-                    let hover = view.clone();
-                    Some(
-                        directory_row(
-                            ("web-directory-row", index),
-                            path.to_string_lossy().into_owned(),
-                            index == selected,
+        let rows = gpui::uniform_list(
+            ("agent-project-directories", self.pane.0),
+            entries.len(),
+            move |range, _, cx| {
+                range
+                    .map(|index| {
+                        let Some(directory_index) = entries[index] else {
+                            return div()
+                                .h(px(26.0))
+                                .flex()
+                                .items_center()
+                                .px_2p5()
+                                .text_size(zz_ui::rems_from_px(11.0))
+                                .line_height(px(16.0))
+                                .text_color(cx.theme().foreground.muted())
+                                .child(if index == 0 && recent > 0 {
+                                    "Recent"
+                                } else {
+                                    "All directories"
+                                })
+                                .into_any_element();
+                        };
+                        let directory = &directories[directory_index];
+                        let path = directory.path.clone();
+                        let highlighted =
+                            Some(&path) == selected.as_ref() || Some(&path) == hovered.as_ref();
+                        let pointer_path = path.clone();
+                        let hover = view.clone();
+                        let click = view.clone();
+                        zz_ui::picker::directory_row(
+                            ("agent-project-directory", directory_index),
+                            directory.label.clone(),
+                            highlighted,
                             cx,
                         )
-                        .on_mouse_move(move |_, _, cx| {
+                        .h(px(26.0))
+                        .menu_item_corners(px(26.0), cx)
+                        .px_2()
+                        .line_height(px(16.0))
+                        .when(directory.sessions > 0, |row| {
+                            row.child(
+                                div()
+                                    .flex_none()
+                                    .text_size(zz_ui::rems_from_px(11.0))
+                                    .text_color(if highlighted {
+                                        cx.theme().foreground
+                                    } else {
+                                        cx.theme().foreground.muted()
+                                    })
+                                    .child(directory.sessions.to_string()),
+                            )
+                        })
+                        .on_hover(move |hovered, _, cx| {
                             hover.update(cx, |this, cx| {
-                                if this.directory_selected != index {
-                                    this.directory_selected = index;
+                                let next = if *hovered {
+                                    Some(pointer_path.clone())
+                                } else if this.project_hovered.as_ref() == Some(&pointer_path) {
+                                    None
+                                } else {
+                                    return;
+                                };
+                                if this.project_hovered != next {
+                                    this.project_hovered = next;
                                     cx.notify();
                                 }
                             });
                         })
-                        .on_click(move |_, window, cx| {
-                            click.update(cx, |this, cx| this.choose_directory(index, window, cx));
+                        .on_click(move |_, _, cx| {
+                            click.update(cx, |this, cx| this.select_project(path.clone(), cx));
                             cx.stop_propagation();
-                        }),
-                    )
-                })
-                .collect::<Vec<_>>()
-        })
+                        })
+                        .into_any_element()
+                    })
+                    .collect::<Vec<_>>()
+            },
+        )
         .flex_1()
-        .track_scroll(&self.picker_scroll);
-        picker_overlay("web-directory-overlay", cx)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    this.directory_open = false;
-                    this.input.read(cx).focus_handle(cx).focus(window, cx);
-                    cx.notify();
-                    cx.stop_propagation();
-                }),
-            )
+        .w_full()
+        .track_scroll(&self.project_scroll);
+        zz_ui::v_flex()
+            .flex_none()
+            .min_w_0()
+            .min_h_0()
+            .when(self.history_compact, |column| {
+                column.w_full().h(gpui::relative(0.35)).border_b_1()
+            })
+            .when(!self.history_compact, |column| {
+                column.w(gpui::relative(0.36)).border_r_1()
+            })
+            .border_color(cx.theme().border())
+            .p(px(zz_ui::CHROME_GAP))
+            .pr_0()
             .child(
-                picker_modal("web-directory-modal", cx)
-                    .child(picker_header(cx).child(picker_search(&self.directory_input, cx)))
-                    .child(picker_list().child(rows).when(count == 0, |list| {
-                        list.child(picker_empty(
-                            "Enter an absolute directory on the daemon host.",
-                            cx,
-                        ))
-                    }))
-                    .child(
-                        picker_footer(cx)
-                            .child(palette_shortcut_hint(["up", "down"], "select"))
-                            .child(palette_shortcut_hint(["enter"], "open"))
-                            .child(palette_shortcut_hint(["escape"], "close")),
-                    ),
+                zz_ui::v_flex()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .pr(zz_ui::scroll::GUTTER_WIDTH)
+                    .child(rows)
+                    .vertical_scrollbar(&self.project_scroll),
             )
             .into_any_element()
     }
@@ -1522,9 +1714,9 @@ impl AgentPane {
         if agent_title_is_editing(window) {
             return;
         }
-        if !self.history_open && !self.directory_open {
+        let modifiers = event.keystroke.modifiers;
+        if !self.history_open {
             if !self.completions.is_empty() {
-                let modifiers = event.keystroke.modifiers;
                 match event.keystroke.key.as_str() {
                     "up" if !modifiers.platform && !modifiers.alt => {
                         self.navigate_completion(-1, cx);
@@ -1548,37 +1740,71 @@ impl AgentPane {
         }
         match event.keystroke.key.as_str() {
             "escape" => {
-                if self.history_delete.is_some() {
-                    self.history_delete = None;
-                } else {
-                    self.directory_open = false;
+                if self.history_delete.take().is_none() {
                     self.close_history(window, cx);
                 }
             }
-            "up" | "down" if self.history_delete.is_none() => {
-                let count = if self.history_open {
-                    self.history_results(cx).len()
+            "tab" => self.project_focus = !self.project_focus,
+            "up" | "down"
+                if self.history_delete.is_none() && !modifiers.platform && !modifiers.alt =>
+            {
+                let up = event.keystroke.key == "up";
+                let results = self.history_results(cx).len();
+                if self.project_focus || results == 0 {
+                    let directories = self.directory_results(cx);
+                    let count = directories.len();
+                    if count > 0 {
+                        let current = directories
+                            .iter()
+                            .position(|row| Some(&row.path) == self.project_directory.as_ref())
+                            .unwrap_or_default();
+                        let next = if up {
+                            current.checked_sub(1).unwrap_or(count - 1)
+                        } else {
+                            (current + 1) % count
+                        };
+                        self.select_project(directories[next].path.clone(), cx);
+                        let recent = directories.iter().take_while(|row| row.recent).count();
+                        self.project_scroll.scroll_to_item(
+                            next + 1 + usize::from(recent > 0 && next >= recent),
+                            gpui::ScrollStrategy::Nearest,
+                        );
+                    }
                 } else {
-                    self.directory_results(cx).len()
-                };
-                let selected = if self.history_open {
-                    &mut self.history_selected
-                } else {
-                    &mut self.directory_selected
-                };
-                *selected = if event.keystroke.key == "up" {
-                    selected.saturating_sub(1)
-                } else {
-                    (*selected + 1).min(count.saturating_sub(1))
-                };
-                self.picker_scroll
-                    .scroll_to_item(*selected, gpui::ScrollStrategy::Nearest);
+                    self.history_selected = if up {
+                        self.history_selected.checked_sub(1).unwrap_or(results - 1)
+                    } else {
+                        (self.history_selected + 1) % results
+                    };
+                    self.picker_scroll
+                        .scroll_to_item(self.history_selected, gpui::ScrollStrategy::Nearest);
+                }
             }
             "enter" if self.history_delete.is_none() => {
-                if self.history_open {
-                    self.open_history_result(self.history_selected, window, cx);
+                if modifiers.platform || self.history_results(cx).is_empty() {
+                    self.start_new_session(window, cx);
+                } else if self.project_focus {
+                    self.project_focus = false;
                 } else {
-                    self.choose_directory(self.directory_selected, window, cx);
+                    self.open_history_result(self.history_selected, window, cx);
+                }
+            }
+            "delete" | "backspace"
+                if !self.project_focus
+                    && (event.keystroke.key == "delete"
+                        || self.history_input.read(cx).value().is_empty()) =>
+            {
+                if self
+                    .connection
+                    .read(cx)
+                    .agent_session_delete_supported(self.pane)
+                    && let Some(session) = self
+                        .history_results(cx)
+                        .get(self.history_selected)
+                        .and_then(|index| self.sessions.get(*index))
+                    && !self.session_is_open(&session.session_id, cx)
+                {
+                    self.history_delete = Some(session.session_id.clone());
                 }
             }
             _ => return,
@@ -1586,30 +1812,88 @@ impl AgentPane {
         cx.stop_propagation();
         cx.notify();
     }
+
     fn close_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.history_open = false;
+        self.project_hovered = None;
+        self.history_delete = None;
         self.input.read(cx).focus_handle(cx).focus(window, cx);
         cx.notify();
     }
 
-    fn permissions(&self, payload: &str, request_id: u64, cx: &mut Context<Self>) -> AnyElement {
+    fn pending_permissions(&self, cx: &App) -> Vec<PendingPermission> {
+        let mut requests = self
+            .transcript
+            .model
+            .permissions()
+            .iter()
+            .map(|request| PendingPermission {
+                request_id: request.request_id,
+                title: request.title.clone(),
+                options: request
+                    .options
+                    .iter()
+                    .map(|option| PermissionChoice {
+                        id: option.id.clone(),
+                        name: option.name.clone(),
+                        allow: Some(matches!(
+                            option.kind,
+                            AgentPermissionKind::AllowOnce | AgentPermissionKind::AllowAlways
+                        )),
+                    })
+                    .collect(),
+            })
+            .collect::<Vec<_>>();
+        if let Some(permission) = self
+            .connection
+            .read(cx)
+            .core
+            .agent_state(self.pane)
+            .and_then(|state| state.pending_permission.as_ref())
+            && !requests
+                .iter()
+                .any(|request| request.request_id == permission.request_id)
+        {
+            let payload = serde_json::from_str::<Value>(&permission.payload).unwrap_or_default();
+            requests.push(PendingPermission {
+                request_id: permission.request_id,
+                title: payload
+                    .pointer("/tool_call/title")
+                    .or_else(|| payload.pointer("/toolCall/title"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("This agent needs your permission")
+                    .to_owned(),
+                options: permission_choices(&payload),
+            });
+        }
+        requests
+    }
+
+    fn current_permission(&self, cx: &App) -> Option<PendingPermission> {
+        self.pending_permissions(cx)
+            .into_iter()
+            .find(|request| !self.permission_answered.contains(&request.request_id))
+    }
+
+    fn permissions(
+        &self,
+        permission: PendingPermission,
+        index: usize,
+        count: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let request_id = permission.request_id;
         let writable = self.connection.read(cx).connected
             && !self.connection.read(cx).core.attached_read_only()
-            && !self.permission_answered;
-        let payload = serde_json::from_str::<Value>(payload).unwrap_or_default();
-        let title = payload
-            .pointer("/tool_call/title")
-            .or_else(|| payload.pointer("/toolCall/title"))
-            .and_then(Value::as_str)
-            .unwrap_or("This agent needs your permission")
-            .to_owned();
-        let options = permission_choices(&payload)
+            && !self.permission_answered.contains(&request_id);
+        let options = permission
+            .options
             .into_iter()
             .enumerate()
             .map(|(index, option)| {
                 let id = option.id;
                 let button = Button::new(format!(
-                    "web-agent-permission-{}-{request_id}-{index}",
+                    "agent-permission-{}-{request_id}-{index}",
                     self.pane.0
                 ))
                 .small()
@@ -1626,7 +1910,7 @@ impl AgentPane {
                 };
                 permission_option(
                     format!(
-                        "web-agent-permission-option-{}-{request_id}-{index}",
+                        "agent-permission-option-{}-{request_id}-{index}",
                         self.pane.0
                     ),
                     index,
@@ -1644,11 +1928,11 @@ impl AgentPane {
             })
             .collect();
         permission_card(
-            title,
-            None,
+            permission.title,
+            (count > 1).then(|| format!("{}/{count}", index + 1).into()),
             options,
             Button::new(format!(
-                "web-agent-permission-cancel-{}-{request_id}",
+                "agent-permission-cancel-{}-{request_id}",
                 self.pane.0
             ))
             .small()
@@ -1673,16 +1957,15 @@ impl AgentPane {
         let connection = self.connection.read(cx);
         if !connection.connected
             || connection.core.attached_read_only()
-            || self.permission_answered
-            || connection
-                .core
-                .agent_state(self.pane)
-                .and_then(|state| state.pending_permission.as_ref())
-                .is_none_or(|permission| permission.request_id != request_id)
+            || self.permission_answered.contains(&request_id)
+            || !self
+                .pending_permissions(cx)
+                .iter()
+                .any(|request| request.request_id == request_id)
         {
             return;
         }
-        self.permission_answered = true;
+        self.permission_answered.insert(request_id);
         self.connection.update(cx, |connection, cx| {
             connection.send(
                 ProtocolMessage::AgentRespondPermission {
@@ -1703,29 +1986,17 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         let modifiers = event.keystroke.modifiers;
-        if modifiers.platform
-            || modifiers.alt
-            || modifiers.control
-            || modifiers.function
-            || self.permission_answered
-        {
+        if modifiers.platform || modifiers.alt || modifiers.control || modifiers.function {
             return;
         }
         let input = self.input.read(cx);
         if !input.value().trim().is_empty() && input.focus_handle(cx).is_focused(window) {
             return;
         }
-        let Some(permission) = self
-            .connection
-            .read(cx)
-            .core
-            .agent_state(self.pane)
-            .and_then(|state| state.pending_permission.clone())
-        else {
+        let Some(permission) = self.current_permission(cx) else {
             return;
         };
-        let payload = serde_json::from_str(&permission.payload).unwrap_or_default();
-        let options = permission_choices(&payload);
+        let options = permission.options;
         match event.keystroke.key.as_str() {
             "escape" => self.respond_permission(permission.request_id, None, cx),
             "up" if !options.is_empty() => {
@@ -1935,21 +2206,52 @@ impl Render for AgentPane {
                 state.phase,
                 AgentConnectionPhase::Ready | AgentConnectionPhase::Running
             );
-        let permission_id = state
-            .pending_permission
-            .as_ref()
-            .map(|permission| permission.request_id);
+        let permissions = self.pending_permissions(cx);
+        self.permission_answered
+            .retain(|id| permissions.iter().any(|request| request.request_id == *id));
+        let permissions = permissions
+            .into_iter()
+            .filter(|request| !self.permission_answered.contains(&request.request_id))
+            .collect::<Vec<_>>();
+        let current_permission = (!permissions.is_empty()).then_some(0);
+        let permission_id = current_permission.map(|index| permissions[index].request_id);
         if self.permission_request_id != permission_id {
             self.permission_request_id = permission_id;
             self.permission_selected = 0;
-            self.permission_answered = false;
         }
         self.stick.set_bottom_padding(COMPOSER_OUTER_PADDING);
         self.drive_stick(window, cx);
         let show_jump = !self.rows.is_empty() && self.stick.shows_jump_button();
         let mut prefix = Vec::new();
-        if let Some(permission) = &state.pending_permission {
-            prefix.push(self.permissions(&permission.payload, permission.request_id, cx));
+        if let Some(index) = current_permission {
+            prefix.push(self.permissions(permissions[index].clone(), index, permissions.len(), cx));
+        }
+        if state.queued_prompts > 0 {
+            prefix.push(
+                zz_ui::h_flex()
+                    .w_full()
+                    .justify_end()
+                    .child(
+                        Button::new(("agent-unqueue", self.pane.0))
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::Undo2)
+                            .label(format!("{} queued", state.queued_prompts))
+                            .tooltip("Return the queued prompts to the composer")
+                            .text_color(cx.theme().foreground.muted())
+                            .disabled(!writable)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.connection.update(cx, |connection, cx| {
+                                    connection.send(
+                                        ProtocolMessage::AgentUnqueue { pane: this.pane },
+                                        cx,
+                                    );
+                                });
+                                cx.stop_propagation();
+                            })),
+                    )
+                    .into_any_element(),
+            );
         }
         prefix.extend(self.render_error(&state, cx));
         prefix.extend(self.render_completions(cx));
@@ -1959,13 +2261,15 @@ impl Render for AgentPane {
         let action = composer_action_button(
             ("agent-action", self.pane.0),
             action_kind,
-            if action_kind == ComposerAction::Stop {
-                writable
-            } else {
-                ready
-                    && state.pending_permission.is_none()
-                    && has_content
-                    && self.settings_apply.is_none()
+            match action_kind {
+                ComposerAction::Stop => writable,
+                ComposerAction::Queue => writable && self.settings_apply.is_none(),
+                ComposerAction::Send => {
+                    ready
+                        && state.pending_permission.is_none()
+                        && has_content
+                        && self.settings_apply.is_none()
+                }
             },
         );
         let action = if action_kind == ComposerAction::Stop {
@@ -1986,6 +2290,9 @@ impl Render for AgentPane {
                 .on_click(cx.listener(|this, _, window, cx| this.choose_images(window, cx)))
                 .into_any_element(),
         ];
+        if cfg!(target_os = "ios") {
+            settings.clear();
+        }
         settings.extend(self.render_config_controls(&state, cx));
         let controls = config_controls(&state.config_options, &state.modes);
         let model = controls
@@ -2031,33 +2338,9 @@ impl Render for AgentPane {
             window,
             cx,
         ));
-        let queued = (state.queued_prompts > 0).then(|| {
-            agent_chrome_button("web-agent-restore-queue")
-                .label(format!("{} queued", state.queued_prompts))
-                .tooltip("Restore queued prompts to draft")
-                .disabled(!writable)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.connection.update(cx, |connection, cx| {
-                        connection.send(ProtocolMessage::AgentUnqueue { pane: this.pane }, cx);
-                    });
-                }))
-                .into_any_element()
-        });
         let usage = self.usage.map(|(used, size)| {
             context_usage_meter(("agent-context-usage", self.pane.0), used, size, cx)
         });
-        let usage = if queued.is_some() || usage.is_some() {
-            Some(
-                zz_ui::h_flex()
-                    .items_center()
-                    .gap_1()
-                    .children(queued)
-                    .children(usage)
-                    .into_any_element(),
-            )
-        } else {
-            None
-        };
         let directory = agent_directory_button(
             "web-agent-directory",
             self.descriptor.cwd.as_ref().map_or_else(
@@ -2074,51 +2357,13 @@ impl Render for AgentPane {
         .on_click(cx.listener(|this, _, window, cx| this.open_directory(window, cx)))
         .into_any_element();
         let pane = self.pane;
-        let connection = self.connection.clone();
-        let cwd = self.descriptor.cwd.clone();
-        let new_session = agent_header_icon_button(
-            "web-agent-new-session",
-            IconName::ChatPlus,
-            ready && !running && cwd.is_some(),
-            cx,
-        )
-        .tooltip("New conversation")
-        .on_click(move |_, _, cx| {
-            if let Some(cwd) = cwd.clone() {
-                connection.update(cx, |connection, cx| {
-                    connection.send(
-                        ProtocolMessage::AgentSessionOp {
-                            pane,
-                            op: AgentSessionOpKind::New { cwd },
-                        },
-                        cx,
-                    );
-                });
-            }
-        });
-        let history = agent_header_icon_button(
-            "web-agent-history-button",
-            IconName::History,
-            ready && !running && self.history_supported,
-            cx,
-        )
-        .tooltip(if self.history_supported {
-            "Browse sessions stored by this agent"
-        } else {
-            "This agent does not support conversation history"
-        })
-        .on_click(cx.listener(|this, _, window, cx| this.list_sessions(true, window, cx)));
         let composer =
             AgentComposer {
                 input: self.input.clone(),
                 action: action.into_any_element(),
                 settings,
                 usage,
-                footer_actions: vec![
-                    directory,
-                    new_session.into_any_element(),
-                    history.into_any_element(),
-                ],
+                footer_actions: vec![directory],
                 git: state.git.as_ref().map(|git| {
                     git_summary_footer(
                         ("agent-git-summary", self.pane.0),
@@ -2210,6 +2455,42 @@ impl Render for AgentPane {
                 window,
                 cx,
             ));
+        let can_drag = writable
+            && self.header_drag_handler.is_some()
+            && self
+                .connection
+                .read(cx)
+                .core
+                .snapshot()
+                .sessions
+                .iter()
+                .flat_map(|session| &session.windows)
+                .any(|window| {
+                    window.panes.contains_key(&pane)
+                        && window.zoomed_pane.is_none()
+                        && window.panes.len() > 1
+                });
+        let drag_handler = self.header_drag_handler.clone();
+        let header_drag = pane_drag_button(
+            ("agent-pane-drag", pane.0),
+            pane,
+            title,
+            can_drag,
+            move |drag, window, cx| {
+                if let Some(handler) = &drag_handler {
+                    handler(drag, window, cx);
+                }
+            },
+            cx,
+        )
+        .relative()
+        .when(can_drag, |grip| {
+            grip.when_some(self.header_touch_drag_handler.clone(), |grip, handler| {
+                grip.child(super::touch_drag_handle(move |event, window, cx| {
+                    handler(event, window, cx);
+                }))
+            })
+        });
         let empty = self.rows.is_empty().then(|| {
             let empty_message = if connected {
                 match state.phase {
@@ -2245,6 +2526,10 @@ impl Render for AgentPane {
             .flex_col()
             .size_full()
             .overflow_hidden()
+            .rounded_tl(self.corner_radii.top_left)
+            .rounded_tr(self.corner_radii.top_right)
+            .rounded_bl(self.corner_radii.bottom_left)
+            .rounded_br(self.corner_radii.bottom_right)
             .bg(cx
                 .theme()
                 .background
@@ -2299,6 +2584,7 @@ impl Render for AgentPane {
                                 }))
                         }),
                     )
+                    .child(header_drag)
                     .child(
                         pane_header_icon_button("web-agent-close", IconName::Xmark, writable, cx)
                             .tooltip("Close pane")
@@ -2373,9 +2659,6 @@ impl Render for AgentPane {
             .when(self.history_open, |pane| {
                 pane.child(self.history(ready && !running, cx))
             })
-            .when(self.directory_open, |pane| {
-                pane.child(self.directory_picker(cx))
-            })
             .capture_action(cx.listener(Self::complete))
             .capture_action(cx.listener(Self::move_completion_up))
             .capture_action(cx.listener(Self::move_completion_down))
@@ -2383,26 +2666,14 @@ impl Render for AgentPane {
     }
 }
 
-#[derive(Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionSummary {
-    session_id: String,
-    cwd: PathBuf,
-    #[serde(default)]
-    additional_directories: Vec<PathBuf>,
-    title: Option<String>,
-    #[serde(default)]
-    updated_at: Option<String>,
+#[derive(Clone)]
+struct PendingPermission {
+    request_id: u64,
+    title: String,
+    options: Vec<PermissionChoice>,
 }
 
-struct LocalPrompt {
-    text: String,
-    echoed: usize,
-    images: Vec<AgentImage>,
-    echoed_images: usize,
-}
-
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct PermissionChoice {
     id: String,
     name: String,
@@ -2438,20 +2709,13 @@ fn permission_choices(payload: &Value) -> Vec<PermissionChoice> {
         .collect()
 }
 
-fn inbound_image(content: &Value) -> Option<AgentImage> {
-    if content.get("type").and_then(Value::as_str) != Some("image") {
-        return None;
-    }
-    let data = content.get("data")?.as_str()?;
-    if data.len() > zz_protocol::MAX_AGENT_PROMPT_BYTES.div_ceil(3) * 4 {
-        return None;
-    }
+fn decode_transcript_image(format: &str, data: Vec<u8>) -> Option<Arc<gpui::Image>> {
     let image = AgentImage {
-        format: content.get("mimeType")?.as_str()?.to_owned(),
-        data: BASE64.decode(data).ok()?,
+        format: format.to_owned(),
+        data,
     };
     crate::attachments::validate_images("", std::slice::from_ref(&image)).ok()?;
-    Some(image)
+    preview_image(&image)
 }
 
 fn preview_image(image: &AgentImage) -> Option<Arc<gpui::Image>> {
@@ -2499,358 +2763,296 @@ fn restored_prompts(
         .collect()
 }
 
-#[derive(Default)]
 struct Transcript {
+    model: AgentTranscript<Arc<gpui::Image>>,
     entries: Vec<AgentEntry>,
-    messages: HashMap<String, usize>,
-    tools: HashMap<String, usize>,
-    current: Option<(String, usize)>,
-    generation: u64,
-    local_prompts: VecDeque<LocalPrompt>,
+    markdown: HashMap<u64, AgentMarkdown>,
+    tool_payloads: HashMap<(u64, usize), AgentToolPayload>,
+    revision: u64,
     session_reset: bool,
 }
 
-impl Transcript {
-    fn local_prompt(&mut self, id: u64, text: &str, images: &[AgentImage]) {
-        self.entries.push(AgentEntry::User {
-            id,
-            markdown: AgentMarkdown::from(text),
-            images: images
-                .iter()
-                .filter_map(preview_image)
-                .collect::<Vec<_>>()
-                .into(),
-        });
-        self.current = None;
-        self.local_prompts.push_back(LocalPrompt {
-            text: text.to_owned(),
-            echoed: 0,
-            images: images.to_vec(),
-            echoed_images: 0,
-        });
-    }
-
-    fn prune(&mut self) {
-        let remove = self.entries.len().saturating_sub(500);
-        if remove == 0 {
-            return;
+impl Default for Transcript {
+    fn default() -> Self {
+        Self {
+            model: AgentTranscript::new(decode_transcript_image),
+            entries: Vec::new(),
+            markdown: HashMap::new(),
+            tool_payloads: HashMap::new(),
+            revision: 0,
+            session_reset: false,
         }
-        self.entries.drain(..remove);
-        self.messages.retain(|_, index| {
-            if *index < remove {
-                false
-            } else {
-                *index -= remove;
-                true
-            }
-        });
-        self.tools.retain(|_, index| {
-            if *index < remove {
-                false
-            } else {
-                *index -= remove;
-                true
-            }
-        });
-        self.current = self
-            .current
-            .take()
-            .and_then(|(kind, index)| index.checked_sub(remove).map(|index| (kind, index)));
+    }
+}
+
+impl Transcript {
+    fn local_prompt(&mut self, text: &str, images: &[AgentImage]) {
+        self.model.begin_prompt(
+            text.to_owned(),
+            images.iter().filter_map(preview_image).collect(),
+        );
+        self.synchronize();
     }
 
-    fn apply(&mut self, sequence: u64, item: &Value) {
+    fn synchronize(&mut self) {
+        let changed = self.model.changed_entries(self.revision);
+        let indices = changed.unwrap_or_else(|| (0..self.model.entries().len()).collect());
+        for index in indices {
+            let entry = ui_entry_with_markdown(
+                &self.model.entries()[index],
+                &mut self.markdown,
+                &mut self.tool_payloads,
+            );
+            if index < self.entries.len() {
+                self.entries[index] = entry;
+            } else {
+                self.entries.push(entry);
+            }
+        }
+        self.revision = self.model.revision();
+    }
+
+    fn apply(&mut self, _sequence: u64, item: &Value) {
         match item.get("item").and_then(Value::as_str).unwrap_or_default() {
             "sessionReset" => {
                 *self = Self::default();
                 self.session_reset = true;
             }
-            "sessionReady" => self.session_reset = false,
+            "sessionReady" => {
+                self.session_reset = false;
+                self.model.finish_replay();
+                self.model.finish_turn();
+            }
             "sessionSwitched" => {
                 if !self.session_reset {
                     *self = Self::default();
                 }
-                for (index, update) in item
+                for update in item
                     .get("replay")
                     .and_then(Value::as_array)
                     .into_iter()
                     .flatten()
-                    .enumerate()
                 {
-                    self.update(
-                        sequence.saturating_mul(1024).saturating_add(index as u64),
-                        update,
-                    );
+                    if let Ok(update) = serde_json::from_value(update.clone()) {
+                        self.model.apply_update(update);
+                    }
                 }
                 self.session_reset = false;
-                self.current = None;
+                self.model.finish_replay();
             }
             "update" => {
-                if let Some(update) = item.get("update") {
-                    self.update(sequence, update);
+                if let Some(update) = item.get("update")
+                    && let Ok(update) = serde_json::from_value(update.clone())
+                {
+                    self.model.apply_update(update);
                 }
             }
-            "turnStarted" | "promptFinished" => {
-                if item.get("item").and_then(Value::as_str) == Some("promptFinished") {
-                    self.local_prompts.pop_front();
+            "permissionRequested" => {
+                if let (Some(request_id), Some(tool), Some(options)) = (
+                    item.get("request_id").and_then(Value::as_u64),
+                    item.get("tool_call"),
+                    item.get("options"),
+                ) && let (Ok(tool), Ok(options)) = (
+                    serde_json::from_value(tool.clone()),
+                    serde_json::from_value(options.clone()),
+                ) {
+                    self.model.request_permission(request_id, tool, options);
                 }
-                self.current = None;
-                self.generation = self.generation.wrapping_add(1);
             }
+            "permissionResolved" => {
+                if let Some(request_id) = item.get("request_id").and_then(Value::as_u64) {
+                    self.model.resolve_permission(
+                        request_id,
+                        item.get("canceled")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                    );
+                }
+            }
+            "promptFinished" => {
+                if item.pointer("/outcome/outcome").and_then(Value::as_str) == Some("failed") {
+                    self.model.fail_inflight();
+                } else if item.pointer("/outcome/stop_reason").and_then(Value::as_str)
+                    == Some("cancelled")
+                {
+                    self.model.cancel_inflight();
+                } else {
+                    self.model.finish_turn();
+                }
+                self.model.finish_replay();
+            }
+            "paneFailed" => self.model.fail_inflight(),
             _ => {}
         }
+        self.synchronize();
     }
+}
 
-    fn update(&mut self, sequence: u64, update: &Value) {
-        let kind = update
-            .get("sessionUpdate")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        match kind {
-            "agent_message_chunk" | "user_message_chunk" | "agent_thought_chunk" => {
-                let Some(content) = update.get("content") else {
-                    return;
-                };
-                let image = (kind == "user_message_chunk")
-                    .then(|| inbound_image(content))
-                    .flatten();
-                let text = if let Some(text) = content.get("text").and_then(Value::as_str) {
-                    text.to_owned()
-                } else if content.get("type").and_then(Value::as_str) == Some("image") {
-                    if image.is_some() {
-                        String::new()
-                    } else {
-                        format!(
-                            "*[Image: {}]*",
-                            content
-                                .get("mimeType")
-                                .and_then(Value::as_str)
-                                .unwrap_or("unknown")
-                        )
+fn streaming_markdown(
+    markdown: &mut HashMap<u64, AgentMarkdown>,
+    id: u64,
+    source: &str,
+) -> AgentMarkdown {
+    let markdown = markdown
+        .entry(id)
+        .or_insert_with(|| AgentMarkdown::new(source));
+    markdown.synchronize_append(source);
+    markdown.clone()
+}
+
+fn replaced_markdown(
+    markdown: &mut HashMap<u64, AgentMarkdown>,
+    id: u64,
+    source: &str,
+) -> AgentMarkdown {
+    let markdown = markdown
+        .entry(id)
+        .or_insert_with(|| AgentMarkdown::new(source));
+    markdown.replace(source);
+    markdown.clone()
+}
+
+fn ui_entry_with_markdown(
+    entry: &AgentThreadEntry<Arc<gpui::Image>>,
+    markdown_sources: &mut HashMap<u64, AgentMarkdown>,
+    tool_payloads: &mut HashMap<(u64, usize), AgentToolPayload>,
+) -> AgentEntry {
+    match entry {
+        AgentThreadEntry::User {
+            id,
+            markdown,
+            images,
+        } => AgentEntry::User {
+            id: *id,
+            markdown: streaming_markdown(markdown_sources, *id, markdown),
+            images: images.clone().into(),
+        },
+        AgentThreadEntry::Assistant { id, markdown, .. } => AgentEntry::Assistant {
+            id: *id,
+            markdown: streaming_markdown(markdown_sources, *id, markdown),
+        },
+        AgentThreadEntry::Reasoning {
+            id,
+            label,
+            markdown,
+            default_expanded,
+        } => AgentEntry::Reasoning {
+            id: *id,
+            label: gpui::SharedString::from(label.clone()),
+            markdown: streaming_markdown(markdown_sources, *id, markdown),
+            default_expanded: *default_expanded,
+        },
+        AgentThreadEntry::Tool {
+            id,
+            kind,
+            status,
+            label,
+            location,
+            input,
+            output,
+            default_expanded,
+            ..
+        } => {
+            tool_payloads.retain(|(entry_id, slot), _| {
+                *entry_id != *id
+                    || (*slot == 0 && input.is_some())
+                    || (*slot > 0 && *slot <= output.len())
+            });
+            AgentEntry::Tool(AgentToolEntry {
+                id: *id,
+                kind: match kind {
+                    AgentToolKindModel::Read => AgentToolKind::Read,
+                    AgentToolKindModel::Search => AgentToolKind::Search,
+                    AgentToolKindModel::Edit
+                    | AgentToolKindModel::Delete
+                    | AgentToolKindModel::Move => AgentToolKind::Edit,
+                    AgentToolKindModel::Execute => AgentToolKind::Execute,
+                    AgentToolKindModel::Fetch => AgentToolKind::Fetch,
+                    AgentToolKindModel::Think => AgentToolKind::Think,
+                    AgentToolKindModel::SwitchMode | AgentToolKindModel::Other => {
+                        AgentToolKind::Other
                     }
-                } else {
-                    return;
-                };
-                if kind == "user_message_chunk"
-                    && let Some(local) = self.local_prompts.front_mut()
-                {
-                    if let Some(image) = &image {
-                        if local
-                            .images
-                            .get(local.echoed_images)
-                            .is_some_and(|expected| {
-                                expected.format == image.format && expected.data == image.data
-                            })
-                        {
-                            local.echoed_images += 1;
-                            return;
-                        }
-                    } else if local
-                        .text
-                        .get(local.echoed..)
-                        .is_some_and(|remaining| remaining.starts_with(&text))
-                    {
-                        local.echoed += text.len();
-                        return;
-                    }
-                }
-                let images = image
+                },
+                status: match status {
+                    AgentToolStatusModel::Pending => AgentToolStatus::Pending,
+                    AgentToolStatusModel::Running => AgentToolStatus::Running,
+                    AgentToolStatusModel::NeedsApproval => AgentToolStatus::NeedsApproval,
+                    AgentToolStatusModel::Completed => AgentToolStatus::Completed,
+                    AgentToolStatusModel::Failed => AgentToolStatus::Failed,
+                    AgentToolStatusModel::Canceled => AgentToolStatus::Canceled,
+                },
+                label: gpui::SharedString::from(label.clone()),
+                location: location.clone().map(gpui::SharedString::from),
+                input: input
                     .as_ref()
-                    .and_then(preview_image)
-                    .into_iter()
-                    .collect::<Vec<_>>();
-                let key = update
-                    .get("messageId")
-                    .and_then(Value::as_str)
-                    .map(|id| format!("{}:{kind}:{id}", self.generation));
-                let previous = key
-                    .as_ref()
-                    .and_then(|key| self.messages.get(key).copied())
-                    .or_else(|| {
-                        key.is_none()
-                            .then(|| {
-                                self.current
-                                    .as_ref()
-                                    .filter(|(previous, _)| previous == kind)
-                                    .map(|(_, index)| *index)
-                            })
-                            .flatten()
-                    });
-                if let Some(index) = previous {
-                    let markdown = match &mut self.entries[index] {
-                        AgentEntry::User {
-                            markdown,
-                            images: existing,
-                            ..
-                        } => {
-                            if !images.is_empty() {
-                                let mut combined = existing.to_vec();
-                                combined.extend(images);
-                                combined.truncate(zz_protocol::MAX_AGENT_PROMPT_IMAGES);
-                                *existing = combined.into();
-                            }
-                            markdown
-                        }
-                        AgentEntry::Assistant { markdown, .. }
-                        | AgentEntry::Reasoning { markdown, .. } => markdown,
-                        _ => return,
-                    };
-                    let mut combined = markdown.full_text();
-                    if combined.len() >= 256 * 1024 {
-                        return;
-                    }
-                    combined.push_str(&text);
-                    let mut end = combined.len().min(256 * 1024);
-                    while !combined.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    combined.truncate(end);
-                    markdown.synchronize_append(&combined);
-                    return;
-                }
-                let markdown = AgentMarkdown::from(text);
-                let entry = match kind {
-                    "user_message_chunk" => AgentEntry::User {
-                        id: sequence,
-                        markdown,
-                        images: images.into(),
-                    },
-                    "agent_thought_chunk" => AgentEntry::Reasoning {
-                        id: sequence,
-                        label: "Thinking".into(),
-                        markdown,
-                        default_expanded: false,
-                    },
-                    _ => AgentEntry::Assistant {
-                        id: sequence,
-                        markdown,
-                    },
-                };
-                let index = self.entries.len();
-                self.entries.push(entry);
-                if let Some(key) = key {
-                    self.messages.insert(key, index);
-                }
-                self.current = Some((kind.to_owned(), index));
-            }
-            "tool_call" | "tool_call_update" => {
-                self.current = None;
-                let Some(id) = update.get("toolCallId").and_then(Value::as_str) else {
-                    return;
-                };
-                let index = *self.tools.entry(id.to_owned()).or_insert_with(|| {
-                    let index = self.entries.len();
-                    self.entries.push(AgentEntry::Tool(AgentToolEntry {
-                        id: sequence,
-                        kind: AgentToolKind::Other,
-                        status: AgentToolStatus::Pending,
-                        label: "Tool call".into(),
-                        location: None,
-                        input: None,
-                        output: Arc::from([]),
-                        default_expanded: false,
-                    }));
-                    index
-                });
-                let AgentEntry::Tool(tool) = &mut self.entries[index] else {
-                    return;
-                };
-                if let Some(title) = update.get("title").and_then(Value::as_str) {
-                    tool.label = title.to_owned().into();
-                }
-                if let Some(kind) = update.get("kind").and_then(Value::as_str) {
-                    tool.kind = match kind {
-                        "read" => AgentToolKind::Read,
-                        "search" => AgentToolKind::Search,
-                        "edit" => AgentToolKind::Edit,
-                        "execute" => AgentToolKind::Execute,
-                        "fetch" => AgentToolKind::Fetch,
-                        "think" => AgentToolKind::Think,
-                        _ => AgentToolKind::Other,
-                    };
-                }
-                if let Some(status) = update.get("status").and_then(Value::as_str) {
-                    tool.status = match status {
-                        "in_progress" => AgentToolStatus::Running,
-                        "completed" => AgentToolStatus::Completed,
-                        "failed" => AgentToolStatus::Failed,
-                        _ => AgentToolStatus::Pending,
-                    };
-                }
-                if let Some(locations) = update.get("locations") {
-                    tool.location = locations
-                        .get(0)
-                        .and_then(|location| location.get("path"))
-                        .and_then(Value::as_str)
-                        .map(|path| path.to_owned().into());
-                }
-                if let Some(input) = update.get("rawInput") {
-                    tool.input = Some(AgentToolPayload::Json(
-                        serde_json::to_string_pretty(input)
-                            .unwrap_or_default()
-                            .into(),
-                    ));
-                }
-                if let Some(content) = update.get("content").and_then(Value::as_array) {
-                    tool.output = content
-                        .iter()
-                        .filter_map(|content| {
-                            if content.get("type").and_then(Value::as_str) == Some("diff") {
-                                Some(AgentToolPayload::Diff {
-                                    path: content
-                                        .get("path")
-                                        .and_then(Value::as_str)
-                                        .unwrap_or_default()
-                                        .to_owned()
-                                        .into(),
-                                    old: content
-                                        .get("oldText")
-                                        .and_then(Value::as_str)
-                                        .map(Into::into),
-                                    new: content
-                                        .get("newText")
-                                        .and_then(Value::as_str)
-                                        .unwrap_or_default()
-                                        .into(),
-                                })
-                            } else {
-                                content
-                                    .pointer("/content/text")
-                                    .and_then(Value::as_str)
-                                    .map(|text| AgentToolPayload::Text(text.into()))
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .into();
-                }
-            }
-            "plan" => {
-                let markdown = update
-                    .get("entries")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .map(|entry| {
-                        let checked =
-                            entry.get("status").and_then(Value::as_str) == Some("completed");
-                        format!(
-                            "- [{}] {}",
-                            if checked { "x" } else { " " },
-                            entry
-                                .get("content")
-                                .and_then(Value::as_str)
-                                .unwrap_or_default()
-                        )
+                    .map(|payload| retained_tool_payload(tool_payloads, *id, 0, payload)),
+                output: output
+                    .iter()
+                    .enumerate()
+                    .map(|(index, payload)| {
+                        retained_tool_payload(tool_payloads, *id, index + 1, payload)
                     })
                     .collect::<Vec<_>>()
-                    .join("\n");
-                self.entries.push(AgentEntry::Plan {
-                    id: sequence,
-                    markdown: markdown.into(),
-                });
-            }
-            _ => {}
+                    .into(),
+                default_expanded: *default_expanded,
+            })
         }
+        AgentThreadEntry::Plan { id, markdown } => AgentEntry::Plan {
+            id: *id,
+            markdown: replaced_markdown(markdown_sources, *id, markdown),
+        },
     }
+}
+
+fn retained_tool_payload(
+    retained: &mut HashMap<(u64, usize), AgentToolPayload>,
+    entry_id: u64,
+    slot: usize,
+    payload: &ToolPayload,
+) -> AgentToolPayload {
+    let key = (entry_id, slot);
+    let next = match (retained.get(&key), payload) {
+        (
+            Some(AgentToolPayload::Diff {
+                old: retained_old,
+                new: retained_new,
+                ..
+            }),
+            ToolPayload::Diff { path, old, new },
+        ) if retained_old.is_some() == old.is_some() => {
+            if let (Some(retained_old), Some(old)) = (retained_old, old) {
+                retained_old.synchronize(old);
+            }
+            retained_new.synchronize(new);
+            AgentToolPayload::Diff {
+                path: path.clone().into(),
+                old: retained_old.clone(),
+                new: retained_new.clone(),
+            }
+        }
+        (Some(AgentToolPayload::Text(retained)), ToolPayload::Text(text)) => {
+            retained.synchronize(text);
+            AgentToolPayload::Text(retained.clone())
+        }
+        (Some(AgentToolPayload::Json(retained)), ToolPayload::Json(text)) => {
+            retained.synchronize(text);
+            AgentToolPayload::Json(retained.clone())
+        }
+        (Some(AgentToolPayload::Terminal(retained)), ToolPayload::Terminal(text)) => {
+            retained.synchronize(text);
+            AgentToolPayload::Terminal(retained.clone())
+        }
+        (_, ToolPayload::Diff { path, old, new }) => AgentToolPayload::Diff {
+            path: path.clone().into(),
+            old: old.as_deref().map(AgentToolText::new),
+            new: AgentToolText::new(new),
+        },
+        (_, ToolPayload::Text(text)) => AgentToolPayload::Text(AgentToolText::new(text)),
+        (_, ToolPayload::Json(text)) => AgentToolPayload::Json(AgentToolText::new(text)),
+        (_, ToolPayload::Terminal(text)) => AgentToolPayload::Terminal(AgentToolText::new(text)),
+    };
+    retained.insert(key, next.clone());
+    next
 }
 
 #[cfg(test)]
@@ -2916,7 +3118,7 @@ mod tests {
         let content =
             json!({"type":"image","mimeType":image.format,"data":BASE64.encode(&image.data)});
         let mut transcript = Transcript::default();
-        transcript.local_prompt(u64::MAX, "", &[image]);
+        transcript.local_prompt("", &[image]);
         transcript.apply(1, &json!({"item":"turnStarted"}));
         transcript.apply(2, &json!({"item":"update","update":{"sessionUpdate":"user_message_chunk","content":content}}));
         assert_eq!(transcript.entries.len(), 1);
@@ -2929,6 +3131,119 @@ mod tests {
             };
             assert_eq!(images.len(), 1);
         }
+    }
+
+    #[test]
+    fn plan_updates_replace_the_existing_row_and_keep_in_progress_markers() {
+        let mut transcript = Transcript::default();
+        for (sequence, status) in [(1, "in_progress"), (2, "completed")] {
+            transcript.apply(sequence, &json!({"item":"update","update":{
+                "sessionUpdate":"plan","entries":[{"content":"Ship shared UI","priority":"high","status":status}]
+            }}));
+            let AgentEntry::Plan { markdown, .. } = &transcript.entries[0] else {
+                panic!()
+            };
+            assert_eq!(
+                markdown.full_text(),
+                if sequence == 1 {
+                    "- [~] Ship shared UI"
+                } else {
+                    "- [x] Ship shared UI"
+                }
+            );
+        }
+        assert_eq!(transcript.entries.len(), 1);
+    }
+
+    #[test]
+    fn structured_tool_output_permissions_and_cancellation_follow_the_shared_model() {
+        let mut transcript = Transcript::default();
+        transcript.apply(1, &json!({"item":"update","update":{
+            "sessionUpdate":"tool_call","toolCallId":"t","title":"Run tests","kind":"execute","status":"in_progress",
+            "locations":[{"path":"src/main.rs","line":12}],
+            "content":[{"type":"terminal","terminalId":"pty-1"}],"rawOutput":{"ignored":true}
+        }}));
+        let AgentEntry::Tool(tool) = &transcript.entries[0] else {
+            panic!()
+        };
+        assert_eq!(tool.location.as_deref(), Some("src/main.rs:12"));
+        assert!(matches!(&tool.output[0], AgentToolPayload::Terminal(_)));
+        transcript.apply(2, &json!({"item":"permissionRequested","request_id":7,
+            "tool_call":{"toolCallId":"t"},"options":[{"optionId":"allow","name":"Allow once","kind":"allow_once"}]}));
+        let AgentEntry::Tool(tool) = &transcript.entries[0] else {
+            panic!()
+        };
+        assert_eq!(tool.status, AgentToolStatus::NeedsApproval);
+        assert_eq!(transcript.model.permissions().len(), 1);
+        transcript.apply(
+            3,
+            &json!({"item":"permissionResolved","request_id":7,"canceled":true}),
+        );
+        let AgentEntry::Tool(tool) = &transcript.entries[0] else {
+            panic!()
+        };
+        assert_eq!(tool.status, AgentToolStatus::Canceled);
+        assert!(transcript.model.permissions().is_empty());
+    }
+
+    #[test]
+    fn failed_and_canceled_turns_settle_unfinished_tools() {
+        for (outcome, expected) in [
+            (
+                json!({"outcome":"failed","message":"lost connection"}),
+                AgentToolStatus::Failed,
+            ),
+            (
+                json!({"outcome":"finished","stop_reason":"cancelled"}),
+                AgentToolStatus::Canceled,
+            ),
+        ] {
+            let mut transcript = Transcript::default();
+            transcript.apply(1, &json!({"item":"update","update":{
+                "sessionUpdate":"tool_call","toolCallId":"t","title":"Read file","kind":"read","status":"in_progress"
+            }}));
+            transcript.apply(2, &json!({"item":"promptFinished","outcome":outcome}));
+            let AgentEntry::Tool(tool) = &transcript.entries[0] else {
+                panic!()
+            };
+            assert_eq!(tool.status, expected);
+        }
+    }
+
+    #[test]
+    fn project_picker_searches_session_titles_ids_and_remote_paths() {
+        let sessions = vec![
+            AgentSessionSummary {
+                session_id: "opaque-a".into(),
+                cwd: "/work/api".into(),
+                title: Some("Fix login".into()),
+                additional_directories: vec![],
+                updated_at: None,
+            },
+            AgentSessionSummary {
+                session_id: "opaque-b".into(),
+                cwd: "/other/api".into(),
+                title: Some("Draft docs".into()),
+                additional_directories: vec![],
+                updated_at: None,
+            },
+        ];
+        let rows = project_directory_rows(Some(Path::new("/work/api")), &sessions, &[], "");
+        assert_eq!(
+            rows.iter()
+                .map(|row| row.label.as_str())
+                .collect::<Vec<_>>(),
+            ["/work/api", "/other/api"]
+        );
+        assert_eq!(rows[0].sessions, 1);
+        let filtered =
+            project_directory_rows(Some(Path::new("/work/api")), &sessions, &[], "login");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].path, PathBuf::from("/work/api"));
+        assert_eq!(ranked_session_indices(&sessions, "opaque-b"), [1]);
+        let typed = project_directory_rows(None, &[], &[], "/remote/project");
+        assert_eq!(typed[0].path, PathBuf::from("/remote/project"));
+        assert!(!typed[0].recent);
     }
 
     #[test]
@@ -2969,6 +3284,28 @@ mod tests {
     }
 
     #[test]
+    fn history_timestamps_use_compact_calendar_labels() {
+        let date = |year, month, day| {
+            chrono::NaiveDate::from_ymd_opt(year, month, day).expect("valid fixture date")
+        };
+        let today = date(2026, 7, 20);
+        assert_eq!(history_timestamp_label(today, 18, 1, today), "Today, 18:01");
+        assert_eq!(
+            history_timestamp_label(date(2026, 7, 19), 9, 43, today),
+            "Yesterday, 09:43"
+        );
+        assert_eq!(
+            history_timestamp_label(date(2026, 6, 4), 7, 5, today),
+            "Jun 4, 07:05"
+        );
+        assert_eq!(
+            history_timestamp_label(date(2025, 12, 31), 23, 59, today),
+            "Dec 31, 2025, 23:59"
+        );
+        assert_eq!(history_timestamp("not a date"), "not a date");
+    }
+
+    #[test]
     fn usage_reads_live_and_history_updates() {
         let update = json!({"sessionUpdate":"usage_update","used":400,"size":1000});
         assert_eq!(usage_from_update(&update), Some((400, 1000)));
@@ -2985,15 +3322,15 @@ mod tests {
     #[test]
     fn submitted_prompt_is_visible_without_a_provider_echo_and_not_duplicated_by_one() {
         let mut transcript = Transcript::default();
-        transcript.local_prompt(u64::MAX, "hello world", &[]);
+        transcript.local_prompt("hello world", &[]);
         assert_eq!(transcript.entries.len(), 1);
         transcript.apply(1, &json!({"item":"turnStarted"}));
         for (sequence, text) in [(2, "hello"), (3, " world")] {
-            transcript.apply(sequence, &json!({"item":"update","update":{"sessionUpdate":"user_message_chunk","content":{"text":text}}}));
+            transcript.apply(sequence, &json!({"item":"update","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":text}}}));
         }
         assert_eq!(transcript.entries.len(), 1);
         transcript.apply(4, &json!({"item":"promptFinished"}));
-        transcript.apply(5, &json!({"item":"update","update":{"sessionUpdate":"user_message_chunk","content":{"text":"another client"}}}));
+        transcript.apply(5, &json!({"item":"update","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"another client"}}}));
         assert_eq!(transcript.entries.len(), 2);
     }
 
@@ -3017,7 +3354,7 @@ mod tests {
     fn chunks_keep_message_identity_and_turn_boundaries() {
         let mut transcript = Transcript::default();
         for (sequence, text) in [(1, "hello"), (2, " world")] {
-            transcript.apply(sequence, &json!({"item":"update","update":{"sessionUpdate":"agent_message_chunk","messageId":"a","content":{"text":text}}}));
+            transcript.apply(sequence, &json!({"item":"update","update":{"sessionUpdate":"agent_message_chunk","messageId":"a","content":{"type":"text","text":text}}}));
         }
         assert_eq!(transcript.entries.len(), 1);
         let AgentEntry::Assistant { markdown, .. } = &transcript.entries[0] else {
@@ -3025,7 +3362,7 @@ mod tests {
         };
         assert_eq!(markdown.full_text(), "hello world");
         transcript.apply(3, &json!({"item":"promptFinished"}));
-        transcript.apply(4, &json!({"item":"update","update":{"sessionUpdate":"agent_message_chunk","messageId":"a","content":{"text":"next"}}}));
+        transcript.apply(4, &json!({"item":"update","update":{"sessionUpdate":"agent_message_chunk","messageId":"a","content":{"type":"text","text":"next"}}}));
         assert_eq!(transcript.entries.len(), 2);
     }
 
@@ -3033,13 +3370,13 @@ mod tests {
     fn session_switch_preserves_streamed_history_and_replaces_a_previous_session() {
         let mut transcript = Transcript::default();
         transcript.apply(1, &json!({"item":"sessionReset","restoring":true}));
-        transcript.apply(2, &json!({"item":"update","update":{"sessionUpdate":"agent_message_chunk","content":{"text":"restored"}}}));
+        transcript.apply(2, &json!({"item":"update","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"restored"}}}));
         transcript.apply(3, &json!({"item":"sessionSwitched","replay":[]}));
         let AgentEntry::Assistant { markdown, .. } = &transcript.entries[0] else {
             panic!()
         };
         assert_eq!(markdown.full_text(), "restored");
-        transcript.apply(4, &json!({"item":"sessionSwitched","replay":[{"sessionUpdate":"agent_message_chunk","content":{"text":"another session"}}]}));
+        transcript.apply(4, &json!({"item":"sessionSwitched","replay":[{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"another session"}}]}));
         assert_eq!(transcript.entries.len(), 1);
         let AgentEntry::Assistant { markdown, .. } = &transcript.entries[0] else {
             panic!()
@@ -3058,7 +3395,7 @@ mod tests {
         assert_eq!(tool.status, AgentToolStatus::Completed);
         transcript.apply(3, &json!({"item":"sessionReset"}));
         assert!(transcript.entries.is_empty());
-        assert!(transcript.tools.is_empty());
+        assert!(transcript.model.permissions().is_empty());
     }
 }
 
@@ -3191,6 +3528,96 @@ fn config_controls(config_options: &str, modes: &str) -> Vec<ConfigControl> {
     controls
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProjectDirectory {
+    path: PathBuf,
+    label: String,
+    sessions: usize,
+    recent: bool,
+}
+
+fn ranked_session_indices(sessions: &[AgentSessionSummary], query: &str) -> Vec<usize> {
+    let needle = query.trim().to_lowercase();
+    let mut ranked = sessions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, session)| {
+            if needle.is_empty() {
+                return Some((3, index));
+            }
+            [
+                session.title.as_deref().unwrap_or_default().to_lowercase(),
+                session.cwd.to_string_lossy().to_lowercase(),
+                session.session_id.to_lowercase(),
+            ]
+            .iter()
+            .filter_map(|candidate| completion_score(candidate, &needle))
+            .min()
+            .map(|score| (score, index))
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by_key(|(score, index)| (*score, *index));
+    ranked.into_iter().map(|(_, index)| index).collect()
+}
+
+fn project_directory_rows(
+    cwd: Option<&Path>,
+    sessions: &[AgentSessionSummary],
+    directories: &[PathBuf],
+    query: &str,
+) -> Vec<ProjectDirectory> {
+    let matching = ranked_session_indices(sessions, query)
+        .into_iter()
+        .map(|index| sessions[index].cwd.as_path())
+        .collect::<BTreeSet<_>>();
+    let needle = query.trim().to_lowercase();
+    let mut counts = HashMap::<PathBuf, usize>::new();
+    for session in sessions {
+        *counts.entry(session.cwd.clone()).or_default() += 1;
+    }
+    let mut seen = BTreeSet::new();
+    let mut rows = Vec::new();
+    for (path, recent) in cwd
+        .into_iter()
+        .chain(sessions.iter().map(|session| session.cwd.as_path()))
+        .map(|path| (path, true))
+        .chain(directories.iter().map(|path| (path.as_path(), false)))
+    {
+        if (needle.is_empty()
+            || completion_score(&path.to_string_lossy().to_lowercase(), &needle).is_some()
+            || matching.contains(path))
+            && seen.insert(path.to_path_buf())
+        {
+            rows.push(ProjectDirectory {
+                path: path.to_path_buf(),
+                label: directory_label(path),
+                sessions: counts.get(path).copied().unwrap_or_default(),
+                recent,
+            });
+        }
+    }
+    if let Some(path) = absolute_daemon_directory(query)
+        && seen.insert(path.clone())
+    {
+        rows.push(ProjectDirectory {
+            label: directory_label(&path),
+            path,
+            sessions: 0,
+            recent: false,
+        });
+    }
+    let mut labels = HashMap::<String, usize>::new();
+    for row in &rows {
+        *labels.entry(row.label.clone()).or_default() += 1;
+    }
+    for row in &mut rows {
+        if labels[&row.label] > 1 {
+            row.label = row.path.display().to_string();
+        }
+    }
+    rows
+}
+
 fn absolute_daemon_directory(query: &str) -> Option<PathBuf> {
     let query = query.trim();
     (query.starts_with('/') && query.len() <= 64 * 1024 && !query.contains('\0'))
@@ -3208,38 +3635,57 @@ fn history_timestamp(value: &str) -> String {
     #[cfg(target_family = "wasm")]
     {
         let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(value));
-        if !date.get_time().is_finite() {
-            return value.into();
-        }
         let now = js_sys::Date::new_0();
-        let time = format!("{:02}:{:02}", date.get_hours(), date.get_minutes());
-        let yesterday = js_sys::Date::new_0();
-        yesterday.set_date(now.get_date().saturating_sub(1));
-        let same_day = |other: &js_sys::Date| {
-            date.get_full_year() == other.get_full_year()
-                && date.get_month() == other.get_month()
-                && date.get_date() == other.get_date()
-        };
-        if same_day(&now) {
-            return format!("Today, {time}");
-        }
-        if same_day(&yesterday) {
-            return format!("Yesterday, {time}");
-        }
-        let months = [
-            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-        ];
-        let month = months[date.get_month() as usize];
-        if date.get_full_year() == now.get_full_year() {
-            format!("{month} {}, {time}", date.get_date())
-        } else {
-            format!(
-                "{month} {}, {}, {time}",
+        let day = |date: &js_sys::Date| {
+            chrono::NaiveDate::from_ymd_opt(
+                date.get_full_year() as i32,
+                date.get_month() + 1,
                 date.get_date(),
-                date.get_full_year()
             )
+        };
+        match (day(&date), day(&now)) {
+            (Some(day), Some(today)) if date.get_time().is_finite() => {
+                history_timestamp_label(day, date.get_hours(), date.get_minutes(), today)
+            }
+            _ => value.into(),
         }
     }
     #[cfg(not(target_family = "wasm"))]
-    value.into()
+    {
+        use chrono::Timelike as _;
+        let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(value) else {
+            return value.to_owned();
+        };
+        let local = timestamp.with_timezone(&chrono::Local);
+        history_timestamp_label(
+            local.date_naive(),
+            local.hour(),
+            local.minute(),
+            chrono::Local::now().date_naive(),
+        )
+    }
+}
+
+fn history_timestamp_label(
+    date: chrono::NaiveDate,
+    hour: u32,
+    minute: u32,
+    today: chrono::NaiveDate,
+) -> String {
+    use chrono::Datelike as _;
+    let time = format!("{hour:02}:{minute:02}");
+    if date == today {
+        format!("Today, {time}")
+    } else if today.pred_opt() == Some(date) {
+        format!("Yesterday, {time}")
+    } else if date.year() == today.year() {
+        format!("{} {}, {time}", date.format("%b"), date.day())
+    } else {
+        format!(
+            "{} {}, {}, {time}",
+            date.format("%b"),
+            date.day(),
+            date.year()
+        )
+    }
 }

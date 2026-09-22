@@ -40,6 +40,7 @@ cargo watch \
     --watch clients/web/Cargo.toml \
     --watch clients/web/Cargo.lock \
     --watch clients/web/src \
+    --watch clients/gpui-shared/src \
     --watch clients/web/web \
     --watch crates/zz-client/src \
     --watch crates/zz-protocol/src \

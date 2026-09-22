@@ -14,10 +14,14 @@ use zz_ui::{
     shell::{WorkspaceStatusSlots, workspace_status_bar},
 };
 
-use super::{WebClient, sidebar};
+use super::{AppShell, sidebar};
 use crate::connection::Connection;
 
-pub(super) fn render(view: &WebClient, cx: &mut Context<WebClient>) -> AnyElement {
+pub(super) fn render(
+    view: &AppShell,
+    window: &gpui::Window,
+    cx: &mut Context<AppShell>,
+) -> AnyElement {
     let connection = view.connection.read(cx);
     let core = &connection.core;
     let connected = connection.connected;
@@ -78,7 +82,7 @@ pub(super) fn render(view: &WebClient, cx: &mut Context<WebClient>) -> AnyElemen
                                     );
                                     connection.command(
                                         "select-pane",
-                                        vec!["-t".into(), target.clone()],
+                                        vec!["-Z".into(), "-t".into(), target.clone()],
                                         cx,
                                     );
                                 });
@@ -140,7 +144,7 @@ pub(super) fn render(view: &WebClient, cx: &mut Context<WebClient>) -> AnyElemen
                             );
                             connection.command(
                                 "select-pane",
-                                vec!["-t".into(), target.clone()],
+                                vec!["-Z".into(), "-t".into(), target.clone()],
                                 cx,
                             );
                         });
@@ -182,7 +186,7 @@ pub(super) fn render(view: &WebClient, cx: &mut Context<WebClient>) -> AnyElemen
             session,
             windows,
             right,
-            titlebar_controls: (!view.sidebar).then(|| (view.controls(cx), px(52.0))),
+            titlebar_controls: Some((view.controls(cx), AppShell::controls_width(window))),
             window_controls: None,
         },
         cx,

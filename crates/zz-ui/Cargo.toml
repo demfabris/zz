@@ -17,6 +17,7 @@ agent = []
 editor = []
 tree-sitter = [
     "dep:tree-sitter",
+    "dep:tree-sitter-language",
     "dep:tree-sitter-json",
     "dep:tree-sitter-md",
     "dep:tree-sitter-rust",
@@ -54,6 +55,13 @@ parking_lot.workspace = true
 ropey = { version = "=2.0.0-beta.1", features = ["metric_lines_lf", "metric_utf16"] }
 sum-tree = { version = "0.2.0", package = "zed-sum-tree" }
 tracing = "0.1.44"
+tree-sitter = { version = "0.27.0", optional = true }
+tree-sitter-language = { version = "0.1.8", optional = true }
+tree-sitter-json = { version = "0.24.8", optional = true }
+tree-sitter-md = { version = "0.5.3", optional = true }
+tree-sitter-rust = { version = "0.24.2", optional = true }
+tree-sitter-tmux = { version = "0.1.4", optional = true }
+tree-sitter-toml-ng = { version = "0.7.0", optional = true }
 zz-client = { path = "../zz-client" }
 zz-protocol = { path = "../zz-protocol" }
 zz-terminal = { path = "../zz-terminal", default-features = false }
@@ -64,12 +72,6 @@ zz-terminal = { path = "../zz-terminal", default-features = false }
 rust-embed = { version = "8.12", features = ["include-exclude", "debug-embed"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-tree-sitter = { version = "0.26.13", optional = true }
-tree-sitter-json = { version = "0.24.8", optional = true }
-tree-sitter-md = { version = "0.5.3", optional = true }
-tree-sitter-rust = { version = "0.24.2", optional = true }
-tree-sitter-tmux = { version = "0.1.4", optional = true }
-tree-sitter-toml-ng = { version = "0.7.0", optional = true }
 url.workspace = true
 
 [dev-dependencies]

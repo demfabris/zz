@@ -31,7 +31,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn connect(endpoint: String, session: String) -> Self {
+    pub fn connect(endpoint: String, session: Option<String>, native_ui: bool) -> Self {
         let (tx, events) = mpsc::sync_channel(64);
         let client = Arc::new(Mutex::new(None));
         let cancelled = Arc::new(AtomicBool::new(false));
@@ -75,13 +75,14 @@ impl Connection {
                         }
                     }
                 });
+                let connect = if native_ui {
+                    InteractiveClient::connect_endpoint_with_prompts
+                } else {
+                    InteractiveClient::connect_terminal_surface_endpoint_with_prompts
+                };
                 let connected = Arc::new(
-                    InteractiveClient::connect_terminal_surface_endpoint_with_prompts(
-                        &endpoint,
-                        TerminalColorScheme::Dark,
-                        Some(prompts),
-                    )
-                    .map_err(|error| error.to_string())?,
+                    connect(&endpoint, TerminalColorScheme::Dark, Some(prompts))
+                        .map_err(|error| error.to_string())?,
                 );
                 {
                     let mut slot = shared_client.lock().unwrap();
@@ -91,9 +92,11 @@ impl Connection {
                     }
                     *slot = Some(connected.clone());
                 }
-                connected
-                    .attach(session.clone())
-                    .map_err(|error| error.to_string())?;
+                if let Some(session) = &session {
+                    connected
+                        .attach(session.clone())
+                        .map_err(|error| error.to_string())?;
+                }
                 if tx.send(Event::Connected(connected.clone())).is_err() {
                     return Ok(());
                 }

@@ -3,8 +3,8 @@ use std::{cell::RefCell, rc::Rc};
 use gpui::{
     Anchor, AnyElement, App, Context, DismissEvent, Element, ElementId, Entity, Focusable,
     GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement, IntoElement,
-    MouseButton, MouseDownEvent, ParentElement, Pixels, Point, StyleRefinement, Styled,
-    Subscription, Window, anchored, deferred, div, prelude::FluentBuilder, px,
+    LongPressEvent, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, StyleRefinement,
+    Styled, Subscription, TouchPhase, Window, anchored, deferred, div, prelude::FluentBuilder, px,
 };
 
 use super::PopupMenu;
@@ -262,12 +262,8 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
             |_view, state: &mut ContextMenuState, window, _| {
                 let shared_state = state.shared_state.clone();
 
-                let hitbox = hitbox.clone();
-                window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
-                    if phase.bubble()
-                        && event.button == MouseButton::Right
-                        && hitbox.is_hovered(window)
-                    {
+                let open = Rc::new(
+                    move |position: Point<Pixels>, window: &mut Window, cx: &mut App| {
                         let previous_focus_handle = window.focused(cx).and_then(|focused| {
                             let shared_state = shared_state.borrow();
                             match shared_state.menu_view.as_ref() {
@@ -282,7 +278,7 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                             let mut shared_state = shared_state.borrow_mut();
                             shared_state.menu_view = None;
                             shared_state._subscription = None;
-                            shared_state.position = event.position;
+                            shared_state.position = position;
                             shared_state.open = true;
                         }
 
@@ -316,6 +312,29 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                                 }
                             }
                         });
+                    },
+                );
+
+                let mouse_hitbox = hitbox.clone();
+                let mouse_open = Rc::clone(&open);
+                window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+                    if phase.bubble()
+                        && event.button == MouseButton::Right
+                        && mouse_hitbox.is_hovered(window)
+                    {
+                        mouse_open(event.position, window, cx);
+                    }
+                });
+
+                let press_hitbox = hitbox.clone();
+                window.on_mouse_event(move |event: &LongPressEvent, phase, window, cx| {
+                    if phase.bubble()
+                        && event.phase == TouchPhase::Started
+                        && !window.default_prevented()
+                        && press_hitbox.is_hovered_at(event.start_position, window)
+                    {
+                        window.prevent_default();
+                        open(event.start_position, window, cx);
                     }
                 });
             },

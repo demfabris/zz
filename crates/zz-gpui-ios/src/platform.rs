@@ -51,6 +51,8 @@ pub(crate) struct IosPlatformState {
     finish_launching: Option<Box<dyn FnOnce()>>,
     reopen: Option<Box<dyn FnMut()>>,
     activated_once: bool,
+    touch_gestures: bool,
+    appearance: Option<WindowAppearance>,
 }
 
 impl Default for IosPlatform {
@@ -74,7 +76,14 @@ impl IosPlatform {
             finish_launching: None,
             reopen: None,
             activated_once: false,
+            touch_gestures: false,
+            appearance: None,
         }))
+    }
+
+    pub fn with_touch_gestures(self, enabled: bool) -> Self {
+        self.0.lock().touch_gestures = enabled;
+        self
     }
 }
 
@@ -129,11 +138,25 @@ impl Platform for IosPlatform {
         handle: AnyWindowHandle,
         params: WindowParams,
     ) -> Result<Box<dyn PlatformWindow>> {
-        Ok(Box::new(IosWindow::open(handle, params)?))
+        let (touch_gestures, appearance) = {
+            let state = self.0.lock();
+            (state.touch_gestures, state.appearance)
+        };
+        Ok(Box::new(IosWindow::open(
+            handle,
+            params,
+            touch_gestures,
+            appearance,
+        )?))
     }
 
     fn window_appearance(&self) -> WindowAppearance {
-        screen_appearance()
+        self.0.lock().appearance.unwrap_or_else(screen_appearance)
+    }
+
+    fn set_window_appearance(&self, appearance: Option<WindowAppearance>) {
+        self.0.lock().appearance = appearance;
+        crate::window::set_window_appearance(appearance);
     }
 
     fn open_url(&self, url: &str) {
@@ -230,7 +253,9 @@ impl Platform for IosPlatform {
         Err(anyhow!("auxiliary executables unsupported on iOS"))
     }
 
-    fn set_cursor_style(&self, _style: CursorStyle) {}
+    fn set_cursor_style(&self, style: CursorStyle) {
+        crate::window::set_cursor_style(style);
+    }
 
     fn hide_cursor_until_mouse_moves(&self) {}
 
@@ -248,8 +273,32 @@ impl Platform for IosPlatform {
             if pasteboard.is_null() {
                 return None;
             }
+            let mut entries = Vec::new();
+            for (kind, format) in [
+                ("public.png", gpui::ImageFormat::Png),
+                ("public.jpeg", gpui::ImageFormat::Jpeg),
+            ] {
+                let data: id = msg_send![pasteboard, dataForPasteboardType: ns_string(kind)];
+                if data.is_null() {
+                    continue;
+                }
+                let bytes: *const u8 = msg_send![data, bytes];
+                let length: usize = msg_send![data, length];
+                if !bytes.is_null() && length > 0 {
+                    let bytes = std::slice::from_raw_parts(bytes, length).to_vec();
+                    entries.push(gpui::ClipboardEntry::Image(gpui::Image::from_bytes(
+                        format, bytes,
+                    )));
+                    break;
+                }
+            }
             let string: id = msg_send![pasteboard, string];
-            crate::nsstring_to_string(string).map(ClipboardItem::new_string)
+            if let Some(text) = crate::nsstring_to_string(string) {
+                entries.push(gpui::ClipboardEntry::String(gpui::ClipboardString::new(
+                    text,
+                )));
+            }
+            (!entries.is_empty()).then_some(ClipboardItem { entries })
         }
     }
 

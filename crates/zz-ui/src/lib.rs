@@ -2,6 +2,7 @@
 //! zz desktop app and the browser client.
 
 pub mod chrome_palette;
+pub mod tmux_style;
 mod widget;
 
 pub use widget::{

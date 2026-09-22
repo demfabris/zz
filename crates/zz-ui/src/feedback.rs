@@ -91,6 +91,17 @@ pub fn ssh_secret_prompt_dialog(
     input: &Entity<InputState>,
     cx: &App,
 ) -> Dialog {
+    ssh_text_prompt_dialog(dialog, title, question, input, false, cx)
+}
+
+pub fn ssh_text_prompt_dialog(
+    dialog: Dialog,
+    title: impl Into<SharedString>,
+    question: &str,
+    input: &Entity<InputState>,
+    echo: bool,
+    cx: &App,
+) -> Dialog {
     prompt_dialog(dialog, title)
         .button_props(
             DialogButtonProps::default()
@@ -98,13 +109,11 @@ pub fn ssh_secret_prompt_dialog(
                 .cancel_text("Cancel")
                 .show_cancel(true),
         )
-        .child(
-            prompt_body().child(prompt_question(question, cx)).child(
-                Input::new(input)
-                    .small()
-                    .content_type(InputContentType::Password),
-            ),
-        )
+        .child(prompt_body().child(prompt_question(question, cx)).child(
+            Input::new(input).small().when(!echo, |input| {
+                input.content_type(InputContentType::Password)
+            }),
+        ))
 }
 
 /// Confirmation for ssh's yes/no questions: an unrecognised host key, or an

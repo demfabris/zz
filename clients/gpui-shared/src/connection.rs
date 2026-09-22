@@ -10,6 +10,28 @@ use zz_protocol::{
     ServerError, SessionId,
 };
 
+#[cfg(target_os = "ios")]
+fn native_endpoint() -> Option<String> {
+    let path = std::path::PathBuf::from(std::env::var_os("HOME")?)
+        .join("Library/Application Support/zz-gpui/endpoint");
+    let launched = std::env::var("ZZ_GPUI_ENDPOINT")
+        .or_else(|_| std::env::var("ZZ_SOCKET"))
+        .ok()
+        .map(|endpoint| endpoint.trim().to_owned())
+        .filter(|endpoint| !endpoint.is_empty());
+    if let Some(endpoint) = &launched {
+        if let Some(directory) = path.parent() {
+            let _ = std::fs::create_dir_all(directory);
+        }
+        let _ = std::fs::write(&path, endpoint);
+        return launched;
+    }
+    std::fs::read_to_string(&path)
+        .ok()
+        .map(|endpoint| endpoint.trim().to_owned())
+        .filter(|endpoint| !endpoint.is_empty())
+}
+
 const MAX_AGENT_HISTORY_BYTES: usize = 32 * 1024 * 1024;
 const MAX_AGENT_HISTORY_ITEMS: usize = 10_000;
 
@@ -163,7 +185,27 @@ impl AgentCursor {
     }
 }
 
+#[cfg(target_os = "ios")]
+#[derive(Clone)]
+pub struct AuthenticationPrompt {
+    pub id: u64,
+    pub kind: zz_daemon::AskpassPromptKind,
+    pub text: String,
+    pub echo: bool,
+}
+
 pub struct Connection {
+    #[cfg(target_os = "ios")]
+    native: Option<crate::transport::Connection>,
+    #[cfg(target_os = "ios")]
+    client: Option<Arc<zz_daemon::InteractiveClient>>,
+    #[cfg(target_os = "ios")]
+    reader: Option<gpui::Task<()>>,
+    #[cfg(target_os = "ios")]
+    auth_prompt: Option<(
+        AuthenticationPrompt,
+        std::sync::mpsc::Sender<zz_daemon::AskpassReply>,
+    )>,
     pub core: ClientCore,
     pub status: String,
     pub connected: bool,
@@ -175,6 +217,7 @@ pub struct Connection {
     epoch: u64,
     dialog_active: bool,
     request_id: u64,
+    commands: HashMap<u64, String>,
     remembered_session: Option<SessionId>,
     attaching: bool,
     retry_default: bool,
@@ -193,6 +236,14 @@ impl EventEmitter<CoreEvent> for Connection {}
 impl Connection {
     pub fn new(_: &mut Context<Self>) -> Self {
         Self {
+            #[cfg(target_os = "ios")]
+            native: None,
+            #[cfg(target_os = "ios")]
+            client: None,
+            #[cfg(target_os = "ios")]
+            reader: None,
+            #[cfg(target_os = "ios")]
+            auth_prompt: None,
             core: ClientCore::new(),
             status: "Connecting…".into(),
             connected: false,
@@ -204,6 +255,7 @@ impl Connection {
             epoch: 0,
             dialog_active: false,
             request_id: 1,
+            commands: HashMap::new(),
             remembered_session: None,
             attaching: false,
             retry_default: false,
@@ -374,7 +426,13 @@ impl Connection {
         {
             self.core.hello_received().then(browser::instance_id)
         }
-        #[cfg(not(target_family = "wasm"))]
+        #[cfg(target_os = "ios")]
+        {
+            self.client
+                .as_ref()
+                .map(|client| client.client_instance_id())
+        }
+        #[cfg(not(any(target_family = "wasm", target_os = "ios")))]
         {
             None
         }
@@ -423,7 +481,30 @@ impl Connection {
                 Err(error) => self.disconnected(error, cx),
             }
         }
-        #[cfg(not(target_family = "wasm"))]
+        #[cfg(target_os = "ios")]
+        {
+            self.reader = None;
+            self.native = None;
+            self.client = None;
+            self.auth_prompt = None;
+            self.core = ClientCore::new();
+            if let Some(endpoint) = native_endpoint() {
+                self.native = Some(crate::transport::Connection::connect(endpoint, None, true));
+                self.reader = Some(cx.spawn(async move |this, cx| {
+                    loop {
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_millis(16))
+                            .await;
+                        if this.update(cx, |this, cx| this.poll_native(cx)).is_err() {
+                            break;
+                        }
+                    }
+                }));
+            } else {
+                self.status = "No host connected".into();
+            }
+        }
+        #[cfg(not(any(target_family = "wasm", target_os = "ios")))]
         {
             self.status = "Open the browser client through zz-web to connect.".into();
         }
@@ -443,12 +524,19 @@ impl Connection {
                 cx.notify();
             }
         }
-        #[cfg(not(target_family = "wasm"))]
+        #[cfg(target_os = "ios")]
+        if let Some(client) = &self.client
+            && let Err(error) = client.send(&message)
+        {
+            self.disconnect_native(error.to_string(), cx);
+        }
+        #[cfg(not(any(target_family = "wasm", target_os = "ios")))]
         let _ = (message, cx);
     }
 
     pub fn command(&mut self, command: &str, args: Vec<String>, cx: &mut Context<Self>) {
         let request_id = self.next_request_id();
+        self.commands.insert(request_id, command.to_owned());
         self.send(
             ProtocolMessage::CommandRequest(CommandRequest {
                 request_id,
@@ -517,6 +605,7 @@ impl Connection {
             match &event {
                 CoreEvent::HelloReceived => {
                     self.connected = true;
+                    self.commands.clear();
                     #[cfg(target_family = "wasm")]
                     {
                         self.retry = None;
@@ -525,8 +614,19 @@ impl Connection {
                     self.agent_events.clear();
                     self.agent_cursors.clear();
                     self.attach_target(
-                        self.remembered_session
-                            .map_or_else(String::new, |id| id.to_string()),
+                        self.remembered_session.map_or_else(
+                            || {
+                                #[cfg(target_os = "ios")]
+                                {
+                                    std::env::var("ZZ_GPUI_SESSION").unwrap_or_default()
+                                }
+                                #[cfg(not(target_os = "ios"))]
+                                {
+                                    String::new()
+                                }
+                            },
+                            |id| id.to_string(),
+                        ),
                         cx,
                     );
                 }
@@ -560,6 +660,18 @@ impl Connection {
                     } else {
                         self.status = error.to_string();
                     }
+                    match self.commands.remove(request_id) {
+                        Some(_)
+                            if matches!(
+                                error,
+                                ServerError::PaneExited(_) | ServerError::PaneNotAttached(_)
+                            ) => {}
+                        Some(name) => self.notify_error(format!("{name}: {error}"), cx),
+                        None => {}
+                    }
+                }
+                CoreEvent::CommandResponse(CommandResponse::Success { request_id, .. }) => {
+                    self.commands.remove(request_id);
                 }
                 CoreEvent::ClientMessage { text, .. } => self.status.clone_from(text),
                 CoreEvent::Clipboard { text, .. } => {
@@ -573,10 +685,7 @@ impl Connection {
                     cx.open_url(uri);
                 }
                 CoreEvent::OpenUri { uri, .. } => {
-                    self.notify_error(
-                        format!("Cannot open this URI in the browser client: {uri}"),
-                        cx,
-                    );
+                    self.notify_error(format!("Cannot open this URI: {uri}"), cx);
                 }
                 CoreEvent::PrefixCancelled { request_id } => {
                     if self.prefix_cancel_pending == Some(*request_id) {
@@ -632,8 +741,7 @@ impl Connection {
                         cursor.trim(journal, MAX_AGENT_HISTORY_BYTES, MAX_AGENT_HISTORY_ITEMS);
                     let history_trimmed = self.trim_agent_history();
                     if pane_trimmed || history_trimmed {
-                        self.status =
-                            "Showing recent agent history to limit browser memory.".into();
+                        self.status = "Showing recent agent history to limit memory use.".into();
                     }
                     if invalid {
                         self.status = "Some agent updates could not be read.".into();
@@ -659,7 +767,7 @@ impl Connection {
                 CoreEvent::AgentCommand { request_id, .. } => self.send(
                     ProtocolMessage::GuiResponse(zz_protocol::GuiResponse::Error {
                         request_id: *request_id,
-                        message: "This desktop action is unavailable in the browser client.".into(),
+                        message: "This action requires the desktop client.".into(),
                     }),
                     cx,
                 ),
@@ -676,6 +784,86 @@ impl Connection {
             self.pasted_images.release_retired(cx);
             cx.emit(event);
         }
+        cx.notify();
+    }
+
+    #[cfg(target_os = "ios")]
+    fn poll_native(&mut self, cx: &mut Context<Self>) {
+        for _ in 0..128 {
+            let Some(event) = self
+                .native
+                .as_ref()
+                .and_then(|transport| transport.events.try_recv().ok())
+            else {
+                break;
+            };
+            match event {
+                crate::transport::Event::Connected(client) => {
+                    let hello = client.server_hello().clone();
+                    self.client = Some(client);
+                    self.receive(ProtocolMessage::ServerHello(hello), cx);
+                }
+                crate::transport::Event::Message(message) => self.receive(*message, cx),
+                crate::transport::Event::Prompt(prompt) => {
+                    self.auth_prompt = Some((
+                        AuthenticationPrompt {
+                            id: self.next_request_id(),
+                            kind: prompt.kind,
+                            text: prompt.text,
+                            echo: prompt.echo,
+                        },
+                        prompt.reply,
+                    ));
+                    self.status = "Authentication required".into();
+                    cx.notify();
+                }
+                crate::transport::Event::Failed(error) => self.disconnect_native(error, cx),
+            }
+        }
+    }
+
+    #[cfg(target_os = "ios")]
+    pub fn pending_auth_prompt(&self) -> Option<&AuthenticationPrompt> {
+        self.auth_prompt.as_ref().map(|(prompt, _)| prompt)
+    }
+
+    #[cfg(target_os = "ios")]
+    pub fn answer_auth_prompt(&mut self, id: u64, answer: Option<String>, cx: &mut Context<Self>) {
+        if self
+            .auth_prompt
+            .as_ref()
+            .is_none_or(|(prompt, _)| prompt.id != id)
+        {
+            return;
+        }
+        let (_, reply) = self.auth_prompt.take().unwrap();
+        let cancelled = answer.is_none();
+        let answer = answer.map_or(
+            zz_daemon::AskpassReply::Cancel,
+            zz_daemon::AskpassReply::answer,
+        );
+        if reply.send(answer).is_err() {
+            self.disconnect_native("Authentication expired. Reconnect to try again.".into(), cx);
+        } else if cancelled {
+            self.disconnect_native("Authentication cancelled".into(), cx);
+        } else {
+            self.status = "Connecting…".into();
+            cx.notify();
+        }
+    }
+
+    #[cfg(target_os = "ios")]
+    fn disconnect_native(&mut self, status: String, cx: &mut Context<Self>) {
+        self.connected = false;
+        self.client = None;
+        self.native = None;
+        self.auth_prompt = None;
+        self.color_scheme = None;
+        self.epoch = self.epoch.wrapping_add(1);
+        self.prefix_cancel_pending = None;
+        self.dialog_active = false;
+        self.attaching = false;
+        self.status = status;
         cx.notify();
     }
 

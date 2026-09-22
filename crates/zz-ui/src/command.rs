@@ -1,10 +1,17 @@
 pub mod floating;
 mod palette;
+mod palette_model;
+mod palette_view;
 
 pub use palette::{
     PalettePill, PaletteRow, PaletteStatus, command_palette_empty, command_palette_entry,
     command_palette_section, command_palette_tree_entry, unified_command_palette_input,
 };
+pub use palette_model::{
+    PaletteHostId, PaletteMode, PaletteSettings, PaletteTarget, PaletteTree, PaletteTreeHost,
+    PaletteTreePane, PaletteTreeSession, PaletteTreeWindow,
+};
+pub use palette_view::{CommandPaletteEvent, CommandPaletteView, PaletteBackend};
 
 use crate::{
     ActiveTheme as _, CHROME_GAP, Colorize as _, Sizable as _, StyledExt as _,

@@ -1,15 +1,15 @@
 use std::ops::Range;
 
-#[cfg(all(feature = "tree-sitter", not(target_family = "wasm")))]
+#[cfg(feature = "tree-sitter")]
 use tree_sitter::Node;
-#[cfg(all(feature = "tree-sitter", not(target_family = "wasm")))]
+#[cfg(feature = "tree-sitter")]
 pub use tree_sitter::Tree;
 
-#[cfg(any(not(feature = "tree-sitter"), target_family = "wasm"))]
+#[cfg(not(feature = "tree-sitter"))]
 /// Stub type for tree-sitter Tree on WASM (tree-sitter not available).
 pub struct Tree;
 
-#[cfg(all(feature = "tree-sitter", not(target_family = "wasm")))]
+#[cfg(feature = "tree-sitter")]
 const MIN_FOLD_LINES: usize = 2;
 
 /// Foldable region spanning `start_line` to `end_line`, both inclusive.
@@ -32,14 +32,14 @@ impl FoldRange {
     }
 }
 
-#[cfg(all(feature = "tree-sitter", not(target_family = "wasm")))]
+#[cfg(feature = "tree-sitter")]
 fn is_foldable_node(node: &Node) -> bool {
     let start = node.start_position().row;
     let end = node.end_position().row;
     end.saturating_sub(start) >= MIN_FOLD_LINES
 }
 
-#[cfg(all(feature = "tree-sitter", not(target_family = "wasm")))]
+#[cfg(feature = "tree-sitter")]
 pub fn extract_fold_ranges(tree: &Tree) -> Vec<FoldRange> {
     let mut ranges = Vec::new();
     let root = tree.root_node();
@@ -53,7 +53,7 @@ pub fn extract_fold_ranges(tree: &Tree) -> Vec<FoldRange> {
     ranges
 }
 
-#[cfg(all(feature = "tree-sitter", not(target_family = "wasm")))]
+#[cfg(feature = "tree-sitter")]
 /// Fold ranges touching `byte_range`, skipping subtrees outside it.
 pub fn extract_fold_ranges_in_range(tree: &Tree, byte_range: Range<usize>) -> Vec<FoldRange> {
     let mut ranges = Vec::new();
@@ -68,7 +68,7 @@ pub fn extract_fold_ranges_in_range(tree: &Tree, byte_range: Range<usize>) -> Ve
     ranges
 }
 
-#[cfg(all(feature = "tree-sitter", not(target_family = "wasm")))]
+#[cfg(feature = "tree-sitter")]
 fn collect_foldable_nodes_in_range(
     node: Node,
     byte_range: &Range<usize>,
@@ -93,7 +93,7 @@ fn collect_foldable_nodes_in_range(
     }
 }
 
-#[cfg(all(feature = "tree-sitter", not(target_family = "wasm")))]
+#[cfg(feature = "tree-sitter")]
 fn collect_foldable_nodes(node: Node, ranges: &mut Vec<FoldRange>) {
     if !is_foldable_node(&node) {
         return;
@@ -110,13 +110,13 @@ fn collect_foldable_nodes(node: Node, ranges: &mut Vec<FoldRange>) {
     }
 }
 
-#[cfg(any(not(feature = "tree-sitter"), target_family = "wasm"))]
+#[cfg(not(feature = "tree-sitter"))]
 /// Always empty without the `tree-sitter` feature.
 pub fn extract_fold_ranges(_tree: &Tree) -> Vec<FoldRange> {
     Vec::new()
 }
 
-#[cfg(any(not(feature = "tree-sitter"), target_family = "wasm"))]
+#[cfg(not(feature = "tree-sitter"))]
 /// Always empty without the `tree-sitter` feature.
 pub fn extract_fold_ranges_in_range(_tree: &Tree, _byte_range: Range<usize>) -> Vec<FoldRange> {
     Vec::new()

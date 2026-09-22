@@ -1,8 +1,16 @@
+#[path = "../../gpui-shared/src/app.rs"]
 mod app;
+#[path = "../../gpui-shared/src/attachments.rs"]
 mod attachments;
+#[path = "../../gpui-shared/src/command_palette.rs"]
 mod command_palette;
+#[path = "../../gpui-shared/src/connection.rs"]
 mod connection;
+#[path = "../../gpui-shared/src/preferences.rs"]
+mod preferences;
+#[path = "../../gpui-shared/src/terminal.rs"]
 mod terminal;
+#[path = "../../gpui-shared/src/terminal_images.rs"]
 mod terminal_images;
 
 use std::borrow::Cow;
@@ -43,7 +51,7 @@ fn launch(cx: &mut App) {
             window.set_window_title(zz_protocol::app_identity::DISPLAY_NAME);
             window.set_default_corner_smoothing(4.0);
             window.set_adaptive_corner_fraction(Some(0.45));
-            let client = cx.new(|cx| app::WebClient::new(window, cx));
+            let client = cx.new(|cx| app::AppShell::new(window, cx));
             #[cfg(target_family = "wasm")]
             window.on_next_frame(|_, _| READY.with(|ready| ready.set(true)));
             cx.new(|cx| Root::new(client, window, cx).bordered(false))

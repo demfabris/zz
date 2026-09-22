@@ -59,6 +59,11 @@ pub fn workspace_layout_button(id: impl Into<ElementId>) -> Button {
 }
 
 #[must_use]
+pub fn workspace_palette_button(id: impl Into<ElementId>) -> Button {
+    workspace_chrome_button(id, IconName::Search, "Command palette")
+}
+
+#[must_use]
 pub fn workspace_settings_button(id: impl Into<ElementId>) -> Button {
     workspace_chrome_button(id, IconName::Settings, "Settings")
 }
@@ -88,12 +93,15 @@ pub fn workspace_chrome_controls(
 
 #[must_use]
 pub fn workspace_chrome_controls_width(has_layout: bool, window: &Window) -> Pixels {
-    if has_layout {
-        WORKSPACE_STATUS_PILL_HEIGHT * 2.0
-            + rems_from_px(WORKSPACE_CHROME_CONTROL_GAP).to_pixels(window.rem_size())
-    } else {
-        WORKSPACE_STATUS_PILL_HEIGHT
-    }
+    workspace_chrome_controls_width_for(if has_layout { 2 } else { 1 }, window)
+}
+
+#[must_use]
+pub fn workspace_chrome_controls_width_for(count: usize, window: &Window) -> Pixels {
+    let count = f32::from(u16::try_from(count).unwrap_or(u16::MAX));
+    WORKSPACE_STATUS_PILL_HEIGHT * count
+        + rems_from_px(WORKSPACE_CHROME_CONTROL_GAP).to_pixels(window.rem_size())
+            * (count - 1.0).max(0.0)
 }
 
 #[must_use]

@@ -23,7 +23,9 @@ const KEY_TABLES: &[&str] = &[
 ];
 const BROWSER_COMMANDS: &[&str] = &["capture-browser", "set-browser-url", "set-browser-profile"];
 const AGENT_COMMANDS: &[&str] = &[
+    "agent-respond",
     "agent-send",
+    "new-agent-session",
     "restart-agent-pane",
     "send-last-output",
     "set-agent-provider",
@@ -93,7 +95,10 @@ impl Default for PaneKindAvailability {
 
 impl PaneKindAvailability {
     pub fn allows_command(self, name: &str) -> bool {
-        (self.browser || !BROWSER_COMMANDS.contains(&name))
+        let spec = catalog_command_spec(name);
+        let name = spec.map_or(name, |spec| spec.name);
+        !spec.is_some_and(CommandSpec::is_internal)
+            && (self.browser || !BROWSER_COMMANDS.contains(&name))
             && (self.agent || !AGENT_COMMANDS.contains(&name))
     }
 }
@@ -119,7 +124,14 @@ pub fn complete_command(
 
     let mut ranked = Vec::new();
     if segment_start == 0 {
-        add_history(&mut ranked, input, cursor, history, 0..input.len());
+        add_history(
+            &mut ranked,
+            input,
+            cursor,
+            history,
+            0..input.len(),
+            availability,
+        );
     }
 
     if active_index == 0 {
@@ -143,7 +155,7 @@ pub fn complete_command(
         return finish(ranked);
     };
 
-    if spec.is_internal() {
+    if !availability.allows_command(spec.name) {
         return Vec::new();
     }
 
@@ -255,6 +267,7 @@ fn add_history(
     cursor: usize,
     history: &[String],
     replacement: Range<usize>,
+    availability: PaneKindAvailability,
 ) {
     let query = input[..cursor].trim();
     let mut seen = BTreeSet::new();
@@ -264,8 +277,7 @@ fn add_history(
             || tokenize(entry)
                 .split(|token| token.value == ";")
                 .filter_map(|segment| segment.first())
-                .filter_map(|token| catalog_command_spec(&token.value))
-                .any(CommandSpec::is_internal)
+                .any(|token| !availability.allows_command(&token.value))
         {
             continue;
         }
@@ -294,7 +306,7 @@ fn add_commands(
     availability: PaneKindAvailability,
 ) {
     for (order, spec) in command_specs().enumerate() {
-        if spec.is_internal() || !availability.allows_command(spec.name) {
+        if !availability.allows_command(spec.name) {
             continue;
         }
         let Some((rank, matched_alias)) = command_rank(spec, query, order) else {
@@ -1105,14 +1117,27 @@ mod tests {
             agent: false,
             editor: false,
         };
-        for command in ["agent-send", "send-last-output", "capture-browser"] {
+        for command in AGENT_COMMANDS.iter().chain(BROWSER_COMMANDS) {
             let completions =
                 complete_command(command, command.len(), &[], &snapshot(), unavailable);
             assert!(
                 !completions
                     .iter()
-                    .any(|completion| completion.label == command),
+                    .any(|completion| completion.label == *command),
                 "advertised unavailable {command}"
+            );
+            let input = format!("{command} ");
+            assert!(
+                complete_command(&input, input.len(), &[], &snapshot(), unavailable).is_empty(),
+                "advertised arguments for unavailable {command}"
+            );
+            let history = vec![format!("list-panes ; {command}")];
+            let completions = complete_command("", 0, &history, &snapshot(), unavailable);
+            assert!(
+                completions
+                    .iter()
+                    .all(|item| item.kind != CompletionKind::History),
+                "advertised history for unavailable {command}"
             );
         }
         for command in ["debug-marker", "tools"] {
@@ -1130,6 +1155,14 @@ mod tests {
     #[test]
     fn internal_commands_are_hidden_in_catalog_history_and_arguments() {
         for command in zz_protocol::INTERNAL_COMMAND_NAMES {
+            assert!(
+                !PaneKindAvailability {
+                    browser: true,
+                    agent: true,
+                    editor: true,
+                }
+                .allows_command(command)
+            );
             let history = vec![format!("list-panes ; {command}")];
             for input in [(*command).to_owned(), format!("{command} ")] {
                 let completions = complete_command(

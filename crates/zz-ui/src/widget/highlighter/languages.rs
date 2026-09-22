@@ -118,7 +118,7 @@ impl Language {
 
         LanguageConfig::new(
             self.name(),
-            language.into(),
+            language,
             self.injection_languages(),
             highlights,
             injections,

@@ -318,12 +318,14 @@ impl SyntaxHighlighter {
             ));
         };
 
-        let Some(grammar) = config.language.as_ref() else {
+        let Some(grammar) = config.grammar() else {
             return Ok(Self::build_inert(config.name.clone()));
         };
 
         let mut parser = Parser::new();
-        parser.set_language(grammar).context("parse set_language")?;
+        parser
+            .set_language(&grammar)
+            .context("parse set_language")?;
 
         let mut query_source = String::new();
         query_source.push_str(&config.injections);
@@ -331,7 +333,7 @@ impl SyntaxHighlighter {
         query_source.push_str(&config.locals);
         query_source.push_str(&config.highlights);
 
-        let mut query = Query::new(grammar, &query_source).context("new query")?;
+        let mut query = Query::new(&grammar, &query_source).context("new query")?;
 
         let mut injection_pattern_count = 0;
         for i in 0..(query.pattern_count()) {
@@ -341,7 +343,7 @@ impl SyntaxHighlighter {
         }
 
         let injections_query = if !config.injections.is_empty() {
-            Query::new(grammar, &config.injections).ok().map(Arc::new)
+            Query::new(&grammar, &config.injections).ok().map(Arc::new)
         } else {
             None
         };
@@ -537,7 +539,7 @@ impl SyntaxHighlighter {
                 return Some((config.name, query.clone()));
             }
 
-            let query = match Query::new(config.language.as_ref()?, &config.highlights) {
+            let query = match Query::new(&config.grammar()?, &config.highlights) {
                 Ok(query) => Arc::new(query),
                 Err(error) => {
                     tracing::error!(
@@ -593,7 +595,7 @@ impl SyntaxHighlighter {
 
             if language_name.is_none() {
                 language_name = query_match
-                    .captures
+                    .captures()
                     .iter()
                     .find(|cap| Some(cap.index) == data.language_capture_index)
                     .and_then(|capture| {
@@ -617,7 +619,7 @@ impl SyntaxHighlighter {
             };
 
             let mut ranges = query_match
-                .captures
+                .captures()
                 .iter()
                 .filter(|cap| Some(cap.index) == data.content_capture_index)
                 .map(|capture| capture.node.range())
@@ -700,7 +702,7 @@ impl SyntaxHighlighter {
         }
         let config = LanguageRegistry::singleton().language(language_name)?;
         let mut parser = Parser::new();
-        parser.set_language(config.language.as_ref()?).ok()?;
+        parser.set_language(&config.grammar()?).ok()?;
         parser.set_included_ranges(&ranges).ok()?;
         let parse_start = Instant::now();
         let mut timed_out = false;
@@ -790,7 +792,7 @@ impl SyntaxHighlighter {
                     .iter()
                     .any(|prop| prop.key.as_ref() == "highlight.allow-overlap");
 
-                for cap in m.captures {
+                for cap in m.captures() {
                     let node_range = cap.node.start_byte()..cap.node.end_byte();
 
                     if !allow_overlapping_captures && node_range.start < last_end {
@@ -819,7 +821,7 @@ impl SyntaxHighlighter {
             let mut matches = query_cursor.matches(&query, *query_node, TextProvider(&source));
 
             while let Some(query_match) = matches.next() {
-                for cap in query_match.captures {
+                for cap in query_match.captures() {
                     let node = cap.node;
 
                     let Some(highlight_name) = query.capture_names().get(cap.index as usize) else {

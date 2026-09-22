@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt,
     sync::{LazyLock, Mutex, MutexGuard, PoisonError},
 };
 
@@ -8,10 +9,10 @@ use gpui::SharedString;
 use super::{Language, languages};
 
 /// Parser and query data for one language. A `None` grammar is never parsed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct LanguageConfig {
     pub name: SharedString,
-    pub language: Option<tree_sitter::Language>,
+    pub language: Option<tree_sitter_language::LanguageFn>,
     pub injection_languages: Vec<SharedString>,
     pub highlights: SharedString,
     pub injections: SharedString,
@@ -21,7 +22,7 @@ pub struct LanguageConfig {
 impl LanguageConfig {
     pub fn new(
         name: impl Into<SharedString>,
-        language: tree_sitter::Language,
+        language: tree_sitter_language::LanguageFn,
         injection_languages: Vec<SharedString>,
         highlights: &str,
         injections: &str,
@@ -37,6 +38,10 @@ impl LanguageConfig {
         }
     }
 
+    pub fn grammar(&self) -> Option<tree_sitter::Language> {
+        self.language.map(tree_sitter::Language::new)
+    }
+
     pub fn plain(name: impl Into<SharedString>) -> Self {
         Self {
             name: name.into(),
@@ -46,6 +51,16 @@ impl LanguageConfig {
             injections: SharedString::default(),
             locals: SharedString::default(),
         }
+    }
+}
+
+impl fmt::Debug for LanguageConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LanguageConfig")
+            .field("name", &self.name)
+            .field("grammar", &self.language.is_some())
+            .finish_non_exhaustive()
     }
 }
 

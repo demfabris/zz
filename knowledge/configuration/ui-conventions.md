@@ -2,7 +2,7 @@
 type: Configuration
 title: UI design conventions
 description: The component, palette, and styling rules that keep zz application chrome consistent and theme-aware.
-resource: crates/zz/src/command/palette.rs
+resource: crates/zz-ui/src/command/palette_view.rs
 tags: [ui, gpui, zz-ui, theme, chrome, clippy]
 timestamp: 2026-09-22T00:00:00Z
 ---
@@ -19,7 +19,7 @@ parallel widget set or color palette. Import `zz_ui::ActiveTheme` (not `gpui_com
 that path does not resolve) and read colors from `cx.theme()` at the point where a GPUI element
 is rendered.
 
-The house-style reference is `crates/zz/src/command/palette.rs`. It demonstrates `cx.theme()`
+The house-style reference is `crates/zz-ui/src/command/palette_view.rs`. It demonstrates `cx.theme()`
 derivations alongside the `Input`/`InputState`, `ListItem`, `Kbd`, and `Tag` widgets.
 The browser client in `clients/web` (`just web`) uses the shared GPUI components outside the desktop app.
 

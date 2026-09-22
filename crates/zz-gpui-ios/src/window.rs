@@ -2,11 +2,13 @@ use crate::{CGPoint, CGRect, IosDisplay, id, nil};
 use futures::channel::oneshot;
 use gpui::accesskit;
 use gpui::{
-    AnyWindowHandle, Bounds, Capslock, DevicePixels, DispatchEventResult, KeyDownEvent, KeyUpEvent,
-    Keystroke, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler,
-    PlatformWindow, Point, PromptButton, PromptLevel, RequestFrameOptions, Size, WindowAppearance,
-    WindowBackgroundAppearance, WindowBounds, WindowParams, point, px, size,
+    AnyWindowHandle, Bounds, Capslock, CursorStyle, DevicePixels, DispatchEventResult,
+    KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
+    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformAtlas,
+    PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point, PromptButton,
+    PromptLevel, RequestFrameOptions, ScrollDelta, ScrollWheelEvent, Size, TouchEvent, TouchId,
+    TouchPhase, WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowParams, point,
+    px, size,
 };
 use objc::{
     class,
@@ -18,6 +20,7 @@ use objc::{
 use raw_window_handle as rwh;
 use std::cell::RefCell;
 use std::{
+    collections::HashMap,
     ffi::c_void,
     ptr::{self, NonNull},
     rc::Rc,
@@ -40,6 +43,7 @@ pub(crate) struct IosWindowState {
     request_frame_callback: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     event_callback: Option<Box<dyn FnMut(PlatformInput) -> DispatchEventResult>>,
     resize_callback: Option<Box<dyn FnMut(Size<Pixels>, f32)>>,
+    appearance_callback: Option<Box<dyn FnMut()>>,
     insets_callback: Option<Box<dyn FnMut(gpui::WindowInsets)>>,
     close_callback: Option<Box<dyn FnOnce()>>,
     input_handler: Option<PlatformInputHandler>,
@@ -48,12 +52,21 @@ pub(crate) struct IosWindowState {
     active: bool,
     active_callback: Option<Box<dyn FnMut(bool)>>,
     last_touch: Point<Pixels>,
+    touch_gestures: bool,
+    touches: HashMap<usize, (TouchId, Point<Pixels>)>,
+    next_touch: u64,
+    pointer_button: Option<MouseButton>,
 }
 
 pub(crate) struct IosWindow(Rc<RefCell<IosWindowState>>);
 
 impl IosWindow {
-    pub(crate) fn open(handle: AnyWindowHandle, _params: WindowParams) -> anyhow::Result<Self> {
+    pub(crate) fn open(
+        handle: AnyWindowHandle,
+        _params: WindowParams,
+        touch_gestures: bool,
+        appearance: Option<WindowAppearance>,
+    ) -> anyhow::Result<Self> {
         REGISTER_VIEW.call_once(register_view_class);
 
         unsafe {
@@ -68,12 +81,14 @@ impl IosWindow {
             } else {
                 msg_send![native_window, initWithWindowScene: scene]
             };
+            apply_window_appearance(native_window, appearance);
 
             let controller: id = msg_send![class!(UIViewController), new];
             let native_view: id = msg_send![VIEW_CLASS, alloc];
             let native_view: id = msg_send![native_view, initWithFrame: screen_bounds];
             let _: () = msg_send![native_view, setContentScaleFactor: scale];
             let _: () = msg_send![native_view, setAutoresizingMask: 18usize];
+            let _: () = msg_send![native_view, setMultipleTouchEnabled: touch_gestures as BOOL];
             let _: () = msg_send![controller, setView: native_view];
             let _: () = msg_send![native_window, setRootViewController: controller];
             let _: () = msg_send![controller, release];
@@ -123,6 +138,7 @@ impl IosWindow {
                 request_frame_callback: None,
                 event_callback: None,
                 resize_callback: None,
+                appearance_callback: None,
                 insets_callback: None,
                 close_callback: None,
                 input_handler: None,
@@ -131,6 +147,10 @@ impl IosWindow {
                 active: true,
                 active_callback: None,
                 last_touch: Point::default(),
+                touch_gestures,
+                touches: HashMap::new(),
+                next_touch: 0,
+                pointer_button: None,
             }));
 
             state.borrow_mut().renderer.update_drawable_size(size(
@@ -140,6 +160,11 @@ impl IosWindow {
 
             let state_ptr = Rc::into_raw(state.clone()) as *mut c_void;
             (*native_view).set_ivar(STATE_IVAR, state_ptr);
+            let traits: id =
+                msg_send![class!(NSArray), arrayWithObject: class!(UITraitUserInterfaceStyle)];
+            let _: id = msg_send![native_view, registerForTraitChanges: traits withAction: sel!(zzAppearanceChanged)];
+
+            install_pointer_input(native_view);
 
             let _: () = msg_send![native_window, makeKeyAndVisible];
             let _: BOOL = msg_send![native_view, becomeFirstResponder];
@@ -250,7 +275,16 @@ impl PlatformWindow for IosWindow {
     }
 
     fn appearance(&self) -> WindowAppearance {
-        WindowAppearance::Dark
+        let view = self.0.borrow().native_view;
+        let style: i64 = unsafe {
+            let traits: id = msg_send![view, traitCollection];
+            msg_send![traits, userInterfaceStyle]
+        };
+        if style == 1 {
+            WindowAppearance::Light
+        } else {
+            WindowAppearance::Dark
+        }
     }
 
     fn display(&self) -> Option<Rc<dyn PlatformDisplay>> {
@@ -347,7 +381,9 @@ impl PlatformWindow for IosWindow {
         self.0.borrow_mut().close_callback = Some(callback);
     }
 
-    fn on_appearance_changed(&self, _callback: Box<dyn FnMut()>) {}
+    fn on_appearance_changed(&self, callback: Box<dyn FnMut()>) {
+        self.0.borrow_mut().appearance_callback = Some(callback);
+    }
 
     fn draw(&self, scene: &gpui::Scene) {
         let mut state = self.0.borrow_mut();
@@ -449,6 +485,19 @@ fn register_view_class() {
     decl.add_ivar::<*mut c_void>(STATE_IVAR);
     unsafe {
         decl.add_protocol(Protocol::get("UIKeyInput").unwrap());
+        if let Some(protocol) = Protocol::get("UIPointerInteractionDelegate") {
+            decl.add_protocol(protocol);
+        }
+        decl.add_method(sel!(zzHover:), hover as extern "C" fn(&Object, Sel, id));
+        decl.add_method(sel!(zzScroll:), scroll as extern "C" fn(&Object, Sel, id));
+        decl.add_method(
+            sel!(pointerInteraction:styleForRegion:),
+            pointer_style as extern "C" fn(&Object, Sel, id, id) -> id,
+        );
+        decl.add_method(
+            sel!(zzAppearanceChanged),
+            appearance_changed as extern "C" fn(&Object, Sel),
+        );
         decl.add_method(
             sel!(canBecomeFirstResponder),
             can_become_first_responder as extern "C" fn(&Object, Sel) -> BOOL,
@@ -513,7 +562,7 @@ fn register_view_class() {
         );
         decl.add_method(
             sel!(touchesCancelled:withEvent:),
-            touches_ended as extern "C" fn(&Object, Sel, id, id),
+            touches_cancelled as extern "C" fn(&Object, Sel, id, id),
         );
         VIEW_CLASS = decl.register();
     }
@@ -534,6 +583,49 @@ extern "C" fn step(this: &Object, _: Sel, _link: id) {
         drop(lock);
         callback(options);
         state.borrow_mut().request_frame_callback = Some(callback);
+    }
+}
+
+extern "C" fn appearance_changed(this: &Object, _: Sel) {
+    let raw: *mut c_void = unsafe { *this.get_ivar(STATE_IVAR) };
+    if raw.is_null() {
+        return;
+    }
+    let state = unsafe { get_window_state(this) };
+    let callback = state.borrow_mut().appearance_callback.take();
+    if let Some(mut callback) = callback {
+        callback();
+        state.borrow_mut().appearance_callback = Some(callback);
+    }
+}
+
+pub(crate) fn set_window_appearance(appearance: Option<WindowAppearance>) {
+    let view = MAIN_VIEW.load(std::sync::atomic::Ordering::Acquire);
+    if view.is_null() {
+        return;
+    }
+    unsafe {
+        let window: id = msg_send![view, window];
+        if !window.is_null() {
+            apply_window_appearance(window, appearance);
+        }
+    }
+}
+
+unsafe fn apply_window_appearance(window: id, appearance: Option<WindowAppearance>) {
+    let style = match appearance {
+        Some(WindowAppearance::Light | WindowAppearance::VibrantLight) => 1i64,
+        Some(WindowAppearance::Dark | WindowAppearance::VibrantDark) => 2i64,
+        None => 0i64,
+    };
+    let current: i64 = msg_send![window, overrideUserInterfaceStyle];
+    if current == style {
+        return;
+    }
+    let _: () = msg_send![window, setOverrideUserInterfaceStyle: style];
+    let controller: id = msg_send![window, rootViewController];
+    if !controller.is_null() {
+        let _: () = msg_send![controller, setNeedsStatusBarAppearanceUpdate];
     }
 }
 
@@ -609,9 +701,87 @@ fn touch_count(touches: id) -> usize {
     }
 }
 
-extern "C" fn touches_began(this: &Object, _: Sel, touches: id, _event: id) {
+const UI_TOUCH_TYPE_INDIRECT_POINTER: isize = 3;
+
+fn pointer_touch(touches: id) -> bool {
+    unsafe {
+        let touch: id = msg_send![touches, anyObject];
+        let kind: isize = msg_send![touch, type];
+        kind == UI_TOUCH_TYPE_INDIRECT_POINTER
+    }
+}
+
+fn event_modifiers(event: id) -> Modifiers {
+    if event.is_null() {
+        return Modifiers::default();
+    }
+    let flags: isize = unsafe { msg_send![event, modifierFlags] };
+    crate::keyboard::modifiers(flags as u64)
+}
+
+fn event_button(event: id) -> MouseButton {
+    let mask: isize = if event.is_null() {
+        0
+    } else {
+        unsafe { msg_send![event, buttonMask] }
+    };
+    match mask {
+        mask if mask & 1 != 0 => MouseButton::Left,
+        mask if mask & 2 != 0 => MouseButton::Right,
+        0 => MouseButton::Left,
+        _ => MouseButton::Middle,
+    }
+}
+
+fn pointer_input(this: &Object, touches: id, event: id, phase: TouchPhase) {
+    let position = touch_position(this, touches);
+    let modifiers = event_modifiers(event);
+    let state = unsafe { get_window_state(this) };
+    state.borrow_mut().last_touch = position;
+    let input = match phase {
+        TouchPhase::Started => {
+            let button = event_button(event);
+            state.borrow_mut().pointer_button = Some(button);
+            PlatformInput::MouseDown(MouseDownEvent {
+                button,
+                position,
+                modifiers,
+                click_count: touch_count(touches),
+                first_mouse: false,
+            })
+        }
+        TouchPhase::Moved => PlatformInput::MouseMove(MouseMoveEvent {
+            position,
+            pressed_button: state.borrow().pointer_button,
+            modifiers,
+        }),
+        TouchPhase::Ended | TouchPhase::Cancelled => {
+            let button = state
+                .borrow_mut()
+                .pointer_button
+                .take()
+                .unwrap_or(MouseButton::Left);
+            PlatformInput::MouseUp(MouseUpEvent {
+                button,
+                position,
+                modifiers,
+                click_count: touch_count(touches),
+            })
+        }
+    };
+    dispatch_event(this, input);
+}
+
+extern "C" fn touches_began(this: &Object, _: Sel, touches: id, event: id) {
     unsafe {
         let _: BOOL = msg_send![this, becomeFirstResponder];
+    }
+    if pointer_touch(touches) {
+        pointer_input(this, touches, event, TouchPhase::Started);
+        return;
+    }
+    if dispatch_touches(this, touches, TouchPhase::Started) {
+        return;
     }
     let position = touch_position(this, touches);
     {
@@ -634,7 +804,14 @@ extern "C" fn touches_began(this: &Object, _: Sel, touches: id, _event: id) {
     );
 }
 
-extern "C" fn touches_moved(this: &Object, _: Sel, touches: id, _event: id) {
+extern "C" fn touches_moved(this: &Object, _: Sel, touches: id, event: id) {
+    if pointer_touch(touches) {
+        pointer_input(this, touches, event, TouchPhase::Moved);
+        return;
+    }
+    if dispatch_touches(this, touches, TouchPhase::Moved) {
+        return;
+    }
     let position = touch_position(this, touches);
     {
         let state = unsafe { get_window_state(this) };
@@ -654,7 +831,14 @@ extern "C" fn touches_moved(this: &Object, _: Sel, touches: id, _event: id) {
     );
 }
 
-extern "C" fn touches_ended(this: &Object, _: Sel, touches: id, _event: id) {
+extern "C" fn touches_ended(this: &Object, _: Sel, touches: id, event: id) {
+    if pointer_touch(touches) {
+        pointer_input(this, touches, event, TouchPhase::Ended);
+        return;
+    }
+    if dispatch_touches(this, touches, TouchPhase::Ended) {
+        return;
+    }
     let position = touch_position(this, touches);
     let modifiers = unsafe { get_window_state(this) }
         .borrow()
@@ -669,6 +853,60 @@ extern "C" fn touches_ended(this: &Object, _: Sel, touches: id, _event: id) {
             click_count: touch_count(touches),
         }),
     );
+}
+
+extern "C" fn touches_cancelled(this: &Object, sel: Sel, touches: id, event: id) {
+    if pointer_touch(touches) {
+        pointer_input(this, touches, event, TouchPhase::Cancelled);
+        return;
+    }
+    if !dispatch_touches(this, touches, TouchPhase::Cancelled) {
+        touches_ended(this, sel, touches, event);
+    }
+}
+
+fn dispatch_touches(this: &Object, touches: id, phase: TouchPhase) -> bool {
+    let state = unsafe { get_window_state(this) };
+    if !state.borrow().touch_gestures {
+        return false;
+    }
+    for touch in press_objects(touches) {
+        let location: CGPoint =
+            unsafe { msg_send![touch, locationInView: this as *const Object as id] };
+        let position = point(px(location.x as f32), px(location.y as f32));
+        let id = {
+            let mut state = state.borrow_mut();
+            state.last_touch = position;
+            if phase == TouchPhase::Started {
+                state.next_touch += 1;
+                let id = TouchId(state.next_touch);
+                state.touches.insert(touch as usize, (id, position));
+                id
+            } else if matches!(phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+                let Some((id, _)) = state.touches.remove(&(touch as usize)) else {
+                    continue;
+                };
+                id
+            } else {
+                let Some((id, last)) = state.touches.get_mut(&(touch as usize)) else {
+                    continue;
+                };
+                *last = position;
+                *id
+            }
+        };
+        dispatch_event(
+            this,
+            PlatformInput::Touch(TouchEvent {
+                id,
+                phase,
+                position,
+                predicted_position: None,
+                force: None,
+            }),
+        );
+    }
+    true
 }
 
 extern "C" fn can_become_first_responder(_: &Object, _: Sel) -> BOOL {
@@ -895,6 +1133,19 @@ pub(crate) fn scene_active_changed(active: bool) {
     unsafe {
         if !active {
             release_all_keys(&*view);
+            let touches = std::mem::take(&mut get_window_state(&*view).borrow_mut().touches);
+            for (_, (id, position)) in touches {
+                dispatch_event(
+                    &*view,
+                    PlatformInput::Touch(TouchEvent {
+                        id,
+                        phase: TouchPhase::Cancelled,
+                        position,
+                        predicted_position: None,
+                        force: None,
+                    }),
+                );
+            }
         }
         let state = get_window_state(&*view);
         let callback = {
@@ -931,6 +1182,123 @@ unsafe extern "C" {}
 
 static MAIN_VIEW: std::sync::atomic::AtomicPtr<Object> =
     std::sync::atomic::AtomicPtr::new(ptr::null_mut());
+
+static POINTER_INTERACTION: std::sync::atomic::AtomicPtr<Object> =
+    std::sync::atomic::AtomicPtr::new(ptr::null_mut());
+
+static CURSOR_STYLE: std::sync::Mutex<CursorStyle> = std::sync::Mutex::new(CursorStyle::Arrow);
+
+unsafe fn install_pointer_input(view: id) {
+    unsafe {
+        let hover: id = msg_send![class!(UIHoverGestureRecognizer), alloc];
+        let hover: id = msg_send![hover, initWithTarget: view action: sel!(zzHover:)];
+        let _: () = msg_send![hover, setCancelsTouchesInView: false as BOOL];
+        let _: () = msg_send![view, addGestureRecognizer: hover];
+        let _: () = msg_send![hover, release];
+
+        let scroll: id = msg_send![class!(UIPanGestureRecognizer), alloc];
+        let scroll: id = msg_send![scroll, initWithTarget: view action: sel!(zzScroll:)];
+        let _: () = msg_send![scroll, setAllowedScrollTypesMask: 3isize];
+        let no_touches: id = msg_send![class!(NSArray), array];
+        let _: () = msg_send![scroll, setAllowedTouchTypes: no_touches];
+        let _: () = msg_send![scroll, setCancelsTouchesInView: false as BOOL];
+        let _: () = msg_send![view, addGestureRecognizer: scroll];
+        let _: () = msg_send![scroll, release];
+
+        let interaction: id = msg_send![class!(UIPointerInteraction), alloc];
+        let interaction: id = msg_send![interaction, initWithDelegate: view];
+        let _: () = msg_send![view, addInteraction: interaction];
+        POINTER_INTERACTION.store(interaction, std::sync::atomic::Ordering::Release);
+    }
+}
+
+pub(crate) fn set_cursor_style(style: CursorStyle) {
+    let mut current = CURSOR_STYLE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if *current == style {
+        return;
+    }
+    *current = style;
+    drop(current);
+    let interaction = POINTER_INTERACTION.load(std::sync::atomic::Ordering::Acquire);
+    if !interaction.is_null() {
+        unsafe {
+            let _: () = msg_send![interaction, invalidate];
+        }
+    }
+}
+
+extern "C" fn pointer_style(_: &Object, _: Sel, _interaction: id, _region: id) -> id {
+    let style = *CURSOR_STYLE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    unsafe {
+        let beam = |axis: usize| -> id {
+            let shape: id =
+                msg_send![class!(UIPointerShape), beamWithPreferredLength: 20.0f64 axis: axis];
+            msg_send![class!(UIPointerStyle), styleWithShape: shape constrainedAxes: 0usize]
+        };
+        match style {
+            CursorStyle::IBeam => beam(2),
+            CursorStyle::IBeamCursorForVerticalLayout => beam(1),
+            _ => nil,
+        }
+    }
+}
+
+fn recognizer_point(this: &Object, recognizer: id) -> Point<Pixels> {
+    let location: CGPoint =
+        unsafe { msg_send![recognizer, locationInView: this as *const Object as id] };
+    point(px(location.x as f32), px(location.y as f32))
+}
+
+extern "C" fn hover(this: &Object, _: Sel, recognizer: id) {
+    let phase: isize = unsafe { msg_send![recognizer, state] };
+    let position = recognizer_point(this, recognizer);
+    let modifiers = event_modifiers(recognizer);
+    unsafe { get_window_state(this) }.borrow_mut().last_touch = position;
+    let input = match phase {
+        1 | 2 => PlatformInput::MouseMove(MouseMoveEvent {
+            position,
+            pressed_button: None,
+            modifiers,
+        }),
+        3..=5 => PlatformInput::MouseExited(MouseExitEvent {
+            position,
+            pressed_button: None,
+            modifiers,
+        }),
+        _ => return,
+    };
+    dispatch_event(this, input);
+}
+
+extern "C" fn scroll(this: &Object, _: Sel, recognizer: id) {
+    let phase: isize = unsafe { msg_send![recognizer, state] };
+    let touch_phase = match phase {
+        1 => TouchPhase::Started,
+        2 => TouchPhase::Moved,
+        3 | 4 => TouchPhase::Ended,
+        _ => return,
+    };
+    let view = this as *const Object as id;
+    let translation: CGPoint = unsafe { msg_send![recognizer, translationInView: view] };
+    unsafe {
+        let _: () = msg_send![recognizer, setTranslation: CGPoint { x: 0.0, y: 0.0 } inView: view];
+    }
+    let position = recognizer_point(this, recognizer);
+    unsafe { get_window_state(this) }.borrow_mut().last_touch = position;
+    dispatch_event(
+        this,
+        PlatformInput::ScrollWheel(ScrollWheelEvent {
+            position,
+            delta: ScrollDelta::Pixels(point(px(translation.x as f32), px(translation.y as f32))),
+            modifiers: event_modifiers(recognizer),
+            touch_phase,
+        }),
+    );
+}
 
 extern "C" fn layer_class(_: &Class, _: Sel) -> *const Class {
     class!(CAMetalLayer)

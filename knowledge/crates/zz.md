@@ -781,7 +781,7 @@ in [running zz](/playbooks/running-zz.md) or the `zz::diagnostics::terminal_rend
 | `crates/zz/src/chooser/tree.rs` | `ChooseTreeView` . native window/pane chooser overlay |
 | `crates/zz/src/chooser/buffer.rs` | `ChooseBufferView` . native paste-buffer chooser overlay |
 | `crates/zz/src/pane/display.rs` | `DisplayPanesView` . native pane-numbering overlay input target |
-| `crates/zz/src/command/palette.rs` | `CommandPaletteView` . native prompt input, catalog/history completions, and submission |
+| `crates/zz/src/command/palette.rs` | Desktop `PaletteBackend` for zz-ui's `CommandPaletteView`: multi-host tree, config settings, and mux activation |
 | `crates/zz/src/command/completion.rs` | Token-aware command, option, enum, history, and live-target completion ranking |
 | `crates/zz/src/diagnostics/mod.rs` | `--verbose` logging, panic hook, process/app-state samplers, process-role classification |
 | `crates/zz/src/file_picker.rs` | Feature-gated fuzzy path picker shared by Agent and Editor panes |

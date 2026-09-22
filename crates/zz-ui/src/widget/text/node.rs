@@ -663,12 +663,12 @@ impl CodeBlock {
                 *highlighter = SyntaxHighlighter::new(lang);
             }
 
-            #[cfg(all(feature = "tree-sitter", not(target_family = "wasm")))]
+            #[cfg(feature = "tree-sitter")]
             {
                 let rope = ropey::Rope::from(code.as_str());
                 highlighter.update(None, &rope, None);
             }
-            #[cfg(any(not(feature = "tree-sitter"), target_family = "wasm"))]
+            #[cfg(not(feature = "tree-sitter"))]
             highlighter.update(code.as_str());
             highlighter.styles(&(0..code.len()), highlight_theme)
         });

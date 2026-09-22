@@ -18,6 +18,18 @@ impl HostId {
     }
 }
 
+impl From<HostId> for zz_ui::command::PaletteHostId {
+    fn from(host: HostId) -> Self {
+        Self(host.0)
+    }
+}
+
+impl From<zz_ui::command::PaletteHostId> for HostId {
+    fn from(host: zz_ui::command::PaletteHostId) -> Self {
+        Self(host.0)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HostState {
     Disconnected,

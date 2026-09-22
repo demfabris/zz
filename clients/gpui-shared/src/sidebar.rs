@@ -1,4 +1,4 @@
-use super::WebClient;
+use super::AppShell;
 use crate::connection::Connection;
 use gpui::{
     AnyElement, App, Context, Entity, FocusHandle, Hsla, ListSizingBehavior, MouseButton,
@@ -161,13 +161,18 @@ fn activate(connection: &Entity<Connection>, target: Target, cx: &mut App) {
                 connection.command("select-window", vec!["-t".into(), id.to_string()], cx);
             }
             Target::Pane(id) => {
-                connection.command("select-pane", vec!["-t".into(), id.to_string()], cx);
+                connection.command("select-window", vec!["-t".into(), id.to_string()], cx);
+                connection.command(
+                    "select-pane",
+                    vec!["-Z".into(), "-t".into(), id.to_string()],
+                    cx,
+                );
             }
         }
     });
 }
 
-fn toggle(view: &mut WebClient, target: Target, cx: &mut Context<WebClient>) {
+fn toggle(view: &mut AppShell, target: Target, cx: &mut Context<AppShell>) {
     view.sidebar_selection = Some(target);
     if !view.collapsed_tree.remove(&target) {
         view.collapsed_tree.insert(target);
@@ -175,7 +180,7 @@ fn toggle(view: &mut WebClient, target: Target, cx: &mut Context<WebClient>) {
     cx.notify();
 }
 
-pub(super) fn reconcile(view: &mut WebClient, window: &Window, cx: &App) {
+pub(super) fn reconcile(view: &mut AppShell, window: &Window, cx: &App) {
     let core = &view.connection.read(cx).core;
     let snapshot = core.snapshot();
     view.unseen_agents
@@ -199,7 +204,8 @@ pub(super) fn reconcile(view: &mut WebClient, window: &Window, cx: &App) {
         .map(|window| Target::Pane(window.active_pane))
         .or_else(|| session.map(|session| Target::Session(session.id)))
         .unwrap_or(Target::Host);
-    if view.sidebar_active != Some(active) {
+    let active_changed = view.sidebar_active != Some(active);
+    if active_changed {
         view.sidebar_active = Some(active);
         view.collapsed_tree.remove(&Target::Host);
         if let Some(session) = session {
@@ -219,6 +225,10 @@ pub(super) fn reconcile(view: &mut WebClient, window: &Window, cx: &App) {
         core,
         &view.unseen_agents,
     );
+    if active_changed && let Some(index) = rows.iter().position(|row| row.target == active) {
+        view.sidebar_scroll
+            .scroll_to_item(index, ScrollStrategy::Nearest);
+    }
     if !rows
         .iter()
         .any(|row| Some(row.target) == view.sidebar_selection)
@@ -232,10 +242,10 @@ pub(super) fn reconcile(view: &mut WebClient, window: &Window, cx: &App) {
 }
 
 pub(super) fn handle_key(
-    view: &mut WebClient,
+    view: &mut AppShell,
     action: ChromeAction,
     window: &mut Window,
-    cx: &mut Context<WebClient>,
+    cx: &mut Context<AppShell>,
 ) -> bool {
     reconcile(view, window, cx);
     let core = &view.connection.read(cx).core;
@@ -308,7 +318,11 @@ pub(super) fn handle_key(
                 execute(&view.connection, &command, cx);
             }
         }
-        ChromeAction::SidebarCommandPalette => view.command("command-prompt", Vec::new(), cx),
+        ChromeAction::SidebarCommandPalette => view.open_palette(
+            Some(crate::command_palette::PaletteMode::Command),
+            window,
+            cx,
+        ),
         _ => return false,
     }
     true
@@ -329,7 +343,7 @@ pub(super) struct Runtime {
     pub connection: Entity<Connection>,
     pub focus: FocusHandle,
     pub focused: bool,
-    pub view: Entity<WebClient>,
+    pub view: Entity<AppShell>,
     pub selected: Option<Target>,
     pub unseen_agents: BTreeSet<PaneId>,
 }

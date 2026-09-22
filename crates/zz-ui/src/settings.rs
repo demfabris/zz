@@ -1,3 +1,4 @@
+pub mod about;
 pub mod appearance;
 pub mod panes_preview;
 pub mod status_bar_preview;
@@ -148,6 +149,28 @@ pub fn settings_navigation_button(section: SettingsSection, selected: bool, _: &
         .label(section.title())
         .child(div().flex_1())
         .when(selected, crate::StyledExt::font_medium)
+}
+
+/// The row that leaves the settings route, above the section list.
+pub fn settings_navigation_back_button(id: impl Into<ElementId>) -> Button {
+    Button::new(id)
+        .w_full()
+        .px(px(8.0))
+        .small()
+        .ghost()
+        .icon(crate::IconName::ArrowLeft)
+        .label("Back")
+        .child(div().flex_1())
+}
+
+/// Holds the back button at the workspace tree's row height.
+pub fn settings_navigation_back_row(button: Button) -> gpui::Div {
+    div()
+        .flex()
+        .flex_none()
+        .h(px(crate::navigation::WORKSPACE_TREE_ROW_HEIGHT))
+        .items_center()
+        .child(button)
 }
 
 /// Label above a settings navigation group.
@@ -339,7 +362,7 @@ mod tests {
                     border_width: 0.5,
                     inactive_opacity: 0.7,
                 },
-                gaps,
+                [gaps],
                 background,
                 [opacity, glow],
                 [margin, radius, border],
@@ -1059,7 +1082,7 @@ impl SelectItem for SettingsSelectItem {
 
 pub fn panes_page(
     preview: panes_preview::PanesPreview,
-    gaps: SettingEntry,
+    layout: impl IntoIterator<Item = SettingEntry>,
     background_opacity: SettingEntry,
     focus: [SettingEntry; 2],
     frame: [SettingEntry; 3],
@@ -1087,7 +1110,7 @@ pub fn panes_page(
                         ))
                         .child(preview),
                 )
-                .child(SettingsStack::titled("Layout").child(gaps))
+                .child(SettingsStack::titled("Layout").children(layout))
                 .child(SettingsStack::titled("Appearance").child(background_opacity))
                 .child(SettingsStack::titled("Focus").children(focus))
                 .child(

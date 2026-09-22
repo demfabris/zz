@@ -15,7 +15,11 @@ type_complexity = "allow"
 accesskit_ios = "0.1.2"
 anyhow = "1"
 async-task = "4.7"
+base64 = "0.23.1"
+chrono = "0.4.45"
+image = { version = "=0.25.10", default-features = false }
 dispatch2 = "0.3.1"
+env_logger.workspace = true
 futures = "0.3"
 gpui.workspace = true
 gpui_wgpu = { git = "https://github.com/demfabris/zed", rev = "25655fcd99ebbdb4c8287ff01d540044d12fa10f" }
@@ -23,13 +27,23 @@ log.workspace = true
 objc = "0.2"
 parking_lot.workspace = true
 raw-window-handle.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 uuid = "1"
+zz-client = { path = "../zz-client" }
+zz-daemon = { path = "../zz-daemon", default-features = false }
+zz-protocol = { path = "../zz-protocol" }
+zz-terminal = { path = "../zz-terminal", default-features = false }
+zz-ui = { path = "../zz-ui", features = ["agent", "tree-sitter"] }
 
 [dev-dependencies]
+async-channel = "2.5.0"
 gpui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 zz-client = { path = "../zz-client" }
 zz-daemon = { path = "../zz-daemon", default-features = false }
 zz-protocol = { path = "../zz-protocol" }
 env_logger.workspace = true
 zz-terminal = { path = "../zz-terminal", default-features = false }
-zz-ui = { path = "../zz-ui" }
+zz-ui = { path = "../zz-ui", features = ["agent"] }

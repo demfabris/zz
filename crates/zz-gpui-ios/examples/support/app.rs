@@ -155,7 +155,8 @@ impl TerminalApp {
         self.cache = RowRenderCache::default();
         self.connection = Some(Connection::connect(
             endpoint.trim().into(),
-            std::env::var("ZZ_GPUI_SESSION").unwrap_or_default(),
+            Some(std::env::var("ZZ_GPUI_SESSION").unwrap_or_default()),
+            false,
         ));
         self.status = "Connecting…".into();
         self.show_endpoint = false;

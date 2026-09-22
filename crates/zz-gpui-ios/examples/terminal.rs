@@ -1,5 +1,5 @@
 #[cfg(target_os = "ios")]
-#[path = "support/connection.rs"]
+#[path = "../src/transport.rs"]
 mod connection;
 #[cfg(target_os = "ios")]
 #[path = "support/input.rs"]

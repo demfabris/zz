@@ -13,10 +13,13 @@
     <key>CFBundleSupportedPlatforms</key><array><string>iPhoneSimulator</string></array>
     <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
     <key>UILaunchScreen</key><dict/>
-    <key>UIUserInterfaceStyle</key><string>Dark</string>
+    <key>UIApplicationSupportsIndirectInputEvents</key><true/>
     <key>NSLocalNetworkUsageDescription</key><string>Connect to your zz host over SSH.</string>
     <key>UISupportedInterfaceOrientations</key>
     <array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationPortraitUpsideDown</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
+    <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key><false/>

@@ -75,10 +75,6 @@ const KEY_INPUT_WIDTH: f32 = 65.0;
 const CONFIG_EDITOR_FONT_SIZE: f32 = 12.0;
 const CONFIG_EDITOR_PADDING: f32 = 2.0;
 const APP_ICON_PREVIEW_SIZE: f32 = 48.0;
-const ABOUT_LOGO_SIZE: f32 = 88.0;
-const REPOSITORY_URL: &str = "https://github.com/demfabris/zz";
-const RELEASES_URL: &str = "https://github.com/demfabris/zz/releases";
-const ISSUES_URL: &str = "https://github.com/demfabris/zz/issues/new";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum ConfigFileKind {
@@ -1561,74 +1557,24 @@ impl SettingsView {
 
     fn about_section(cx: &Context<Self>) -> AnyElement {
         Self::scroll_column("settings-about")
-            .child(about_hero(cx))
+            .child(zz_ui::settings::about::about_hero(
+                img(crate::app_icon::about_logo(cx.theme().mode))
+                    .size(px(zz_ui::settings::about::ABOUT_LOGO_SIZE)),
+                cx,
+            ))
             .when_some(Self::updates_stack(cx), gpui::ParentElement::child)
-            .child(
-                SettingsStack::titled("Build")
-                    .description("What to quote in a bug report.")
-                    .child(
-                        SettingEntry::new("Version", "The zz bundle version.")
-                            .title_actions(copy_build_info_button())
-                            .control(about_value(env!("CARGO_PKG_VERSION"), cx)),
-                    )
-                    .child(
-                        SettingEntry::new(
-                            "Platform",
-                            "The operating system and processor architecture this build targets.",
-                        )
-                        .control(about_value(platform(), cx)),
-                    )
-                    .child(
-                        SettingEntry::new("Renderer", "The GPUI revision this build links.")
-                            .control(about_value(gpui_revision(), cx)),
-                    ),
-            )
-            .child(
-                SettingsStack::titled("Project")
-                    .child(
-                        SettingEntry::new(
-                            "Source code",
-                            "zz is open source. Read it, build it, or send a patch.",
-                        )
-                        .control(link_button(
-                            "settings-about-repository",
-                            "GitHub",
-                            REPOSITORY_URL,
-                            cx,
-                        )),
-                    )
-                    .child(
-                        SettingEntry::new(
-                            "Releases",
-                            "Every tagged build, with notes on what changed.",
-                        )
-                        .control(link_button(
-                            "settings-about-releases",
-                            "Releases",
-                            RELEASES_URL,
-                            cx,
-                        )),
-                    )
-                    .child(
-                        SettingEntry::new(
-                            "Report an issue",
-                            "Something broken or missing? Bring the build details above.",
-                        )
-                        .control(link_button(
-                            "settings-about-issues",
-                            "New issue",
-                            ISSUES_URL,
-                            cx,
-                        )),
-                    )
-                    .child(
-                        SettingEntry::new(
-                            "License",
-                            "Dual-licensed, at your option. Contributions land under both.",
-                        )
-                        .control(about_value("MIT or Apache-2.0", cx)),
-                    ),
-            )
+            .child(zz_ui::settings::about::about_build_stack(
+                platform(),
+                zz_ui::settings::about::about_copy_button("settings-about-copy-build-info")
+                    .on_click(|_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(
+                            zz_ui::settings::about::build_info(&platform()),
+                        ));
+                        toast::push(Notification::success("Copied build information"), cx);
+                    }),
+                cx,
+            ))
+            .child(zz_ui::settings::about::about_project_stack(cx))
             .into_any_element()
     }
 
@@ -1751,13 +1697,13 @@ impl SettingsView {
                 border_width: resolved.pane_border_width.value,
                 inactive_opacity: resolved.pane_inactive_opacity.value,
             },
-Self::boolean_setting(
+[Self::boolean_setting(
                 ConfigKey::PaneGaps,
                 "Pane gaps",
                 "Separate panes with card-like spacing and chrome.",
                 resolved.pane_gaps,
                 cx,
-            ),
+            )],
 Self::numeric_setting(
                 ConfigKey::PaneBackgroundOpacity,
                 "Background opacity",
@@ -2610,88 +2556,8 @@ fn theme_preview(
     )
 }
 
-fn about_hero(cx: &App) -> gpui::Div {
-    div()
-        .flex()
-        .flex_col()
-        .items_center()
-        .gap(px(12.0))
-        .pt(px(20.0))
-        .pb(px(10.0))
-        .child(img(crate::app_icon::about_logo(cx.theme().mode)).size(px(ABOUT_LOGO_SIZE)))
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap(px(5.0))
-                .child(
-                    zz_ui::StyledExt::font_medium(div().text_size(zz_ui::rems_from_px(22.0)))
-                        .child("zz"),
-                )
-                .child(
-                    div()
-                        .text_size(zz_ui::rems_from_px(12.0))
-                        .text_color(cx.theme().foreground.muted())
-                        .child(SettingsSection::About.description()),
-                )
-                .child(settings_provenance_badge(concat!(
-                    "v",
-                    env!("CARGO_PKG_VERSION")
-                ))),
-        )
-}
-
-fn about_value(value: impl Into<SharedString>, cx: &App) -> gpui::Div {
-    div()
-        .flex_none()
-        .font_family(cx.theme().mono_font_family.clone())
-        .text_size(zz_ui::rems_from_px(11.0))
-        .text_color(cx.theme().foreground.muted())
-        .child(value.into())
-}
-
-fn link_button(id: &'static str, label: &'static str, url: &'static str, cx: &App) -> Button {
-    Button::new(id)
-        .small()
-        .icon(zz_ui::IconName::ExternalLink)
-        .label(label)
-        .bg(settings_control_fill(cx))
-        .on_click(move |_, _, cx| cx.open_url(url))
-}
-
-fn copy_build_info_button() -> Button {
-    Button::new("settings-about-copy-build-info")
-        .xsmall()
-        .compact()
-        .ghost()
-        .icon(zz_ui::IconName::Copy)
-        .tooltip("Copy build information")
-        .on_click(|_, _, cx| {
-            cx.write_to_clipboard(ClipboardItem::new_string(build_info()));
-            toast::push(Notification::success("Copied build information"), cx);
-        })
-}
-
-fn build_info() -> String {
-    format!(
-        "zz {} ({} {}, gpui {})",
-        env!("CARGO_PKG_VERSION"),
-        std::env::consts::OS,
-        std::env::consts::ARCH,
-        gpui_revision(),
-    )
-}
-
 fn platform() -> String {
     format!("{} · {}", std::env::consts::OS, std::env::consts::ARCH)
-}
-
-fn gpui_revision() -> &'static str {
-    let Some((_, revision)) = crate::GPUI_SOURCE.split_once('#') else {
-        return crate::GPUI_SOURCE;
-    };
-    revision.get(..8).unwrap_or(revision)
 }
 
 fn provenance_badge(provenance: ConfigProvenance) -> Tag {

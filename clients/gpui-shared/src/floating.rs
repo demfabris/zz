@@ -1,11 +1,11 @@
 use std::{cell::Cell, rc::Rc};
 
 use gpui::{
-    AnyElement, App, Bounds, Context, Hsla, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    Point, ScrollWheelEvent, Window, div, point, prelude::*, px, size,
+    AnyElement, Bounds, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
+    ScrollWheelEvent, Window, div, point, prelude::*, px, size,
 };
 use zz_client::{MenuBox, MenuKeyResult, MenuPointerKind, resolve_menu_mouse};
-use zz_protocol::{InputMessage, MenuState, PopupBorderLines, TmuxColour, parse_tmux_colour};
+use zz_protocol::{InputMessage, MenuState, PopupBorderLines};
 use zz_ui::{
     ActiveTheme as _, Colorize as _, ElementExt as _,
     command::floating::{
@@ -15,21 +15,21 @@ use zz_ui::{
     pane::FloatingSurface,
 };
 
-use super::WebClient;
+use super::AppShell;
 
-impl WebClient {
+impl AppShell {
     pub(super) fn floating_canvas_size(&self, window: &Window) -> gpui::Size<Pixels> {
-        let viewport = window.viewport_size();
+        let viewport = window.fully_visible_bounds().size;
         size(
             (viewport.width
-                - px(if self.sidebar || self.settings.is_some() {
+                - px(if self.inline_sidebar(window) {
                     self.sidebar_width(window)
                 } else {
                     0.0
                 }))
             .max(px(0.0)),
             (viewport.height
-                - if self.settings.is_none() {
+                - if self.settings.is_none() && !self.inline_sidebar(window) {
                     zz_ui::TITLE_BAR_HEIGHT
                 } else {
                     px(0.0)
@@ -138,8 +138,7 @@ impl WebClient {
                             this.menu_pointer(
                                 &press_state,
                                 press_bounds.get(),
-                                MenuPointerKind::Press,
-                                menu_press_buttons(event.button),
+                                (MenuPointerKind::Press, menu_press_buttons(event.button)),
                                 event.position,
                                 window,
                                 cx,
@@ -152,8 +151,7 @@ impl WebClient {
                             this.menu_pointer(
                                 &release_state,
                                 release_bounds.get(),
-                                MenuPointerKind::Release,
-                                RELEASE_BUTTONS,
+                                (MenuPointerKind::Release, RELEASE_BUTTONS),
                                 event.position,
                                 window,
                                 cx,
@@ -171,8 +169,7 @@ impl WebClient {
                             this.menu_pointer(
                                 &move_state,
                                 move_bounds.get(),
-                                kind,
-                                buttons,
+                                (kind, buttons),
                                 event.position,
                                 window,
                                 cx,
@@ -185,8 +182,7 @@ impl WebClient {
                             this.menu_pointer(
                                 &state,
                                 content_bounds.get(),
-                                MenuPointerKind::Wheel,
-                                WHEEL_BUTTONS,
+                                (MenuPointerKind::Wheel, WHEEL_BUTTONS),
                                 event.position,
                                 window,
                                 cx,
@@ -229,8 +225,7 @@ impl WebClient {
         &mut self,
         state: &MenuState,
         content_bounds: Bounds<Pixels>,
-        kind: MenuPointerKind,
-        buttons: u8,
+        (kind, buttons): (MenuPointerKind, u8),
         position: Point<Pixels>,
         window: &Window,
         cx: &mut Context<Self>,
@@ -278,42 +273,4 @@ impl WebClient {
     }
 }
 
-pub(super) fn style_color(style: &str, key: &str, fallback: Hsla, cx: &App) -> Hsla {
-    let Some(value) = style.split(',').find_map(|part| {
-        let (name, value) = part.split_once('=')?;
-        name.eq_ignore_ascii_case(key).then_some(value)
-    }) else {
-        return fallback;
-    };
-    let Some(color) = parse_tmux_colour(value) else {
-        return fallback;
-    };
-    let packed = match color {
-        TmuxColour::Rgb(color) => color,
-        TmuxColour::Basic(index) | TmuxColour::Indexed(index) => {
-            zz_protocol::indexed_colour_rgb(index)
-        }
-        TmuxColour::Default | TmuxColour::Terminal => return fallback,
-        TmuxColour::Theme(index) => {
-            return match index {
-                0 => cx.theme().background,
-                1 | 7..=9 => cx.theme().foreground,
-                2 => cx.theme().border(),
-                3 => cx.theme().background.raised(1).opaque(),
-                4 => cx.theme().success,
-                5 => cx.theme().warning,
-                6 => cx.theme().danger,
-                _ => fallback,
-            };
-        }
-    };
-    let channel =
-        |shift: u32| f32::from(u8::try_from((packed >> shift) & 0xff).unwrap_or_default()) / 255.0;
-    gpui::Rgba {
-        r: channel(16),
-        g: channel(8),
-        b: channel(0),
-        a: 1.0,
-    }
-    .into()
-}
+pub(super) use zz_ui::tmux_style::tmux_style_colour as style_color;

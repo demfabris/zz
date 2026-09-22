@@ -1,9 +1,9 @@
 //! Three coordinate spaces: buffer lines, wrap rows (soft wrap), display rows (folding).
 mod display_map;
 mod fold_map;
-#[cfg(all(feature = "tree-sitter", not(target_family = "wasm")))]
+#[cfg(feature = "tree-sitter")]
 mod folding;
-#[cfg(any(not(feature = "tree-sitter"), target_family = "wasm"))]
+#[cfg(not(feature = "tree-sitter"))]
 pub mod folding;
 mod text_wrapper;
 mod wrap_map;
@@ -11,7 +11,7 @@ mod wrap_map;
 pub use self::display_map::DisplayMap;
 pub(crate) use self::text_wrapper::LineLayout;
 
-#[cfg(any(not(feature = "tree-sitter"), target_family = "wasm"))]
+#[cfg(not(feature = "tree-sitter"))]
 #[allow(unused_imports)]
 pub use folding::Tree;
 #[allow(unused_imports)]

@@ -192,6 +192,7 @@ impl Render for Notification {
             .occlude()
             .relative()
             .w(DEFAULT_WIDTH)
+            .max_w((window.fully_visible_bounds().size.width - px(32.)).max(px(1.)))
             .items_center()
             .border_1()
             .border_color(cx.theme().border())

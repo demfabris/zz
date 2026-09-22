@@ -1,12 +1,54 @@
+use std::time::Duration;
+
 use gpui::{
-    App, Context, CursorStyle, ElementId, Entity, IntoElement, Pixels, Point, Render, Window, div,
-    prelude::*, px,
+    App, Bounds, Context, CursorStyle, ElementId, Entity, IntoElement, Pixels, Point, Render,
+    Window, div, prelude::*, px,
 };
 use zz_protocol::PaneId;
 
 use crate::IconName;
 
 use super::pane_header_icon_button;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct DropPreviewFrame {
+    pub bounds: Bounds<Pixels>,
+    pub opacity: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DropPreview {
+    pub from: DropPreviewFrame,
+    pub to: DropPreviewFrame,
+    pub sequence: u64,
+    pub duration: Duration,
+}
+
+impl DropPreview {
+    pub fn at(self, delta: f32) -> DropPreviewFrame {
+        DropPreviewFrame {
+            bounds: lerp_bounds(self.from.bounds, self.to.bounds, delta),
+            opacity: self.from.opacity + (self.to.opacity - self.from.opacity) * delta,
+        }
+    }
+}
+
+fn lerp_bounds(from: Bounds<Pixels>, to: Bounds<Pixels>, delta: f32) -> Bounds<Pixels> {
+    Bounds::new(
+        gpui::point(
+            lerp_pixels(from.origin.x, to.origin.x, delta),
+            lerp_pixels(from.origin.y, to.origin.y, delta),
+        ),
+        gpui::size(
+            lerp_pixels(from.size.width, to.size.width, delta),
+            lerp_pixels(from.size.height, to.size.height, delta),
+        ),
+    )
+}
+
+fn lerp_pixels(from: Pixels, to: Pixels, delta: f32) -> Pixels {
+    from + (to - from) * delta
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PaneDrag {

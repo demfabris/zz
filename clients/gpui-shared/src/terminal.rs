@@ -1,11 +1,12 @@
-use std::{collections::HashSet, ops::Range, sync::Arc, time::Duration};
+use std::{cell::Cell, collections::HashSet, ops::Range, rc::Rc, sync::Arc, time::Duration};
 
 use gpui::{
-    Anchor, AnyElement, App, Bounds, ClipboardEntry, ClipboardItem, Context, ElementInputHandler,
-    Entity, EntityInputHandler, FocusHandle, Focusable, ImageSource, KeyDownEvent, KeyUpEvent,
-    Keystroke, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent,
-    MouseUpEvent, ObjectFit, Pixels, Point, Render, ScrollWheelEvent, Subscription, Task,
-    UTF16Selection, Window, anchored, canvas, deferred, div, img, prelude::*, px,
+    Anchor, AnyElement, App, Bounds, ClipboardEntry, ClipboardItem, Context, Corners,
+    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, Hsla, ImageSource,
+    KeyDownEvent, KeyUpEvent, Keystroke, ModifiersChangedEvent, MouseButton, MouseDownEvent,
+    MouseExitEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Point, Render,
+    ScrollWheelEvent, Subscription, Task, UTF16Selection, Window, anchored, canvas, deferred, div,
+    img, prelude::*, px,
 };
 use zz_client::{
     ChromeAction, ChromeKeymap, ChromeProfile, ClientCore, CoreEvent, TERMINAL_TABLE,
@@ -13,16 +14,19 @@ use zz_client::{
 };
 use zz_protocol::{InputMessage, PaneId, PopupAction, TerminalUiCommand};
 use zz_terminal::{
-    KeyAction, KeyCode, KeyInput, PointerCellEvent, SearchCase, SearchDirection, SearchMode,
-    SearchQuery, SearchStatus, SessionStatus, TerminalAppearance, TerminalMode,
-    TerminalMouseButton, TerminalMouseInput, TerminalMousePhase, TerminalViewAction,
-    TerminalViewport,
+    AppearanceConfigKey, AppearanceSource, KeyAction, KeyCode, KeyInput, PointerCellEvent,
+    SearchCase, SearchDirection, SearchMode, SearchQuery, SearchStatus, SessionStatus,
+    TerminalAppearance, TerminalMode, TerminalMouseButton, TerminalMouseInput, TerminalMousePhase,
+    TerminalViewAction, TerminalViewport,
 };
 use zz_ui::{
-    ActiveTheme, Colorize as _,
+    ActiveTheme, Colorize as _, Disableable as _, Icon, IconName, Selectable as _, Sizable as _,
+    StyledExt as _,
+    button::{Button, ButtonVariants as _},
+    input::{Input, InputEvent, InputState},
     pane::{
-        PaneOverlayCorner, pane_overlay_stack, terminal_link_popup, terminal_mode_indicator,
-        terminal_search_prompt, terminal_status_popup,
+        PaneOverlayCorner, pane_overlay_stack, pane_status_badge, pane_sync_badge,
+        pane_unzoom_control, terminal_link_popup, terminal_mode_indicator, terminal_status_popup,
     },
     terminal::{
         GridSize, PaintState, RowRenderCache, TerminalRenderInput, cursor_should_blink,
@@ -32,13 +36,75 @@ use zz_ui::{
 
 use crate::connection::Connection;
 
-fn bundled_font_appearance(core: &ClientCore) -> TerminalAppearance {
+#[derive(Clone, PartialEq)]
+pub(crate) struct TerminalDisplayPreferences {
+    pub font_family: Option<String>,
+    pub font_scale: f32,
+}
+
+impl gpui::Global for TerminalDisplayPreferences {}
+
+pub(crate) fn localized_font_appearance(
+    core: &ClientCore,
+    available_fonts: &[String],
+    fallback: &str,
+    cx: &App,
+) -> TerminalAppearance {
     let mut appearance = core.appearance().cloned().unwrap_or_default();
-    appearance.font_families.clear();
-    appearance.font_families_bold.clear();
-    appearance.font_families_italic.clear();
-    appearance.font_families_bold_italic.clear();
+    for (families, key) in [
+        (
+            &mut appearance.font_families,
+            AppearanceConfigKey::FontFamily,
+        ),
+        (
+            &mut appearance.font_families_bold,
+            AppearanceConfigKey::FontFamilyBold,
+        ),
+        (
+            &mut appearance.font_families_italic,
+            AppearanceConfigKey::FontFamilyItalic,
+        ),
+        (
+            &mut appearance.font_families_bold_italic,
+            AppearanceConfigKey::FontFamilyBoldItalic,
+        ),
+    ] {
+        localize_font_stack(
+            families,
+            core.appearance_provenance().source(key),
+            available_fonts,
+        );
+    }
+    if appearance.font_families.is_empty() {
+        appearance.font_families.push(fallback.to_owned());
+    }
+    if let Some(preferences) = cx.try_global::<TerminalDisplayPreferences>() {
+        if let Some(family) = preferences.font_family.as_ref().filter(|family| {
+            available_fonts
+                .iter()
+                .any(|available| available.eq_ignore_ascii_case(family))
+        }) {
+            appearance.font_families = vec![family.clone()];
+            appearance.font_families_bold.clear();
+            appearance.font_families_italic.clear();
+            appearance.font_families_bold_italic.clear();
+        }
+        appearance.font_size_points =
+            (appearance.font_size_points * preferences.font_scale).clamp(7.0, 48.0);
+    }
     appearance
+}
+
+fn localize_font_stack(families: &mut Vec<String>, source: AppearanceSource, available: &[String]) {
+    if source == AppearanceSource::Default {
+        families.clear();
+    } else {
+        families.retain(|family| {
+            available
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(family))
+        });
+    }
 }
 
 pub struct TerminalPane {
@@ -53,6 +119,11 @@ pub struct TerminalPane {
     scale: f32,
     force_local_selection: bool,
     font_delta: f32,
+    available_fonts: Vec<String>,
+    text_opacity: f32,
+    pane_status: (Option<String>, bool, bool),
+    corner_radii: Corners<Pixels>,
+    resize_suppressed: Rc<Cell<bool>>,
     scroll_rows: f32,
     geometry: Option<GridSize>,
     cache: RowRenderCache,
@@ -82,6 +153,8 @@ pub struct TerminalPane {
     chrome: ChromeKeymap,
     apple_chrome: ChromeKeymap,
     search: Option<SearchQuery>,
+    search_input: Option<Entity<InputState>>,
+    search_focus_pending: bool,
     search_accept_on_enter: bool,
     swallowed_search_key: Option<KeyCode>,
     _subscription: Subscription,
@@ -172,6 +245,11 @@ impl TerminalPane {
             scale: 1.0,
             force_local_selection: false,
             font_delta: 0.,
+            available_fonts: cx.text_system().all_font_names(),
+            text_opacity: 1.0,
+            pane_status: (None, false, false),
+            corner_radii: Corners::default(),
+            resize_suppressed: Rc::default(),
             scroll_rows: 0.,
             geometry: None,
             cache: RowRenderCache::default(),
@@ -198,13 +276,24 @@ impl TerminalPane {
             forwarded: HashSet::new(),
             marked_text: None,
             surface: TerminalSurface::Pane,
-            chrome: ChromeKeymap::for_profile(ChromeProfile::Desktop),
+            chrome: ChromeKeymap::for_profile(if cfg!(target_os = "ios") {
+                ChromeProfile::DesktopApple
+            } else {
+                ChromeProfile::Desktop
+            }),
             apple_chrome: ChromeKeymap::for_profile(ChromeProfile::DesktopApple),
             search: None,
+            search_input: None,
+            search_focus_pending: false,
             search_accept_on_enter: false,
             swallowed_search_key: None,
             _subscription: subscription,
         }
+    }
+
+    pub(crate) fn with_resize_suppression(mut self, suppressed: Rc<Cell<bool>>) -> Self {
+        self.resize_suppressed = suppressed;
+        self
     }
 
     pub fn new_popup(pane: PaneId, connection: Entity<Connection>, cx: &mut Context<Self>) -> Self {
@@ -221,6 +310,57 @@ impl TerminalPane {
         let mut this = Self::new(pane, connection, cx);
         this.surface = TerminalSurface::CommandOutput;
         this
+    }
+
+    pub(crate) fn set_text_dimmed(&mut self, dimmed: bool, opacity: f32, cx: &mut Context<Self>) {
+        let opacity = if dimmed { opacity.clamp(0.0, 1.0) } else { 1.0 };
+        if self.text_opacity.to_bits() != opacity.to_bits() {
+            self.text_opacity = opacity;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn set_pane_status(
+        &mut self,
+        dead: Option<String>,
+        synchronized: bool,
+        zoomed: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let status = (dead, synchronized, zoomed);
+        if self.pane_status != status {
+            self.pane_status = status;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn set_corner_radii(&mut self, radii: Corners<Pixels>, cx: &mut Context<Self>) {
+        if self.corner_radii != radii {
+            self.corner_radii = radii;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn pane_background(&self, cx: &App) -> Hsla {
+        let core = &self.connection.read(cx).core;
+        let background = self
+            .viewport(core)
+            .map_or(cx.theme().background, |viewport| {
+                zz_ui::terminal::terminal_background(
+                    viewport.background,
+                    core.appearance()
+                        .map_or(1.0, |appearance| appearance.background_opacity),
+                )
+            });
+        if self.surface == TerminalSurface::Popup {
+            background
+        } else {
+            cx.theme()
+                .background
+                .opaque()
+                .blend(background)
+                .opacity(cx.theme().pane_background_opacity)
+        }
     }
 
     fn observe_image_hover(&mut self, uri: Option<Arc<str>>, cx: &mut Context<Self>) {
@@ -340,34 +480,33 @@ impl TerminalPane {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search.is_some() && !self.focus.is_focused(window) {
+            return;
+        }
         self.reset_cursor_blink(cx);
         let input = key_input(event);
+        if input.key == KeyCode::Unidentified {
+            return;
+        }
         if self.swallowed_search_key == Some(input.key) {
             cx.stop_propagation();
             return;
         }
-        if let Some(query) = self.search.as_mut() {
-            if input.key == KeyCode::Escape {
-                self.close_search(window, cx);
-                self.swallowed_search_key = Some(input.key);
-            } else if input.key == KeyCode::Enter && self.search_accept_on_enter {
-                self.search = None;
-                self.marked_text = None;
-                self.swallowed_search_key = Some(input.key);
-            } else if let Some(action) = search_key_action(query, &input) {
-                self.view(action, cx);
-            } else if matches!(input.key, KeyCode::Character(_))
-                && ((!input.modifiers.control() && !input.modifiers.platform())
-                    || (matches!(input.key, KeyCode::Character('v' | 'V'))
-                        && !input.modifiers.alt()))
+        if self.search.is_some() {
+            if self
+                .chrome
+                .resolve(TERMINAL_TABLE, &input)
+                .or_else(|| self.apple_chrome.resolve(TERMINAL_TABLE, &input))
+                == Some(ChromeAction::TerminalSearch)
             {
-                return;
+                self.open_search(window, cx);
+            } else if let Some(input) = &self.search_input {
+                input.read(cx).focus_handle(cx).focus(window, cx);
             }
-            cx.notify();
             cx.stop_propagation();
             return;
         }
-        if !self.connection.read(cx).core.prefix_armed() {
+        if !self.connection.read(cx).core.claims_prefix_input(&input) {
             match self
                 .chrome
                 .resolve(TERMINAL_TABLE, &input)
@@ -406,7 +545,14 @@ impl TerminalPane {
                     cx.stop_propagation();
                     return;
                 }
-                Some(ChromeAction::TerminalPaste) => return,
+                Some(ChromeAction::TerminalPaste) => {
+                    #[cfg(target_os = "ios")]
+                    {
+                        zz_gpui_ios::request_paste();
+                        cx.stop_propagation();
+                    }
+                    return;
+                }
                 Some(ChromeAction::TerminalSearch) => {
                     self.open_search(window, cx);
                     cx.stop_propagation();
@@ -415,9 +561,10 @@ impl TerminalPane {
                 _ => {}
             }
         }
-        let raw = self
-            .viewport(&self.connection.read(cx).core)
-            .is_some_and(|viewport| viewport.kitty_keyboard)
+        let raw = cfg!(target_os = "ios")
+            || self
+                .viewport(&self.connection.read(cx).core)
+                .is_some_and(|viewport| viewport.kitty_keyboard)
             || !matches!(input.key, KeyCode::Character(_))
             || input.modifiers.control()
             || input.modifiers.alt()
@@ -438,11 +585,12 @@ impl TerminalPane {
 
     fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.begin_search(SearchQuery::default(), false, cx);
-        window.focus(&self.focus, cx);
+        self.sync_search_input(window, cx);
     }
 
     fn begin_search(&mut self, query: SearchQuery, accept_on_enter: bool, cx: &mut Context<Self>) {
         self.search = Some(query.clone());
+        self.search_focus_pending = true;
         self.search_accept_on_enter = accept_on_enter;
         self.marked_text = None;
         self.view(TerminalViewAction::SearchBegin(query), cx);
@@ -451,10 +599,235 @@ impl TerminalPane {
 
     fn close_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search = None;
+        self.search_focus_pending = false;
         self.marked_text = None;
         self.view(TerminalViewAction::SearchClose, cx);
         window.focus(&self.focus, cx);
         cx.notify();
+    }
+
+    fn sync_search_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search.is_none() {
+            return;
+        }
+        if self.search_input.is_none() {
+            let input = cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder("Find in this pane…")
+                    .context_menu(true)
+            });
+            cx.subscribe_in(
+                &input,
+                window,
+                |view, input, event: &InputEvent, window, cx| match event {
+                    InputEvent::Change => {
+                        if let Some(query) = view.search.as_mut() {
+                            query.text = input.read(cx).value().to_string();
+                            let query = query.clone();
+                            view.view(TerminalViewAction::SearchUpdate(query), cx);
+                            cx.notify();
+                        }
+                    }
+                    InputEvent::Focus if view.surface == TerminalSurface::Pane => {
+                        view.connection.update(cx, |connection, cx| {
+                            connection.command(
+                                "select-pane",
+                                vec!["-Z".into(), "-t".into(), view.pane.to_string()],
+                                cx,
+                            );
+                        });
+                    }
+                    InputEvent::PressEnter { shift } if view.search.is_some() => {
+                        if view.search_accept_on_enter {
+                            view.search = None;
+                            view.search_focus_pending = false;
+                            view.marked_text = None;
+                            view.focus.focus(window, cx);
+                            view.swallowed_search_key = Some(KeyCode::Enter);
+                            cx.notify();
+                        } else {
+                            let backward =
+                                view.search.as_ref().is_some_and(|query| {
+                                    query.direction == SearchDirection::Backward
+                                }) ^ shift;
+                            view.step_search(backward, cx);
+                        }
+                    }
+                    _ => {}
+                },
+            )
+            .detach();
+            self.search_input = Some(input);
+        }
+        if self.search_focus_pending {
+            self.search_focus_pending = false;
+            let input = self.search_input.as_ref().unwrap();
+            let query = self.search.as_ref().unwrap();
+            input.update(cx, |input, cx| {
+                input.set_value(query.text.clone(), window, cx);
+            });
+            input.read(cx).focus_handle(cx).focus(window, cx);
+        }
+    }
+
+    fn step_search(&self, backward: bool, cx: &mut Context<Self>) {
+        self.view(
+            if backward {
+                TerminalViewAction::SearchPrevious
+            } else {
+                TerminalViewAction::SearchNext
+            },
+            cx,
+        );
+    }
+
+    fn search_bar(&self, status: Option<SearchStatus>, cx: &mut Context<Self>) -> AnyElement {
+        let query = self.search.as_ref().unwrap();
+        let enabled = status.is_some_and(|status| {
+            status.total > 0 && !status.pending() && !status.invalid_pattern()
+        });
+        let regex = Button::compact_icon("terminal-search-regex", IconName::Asterisk)
+            .ghost()
+            .flat()
+            .selected(query.mode == SearchMode::Regex)
+            .tooltip("Regular expression")
+            .on_click(cx.listener(|view, _, _, cx| {
+                if let Some(query) = view.search.as_mut() {
+                    query.mode = match query.mode {
+                        SearchMode::Literal => SearchMode::Regex,
+                        SearchMode::Regex => SearchMode::Literal,
+                    };
+                    let query = query.clone();
+                    view.view(TerminalViewAction::SearchUpdate(query), cx);
+                    cx.notify();
+                }
+                cx.stop_propagation();
+            }));
+        let case = Button::compact_icon("terminal-search-case", IconName::CaseSensitive)
+            .ghost()
+            .flat()
+            .selected(query.case == SearchCase::Sensitive)
+            .tooltip(match query.case {
+                SearchCase::Smart => "Smart case",
+                SearchCase::Sensitive => "Match case",
+                SearchCase::Insensitive => "Ignore case",
+            })
+            .on_click(cx.listener(|view, _, _, cx| {
+                if let Some(query) = view.search.as_mut() {
+                    query.case = match query.case {
+                        SearchCase::Sensitive => SearchCase::Insensitive,
+                        _ => SearchCase::Sensitive,
+                    };
+                    let query = query.clone();
+                    view.view(TerminalViewAction::SearchUpdate(query), cx);
+                    cx.notify();
+                }
+                cx.stop_propagation();
+            }));
+        let previous = Button::compact_icon("terminal-search-previous", IconName::ChevronUp)
+            .ghost()
+            .flat()
+            .disabled(!enabled)
+            .tooltip("Previous match")
+            .on_click(cx.listener(|view, _, _, cx| {
+                view.step_search(true, cx);
+                cx.stop_propagation();
+            }));
+        let next = Button::compact_icon("terminal-search-next", IconName::ChevronDown)
+            .ghost()
+            .flat()
+            .disabled(!enabled)
+            .tooltip("Next match")
+            .on_click(cx.listener(|view, _, _, cx| {
+                view.step_search(false, cx);
+                cx.stop_propagation();
+            }));
+        let close = Button::compact_icon("terminal-search-close", IconName::Xmark)
+            .ghost()
+            .flat()
+            .tooltip("Close search")
+            .on_click(cx.listener(|view, _, window, cx| {
+                view.close_search(window, cx);
+                cx.stop_propagation();
+            }));
+        div()
+            .id("terminal-search")
+            .debug_selector(|| "terminal-search".to_owned())
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(4.0))
+            .w(px(460.0))
+            .max_w_full()
+            .p(px(4.0))
+            .bg(cx.theme().background.raised(1))
+            .rounded(cx.theme().radius)
+            .control_surface(cx)
+            .occlude()
+            .font_family(cx.theme().font_family.clone())
+            .text_color(cx.theme().foreground)
+            .text_size(zz_ui::rems_from_px(13.0))
+            .line_height(px(16.0))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Middle, |_, _, cx| cx.stop_propagation())
+            .on_mouse_up(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .on_mouse_up(MouseButton::Middle, |_, _, cx| cx.stop_propagation())
+            .on_mouse_move(|_, _, cx| cx.stop_propagation())
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .capture_key_down(cx.listener(|view, event: &KeyDownEvent, _, cx| {
+                if let Some(query) = view.search.as_mut()
+                    && let Some(action) = search_key_action(query, &key_input(event))
+                {
+                    view.view(action, cx);
+                    cx.notify();
+                    cx.stop_propagation();
+                }
+            }))
+            .on_action(cx.listener(|view, _: &zz_ui::input::Escape, window, cx| {
+                view.close_search(window, cx);
+                view.swallowed_search_key = Some(KeyCode::Escape);
+                cx.stop_propagation();
+            }))
+            .on_action(|_: &zz_ui::input::Enter, _, cx| cx.stop_propagation())
+            .child(
+                div().flex_1().min_w(px(110.0)).child(
+                    Input::new(self.search_input.as_ref().unwrap())
+                        .small()
+                        .appearance(false)
+                        .prefix(Icon::new(IconName::Search).size(px(13.0))),
+                ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(px(2.0))
+                    .ml_auto()
+                    .child(
+                        div()
+                            .px(px(4.0))
+                            .text_size(zz_ui::rems_from_px(11.0))
+                            .text_color(if status.is_some_and(SearchStatus::invalid_pattern) {
+                                cx.theme().danger
+                            } else {
+                                cx.theme().foreground.muted()
+                            })
+                            .child(if query.text.is_empty() {
+                                String::new()
+                            } else {
+                                search_result_text(status)
+                            }),
+                    )
+                    .child(regex)
+                    .child(case)
+                    .child(previous)
+                    .child(next)
+                    .child(close),
+            )
+            .into_any_element()
     }
 
     fn on_key_up(&mut self, event: &KeyUpEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -530,7 +903,11 @@ impl TerminalPane {
         self.pointer = Some(event.position);
         if self.surface == TerminalSurface::Pane {
             self.connection.update(cx, |connection, cx| {
-                connection.command("select-pane", vec!["-t".into(), self.pane.to_string()], cx);
+                connection.command(
+                    "select-pane",
+                    vec!["-Z".into(), "-t".into(), self.pane.to_string()],
+                    cx,
+                );
             });
         }
         if event.button == MouseButton::Left && self.scrollbar_hit(event.position, cx) {
@@ -766,7 +1143,12 @@ impl TerminalPane {
                 let _ = window.drop_image(image);
             }
             let viewport = self.viewport(&connection.core)?;
-            let appearance = bundled_font_appearance(&connection.core);
+            let appearance = localized_font_appearance(
+                &connection.core,
+                &self.available_fonts,
+                &cx.theme().mono_font_family,
+                cx,
+            );
             if self.row_revisions.len() != usize::from(viewport.rows) {
                 self.row_revisions.resize(usize::from(viewport.rows), 0);
                 self.all_dirty = true;
@@ -799,7 +1181,7 @@ impl TerminalPane {
                     command_output: self.surface == TerminalSurface::CommandOutput,
                     appearance: &appearance,
                     appearance_hash: appearance.stable_hash(),
-                    text_opacity: 1.0,
+                    text_opacity: self.text_opacity,
                     focused: self.focused,
                     cursor_blink_visible: self.cursor_blink_visible,
                     marked_text: self
@@ -829,7 +1211,11 @@ impl TerminalPane {
         let measured = geometry.grid;
         let measurable =
             bounds.size.width >= geometry.cell_width && bounds.size.height >= geometry.line_height;
-        if measurable && self.geometry != Some(measured) && attached {
+        if measurable
+            && self.geometry != Some(measured)
+            && attached
+            && (self.surface != TerminalSurface::Pane || !self.resize_suppressed.get())
+        {
             self.geometry = Some(measured);
             match self.surface {
                 TerminalSurface::Pane => self.send(
@@ -861,6 +1247,7 @@ impl TerminalPane {
         &mut self,
         bounds: Bounds<Pixels>,
         paint: &mut Option<PaintState>,
+        hitbox: &gpui::Hitbox,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -871,6 +1258,139 @@ impl TerminalPane {
         );
         if let Some(paint) = paint {
             self.cache.paint(paint, bounds, window, cx);
+        }
+        {
+            let view = cx.entity().downgrade();
+            let press_hitbox = hitbox.clone();
+            window.on_mouse_event(move |event: &gpui::LongPressEvent, phase, window, cx| {
+                if !phase.bubble() {
+                    return;
+                }
+                let _ = view.update(cx, |this, cx| {
+                    let entity = cx.entity();
+                    if event.phase == gpui::TouchPhase::Started {
+                        if window.default_prevented()
+                            || !press_hitbox.is_hovered_at(event.start_position, window)
+                        {
+                            return;
+                        }
+                        window.capture_long_press(&entity);
+                        window.prevent_default();
+                    } else if !window.has_long_press_capture(&entity) {
+                        return;
+                    }
+                    this.touch_selection(event.phase, event.position, window, cx);
+                    cx.stop_propagation();
+                });
+            });
+            let view = cx.entity().downgrade();
+            let drag_hitbox = hitbox.clone();
+            window.on_mouse_event(move |event: &gpui::TouchDragEvent, phase, window, cx| {
+                if !phase.bubble() {
+                    return;
+                }
+                let _ = view.update(cx, |this, cx| {
+                    if event.phase == gpui::TouchPhase::Started {
+                        let tracking = this
+                            .viewport(&this.connection.read(cx).core)
+                            .is_some_and(|viewport| viewport.mouse_tracking);
+                        if window.default_prevented()
+                            || !drag_hitbox.is_hovered_at(event.start_position, window)
+                            || (!tracking && !this.scrollbar_hit(event.start_position, cx))
+                        {
+                            return;
+                        }
+                        this.on_mouse_down(
+                            &MouseDownEvent {
+                                button: MouseButton::Left,
+                                position: event.start_position,
+                                modifiers: gpui::Modifiers::default(),
+                                click_count: 1,
+                                first_mouse: false,
+                            },
+                            window,
+                            cx,
+                        );
+                        window.prevent_default();
+                    } else if this.scrollbar_dragging
+                        || this.pressed_buttons.contains(&MouseButton::Left)
+                    {
+                        match event.phase {
+                            gpui::TouchPhase::Moved => this.on_mouse_move(
+                                &MouseMoveEvent {
+                                    position: event.position,
+                                    pressed_button: Some(MouseButton::Left),
+                                    modifiers: gpui::Modifiers::default(),
+                                },
+                                window,
+                                cx,
+                            ),
+                            gpui::TouchPhase::Ended | gpui::TouchPhase::Cancelled => this
+                                .on_mouse_up(
+                                    &MouseUpEvent {
+                                        button: MouseButton::Left,
+                                        position: event.position,
+                                        modifiers: gpui::Modifiers::default(),
+                                        click_count: 1,
+                                    },
+                                    window,
+                                    cx,
+                                ),
+                            gpui::TouchPhase::Started => {}
+                        }
+                    } else {
+                        return;
+                    }
+                    cx.stop_propagation();
+                });
+            });
+        }
+    }
+
+    fn touch_selection(
+        &mut self,
+        phase: gpui::TouchPhase,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match phase {
+            gpui::TouchPhase::Started => {
+                self.on_mouse_down(
+                    &MouseDownEvent {
+                        button: MouseButton::Left,
+                        position,
+                        modifiers: gpui::Modifiers {
+                            shift: true,
+                            ..Default::default()
+                        },
+                        click_count: 2,
+                        first_mouse: false,
+                    },
+                    window,
+                    cx,
+                );
+                self.force_local_selection = true;
+            }
+            gpui::TouchPhase::Moved => self.on_mouse_move(
+                &MouseMoveEvent {
+                    position,
+                    pressed_button: Some(MouseButton::Left),
+                    modifiers: gpui::Modifiers::default(),
+                },
+                window,
+                cx,
+            ),
+            gpui::TouchPhase::Ended | gpui::TouchPhase::Cancelled => self.on_mouse_up(
+                &MouseUpEvent {
+                    button: MouseButton::Left,
+                    position,
+                    modifiers: gpui::Modifiers::default(),
+                    click_count: 1,
+                },
+                window,
+                cx,
+            ),
         }
     }
 
@@ -883,6 +1403,24 @@ impl TerminalPane {
                 self.observe_image_hover(None, cx);
                 self.end_drag();
                 self.pressed_buttons.clear();
+                #[cfg(target_os = "ios")]
+                for key in self.forwarded.drain().collect::<Vec<_>>() {
+                    self.send(
+                        InputMessage::Key {
+                            pane: self.pane,
+                            input: keystroke_input(
+                                &Keystroke {
+                                    key,
+                                    modifiers: gpui::Modifiers::default(),
+                                    key_char: None,
+                                },
+                                KeyAction::Release,
+                            ),
+                            text_follows: false,
+                        },
+                        cx,
+                    );
+                }
                 self.forwarded.clear();
                 self.swallowed_search_key = None;
                 self.view(TerminalViewAction::ClearLinkHover, cx);
@@ -956,8 +1494,14 @@ impl TerminalPane {
 }
 
 impl Focusable for TerminalPane {
-    fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus.clone()
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        if self.search.is_some()
+            && let Some(input) = &self.search_input
+        {
+            input.read(cx).focus_handle(cx)
+        } else {
+            self.focus.clone()
+        }
     }
 }
 
@@ -985,28 +1529,30 @@ impl Render for TerminalPane {
                 },
             ));
         }
+        self.sync_search_input(window, cx);
         self.sync_focus(window, cx);
-        let appearance = bundled_font_appearance(&self.connection.read(cx).core);
+        let appearance = localized_font_appearance(
+            &self.connection.read(cx).core,
+            &self.available_fonts,
+            &cx.theme().mono_font_family,
+            cx,
+        );
         let font = terminal_font_for_style(&appearance, &cx.theme().mono_font_family, false, false);
         let font_size = px((appearance.font_size_points + self.font_delta).clamp(7., 48.));
         let prepare = cx.entity();
         let paint = cx.entity();
-        let mut background = cx.theme().background;
         let mut mode = None;
         let mut hovered_uri = None;
         let mut search_status = None;
+        let mut top_right: Vec<AnyElement> = Vec::new();
         let mut bottom_right: Vec<AnyElement> = Vec::new();
         if let Some(viewport) = self.viewport(&self.connection.read(cx).core) {
-            background = zz_ui::terminal::terminal_background(
-                viewport.background,
-                appearance.background_opacity,
-            );
             hovered_uri.clone_from(&viewport.presentation.hovered_uri);
             search_status = viewport.search;
             if let Some(uri) = &hovered_uri
                 && pasted_image_number(uri).is_none()
             {
-                bottom_right.push(terminal_link_popup(uri.to_string(), cx).into_any_element());
+                bottom_right.push(terminal_link_popup(presented_uri(uri), cx).into_any_element());
             }
             if self.surface != TerminalSurface::Popup {
                 mode = terminal_mode_text(viewport.mode, viewport.unseen_output);
@@ -1023,45 +1569,17 @@ impl Render for TerminalPane {
             },
             cx,
         );
-        if let Some(query) = &self.search {
-            let prompt = search_prompt_text(
-                query,
-                self.marked_text.as_deref().unwrap_or_default(),
-                search_status,
-            );
-            let caret = "Find: ".len() + query.text.len();
-            let view = cx.entity();
-            bottom_right.push(
-                terminal_search_prompt(
-                    prompt,
-                    caret,
-                    move |bounds, window, cx| {
-                        view.update(cx, |view, _| {
-                            if view.cursor_bounds != bounds {
-                                view.cursor_bounds = bounds;
-                                window.invalidate_character_coordinates();
-                            }
-                        });
-                    },
-                    cx,
-                )
-                .into_any_element(),
-            );
+        if self.search.is_some() {
+            top_right.push(self.search_bar(search_status, cx));
         }
         let mut root = div()
             .id(("terminal", self.pane.0))
             .relative()
             .size_full()
             .overflow_hidden()
-            .bg(if self.surface == TerminalSurface::Pane {
-                cx.theme()
-                    .background
-                    .opaque()
-                    .blend(background)
-                    .opacity(cx.theme().pane_background_opacity)
-            } else {
-                background
-            })
+            .bg(self.pane_background(cx))
+            .rounded_bl(self.corner_radii.bottom_left)
+            .rounded_br(self.corner_radii.bottom_right)
             .font(font)
             .text_size(font_size)
             .when(self.surface != TerminalSurface::Popup, |root| {
@@ -1070,6 +1588,7 @@ impl Render for TerminalPane {
                     .pt(px(appearance.padding_top))
                     .pb(px(appearance.padding_bottom))
             })
+            .key_context("Terminal")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key_down))
             .on_key_up(cx.listener(Self::on_key_up))
@@ -1089,10 +1608,16 @@ impl Render for TerminalPane {
             .child(
                 canvas(
                     move |bounds, window, cx| {
-                        prepare.update(cx, |view, cx| view.prepare(bounds, window, cx))
+                        let hitbox = window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal);
+                        (
+                            prepare.update(cx, |view, cx| view.prepare(bounds, window, cx)),
+                            hitbox,
+                        )
                     },
-                    move |bounds, mut state, window, cx| {
-                        paint.update(cx, |view, cx| view.paint(bounds, &mut state, window, cx));
+                    move |bounds, (mut state, hitbox), window, cx| {
+                        paint.update(cx, |view, cx| {
+                            view.paint(bounds, &mut state, &hitbox, window, cx);
+                        });
                     },
                 )
                 .size_full(),
@@ -1101,11 +1626,40 @@ impl Render for TerminalPane {
             root = root.cursor_pointer();
         }
         if let Some((label, detail)) = mode {
+            top_right.push(terminal_mode_indicator(label, detail, cx).into_any_element());
+        }
+        if let Some(dead) = &self.pane_status.0 {
+            top_right
+                .push(pane_status_badge(IconName::CircleX, dead.clone(), cx).into_any_element());
+        }
+        if self.pane_status.1 {
+            top_right.push(pane_sync_badge(cx).into_any_element());
+        }
+        if self.pane_status.2 {
+            top_right.push(
+                pane_unzoom_control()
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        let pane = view.pane;
+                        view.connection.update(cx, |connection, cx| {
+                            if !connection.core.attached_read_only() {
+                                connection.command(
+                                    "resize-pane",
+                                    vec!["-Z".into(), "-t".into(), pane.to_string()],
+                                    cx,
+                                );
+                            }
+                        });
+                        cx.stop_propagation();
+                    }))
+                    .into_any_element(),
+            );
+        }
+        if !top_right.is_empty() {
             root = root.child(
-                terminal_mode_indicator(label, detail, cx)
-                    .absolute()
-                    .right(px(8.0))
-                    .top(px(8.0)),
+                pane_overlay_stack(PaneOverlayCorner::TopRight, top_right)
+                    .left(px(8.0))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
             );
         }
         if let Some(popover) = self.image_hover_popover(cx) {
@@ -1123,6 +1677,12 @@ impl Render for TerminalPane {
 
 impl EntityInputHandler for TerminalPane {
     fn paste(&mut self, item: ClipboardItem, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search.is_some()
+            && let Some(input) = self.search_input.clone()
+        {
+            input.update(cx, |input, cx| input.paste(item, window, cx));
+            return;
+        }
         if self.surface == TerminalSurface::Pane
             && self.search.is_none()
             && let Some(image) = item.entries().iter().find_map(|entry| match entry {
@@ -1173,11 +1733,19 @@ impl EntityInputHandler for TerminalPane {
     }
     fn replace_text_in_range(
         &mut self,
-        _: Option<Range<usize>>,
+        range: Option<Range<usize>>,
         text: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.search.is_some()
+            && let Some(input) = self.search_input.clone()
+        {
+            input.update(cx, |input, cx| {
+                input.replace_text_in_range(range, text, window, cx);
+            });
+            return;
+        }
         self.reset_cursor_blink(cx);
         let composed = self.marked_text.take().is_some();
         if !text.is_empty() {
@@ -1241,17 +1809,6 @@ fn pasted_image_number(uri: &str) -> Option<u32> {
 
 fn search_key_action(query: &mut SearchQuery, input: &KeyInput) -> Option<TerminalViewAction> {
     match input.key {
-        KeyCode::Enter => Some(
-            if (query.direction == SearchDirection::Backward) ^ input.modifiers.shift() {
-                TerminalViewAction::SearchPrevious
-            } else {
-                TerminalViewAction::SearchNext
-            },
-        ),
-        KeyCode::Backspace => {
-            query.text.pop();
-            Some(TerminalViewAction::SearchUpdate(query.clone()))
-        }
         KeyCode::Character('r' | 'R') if input.modifiers.alt() => {
             query.mode = match query.mode {
                 SearchMode::Literal => SearchMode::Regex,
@@ -1271,35 +1828,22 @@ fn search_key_action(query: &mut SearchQuery, input: &KeyInput) -> Option<Termin
     }
 }
 
-fn search_prompt_text(query: &SearchQuery, marked: &str, status: Option<SearchStatus>) -> String {
-    let result = status.map_or_else(String::new, |status| {
-        if status.invalid_pattern() {
-            "  invalid pattern".to_owned()
-        } else if status.pending() {
-            "  searching…".to_owned()
-        } else if status.total == 0 {
-            "  0/0".to_owned()
-        } else {
-            format!("  {}/{}", status.current(), status.total)
-        }
-    });
-    let mode = match query.mode {
-        SearchMode::Literal => "literal",
-        SearchMode::Regex => "regex",
-    };
-    let case = match query.case {
-        SearchCase::Smart => "smart-case",
-        SearchCase::Sensitive => "case-sensitive",
-        SearchCase::Insensitive => "case-insensitive",
-    };
-    let direction = match query.direction {
-        SearchDirection::Forward => "forward",
-        SearchDirection::Backward => "backward",
-    };
-    format!(
-        "Find: {}{marked}{result}  [{direction}, {mode}, {case}]  Alt+R / Alt+C",
-        query.text
-    )
+fn search_result_text(status: Option<SearchStatus>) -> String {
+    match status {
+        Some(status) if status.invalid_pattern() => "Invalid pattern".to_owned(),
+        Some(status) if status.pending() => "Searching…".to_owned(),
+        Some(status) if status.total > 0 => format!("{} / {}", status.current(), status.total),
+        _ => "0 matches".to_owned(),
+    }
+}
+
+fn presented_uri(uri: &str) -> String {
+    let mut characters = uri.chars();
+    let mut presented = characters.by_ref().take(240).collect::<String>();
+    if characters.next().is_some() {
+        presented.push('…');
+    }
+    presented
 }
 
 fn terminal_mode_text(
@@ -1314,16 +1858,16 @@ fn terminal_mode_text(
             total,
             hide_position,
         } => Some((
-            Some("COPY MODE"),
+            Some("Copy mode"),
             match (hide_position, unseen_output) {
                 (true, 0) => String::new(),
                 (true, unseen) => format!("+{unseen} output"),
-                (false, 0) => format!("{position}/{total}"),
-                (false, unseen) => format!("{position}/{total}  ·  +{unseen} output"),
+                (false, 0) => format!("{position} / {total}"),
+                (false, unseen) => format!("{position} / {total} · +{unseen} output"),
             },
         )),
         TerminalMode::View { position, total } => {
-            Some((Some("VIEW MODE"), format!("{position}/{total}  ·  q close")))
+            Some((Some("View mode"), format!("{position} / {total}")))
         }
     }
 }
@@ -1351,23 +1895,30 @@ pub fn key_input(event: &KeyDownEvent) -> KeyInput {
 }
 
 fn keystroke_input(keystroke: &Keystroke, action: KeyAction) -> KeyInput {
-    let key = key_code(&keystroke.key);
-    let character = if let KeyCode::Character(value) = key {
-        Some(value)
-    } else {
-        None
-    };
-    KeyInput {
-        action,
-        key,
-        modifiers: wire_modifiers(keystroke.modifiers),
-        text: keystroke
-            .key_char
-            .clone()
-            .or_else(|| character.map(|value| value.to_string()))
-            .filter(|text| !text.chars().any(char::is_control))
-            .map(String::into_boxed_str),
-        unshifted_codepoint: character,
+    #[cfg(target_os = "ios")]
+    {
+        crate::input::key_input(keystroke, action)
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let key = key_code(&keystroke.key);
+        let character = if let KeyCode::Character(value) = key {
+            Some(value)
+        } else {
+            None
+        };
+        KeyInput {
+            action,
+            key,
+            modifiers: wire_modifiers(keystroke.modifiers),
+            text: keystroke
+                .key_char
+                .clone()
+                .or_else(|| character.map(|value| value.to_string()))
+                .filter(|text| !text.chars().any(char::is_control))
+                .map(String::into_boxed_str),
+            unshifted_codepoint: character,
+        }
     }
 }
 
@@ -1448,11 +1999,11 @@ mod tests {
         };
         assert_eq!(
             search_key_action(&mut query, &key("enter".into(), false, false)),
-            Some(TerminalViewAction::SearchPrevious)
+            None
         );
         assert_eq!(
             search_key_action(&mut query, &key("enter".into(), true, false)),
-            Some(TerminalViewAction::SearchNext)
+            None
         );
         let _ = search_key_action(&mut query, &key("r".into(), false, true));
         assert_eq!(query.mode, SearchMode::Regex);
@@ -1466,8 +2017,12 @@ mod tests {
             let _ = search_key_action(&mut query, &key("c".into(), false, true));
             assert_eq!(query.case, expected);
         }
-        let _ = search_key_action(&mut query, &key("backspace".into(), false, false));
-        assert_eq!(query.text, "caf");
+        assert_eq!(
+            search_key_action(&mut query, &key("backspace".into(), false, false)),
+            None
+        );
+        assert_eq!(query.text, "café");
+        assert_eq!(query.direction, SearchDirection::Backward);
         assert_eq!(
             search_key_action(&mut query, &key("x".into(), false, false)),
             None
@@ -1475,25 +2030,19 @@ mod tests {
     }
 
     #[test]
-    fn terminal_search_feedback_includes_composition_and_server_results() {
-        let query = SearchQuery::literal("café");
-        let text = search_prompt_text(&query, "編集中", Some(SearchStatus::new(2, 4)));
+    fn terminal_search_feedback_uses_server_results() {
+        assert_eq!(search_result_text(Some(SearchStatus::new(2, 4))), "2 / 4");
         assert_eq!(
-            text,
-            "Find: café編集中  2/4  [forward, literal, smart-case]  Alt+R / Alt+C"
+            search_result_text(Some(SearchStatus::new(0, 0))),
+            "0 matches"
         );
-        assert!(search_prompt_text(&query, "", Some(SearchStatus::new(0, 0))).contains("  0/0"));
-        assert!(
-            search_prompt_text(&query, "", Some(SearchStatus::default().with_pending(true)))
-                .contains("searching…")
+        assert_eq!(
+            search_result_text(Some(SearchStatus::default().with_pending(true))),
+            "Searching…"
         );
-        assert!(
-            search_prompt_text(
-                &query,
-                "",
-                Some(SearchStatus::default().with_invalid_pattern(true))
-            )
-            .contains("invalid pattern")
+        assert_eq!(
+            search_result_text(Some(SearchStatus::default().with_invalid_pattern(true))),
+            "Invalid pattern"
         );
     }
 
@@ -1509,7 +2058,7 @@ mod tests {
                 },
                 3,
             ),
-            Some((Some("COPY MODE"), "+3 output".into()))
+            Some((Some("Copy mode"), "+3 output".into()))
         );
         assert_eq!(
             terminal_mode_text(
@@ -1519,8 +2068,31 @@ mod tests {
                 },
                 0,
             ),
-            Some((Some("VIEW MODE"), "12/20  ·  q close".into()))
+            Some((Some("View mode"), "12 / 20".into()))
         );
+    }
+
+    #[test]
+    fn hovered_uri_presentation_preserves_character_boundaries() {
+        let uri = format!("https://example.com/{}", "界".repeat(300));
+        let presented = presented_uri(&uri);
+        assert_eq!(presented.chars().count(), 241);
+        assert!(presented.ends_with('…'));
+        assert_eq!(presented_uri("https://example.com"), "https://example.com");
+    }
+
+    #[test]
+    fn terminal_fonts_keep_available_overrides_and_drop_remote_defaults() {
+        let available = vec!["Lilex".to_owned(), "Local Mono".to_owned()];
+        let mut explicit = vec![
+            "Missing Mono".to_owned(),
+            "local mono".to_owned(),
+            "Lilex".to_owned(),
+        ];
+        localize_font_stack(&mut explicit, AppearanceSource::Override, &available);
+        assert_eq!(explicit, ["local mono", "Lilex"]);
+        localize_font_stack(&mut explicit, AppearanceSource::Default, &available);
+        assert!(explicit.is_empty());
     }
 
     #[test]

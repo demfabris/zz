@@ -106,7 +106,7 @@ each expansion before choosing another branch and matches against the resulting 
 Clearing the query collapses only branches opened for search. The adapter resolves targets against
 fresh source indices as rows appear or disappear; it uses the existing chooser messages without
 a wire change. `CommandPaletteView::advance_chooser_search` in
-`crates/zz/src/command/palette.rs` owns this sequence.
+`crates/zz-ui/src/command/palette_view.rs` owns this sequence.
 
 # How completions are sourced
 
@@ -136,8 +136,12 @@ rejected by the daemon's existing target validation rather than trusted client-s
 `command/palette.rs` builds its Input, Tag pills, ListItem rows, section headers, status dots,
 and matched-label spans. `PaletteRow::icon` and `PaletteRow::expanded` carry the tree icon and
 disclosure state. `command_palette_tree_entry` gives the disclosure its own toggle handler while
-the row keeps its activation handler. The desktop adapter owns mode and selection state in
-`crates/zz/src/command/palette/model.rs`; each client retains its own mux and input lifecycle.
+the row keeps its activation handler. One `CommandPaletteView` in
+`crates/zz-ui/src/command/palette_view.rs` serves desktop, web, and iOS; the mode, tree, and
+selection model lives beside it in `palette_model.rs`. Each client supplies a `PaletteBackend`:
+desktop builds a multi-host `PaletteTree` from its mux fleet, the thin clients a single-host tree
+from their daemon connection, and both route input, command execution, and target activation
+through the same trait.
 `InputState` continues to handle selection, IME, clipboard, and undo. Mode changes update its
 placeholder without replacing the field.
 
@@ -180,11 +184,12 @@ the live version is the `PROTOCOL_VERSION` constant in `crates/zz-protocol/src/m
 
 | File | Role |
 | --- | --- |
-| `crates/zz/src/command/palette.rs` | Desktop input, suggestion selection, pointer dismissal, and prompt synchronization |
-| `clients/web/src/command_palette.rs` | Browser adapter for the same shared completion engine and palette widgets |
+| `crates/zz-ui/src/command/palette_view.rs` | `CommandPaletteView` and `PaletteBackend`: input, suggestion selection, pointer dismissal, prompt and chooser synchronization for every client |
+| `crates/zz-ui/src/command/palette_model.rs` | Host-agnostic navigation tree, search modes, result grouping, target selection, and fuzzy matching |
+| `crates/zz/src/command/palette.rs` | Desktop `PaletteBackend`: multi-host tree, config-driven settings, and mux activation |
+| `clients/gpui-shared/src/command_palette.rs` | Web and iOS `PaletteBackend`: single-host tree, client preferences, and connection commands |
 | `crates/zz-ui/src/command.rs` | Shared input, completion rows, badges, shortcut hints, and floating palette surface |
 | `crates/zz-ui/src/command/palette.rs` | Shared tree disclosure, icon, row, pill, section, highlight, and status presentation |
-| `crates/zz/src/command/palette/model.rs` | Desktop navigation tree, search modes, result grouping, target selection, and fuzzy matching |
 | `crates/zz-client/src/completion.rs` | Tokenizes and ranks catalog, option, enum, and live-target completions against the current `MuxSnapshot` |
 | `crates/zz-protocol/src/catalog.rs` | The renderer-free command catalog shared by execution parsing and UI completion; tests enforce unique canonical names, aliases, and options |
 | `crates/zz-protocol/src/message.rs` | Prompt kind/history and the native edit/submit/close actions |

@@ -161,7 +161,7 @@ integration, and broader presentation behavior remain unsupported.
 | `crates/zz-mux/src/command.rs` | `focus_sidebar`, `choose_tree`, and `choose_buffer` validation plus their effects. |
 | `crates/zz-daemon/src/daemon.rs` | Chooser state, live selection, template substitution, action execution, and error delivery. |
 | `crates/zz-protocol/src/message.rs` | `FocusSidebar`, `ChooseTreeKind`, `ChooseTreeItem`/`State`/`Action`, and choose-buffer types. |
-| `crates/zz/src/command/palette.rs` | Desktop Navigate tree adapter, source-index activation, and search expansion/restoration. |
+| `crates/zz-ui/src/command/palette_view.rs` | Navigate tree adapter, source-index activation, and search expansion/restoration for every client. |
 | `crates/zz/src/workspace/sidebar.rs` | Persistent tree projection, titlebar-mode slideover, focus/reveal lifecycle, vim-style navigation, selection, and activation. |
 
 # Related

@@ -36,7 +36,33 @@ if ! command -v wasm-bindgen >/dev/null 2>&1 || [[ "$(wasm-bindgen --version)" !
 fi
 
 cd "$WEB_ROOT"
+WEB_SYNTAX_ARGS=()
+if [[ "${WEB_SYNTAX_HIGHLIGHTING:-1}" == 1 ]]; then
+    WEB_AR="$(command -v llvm-ar || true)"
+    if [[ -z "$WEB_AR" ]] && command -v brew >/dev/null 2>&1; then
+        WEB_AR="$(brew --prefix llvm 2>/dev/null)/bin/llvm-ar"
+    fi
+    if [[ ! -x "$WEB_AR" ]]; then
+        echo "syntax highlighting needs llvm-ar (brew install llvm); set WEB_SYNTAX_HIGHLIGHTING=0 to skip it" >&2
+        exit 2
+    fi
+    WEB_TS_HEADERS="$(cargo metadata --locked --format-version 1 --manifest-path "$WEB_MANIFEST" --features syntax-highlighting \
+        | python3 -c 'import json, os, sys; print(next(os.path.join(os.path.dirname(p["manifest_path"]), "wasm", "include") for p in json.load(sys.stdin)["packages"] if p["name"] == "tree-sitter-language"))')"
+    WEB_TS_STUBS="$WEB_TARGET/tree-sitter-wasm-stubs"
+    mkdir -p "$WEB_TS_STUBS"
+    : > "$WEB_TS_STUBS/stdio.c"
+    : > "$WEB_TS_STUBS/stdlib.c"
+    : > "$WEB_TS_STUBS/string.c"
+    export AR_wasm32_unknown_unknown="$WEB_AR"
+    export CFLAGS_wasm32_unknown_unknown="-isystem $WEB_TS_HEADERS -Disdigit(c)=((unsigned)(c)-48u<10u)"
+    WEB_SYNTAX_ARGS=(
+        --features syntax-highlighting
+        --config "target.wasm32-unknown-unknown.tree-sitter-language.wasm-headers=\"$WEB_TS_HEADERS\""
+        --config "target.wasm32-unknown-unknown.tree-sitter-language.wasm-src=\"$WEB_TS_STUBS\""
+    )
+fi
 ZZ_DEV_BUILD="$WEB_DEV_BUILD" rustup run "$WEB_TOOLCHAIN" cargo build --locked --lib "${WEB_BUILD_ARGS[@]}" \
+    "${WEB_SYNTAX_ARGS[@]}" \
     --manifest-path "$WEB_MANIFEST" \
     --target-dir "$WEB_TARGET" \
     --target wasm32-unknown-unknown

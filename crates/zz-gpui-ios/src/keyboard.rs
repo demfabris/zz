@@ -106,7 +106,7 @@ pub fn is_modifier(hid: u16) -> bool {
     matches!(hid, 57 | 224..=231)
 }
 
-fn modifiers(flags: u64) -> Modifiers {
+pub(crate) fn modifiers(flags: u64) -> Modifiers {
     Modifiers {
         shift: flags & (1 << 17) != 0,
         control: flags & (1 << 18) != 0,

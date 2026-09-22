@@ -210,7 +210,6 @@ impl PastedImages {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zz_ui::terminal::TerminalImageSource as _;
 
     #[test]
     fn pasted_images_deduplicate_and_publish_only_complete_transfers() {

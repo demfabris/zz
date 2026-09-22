@@ -1,5 +1,8 @@
 #[path = "agent_pane.rs"]
 mod agent_pane;
+#[cfg(target_os = "ios")]
+#[path = "authentication.rs"]
+mod authentication;
 #[path = "floating.rs"]
 mod floating;
 #[path = "picker.rs"]
@@ -12,16 +15,17 @@ mod sidebar;
 mod status_bar;
 
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     collections::{BTreeSet, HashMap},
     rc::Rc,
     sync::Arc,
 };
 
 use gpui::{
-    AnyElement, App, Bounds, Context, Corners, DragMoveEvent, Entity, FocusHandle, Focusable,
-    IntoElement, KeyDownEvent, MouseButton, Pixels, Point, Render, ScrollStrategy, Subscription,
-    UniformListScrollHandle, Window, div, prelude::*, px, relative, uniform_list,
+    Animation, AnimationExt as _, AnyElement, App, Bounds, Context, Corners, DragMoveEvent, Entity,
+    FocusHandle, Focusable, IntoElement, KeyDownEvent, MouseButton, Pixels, Point, Render,
+    ScrollStrategy, Subscription, UniformListScrollHandle, Window, div, prelude::*, px,
+    uniform_list,
 };
 use zz_client::{
     ChromeAction, ChromeKeymap, ChromeProfile, DropZone, PaneRect, UI_TABLE, coerced_drop_zone,
@@ -46,15 +50,20 @@ use zz_ui::{
         workspace_sidebar_surface, workspace_sidebar_titlebar,
     },
     pane::{
-        PaneChrome, PaneDrag, PaneDragOverlayState, PaneSplitAxis, TerminalPaneAction,
-        pane_border_color, pane_drag_button, pane_drag_overlay, pane_drag_preview,
-        pane_drop_preview, pane_split_hit_target, pane_surface, terminal_pane_header,
+        DropPreview, DropPreviewFrame, PaneChrome, PaneDrag, PaneDragOverlayState, PaneSplitAxis,
+        PaneSplitHighlight, PaneSplitSide, TerminalPaneAction, pane_border_color, pane_drag_button,
+        pane_drag_overlay, pane_drag_preview, pane_drop_preview, pane_split_hit_target,
+        pane_split_surface, pane_surface, terminal_pane_header,
     },
     settings::{SettingsSection, settings_navigation_button, settings_navigation_group_label},
     shell::{app_shell_surface, app_workspace_surface},
 };
 
-use crate::{command_palette::CommandPaletteView, connection::Connection, terminal::TerminalPane};
+use crate::{
+    command_palette::{CommandPaletteEvent, CommandPaletteView, palette_backend},
+    connection::Connection,
+    terminal::TerminalPane,
+};
 use agent_pane::AgentPane;
 
 const TREE_HINTS: &[ChooserHint] = &[
@@ -103,10 +112,12 @@ const BUFFER_HINTS: &[ChooserHint] = &[
     },
 ];
 
-pub(crate) struct WebClient {
+pub(crate) struct AppShell {
     connection: Entity<Connection>,
     connection_status: String,
     connected: bool,
+    #[cfg(target_os = "ios")]
+    auth_prompt_id: Option<u64>,
     terminals: HashMap<PaneId, Entity<TerminalPane>>,
     waiting_panes: BTreeSet<PaneId>,
     agents: HashMap<PaneId, Entity<AgentPane>>,
@@ -116,7 +127,7 @@ pub(crate) struct WebClient {
     settings: Option<SettingsSection>,
     preferences: settings::Preferences,
     settings_controls: settings::Controls,
-    focus: FocusHandle,
+    pub(crate) focus: FocusHandle,
     sidebar_focus: FocusHandle,
     sidebar_scroll: UniformListScrollHandle,
     collapsed_tree: BTreeSet<sidebar::Target>,
@@ -127,6 +138,8 @@ pub(crate) struct WebClient {
     chrome: ChromeKeymap,
     prompt: Option<Entity<CommandPaletteView>>,
     prompt_revision: u64,
+    chooser_revision: u64,
+    local_palette_revisions: Option<(u64, u64)>,
     modal_open: bool,
     chooser_scroll: UniformListScrollHandle,
     chooser_selection: Option<(bool, u32)>,
@@ -135,13 +148,16 @@ pub(crate) struct WebClient {
     popup_terminal: Option<(PaneId, Entity<TerminalPane>)>,
     output_terminal: Option<(u64, Entity<TerminalPane>)>,
     split_drag: Option<SplitDragState>,
+    terminal_resize_suppressed: Rc<Cell<bool>>,
     pane_drag: Option<PaneDragState>,
     pane_layout_override: Option<PaneLayoutOverride>,
     pane_canvas_bounds: Rc<Cell<Bounds<Pixels>>>,
+    pane_bounds: Rc<RefCell<HashMap<PaneId, Bounds<Pixels>>>>,
+    rendered_drop_preview: Rc<Cell<DropPreviewFrame>>,
     _subscriptions: Vec<Subscription>,
 }
 
-impl WebClient {
+impl AppShell {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let connection = cx.new(Connection::new);
         let window_handle = window.window_handle();
@@ -192,11 +208,15 @@ impl WebClient {
                         if matches!(event, zz_client::CoreEvent::Attached { .. }) {
                             connection.update(cx, Connection::set_color_scheme);
                         }
+                        if matches!(event, zz_client::CoreEvent::Attached { .. }) {
+                            this.prompt_revision = this.prompt_revision.wrapping_add(1).max(1);
+                            this.chooser_revision = this.chooser_revision.wrapping_add(1).max(1);
+                        }
                         this.focused_pane = None;
                         this.waiting_panes.clear();
                         this.popup_terminal = None;
                         this.output_terminal = None;
-                        this.split_drag = None;
+                        this.set_split_drag(None);
                         this.pane_drag = None;
                         this.pane_layout_override = None;
                     }
@@ -206,7 +226,7 @@ impl WebClient {
                                 generation < connection.read(cx).core.snapshot().generation
                             })
                         }) {
-                            this.split_drag = None;
+                            this.set_split_drag(None);
                         }
                     }
                     zz_client::CoreEvent::ClientMessage {
@@ -250,16 +270,17 @@ impl WebClient {
                         window.dismiss_notification(&format!("web-message-{message_id}"), cx);
                     }
                     zz_client::CoreEvent::CommandResponse(
-                        zz_protocol::CommandResponse::Error { error, .. },
+                        zz_protocol::CommandResponse::Error { .. },
                     ) => {
-                        use zz_ui::{WindowExt as _, notification::Notification};
-                        window.push_notification(Notification::error(error.to_string()), cx);
-                        this.split_drag = None;
+                        this.set_split_drag(None);
                         this.pane_layout_override = None;
                     }
                     zz_client::CoreEvent::FocusSidebar => this.focus_sidebar(window, cx),
                     zz_client::CoreEvent::CommandPromptChanged => {
-                        this.prompt_revision = this.prompt_revision.wrapping_add(1);
+                        this.prompt_revision = this.prompt_revision.wrapping_add(1).max(1);
+                    }
+                    zz_client::CoreEvent::ChooseTreeChanged => {
+                        this.chooser_revision = this.chooser_revision.wrapping_add(1).max(1);
                     }
                     zz_client::CoreEvent::MenuChanged => {
                         this.menu_selection = connection
@@ -274,11 +295,16 @@ impl WebClient {
                 cx.notify();
             },
         );
-        let preferences = settings::Preferences::load(cx);
+        let preferences = settings::Preferences::load();
         let appearance_view = cx.weak_entity();
         let appearance_observer = window.observe_window_appearance(move |window, cx| {
             let _ = appearance_view.update(cx, |this, cx| {
                 this.preferences.apply(&this.connection, window, cx);
+            });
+        });
+        let activation_observer = cx.observe_window_activation(window, |this, window, cx| {
+            this.connection.update(cx, |connection, cx| {
+                connection.set_focused(window.is_window_active(), cx);
             });
         });
         let settings_controls = settings::Controls::new(&preferences, window, cx);
@@ -286,6 +312,8 @@ impl WebClient {
             connection,
             connection_status: String::new(),
             connected: false,
+            #[cfg(target_os = "ios")]
+            auth_prompt_id: None,
             terminals: HashMap::new(),
             waiting_panes: BTreeSet::new(),
             agents: HashMap::new(),
@@ -303,9 +331,15 @@ impl WebClient {
             sidebar_pointer_selection: false,
             sidebar_active: None,
             unseen_agents: BTreeSet::new(),
-            chrome: ChromeKeymap::for_profile(ChromeProfile::Desktop),
+            chrome: ChromeKeymap::for_profile(if cfg!(target_os = "ios") {
+                ChromeProfile::DesktopApple
+            } else {
+                ChromeProfile::Desktop
+            }),
             prompt: None,
-            prompt_revision: 0,
+            prompt_revision: 1,
+            chooser_revision: 1,
+            local_palette_revisions: None,
             modal_open: false,
             chooser_scroll: UniformListScrollHandle::new(),
             chooser_selection: None,
@@ -314,10 +348,19 @@ impl WebClient {
             popup_terminal: None,
             output_terminal: None,
             split_drag: None,
+            terminal_resize_suppressed: Rc::new(Cell::new(false)),
             pane_drag: None,
             pane_layout_override: None,
             pane_canvas_bounds: Rc::default(),
-            _subscriptions: vec![key_events, observer, events, appearance_observer],
+            pane_bounds: Rc::default(),
+            rendered_drop_preview: Rc::default(),
+            _subscriptions: vec![
+                key_events,
+                observer,
+                events,
+                appearance_observer,
+                activation_observer,
+            ],
         };
         this.connection.update(cx, Connection::start);
         this.preferences.apply(&this.connection, window, cx);
@@ -335,7 +378,15 @@ impl WebClient {
             .update(cx, |connection, cx| connection.command(command, args, cx));
     }
 
-    fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+    fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if Self::narrow(window) {
+            if self.slideover {
+                self.release_sidebar_focus(window, cx);
+            } else {
+                self.focus_sidebar(window, cx);
+            }
+            return;
+        }
         self.sidebar = !self.sidebar;
         self.slideover = false;
         self.focused_pane = None;
@@ -345,7 +396,7 @@ impl WebClient {
     }
 
     fn focus_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.slideover = !self.sidebar;
+        self.slideover = !self.inline_sidebar(window);
         self.settings = None;
         self.focused_pane = self.active_window(cx).map(|window| window.active_pane);
         self.sidebar_pointer_selection = false;
@@ -371,7 +422,8 @@ impl WebClient {
             .inset_0()
             .flex()
             .items_start()
-            .bg(cx.theme().scrim)
+            .bg(cx.theme().scrim.opacity(0.25))
+            .occlude()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {
@@ -384,7 +436,8 @@ impl WebClient {
                     .h_full()
                     .flex()
                     .flex_none()
-                    .bg(cx.theme().background)
+                    .bg(cx.theme().background.opaque())
+                    .occlude()
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(sidebar),
             )
@@ -420,8 +473,21 @@ impl WebClient {
             cx.stop_propagation();
             return;
         }
+        if self.settings.is_some() && event.keystroke.key == "escape" {
+            self.settings = None;
+            self.focused_pane = None;
+            cx.notify();
+            cx.stop_propagation();
+            return;
+        }
         let input = crate::terminal::key_input(event);
         let core = &self.connection.read(cx).core;
+        if self.prompt.as_ref().is_some_and(|palette| {
+            let palette = palette.read(cx);
+            palette.is_local() || palette.is_window_chooser()
+        }) {
+            return;
+        }
         let overlay = if core.choose_tree().is_some() {
             Some(InputMessage::ChooseTree {
                 action: ChooseTreeAction::Key(input.clone()),
@@ -511,6 +577,9 @@ impl WebClient {
             ChromeKeymap::for_profile(ChromeProfile::DesktopApple).resolve(UI_TABLE, &input)
         });
         match action {
+            Some(ChromeAction::OpenCommandPalette) => {
+                self.open_palette(None, window, cx);
+            }
             Some(ChromeAction::OpenSettings) => {
                 self.settings = Some(SettingsSection::Appearance);
                 cx.notify();
@@ -521,7 +590,7 @@ impl WebClient {
                 } else if !self.sidebar {
                     self.focus_sidebar(window, cx);
                 } else {
-                    self.toggle_sidebar(cx);
+                    self.toggle_sidebar(window, cx);
                 }
             }
             Some(ChromeAction::UiZoomIn) => {
@@ -552,6 +621,76 @@ impl WebClient {
         cx.stop_propagation();
     }
 
+    pub(super) fn open_palette(
+        &mut self,
+        mode: Option<crate::command_palette::PaletteMode>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let core = &self.connection.read(cx).core;
+        if core.popup().is_some() || core.menu().is_some() || core.confirm().is_some() {
+            return;
+        }
+        let close_prompt = core.command_prompt().is_some();
+        let close_tree = core.choose_tree().is_some();
+        if close_prompt {
+            self.send_input(
+                InputMessage::CommandPrompt {
+                    action: zz_protocol::CommandPromptAction::Close,
+                },
+                cx,
+            );
+        }
+        if close_tree {
+            self.send_input(
+                InputMessage::ChooseTree {
+                    action: ChooseTreeAction::Close,
+                },
+                cx,
+            );
+        }
+        let backend = self.palette_backend();
+        let palette = cx.new(|cx| CommandPaletteView::new_unified(backend, mode, window, cx));
+        self.observe_palette(&palette, window, cx);
+        palette.read(cx).focus(cx).focus(window, cx);
+        self.prompt = Some(palette);
+        self.local_palette_revisions = Some((self.prompt_revision, self.chooser_revision));
+        self.settings = None;
+        self.slideover = false;
+        self.modal_open = true;
+        cx.notify();
+    }
+
+    fn palette_backend(&self) -> Rc<dyn zz_ui::command::PaletteBackend> {
+        palette_backend(
+            self.connection.clone(),
+            self.preferences.palette_settings(),
+            self.preferences.agent_enabled,
+        )
+    }
+
+    fn observe_palette(
+        &self,
+        palette: &Entity<CommandPaletteView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.observe(palette, |_, _, cx| cx.notify()).detach();
+        cx.subscribe_in(
+            palette,
+            window,
+            |this, palette, event: &CommandPaletteEvent, window, cx| match event {
+                CommandPaletteEvent::ReturnToDefault => {
+                    this.local_palette_revisions =
+                        Some((this.prompt_revision, this.chooser_revision));
+                    palette.update(cx, |palette, cx| palette.return_to_default(window, cx));
+                    cx.notify();
+                }
+            },
+        )
+        .detach();
+    }
+
     fn controls(&self, cx: &Context<Self>) -> AnyElement {
         let settings = workspace_settings_button("web-settings")
             .selected(self.settings.is_some())
@@ -565,13 +704,40 @@ impl WebClient {
                 cx.notify();
             }));
         let layout = workspace_layout_button("web-sidebar")
-            .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx)));
-        workspace_chrome_controls(settings, Some(layout.into_any_element())).into_any_element()
+            .on_click(cx.listener(|this, _, window, cx| this.toggle_sidebar(window, cx)));
+        workspace_chrome_controls(settings, Some(layout.into_any_element()))
+            .when(cfg!(target_os = "ios"), |controls| {
+                controls.child(
+                    zz_ui::navigation::workspace_palette_button("web-palette").on_click(
+                        cx.listener(|this, _, window, cx| this.open_palette(None, window, cx)),
+                    ),
+                )
+            })
+            .into_any_element()
+    }
+
+    pub(super) fn controls_width(window: &Window) -> Pixels {
+        zz_ui::navigation::workspace_chrome_controls_width_for(
+            if cfg!(target_os = "ios") { 3 } else { 2 },
+            window,
+        )
+    }
+
+    pub(super) fn narrow(window: &Window) -> bool {
+        window.fully_visible_bounds().size.width < px(640.0)
+    }
+
+    pub(super) fn inline_sidebar(&self, window: &Window) -> bool {
+        !Self::narrow(window) && (self.sidebar || self.settings.is_some())
     }
 
     pub(super) fn sidebar_width(&self, window: &Window) -> f32 {
-        self.preferences
-            .sidebar_width(f32::from(window.viewport_size().width))
+        let width = f32::from(window.fully_visible_bounds().size.width);
+        if Self::narrow(window) {
+            zz_ui::navigation::WORKSPACE_SIDEBAR_DEFAULT_WIDTH.min(width - 40.0)
+        } else {
+            self.preferences.sidebar_width(width)
+        }
     }
 
     fn sidebar(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
@@ -579,7 +745,7 @@ impl WebClient {
         let navigation = if let Some(selected) = self.settings {
             let mut rows = Vec::new();
             let mut previous_group = None;
-            for section in SettingsSection::ALL {
+            for section in settings::SECTIONS {
                 let group = section.navigation_group();
                 if previous_group != Some(group) {
                     rows.push(settings_navigation_group_label(group, cx).into_any_element());
@@ -598,20 +764,18 @@ impl WebClient {
                 .id("web-settings-nav")
                 .flex()
                 .flex_col()
+                .w_full()
                 .gap(px(2.0))
-                .px(px(8.0))
-                .child(
-                    Button::new("web-settings-back")
-                        .ghost()
-                        .small()
-                        .icon(IconName::ArrowLeft)
-                        .label("Back to workspace")
-                        .on_click(cx.listener(|this, _, _, cx| {
+                .px(px(6.0))
+                .child(zz_ui::settings::settings_navigation_back_row(
+                    zz_ui::settings::settings_navigation_back_button("web-settings-back").on_click(
+                        cx.listener(|this, _, _, cx| {
                             this.settings = None;
                             this.focused_pane = None;
                             cx.notify();
-                        })),
-                )
+                        }),
+                    ),
+                ))
                 .children(rows)
                 .into_any_element()
         } else {
@@ -634,6 +798,7 @@ impl WebClient {
                 cx,
             )
         };
+        let divider_hidden = self.preferences.gaps && self.inline_sidebar(window);
         workspace_sidebar_surface(
             "web-sidebar-surface",
             self.sidebar_width(window),
@@ -641,6 +806,9 @@ impl WebClient {
             navigation,
             cx,
         )
+        .when(divider_hidden, |surface| {
+            surface.border_color(gpui::transparent_black())
+        })
         .track_focus(&self.sidebar_focus)
         .child(
             div()
@@ -652,15 +820,42 @@ impl WebClient {
                 .w(px(8.0))
                 .cursor(gpui::CursorStyle::ResizeLeftRight)
                 .occlude()
+                .when(divider_hidden, |handle| {
+                    handle.hover(|handle| {
+                        handle
+                            .border_r_1()
+                            .border_color(zz_ui::navigation::workspace_sidebar_divider(cx))
+                    })
+                })
                 .on_drag(SidebarResizeDrag, |_: &SidebarResizeDrag, _, _, cx| {
                     cx.new(|_| SidebarResizePreview)
+                })
+                .child({
+                    let view = cx.entity().downgrade();
+                    touch_drag_handle(move |event, window, cx| {
+                        let _ = view.update(cx, |this, cx| {
+                            match event.phase {
+                                gpui::TouchPhase::Started => window.prevent_default(),
+                                gpui::TouchPhase::Moved => {
+                                    this.preferences.sidebar_width = f32::from(
+                                        event.position.x - window.fully_visible_bounds().left(),
+                                    );
+                                    this.preferences.sidebar_width = this.sidebar_width(window);
+                                    cx.notify();
+                                }
+                                gpui::TouchPhase::Ended => this.preferences.save(),
+                                gpui::TouchPhase::Cancelled => {}
+                            }
+                            cx.stop_propagation();
+                        });
+                    })
                 }),
         )
         .into_any_element()
     }
 
-    fn status_bar(&self, cx: &mut Context<Self>) -> AnyElement {
-        status_bar::render(self, cx)
+    fn status_bar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        status_bar::render(self, window, cx)
     }
 
     fn focus_pane(&mut self, pane: PaneId, window: &mut Window, cx: &mut Context<Self>) {
@@ -672,7 +867,11 @@ impl WebClient {
         } else if let Some(picker) = self.pickers.get(&pane) {
             picker.read(cx).focus_handle(cx).focus(window, cx);
         }
-        self.command("select-pane", vec!["-t".into(), pane.to_string()], cx);
+        self.command(
+            "select-pane",
+            vec!["-Z".into(), "-t".into(), pane.to_string()],
+            cx,
+        );
     }
 
     fn dismiss_pane_prefix(&self, pane: PaneId, cx: &mut App) {
@@ -712,11 +911,14 @@ impl WebClient {
         {
             return;
         }
+        self.rendered_drop_preview.set(DropPreviewFrame::default());
         self.pane_drag = Some(PaneDragState {
             drag,
             window: active.id,
             layout: active.layout,
             target: None,
+            touch: false,
+            preview: None,
         });
         cx.notify();
     }
@@ -746,7 +948,8 @@ impl WebClient {
         if invalid {
             self.pane_drag = None;
             cx.stop_active_drag(window);
-        } else if self.pane_drag.is_some() && !cx.has_active_drag() {
+        } else if self.pane_drag.as_ref().is_some_and(|state| !state.touch) && !cx.has_active_drag()
+        {
             self.finish_pane_drag(cx);
         }
     }
@@ -758,28 +961,61 @@ impl WebClient {
         cx: &mut Context<Self>,
     ) {
         let source = event.drag(cx).pane;
-        let bounds = self.pane_canvas_bounds.get();
-        if let Some(state) = self
+        if self
             .pane_drag
-            .as_mut()
-            .filter(|state| state.drag.pane == source)
+            .as_ref()
+            .is_some_and(|state| state.drag.pane == source)
         {
-            let target = state.target_at(event.event.position, bounds);
-            if state.target != target {
-                state.target = target;
-                cx.notify();
-            }
+            self.update_drop_target(event.event.position, cx);
         }
     }
 
+    fn touch_pane_drag(
+        &mut self,
+        pane: PaneId,
+        event: &gpui::TouchDragEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event.phase {
+            gpui::TouchPhase::Started => {
+                self.on_pane_drag_start(
+                    PaneDrag {
+                        pane,
+                        requires_prefix: false,
+                    },
+                    cx,
+                );
+                if let Some(state) = self.pane_drag.as_mut() {
+                    state.touch = true;
+                    window.prevent_default();
+                }
+            }
+            gpui::TouchPhase::Moved => self.update_drop_target(event.position, cx),
+            gpui::TouchPhase::Ended => self.drop_pane(
+                &PaneDrag {
+                    pane,
+                    requires_prefix: false,
+                },
+                event.position,
+                cx,
+            ),
+            gpui::TouchPhase::Cancelled => self.finish_pane_drag(cx),
+        }
+        cx.stop_propagation();
+    }
+
     fn on_pane_drop(&mut self, drag: &PaneDrag, window: &mut Window, cx: &mut Context<Self>) {
+        self.drop_pane(drag, window.mouse_position(), cx);
+    }
+
+    fn drop_pane(&mut self, drag: &PaneDrag, position: Point<Pixels>, cx: &mut Context<Self>) {
         let Some(state) = self.pane_drag.take_if(|state| state.drag.pane == drag.pane) else {
             return;
         };
         if self.connection.read(cx).connected
             && !self.connection.read(cx).core.attached_read_only()
-            && let Some((target, zone)) =
-                state.target_at(window.mouse_position(), self.pane_canvas_bounds.get())
+            && let Some((target, zone)) = state.target_at(position, &self.pane_bounds.borrow())
             && let Some(command) = pane_drop_command(drag.pane, target, zone)
         {
             self.pane_layout_override =
@@ -807,60 +1043,106 @@ impl WebClient {
         }
     }
 
-    fn pane_drop_preview(&self, cx: &App) -> Option<AnyElement> {
-        let state = self.pane_drag.as_ref()?;
-        let (target, zone) = state.target?;
-        let rect = pane_rects(&state.layout)
-            .into_iter()
-            .find(|(pane, _)| *pane == target)?
-            .1;
-        let canvas = self.pane_canvas_bounds.get();
-        let margin = if self.preferences.gaps {
-            self.preferences.pane_margin
-        } else {
-            0.5
+    fn update_drop_target(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(state) = self.pane_drag.as_mut() else {
+            return;
         };
-        let left = if rect.x <= 0.0 { margin } else { margin / 2.0 };
-        let top = if rect.y <= 0.0 { margin } else { margin / 2.0 };
-        let right = if rect.x + rect.width >= 1.0 {
-            margin
-        } else {
-            margin / 2.0
-        };
-        let bottom = if rect.y + rect.height >= 1.0 {
-            margin
-        } else {
-            margin / 2.0
-        };
-        let bounds = drop_preview_bounds(
-            PaneRect {
-                x: 0.0,
-                y: 0.0,
-                width: (rect.width * f32::from(canvas.size.width) - left - right).max(0.0),
-                height: (rect.height * f32::from(canvas.size.height) - top - bottom).max(0.0),
+        let panes = self.pane_bounds.borrow();
+        let target = state.target_at(position, &panes);
+        if state.target == target {
+            return;
+        }
+        state.target = target;
+        let rendered = self.rendered_drop_preview.get();
+        let to = target
+            .and_then(|(pane, zone)| {
+                panes.get(&pane).map(|bounds| {
+                    let canvas = self.pane_canvas_bounds.get();
+                    let rect = drop_preview_bounds(
+                        PaneRect {
+                            x: f32::from(bounds.left() - canvas.left()),
+                            y: f32::from(bounds.top() - canvas.top()),
+                            width: f32::from(bounds.size.width),
+                            height: f32::from(bounds.size.height),
+                        },
+                        zone,
+                        if self.preferences.gaps {
+                            self.preferences.pane_margin.max(1.0)
+                        } else {
+                            1.0
+                        },
+                    );
+                    DropPreviewFrame {
+                        bounds: Bounds::new(
+                            gpui::point(px(rect.x), px(rect.y)),
+                            gpui::size(px(rect.width), px(rect.height)),
+                        ),
+                        opacity: 1.0,
+                    }
+                })
+            })
+            .unwrap_or(DropPreviewFrame {
+                opacity: 0.0,
+                ..rendered
+            });
+        state.preview = Some(DropPreview {
+            from: if rendered.opacity > 0.0 {
+                rendered
+            } else {
+                DropPreviewFrame { opacity: 0.0, ..to }
             },
-            zone,
-            if self.preferences.gaps {
-                margin.max(1.0)
+            to,
+            sequence: state.preview.map_or(0, |preview| preview.sequence + 1),
+            duration: std::time::Duration::from_millis(if target.is_some() { 180 } else { 140 }),
+        });
+        cx.notify();
+    }
+
+    fn pane_drop_preview(&self, cx: &App) -> Option<AnyElement> {
+        let preview = self.pane_drag.as_ref()?.preview?;
+        let rendered = Rc::clone(&self.rendered_drop_preview);
+        let surface = pane_drop_preview(
+            px(if self.preferences.gaps {
+                self.preferences.pane_radius
+            } else {
+                0.0
+            }),
+            px(if self.preferences.gaps {
+                self.preferences.pane_border_width.max(1.0)
             } else {
                 1.0
-            },
+            }),
+            cx,
         );
+        if !self.preferences.animations || cx.reduce_motion() {
+            rendered.set(preview.to);
+            return Some(
+                surface
+                    .left(preview.to.bounds.left())
+                    .top(preview.to.bounds.top())
+                    .w(preview.to.bounds.size.width)
+                    .h(preview.to.bounds.size.height)
+                    .opacity(preview.to.opacity)
+                    .into_any_element(),
+            );
+        }
         Some(
-            pane_drop_preview(
-                px(if self.preferences.gaps {
-                    self.preferences.pane_radius
-                } else {
-                    0.0
-                }),
-                px(self.preferences.pane_border_width.max(1.0)),
-                cx,
-            )
-            .left(px(rect.x * f32::from(canvas.size.width) + left + bounds.x))
-            .top(px(rect.y * f32::from(canvas.size.height) + top + bounds.y))
-            .w(px(bounds.width))
-            .h(px(bounds.height))
-            .into_any_element(),
+            surface
+                .with_animation(
+                    ("pane-drop-preview", preview.sequence),
+                    Animation::new(preview.duration).with_easing(gpui::ease_out_quint()),
+                    move |surface, delta| {
+                        let frame = preview.at(delta);
+                        rendered.set(frame);
+                        surface
+                            .left(frame.bounds.left())
+                            .top(frame.bounds.top())
+                            .w(frame.bounds.size.width)
+                            .h(frame.bounds.size.height)
+                            .opacity(frame.opacity)
+                    },
+                )
+                .into_any_element(),
         )
     }
 
@@ -934,6 +1216,7 @@ impl WebClient {
                 .into_any_element();
         };
         self.reconcile_pane_drag(&active_window, window, cx);
+        self.reconcile_split_drag(&active_window, cx);
         let mut layout = active_window.zoomed_pane.map_or_else(
             || {
                 self.pane_layout_override.as_ref().map_or_else(
@@ -950,8 +1233,6 @@ impl WebClient {
             update_split_ratio(&mut layout, state.drag.split, state.ratio);
         }
         let rects = pane_rects(&layout);
-        let mut dividers = Vec::new();
-        collect_split_bounds(&layout, &rects, &mut dividers);
         let core = &self.connection.read(cx).core;
         let can_drag = self.connection.read(cx).connected
             && !core.attached_read_only()
@@ -962,7 +1243,8 @@ impl WebClient {
             .mux_options()
             .get(zz_protocol::MuxOptionKey::FocusFollowsMouse)
             .is_some_and(|option| option.value == "on");
-        let can_focus = !self.sidebar_focus.is_focused(window)
+        let can_focus = self.prompt.is_none()
+            && !self.sidebar_focus.is_focused(window)
             && core.choose_tree().is_none()
             && core.choose_buffer().is_none()
             && core.command_prompt().is_none()
@@ -970,7 +1252,10 @@ impl WebClient {
             && core.confirm().is_none()
             && core.popup().is_none()
             && core.command_output().is_none();
-        let existing: Vec<_> = self
+        let output = core
+            .command_output_id()
+            .zip(core.command_output().map(|(pane, _)| pane));
+        let existing: HashMap<_, _> = self
             .connection
             .read(cx)
             .core
@@ -978,23 +1263,77 @@ impl WebClient {
             .sessions
             .iter()
             .flat_map(|session| &session.windows)
-            .flat_map(|window| window.panes.keys().copied())
+            .flat_map(|window| {
+                window
+                    .panes
+                    .iter()
+                    .map(|(id, pane)| (*id, pane.kind.clone()))
+            })
             .collect();
-        self.terminals.retain(|pane, _| existing.contains(pane));
-        self.waiting_panes.retain(|pane| existing.contains(pane));
-        self.agents.retain(|pane, _| existing.contains(pane));
-        self.pickers.retain(|pane, _| existing.contains(pane));
-        let mut panes = Vec::new();
-        for (pane_id, rect) in rects {
+        if self.pickers.keys().any(|pane| {
+            self.focused_pane == Some(*pane)
+                && !matches!(existing.get(pane), Some(PaneKindSnapshot::Picker))
+        }) {
+            self.focused_pane = None;
+        }
+        self.terminals
+            .retain(|pane, _| matches!(existing.get(pane), Some(PaneKindSnapshot::Terminal)));
+        self.waiting_panes
+            .retain(|pane| existing.contains_key(pane));
+        self.agents
+            .retain(|pane, _| matches!(existing.get(pane), Some(PaneKindSnapshot::Agent(_))));
+        self.pickers
+            .retain(|pane, _| matches!(existing.get(pane), Some(PaneKindSnapshot::Picker)));
+        let mut panes = HashMap::new();
+        self.pane_bounds
+            .borrow_mut()
+            .retain(|pane, _| active_window.panes.contains_key(pane));
+        for (pane_id, _) in rects {
             let Some(pane) = active_window.panes.get(&pane_id) else {
                 continue;
             };
+            let radii = Corners::all(if self.preferences.gaps {
+                px(self.preferences.pane_radius)
+            } else {
+                px(0.0)
+            });
+            let dead_label = pane.dead.then(|| {
+                pane.dead_status
+                    .map_or_else(|| "Dead".to_owned(), |status| format!("Dead · {status}"))
+            });
             let content = match &pane.kind {
                 PaneKindSnapshot::Terminal => {
-                    let terminal = self.terminals.entry(pane_id).or_insert_with(|| {
-                        let connection = self.connection.clone();
-                        cx.new(|cx| TerminalPane::new(pane_id, connection, cx))
-                    });
+                    let terminal = if let Some(id) = output
+                        .filter(|(_, pane)| *pane == pane_id)
+                        .map(|(id, _)| id)
+                    {
+                        if self
+                            .output_terminal
+                            .as_ref()
+                            .is_none_or(|(previous, _)| *previous != id)
+                        {
+                            let connection = self.connection.clone();
+                            let terminal = cx.new(|cx| {
+                                TerminalPane::new_command_output(pane_id, connection, cx)
+                            });
+                            terminal.read(cx).focus_handle(cx).focus(window, cx);
+                            self.output_terminal = Some((id, terminal));
+                        }
+                        &self
+                            .output_terminal
+                            .as_ref()
+                            .expect("command output terminal")
+                            .1
+                    } else {
+                        self.terminals.entry(pane_id).or_insert_with(|| {
+                            let connection = self.connection.clone();
+                            let suppressed = Rc::clone(&self.terminal_resize_suppressed);
+                            cx.new(|cx| {
+                                TerminalPane::new(pane_id, connection, cx)
+                                    .with_resize_suppression(suppressed)
+                            })
+                        })
+                    };
                     if can_focus
                         && pane_id == active_window.active_pane
                         && self.focused_pane != Some(pane_id)
@@ -1002,16 +1341,53 @@ impl WebClient {
                         terminal.read(cx).focus_handle(cx).focus(window, cx);
                         self.focused_pane = Some(pane_id);
                     }
+                    terminal.update(cx, |terminal, cx| {
+                        terminal.set_text_dimmed(
+                            active_window.active_pane != pane_id,
+                            self.preferences.pane_inactive_opacity,
+                            cx,
+                        );
+                        terminal.set_pane_status(
+                            dead_label.clone(),
+                            pane.synchronized_input,
+                            active_window.zoomed_pane == Some(pane_id),
+                            cx,
+                        );
+                        terminal.set_corner_radii(
+                            Corners {
+                                top_left: px(0.0),
+                                top_right: px(0.0),
+                                ..radii
+                            },
+                            cx,
+                        );
+                    });
                     terminal.clone().into_any_element()
                 }
                 PaneKindSnapshot::Agent(descriptor) => {
+                    let view = cx.weak_entity();
+                    let touch_view = view.clone();
                     let agent = self.agents.entry(pane_id).or_insert_with(|| {
                         let connection = self.connection.clone();
                         cx.new(|cx| {
-                            AgentPane::new(pane_id, descriptor.clone(), connection, window, cx)
+                            let mut agent =
+                                AgentPane::new(pane_id, descriptor.clone(), connection, window, cx);
+                            agent.set_header_drag_handler(move |drag, _, cx| {
+                                let _ =
+                                    view.update(cx, |this, cx| this.on_pane_drag_start(*drag, cx));
+                            });
+                            agent.set_header_touch_drag_handler(move |event, window, cx| {
+                                let _ = touch_view.update(cx, |this, cx| {
+                                    this.touch_pane_drag(pane_id, event, window, cx);
+                                });
+                            });
+                            agent
                         })
                     });
-                    agent.update(cx, |agent, cx| agent.update_descriptor(descriptor, cx));
+                    agent.update(cx, |agent, cx| {
+                        agent.update_descriptor(descriptor, cx);
+                        agent.set_corner_radii(radii, cx);
+                    });
                     if can_focus
                         && pane_id == active_window.active_pane
                         && self.focused_pane != Some(pane_id)
@@ -1026,6 +1402,7 @@ impl WebClient {
                     IconName::Globe,
                     "Embedded Chromium needs the desktop app. Open this page in a browser tab.",
                     descriptor.tabs.get(descriptor.active_tab).cloned(),
+                    radii,
                     cx,
                 ),
                 PaneKindSnapshot::Editor(_) => unsupported_pane(
@@ -1033,12 +1410,20 @@ impl WebClient {
                     IconName::File,
                     "The daemon does not share editor file contents with browser clients yet.",
                     None,
+                    radii,
                     cx,
                 ),
                 PaneKindSnapshot::Picker => {
                     let picker = self.pickers.entry(pane_id).or_insert_with(|| {
                         let connection = self.connection.clone();
-                        cx.new(|cx| picker::PanePicker::new(pane_id, connection, cx))
+                        cx.new(|cx| {
+                            picker::PanePicker::new(
+                                pane_id,
+                                connection,
+                                self.preferences.agent_enabled,
+                                cx,
+                            )
+                        })
                     });
                     if can_focus
                         && pane_id == active_window.active_pane
@@ -1047,23 +1432,24 @@ impl WebClient {
                         picker.read(cx).focus_handle(cx).focus(window, cx);
                         self.focused_pane = Some(pane_id);
                     }
+                    picker.update(cx, |picker, cx| {
+                        picker.set_agent_enabled(self.preferences.agent_enabled);
+                        picker.set_corner_radii(radii, cx);
+                    });
                     picker.clone().into_any_element()
                 }
             };
-            let margin = if self.preferences.gaps {
-                self.preferences.pane_margin
-            } else {
-                0.5
-            };
-            let radii = Corners::all(if self.preferences.gaps {
-                px(self.preferences.pane_radius)
-            } else {
-                px(0.0)
-            });
             let content = if matches!(pane.kind, PaneKindSnapshot::Terminal) {
                 let title = zz_client::navigation::pane_label(pane);
                 let view = cx.entity();
+                let touch_view = cx.weak_entity();
                 let connection = self.connection.clone();
+                let background = output
+                    .filter(|(_, pane)| *pane == pane_id)
+                    .and(self.output_terminal.as_ref())
+                    .map_or(&self.terminals[&pane_id], |(_, terminal)| terminal)
+                    .read(cx)
+                    .pane_background(cx);
                 let header = terminal_pane_header(
                     active_window.active_pane == pane_id,
                     title.clone(),
@@ -1076,7 +1462,15 @@ impl WebClient {
                             view.update(cx, |this, cx| this.on_pane_drag_start(*drag, cx));
                         },
                         cx,
-                    ),
+                    )
+                    .relative()
+                    .when(can_drag, |handle| {
+                        handle.child(touch_drag_handle(move |event, window, cx| {
+                            let _ = touch_view.update(cx, |this, cx| {
+                                this.touch_pane_drag(pane_id, event, window, cx);
+                            });
+                        }))
+                    }),
                     move |action, _, cx| {
                         connection.update(cx, |connection, cx| {
                             if !connection.connected || connection.core.attached_read_only() {
@@ -1111,7 +1505,16 @@ impl WebClient {
                             .flex_none()
                             .rounded_tl(radii.top_left)
                             .rounded_tr(radii.top_right)
-                            .child(header),
+                            .bg(background)
+                            .child(
+                                div()
+                                    .opacity(if active_window.active_pane == pane_id {
+                                        1.0
+                                    } else {
+                                        self.preferences.pane_inactive_opacity
+                                    })
+                                    .child(header),
+                            ),
                     )
                     .child(div().flex_1().min_h_0().min_w_0().child(content))
                     .into_any_element()
@@ -1123,36 +1526,35 @@ impl WebClient {
                 px(if self.preferences.gaps {
                     self.preferences.pane_border_width
                 } else {
-                    0.5
+                    0.0
                 }),
                 pane_border_color(active_window.active_pane == pane_id, cx),
                 self.preferences.gaps,
             )
             .active(active_window.active_pane == pane_id)
             .dimmed(
-                active_window.active_pane != pane_id,
+                active_window.active_pane != pane_id
+                    && !matches!(pane.kind, PaneKindSnapshot::Terminal),
                 self.preferences.pane_inactive_opacity,
             );
+            let terminal_pane = matches!(&pane.kind, PaneKindSnapshot::Terminal);
             let mut status_tags = Vec::new();
-            if pane.dead {
-                let label = pane
-                    .dead_status
-                    .map_or_else(|| "dead".to_owned(), |status| format!("dead ({status})"));
-                status_tags.push(zz_ui::pane::pane_waiting_state(label, cx).into_any_element());
+            if !terminal_pane && let Some(label) = dead_label {
+                status_tags.push(
+                    zz_ui::pane::pane_status_badge(IconName::CircleX, label, cx).into_any_element(),
+                );
             }
-            if matches!(&pane.kind, PaneKindSnapshot::Terminal)
-                && self.connection.read(cx).core.viewport(pane_id).is_none()
-            {
+            if terminal_pane && self.connection.read(cx).core.viewport(pane_id).is_none() {
                 self.waiting_panes.insert(pane_id);
                 status_tags.push(
                     zz_ui::pane::pane_waiting_state(format!("Waiting for {pane_id}"), cx)
                         .into_any_element(),
                 );
             }
-            if pane.synchronized_input {
+            if !terminal_pane && pane.synchronized_input {
                 status_tags.push(zz_ui::pane::pane_sync_badge(cx).into_any_element());
             }
-            if active_window.zoomed_pane == Some(pane_id) {
+            if !terminal_pane && active_window.zoomed_pane == Some(pane_id) {
                 let connection = self.connection.clone();
                 let control = div()
                     .id(("web-unzoom-pane", pane_id.0))
@@ -1181,6 +1583,10 @@ impl WebClient {
                         zz_ui::pane::PaneOverlayCorner::TopRight,
                         status_tags,
                     )
+                    .when(terminal_pane, |stack| {
+                        stack.top(px(zz_ui::pane::TERMINAL_HEADER_HEIGHT + 8.0))
+                    })
+                    .occlude()
                     .into_any_element(),
                 ]
             };
@@ -1216,133 +1622,18 @@ impl WebClient {
                         .into_any_element(),
                 );
             }
-            panes.push(
-                div()
-                    .absolute()
-                    .left(relative(rect.x))
-                    .top(relative(rect.y))
-                    .w(relative(rect.width))
-                    .h(relative(rect.height))
-                    .pl(px(if rect.x <= 0.0 { margin } else { margin / 2.0 }))
-                    .pt(px(if rect.y <= 0.0 { margin } else { margin / 2.0 }))
-                    .pr(px(if rect.x + rect.width >= 1.0 {
-                        margin
-                    } else {
-                        margin / 2.0
-                    }))
-                    .pb(px(if rect.y + rect.height >= 1.0 {
-                        margin
-                    } else {
-                        margin / 2.0
-                    }))
-                    .child(
-                        pane_surface(
-                            ("web-pane", pane_id.0),
-                            content,
-                            status_overlays,
-                            chrome,
-                            cx,
-                        )
-                        .when(
-                            follows_pointer && active_window.active_pane != pane_id,
-                            |surface| {
-                                surface.on_mouse_move(cx.listener(
-                                    move |this, event: &gpui::MouseMoveEvent, _, cx| {
-                                        if event.pressed_button.is_none() {
-                                            this.command(
-                                                "select-pane",
-                                                vec!["-t".into(), pane_id.to_string()],
-                                                cx,
-                                            );
-                                        }
-                                    },
-                                ))
-                            },
-                        )
-                        .capture_any_mouse_down(cx.listener(move |this, _, window, cx| {
-                            if this
-                                .active_window(cx)
-                                .is_some_and(|active| active.active_pane != pane_id)
-                            {
-                                this.focus_pane(pane_id, window, cx);
-                            }
-                        })),
-                    )
-                    .into_any_element(),
-            );
-        }
-        if self.connection.read(cx).connected && !self.connection.read(cx).core.attached_read_only()
-        {
-            for (split, axis, ratio, rect) in dividers {
-                let drag = SplitDrag {
-                    window: active_window.id,
-                    split,
-                    axis,
-                    start_ratio: ratio,
-                };
-                panes.push(
-                    div()
-                        .id(("web-split-bounds", split.0))
-                        .absolute()
-                        .left(relative(rect.x))
-                        .top(relative(rect.y))
-                        .w(relative(rect.width))
-                        .h(relative(rect.height))
-                        .child(
-                            pane_split_hit_target(
-                                ("web-split-divider", split.0),
-                                match axis {
-                                    zz_protocol::Axis::Horizontal => PaneSplitAxis::Horizontal,
-                                    zz_protocol::Axis::Vertical => PaneSplitAxis::Vertical,
-                                },
-                                ratio,
-                                px(if self.preferences.gaps { 6.0 } else { 1.0 }),
-                            )
-                            .on_drag(drag, |_: &SplitDrag, _, _, cx| cx.new(|_| SplitDragPreview)),
-                        )
-                        .on_drag_move::<SplitDrag>(cx.listener(
-                            move |this, event: &DragMoveEvent<SplitDrag>, _, cx| {
-                                let drag = *event.drag(cx);
-                                if drag.split != split
-                                    || this
-                                        .split_drag
-                                        .is_some_and(|state| state.committed_generation.is_some())
-                                {
-                                    return;
-                                }
-                                let (offset, size) = match drag.axis {
-                                    zz_protocol::Axis::Horizontal => (
-                                        event.event.position.x - event.bounds.left(),
-                                        event.bounds.size.width,
-                                    ),
-                                    zz_protocol::Axis::Vertical => (
-                                        event.event.position.y - event.bounds.top(),
-                                        event.bounds.size.height,
-                                    ),
-                                };
-                                let ratio = (f32::from(offset) / f32::from(size).max(1.0))
-                                    .clamp(0.01, 0.99);
-                                this.split_drag = Some(SplitDragState {
-                                    drag,
-                                    ratio,
-                                    committed_generation: None,
-                                });
-                                cx.notify();
-                                cx.stop_propagation();
-                            },
-                        ))
-                        .into_any_element(),
-                );
-            }
-        }
-        if let Some(display) = self.connection.read(cx).core.display_panes() {
-            for indicator in &display.indicators {
-                let Some((_, rect)) = pane_rects(&layout)
-                    .into_iter()
-                    .find(|(pane, _)| *pane == indicator.pane)
-                else {
-                    continue;
-                };
+            if let Some(indicator) =
+                self.connection
+                    .read(cx)
+                    .core
+                    .display_panes()
+                    .and_then(|display| {
+                        display
+                            .indicators
+                            .iter()
+                            .find(|indicator| indicator.pane == pane_id)
+                    })
+            {
                 let connection = self.connection.clone();
                 let pane = indicator.pane;
                 let key = indicator
@@ -1379,31 +1670,81 @@ impl WebClient {
                     cx.stop_propagation();
                 });
                 let label = (!indicator.label.is_empty()).then(|| {
+                    let foreground = cx.theme().foreground;
+                    let background = cx.theme().background;
+                    let bucket = |segments: &[zz_protocol::StyledSegment]| {
+                        zz_ui::tmux_style::tmux_styled_segments_text(
+                            segments, foreground, background, cx,
+                        )
+                        .into_styled_text()
+                    };
+                    let [left, centre, right] =
+                        zz_ui::tmux_style::split_tmux_alignment(&indicator.label);
                     div()
                         .absolute()
                         .top(px(8.0))
                         .left(px(8.0))
                         .right(px(8.0))
                         .overflow_hidden()
+                        .flex()
+                        .justify_between()
                         .font_family(cx.theme().mono_font_family.clone())
                         .text_xs()
-                        .text_color(cx.theme().foreground)
-                        .child(indicator.label.clone())
+                        .text_color(foreground)
+                        .child(bucket(&left))
+                        .child(bucket(&centre))
+                        .child(bucket(&right))
                 });
-                panes.push(
-                    div()
-                        .absolute()
-                        .left(relative(rect.x))
-                        .top(relative(rect.y))
-                        .w(relative(rect.width))
-                        .h(relative(rect.height))
-                        .child(zz_ui::pane::pane_indicator_overlay(card).children(label))
+                status_overlays.push(
+                    zz_ui::pane::pane_indicator_overlay(card)
+                        .children(label)
                         .into_any_element(),
                 );
             }
+            let measured = Rc::clone(&self.pane_bounds);
+            panes.insert(
+                pane_id,
+                pane_surface(
+                    ("web-pane", pane_id.0),
+                    content,
+                    status_overlays,
+                    chrome,
+                    cx,
+                )
+                .when(
+                    follows_pointer && active_window.active_pane != pane_id,
+                    |surface| {
+                        surface.on_mouse_move(cx.listener(
+                            move |this, event: &gpui::MouseMoveEvent, _, cx| {
+                                if event.pressed_button.is_none() {
+                                    this.command(
+                                        "select-pane",
+                                        vec!["-t".into(), pane_id.to_string()],
+                                        cx,
+                                    );
+                                }
+                            },
+                        ))
+                    },
+                )
+                .capture_any_mouse_down(cx.listener(move |this, _, window, cx| {
+                    if this
+                        .active_window(cx)
+                        .is_some_and(|active| active.active_pane != pane_id)
+                    {
+                        this.focus_pane(pane_id, window, cx);
+                    }
+                }))
+                .on_prepaint(move |bounds, _, _| {
+                    measured.borrow_mut().insert(pane_id, bounds);
+                })
+                .into_any_element(),
+            );
         }
+        let content = self.render_layout(&layout, &active_window, &mut panes, cx);
+        let mut overlays = Vec::new();
         if !self.connection.read(cx).connected {
-            panes.push(
+            overlays.push(
                 div()
                     .absolute()
                     .left_0()
@@ -1418,6 +1759,7 @@ impl WebClient {
             );
         }
         let canvas_bounds = Rc::clone(&self.pane_canvas_bounds);
+        let release_view = cx.weak_entity();
         let preview = self.pane_drop_preview(cx);
         div()
             .id("web-pane-canvas")
@@ -1427,7 +1769,9 @@ impl WebClient {
             .on_drag_move::<PaneDrag>(cx.listener(Self::on_pane_drag_move))
             .on_drop(cx.listener(Self::on_pane_drop))
             .on_mouse_move(cx.listener(|this, _, _, cx| {
-                if this.pane_drag.is_some() && !cx.has_active_drag() {
+                if this.pane_drag.as_ref().is_some_and(|state| !state.touch)
+                    && !cx.has_active_drag()
+                {
                     this.finish_pane_drag(cx);
                 }
             }))
@@ -1443,9 +1787,239 @@ impl WebClient {
                     cx.notify();
                 }
             }))
-            .children(panes)
+            .child(
+                div()
+                    .size_full()
+                    .p(px(if self.preferences.gaps {
+                        self.preferences.pane_margin
+                    } else {
+                        0.0
+                    }))
+                    .when(!self.inline_sidebar(window), gpui::Styled::pt_0)
+                    .child(content),
+            )
+            .children(overlays)
             .children(preview)
+            .child(
+                gpui::canvas(
+                    |_, _, _| (),
+                    move |_, (), window, _| {
+                        window.on_mouse_event(move |event: &gpui::MouseUpEvent, phase, _, cx| {
+                            if phase.capture() && event.button == MouseButton::Left {
+                                let _ = release_view.update(cx, Self::commit_split);
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .inset_0(),
+            )
             .into_any_element()
+    }
+
+    fn render_layout(
+        &self,
+        node: &zz_protocol::LayoutNode,
+        active: &WindowSnapshot,
+        panes: &mut HashMap<PaneId, AnyElement>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let zz_protocol::LayoutNode::Split {
+            id,
+            axis,
+            ratio,
+            first,
+            second,
+        } = node
+        else {
+            let zz_protocol::LayoutNode::Pane(pane) = node else {
+                unreachable!()
+            };
+            return panes
+                .remove(pane)
+                .unwrap_or_else(|| div().into_any_element());
+        };
+        let first = self.render_layout(first, active, panes, cx);
+        let second = self.render_layout(second, active, panes, cx);
+        let split = *id;
+        let axis = *axis;
+        let ratio = *ratio;
+        let drag = SplitDrag {
+            window: active.id,
+            split,
+            axis,
+            start_ratio: ratio,
+        };
+        let split_axis = match axis {
+            zz_protocol::Axis::Horizontal => PaneSplitAxis::Horizontal,
+            zz_protocol::Axis::Vertical => PaneSplitAxis::Vertical,
+        };
+        let gap = px(if self.preferences.gaps {
+            self.preferences.pane_margin
+        } else {
+            0.0
+        });
+        let highlight = zz_client::pane_separator::pane_separator(node, active.active_pane, None)
+            .map(|separator| {
+                PaneSplitHighlight::new(
+                    separator.span().start(),
+                    separator.span().length(),
+                    match separator.side() {
+                        zz_client::pane_separator::SeparatorSide::First => PaneSplitSide::First,
+                        zz_client::pane_separator::SeparatorSide::Second => PaneSplitSide::Second,
+                    },
+                    cx.theme().accent,
+                )
+            });
+        let bounds = Rc::new(Cell::new(Bounds::default()));
+        let touch_bounds = Rc::clone(&bounds);
+        let view = cx.entity().downgrade();
+        let enabled = self.connection.read(cx).connected
+            && !self.connection.read(cx).core.attached_read_only()
+            && self.pane_drag.is_none();
+        let handle = if enabled {
+            pane_split_hit_target(("split-divider", split.0), split_axis, ratio, gap)
+                .on_drag(drag, |_: &SplitDrag, _, _, cx| cx.new(|_| SplitDragPreview))
+                .child(touch_drag_handle(move |event, window, cx| {
+                    let _ = view.update(cx, |this, cx| {
+                        match event.phase {
+                            gpui::TouchPhase::Started => {
+                                this.set_split_drag(Some(SplitDragState {
+                                    drag,
+                                    ratio,
+                                    touch: true,
+                                    committed_generation: None,
+                                }));
+                                window.prevent_default();
+                            }
+                            gpui::TouchPhase::Moved => {
+                                if this
+                                    .split_drag
+                                    .is_some_and(|state| state.drag.split == split)
+                                {
+                                    this.move_split(drag, event.position, touch_bounds.get(), cx);
+                                }
+                            }
+                            gpui::TouchPhase::Ended => this.commit_split(cx),
+                            gpui::TouchPhase::Cancelled => {
+                                this.set_split_drag(None);
+                                cx.notify();
+                            }
+                        }
+                        cx.stop_propagation();
+                    });
+                }))
+                .into_any_element()
+        } else {
+            div().absolute().into_any_element()
+        };
+        pane_split_surface(
+            ("mux-split", split.0),
+            split_axis,
+            ratio,
+            self.split_drag
+                .is_some_and(|state| state.drag.split == split),
+            self.preferences.gaps,
+            gap,
+            None,
+            highlight,
+            first,
+            second,
+            handle,
+            cx,
+        )
+        .on_prepaint(move |measured, _, _| bounds.set(measured))
+        .on_drag_move::<SplitDrag>(cx.listener(
+            move |this, event: &DragMoveEvent<SplitDrag>, _, cx| {
+                let drag = *event.drag(cx);
+                if drag.split == split {
+                    this.move_split(drag, event.event.position, event.bounds, cx);
+                    cx.stop_propagation();
+                }
+            },
+        ))
+        .into_any_element()
+    }
+
+    fn move_split(
+        &mut self,
+        drag: SplitDrag,
+        position: Point<Pixels>,
+        bounds: Bounds<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .split_drag
+            .is_some_and(|state| state.committed_generation.is_some())
+        {
+            return;
+        }
+        let (offset, size) = match drag.axis {
+            zz_protocol::Axis::Horizontal => (position.x - bounds.left(), bounds.size.width),
+            zz_protocol::Axis::Vertical => (position.y - bounds.top(), bounds.size.height),
+        };
+        let (start_ratio, touch) = self.split_drag.map_or((drag.start_ratio, false), |state| {
+            (state.drag.start_ratio, state.touch)
+        });
+        self.set_split_drag(Some(SplitDragState {
+            drag: SplitDrag {
+                start_ratio,
+                ..drag
+            },
+            ratio: if f32::from(size) > 0.0 {
+                (f32::from(offset) / f32::from(size)).clamp(0.0, 1.0)
+            } else {
+                0.5
+            },
+            touch,
+            committed_generation: None,
+        }));
+        cx.notify();
+    }
+
+    fn set_split_drag(&mut self, state: Option<SplitDragState>) {
+        self.split_drag = state;
+        self.terminal_resize_suppressed.set(state.is_some());
+    }
+
+    fn reconcile_split_drag(&mut self, active: &WindowSnapshot, cx: &mut Context<Self>) {
+        let Some(state) = self.split_drag else {
+            return;
+        };
+        if state.drag.window != active.id
+            || active.zoomed_pane.is_some()
+            || !active.layout.contains_split(state.drag.split)
+        {
+            self.set_split_drag(None);
+        } else if !state.touch && state.committed_generation.is_none() && !cx.has_active_drag() {
+            self.commit_split(cx);
+        }
+    }
+
+    fn commit_split(&mut self, cx: &mut Context<Self>) {
+        let Some(mut state) = self.split_drag else {
+            return;
+        };
+        if state.committed_generation.is_some() {
+            return;
+        }
+        let ratio_basis_points = split_ratio_basis(state.ratio);
+        if ratio_basis_points == split_ratio_basis(state.drag.start_ratio) {
+            self.set_split_drag(None);
+        } else {
+            state.ratio = f32::from(ratio_basis_points) / f32::from(zz_protocol::SPLIT_RATIO_BASIS);
+            state.committed_generation = Some(self.connection.read(cx).core.snapshot().generation);
+            self.set_split_drag(Some(state));
+            self.send_input(
+                InputMessage::ResizeSplit {
+                    window: state.drag.window,
+                    split: state.drag.split,
+                    ratio_basis_points,
+                },
+                cx,
+            );
+        }
+        cx.notify();
     }
 
     fn overlay(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -1453,9 +2027,61 @@ impl WebClient {
         let tree = core.choose_tree().cloned();
         let buffer = core.choose_buffer().cloned();
         let prompt = core.command_prompt().cloned();
-        if prompt.is_none() {
+        let window_chooser = tree
+            .as_ref()
+            .filter(|state| state.kind == ChooseTreeKind::Windows);
+        if self.prompt.as_ref().is_some_and(|palette| {
+            let palette = palette.read(cx);
+            if palette.is_local() {
+                palette.is_finished()
+            } else if palette.is_window_chooser() {
+                window_chooser.is_none()
+            } else {
+                prompt.is_none()
+            }
+        }) {
             self.prompt = None;
+            self.focused_pane = None;
         }
+        let daemon_reopened =
+            self.local_palette_revisions
+                .is_none_or(|(prompt_revision, chooser_revision)| {
+                    (prompt.is_some() && prompt_revision != self.prompt_revision)
+                        || (window_chooser.is_some() && chooser_revision != self.chooser_revision)
+                });
+        if !daemon_reopened
+            && let Some(palette) = self
+                .prompt
+                .as_ref()
+                .filter(|palette| palette.read(cx).is_local())
+        {
+            palette.update(cx, |palette, cx| palette.refresh(window, cx));
+            self.modal_open = true;
+            return Some(palette.clone().into_any_element());
+        }
+        if let Some(state) = window_chooser {
+            let opened = self
+                .prompt
+                .as_ref()
+                .is_none_or(|palette| !palette.read(cx).is_window_chooser());
+            if opened {
+                let backend = self.palette_backend();
+                let revision = self.chooser_revision;
+                let palette = cx.new(|cx| {
+                    CommandPaletteView::new_window_chooser(backend, state, revision, window, cx)
+                });
+                self.observe_palette(&palette, window, cx);
+                palette.read(cx).focus(cx).focus(window, cx);
+                self.prompt = Some(palette);
+            }
+            let palette = self.prompt.as_ref().unwrap();
+            palette.update(cx, |palette, cx| {
+                palette.synchronize_window_chooser(state, self.chooser_revision, window, cx);
+            });
+            self.modal_open = true;
+            return Some(palette.clone().into_any_element());
+        }
+
         let menu = core.menu().cloned();
         let confirm = core.confirm().cloned();
         if prompt.is_none()
@@ -1667,28 +2293,33 @@ impl WebClient {
             )
         } else if let Some(state) = prompt {
             let snapshot = Arc::clone(self.connection.read(cx).core.snapshot());
-            let pane = self.active_window(cx).map(|window| window.active_pane);
-            let opened = self.prompt.is_none();
-            let palette = self.prompt.get_or_insert_with(|| {
-                let connection = self.connection.clone();
-                cx.new(|cx| {
+            if self.prompt.as_ref().is_some_and(|palette| {
+                palette.read(cx).is_local() || palette.read(cx).is_window_chooser()
+            }) {
+                self.prompt = None;
+            }
+            if self.prompt.is_none() {
+                let backend = self.palette_backend();
+                let revision = self.prompt_revision;
+                let palette = cx.new(|cx| {
                     CommandPaletteView::new(
-                        connection,
-                        pane,
+                        backend,
                         &state,
-                        self.prompt_revision,
+                        revision,
                         Arc::clone(&snapshot),
                         window,
                         cx,
                     )
-                })
-            });
-            palette.update(cx, |palette, cx| {
-                palette.synchronize(&state, self.prompt_revision, &snapshot, pane, window, cx);
-            });
-            if opened {
+                });
+                self.observe_palette(&palette, window, cx);
                 palette.read(cx).focus(cx).focus(window, cx);
+                self.prompt = Some(palette);
             }
+            let palette = self.prompt.as_ref().expect("daemon prompt palette");
+            palette.update(cx, |palette, cx| {
+                palette.synchronize(&state, self.prompt_revision, &snapshot, window, cx);
+                palette.refresh(window, cx);
+            });
             self.modal_open = true;
             return Some(palette.clone().into_any_element());
         } else {
@@ -1828,82 +2459,20 @@ impl WebClient {
                     .into_any_element(),
             );
         }
-        let (terminal, title, close) = if let Some((id, pane)) = output {
-            if self
-                .output_terminal
-                .as_ref()
-                .is_none_or(|(previous, _)| *previous != id)
-            {
-                let connection = self.connection.clone();
-                let terminal = cx.new(|cx| TerminalPane::new_command_output(pane, connection, cx));
-                terminal.read(cx).focus_handle(cx).focus(window, cx);
-                self.output_terminal = Some((id, terminal));
-            }
-            (
-                self.output_terminal.as_ref()?.1.clone(),
-                "Command output".to_owned(),
-                InputMessage::CommandOutputView {
-                    action: zz_terminal::TerminalViewAction::CopyMode(
-                        zz_terminal::CopyModeAction::Cancel,
-                    ),
-                },
-            )
-        } else {
-            if self.popup_terminal.take().is_some() || self.output_terminal.take().is_some() {
-                self.focused_pane = None;
-                cx.notify();
-            }
-            return None;
-        };
-        let connection = self.connection.clone();
-        let content = div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .child(
-                div()
-                    .flex()
-                    .flex_none()
-                    .h(px(32.0))
-                    .items_center()
-                    .px(px(8.0))
-                    .child(div().flex_1().text_size(px(12.0)).child(title))
-                    .child(
-                        Button::compact_icon("web-terminal-overlay-close", IconName::Xmark)
-                            .tooltip("Close")
-                            .on_click(move |_, _, cx| {
-                                connection.update(cx, |connection, cx| {
-                                    connection.send(ProtocolMessage::Input(close.clone()), cx);
-                                });
-                            }),
-                    ),
-            )
-            .child(div().flex_1().min_h_0().child(terminal));
-        let frame = div()
-            .absolute()
-            .left(px(32.0))
-            .right(px(32.0))
-            .top(px(48.0))
-            .bottom(px(32.0))
-            .child(zz_ui::pane::FloatingSurface::new(
-                "web-terminal-overlay",
-                content,
-                cx,
-            ));
-        Some(
-            div()
-                .absolute()
-                .inset_0()
-                .bg(cx.theme().scrim.opacity(0.25))
-                .occlude()
-                .child(frame)
-                .into_any_element(),
-        )
+        let popup_closed = self.popup_terminal.take().is_some();
+        let output_closed = output.is_none() && self.output_terminal.take().is_some();
+        if popup_closed || output_closed {
+            self.focused_pane = None;
+            cx.notify();
+        }
+        None
     }
 }
 
-impl Render for WebClient {
+impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(target_os = "ios")]
+        self.sync_authentication(window, cx);
         let dialog = window
             .root::<Root>()
             .flatten()
@@ -1911,19 +2480,20 @@ impl Render for WebClient {
         self.connection.update(cx, |connection, cx| {
             connection.reconcile_dialog_prefix(dialog, cx)
         });
-        if !self.sidebar
+        if !self.inline_sidebar(window)
             && !self.slideover
             && self.settings.is_none()
             && self.sidebar_focus.is_focused(window)
         {
             self.release_sidebar_focus(window, cx);
         }
-        let sidebar = if self.sidebar || self.settings.is_some() {
+        let sidebar = if self.inline_sidebar(window) {
             self.sidebar(window, cx)
         } else {
             div().into_any_element()
         };
-        let titlebar = (self.settings.is_none()).then(|| self.status_bar(cx));
+        let titlebar = (self.settings.is_none() && !self.inline_sidebar(window))
+            .then(|| self.status_bar(window, cx));
         let workspace = self.workspace(window, cx);
         let mut terminal_overlays = self
             .terminal_overlay(window, cx)
@@ -1931,14 +2501,14 @@ impl Render for WebClient {
             .collect::<Vec<_>>();
         terminal_overlays.extend(self.floating_overlay(window, cx));
         let mut overlays = Vec::new();
-        if self.slideover && !self.sidebar && self.settings.is_none() {
+        if self.slideover && !self.inline_sidebar(window) && self.settings.is_none() {
             overlays.push(self.slideover(window, cx));
         }
         overlays.extend(self.overlay(window, cx));
         overlays.extend(Root::render_dialog_layer(window, cx).map(IntoElement::into_any_element));
         overlays
             .extend(Root::render_notification_layer(window, cx).map(IntoElement::into_any_element));
-        app_shell_surface(
+        let shell = app_shell_surface(
             "web-client",
             cx.theme().background,
             sidebar,
@@ -1964,32 +2534,64 @@ impl Render for WebClient {
             MouseButton::Left,
             cx.listener(|this, _, window, cx| {
                 cx.defer_in(window, |this, _, cx| this.finish_pane_drag(cx));
-                let Some(mut state) = this.split_drag else {
-                    return;
-                };
-                if state.committed_generation.is_some() {
-                    return;
-                }
-                let ratio_basis_points = (state.ratio * 10_000.0).round() as u16;
-                if ratio_basis_points == (state.drag.start_ratio * 10_000.0).round() as u16 {
-                    this.split_drag = None;
-                } else {
-                    state.committed_generation =
-                        Some(this.connection.read(cx).core.snapshot().generation);
-                    this.split_drag = Some(state);
-                    this.send_input(
-                        InputMessage::ResizeSplit {
-                            window: state.drag.window,
-                            split: state.drag.split,
-                            ratio_basis_points,
-                        },
-                        cx,
-                    );
-                }
-                cx.notify();
+                this.commit_split(cx);
             }),
-        )
+        );
+        let visible = window.fully_visible_bounds();
+        let bottom = if self.preferences.extend_bottom_safe_area {
+            window.visual_viewport_bounds().bottom()
+        } else {
+            visible.bottom()
+        };
+        div()
+            .size_full()
+            .bg(cx.theme().background)
+            .pt(visible.top())
+            .pb((window.viewport_size().height - bottom).max(px(0.0)))
+            .pl(visible.left())
+            .pr(window.viewport_size().width - visible.right())
+            .child(shell)
     }
+}
+
+pub(super) fn touch_drag_handle(
+    handler: impl Fn(&gpui::TouchDragEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    gpui::canvas(
+        |bounds, window, cx| {
+            (
+                window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal),
+                window.use_state(cx, |_, _| false),
+            )
+        },
+        move |_, (hitbox, claimed), window, _| {
+            window.on_mouse_event(move |event: &gpui::TouchDragEvent, phase, window, cx| {
+                if !phase.bubble() {
+                    return;
+                }
+                if event.phase == gpui::TouchPhase::Started {
+                    if window.default_prevented()
+                        || !hitbox.is_hovered_at(event.start_position, window)
+                    {
+                        return;
+                    }
+                    handler(event, window, cx);
+                    claimed.update(cx, |claimed, _| *claimed = window.default_prevented());
+                } else if *claimed.read(cx) {
+                    handler(event, window, cx);
+                    if matches!(
+                        event.phase,
+                        gpui::TouchPhase::Ended | gpui::TouchPhase::Cancelled
+                    ) {
+                        claimed.update(cx, |claimed, _| *claimed = false);
+                    }
+                }
+            });
+        },
+    )
+    .absolute()
+    .inset_0()
+    .size_full()
 }
 
 struct PaneDragState {
@@ -1997,42 +2599,36 @@ struct PaneDragState {
     window: zz_protocol::WindowId,
     layout: zz_protocol::LayoutNode,
     target: Option<(PaneId, DropZone)>,
+    touch: bool,
+    preview: Option<DropPreview>,
 }
 
 impl PaneDragState {
     fn target_at(
         &self,
         position: Point<Pixels>,
-        canvas: Bounds<Pixels>,
+        bounds: &HashMap<PaneId, Bounds<Pixels>>,
     ) -> Option<(PaneId, DropZone)> {
-        let position = position - canvas.origin;
-        let position = (f32::from(position.x), f32::from(position.y));
-        pane_rects(&self.layout)
-            .into_iter()
-            .find_map(|(pane, rect)| {
-                let slot = PaneRect {
-                    x: rect.x * f32::from(canvas.size.width),
-                    y: rect.y * f32::from(canvas.size.height),
-                    width: rect.width * f32::from(canvas.size.width),
-                    height: rect.height * f32::from(canvas.size.height),
-                };
-                (pane != self.drag.pane
-                    && position.0 >= slot.x
-                    && position.1 >= slot.y
-                    && position.0 < slot.x + slot.width
-                    && position.1 < slot.y + slot.height)
-                    .then(|| {
-                        (
-                            pane,
-                            coerced_drop_zone(
-                                &self.layout,
-                                self.drag.pane,
-                                pane,
-                                drop_zone_at(slot, position),
-                            ),
-                        )
-                    })
-            })
+        bounds.iter().find_map(|(pane, bounds)| {
+            if *pane == self.drag.pane || !bounds.contains(&position) {
+                return None;
+            }
+            let slot = PaneRect {
+                x: f32::from(bounds.left()),
+                y: f32::from(bounds.top()),
+                width: f32::from(bounds.size.width),
+                height: f32::from(bounds.size.height),
+            };
+            Some((
+                *pane,
+                coerced_drop_zone(
+                    &self.layout,
+                    self.drag.pane,
+                    *pane,
+                    drop_zone_at(slot, (f32::from(position.x), f32::from(position.y))),
+                ),
+            ))
+        })
     }
 }
 
@@ -2065,7 +2661,17 @@ struct SplitDrag {
 struct SplitDragState {
     drag: SplitDrag,
     ratio: f32,
+    touch: bool,
     committed_generation: Option<u64>,
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the clamped ratio is converted to a bounded protocol fixed-point value"
+)]
+fn split_ratio_basis(ratio: f32) -> u16 {
+    (ratio.clamp(0.0, 1.0) * f32::from(zz_protocol::SPLIT_RATIO_BASIS)).round() as u16
 }
 
 struct SplitDragPreview;
@@ -2090,44 +2696,6 @@ fn update_split_ratio(node: &mut zz_protocol::LayoutNode, split: zz_protocol::Sp
         } else {
             update_split_ratio(first, split, value);
             update_split_ratio(second, split, value);
-        }
-    }
-}
-
-fn collect_split_bounds(
-    node: &zz_protocol::LayoutNode,
-    panes: &[(PaneId, zz_client::NormalizedPaneRect)],
-    splits: &mut Vec<(
-        zz_protocol::SplitId,
-        zz_protocol::Axis,
-        f32,
-        zz_client::NormalizedPaneRect,
-    )>,
-) -> zz_client::NormalizedPaneRect {
-    match node {
-        zz_protocol::LayoutNode::Pane(id) => panes
-            .iter()
-            .find(|(pane, _)| pane == id)
-            .map_or(zz_client::NormalizedPaneRect::default(), |(_, rect)| *rect),
-        zz_protocol::LayoutNode::Split {
-            id,
-            axis,
-            ratio,
-            first,
-            second,
-        } => {
-            let first = collect_split_bounds(first, panes, splits);
-            let second = collect_split_bounds(second, panes, splits);
-            let x = first.x.min(second.x);
-            let y = first.y.min(second.y);
-            let rect = zz_client::NormalizedPaneRect {
-                x,
-                y,
-                width: (first.x + first.width).max(second.x + second.width) - x,
-                height: (first.y + first.height).max(second.y + second.height) - y,
-            };
-            splits.push((*id, *axis, *ratio, rect));
-            rect
         }
     }
 }
@@ -2163,6 +2731,7 @@ fn unsupported_pane(
     icon: IconName,
     reason: &str,
     url: Option<String>,
+    radii: Corners<Pixels>,
     cx: &App,
 ) -> AnyElement {
     let toolbar = (title == "Browser").then(|| {
@@ -2195,6 +2764,13 @@ fn unsupported_pane(
         .justify_center()
         .gap(px(12.0))
         .p(px(24.0))
+        .rounded_bl(radii.bottom_left)
+        .rounded_br(radii.bottom_right)
+        .when(toolbar.is_none(), |message| {
+            message
+                .rounded_tl(radii.top_left)
+                .rounded_tr(radii.top_right)
+        })
         .bg(cx
             .theme()
             .background
@@ -2227,6 +2803,8 @@ fn unsupported_pane(
         .children(toolbar.map(|toolbar| {
             div()
                 .flex_none()
+                .rounded_tl(radii.top_left)
+                .rounded_tr(radii.top_right)
                 .bg(cx
                     .theme()
                     .background
@@ -2310,23 +2888,37 @@ mod prefix_tests {
                 second: Box::new(LayoutNode::Pane(PaneId(2))),
             },
             target: None,
+            touch: false,
+            preview: None,
         };
         let canvas = Bounds::new(point(px(250.0), px(40.0)), size(px(1000.0), px(400.0)));
+        let bounds = [
+            (
+                PaneId(1),
+                Bounds::new(canvas.origin, size(px(497.0), px(400.0))),
+            ),
+            (
+                PaneId(2),
+                Bounds::new(point(px(753.0), px(40.0)), size(px(497.0), px(400.0))),
+            ),
+        ]
+        .into_iter()
+        .collect();
         assert_eq!(
-            state.target_at(point(px(1000.0), px(240.0)), canvas),
+            state.target_at(point(px(1000.0), px(240.0)), &bounds),
             Some((PaneId(2), DropZone::Center))
         );
         assert_eq!(
-            state.target_at(point(px(1000.0), px(45.0)), canvas),
+            state.target_at(point(px(1000.0), px(45.0)), &bounds),
             Some((PaneId(2), DropZone::Top))
         );
         assert_eq!(
-            state.target_at(point(px(1240.0), px(240.0)), canvas),
+            state.target_at(point(px(1240.0), px(240.0)), &bounds),
             Some((PaneId(2), DropZone::Right))
         );
-        assert_eq!(state.target_at(point(px(500.0), px(240.0)), canvas), None);
-        assert_eq!(state.target_at(point(px(1300.0), px(240.0)), canvas), None);
-        assert_eq!(state.target_at(point(px(1000.0), px(20.0)), canvas), None);
+        assert_eq!(state.target_at(point(px(500.0), px(240.0)), &bounds), None);
+        assert_eq!(state.target_at(point(px(1300.0), px(240.0)), &bounds), None);
+        assert_eq!(state.target_at(point(px(1000.0), px(20.0)), &bounds), None);
     }
 
     #[test]
@@ -2359,44 +2951,6 @@ mod prefix_tests {
                 String::new(),
                 String::new()
             )
-        );
-    }
-
-    #[test]
-    fn nested_dividers_follow_shared_pane_geometry_after_a_resize() {
-        use zz_protocol::{Axis, LayoutNode, PaneId, SplitId};
-        let mut layout = LayoutNode::Split {
-            id: SplitId(1),
-            axis: Axis::Horizontal,
-            ratio: 0.25,
-            first: Box::new(LayoutNode::Pane(PaneId(1))),
-            second: Box::new(LayoutNode::Split {
-                id: SplitId(2),
-                axis: Axis::Vertical,
-                ratio: 0.6,
-                first: Box::new(LayoutNode::Pane(PaneId(2))),
-                second: Box::new(LayoutNode::Pane(PaneId(3))),
-            }),
-        };
-        super::update_split_ratio(&mut layout, SplitId(1), 0.4);
-        let panes = zz_client::pane_rects(&layout);
-        let mut splits = Vec::new();
-        super::collect_split_bounds(&layout, &panes, &mut splits);
-        let (_, axis, ratio, bounds) = splits.iter().find(|(id, ..)| *id == SplitId(2)).unwrap();
-        assert_eq!(*axis, Axis::Vertical);
-        assert_eq!(*ratio, 0.6);
-        assert_eq!(
-            *bounds,
-            zz_client::NormalizedPaneRect {
-                x: 0.4,
-                y: 0.0,
-                width: 0.6,
-                height: 1.0
-            }
-        );
-        assert_eq!(
-            splits.last().unwrap().3,
-            zz_client::NormalizedPaneRect::FULL
         );
     }
 

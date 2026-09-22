@@ -39,12 +39,12 @@ use zz_ui::{
 };
 use zz_ui::{
     pane::{
-        FloatingSurface, PaneChrome, PaneDrag, PaneDragOverlayState, PaneOverlayCorner,
-        PaneSplitAxis, PaneSplitHighlight, PaneSplitSide, TERMINAL_HEADER_HEIGHT,
-        TerminalPaneAction, pane_border_color, pane_drag_button, pane_drag_overlay,
-        pane_drag_preview, pane_drop_preview, pane_indicator_card, pane_indicator_overlay,
-        pane_overlay_stack, pane_split_hit_target, pane_split_slot, pane_split_surface,
-        pane_surface, pane_sync_badge, pane_unzoom_control, pane_waiting_state,
+        DropPreview, DropPreviewFrame, FloatingSurface, PaneChrome, PaneDrag, PaneDragOverlayState,
+        PaneOverlayCorner, PaneSplitAxis, PaneSplitHighlight, PaneSplitSide,
+        TERMINAL_HEADER_HEIGHT, TerminalPaneAction, pane_border_color, pane_drag_button,
+        pane_drag_overlay, pane_drag_preview, pane_drop_preview, pane_indicator_card,
+        pane_indicator_overlay, pane_overlay_stack, pane_split_hit_target, pane_split_slot,
+        pane_split_surface, pane_surface, pane_sync_badge, pane_unzoom_control, pane_waiting_state,
         terminal_pane_header,
     },
     shell::{app_connection_state, app_workspace_surface},
@@ -67,7 +67,7 @@ use crate::{
     command::{
         confirm::ConfirmView,
         menu::MenuView,
-        palette::{CommandPaletteEvent, CommandPaletteView, PaletteMode},
+        palette::{CommandPaletteEvent, CommandPaletteView, PaletteMode, palette_backend},
     },
     config::{self, AgentConfig, frame_content_corner_radius},
     diagnostics,
@@ -295,29 +295,6 @@ enum PaneDragLayer {
     Idle,
     Armed,
     Dragging(PaneId),
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct DropPreviewFrame {
-    bounds: Bounds<Pixels>,
-    opacity: f32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct DropPreview {
-    from: DropPreviewFrame,
-    to: DropPreviewFrame,
-    sequence: u64,
-    duration: Duration,
-}
-
-impl DropPreview {
-    fn at(self, delta: f32) -> DropPreviewFrame {
-        DropPreviewFrame {
-            bounds: lerp_bounds(self.from.bounds, self.to.bounds, delta),
-            opacity: self.from.opacity + (self.to.opacity - self.from.opacity) * delta,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1174,7 +1151,8 @@ impl AppView {
                 action: zz_protocol::ChooseTreeAction::Close,
             });
         }
-        let palette = cx.new(|cx| CommandPaletteView::new_unified(mux, mode, window, cx));
+        let palette =
+            cx.new(|cx| CommandPaletteView::new_unified(palette_backend(mux), mode, window, cx));
         self.observe_command_palette(&palette, window, cx);
         palette.read(cx).focus(cx).focus(window, cx);
         self.command_palette = Some(palette);
@@ -1680,7 +1658,7 @@ impl AppView {
                     let snapshot = Arc::clone(&snapshot);
                     self.command_palette = Some(cx.new(|cx| {
                         CommandPaletteView::new(
-                            mux,
+                            palette_backend(mux),
                             state,
                             command_prompt_revision,
                             snapshot,
@@ -1715,7 +1693,7 @@ impl AppView {
                     let mux = self.mux.clone();
                     let palette = cx.new(|cx| {
                         CommandPaletteView::new_window_chooser(
-                            mux,
+                            palette_backend(mux),
                             state,
                             choose_tree_revision,
                             window,
@@ -2933,10 +2911,10 @@ impl AppView {
         if indicator.label.is_empty() {
             return None;
         }
-        let [left, centre, right] = split_indicator_label_alignment(&indicator.label);
+        let [left, centre, right] = zz_ui::tmux_style::split_tmux_alignment(&indicator.label);
         let foreground = cx.theme().foreground;
         let background = crate::theme::chrome_background(cx);
-        let bucket = |segments: &[zz_mux::StyledSegment]| {
+        let bucket = |segments: &[zz_protocol::StyledSegment]| {
             crate::theme::tmux_styled_segments_text(segments, foreground, background, cx)
                 .into_styled_text()
                 .into_any_element()
@@ -3431,36 +3409,6 @@ fn pane_bounds(rect: NormalizedPaneRect, canvas_size: Size<Pixels>) -> Bounds<Pi
     )
 }
 
-fn lerp_bounds(from: Bounds<Pixels>, to: Bounds<Pixels>, delta: f32) -> Bounds<Pixels> {
-    Bounds::new(
-        gpui::point(
-            lerp_pixels(from.origin.x, to.origin.x, delta),
-            lerp_pixels(from.origin.y, to.origin.y, delta),
-        ),
-        gpui::size(
-            lerp_pixels(from.size.width, to.size.width, delta),
-            lerp_pixels(from.size.height, to.size.height, delta),
-        ),
-    )
-}
-
-fn lerp_pixels(from: Pixels, to: Pixels, delta: f32) -> Pixels {
-    from + (to - from) * delta
-}
-
-fn split_indicator_label_alignment(label: &str) -> [Vec<zz_mux::StyledSegment>; 3] {
-    let mut buckets: [Vec<zz_mux::StyledSegment>; 3] = [Vec::new(), Vec::new(), Vec::new()];
-    for segment in zz_mux::parse_styled_segments(label) {
-        let bucket = match segment.style.align {
-            Some(zz_mux::TmuxAlign::Centre | zz_mux::TmuxAlign::AbsoluteCentre) => 1,
-            Some(zz_mux::TmuxAlign::Right) => 2,
-            _ => 0,
-        };
-        buckets[bucket].push(segment);
-    }
-    buckets
-}
-
 fn split_ratio_from_pointer(axis: Axis, pointer: Point<Pixels>, bounds: Bounds<Pixels>) -> f32 {
     let (offset, extent) = match axis {
         Axis::Horizontal => (
@@ -3503,26 +3451,6 @@ mod tests {
     enum PaneReleaseStep {
         Drop(CommandInvocation),
         Teardown(PaneId),
-    }
-
-    #[test]
-    fn indicator_labels_split_into_alignment_buckets() {
-        let [left, centre, right] =
-            split_indicator_label_alignment("L#[align=centre]C#[align=right]#[fg=red]80x24");
-        assert_eq!(left.len(), 1);
-        assert_eq!(left[0].text, "L");
-        assert_eq!(centre.len(), 1);
-        assert_eq!(centre[0].text, "C");
-        assert_eq!(right.len(), 1);
-        assert_eq!(right[0].text, "80x24");
-        assert_eq!(
-            right[0].style.fg,
-            Some(zz_mux::TmuxColour::Basic(1)),
-            "styled segments keep their parsed colours"
-        );
-        let [left, centre, right] = split_indicator_label_alignment("#[align=right]80x24");
-        assert!(left.is_empty() && centre.is_empty());
-        assert_eq!(right[0].text, "80x24");
     }
 
     struct PaneReleaseOrderPreview;

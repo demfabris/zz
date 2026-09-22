@@ -2,24 +2,24 @@
 
 #![allow(clippy::pedantic, clippy::style, clippy::complexity)]
 
-#[cfg(all(feature = "tree-sitter", not(target_family = "wasm")))]
+#[cfg(feature = "tree-sitter")]
 mod highlighter;
-#[cfg(all(feature = "tree-sitter", not(target_family = "wasm")))]
+#[cfg(feature = "tree-sitter")]
 mod languages;
 mod palette;
-#[cfg(all(feature = "tree-sitter", not(target_family = "wasm")))]
+#[cfg(feature = "tree-sitter")]
 mod registry;
-#[cfg(any(not(feature = "tree-sitter"), target_family = "wasm"))]
+#[cfg(not(feature = "tree-sitter"))]
 mod syntax;
 mod theme;
 
-#[cfg(all(feature = "tree-sitter", not(target_family = "wasm")))]
+#[cfg(feature = "tree-sitter")]
 pub use highlighter::SyntaxHighlighter;
-#[cfg(all(feature = "tree-sitter", not(target_family = "wasm")))]
+#[cfg(feature = "tree-sitter")]
 pub use languages::Language;
-#[cfg(all(feature = "tree-sitter", not(target_family = "wasm")))]
+#[cfg(feature = "tree-sitter")]
 pub use registry::{LanguageConfig, LanguageRegistry};
-#[cfg(any(not(feature = "tree-sitter"), target_family = "wasm"))]
+#[cfg(not(feature = "tree-sitter"))]
 pub use syntax::{LanguageConfig, LanguageRegistry, SyntaxHighlighter};
 pub use theme::{
     FontStyle, FontWeightContent, HighlightTheme, HighlightThemeStyle, SyntaxColors, ThemeStyle,

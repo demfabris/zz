@@ -17,6 +17,7 @@ mod input;
 mod layout;
 mod menu;
 pub mod navigation;
+pub mod pane_separator;
 mod status;
 mod status_bar;
 

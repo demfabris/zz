@@ -1133,7 +1133,7 @@ impl InteractiveClient {
         }
     }
 
-    fn send(&self, message: &ProtocolMessage) -> Result<(), DaemonError> {
+    pub fn send(&self, message: &ProtocolMessage) -> Result<(), DaemonError> {
         let started = diagnostic_timer();
         let lock_started = diagnostic_timer();
         let mut writer = self.writer.lock();

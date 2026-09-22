@@ -12,7 +12,7 @@ use gpui::{
 };
 
 mod drag;
-pub use drag::{PaneDrag, pane_drag_button, pane_drag_preview};
+pub use drag::{DropPreview, DropPreviewFrame, PaneDrag, pane_drag_button, pane_drag_preview};
 
 pub const TERMINAL_HEADER_HEIGHT: f32 = 36.0;
 
@@ -572,6 +572,8 @@ pub fn pane_split_surface(
     let first = div()
         .flex()
         .flex_none()
+        .min_w_0()
+        .min_h_0()
         .when(!gaps, gpui::Styled::overflow_hidden)
         .when(axis == PaneSplitAxis::Horizontal, |element| {
             element.w(relative(ratio)).h_full()
@@ -651,6 +653,8 @@ pub fn pane_split_surface(
         .relative()
         .flex()
         .size_full()
+        .min_w_0()
+        .min_h_0()
         .when(!gaps, gpui::Styled::overflow_hidden)
         .when(axis == PaneSplitAxis::Vertical, |element| {
             element.flex_col()
@@ -661,6 +665,8 @@ pub fn pane_split_surface(
             div()
                 .flex()
                 .flex_1()
+                .min_w_0()
+                .min_h_0()
                 .when(!gaps, gpui::Styled::overflow_hidden)
                 .child(second_content),
         )

@@ -4,7 +4,7 @@ title: UI design conventions
 description: The component, palette, and styling rules that keep zz application chrome consistent and theme-aware.
 resource: crates/zz/src/command/palette.rs
 tags: [ui, gpui, zz-ui, theme, chrome, clippy]
-timestamp: 2026-09-17T00:00:00Z
+timestamp: 2026-09-22T00:00:00Z
 ---
 
 # Overview
@@ -197,7 +197,10 @@ already receive the workspace `Window` can call `window.push_notification` direc
 
 Interface settings offers a UI font picker over GPUI’s system font families on macOS, Linux, and
 Windows. `ui-font-family` in `zz/config` sets `Theme.font_family`; System default uses GPUI’s
-`.SystemUIFont` alias. Config reload and OS appearance changes reapply the choice to open windows.
+`.SystemUIFont` alias. On Linux the fork resolves that alias to the desktop interface font, read
+through the settings portal (GNOME `font-name`, KDE `kdeglobals` `font`), and follows changes to it;
+without a portal value it falls back to GPUI's fallback stack. Config reload and OS appearance
+changes reapply the choice to open windows.
 The `UiFontConfig` global holds this string separately so `AppConfig` remains `Copy`.
 Native entrypoints register `AvailableFonts` from their GPUI platform text system. The picker queries
 that catalog directly to avoid offering GPUI fallback names that are not installed.

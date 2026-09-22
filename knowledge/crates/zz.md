@@ -4,7 +4,7 @@ title: zz crate (the GPUI client)
 description: The long-lived GPUI desktop client, linking zz-cli for CLI dispatch, daemon spawning, and terminal attach, and hosting terminal, Chromium browser, and native Agent panes.
 resource: crates/zz/src/lib.rs
 tags: [gpui, crate, client, terminal, browser, agent, ui]
-timestamp: 2026-09-09T00:00:00Z
+timestamp: 2026-09-22T00:00:00Z
 ---
 
 # Overview
@@ -214,7 +214,7 @@ Browser, Terminal, Hosts, System, About:
 | Browser | Browser-local shortcuts, beginning with the element-selector hotkey |
 | Terminal | Full-file Ghostty-compatible configuration editor with Save and Import Ghostty |
 | Hosts | Configured `host-<name>` machines, live connection state, Remove, and an inline Add host form |
-| System | Daemon (`quit-daemon-on-exit`), Diagnostics (`show-fps`), Experimental pane gates |
+| System | Daemon (`quit-daemon-on-exit`), Experimental pane gates |
 | About | Version, build identity, and project links |
 
 A **Devices** pairing page sat in this list until 2026-08-01 and was deleted with QUIC pairing.
@@ -339,9 +339,8 @@ edges remain square at every layer.
 `menus.rs` declares one menu tree: zz, File, Edit, View, Window (macOS), and Help.
 macOS displays it through GPUI's native menu API; Linux and Windows retain it for a future menu bar.
 `menus::install` rebuilds on chrome-keymap replacement after config reload and on changes to the
-`BTreeSet<String>` of live session names. Other mux notifications leave the menu tree alone. The
-Show FPS checkmark follows the configuration, and GPUI uses the focused surface's action handlers
-to decide which commands are available.
+`BTreeSet<String>` of live session names. Other mux notifications leave the menu tree alone.
+GPUI uses the focused surface's action handlers to decide which commands are available.
 
 The macOS chrome defaults assign `Cmd+N` to New Session, `Cmd+Shift+N` to New Window, `Cmd+D` to
 Split Right, and `Cmd+Shift+D` to Split Down. `macos_app.rs` retains the application actions and
@@ -729,11 +728,10 @@ the OS profiler can. Captures land beside the ring logs as `zz.stall-<unix-secon
 newest 8 kept, one per 60 s cooldown; attachment works because the locally installed bundle is
 signed without hardened runtime.
 
-The default-off on-screen FPS diagnostics are separate from verbose logging. `diagnostics/fps.rs`'s
-`AppFpsMeter` samples GPUI `FrameTiming` records for the main window, while each `BrowserView` owns a
-`FrameRateSampler` counting fresh CEF OSR frames it consumes. One watched key, `show-fps`, enables
-both badges; they remain two independent pipelines measuring different things and can disagree
-without either being wrong, and neither replaces CEF's own frame-rate ceilings.
+zz builds GPUI without its `profiler` feature. That feature kept a 4 MiB foreground-task journal
+and per-window frame histograms in every build, and its only users were a `show-fps` overlay and a
+verbose-mode frame trace, both removed on 2026-09-22. For frame timing, use the Instruments recipes
+in [running zz](/playbooks/running-zz.md) or the `zz::diagnostics::terminal_render` trace target.
 
 # Helper binaries (`src/bin/`)
 
@@ -786,7 +784,6 @@ without either being wrong, and neither replaces CEF's own frame-rate ceilings.
 | `crates/zz/src/command/palette.rs` | `CommandPaletteView` . native prompt input, catalog/history completions, and submission |
 | `crates/zz/src/command/completion.rs` | Token-aware command, option, enum, history, and live-target completion ranking |
 | `crates/zz/src/diagnostics/mod.rs` | `--verbose` logging, panic hook, process/app-state samplers, process-role classification |
-| `crates/zz/src/diagnostics/fps.rs` | Live GPUI frame-timing sampler plus shared browser FPS sampling policy |
 | `crates/zz/src/file_picker.rs` | Feature-gated fuzzy path picker shared by Agent and Editor panes |
 | `crates/zz/src/user_data.rs` | Platform user-data location and user-only file/directory permission policy |
 | `crates/zz/src/bin/zz_helper.rs` | CEF subprocess entrypoint binary |

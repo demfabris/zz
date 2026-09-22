@@ -233,7 +233,7 @@ fn install_config(path: Option<&Path>, parsed: Option<io::Result<ParsedConfig>>,
 
     log::info!(
         target: "zz::config",
-        "application configuration path={} pane_gaps={} pane_inactive_opacity={} pane_corner_radius={} pane_margin={} pane_border_width={} widget_corner_radius={} chrome_contrast={} window_corner_radius={} editor_font_size={} editor_line_numbers={} editor_relative_line_numbers={} editor_soft_wrap={} editor_vim_mode={} browser_element_selector_hotkey={} browser_search_provider={} browser_egress={} use_system_titlebar={} window_background_blur={} animations={} tray={} show_fps={} quit_daemon_on_exit={} auto_restart_stale_daemon={} check_for_updates={} agent_working_directory={:?} daemon_override_entries={}",
+        "application configuration path={} pane_gaps={} pane_inactive_opacity={} pane_corner_radius={} pane_margin={} pane_border_width={} widget_corner_radius={} chrome_contrast={} window_corner_radius={} editor_font_size={} editor_line_numbers={} editor_relative_line_numbers={} editor_soft_wrap={} editor_vim_mode={} browser_element_selector_hotkey={} browser_search_provider={} browser_egress={} use_system_titlebar={} window_background_blur={} animations={} tray={} quit_daemon_on_exit={} auto_restart_stale_daemon={} check_for_updates={} agent_working_directory={:?} daemon_override_entries={}",
         path.display(),
         parsed.config.pane_gaps.value,
         parsed.config.pane_inactive_opacity.value,
@@ -255,7 +255,6 @@ fn install_config(path: Option<&Path>, parsed: Option<io::Result<ParsedConfig>>,
         parsed.config.window_background_blur.value,
         parsed.config.animations.value,
         parsed.config.tray.value,
-        parsed.config.show_fps.value,
         parsed.config.quit_daemon_on_exit.value,
         parsed.config.auto_restart_stale_daemon.value,
         parsed.config.check_for_updates.value,
@@ -1045,7 +1044,6 @@ mod tests {
              use-system-titlebar = true\n\
              window-background-blur = true\n\
              animations = false\n\
-             show-fps = true\n\
              quit-daemon-on-exit = true\n\
              auto-restart-stale-daemon = true\n\
              check-for-updates = false\n\
@@ -1129,11 +1127,6 @@ mod tests {
         assert!(!parsed.config.animations.value);
         assert_eq!(
             parsed.config.animations.provenance,
-            ConfigProvenance::Override
-        );
-        assert!(parsed.config.show_fps.value);
-        assert_eq!(
-            parsed.config.show_fps.provenance,
             ConfigProvenance::Override
         );
         assert!(parsed.config.quit_daemon_on_exit.value);
@@ -1296,6 +1289,7 @@ mod tests {
         let parsed = parse_config(
             "frame-content-corner-radius = 12.5\n\
              pane-content-corner-radius = 12.5\n\
+             show-fps = true\n\
              show-app-fps = true\n\
              show-browser-fps = true\n\
              corner-shape = round\n\
@@ -1313,7 +1307,7 @@ mod tests {
                 ..zz_config::AppConfig::default()
             }
         );
-        assert_eq!(parsed.diagnostics.len(), 6);
+        assert_eq!(parsed.diagnostics.len(), 7);
         assert!(
             parsed
                 .diagnostics
@@ -1509,14 +1503,14 @@ mod tests {
         let path = directory.path().join(CONFIG_FILE_NAME);
         fs::write(
             &path,
-            "# keep\nhost-desktop = ssh://old\nshow-fps = true\nhost-desktop=ssh://new:9922 # effective\nhost-server = ssh://server:9922\n",
+            "# keep\nhost-desktop = ssh://old\ntray = false\nhost-desktop=ssh://new:9922 # effective\nhost-server = ssh://server:9922\n",
         )
         .unwrap();
 
         assert!(remove_fleet_host_at(&path, "desktop").unwrap());
         assert_eq!(
             fs::read_to_string(&path).unwrap(),
-            "# keep\nshow-fps = true\nhost-server = ssh://server:9922\n"
+            "# keep\ntray = false\nhost-server = ssh://server:9922\n"
         );
         assert!(!remove_fleet_host_at(&path, "desktop").unwrap());
     }
@@ -1567,7 +1561,7 @@ mod tests {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         let source = "# keep this comment\r\n\
                       host-desktop  = ssh://old-desktop  # keep this too\r\n\
-                      show-fps = true\r\n";
+                      tray = false\r\n";
         fs::write(&path, source).unwrap();
 
         write_fleet_host_at(&path, "desktop", "ssh://desktop:9922").unwrap();
@@ -1575,7 +1569,7 @@ mod tests {
             fs::read_to_string(&path).unwrap(),
             "# keep this comment\r\n\
              host-desktop  = ssh://desktop:9922  # keep this too\r\n\
-             show-fps = true\r\n"
+             tray = false\r\n"
         );
 
         write_fleet_host_at(&path, "desktop", "ssh://desktop:7444").unwrap();
@@ -1589,13 +1583,13 @@ mod tests {
     fn an_added_ssh_host_round_trips_through_the_config_file() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join(CONFIG_FILE_NAME);
-        fs::write(&path, "show-fps = true\n").unwrap();
+        fs::write(&path, "tray = false\n").unwrap();
 
         write_fleet_host_at(&path, "arch-desktop", "ssh://fabrico@arch-desktop:2222").unwrap();
 
         assert_eq!(
             fs::read_to_string(&path).unwrap(),
-            "show-fps = true\nhost-arch-desktop = ssh://fabrico@arch-desktop:2222\n"
+            "tray = false\nhost-arch-desktop = ssh://fabrico@arch-desktop:2222\n"
         );
         let parsed = load_config(&path).unwrap();
         assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
@@ -2440,7 +2434,7 @@ mod tests {
         let source = " ".repeat(MAX_CONFIG_BYTES);
         fs::write(&path, &source).expect("write bounded configuration");
 
-        let error = write_config_edit_at(&path, ConfigKey::ShowFps.as_str(), Some("true"))
+        let error = write_config_edit_at(&path, ConfigKey::Tray.as_str(), Some("false"))
             .expect_err("appending past the read bound must fail");
 
         assert_eq!(error.kind(), ErrorKind::InvalidData);
@@ -3008,7 +3002,6 @@ mod tests {
             "window-background-blur",
             "animations",
             "tray",
-            "show-fps",
             "quit-daemon-on-exit",
             "auto-restart-stale-daemon",
             "check-for-updates",

@@ -4,7 +4,7 @@ title: GPUI revision pin
 description: Where the patched Zed revision zz builds against is defined, how to read it, and what the carried GPUI patches do. gpui-component is not a dependency.
 resource: Cargo.toml
 tags: [gpui, zed, pin, reference, git-dependency]
-timestamp: 2026-09-17T00:00:00Z
+timestamp: 2026-09-22T00:00:00Z
 ---
 
 # Overview
@@ -143,6 +143,21 @@ Each is upstream-able as a small Zed PR; if Zed merges an equivalent, drop it. I
     buffer-to-surface ratios, resubmits xdg geometry after zoom changes, and compensates for KWin's
     content-local effect coordinates. While ext blur is active, GPUI clips the incompatible outer
     shadow to the scene mask so raw rails and blurred corner tips cannot appear.
+31. Vulkan before OpenGL on Linux (`e166028f70`). The wgpu renderer first creates a Vulkan-only
+    instance and keeps it when the adapter is a discrete or integrated GPU; software, virtual, or
+    failed Vulkan falls back to the combined Vulkan+GL instance, as does a valid `ZED_DEVICE_ID`.
+    A hardware GPU therefore never loads the EGL/GL driver stack. Window-sized path intermediate
+    and MSAA textures are created by the first frame that rasterizes a path.
+32. Memoized font resolution (`c8081ba076`). `TextSystem::resolve_font` walks the fallback stack
+    once per requested font. Before, every text shape re-walked it, and each missing family
+    formatted a new error; on Linux `.SystemUIFont` maps to IBM Plex Sans, so every UI text run
+    paid several failed lookups when that font was not installed.
+33. Desktop interface font on Linux (`19aae7aa64`, `25655fcd99`). `gpui_linux` reads GNOME's
+    `org.gnome.desktop.interface` `font-name` or KDE's `org.kde.kdeglobals.General` `font` through
+    the settings portal and maps `.SystemUIFont` to the first installed family it names, following
+    later changes. The first read happens while the platform is built (capped at 200 ms) so no
+    frame is shaped in the fallback family first. `PlatformTextSystem::font_generation` tells
+    `TextSystem` to drop resolved ids, and open windows force a redraw.
 
 WGPU window-frame antialiasing (`c8135f5b6b`) applies outer coverage once when a quad and the
 window mask have identical bounds, radii, and corner smoothing. Other intersections retain their

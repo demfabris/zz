@@ -4,7 +4,7 @@ title: Off-screen rendering & the frame mailbox
 description: How CEF frames cross the one-slot mailbox through the universal readback tier, Linux wgpu tier, macOS Metal-IOSurface tier, or Windows D3D11 tier, and how zz paces visible sessions.
 resource: crates/zz-browser/src/frame.rs
 tags: [browser, osr, frame, gpu, iosurface, hidpi, wayland, pacing]
-timestamp: 2026-07-27T00:00:00Z
+timestamp: 2026-09-22T00:00:00Z
 ---
 
 # Overview
@@ -222,10 +222,6 @@ ratchet to the 30 FPS floor when adaptation defaulted on.
 Why a stable divisor beats a larger instantaneous frame count on a fixed refresh
 grid is argued in [the CEF runtime's external BeginFrame
 section](/browser/cef-runtime.md).
-
-The optional `show-fps` badge counts fresh frames consumed by a
-`BrowserView`; it does not report the configured ceiling. Static pages can
-therefore read zero, and coalesced frames are not counted as displayed.
 
 # Device scale factor / DPI handling
 

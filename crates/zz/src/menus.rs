@@ -1,5 +1,5 @@
 #[cfg(not(target_os = "ios"))]
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 #[cfg(target_os = "macos")]
 use gpui::SystemMenuType;
@@ -11,7 +11,7 @@ use crate::macos_app::{Hide, HideOthers, Minimize, Quit, ShowAll, Zoom};
 #[cfg(not(target_os = "ios"))]
 use crate::{
     browser::view::{GoBack, GoForward, Reload, ToggleDevTools},
-    config::{resolved_config, settings::OpenSettings},
+    config::settings::OpenSettings,
     keymap::ChromeState,
     mux::client::MuxClient,
     ui_scale::{DecreaseUiZoom, IncreaseUiZoom, ResetUiZoom},
@@ -39,7 +39,6 @@ gpui::actions!(
         ClearScrollback,
         Find,
         ToggleSidebar,
-        ShowFps,
         CheckForUpdates,
         OpenLogs,
         ImportTmuxConfig,
@@ -100,16 +99,21 @@ pub(crate) fn install(cx: &mut App) {
 
 #[cfg(not(target_os = "ios"))]
 pub(crate) fn observe_mux(mux: &Entity<MuxClient>, cx: &mut App) {
-    update_sessions(mux, cx);
-    cx.observe(mux, |mux, cx| update_sessions(&mux, cx))
-        .detach();
+    let mut snapshot = mux.read(cx).snapshot();
+    update_sessions(&snapshot, cx);
+    cx.observe(mux, move |mux, cx| {
+        let next = mux.read(cx).snapshot();
+        if !Arc::ptr_eq(&snapshot, &next) {
+            snapshot = next;
+            update_sessions(&snapshot, cx);
+        }
+    })
+    .detach();
 }
 
 #[cfg(not(target_os = "ios"))]
-fn update_sessions(mux: &Entity<MuxClient>, cx: &mut App) {
-    let names = mux
-        .read(cx)
-        .snapshot()
+fn update_sessions(snapshot: &zz_protocol::MuxSnapshot, cx: &mut App) {
+    let names = snapshot
         .sessions
         .iter()
         .map(|session| session.name.clone())
@@ -133,11 +137,11 @@ pub(crate) fn app_menus(cx: &App) -> Vec<Menu> {
         .try_global::<MenuSessions>()
         .map(|sessions| sessions.0.clone())
         .unwrap_or_default();
-    menu_tree(&sessions, resolved_config(cx).show_fps.value)
+    menu_tree(&sessions)
 }
 
 #[cfg(not(target_os = "ios"))]
-fn menu_tree(sessions: &BTreeSet<String>, show_fps: bool) -> Vec<Menu> {
+fn menu_tree(sessions: &BTreeSet<String>) -> Vec<Menu> {
     vec![
         Menu::new("zz").items([
             MenuItem::action("About zz", About),
@@ -224,8 +228,6 @@ fn menu_tree(sessions: &BTreeSet<String>, show_fps: bool) -> Vec<Menu> {
             MenuItem::action("Forward", GoForward),
             MenuItem::action("Reload", Reload),
             MenuItem::action("Developer Tools", ToggleDevTools),
-            MenuItem::separator(),
-            MenuItem::action("Show FPS", ShowFps).checked(show_fps),
         ]),
         #[cfg(target_os = "macos")]
         Menu::new("Window").items([
@@ -259,11 +261,78 @@ fn open_url(label: &str, url: &str) -> MenuItem {
 
 #[cfg(all(test, not(target_os = "ios")))]
 mod tests {
+    use gpui::AppContext as _;
+
     use super::*;
+
+    #[gpui::test]
+    fn session_menu_follows_replaced_snapshots_and_empty_workspaces(cx: &mut gpui::TestAppContext) {
+        let mux = cx.new(|cx| {
+            MuxClient::new(
+                Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
+                zz_daemon::default_socket_path(),
+                cx,
+            )
+        });
+        cx.update(|cx| observe_mux(&mux, cx));
+        assert!(cx.read(|cx| cx.global::<MenuSessions>().0.is_empty()));
+
+        let snapshot = zz_protocol::MuxSnapshot {
+            generation: 1,
+            focused_window: None,
+            sessions: vec![zz_protocol::SessionSnapshot {
+                id: zz_protocol::SessionId(1),
+                name: "work".to_owned(),
+                active_window: zz_protocol::WindowId(1),
+                windows: Vec::new(),
+                viewers: Vec::new(),
+            }],
+        };
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(zz_protocol::SessionId(1), snapshot.clone(), cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            cx.read(|cx| cx.global::<MenuSessions>().0.clone()),
+            BTreeSet::from(["work".to_owned()])
+        );
+
+        mux.update(cx, |_, cx| cx.notify());
+        cx.run_until_parked();
+        assert_eq!(
+            cx.read(|cx| cx.global::<MenuSessions>().0.clone()),
+            BTreeSet::from(["work".to_owned()])
+        );
+
+        let mut renamed = snapshot;
+        renamed.sessions[0].name = "renamed".to_owned();
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(zz_protocol::SessionId(1), renamed, cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            cx.read(|cx| cx.global::<MenuSessions>().0.clone()),
+            BTreeSet::from(["renamed".to_owned()])
+        );
+
+        mux.update(cx, |mux, cx| {
+            mux.handle_message_for_test(
+                zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 0,
+                    payload: zz_protocol::EventPayload::Snapshot(
+                        zz_protocol::MuxSnapshot::default(),
+                    ),
+                }),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        assert!(cx.read(|cx| cx.global::<MenuSessions>().0.is_empty()));
+    }
 
     #[test]
     fn top_level_order_and_native_window_menu() {
-        let menus = menu_tree(&BTreeSet::new(), false);
+        let menus = menu_tree(&BTreeSet::new());
         let names = menus
             .iter()
             .map(|menu| menu.name.as_ref())

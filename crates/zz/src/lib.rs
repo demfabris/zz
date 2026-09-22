@@ -216,6 +216,24 @@ fn finish_bootstrap(
     0
 }
 
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+const HEAP_TRIM_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[allow(
+    unsafe_code,
+    reason = "glibc keeps pages freed by Mesa and other C libraries inside its heap until malloc_trim returns them"
+)]
+fn start_heap_trim(cx: &mut App) {
+    cx.spawn(async move |cx| {
+        loop {
+            cx.background_executor().timer(HEAP_TRIM_INTERVAL).await;
+            unsafe { libc::malloc_trim(0) };
+        }
+    })
+    .detach();
+}
+
 #[cfg(not(target_os = "ios"))]
 fn run_app(
     runtime: Result<BrowserRuntime, BrowserError>,
@@ -244,6 +262,8 @@ fn run_app(
             cx.set_global(fonts);
             cx.set_global(profile);
             diagnostics::start_main_thread_watchdog(cx);
+            #[cfg(all(target_os = "linux", target_env = "gnu"))]
+            start_heap_trim(cx);
             #[cfg(target_os = "macos")]
             cx.activate(true);
             config::init(cx);
@@ -296,7 +316,7 @@ fn run_app(
                     window_decorations: Some(window_decorations),
                     app_id: Some(zz_protocol::app_identity::DIRECTORY.into()),
                     #[cfg(target_os = "linux")]
-                    icon: Some(app_icon::x11_window_icon()),
+                    icon: (cx.compositor_name() == "X11").then(app_icon::x11_window_icon),
                     ..Default::default()
                 },
                 move |window, cx| {
@@ -404,7 +424,7 @@ fn run_app(
                         )
                     });
                     let shell = cx
-                        .new(|cx| AppShell::new(view, controller, agent_controller, window, cx));
+                        .new(|cx| AppShell::new(view, controller, agent_controller, cx));
                     let observed_window_state = window_state.clone();
                     window
                         .subscribe(

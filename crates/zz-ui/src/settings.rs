@@ -101,9 +101,7 @@ impl SettingsSection {
                 "zz loads only zz/mux.conf. Import a tmux file here, or edit the options and bindings below."
             }
             Self::Hosts => "Manage the ssh machines in the fleet.",
-            Self::Advanced => {
-                "Control daemon lifecycle, diagnostics, and experimental pane features."
-            }
+            Self::Advanced => "Control daemon lifecycle and experimental pane features.",
             Self::About => "tmux, ghostty and gpui walked into a mux.",
         }
     }

@@ -622,7 +622,7 @@ mod tests {
         let path = directory.path().join(CONFIG_FILE_NAME);
         let source = "# keep this comment\r\n\
                       host-box = ssh://first\r\n\
-                      show-fps = true\r\n\
+                      tray = false\r\n\
                       host-box  = ssh://old  # keep this too\r\n";
         fs::write(&path, source).unwrap();
 
@@ -632,7 +632,7 @@ mod tests {
             fs::read_to_string(path).unwrap(),
             "# keep this comment\r\n\
              host-box = ssh://first\r\n\
-             show-fps = true\r\n\
+             tray = false\r\n\
              host-box  = ssh://new:9922  # keep this too\r\n"
         );
     }

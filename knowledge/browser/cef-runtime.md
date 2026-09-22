@@ -4,7 +4,7 @@ title: CEF runtime & subprocess dispatch
 description: CEF Alloy OSR bootstrap with deferred initialization, single-binary subprocess dispatch, frame-rate policy, external BeginFrames, message pumping, and safe foreground command dispatch.
 resource: crates/zz-browser/src/cef_runtime.rs
 tags: [browser, cef, runtime, subprocess, begin-frame, frame-pacing]
-timestamp: 2026-09-07T00:00:00Z
+timestamp: 2026-09-22T00:00:00Z
 ---
 
 # Overview
@@ -25,8 +25,8 @@ publishes owned frames into a [mailbox](/browser/osr-rendering.md).
 # Single-binary multi-process model
 
 zz ships one executable that Chromium re-executes for its zygote, GPU, renderer,
-and utility subprocesses. `bootstrap()` decides which role the current process
-plays by calling CEF `execute_process` early:
+and utility subprocesses. For Chromium subprocesses, `bootstrap()` calls CEF
+`execute_process` before GPUI starts:
 
 - `execute_process` returns `>= 0` → this is a **subprocess**; return
   `BrowserBootstrap::SubprocessExit(code)` and never start GPUI.
@@ -42,25 +42,36 @@ through CEF's sandbox bootstrap executable and the exported `RunWinMain` entry.
 
 # Deferred initialization
 
+On Linux x86_64, the desktop executable has no direct `libcef.so` dependency.
+The local `cef-dll-sys` adapter re-exports the pinned upstream types and resolves
+its C functions on demand. A main-process `bootstrap_args_with_paths` prepares
+the runtime without loading Chromium. A `--type` subprocess loads it before
+calling `execute_process`. The adapter checks its complete symbol table and
+keeps the library handle for the process lifetime.
+
 On macOS, `bootstrap_args_with_paths` loads the CEF framework before starting
-GPUI. It prepares the runtime and subprocess dispatch without calling
-`cef::initialize`. `BrowserController::new` leaves its message pump stopped
-while the runtime is `Uninitialized`.
+GPUI. Linux ARM64 and Windows retain upstream loading behavior. These paths
+prepare the runtime and subprocess dispatch without calling `cef::initialize`.
+`BrowserController::new` leaves its message pump stopped while the runtime is
+`Uninitialized`.
 
 When a browser or browser-data operation calls
 `BrowserController::ensure_runtime_started`, the controller schedules
 `start_runtime` on the foreground executor. That task takes the runtime out of
 the controller, calls `BrowserRuntime::start` outside GPUI app borrows, then
-returns it to the controller. `start` calls `cef::initialize` on the main
-thread. The controller then replays deferred callbacks and starts pumping.
-Terminal-only startup therefore still loads the framework, while Chromium
-initialization waits for a browser operation.
+returns it to the controller. On Linux x86_64, `start` first loads the browser
+library and reports any failure through `BrowserError`. It then calls
+`cef::initialize` on the main thread. The controller replays deferred callbacks
+and starts pumping. Terminal-only startup on Linux x86_64 does not map Chromium;
+the other targets still load its library before the first browser operation.
 
 The lifecycle log target `zz_browser::diagnostics::lifecycle` records separate
 `cold runtime prepared` and `runtime initialized` durations in microseconds.
 See `crates/zz-browser/src/cef_runtime.rs` `bootstrap_args_with_paths` and
 `BrowserRuntime::start`, and `crates/zz/src/browser/controller.rs`
 `BrowserController::new`, `ensure_runtime_started`, and `start_runtime`.
+The adapter's pin, generator, native probe, and ARM64 qualification gap are
+documented in `third_party/rust/cef-dll-sys/UPSTREAM.md`.
 
 # Initialization settings
 
@@ -105,16 +116,22 @@ zz's Wayland-hosted fixture, so the application keeps Ozone selection automatic.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `ZZ_BROWSER_FPS=1..240` | Unset | Explicit per-session OSR ceiling. On macOS, an unset value derives the ceiling from the fastest attached `NSScreen`; other platforms retain 60 FPS. Invalid explicit values fall back to 60. |
+| `ZZ_BROWSER_FPS=1..240` | Unset | Explicit per-session OSR ceiling. An unset value uses the fastest attached display: `NSScreen` on macOS, GPUI display refresh rates elsewhere. Missing display rates and invalid explicit values fall back to 60. |
 | `ZZ_BROWSER_GPU=0` | GPU enabled | Disables Chromium GPU rendering/compositing and therefore shared-texture OSR. |
 | `ZZ_BROWSER_SHARED_TEXTURE=0` | Shared textures enabled | Keeps Chromium GPU content acceleration but selects the universal `on_paint` readback tier. On Linux, each visible shared-texture session gets a two-second first-frame guard. Any delivered frame cancels the guard, and hiding the pane pauses it. If the guard expires, zz recreates only that session in readback mode while keeping the GPU process enabled. This covers failures before CEF emits either paint callback. On the tested NVIDIA host, CEF 151's default GL path hit that failure; native Vulkan produced frames but failed resize stress under Chromium's unsupported Ozone/Wayland combination. See the [NVIDIA accelerated OSR investigation](/research/2026-08-07-nvidia-cef-accelerated-osr.md). |
 | `ZZ_BROWSER_EXTERNAL_BEGIN_FRAME` | macOS on; Linux/FreeBSD off | On macOS, exact `0` restores CEF's internal BeginFrame timer. On Linux/FreeBSD, exact `1` opts into zz-driven BeginFrames; all other values leave them off. |
 | `ZZ_BROWSER_BF_ADAPTIVE=1` | Adaptive throttle disabled | Opts into delivery-based BeginFrame divisor tiers on the anchored clock; all other values leave adaptation off. |
 
-The effective ceiling is computed once at controller initialization. Focused
-sessions use it. Visible unfocused sessions use at most 30 FPS, except that wheel
+The controller resolves the ceiling before creating a session and caches the
+first available display rate. An unavailable display probe uses 60 FPS and
+retries on the next session creation. Focused sessions use the ceiling.
+Visible unfocused sessions use at most 30 FPS, except that wheel
 input temporarily restores the ceiling and re-arms a one-second decay. Hidden
 sessions remain stopped through `was_hidden`.
+
+The controller retains one decay task per unfocused scrolling tab and cancels
+the previous task on another wheel event. Focus, tab closure, and shutdown
+cancel outstanding decay tasks.
 
 # External message pump
 
@@ -122,8 +139,8 @@ CEF never runs its own loop here. Instead:
 
 1. `RuntimeBrowserProcessHandler::on_schedule_message_pump_work(delay_ms)` fires a
    `RuntimeSignal::ScheduleMessagePump(delay_ms)` over an `async-channel`.
-2. The app arms a reschedulable GPUI timer and clones the runtime's
-   `BrowserMessagePump` handle at the deadline.
+2. The app replaces its retained GPUI timer task, cancelling the superseded
+   timer, and clones the runtime's `BrowserMessagePump` handle at the deadline.
 3. The GPUI entity update returns, releasing the app's `RefCell` borrow, before
    `BrowserMessagePump::do_message_loop_work()` enters CEF on the main thread.
 4. The handle calls `cef::do_message_loop_work()` only while initialized and not
@@ -211,9 +228,9 @@ turns:
 6. hidden panes send no BeginFrames.
 
 The creation/visibility activity window keeps BeginFrames flowing until the
-first OSR paint. Linux/FreeBSD retain a 60 FPS display ceiling unless
-`ZZ_BROWSER_FPS` is set; querying their actual display refresh rate remains
-future work. Their opt-in default is deliberate because an invalid external
+first OSR paint. Linux/FreeBSD derive the display ceiling from GPUI's reported
+refresh rates, with a 60 FPS fallback when none are available; `ZZ_BROWSER_FPS`
+overrides that ceiling. Their opt-in default is deliberate because an invalid external
 clock can leave a pane blank on an unvalidated display backend.
 
 Hot panes can additionally use a per-pane adaptive divisor behind the exact

@@ -291,7 +291,7 @@ mod tests {
         fs::create_dir_all(config_path.parent().unwrap()).unwrap();
         fs::write(
             &config_path,
-            "# keep\nhost-desktop = ssh://old-desktop # keep too\nshow-fps = true\n",
+            "# keep\nhost-desktop = ssh://old-desktop # keep too\ntray = false\n",
         )
         .unwrap();
 
@@ -306,7 +306,7 @@ mod tests {
         }
         assert_eq!(
             fs::read_to_string(&config_path).unwrap(),
-            "# keep\nhost-desktop = ssh://fabrico@arch-desktop # keep too\nshow-fps = true\n"
+            "# keep\nhost-desktop = ssh://fabrico@arch-desktop # keep too\ntray = false\n"
         );
 
         assert_eq!(
@@ -322,7 +322,7 @@ mod tests {
         assert!(removed.contains("config line removed: yes"));
         assert_eq!(
             fs::read_to_string(&config_path).unwrap(),
-            "# keep\nshow-fps = true\n"
+            "# keep\ntray = false\n"
         );
         assert_eq!(run(["list".to_owned()]).unwrap(), "");
 
@@ -333,7 +333,7 @@ mod tests {
 
         fs::write(
             &config_path,
-            "# keep\nhost-gpu = quic://gpu:9922\nshow-fps = true\n",
+            "# keep\nhost-gpu = quic://gpu:9922\ntray = false\n",
         )
         .unwrap();
         assert_eq!(
@@ -351,7 +351,7 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(&config_path).unwrap(),
-            "# keep\nshow-fps = true\n"
+            "# keep\ntray = false\n"
         );
     }
 }

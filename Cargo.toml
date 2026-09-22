@@ -53,7 +53,7 @@ futures-lite = "2.6.1"
 gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", default-features = false, features = ["font-kit", "wayland", "x11"] }
 getrandom = "0.4.3"
-image = "=0.25.10"
+image = { version = "=0.25.10", default-features = false }
 libc = "0.2.189"
 interprocess = "2.4.4"
 libghostty-vt = { version = "=0.2.1", git = "https://github.com/uzaaft/libghostty-rs", rev = "46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0", default-features = false }
@@ -94,12 +94,15 @@ windows = "=0.62.2"
 x11rb = "0.13.2"
 zeroize = "=1.9.0"
 
+[patch.crates-io]
+cef-dll-sys = { path = "third_party/rust/cef-dll-sys" }
+
 [patch."https://github.com/uzaaft/libghostty-rs"]
 libghostty-vt-sys = { path = "third_party/rust/libghostty-vt-sys" }
 
 [patch."https://github.com/zed-industries/zed"]
-gpui = { git = "https://github.com/demfabris/zed", rev = "7bdd43258b8389d8d609ae7d4f92707d192cbeaa", version = "=0.2.2" }
-gpui_platform = { git = "https://github.com/demfabris/zed", rev = "7bdd43258b8389d8d609ae7d4f92707d192cbeaa" }
+gpui = { git = "https://github.com/demfabris/zed", rev = "25655fcd99ebbdb4c8287ff01d540044d12fa10f", version = "=0.2.2" }
+gpui_platform = { git = "https://github.com/demfabris/zed", rev = "25655fcd99ebbdb4c8287ff01d540044d12fa10f" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

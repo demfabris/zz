@@ -1,4 +1,7 @@
-use std::sync::{Arc, LazyLock};
+use std::{
+    borrow::Cow,
+    sync::{Arc, LazyLock},
+};
 
 use gpui::{App, RenderImage, WindowAppearance};
 use image::{Frame, RgbaImage, imageops::FilterType};
@@ -61,15 +64,27 @@ fn decode_png(png: &[u8]) -> RgbaImage {
         .into_rgba8()
 }
 
-fn icon_pixels(variant: ThemeMode) -> &'static RgbaImage {
-    static PIXELS: LazyLock<[RgbaImage; 2]> = LazyLock::new(|| {
-        [
-            decode_png(APP_ICON_LIGHT_PNG),
-            decode_png(APP_ICON_DARK_PNG),
-        ]
-    });
+fn icon_pixels(variant: ThemeMode) -> Cow<'static, RgbaImage> {
+    #[cfg(target_os = "linux")]
+    {
+        Cow::Owned(decode_png(if variant.is_dark() {
+            APP_ICON_DARK_PNG
+        } else {
+            APP_ICON_LIGHT_PNG
+        }))
+    }
 
-    &PIXELS[usize::from(variant.is_dark())]
+    #[cfg(not(target_os = "linux"))]
+    {
+        static PIXELS: LazyLock<[RgbaImage; 2]> = LazyLock::new(|| {
+            [
+                decode_png(APP_ICON_LIGHT_PNG),
+                decode_png(APP_ICON_DARK_PNG),
+            ]
+        });
+
+        Cow::Borrowed(&PIXELS[usize::from(variant.is_dark())])
+    }
 }
 
 fn render_image(pixels: RgbaImage) -> Arc<RenderImage> {
@@ -107,7 +122,7 @@ pub(crate) fn icon_preview(variant: ThemeMode) -> Arc<RenderImage> {
     static PREVIEWS: LazyLock<[Arc<RenderImage>; 2]> = LazyLock::new(|| {
         [ThemeMode::Light, ThemeMode::Dark].map(|variant| {
             render_image(resize_preview(
-                icon_pixels(variant),
+                &icon_pixels(variant),
                 SETTINGS_PREVIEW_RASTER_SIZE,
             ))
         })
@@ -119,7 +134,10 @@ pub(crate) fn icon_preview(variant: ThemeMode) -> Arc<RenderImage> {
 pub(crate) fn about_logo(variant: ThemeMode) -> Arc<RenderImage> {
     static LOGOS: LazyLock<[Arc<RenderImage>; 2]> = LazyLock::new(|| {
         [ThemeMode::Light, ThemeMode::Dark].map(|variant| {
-            render_image(resize_preview(icon_pixels(variant), ABOUT_LOGO_RASTER_SIZE))
+            render_image(resize_preview(
+                &icon_pixels(variant),
+                ABOUT_LOGO_RASTER_SIZE,
+            ))
         })
     });
 
@@ -128,9 +146,7 @@ pub(crate) fn about_logo(variant: ThemeMode) -> Arc<RenderImage> {
 
 #[cfg(any(target_os = "linux", test))]
 pub(crate) fn x11_window_icon() -> Arc<RgbaImage> {
-    static APP_ICON: LazyLock<Arc<RgbaImage>> =
-        LazyLock::new(|| Arc::new(decode_png(APP_ICON_PNG)));
-    Arc::clone(&APP_ICON)
+    Arc::new(decode_png(APP_ICON_PNG))
 }
 
 pub(crate) fn apply(cx: &App) {
@@ -140,7 +156,7 @@ pub(crate) fn apply(cx: &App) {
         if setting == AppIconSetting::Automatic && macos::bundle_declares_icon() {
             macos::reset_dock_icon();
         } else {
-            macos::set_dock_icon(icon_pixels(variant(setting, cx.window_appearance())));
+            macos::set_dock_icon(&icon_pixels(variant(setting, cx.window_appearance())));
         }
     }
 

@@ -702,26 +702,6 @@ pub fn pane_status_badge(icon: IconName, label: impl IntoElement, cx: &App) -> g
         .child(label)
 }
 
-#[must_use]
-pub fn frame_rate_badge(label: &'static str, fps: Option<f64>, cx: &App) -> gpui::Div {
-    let rate = fps
-        .filter(|fps| fps.is_finite())
-        .map_or_else(|| "--.-".to_owned(), |fps| format!("{fps:>5.1}"));
-    div()
-        .h(px(22.0))
-        .px(px(7.0))
-        .flex()
-        .items_center()
-        .rounded(cx.theme().radius)
-        .border_1()
-        .border_color(cx.theme().border().subtle())
-        .bg(cx.theme().background.floating())
-        .font_family(cx.theme().mono_font_family.clone())
-        .text_size(crate::rems_from_px(10.0))
-        .text_color(cx.theme().foreground)
-        .child(format!("{label} {rate} FPS"))
-}
-
 pub fn pane_indicator_overlay(indicator: impl IntoElement) -> gpui::Div {
     div()
         .absolute()

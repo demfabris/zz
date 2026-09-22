@@ -18,7 +18,7 @@ async-task = "4.7"
 dispatch2 = "0.3.1"
 futures = "0.3"
 gpui.workspace = true
-gpui_wgpu = { git = "https://github.com/demfabris/zed", rev = "7bdd43258b8389d8d609ae7d4f92707d192cbeaa" }
+gpui_wgpu = { git = "https://github.com/demfabris/zed", rev = "25655fcd99ebbdb4c8287ff01d540044d12fa10f" }
 log.workspace = true
 objc = "0.2"
 parking_lot.workspace = true

@@ -370,7 +370,6 @@ mkdir -p ~/.config/zz && cp examples/config ~/.config/zz/config
 | `quit-daemon-on-exit` | `false` | Kill sessions when the app quits |
 | `browser-search-provider` | `google` | `google`, `duckduckgo`, or `brave` |
 | `browser-egress` | `true` | Route a remote pane's traffic through its host |
-| `show-fps` | `false` | Frame-rate readouts |
 
 Terminal appearance uses Ghostty's spellings, so `theme`, `font-family`,
 `font-feature`, `palette`, `cursor-style`, `minimum-contrast`, and per-edge

@@ -66,10 +66,6 @@ fn value(parsed: &ParsedConfig, key: ConfigKey) -> (Value, ConfigProvenance) {
             let setting = &parsed.config.tray;
             (json!(setting.value), setting.provenance)
         }
-        ConfigKey::ShowFps => {
-            let setting = &parsed.config.show_fps;
-            (json!(setting.value), setting.provenance)
-        }
         ConfigKey::QuitDaemonOnExit => {
             let setting = &parsed.config.quit_daemon_on_exit;
             (json!(setting.value), setting.provenance)
@@ -279,7 +275,6 @@ fn section(key: ConfigKey) -> &'static str {
         | ConfigKey::PaletteWindowLayout
         | ConfigKey::PaletteHostPrefix
         | ConfigKey::PaletteShowKeys
-        | ConfigKey::ShowFps
         | ConfigKey::QuitDaemonOnExit
         | ConfigKey::AutoRestartStaleDaemon
         | ConfigKey::ExperimentalAgentPane
@@ -296,7 +291,6 @@ fn title(key: ConfigKey) -> String {
         ConfigKey::PaneGlowStrength => "Selected pane glow".to_owned(),
         ConfigKey::BrowserElementSelectorHotkey => "Element selector shortcut".to_owned(),
         ConfigKey::BrowserEgress => "Route remote browsing through SSH".to_owned(),
-        ConfigKey::ShowFps => "Show frame rate".to_owned(),
         ConfigKey::StatusShowSession => "Show session".to_owned(),
         ConfigKey::StatusAgents => "Agent activity".to_owned(),
         ConfigKey::StatusHost => "Host name".to_owned(),
@@ -324,7 +318,6 @@ pub fn settings(parsed: &ParsedConfig) -> Vec<Setting> {
         ConfigKey::WindowBackgroundBlur,
         ConfigKey::Animations,
         ConfigKey::Tray,
-        ConfigKey::ShowFps,
         ConfigKey::QuitDaemonOnExit,
         ConfigKey::AutoRestartStaleDaemon,
         ConfigKey::CheckForUpdates,

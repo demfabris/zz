@@ -94,6 +94,7 @@ impl AgentEvents {
 
 const MAX_PENDING_DECODED_MESSAGES: usize = 1;
 const MAX_HISTORY_ROWS: usize = 10_000;
+const MIN_HISTORY_DICTIONARY_COMPACTION_BYTES: usize = 1024;
 const MAX_HISTORY_CHUNK_ROWS: u32 = 512;
 const HISTORY_BACKFILL_QUIET: Duration = Duration::from_millis(100);
 const MAX_PANE_IMAGE_SNAPSHOTS: usize = 8;
@@ -544,6 +545,152 @@ impl HistoryRing {
     fn len(&self) -> usize {
         self.rows.len()
     }
+}
+
+fn compact_history_dictionary(
+    rows: &mut VecDeque<HistoryRow>,
+    source: &Arc<TerminalDictionary>,
+    current: &TerminalDictionary,
+) {
+    let style_bytes = if Arc::ptr_eq(&source.styles, &current.styles) {
+        0
+    } else {
+        std::mem::size_of_val(source.styles.as_ref())
+    };
+    let grapheme_bytes = if !Arc::ptr_eq(&source.grapheme_offsets, &current.grapheme_offsets)
+        || !Arc::ptr_eq(&source.grapheme_bytes, &current.grapheme_bytes)
+    {
+        std::mem::size_of_val(source.grapheme_offsets.as_ref()) + source.grapheme_bytes.len()
+    } else {
+        0
+    };
+    let styles_start = compact_history_plane_start(rows, style_bytes, |dictionary| {
+        Arc::ptr_eq(&dictionary.styles, &source.styles)
+    });
+    let graphemes_start = compact_history_plane_start(rows, grapheme_bytes, |dictionary| {
+        Arc::ptr_eq(&dictionary.grapheme_offsets, &source.grapheme_offsets)
+            && Arc::ptr_eq(&dictionary.grapheme_bytes, &source.grapheme_bytes)
+    });
+    let start = styles_start.min(graphemes_start);
+    if start == rows.len() {
+        return;
+    }
+
+    let mut style_ids = HashMap::new();
+    let mut styles = Vec::new();
+    let mut grapheme_ids = HashMap::new();
+    let mut grapheme_offsets = vec![0];
+    let mut grapheme_bytes = Vec::new();
+    for (offset, row) in rows.range(start..).enumerate() {
+        let index = start + offset;
+        for cell in &row.cells {
+            if index >= styles_start
+                && let std::collections::hash_map::Entry::Vacant(entry) =
+                    style_ids.entry(cell.style_id())
+            {
+                let Some(style) = source.styles.get(usize::from(cell.style_id())) else {
+                    return;
+                };
+                entry.insert(u16::try_from(styles.len()).expect("source styles fit in u16"));
+                styles.push(*style);
+            }
+            let glyph = cell.glyph();
+            if index >= graphemes_start
+                && glyph & GRAPHEME_TABLE_BIT != 0
+                && let std::collections::hash_map::Entry::Vacant(entry) = grapheme_ids.entry(glyph)
+            {
+                let index = (glyph & !GRAPHEME_TABLE_BIT) as usize;
+                let Some((&start, &end)) = source
+                    .grapheme_offsets
+                    .get(index)
+                    .zip(source.grapheme_offsets.get(index + 1))
+                else {
+                    return;
+                };
+                let Some(bytes) = source.grapheme_bytes.get(start as usize..end as usize) else {
+                    return;
+                };
+                let index = u32::try_from(grapheme_offsets.len() - 1)
+                    .expect("source grapheme indices fit in u32");
+                entry.insert(GRAPHEME_TABLE_BIT | index);
+                grapheme_bytes.extend_from_slice(bytes);
+                grapheme_offsets.push(
+                    u32::try_from(grapheme_bytes.len()).expect("source grapheme bytes fit in u32"),
+                );
+            }
+        }
+    }
+    let styles: Arc<[_]> = styles.into();
+    let grapheme_offsets: Arc<[_]> = grapheme_offsets.into();
+    let grapheme_bytes: Arc<[_]> = grapheme_bytes.into();
+    let mut previous = None;
+    let mut replacement = None;
+    for (offset, row) in rows.range_mut(start..).enumerate() {
+        let index = start + offset;
+        if previous
+            .as_ref()
+            .is_none_or(|dictionary| !Arc::ptr_eq(dictionary, &row.dictionary))
+        {
+            previous = Some(Arc::clone(&row.dictionary));
+            replacement = Some(Arc::new(TerminalDictionary::from_shared(
+                if index >= styles_start {
+                    Arc::clone(&styles)
+                } else {
+                    Arc::clone(&row.dictionary.styles)
+                },
+                if index >= graphemes_start {
+                    Arc::clone(&grapheme_offsets)
+                } else {
+                    Arc::clone(&row.dictionary.grapheme_offsets)
+                },
+                if index >= graphemes_start {
+                    Arc::clone(&grapheme_bytes)
+                } else {
+                    Arc::clone(&row.dictionary.grapheme_bytes)
+                },
+            )));
+        }
+        for cell in &mut row.cells {
+            let glyph = if index >= graphemes_start {
+                grapheme_ids
+                    .get(&cell.glyph())
+                    .copied()
+                    .unwrap_or(cell.glyph())
+            } else {
+                cell.glyph()
+            };
+            let style = if index >= styles_start {
+                style_ids[&cell.style_id()]
+            } else {
+                cell.style_id()
+            };
+            *cell = PackedCell::from_raw(glyph, style, cell.flags());
+        }
+        row.dictionary = Arc::clone(replacement.as_ref().expect("replacement dictionary"));
+    }
+}
+
+fn compact_history_plane_start(
+    rows: &VecDeque<HistoryRow>,
+    dictionary_bytes: usize,
+    shares_plane: impl Fn(&TerminalDictionary) -> bool,
+) -> usize {
+    if dictionary_bytes <= MIN_HISTORY_DICTIONARY_COMPACTION_BYTES {
+        return rows.len();
+    }
+    let mut start = rows.len();
+    let mut cell_bytes = 0;
+    for row in rows.iter().rev() {
+        if !shares_plane(&row.dictionary) {
+            break;
+        }
+        cell_bytes += std::mem::size_of_val(row.cells.as_ref());
+        if cell_bytes >= dictionary_bytes {
+            return rows.len();
+        }
+        start -= 1;
+    }
+    start
 }
 
 pub(crate) struct RetainedTerminalViewport {
@@ -1596,24 +1743,28 @@ impl MuxClient {
     pub fn fleet_hosts(
         &self,
     ) -> impl Iterator<Item = (HostId, &str, &HostState, Option<&MuxSnapshot>)> {
-        let connections = &self.connections;
-        let attached_host = self.attached_host;
-        let attached_snapshot =
-            (!self.attached_snapshot_pending).then(|| self.core.snapshot().as_ref());
         self.registry.iter().map(move |(host, entry)| {
-            let connection = connections
+            let connection = self
+                .connections
                 .get(&host)
                 .expect("every registered host has a connection slot");
             (
                 host,
                 entry.name.as_str(),
                 &connection.state,
-                match attached_snapshot {
-                    Some(snapshot) if host == attached_host => Some(snapshot),
-                    _ => connection.snapshot.as_deref(),
-                },
+                self.host_snapshot(host).map(Arc::as_ref),
             )
         })
+    }
+
+    pub(crate) fn host_snapshot(&self, host: HostId) -> Option<&Arc<MuxSnapshot>> {
+        if host == self.attached_host && !self.attached_snapshot_pending {
+            Some(self.core.snapshot())
+        } else {
+            self.connections
+                .get(&host)
+                .and_then(|connection| connection.snapshot.as_ref())
+        }
     }
 
     pub(crate) fn ensure_connected(&mut self, host: HostId, cx: &mut Context<Self>) {
@@ -3704,6 +3855,11 @@ impl MuxClient {
                 ..
             })
         );
+        let quiet_success = self.error.is_none()
+            && matches!(
+                &message,
+                ProtocolMessage::CommandResponse(CommandResponse::Success { .. })
+            );
         log::trace!(
             target: "zz::diagnostics::mux",
             "handle_message begin message={message:#?}"
@@ -3750,7 +3906,7 @@ impl MuxClient {
             self.viewports.len(),
             self.attached_connection().resync_pending,
         );
-        if !status_only {
+        if !status_only && !quiet_success {
             cx.notify();
         }
     }
@@ -4591,6 +4747,8 @@ fn apply_retained_patch(
     retained
         .revision_scratch
         .extend_from_slice(patch.changed_rows.row_indices());
+    let outgoing_dictionary =
+        (!patch.dictionary.is_empty()).then(|| Arc::clone(&retained.viewport.dictionary));
     if let Err(error) = retained.viewport.apply_patch(patch) {
         retained.revision_scratch.clear();
         return Err(error);
@@ -4615,6 +4773,13 @@ fn apply_retained_patch(
             retained.history.rows.pop_back();
         }
         retained.history_mutations = retained.history_mutations.wrapping_add(1);
+    }
+    if let Some(dictionary) = outgoing_dictionary {
+        compact_history_dictionary(
+            &mut retained.history.rows,
+            &dictionary,
+            &retained.viewport.dictionary,
+        );
     }
     retained.history_scrollbar = next_scrollbar;
     if scroll != 0 || !retained.revision_scratch.is_empty() {
@@ -8636,6 +8801,81 @@ mod tests {
     }
 
     #[gpui::test]
+    fn successful_commands_only_notify_when_clearing_a_visible_error(cx: &mut TestAppContext) {
+        let mux = cx.update(|cx| {
+            let mux = test_mux(cx);
+            mux.update(cx, |mux, _| {
+                install_fake_connection(mux, HostId::LOCAL);
+                mux.error = None;
+            });
+            mux
+        });
+        cx.run_until_parked();
+        let notifications = Rc::new(std::cell::Cell::new(0));
+        let observed = Rc::clone(&notifications);
+        let _subscription =
+            cx.update(|cx| cx.observe(&mux, move |_, _| observed.set(observed.get() + 1)));
+        let success = |request_id| {
+            ProtocolMessage::CommandResponse(CommandResponse::Success {
+                request_id,
+                output: zz_protocol::RawText::default(),
+                exit_code: 0,
+                stderr: String::new(),
+                stdout_claim: zz_protocol::StdoutClaim::None,
+            })
+        };
+        mux.update(cx, |mux, cx| {
+            for request_id in 1..=10 {
+                mux.execute(CommandInvocation::new("select-pane", ["-t", "%1"]));
+                mux.handle_message(HostId::LOCAL, success(request_id), cx);
+            }
+            assert!(tracked_commands(mux, HostId::LOCAL).is_empty());
+            assert_eq!(mux.pending_commands_revision(), 0);
+        });
+        cx.run_until_parked();
+        assert_eq!(notifications.get(), 0);
+
+        mux.update(cx, |mux, cx| {
+            mux.handle_message(
+                HostId::LOCAL,
+                ProtocolMessage::CommandResponse(CommandResponse::Error {
+                    request_id: 0,
+                    error: ServerError::Internal("fixture error".to_owned()),
+                    output: zz_protocol::RawText::default(),
+                }),
+                cx,
+            );
+            assert!(mux.error.is_some());
+        });
+        cx.run_until_parked();
+        assert_eq!(notifications.get(), 1);
+
+        mux.update(cx, |mux, cx| {
+            mux.handle_message(HostId::LOCAL, success(0), cx);
+            assert!(mux.error.is_none());
+        });
+        cx.run_until_parked();
+        assert_eq!(notifications.get(), 2);
+
+        mux.update(cx, |mux, cx| {
+            mux.handle_message(
+                HostId::LOCAL,
+                ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 1,
+                    payload: EventPayload::Snapshot(MuxSnapshot {
+                        generation: 9,
+                        ..MuxSnapshot::default()
+                    }),
+                }),
+                cx,
+            );
+            assert_eq!(mux.snapshot().generation, 9);
+        });
+        cx.run_until_parked();
+        assert_eq!(notifications.get(), 3);
+    }
+
+    #[gpui::test]
     fn a_rejected_command_on_a_non_attached_host_is_reported(cx: &mut TestAppContext) {
         let (_mux, _sink, notifications) = cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(
@@ -8962,6 +9202,375 @@ mod tests {
             .iter()
             .map(|row| row.cells[0].glyph() - 0xe000)
             .collect()
+    }
+
+    #[test]
+    fn retained_history_does_not_keep_every_appended_dictionary_version() {
+        retained_history_dictionary_growth(false);
+    }
+
+    #[test]
+    fn retained_history_compacts_alternating_dictionary_and_scroll_updates() {
+        retained_history_dictionary_growth(true);
+    }
+
+    #[test]
+    fn retained_history_compacts_independently_growing_dictionary_planes() {
+        let mut next_revision = 1;
+        let mut retained = new_retained_viewport(
+            history_fixture_viewport(&[0, 1, 2], 1, 3, 0),
+            &mut next_revision,
+        );
+        let mut expected = VecDeque::from([
+            ("\u{e000}".to_owned(), retained.viewport.foreground),
+            ("\u{e001}".to_owned(), retained.viewport.foreground),
+            ("\u{e002}".to_owned(), retained.viewport.foreground),
+        ]);
+        for frame in 1_u16..=1_000 {
+            let mut next = retained.viewport.clone();
+            next.generation += 1;
+            next.view_generation += 1;
+            next.scrollbar.total += 1;
+            next.scrollbar.offset += 1;
+            let dictionary = Arc::make_mut(&mut next.dictionary);
+            let (glyph, text) = if frame % 2 == 1 {
+                let mut styles = dictionary.styles.to_vec();
+                styles.push(zz_terminal::PackedStyle::new(
+                    zz_terminal::Color::rgb((frame >> 8) as u8, frame as u8, 0),
+                    next.background,
+                    None,
+                    0,
+                    zz_terminal::UnderlineStyle::None,
+                ));
+                dictionary.styles = styles.into();
+                let glyph = 0xe002 + u32::from(frame);
+                (glyph, char::from_u32(glyph).unwrap().to_string())
+            } else {
+                let text = format!(
+                    "{}\u{301}",
+                    char::from_u32(0x400 + u32::from(frame)).unwrap()
+                );
+                let glyph = GRAPHEME_TABLE_BIT | (dictionary.grapheme_offsets.len() - 1) as u32;
+                let mut offsets = dictionary.grapheme_offsets.to_vec();
+                let mut bytes = dictionary.grapheme_bytes.to_vec();
+                bytes.extend_from_slice(text.as_bytes());
+                offsets.push(bytes.len() as u32);
+                dictionary.grapheme_offsets = offsets.into();
+                dictionary.grapheme_bytes = bytes.into();
+                (glyph, text)
+            };
+            let style_id = (dictionary.styles.len() - 1) as u16;
+            expected.push_back((text, dictionary.styles[usize::from(style_id)].foreground()));
+            let cells = Arc::make_mut(&mut next.cells);
+            cells.copy_within(1.., 0);
+            cells[2] = PackedCell::new(glyph, style_id, CellWidth::Narrow);
+            let patch = TerminalViewport::diff(&retained.viewport, &next).unwrap();
+            assert_eq!(patch.scroll, -1);
+            apply_retained_patch(&mut retained, patch, &mut next_revision).unwrap();
+        }
+
+        let mut style_planes = BTreeMap::new();
+        let mut grapheme_planes = BTreeMap::new();
+        for (row, (text, foreground)) in retained.history.rows.iter().zip(expected) {
+            style_planes.insert(
+                row.dictionary.styles.as_ptr() as usize,
+                std::mem::size_of_val(row.dictionary.styles.as_ref()),
+            );
+            grapheme_planes.insert(
+                row.dictionary.grapheme_offsets.as_ptr() as usize,
+                std::mem::size_of_val(row.dictionary.grapheme_offsets.as_ref())
+                    + row.dictionary.grapheme_bytes.len(),
+            );
+            let mut decoded = retained.viewport.clone();
+            decoded.dictionary = Arc::clone(&row.dictionary);
+            assert_eq!(decoded.cell_text(row.cells[0]), text);
+            assert_eq!(
+                decoded.style(row.cells[0]).unwrap().foreground(),
+                foreground
+            );
+        }
+        let dictionary_bytes =
+            style_planes.values().sum::<usize>() + grapheme_planes.values().sum::<usize>();
+        eprintln!(
+            "mixed_dictionary_growth history_rows={} style_planes={} grapheme_planes={} retained_dictionary_bytes={dictionary_bytes}",
+            retained.history.len(),
+            style_planes.len(),
+            grapheme_planes.len(),
+        );
+        assert_eq!(retained.history.len(), 1_000);
+        assert!(dictionary_bytes <= retained.history.len() * 128);
+    }
+
+    fn retained_history_dictionary_growth(separate_dictionary_updates: bool) {
+        let mut next_revision = 1;
+        let mut retained = new_retained_viewport(
+            history_fixture_viewport(&[0, 1, 2], 1, 3, 0),
+            &mut next_revision,
+        );
+        for frame in 1_u16..=1_000 {
+            let mut next = retained.viewport.clone();
+            next.generation += 1;
+            next.view_generation += 1;
+            let mut styles = next.dictionary.styles.to_vec();
+            styles.push(zz_terminal::PackedStyle::new(
+                zz_terminal::Color::rgb((frame >> 8) as u8, frame as u8, 0),
+                next.background,
+                None,
+                0,
+                zz_terminal::UnderlineStyle::None,
+            ));
+            Arc::make_mut(&mut next.dictionary).styles = styles.into();
+            if separate_dictionary_updates {
+                let patch = TerminalViewport::diff(&retained.viewport, &next).unwrap();
+                assert!(patch.changed_rows.is_empty());
+                assert_eq!(patch.scroll, 0);
+                apply_retained_patch(&mut retained, patch, &mut next_revision).unwrap();
+                next.generation += 1;
+                next.view_generation += 1;
+            }
+            next.scrollbar.total += 1;
+            next.scrollbar.offset += 1;
+            let cells = Arc::make_mut(&mut next.cells);
+            cells.copy_within(1.., 0);
+            cells[2] = PackedCell::new(0xe002 + u32::from(frame), frame, CellWidth::Narrow);
+            let patch = TerminalViewport::diff(&retained.viewport, &next).unwrap();
+            assert_eq!(patch.scroll, -1);
+            assert_eq!(patch.dictionary.is_empty(), separate_dictionary_updates);
+            apply_retained_patch(&mut retained, patch, &mut next_revision).unwrap();
+        }
+
+        assert_eq!(retained.history.len(), 1_000);
+        let mut style_planes = BTreeMap::new();
+        for row in &retained.history.rows {
+            style_planes.insert(
+                row.dictionary.styles.as_ptr() as usize,
+                std::mem::size_of_val(row.dictionary.styles.as_ref()),
+            );
+            let cell = row.cells[0];
+            if cell.glyph() >= 0xe003 {
+                let frame = cell.glyph() - 0xe002;
+                assert_eq!(
+                    row.dictionary.styles[usize::from(cell.style_id())].foreground(),
+                    zz_terminal::Color::rgb((frame >> 8) as u8, frame as u8, 0)
+                );
+            }
+        }
+        let style_bytes = style_planes.values().sum::<usize>();
+        eprintln!(
+            "separate_dictionary_updates={separate_dictionary_updates} history_rows={} unique_style_planes={} retained_style_bytes={style_bytes}",
+            retained.history.len(),
+            style_planes.len(),
+        );
+        let bytes_per_row = if separate_dictionary_updates { 80 } else { 64 };
+        assert!(style_bytes <= retained.history.len() * bytes_per_row);
+        assert_eq!(retained.viewport.dictionary.styles.len(), 1_001);
+        assert_eq!(retained.viewport.cells[2].style_id(), 1_000);
+    }
+
+    #[test]
+    fn stable_large_history_dictionaries_keep_one_shared_style_plane() {
+        let mut viewport = TerminalViewport::blank(80, 3, SessionStatus::Running);
+        Arc::make_mut(&mut viewport.dictionary).styles = (0..80)
+            .map(|index| {
+                zz_terminal::PackedStyle::new(
+                    zz_terminal::Color::rgb(index, 0, 0),
+                    viewport.background,
+                    None,
+                    0,
+                    zz_terminal::UnderlineStyle::None,
+                )
+            })
+            .collect();
+        for (row, cells) in Arc::make_mut(&mut viewport.cells)
+            .chunks_mut(80)
+            .enumerate()
+        {
+            for (column, cell) in cells.iter_mut().enumerate() {
+                *cell = PackedCell::new(0xe000 + row as u32, column as u16, CellWidth::Narrow);
+            }
+        }
+        let styles = Arc::clone(&viewport.dictionary.styles);
+        let mut next_revision = 1;
+        let mut retained = new_retained_viewport(viewport, &mut next_revision);
+        for frame in 1..=1_000 {
+            let mut next = retained.viewport.clone();
+            next.generation += 1;
+            next.view_generation += 1;
+            next.scrollbar.total += 1;
+            next.scrollbar.offset += 1;
+            let cells = Arc::make_mut(&mut next.cells);
+            cells.copy_within(80.., 0);
+            for (column, cell) in cells[160..].iter_mut().enumerate() {
+                *cell = PackedCell::new(0xe002 + frame, column as u16, CellWidth::Narrow);
+            }
+            let patch = TerminalViewport::diff(&retained.viewport, &next).unwrap();
+            assert_eq!(patch.scroll, -1);
+            assert!(patch.dictionary.is_empty());
+            apply_retained_patch(&mut retained, patch, &mut next_revision).unwrap();
+        }
+        assert_eq!(retained.history.len(), 1_000);
+        for frame in 1_001..=1_256 {
+            let mut next = retained.viewport.clone();
+            next.generation += 1;
+            next.view_generation += 1;
+            next.scrollbar.total += 1;
+            next.scrollbar.offset += 1;
+            let dictionary = Arc::make_mut(&mut next.dictionary);
+            let glyph = GRAPHEME_TABLE_BIT | (dictionary.grapheme_offsets.len() - 1) as u32;
+            let text = format!("{}\u{301}", char::from_u32(0x400 + frame).unwrap());
+            let mut offsets = dictionary.grapheme_offsets.to_vec();
+            let mut bytes = dictionary.grapheme_bytes.to_vec();
+            bytes.extend_from_slice(text.as_bytes());
+            offsets.push(bytes.len() as u32);
+            dictionary.grapheme_offsets = offsets.into();
+            dictionary.grapheme_bytes = bytes.into();
+            let cells = Arc::make_mut(&mut next.cells);
+            cells.copy_within(80.., 0);
+            for (column, cell) in cells[160..].iter_mut().enumerate() {
+                *cell = PackedCell::new(glyph, column as u16, CellWidth::Narrow);
+            }
+            let patch = TerminalViewport::diff(&retained.viewport, &next).unwrap();
+            assert_eq!(patch.scroll, -1);
+            assert!(!patch.dictionary.is_empty());
+            apply_retained_patch(&mut retained, patch, &mut next_revision).unwrap();
+        }
+        assert_eq!(retained.history.len(), 1_256);
+        assert!(
+            retained
+                .history
+                .rows
+                .iter()
+                .all(|row| Arc::ptr_eq(&row.dictionary.styles, &styles))
+        );
+        assert_eq!(std::mem::size_of_val(styles.as_ref()), 1_280);
+    }
+
+    #[test]
+    fn history_compaction_preserves_shared_rows_styles_graphemes_and_cell_flags() {
+        let mut source_viewport = TerminalViewport::blank(2, 2, SessionStatus::Running);
+        let unused = "unused".repeat(256);
+        let combining = "e\u{301}";
+        let wide = "👩‍💻";
+        source_viewport.dictionary = Arc::new(TerminalDictionary::from_shared(
+            (0..128)
+                .map(|index| {
+                    zz_terminal::PackedStyle::new(
+                        zz_terminal::Color::rgb(index, 0, 0),
+                        source_viewport.background,
+                        None,
+                        0,
+                        zz_terminal::UnderlineStyle::None,
+                    )
+                })
+                .collect(),
+            Arc::from([
+                0,
+                unused.len() as u32,
+                (unused.len() + combining.len()) as u32,
+                (unused.len() + combining.len() + wide.len()) as u32,
+            ]),
+            [unused.as_str(), combining, wide]
+                .concat()
+                .into_bytes()
+                .into(),
+        ));
+        let source = Arc::clone(&source_viewport.dictionary);
+        let mut rows = VecDeque::from([
+            HistoryRow {
+                cells: Box::new([
+                    PackedCell::from_raw(GRAPHEME_TABLE_BIT | 1, 17, 0x400),
+                    PackedCell::new(u32::from('A'), 42, CellWidth::Narrow),
+                ]),
+                dictionary: Arc::clone(&source),
+                revision: 10,
+            },
+            HistoryRow {
+                cells: Box::new([
+                    PackedCell::from_raw(
+                        GRAPHEME_TABLE_BIT | 2,
+                        17,
+                        0x800 | CellWidth::Wide as u16,
+                    ),
+                    PackedCell::new(0, 42, CellWidth::SpacerTail),
+                ]),
+                dictionary: Arc::clone(&source),
+                revision: 11,
+            },
+        ]);
+        let before = rows.clone();
+        let mut glyph_only_rows = before.clone();
+        let current = TerminalDictionary::from_shared(
+            Arc::clone(&source.styles),
+            Arc::from([0]),
+            Arc::from([]),
+        );
+        compact_history_dictionary(&mut glyph_only_rows, &source, &current);
+        assert!(Arc::ptr_eq(
+            &glyph_only_rows[0].dictionary.styles,
+            &source.styles
+        ));
+        assert_eq!(glyph_only_rows[0].cells[0].style_id(), 17);
+        assert_eq!(
+            glyph_only_rows[0].dictionary.grapheme_bytes.len(),
+            combining.len() + wide.len()
+        );
+
+        compact_history_dictionary(&mut rows, &source, &TerminalDictionary::default());
+        assert!(!Arc::ptr_eq(&rows[0].dictionary, &source));
+        assert!(Arc::ptr_eq(&rows[0].dictionary, &rows[1].dictionary));
+        assert_eq!(rows[0].dictionary.styles.len(), 2);
+        assert_eq!(rows[0].dictionary.grapheme_offsets.len(), 3);
+        assert_eq!(
+            rows[0].dictionary.grapheme_bytes.len(),
+            combining.len() + wide.len()
+        );
+        for (row, original) in rows.iter().zip(&before) {
+            assert_eq!(row.revision, original.revision);
+            let mut decoded = source_viewport.clone();
+            decoded.dictionary = Arc::clone(&row.dictionary);
+            for (cell, original) in row.cells.iter().zip(original.cells.iter()) {
+                assert_eq!(cell.flags(), original.flags());
+                assert_eq!(decoded.style(*cell), source_viewport.style(*original));
+                assert_eq!(
+                    decoded.cell_text(*cell),
+                    source_viewport.cell_text(*original)
+                );
+            }
+        }
+
+        let mut history = HistoryRing { rows };
+        let mut next_revision = 12;
+        history.prepend(
+            vec![before[0].cells.to_vec()],
+            source.as_ref().clone(),
+            &mut next_revision,
+        );
+        assert_eq!(history.len(), 3);
+        assert!(Arc::ptr_eq(
+            &history.rows[0].dictionary.styles,
+            &source.styles
+        ));
+        assert_eq!(history.rows[0].cells, before[0].cells);
+        assert_eq!(history.rows[1].dictionary.styles.len(), 2);
+        assert_eq!(source.styles.len(), 128);
+    }
+
+    #[test]
+    fn small_history_dictionaries_keep_the_existing_allocation() {
+        let viewport = TerminalViewport::blank(1, 1, SessionStatus::Running);
+        let mut rows = VecDeque::from([HistoryRow {
+            cells: viewport.cells.to_vec().into_boxed_slice(),
+            dictionary: Arc::clone(&viewport.dictionary),
+            revision: 7,
+        }]);
+        compact_history_dictionary(
+            &mut rows,
+            &viewport.dictionary,
+            &TerminalDictionary::default(),
+        );
+        assert!(Arc::ptr_eq(&rows[0].dictionary, &viewport.dictionary));
+        assert_eq!(&*rows[0].cells, &*viewport.cells);
+        assert_eq!(rows[0].revision, 7);
     }
 
     fn chunk_rows(ids: &[u32]) -> Vec<Vec<PackedCell>> {

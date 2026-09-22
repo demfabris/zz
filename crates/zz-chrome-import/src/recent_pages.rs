@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    fs,
+    fs, io,
     path::PathBuf,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -80,6 +80,7 @@ pub struct RecentPages {
     entries: Vec<RecentPage>,
     shortcuts: Vec<HistoryShortcut>,
     path: Option<PathBuf>,
+    autosave: bool,
 }
 
 impl RecentPages {
@@ -529,24 +530,30 @@ impl RecentPages {
         self.shortcuts.truncate(MAX_SHORTCUTS);
     }
 
-    fn save(&self) {
-        let Some(path) = &self.path else {
-            return;
-        };
-        if let Err(error) = atomic_write(path, self.serialize().as_bytes()) {
-            log::warn!(
-                target: "zz::recent_pages",
-                "could not persist recent pages path={} error={error}",
-                path.display(),
-            );
-            return;
+    fn save_if_enabled(&self) {
+        if self.autosave
+            && let Err(error) = self.save()
+        {
+            log::warn!(target: "zz::recent_pages", "could not persist recent pages: {error}");
         }
-        if let Err(error) = restrict_to_current_user(path) {
-            log::warn!(
-                target: "zz::recent_pages",
-                "could not restrict recent pages permissions path={} error={error}",
-                path.display(),
-            );
+    }
+
+    pub fn save(&self) -> io::Result<()> {
+        let Some(path) = &self.path else {
+            return Ok(());
+        };
+        atomic_write(path, self.serialize().as_bytes())?;
+        restrict_to_current_user(path)
+    }
+
+    pub fn is_persistent(&self) -> bool {
+        self.path.is_some()
+    }
+
+    pub fn load_deferred(path: Option<PathBuf>) -> Self {
+        Self {
+            autosave: false,
+            ..Self::load(path)
         }
     }
 }
@@ -588,6 +595,7 @@ impl RecentPages {
             entries,
             shortcuts,
             path,
+            autosave: true,
         }
     }
 
@@ -609,7 +617,7 @@ impl RecentPages {
             return false;
         }
         self.visit(profile, url, unix_now());
-        self.save();
+        self.save_if_enabled();
         true
     }
 
@@ -617,7 +625,7 @@ impl RecentPages {
         if title.is_empty() || !self.retitle(profile, url, title) {
             return false;
         }
-        self.save();
+        self.save_if_enabled();
         true
     }
 
@@ -652,7 +660,7 @@ impl RecentPages {
         }
         entry.favicon = Some(png);
         self.prune();
-        self.save();
+        self.save_if_enabled();
         true
     }
 
@@ -666,7 +674,7 @@ impl RecentPages {
         if !self.record_omnibox_use_at(profile, input, url, selected, unix_now()) {
             return false;
         }
-        self.save();
+        self.save_if_enabled();
         true
     }
 
@@ -674,14 +682,14 @@ impl RecentPages {
         if !self.remove_entry(profile, url) {
             return false;
         }
-        self.save();
+        self.save_if_enabled();
         true
     }
 
     pub fn import_history(&mut self, entries: Vec<RecentPage>) -> usize {
         let changed = self.merge_history(entries);
         if changed > 0 {
-            self.save();
+            self.save_if_enabled();
         }
         changed
     }
@@ -892,6 +900,7 @@ mod tests {
             entries,
             shortcuts: Vec::new(),
             path: None,
+            autosave: false,
         }
     }
 
@@ -917,6 +926,32 @@ mod tests {
         assert!(restored.remove("work", "https://example.com"));
         assert_eq!(restored.title("work", "https://example.com"), None);
         assert!(restored.suggestions("work", "exa", 8).is_empty());
+    }
+
+    #[test]
+    fn deferred_store_keeps_changes_in_memory_until_explicit_save() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("recent-pages");
+        let mut pages = RecentPages::load_deferred(Some(path.clone()));
+        assert!(pages.is_persistent());
+        assert!(pages.record_visit("work", "https://example.com"));
+        assert!(pages.record_title("work", "https://example.com", "First"));
+        assert!(!path.exists());
+        pages.save().unwrap();
+        assert!(pages.record_title("work", "https://example.com", "Latest"));
+        assert_eq!(
+            RecentPages::load(Some(path.clone())).title("work", "https://example.com"),
+            Some("First")
+        );
+        pages.save().unwrap();
+        assert_eq!(
+            RecentPages::load(Some(path)).title("work", "https://example.com"),
+            Some("Latest")
+        );
+        let mut memory_only = RecentPages::load_deferred(None);
+        assert!(!memory_only.is_persistent());
+        assert!(memory_only.record_visit("work", "https://example.com"));
+        memory_only.save().unwrap();
     }
 
     #[test]

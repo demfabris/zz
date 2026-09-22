@@ -1,3 +1,4 @@
+use std::cell::OnceCell;
 use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::fs;
@@ -153,6 +154,16 @@ pub(crate) fn record_for_pane<'a>(
     pane: &str,
     pane_pid: Option<u32>,
 ) -> Option<&'a PeerRecord> {
+    record_for_pane_with_processes(records, pane, pane_pid, &OnceCell::new())
+}
+
+pub(crate) fn record_for_pane_with_processes<'a>(
+    records: &'a [PeerRecord],
+    pane: &str,
+    pane_pid: Option<u32>,
+    processes: &OnceCell<Option<Vec<(u32, u32)>>>,
+) -> Option<&'a PeerRecord> {
+    let pane_pid = pane_pid?;
     let now = now_ms();
     let mut candidates = records
         .iter()
@@ -164,7 +175,10 @@ pub(crate) fn record_for_pane<'a>(
         })
         .peekable();
     candidates.peek()?;
-    let pids = pane_process_ids(&process_parents().ok()?, pane_pid?);
+    let parents = processes
+        .get_or_init(|| process_parents().ok())
+        .as_deref()?;
+    let pids = pane_process_ids(parents, pane_pid);
     candidates.find(|record| pids.contains(&record.pid))
 }
 
@@ -901,6 +915,51 @@ mod tests {
             Some(me)
         );
         assert!(record_for_pane(&own, "%0", None).is_none());
+    }
+
+    #[test]
+    fn pane_lookup_loads_processes_only_for_matching_candidates() {
+        let processes = OnceCell::new();
+        let me = std::process::id();
+        let records = [PeerRecord {
+            pid: me,
+            tmux: "work:@0.%0".to_owned(),
+            messaging_socket_path: PathBuf::from("/tmp/cc-socks/peer.sock"),
+            updated_at: now_ms(),
+            ..PeerRecord::default()
+        }];
+        assert!(record_for_pane_with_processes(&[], "%0", Some(me), &processes).is_none());
+        assert!(record_for_pane_with_processes(&records, "%1", Some(me), &processes).is_none());
+        assert!(record_for_pane_with_processes(&records, "%0", None, &processes).is_none());
+        assert!(processes.get().is_none());
+        assert!(record_for_pane_with_processes(&records, "%0", Some(me), &processes).is_some());
+        assert!(processes.get().is_some());
+    }
+
+    #[test]
+    fn shared_process_snapshot_keeps_pane_routing_separate() {
+        let me = std::process::id();
+        let parent = std::os::unix::process::parent_id();
+        let processes = OnceCell::from(Some(vec![(me, 10), (parent, 20)]));
+        let record = |pid, pane: &str| PeerRecord {
+            pid,
+            tmux: format!("work:@0.{pane}"),
+            messaging_socket_path: PathBuf::from(format!("/tmp/cc-socks/{pid}.sock")),
+            updated_at: now_ms(),
+            ..PeerRecord::default()
+        };
+        let records = [record(parent, "%0"), record(me, "%0"), record(parent, "%1")];
+        assert_eq!(
+            record_for_pane_with_processes(&records, "%0", Some(10), &processes)
+                .map(|record| record.pid),
+            Some(me)
+        );
+        assert_eq!(
+            record_for_pane_with_processes(&records, "%1", Some(20), &processes)
+                .map(|record| record.pid),
+            Some(parent)
+        );
+        assert!(record_for_pane_with_processes(&records, "%1", Some(10), &processes).is_none());
     }
 
     #[test]

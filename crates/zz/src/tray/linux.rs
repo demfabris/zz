@@ -18,6 +18,8 @@ const TRAY_ICON_PNG: &[u8] = if zz_protocol::app_identity::DEVELOPMENT {
     ))
 };
 
+const TRAY_ICON_SIZE: u32 = 48;
+
 /// A live `StatusNotifierItem`. Dropping it shuts the service down, which is what
 /// removes the icon.
 pub(super) struct Service {
@@ -147,7 +149,13 @@ fn tray_icon() -> Vec<ksni::Icon> {
         log::warn!(target: "zz::tray", "could not decode the tray icon");
         return Vec::new();
     };
-    let rgba = decoded.into_rgba8();
+    let rgba = decoded
+        .resize(
+            TRAY_ICON_SIZE,
+            TRAY_ICON_SIZE,
+            image::imageops::FilterType::Lanczos3,
+        )
+        .into_rgba8();
     let (width, height) = rgba.dimensions();
     let data = rgba
         .pixels()

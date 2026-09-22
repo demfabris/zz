@@ -24,7 +24,7 @@ pub fn tree_host_marker(bell: bool, badge_color: Option<Hsla>, cx: &App) -> AnyE
             gpui::ImageFormat::Png,
             include_bytes!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../assets/linux/hicolor/256x256/apps/zz.png"
+                "/../../assets/linux/hicolor/64x64/apps/zz.png"
             ))
             .to_vec(),
         ))

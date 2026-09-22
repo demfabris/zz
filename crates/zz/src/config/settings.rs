@@ -1398,15 +1398,6 @@ impl SettingsView {
                     cx,
                 )))
             })
-            .child(
-                SettingsStack::titled("Diagnostics").child(Self::boolean_setting(
-                    ConfigKey::ShowFps,
-                    "Show FPS",
-                    "Show a frame-rate overlay.",
-                    resolved.show_fps,
-                    cx,
-                )),
-            )
             .when(
                 cfg!(any(feature = "agent-pane", feature = "editor-pane")),
                 |column| {
@@ -2519,7 +2510,6 @@ fn numeric_config_value(config: &AppConfig, key: ConfigKey) -> f32 {
         | ConfigKey::WindowBackgroundBlur
         | ConfigKey::Animations
         | ConfigKey::Tray
-        | ConfigKey::ShowFps
         | ConfigKey::QuitDaemonOnExit
         | ConfigKey::AutoRestartStaleDaemon
         | ConfigKey::CheckForUpdates

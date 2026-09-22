@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     rc::Rc,
+    sync::Arc,
 };
 
 use gpui::{
@@ -151,6 +152,7 @@ pub struct WorkspaceSidebar {
     mux: Entity<MuxClient>,
     agents: Entity<AgentController>,
     tree_model: Rc<MuxTreeModel>,
+    tree_revision: Option<SidebarRevision>,
     visible_entries: Rc<[VisibleTreeEntry]>,
     visible_indices: BTreeMap<TreeNode, usize>,
     expanded: BTreeSet<TreeNode>,
@@ -194,6 +196,7 @@ impl WorkspaceSidebar {
             mux,
             agents: agents.clone(),
             tree_model: Rc::new(MuxTreeModel::default()),
+            tree_revision: None,
             visible_entries: Rc::from([]),
             visible_indices: BTreeMap::new(),
             expanded: BTreeSet::new(),
@@ -319,8 +322,7 @@ impl WorkspaceSidebar {
     }
 
     pub(crate) fn focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let model = MuxTreeModel::from_mux(self.mux.read(cx));
-        self.reconcile_tree(model);
+        self.synchronize_tree(cx);
 
         if self.mode == ChromeMode::Titlebar {
             self.slideover = true;
@@ -527,6 +529,17 @@ impl WorkspaceSidebar {
         self.mux
             .read(cx)
             .execute(CommandInvocation::new("command-prompt", [] as [&str; 0]));
+    }
+
+    fn synchronize_tree(&mut self, cx: &App) -> bool {
+        let mux = self.mux.read(cx);
+        let revision = SidebarRevision::for_mux(mux);
+        if self.tree_revision.as_ref() == Some(&revision) {
+            return false;
+        }
+        let model = MuxTreeModel::from_mux(mux);
+        self.tree_revision = Some(revision);
+        self.reconcile_tree(model)
     }
 
     fn reconcile_tree(&mut self, model: MuxTreeModel) -> bool {
@@ -755,15 +768,11 @@ fn expand_new_hosts(
 
 impl Render for WorkspaceSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (model, attached_host, attached) = {
+        let (attached_host, attached) = {
             let mux = self.mux.read(cx);
-            (
-                MuxTreeModel::from_mux(mux),
-                mux.attached_host(),
-                mux.attached_session(),
-            )
+            (mux.attached_host(), mux.attached_session())
         };
-        if self.reconcile_tree(model) {
+        if self.synchronize_tree(cx) {
             let agents = self.agents.clone();
             self.reconcile_attention(&agents, cx);
         }
@@ -994,13 +1003,28 @@ fn push_visible_entry(
     entries.push(entry);
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 struct FleetHostRevision {
     id: HostId,
     name: String,
     state: HostState,
-    generation: Option<u64>,
+    snapshot: Option<Arc<MuxSnapshot>>,
 }
+
+impl PartialEq for FleetHostRevision {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.name == other.name
+            && self.state == other.state
+            && match (&self.snapshot, &other.snapshot) {
+                (Some(snapshot), Some(other)) => Arc::ptr_eq(snapshot, other),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+}
+
+impl Eq for FleetHostRevision {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SidebarRevision {
@@ -1027,7 +1051,7 @@ impl SidebarRevision {
                     id,
                     name: name.to_owned(),
                     state: state.clone(),
-                    generation: snapshot.map(|snapshot| snapshot.generation),
+                    snapshot: mux.host_snapshot(id).cloned(),
                 }
             })
             .collect();
@@ -1580,6 +1604,76 @@ mod tests {
     #[gpui::test]
     fn workspace_tree_key_bindings_register(cx: &mut TestAppContext) {
         cx.update(init);
+    }
+
+    #[gpui::test]
+    fn tree_model_tracks_snapshot_focus_and_attachment_revisions(cx: &mut TestAppContext) {
+        let mux = cx.new(|cx| {
+            MuxClient::new(
+                Err(DaemonError::Thread("test client".to_owned())),
+                zz_daemon::default_socket_path(),
+                cx,
+            )
+        });
+        let agents = cx.new(|_| AgentController::new(AgentConfig::default()));
+        let sidebar = cx.new(|cx| WorkspaceSidebar::new(mux.clone(), &agents, cx));
+        sidebar.update(cx, |sidebar, cx| {
+            assert!(sidebar.synchronize_tree(cx));
+            assert_eq!(sidebar.tree_model.hosts.len(), 1);
+            assert!(!sidebar.synchronize_tree(cx));
+        });
+
+        let mut snapshot = snapshot_with_two_panes();
+        snapshot.sessions[0]
+            .windows
+            .push(mux_window(12, 3, "logs", 303));
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(1), snapshot.clone(), cx);
+        });
+        sidebar.update(cx, |sidebar, cx| {
+            assert!(sidebar.synchronize_tree(cx));
+            assert_eq!(
+                sidebar.active_target,
+                Some(TreeNode::Target(
+                    HostId::LOCAL,
+                    TreeTarget::Pane(PaneId(202))
+                ))
+            );
+            assert!(!sidebar.synchronize_tree(cx));
+        });
+
+        snapshot.focused_window = Some(WindowId(12));
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(1), snapshot.clone(), cx);
+        });
+        sidebar.update(cx, |sidebar, cx| {
+            assert!(sidebar.synchronize_tree(cx));
+            assert_eq!(
+                sidebar.active_target,
+                Some(TreeNode::Target(
+                    HostId::LOCAL,
+                    TreeTarget::Pane(PaneId(303))
+                ))
+            );
+        });
+
+        snapshot.sessions[0].name = "renamed".to_owned();
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(1), snapshot.clone(), cx);
+        });
+        sidebar.update(cx, |sidebar, cx| {
+            assert!(sidebar.synchronize_tree(cx));
+            assert_eq!(sidebar.tree_model.hosts[0].sessions[0].name, "renamed");
+        });
+
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(999), snapshot, cx);
+        });
+        sidebar.update(cx, |sidebar, cx| {
+            assert!(sidebar.synchronize_tree(cx));
+            assert_eq!(sidebar.active_target, None);
+            assert!(!sidebar.synchronize_tree(cx));
+        });
     }
 
     #[gpui::test]

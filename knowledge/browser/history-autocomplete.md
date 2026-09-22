@@ -9,7 +9,7 @@ tags:
 - omnibox
 - autocomplete
 - profiles
-timestamp: 2026-08-13T01:57:40Z
+timestamp: 2026-09-22T00:00:00Z
 ---
 
 # Overview
@@ -41,6 +41,32 @@ independent bounds. The loader rejects files over 64 MiB. Writes use the app's
 atomic replace path and restrict the file to the current user on Unix. A legacy
 `unix-seconds<TAB>url<TAB>title` row loads into the `default` profile with one
 visit and no typed credit; the next write upgrades the file.
+
+The shared `RecentPages::load` API saves after each mutation. The GPUI desktop
+adapter records the path at startup and defers loading stored pages, learned
+selections, and favicons until a history lookup or mutation. Its
+`RecentPages::pages` and `pages_mut` accessors perform that first load through
+`load_deferred`; a first mutation therefore preserves existing records before
+changing them. Revision checks do not initialize the store.
+
+The desktop adapter keeps one save worker. It batches changes for 250 ms, clones
+the latest store once per batch, and serializes and writes that snapshot on the
+background executor. Continuous updates do not postpone the batch deadline.
+Writes run in sequence; a change during a write schedules the next batch.
+
+On normal quit, the adapter cancels the batch coordinator, waits for its
+independent background writer, and saves the latest remaining changes
+synchronously. This final flush runs before GPUI starts its quit-future timeout;
+a slow filesystem can delay quitting but does not abandon the newest batch. A
+store without a path stays in memory and starts no save worker.
+
+Quitting before any history lookup or mutation leaves the store uninitialized
+and skips disk reads and writes. The existing file keeps its contents and
+modification time.
+
+History changes notify visible consumers whose displayed history data changed:
+browser tab icons, blank-page recents, suggestion icons, and browser entries in
+the titlebar status bar. They do not force a refresh of every GPUI window.
 
 CEF never reads this file. It contains browsing URLs, titles, and learned address
 text, so operators should treat it as sensitive user data.
@@ -130,7 +156,7 @@ without weakening locally learned use.
 | File | Role |
 | --- | --- |
 | `crates/zz-chrome-import/src/recent_pages.rs` | Bounded storage, migration, matching, scoring, learning, deletion, and tests. |
-| `crates/zz/src/browser/recent_pages.rs` | Desktop history access and window refreshes. |
+| `crates/zz/src/browser/recent_pages.rs` | Lazy desktop history loading, revision notifications, batched background saves, and shutdown flush. |
 | `crates/zz/src/browser/view.rs` | Input events, successful-use credit, keyboard selection, Escape stages, and result actions. |
 | `crates/zz-ui/src/browser.rs` | Native result panel and title/URL rows under the compact toolbar. |
 | `crates/zz-chrome-import/src/history.rs` | Read-only extraction of Chrome timestamps and use counts. |

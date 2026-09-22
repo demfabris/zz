@@ -295,7 +295,7 @@ type RevisionSet = HashSet<u64, BuildHasherDefault<RevisionHasher>>;
 #[derive(Default)]
 pub struct RowRenderCache {
     signature: Option<RowCacheSignature>,
-    revision_epoch: Option<u64>,
+    retention_key: Option<(u64, bool)>,
     rows: RevisionMap<Rc<CachedTextRow>>,
     selection_rows: HashMap<SelectionCacheKey, Rc<CachedTextRow>>,
     live_selection_keys: HashSet<SelectionCacheKey>,
@@ -364,6 +364,7 @@ impl RowRenderCache {
         &mut self,
         signature: RowCacheSignature,
         revision_epoch: u64,
+        local_scroll_active: bool,
         revisions: impl Iterator<Item = u64>,
     ) {
         if self.signature.as_ref() != Some(&signature) {
@@ -383,10 +384,11 @@ impl RowRenderCache {
             self.rows.clear();
             self.selection_rows.clear();
             self.live_selection_keys.clear();
-            self.revision_epoch = None;
+            self.retention_key = None;
             self.live_revisions.clear();
         }
-        if self.revision_epoch == Some(revision_epoch) {
+        let retention_key = (revision_epoch, local_scroll_active);
+        if self.retention_key == Some(retention_key) {
             return;
         }
 
@@ -397,7 +399,7 @@ impl RowRenderCache {
             .retain(|revision, _| live_revisions.contains(revision));
         self.selection_rows
             .retain(|key, _| live_revisions.contains(&key.revision));
-        self.revision_epoch = Some(revision_epoch);
+        self.retention_key = Some(retention_key);
     }
 }
 
@@ -844,6 +846,7 @@ impl RowRenderCache {
                     text_opacity_bits: input.text_opacity.to_bits(),
                 },
                 row_revision_epoch,
+                local_scroll_target.is_some(),
                 (0..input.history.map_or(0, TerminalHistorySource::row_count))
                     .filter(|_| local_scroll_target.is_some())
                     .filter_map(|index| input.history.and_then(|history| history.row(index)))
@@ -3161,7 +3164,7 @@ mod tests {
     fn retained_row_cache_prunes_only_stale_revisions() {
         let mut cache = RowRenderCache::default();
         let initial = [1, 2];
-        cache.prepare(signature(1), 1, initial.iter().copied());
+        cache.prepare(signature(1), 1, false, initial.iter().copied());
         cache.rows.insert(1, Rc::new(CachedTextRow::default()));
         cache.rows.insert(3, Rc::new(CachedTextRow::default()));
         cache.selection_rows.insert(
@@ -3182,26 +3185,52 @@ mod tests {
         );
 
         let updated = [1, 2];
-        cache.prepare(signature(1), 2, updated.iter().copied());
+        cache.prepare(signature(1), 2, false, updated.iter().copied());
         assert!(cache.rows.contains_key(&1));
         assert!(!cache.rows.contains_key(&3));
         assert_eq!(cache.selection_rows.len(), 1);
         let live_capacity = cache.live_revisions.capacity();
 
         let reduced = [1];
-        cache.prepare(signature(1), 3, reduced.iter().copied());
+        cache.prepare(signature(1), 3, false, reduced.iter().copied());
         assert!(cache.live_revisions.capacity() >= live_capacity);
 
-        cache.prepare(signature(2), 3, reduced.iter().copied());
+        cache.prepare(signature(2), 3, false, reduced.iter().copied());
         assert!(cache.rows.is_empty());
         assert!(cache.selection_rows.is_empty());
+    }
+
+    #[test]
+    fn returning_from_local_scroll_releases_cached_history_without_new_output() {
+        let mut cache = RowRenderCache::default();
+        let history = 1..=10_000;
+        let live = 10_001..=10_040;
+        cache.prepare(signature(1), 1, false, live.clone());
+        for revision in live.clone() {
+            cache
+                .rows
+                .insert(revision, Rc::new(CachedTextRow::default()));
+        }
+        let retained_live_row = Rc::clone(&cache.rows[&10_001]);
+
+        cache.prepare(signature(1), 1, true, history.clone().chain(live.clone()));
+        for revision in history {
+            cache
+                .rows
+                .insert(revision, Rc::new(CachedTextRow::default()));
+        }
+        assert_eq!(cache.rows.len(), 10_040);
+
+        cache.prepare(signature(1), 1, false, live);
+        assert_eq!(cache.rows.len(), 40);
+        assert!(Rc::ptr_eq(&cache.rows[&10_001], &retained_live_row));
     }
 
     #[test]
     fn text_opacity_change_invalidates_shaped_rows() {
         let mut cache = RowRenderCache::default();
         let revisions = [1];
-        cache.prepare(signature(1), 1, revisions.iter().copied());
+        cache.prepare(signature(1), 1, false, revisions.iter().copied());
         cache.rows.insert(1, Rc::new(CachedTextRow::default()));
         cache.selection_rows.insert(
             SelectionCacheKey {
@@ -3214,7 +3243,7 @@ mod tests {
 
         let mut dimmed = signature(1);
         dimmed.text_opacity_bits = 0.7_f32.to_bits();
-        cache.prepare(dimmed, 1, revisions.iter().copied());
+        cache.prepare(dimmed, 1, false, revisions.iter().copied());
 
         assert!(cache.rows.is_empty());
         assert!(cache.selection_rows.is_empty());
@@ -4147,11 +4176,11 @@ mod tests {
     fn appearance_hash_change_invalidates_shaped_rows() {
         let mut cache = RowRenderCache::default();
         let first = signature(1);
-        cache.prepare(first.clone(), 1, [7].into_iter());
+        cache.prepare(first.clone(), 1, false, [7].into_iter());
         cache.rows.insert(7, Rc::new(CachedTextRow::default()));
         let mut changed = first;
         changed.appearance_hash = changed.appearance_hash.wrapping_add(1);
-        cache.prepare(changed, 1, [7].into_iter());
+        cache.prepare(changed, 1, false, [7].into_iter());
         assert!(cache.rows.is_empty());
     }
 

@@ -4,7 +4,7 @@ title: Building and running zz
 description: How to build and run the zz GPUI client and its daemon, what the first build downloads, and how to exercise the browser pane with the loopback fixture.
 resource: crates/zz/src/lib.rs
 tags: [running, cargo, cef-download, daemon, browser-fixture, pacman, profiling, instruments]
-timestamp: 2026-09-14T00:00:00Z
+timestamp: 2026-09-22T00:00:00Z
 ---
 
 # Overview
@@ -248,6 +248,26 @@ each frame's `imageOffset` out of the `.ips` JSON body, and run
 function names for the whole stack. This is how the 2026-08-03 Immersive-Reading-Mode login crash
 was pinned (see the [update log](/log.md)).
 
+## Linux allocator memory
+
+The Linux desktop and CLI enable mimalloc's `no_thp` feature. On the pinned
+allocator, this prevents mimalloc from requesting transparent huge pages with
+`MADV_HUGEPAGE`; it does not change the system setting or disable huge pages for
+child programs. Small allocations across many terminal threads otherwise
+inflate resident memory on systems configured to honor that request. Compare
+both RSS and terminal throughput when changing this policy.
+
+On glibc, the desktop calls `malloc_trim(0)` every 10 seconds on the main
+thread (`start_heap_trim` in `crates/zz/src/lib.rs`). Mesa, Wayland, and other
+C libraries allocate through glibc, which otherwise keeps pages freed after
+startup inside its heap; the trim returns about 2 MiB on an idle window. A
+periodic `mi_collect(false)` for mimalloc was measured and dropped: it only
+collects the calling thread's pages, so it did not reach memory retained by
+other threads. Idle-heap regressions are easiest to find with a dhat build;
+the 2026-09-22 profile traced 20 MiB of retained arena to the tray pixmap,
+which zbus expands to one boxed value per byte, so the Linux tray now sends
+a 48 px icon.
+
 ## Profiling the macOS bundle
 
 The profiling workflow deliberately uses the real CEF bundle rather than a raw Cargo binary. Build
@@ -415,8 +435,9 @@ cargo run -p zz -- split-window --kind browser -h http://127.0.0.1:9324
 cargo run -p zz
 ```
 
-CEF off-screen rendering uses the fastest attached macOS display refresh rate as
-its paint ceiling; other platforms default to 60 FPS. Override either with
+CEF off-screen rendering uses the fastest attached display refresh rate as
+its paint ceiling: `NSScreen` on macOS and GPUI display rates elsewhere, with a
+60 FPS fallback when no rate is available. Override the ceiling with
 `ZZ_BROWSER_FPS=1..240`, for example:
 
 ```sh
@@ -456,14 +477,15 @@ pump-driven scheduler there, opt in with the exact value `1`:
 ZZ_BROWSER_EXTERNAL_BEGIN_FRAME=1 just run linux
 ```
 
-The Linux/FreeBSD display ceiling remains 60 FPS unless `ZZ_BROWSER_FPS` is set;
-the opt-in does not infer the display's refresh rate.
+The Linux/FreeBSD display ceiling uses GPUI's reported refresh rates, with a
+60 FPS fallback when none are available. `ZZ_BROWSER_FPS` overrides the ceiling
+independently of the external BeginFrame opt-in.
 
 The browser-specific environment controls:
 
 | Variable | Default | Use |
 | --- | --- | --- |
-| `ZZ_BROWSER_FPS=1..240` | Fastest macOS display; 60 elsewhere | Override the OSR ceiling. |
+| `ZZ_BROWSER_FPS=1..240` | Fastest reported display; 60 FPS fallback | Override the OSR ceiling. |
 | `ZZ_BROWSER_GPU=0` | GPU on | Force software rendering/compositing and readback. |
 | `ZZ_BROWSER_SHARED_TEXTURE=0` | Shared texture on | Keep the GPU process but force readback OSR. Linux also falls back per pane if a visible session produces no first frame within two seconds. |
 | `ZZ_BROWSER_EXTERNAL_BEGIN_FRAME` | macOS on; Linux/FreeBSD off | macOS: exact `0` restores CEF's internal timer. Linux/FreeBSD: exact `1` enables pump-driven BeginFrames. |

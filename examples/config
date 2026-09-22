@@ -104,11 +104,6 @@ use-system-titlebar = false
 # strip when use-system-titlebar is on), where the platform supports it.
 window-background-blur = false
 
-# Overlay frame-rate readouts: the GPUI window draw rate pinned to the
-# window's top-right, and each browser pane's delivered CEF frame rate. These
-# are two independent pipelines and can legitimately disagree.
-show-fps = false
-
 # Stop the zz daemon when the app quits, even if sessions are still open.
 # Off by default: the daemon outliving the app is what lets sessions survive a
 # restart, and it already exits on its own once no sessions and no attached

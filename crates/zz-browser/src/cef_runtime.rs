@@ -343,6 +343,9 @@ pub enum BrowserError {
     ExecuteProcess(i32),
     #[error("CEF initialization failed; verify that its libraries and resources are installed")]
     Initialize,
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[error("CEF could not load its browser library: {0}")]
+    LibraryLoad(String),
     #[error("CEF is still initializing")]
     NotReady,
     #[error("CEF could not create the persistent browser request context")]
@@ -593,6 +596,15 @@ impl BrowserRuntime {
     pub fn start(&mut self) -> Result<(), BrowserError> {
         if self.phase() != RuntimePhase::Uninitialized {
             return Ok(());
+        }
+
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        {
+            if let Err(error) = cef::sys::load_library() {
+                self.message_pump.set_phase(RuntimePhase::Failed);
+                return Err(BrowserError::LibraryLoad(error));
+            }
+            let _ = api_hash(cef::sys::CEF_API_VERSION, 0);
         }
 
         let port = resolve_remote_debugging_port(
@@ -1950,9 +1962,6 @@ fn bootstrap_args_with_paths(
         loader
     };
 
-    // cef-rs binds the experimental header layout, so declare `CEF_API_VERSION`
-    // and never `CEF_API_VERSION_LAST`.
-    let _ = api_hash(cef::sys::CEF_API_VERSION, 0);
     let (signal_tx, signal_rx) = async_channel::unbounded();
     let remote_debugging_port = Arc::new(AtomicU16::new(0));
     let mut app = RuntimeApp::new(
@@ -1960,12 +1969,21 @@ fn bootstrap_args_with_paths(
         Arc::clone(&remote_debugging_port),
         RuntimeRenderProcessHandler::new(RendererSideRouter::new(element_picker_router_config())),
     );
-    let result = execute_process(Some(args.as_main_args()), Some(&mut app), sandbox_info);
-    if result >= 0 {
-        return Ok(BrowserBootstrap::SubprocessExit(result));
-    }
-    if result != -1 {
-        return Err(BrowserError::ExecuteProcess(result));
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    let dispatch = has_subprocess_switch(std::env::args_os().skip(1));
+    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+    let dispatch = true;
+    if dispatch {
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        cef::sys::load_library().map_err(BrowserError::LibraryLoad)?;
+        let _ = api_hash(cef::sys::CEF_API_VERSION, 0);
+        let result = execute_process(Some(args.as_main_args()), Some(&mut app), sandbox_info);
+        if result >= 0 {
+            return Ok(BrowserBootstrap::SubprocessExit(result));
+        }
+        if result != -1 {
+            return Err(BrowserError::ExecuteProcess(result));
+        }
     }
 
     let profile_paths = match profile_paths {
@@ -2042,6 +2060,12 @@ fn bootstrap_args_with_paths(
 pub fn run_subprocess() -> i32 {
     let args = Args::new();
 
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    if let Err(error) = cef::sys::load_library() {
+        log::error!("CEF subprocess could not load its browser library: {error}");
+        return 1;
+    }
+
     #[cfg(target_os = "macos")]
     let _sandbox = {
         let mut sandbox = cef::sandbox::Sandbox::new();
@@ -2072,6 +2096,14 @@ pub fn run_subprocess() -> i32 {
     );
     let result = execute_process(Some(args.as_main_args()), Some(&mut app), ptr::null_mut());
     if result < 0 { 1 } else { result }
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn has_subprocess_switch(arguments: impl IntoIterator<Item = impl AsRef<OsStr>>) -> bool {
+    arguments.into_iter().any(|argument| {
+        let argument = argument.as_ref();
+        argument == "--type" || argument.to_string_lossy().starts_with("--type=")
+    })
 }
 
 fn owned_cef_string(value: &CefStringUserfree) -> Option<Arc<str>> {
@@ -4862,6 +4894,16 @@ fn ensure_no_active_data_operations(active_operations: &AtomicU64) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[test]
+    fn subprocess_switch_accepts_chromium_forms_without_matching_other_flags() {
+        assert!(has_subprocess_switch(["--type=renderer"]));
+        assert!(has_subprocess_switch(["--type", "zygote"]));
+        assert!(!has_subprocess_switch(["--typewriter=renderer"]));
+        assert!(!has_subprocess_switch(["--url=--type=renderer"]));
+        assert!(!has_subprocess_switch(["--verbose"]));
+    }
 
     #[test]
     fn keys_the_page_ignores_are_reported_handled() {

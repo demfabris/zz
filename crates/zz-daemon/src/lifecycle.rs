@@ -10,7 +10,9 @@ use std::{
 #[cfg(any(feature = "daemon", test))]
 use std::{fs::OpenOptions, io::Write};
 
-use sysinfo::{Pid, Process, ProcessesToUpdate, Signal, System, get_current_pid};
+use sysinfo::{
+    Pid, Process, ProcessRefreshKind, ProcessesToUpdate, Signal, System, get_current_pid,
+};
 use thiserror::Error;
 #[cfg(any(feature = "daemon", test))]
 use zz_protocol::PROTOCOL_VERSION;
@@ -37,7 +39,12 @@ impl IdentityRecord {
     #[cfg(any(feature = "daemon", test))]
     fn current() -> io::Result<Self> {
         let pid = get_current_pid().map_err(io::Error::other)?;
-        let system = System::new_all();
+        let mut system = System::new();
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[pid]),
+            true,
+            ProcessRefreshKind::nothing(),
+        );
         let process = system
             .process(pid)
             .ok_or_else(|| io::Error::other(format!("could not inspect current process {pid}")))?;
@@ -195,7 +202,12 @@ pub fn terminate_incompatible_daemon(
         ));
     }
 
-    let mut system = System::new_all();
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[current_pid, process_pid]),
+        true,
+        ProcessRefreshKind::everything(),
+    );
     let current = system.process(current_pid).ok_or_else(|| {
         DaemonRecoveryError::UnsafeTarget("could not inspect the current process".to_owned())
     })?;
@@ -354,7 +366,7 @@ fn request_termination(process: &Process) -> bool {
 fn wait_for_process_exit(system: &mut System, pid: Pid, start_time: u64) -> bool {
     let deadline = Instant::now() + TERMINATION_TIMEOUT;
     loop {
-        system.refresh_processes(ProcessesToUpdate::All, true);
+        system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
         if system
             .process(pid)
             .is_none_or(|process| process.start_time() != start_time)

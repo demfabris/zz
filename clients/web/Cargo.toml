@@ -56,8 +56,8 @@ type_complexity = "allow"
 unused_self = "allow"
 
 [patch."https://github.com/zed-industries/zed"]
-gpui = { git = "https://github.com/demfabris/zed", rev = "7bdd43258b8389d8d609ae7d4f92707d192cbeaa", version = "=0.2.2" }
-gpui_platform = { git = "https://github.com/demfabris/zed", rev = "7bdd43258b8389d8d609ae7d4f92707d192cbeaa" }
+gpui = { git = "https://github.com/demfabris/zed", rev = "25655fcd99ebbdb4c8287ff01d540044d12fa10f", version = "=0.2.2" }
+gpui_platform = { git = "https://github.com/demfabris/zed", rev = "25655fcd99ebbdb4c8287ff01d540044d12fa10f" }
 
 [profile.dev]
 debug = 1

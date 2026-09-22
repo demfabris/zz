@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use gpui::{
     AnyElement, App, Context, DragMoveEvent, Entity, IntoElement, KeyUpEvent, MouseButton, Render,
     Window, div, prelude::*,
@@ -15,8 +17,7 @@ use crate::window::frame::rounded_window_frame;
 use crate::{
     agent::AgentController,
     browser::controller::BrowserController,
-    config::{frame_content_corner_radius, resolved_config, settings::OpenSettings},
-    diagnostics::fps::app_fps_overlay,
+    config::{frame_content_corner_radius, settings::OpenSettings},
     mux::client::MuxClient,
     request_window_close,
     status_bar::render_gui_status_bar,
@@ -30,7 +31,13 @@ use crate::{
     },
 };
 
-pub use crate::diagnostics::fps::AppFpsMeter;
+type BrowserHistoryAppearance = Vec<(
+    zz_protocol::PaneId,
+    String,
+    String,
+    Option<String>,
+    Option<Arc<[u8]>>,
+)>;
 
 pub struct AppShell {
     workspace: Entity<AppView>,
@@ -38,7 +45,7 @@ pub struct AppShell {
     agent_controller: Entity<AgentController>,
     sidebar: Entity<WorkspaceSidebar>,
     mux: Entity<MuxClient>,
-    app_fps_meter: Entity<AppFpsMeter>,
+    browser_history_appearance: BrowserHistoryAppearance,
 }
 
 impl AppShell {
@@ -46,7 +53,6 @@ impl AppShell {
         workspace: Entity<AppView>,
         controller: Entity<BrowserController>,
         agent_controller: Entity<AgentController>,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let sidebar = workspace.read(cx).sidebar();
@@ -89,15 +95,68 @@ impl AppShell {
             .detach();
         cx.observe_global::<crate::update::UpdateState>(|_, cx| cx.notify())
             .detach();
-        let app_fps_meter = cx.new(|cx| AppFpsMeter::new(window, cx));
+        let mut history_revision = crate::browser::recent_pages::revision(cx);
+        cx.observe_global::<crate::browser::recent_pages::RecentPages>(move |shell, cx| {
+            let revision = crate::browser::recent_pages::revision(cx);
+            if revision == history_revision {
+                return;
+            }
+            history_revision = revision;
+            let appearance = shell.current_browser_history_appearance(cx);
+            if appearance != shell.browser_history_appearance {
+                shell.browser_history_appearance = appearance;
+                cx.notify();
+            }
+        })
+        .detach();
         Self {
             workspace,
             controller,
             agent_controller,
             sidebar,
             mux,
-            app_fps_meter,
+            browser_history_appearance: Vec::new(),
         }
+    }
+
+    fn current_browser_history_appearance(&self, cx: &App) -> BrowserHistoryAppearance {
+        use crate::browser::recent_pages;
+        use zz_ui::navigation::status::{MAX_VISIBLE_WINDOWS, visible_window_range};
+
+        let sidebar = self.sidebar.read(cx);
+        if sidebar.route() != WorkspaceRoute::App || sidebar.mode() != ChromeMode::Titlebar {
+            return Vec::new();
+        }
+        let mux = self.mux.read(cx);
+        let snapshot = mux.snapshot();
+        let model = zz_client::StatusBarModel::from_snapshot(
+            &snapshot,
+            mux.attached_session(),
+            None,
+            crate::config::status_bar_settings(cx),
+        );
+        let active = model
+            .windows
+            .iter()
+            .position(|window| window.active)
+            .unwrap_or(0);
+        let visible = visible_window_range(model.windows.len(), active, MAX_VISIBLE_WINDOWS);
+        model.windows[visible]
+            .iter()
+            .flat_map(|window| &window.panes)
+            .filter_map(|pane| {
+                let zz_protocol::PaneKindSnapshot::Browser(browser) = &pane.kind else {
+                    return None;
+                };
+                Some((
+                    pane.id,
+                    browser.profile.clone(),
+                    browser.url().to_owned(),
+                    recent_pages::title(&browser.profile, browser.url(), cx),
+                    recent_pages::favicon(&browser.profile, browser.url(), cx),
+                ))
+            })
+            .collect()
     }
 
     #[cfg(not(target_os = "ios"))]
@@ -245,9 +304,6 @@ impl AppShell {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let show_fps = resolved_config(cx).show_fps.value;
-        self.app_fps_meter
-            .update(cx, |meter, cx| meter.set_enabled(show_fps, cx));
         let (route, mode) = {
             let sidebar = self.sidebar.read(cx);
             (sidebar.route(), sidebar.mode())
@@ -267,10 +323,8 @@ impl Render for AppShell {
 
         let slideover = (route == WorkspaceRoute::App && self.sidebar.read(cx).slideover_open())
             .then(|| self.render_slideover(cx));
-        let overlays = show_fps
-            .then(|| app_fps_overlay(self.app_fps_meter.clone()).into_any_element())
+        let overlays = slideover
             .into_iter()
-            .chain(slideover)
             .chain(dialog_layer.into_iter().map(IntoElement::into_any_element))
             .chain(
                 notification_layer
@@ -415,20 +469,6 @@ impl Render for AppShell {
                 .on_action(cx.listener(|shell, _: &menus::ToggleSidebar, _, cx| {
                     shell.sidebar.update(cx, WorkspaceSidebar::toggle_mode);
                 }))
-                .on_action(|_: &menus::ShowFps, _, cx| {
-                    let enabled = !resolved_config(cx).show_fps.value;
-                    if let Err(error) = crate::config::set_config_key(
-                        crate::config::ConfigKey::ShowFps,
-                        if enabled { "true" } else { "false" },
-                    ) {
-                        crate::window::toast::push(
-                            zz_ui::notification::Notification::error(format!(
-                                "Could not change Show FPS: {error}"
-                            )),
-                            cx,
-                        );
-                    }
-                })
                 .on_action(|_: &menus::CheckForUpdates, _, cx| crate::update::check_now(cx))
                 .on_action(|_: &menus::OpenLogs, _, cx| crate::diagnostics::open_logs(cx))
                 .on_action(|_: &menus::ImportTmuxConfig, window, cx| {
@@ -531,8 +571,7 @@ mod tests {
                     cx,
                 )
             });
-            let shell =
-                cx.new(|cx| AppShell::new(workspace, controller, agent_controller, window, cx));
+            let shell = cx.new(|cx| AppShell::new(workspace, controller, agent_controller, cx));
             crate::build_root(shell, window, cx)
         });
         let cx: &mut VisualTestContext = cx;

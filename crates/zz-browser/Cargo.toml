@@ -38,5 +38,8 @@ objc2-core-foundation = { workspace = true, features = ["CFDictionary", "CFNumbe
 objc2-io-surface.workspace = true
 objc2-metal.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

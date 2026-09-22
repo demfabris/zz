@@ -5,7 +5,6 @@ use std::{
     ops::Range,
     path::Path,
     sync::Arc,
-    time::Instant,
 };
 
 #[cfg(target_os = "macos")]
@@ -47,7 +46,7 @@ use zz_ui::browser::{
     browser_site_menu, browser_start_surface, browser_toolbar_button,
 };
 use zz_ui::feedback::browser_clear_site_data_alert;
-use zz_ui::pane::{PaneDrag, frame_rate_badge, pane_drag_button, pane_header_icon_button};
+use zz_ui::pane::{PaneDrag, pane_drag_button, pane_header_icon_button};
 use zz_ui::{
     ActiveTheme as _, Colorize as _, IconName, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
@@ -68,9 +67,8 @@ use crate::{
     },
     browser::element::BrowserElement,
     browser::screenshot::Screenshot,
-    config::{pane_content_radii, resolved_config},
+    config::pane_content_radii,
     diagnostics,
-    diagnostics::fps::{FPS_SAMPLE_INTERVAL, FrameRateSampler},
     keymap::ChromeChord,
     mux::{
         client::MuxClient,
@@ -381,6 +379,8 @@ struct BrowserChromeView {
     state: ChromeState,
 }
 
+type HistoryIcons = Option<(String, Vec<(String, Option<Arc<[u8]>>)>)>;
+
 impl BrowserChromeView {
     fn new(
         browser: WeakEntity<BrowserView>,
@@ -429,7 +429,7 @@ pub(crate) struct BrowserView {
     gpu_context: Option<BrowserGpuContext>,
     frame_session: Option<SessionId>,
     image_generation: u64,
-    browser_fps: FrameRateSampler,
+    history_icons: HistoryIcons,
     current_url: String,
     mux_tabs: Vec<String>,
     mux_active: usize,
@@ -670,6 +670,22 @@ impl BrowserView {
                 view.handle_controller_event(controller, event, window, cx);
             },
         );
+        let mut history_revision = recent_pages::revision(cx);
+        cx.observe_global::<recent_pages::RecentPages>(move |view, cx| {
+            let revision = recent_pages::revision(cx);
+            if revision == history_revision {
+                return;
+            }
+            history_revision = revision;
+            let icons = view.current_history_icons(cx);
+            if icons != view.history_icons {
+                view.history_icons = icons;
+                if view.visible {
+                    cx.notify();
+                }
+            }
+        })
+        .detach();
         let focus_controller = controller.clone();
         let focus_pane = pane;
         let focus_in = window.on_focus_in(&focus_handle, cx, move |_, cx| {
@@ -719,23 +735,6 @@ impl BrowserView {
             controller.set_active_tab(pane, active_tab, cx);
             controller.request_browser(pane, active_tab, request, cx);
         });
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(FPS_SAMPLE_INTERVAL).await;
-                if this
-                    .update(cx, |view, cx| {
-                        if view.browser_fps.sample(Instant::now()) {
-                            cx.notify();
-                        }
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-
         Self {
             pane,
             mux,
@@ -764,7 +763,7 @@ impl BrowserView {
             gpu_context,
             frame_session: None,
             image_generation: 0,
-            browser_fps: FrameRateSampler::new(),
+            history_icons: None,
             current_url: initial_url,
             mux_tabs,
             mux_active,
@@ -816,6 +815,49 @@ impl BrowserView {
         self.error.is_none()
             && is_blank_url(&self.current_url)
             && !self.tabs[self.active_tab_index()].popup
+    }
+
+    fn current_history_icons(&self, cx: &App) -> HistoryIcons {
+        if !self.visible {
+            return None;
+        }
+        let mut urls = self
+            .tabs
+            .iter()
+            .map(|tab| {
+                if tab.id == self.active_tab {
+                    self.current_url.clone()
+                } else {
+                    tab.url.clone()
+                }
+            })
+            .collect::<Vec<_>>();
+        if self.shows_empty_state() {
+            urls.extend(
+                dedupe_recents(
+                    recent_pages::recent(&self.profile, cx, EMPTY_STATE_RECENT_LIMIT * 8),
+                    EMPTY_STATE_RECENT_LIMIT,
+                )
+                .into_iter()
+                .map(|page| page.url),
+            );
+        }
+        if self.address_editing {
+            urls.extend(
+                self.omnibox
+                    .suggestions
+                    .iter()
+                    .map(|suggestion| suggestion.url.clone()),
+            );
+        }
+        let icons = urls
+            .into_iter()
+            .map(|url| {
+                let icon = recent_pages::favicon(&self.profile, &url, cx);
+                (url, icon)
+            })
+            .collect();
+        Some((self.profile.clone(), icons))
     }
 
     fn set_address_editing(&mut self, editing: bool, cx: &mut Context<Self>) {
@@ -1371,7 +1413,9 @@ impl BrowserView {
             | ControllerEvent::BrowserDataFailed { .. }
             | ControllerEvent::BrowserFailed { .. } => return,
         }
-        cx.notify();
+        if self.visible {
+            cx.notify();
+        }
     }
 
     fn handle_inactive_tab_event(
@@ -1617,7 +1661,6 @@ impl BrowserView {
         };
         self.frame_session = Some(frame.session);
         self.image_generation = frame.generation;
-        self.browser_fps.record_frame();
         log::trace!(
             target: "zz::diagnostics::browser_render",
             "consume_frame pane={} session={} generation={} delivery_generation={} tier={tier} logical={}x{} device={}x{} pool_generation={:?} sequence={:?} image_strong_count={image_strong_count:?} retired_images_len={} retired_images_capacity={} total_elapsed_us={}",
@@ -3540,10 +3583,8 @@ impl Render for BrowserChromeView {
 
 impl Render for BrowserView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let show_fps = resolved_config(cx).show_fps.value;
         let shows_empty_state = self.shows_empty_state();
         let shows_native_state = shows_empty_state || self.error.is_some();
-        self.browser_fps.set_enabled(show_fps, Instant::now());
         if self.chrome_profile_discovery == ChromeProfileDiscovery::NotStarted {
             self.refresh_chrome_profiles(false, window, cx);
         }
@@ -3791,16 +3832,6 @@ impl Render for BrowserView {
 
         if self.element_pick_active {
             content = content.child(BrowserPickStatus::new("Select an element · Esc to cancel"));
-        }
-
-        if show_fps {
-            content = content.child(
-                div()
-                    .absolute()
-                    .top(px(8.0))
-                    .right(px(8.0))
-                    .child(frame_rate_badge("CEF", self.browser_fps.fps(), cx)),
-            );
         }
 
         let omnibox_results = self.render_omnibox_results(cx);
@@ -4089,7 +4120,12 @@ fn cursor_style(cursor: BrowserCursor) -> CursorStyle {
 
 #[cfg(test)]
 mod tests {
-    use std::{any::TypeId, cell::RefCell, collections::HashSet, rc::Rc};
+    use std::{
+        any::TypeId,
+        cell::{Cell, RefCell},
+        collections::HashSet,
+        rc::Rc,
+    };
 
     #[cfg(not(target_os = "macos"))]
     use gpui::VisualTestContext;
@@ -4711,6 +4747,81 @@ mod tests {
                 Some(&SelectTab { index }),
             );
         }
+    }
+
+    #[gpui::test]
+    fn hidden_title_events_update_history_without_notifying_the_pane(cx: &mut TestAppContext) {
+        let url = "https://example.com/";
+        let profile = zz_browser::DEFAULT_BROWSER_PROFILE;
+        cx.update(|cx| {
+            zz_ui::init(cx);
+            cx.set_global(recent_pages::RecentPages::default());
+            recent_pages::record_visit(profile, url, cx);
+        });
+        let view_slot = Rc::new(RefCell::new(None));
+        let captured_view = Rc::clone(&view_slot);
+        let pane = PaneId(7);
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let controller =
+                cx.new(|cx| BrowserController::new(Err(BrowserError::AlreadyShutdown), cx));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let view = cx.new(|cx| {
+                BrowserView::new(
+                    pane,
+                    &BrowserDescriptor::single(url.to_owned(), profile.to_owned()),
+                    controller,
+                    mux,
+                    window,
+                    cx,
+                )
+            });
+            captured_view.replace(Some(view.clone()));
+            Root::new(view, window, cx)
+        });
+        let view = view_slot.borrow().clone().expect("captured browser view");
+        let notifications = Rc::new(Cell::new(0));
+        let observed = Rc::clone(&notifications);
+        cx.update(|_, cx| {
+            cx.observe(&view, move |_, _| observed.set(observed.get() + 1))
+                .detach();
+        });
+        for title in ["Hidden first", "Hidden second"] {
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    let controller = view.controller.clone();
+                    view.handle_controller_event(
+                        &controller,
+                        &ControllerEvent::Browser {
+                            pane,
+                            tab: view.active_tab,
+                            event: BrowserEvent::TitleChanged {
+                                session: SessionId(1),
+                                title: Arc::from(title),
+                            },
+                        },
+                        window,
+                        cx,
+                    );
+                    assert_eq!(view.title, title);
+                    assert_eq!(
+                        recent_pages::title(profile, url, cx).as_deref(),
+                        Some(title)
+                    );
+                });
+            });
+        }
+        assert_eq!(notifications.get(), 0);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| view.set_visible(true, window, cx));
+        });
+        assert!(notifications.get() > 0);
+        cx.update(|_, cx| assert_eq!(view.read(cx).title, "Hidden second"));
     }
 
     #[gpui::test]

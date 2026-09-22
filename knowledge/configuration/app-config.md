@@ -9,14 +9,14 @@ tags:
 - window
 - appearance
 - mux
-timestamp: 2026-09-17T00:00:00Z
+timestamp: 2026-09-22T00:00:00Z
 ---
 
 # Overview
 
 The GUI process loads the first existing `zz/config` file from the user's platform configuration
 roots. `crates/zz/src/config/mod.rs` resolves the candidates when `run_app` enters the GPUI application
-closure, parses named client-local behavior/layout/diagnostic/theme/browser knobs plus
+closure, parses named client-local behavior/layout/theme/browser knobs plus
 chrome-color entries into typed
 `AppConfig`, `BrowserConfig`, and `UiFontConfig` values, parses the one app-owned ACP key into `AgentConfig`,
 collects repeatable `chrome-keybind`/`chrome-unbind` entries for the client-local keymap, and collects the supported
@@ -102,7 +102,6 @@ The client-local schema includes these scalar settings and chrome colors.
 | `window-background-blur` | `false` | `true` or `false` | Whether the desktop shows through the window chrome, blurred |
 | `animations` | `true` | `true` or `false` | Whether interface transitions, loading indicators, scrollbar fades, and animated UI images move |
 | `tray` | `true` | `true` or `false` | Shows a native tray icon while the GUI runs. Closing the window or quitting hides zz when the icon is available, `quit-daemon-on-exit` is false, and the local daemon has sessions; otherwise the usual close or quit behavior applies. Applies live from Settings → System or file edits. Quit and Stop Sessions in the tray menu stops the daemon |
-| `show-fps` | `false` | `true` or `false` | Whether the titlebar GPUI meter **and** each browser pane's CEF meter are shown |
 | `quit-daemon-on-exit` | `false` | `true` or `false` | Whether quitting the app stops the daemon even while sessions are live |
 | `auto-restart-stale-daemon` | `false` | `true` or `false` | Whether a protocol-mismatched local daemon is terminated and replaced on connect. Off by default because it ends every running session |
 | `check-for-updates` | `true` | `true` or `false` | Whether the GUI fetches the GitHub release list ten seconds after launch and daily after that, offering a newer release as a toast. The channel follows the running build (a `-beta.N` version takes prereleases). One anonymous request; nothing else is sent. Release builds only unless `ZZ_UPDATE_CHECK=1`; `ZZ_UPDATE_CHECK=0` silences every build. Surfaced in Settings under About |
@@ -244,13 +243,9 @@ The native macOS client keeps the default derivation strengths and does not show
 Chrome chroma comes from `zz/config` alone, never from the terminal's palette: there is no key that
 makes application chrome follow terminal colors.
 
-`show-fps` is a single switch over two independent pipelines. `diagnostics/fps.rs`'s `AppFpsMeter` samples
-GPUI's per-window `FrameTimingCollector` for the titlebar badge, while each `BrowserView` keeps its
-own `FrameRateSampler` counting only fresh OSR images it consumes. They are actual rates
-rather than limits and **can legitimately disagree**: demand-driven GPUI can draw slowly while idle,
-a static CEF page can publish zero frames, and animated browser content can run under CEF's separate
-focus ceiling. One switch is the whole surface: `show-app-fps` and `show-browser-fps` are **not**
-aliases for it, and leaving either in the file produces the normal `unsupported key` diagnostic.
+zz has no frame-rate overlay. The `show-fps` key was removed together with GPUI's `profiler`
+feature, which it needed; a leftover `show-fps` line, like the older `show-app-fps` and
+`show-browser-fps`, only logs the normal `unsupported key` warning and changes nothing.
 
 `quit-daemon-on-exit` changes what app quit sends: `true` issues `kill-server`, `false` (the default)
 issues `detach()`. Leaving it off is what preserves the multiplexer guarantee that live sessions
@@ -580,7 +575,7 @@ always-live inactive-opacity factor.
 | Editor | **Typography** (`editor-font-size`) · **Display** (`editor-line-numbers`, `editor-relative-line-numbers`, `editor-soft-wrap`, `editor-vim-mode`) |
 | Panes | **Layout** (`pane-gaps`) · **Appearance** (`pane-background-opacity`) · **Focus** (`pane-inactive-opacity`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width` . all disabled without gaps) |
 | Hosts | **Machines** (configured hosts, live connection state, Remove) · **Add host** (an inline ssh destination field) |
-| System | **Tray** (`tray`, only where the profile has one) · **Daemon** (`quit-daemon-on-exit`) · **Diagnostics** (`show-fps`) · **Experimental** (`experimental-editor-pane`, `experimental-agent-pane`, each row present only with its cargo feature). `auto-restart-stale-daemon` is a file key with no Settings row |
+| System | **Tray** (`tray`, only where the profile has one) · **Daemon** (`quit-daemon-on-exit`) · **Experimental** (`experimental-editor-pane`, `experimental-agent-pane`, each row present only with its cargo feature). `auto-restart-stale-daemon` is a file key with no Settings row |
 | Multiplexer | **Split panes**, **Options** (Prefix, Mode keys, Mouse, History limit, Clipboard, Escape time), **Import** (path, Choose, Import), and `zz/mux.conf` editor with Reload and Save |
 | Terminal | **Appearance** (Font family, Font size, Theme, Cursor style, Cursor blink, Background opacity, Padding X/Y), **Import** (path, Choose, Import), and the `zz/config` appearance editor |
 | About | Centered mark (the Dock render at 88pt), name, tagline and version badge · **Updates** (`check-for-updates`, plus a Latest-release row that reads the update state: Check now, or Update / What's new once a newer release is known; desktop only) · **Build** (`CARGO_PKG_VERSION`, OS · arch, the short `ZZ_GPUI_SOURCE` revision, with a copy button on Version that puts all three on one line) · **Project** (repository, releases, new issue, license) |
@@ -708,9 +703,6 @@ pane-inactive-opacity = 0.7
 pane-margin = 8
 pane-corner-radius = 6
 pane-border-width = 0.5
-
-# One switch drives both FPS readouts; they are separate pipelines.
-show-fps = true
 
 # Off by default . the daemon outliving the app is what preserves sessions.
 quit-daemon-on-exit = false

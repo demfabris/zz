@@ -586,7 +586,7 @@ pub struct BrowserController {
     active_tabs: BTreeMap<PaneId, TabId>,
     pane_viewports: BTreeMap<PaneId, Viewport>,
     focused_panes: BTreeSet<PaneId>,
-    wheel_decay_generations: BTreeMap<BrowserKey, u64>,
+    wheel_decay_tasks: BTreeMap<BrowserKey, (u64, Task<()>)>,
     wheel_decay_generation: u64,
     external_begin_frame_hot_until: BTreeMap<BrowserKey, Instant>,
     next_external_begin_frame: BTreeMap<BrowserKey, ExternalBeginFrameDeadline>,
@@ -595,6 +595,7 @@ pub struct BrowserController {
     pump_hot_until: Option<Instant>,
     pump_deadline: Option<Instant>,
     pump_generation: u64,
+    pump_task: Option<Task<()>>,
     queued_cef_work: Vec<CefWork>,
     detached_runtime_phase: Option<RuntimePhase>,
     deferred_runtime_signals: Vec<RuntimeSignal>,
@@ -638,7 +639,7 @@ impl BrowserController {
                     active_tabs: BTreeMap::new(),
                     pane_viewports: BTreeMap::new(),
                     focused_panes: BTreeSet::new(),
-                    wheel_decay_generations: BTreeMap::new(),
+                    wheel_decay_tasks: BTreeMap::new(),
                     wheel_decay_generation: 0,
                     external_begin_frame_hot_until: BTreeMap::new(),
                     next_external_begin_frame: BTreeMap::new(),
@@ -647,6 +648,7 @@ impl BrowserController {
                     pump_hot_until: None,
                     pump_deadline: None,
                     pump_generation: 0,
+                    pump_task: None,
                     queued_cef_work: Vec::new(),
                     detached_runtime_phase: None,
                     deferred_runtime_signals: Vec::new(),
@@ -671,7 +673,7 @@ impl BrowserController {
                 active_tabs: BTreeMap::new(),
                 pane_viewports: BTreeMap::new(),
                 focused_panes: BTreeSet::new(),
-                wheel_decay_generations: BTreeMap::new(),
+                wheel_decay_tasks: BTreeMap::new(),
                 wheel_decay_generation: 0,
                 external_begin_frame_hot_until: BTreeMap::new(),
                 next_external_begin_frame: BTreeMap::new(),
@@ -680,6 +682,7 @@ impl BrowserController {
                 pump_hot_until: None,
                 pump_deadline: None,
                 pump_generation: 0,
+                pump_task: None,
                 queued_cef_work: Vec::new(),
                 detached_runtime_phase: None,
                 deferred_runtime_signals: Vec::new(),
@@ -736,7 +739,7 @@ impl BrowserController {
                 session.set_focus(false);
                 session.set_viewport(viewport);
             }
-            self.wheel_decay_generations.remove(&previous_key);
+            self.wheel_decay_tasks.remove(&previous_key);
             self.external_begin_frame_hot_until.remove(&previous_key);
             self.next_external_begin_frame.remove(&previous_key);
             self.adaptive_begin_frame_throttles.remove(&previous_key);
@@ -752,7 +755,7 @@ impl BrowserController {
         }
 
         let focused = self.focused_panes.contains(&pane);
-        let wheel_boosted = self.wheel_decay_generations.contains_key(&key);
+        let wheel_boosted = self.wheel_decay_tasks.contains_key(&key);
         let frame_rate =
             effective_pane_frame_rate(self.frame_rate_ceiling(), focused, wheel_boosted);
         let became_visible = if let Some(session) = self.sessions.get_mut(&key) {
@@ -995,7 +998,7 @@ impl BrowserController {
             let pane_frame_rate = effective_pane_frame_rate(
                 frame_rate_ceiling,
                 self.focused_panes.contains(&key.0),
-                self.wheel_decay_generations.contains_key(key),
+                self.wheel_decay_tasks.contains_key(key),
             );
             let interval = if hot {
                 if adaptive_enabled {
@@ -1496,10 +1499,10 @@ impl BrowserController {
         };
         let key = (pane, tab);
         if focused {
-            self.wheel_decay_generations.remove(&key);
+            self.wheel_decay_tasks.remove(&key);
         }
         let frame_rate_ceiling = self.frame_rate_ceiling();
-        let wheel_boosted = self.wheel_decay_generations.contains_key(&key);
+        let wheel_boosted = self.wheel_decay_tasks.contains_key(&key);
         if let Some(session) = self.sessions.get(&key) {
             session.set_focus(focused);
             session.set_frame_rate(effective_pane_frame_rate(
@@ -1551,19 +1554,29 @@ impl BrowserController {
             return;
         }
         session.set_frame_rate(frame_rate_ceiling);
+        self.schedule_wheel_decay(key, cx);
+    }
+
+    fn schedule_wheel_decay(&mut self, key: BrowserKey, cx: &mut Context<Self>) {
         self.wheel_decay_generation = self.wheel_decay_generation.wrapping_add(1).max(1);
         let generation = self.wheel_decay_generation;
-        self.wheel_decay_generations.insert(key, generation);
-        cx.spawn(async move |this, cx| {
+        let task = cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(UNFOCUSED_SCROLL_FRAME_RATE_DECAY)
                 .await;
             let _ = this.update(cx, |controller, _| {
-                if controller.wheel_decay_generations.get(&key) != Some(&generation) {
+                if controller
+                    .wheel_decay_tasks
+                    .get(&key)
+                    .map(|(current, _)| *current)
+                    != Some(generation)
+                {
                     return;
                 }
-                controller.wheel_decay_generations.remove(&key);
-                if controller.focused_panes.contains(&pane) {
+                if let Some((_, task)) = controller.wheel_decay_tasks.remove(&key) {
+                    task.detach();
+                }
+                if controller.focused_panes.contains(&key.0) {
                     return;
                 }
                 if let Some(session) = controller.sessions.get(&key) {
@@ -1574,8 +1587,8 @@ impl BrowserController {
                     ));
                 }
             });
-        })
-        .detach();
+        });
+        self.wheel_decay_tasks.insert(key, (generation, task));
     }
 
     pub(crate) fn send_key(
@@ -1697,7 +1710,7 @@ impl BrowserController {
         self.forced_readback.remove(&key);
         self.first_frame_watchdogs.remove(&key);
         self.recreate_after_close.remove(&key);
-        self.wheel_decay_generations.remove(&key);
+        self.wheel_decay_tasks.remove(&key);
         self.external_begin_frame_hot_until.remove(&key);
         self.next_external_begin_frame.remove(&key);
         self.adaptive_begin_frame_throttles.remove(&key);
@@ -1730,7 +1743,7 @@ impl BrowserController {
         );
         keys.extend(self.recreate_after_close.range(range.clone()).copied());
         keys.extend(
-            self.wheel_decay_generations
+            self.wheel_decay_tasks
                 .range(range.clone())
                 .map(|(key, _)| *key),
         );
@@ -1892,6 +1905,10 @@ impl BrowserController {
             return Task::ready(self.is_shutdown_complete());
         }
         self.shutting_down = true;
+        self.pump_task = None;
+        self.pump_deadline = None;
+        self.pump_generation = self.pump_generation.wrapping_add(1).max(1);
+        self.wheel_decay_tasks.clear();
         self.pending_browsers.clear();
         self.first_frame_watchdogs.clear();
         self.recreate_after_close.clear();
@@ -2134,11 +2151,15 @@ impl BrowserController {
         {
             delay = delay.min(deadline.saturating_duration_since(now));
         }
-        let deadline = now.checked_add(delay).unwrap_or(now);
-        self.pump_deadline = Some(deadline);
+        self.arm_pump_timer(delay, cx);
+    }
+
+    fn arm_pump_timer(&mut self, delay: Duration, cx: &mut Context<Self>) {
+        let now = Instant::now();
+        self.pump_deadline = Some(now.checked_add(delay).unwrap_or(now));
         self.pump_generation = self.pump_generation.wrapping_add(1).max(1);
         let generation = self.pump_generation;
-        cx.spawn(async move |this, cx| {
+        self.pump_task = Some(cx.spawn(async move |this, cx| {
             let timer = cx.background_executor().timer(delay);
             timer.await;
             let pump = this.update(cx, |controller, cx| {
@@ -2146,6 +2167,9 @@ impl BrowserController {
                     return None;
                 }
                 controller.pump_deadline = None;
+                if let Some(task) = controller.pump_task.take() {
+                    task.detach();
+                }
                 controller.send_due_external_begin_frames();
                 let pump = controller
                     .runtime
@@ -2159,8 +2183,7 @@ impl BrowserController {
             if let Ok(Some(pump)) = pump {
                 pump.do_message_loop_work();
             }
-        })
-        .detach();
+        }));
     }
 
     fn next_pump_delay(&self, now: Instant) -> Option<Duration> {
@@ -2398,7 +2421,7 @@ impl BrowserController {
         session.set_frame_rate(effective_pane_frame_rate(
             self.frame_rate_ceiling(),
             focused,
-            self.wheel_decay_generations.contains_key(&key),
+            self.wheel_decay_tasks.contains_key(&key),
         ));
         self.sessions.insert(key, session);
         if watch_first_frame {
@@ -2532,7 +2555,7 @@ impl BrowserController {
         }
         if closed && !self.shutting_down {
             self.sessions.remove(&key);
-            self.wheel_decay_generations.remove(&key);
+            self.wheel_decay_tasks.remove(&key);
             self.external_begin_frame_hot_until.remove(&key);
             self.next_external_begin_frame.remove(&key);
             self.adaptive_begin_frame_throttles.remove(&key);
@@ -2629,6 +2652,102 @@ mod tests {
 
         cx.run_until_parked();
         assert_eq!(*calls.borrow(), vec![1, 2]);
+    }
+
+    #[gpui::test]
+    fn pump_timer_replacement_preserves_the_new_deadline(cx: &mut TestAppContext) {
+        let controller = cx.update(|cx| {
+            cx.new(|cx| BrowserController::new(Err(BrowserError::AlreadyShutdown), cx))
+        });
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                controller.arm_pump_timer(Duration::from_millis(10), cx);
+            });
+        });
+        while cx.executor().tick() {}
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                controller.arm_pump_timer(Duration::from_millis(50), cx);
+            });
+        });
+        while cx.executor().tick() {}
+        cx.executor().advance_clock(Duration::from_millis(10));
+        while cx.executor().tick() {}
+        cx.update(|cx| {
+            assert!(controller.read(cx).pump_task.is_some());
+            assert!(controller.read(cx).pump_deadline.is_some());
+        });
+        cx.executor().advance_clock(Duration::from_millis(40));
+        while cx.executor().tick() {}
+        cx.update(|cx| {
+            assert!(controller.read(cx).pump_task.is_none());
+            assert!(controller.read(cx).pump_deadline.is_none());
+            controller.update(cx, |controller, cx| {
+                controller.arm_pump_timer(Duration::from_secs(1), cx);
+                controller.arm_pump_timer(Duration::ZERO, cx);
+            });
+        });
+        while cx.executor().tick() {}
+        cx.update(|cx| assert!(controller.read(cx).pump_task.is_none()));
+    }
+
+    #[gpui::test]
+    fn wheel_decay_replacement_extends_the_boost_and_focus_cancels_it(cx: &mut TestAppContext) {
+        let key = (PaneId(7), TabId(3));
+        let controller = cx.update(|cx| {
+            cx.new(|cx| BrowserController::new(Err(BrowserError::AlreadyShutdown), cx))
+        });
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                controller.active_tabs.insert(key.0, key.1);
+                controller.schedule_wheel_decay(key, cx);
+            });
+        });
+        while cx.executor().tick() {}
+        cx.executor()
+            .advance_clock(UNFOCUSED_SCROLL_FRAME_RATE_DECAY / 2);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                controller.schedule_wheel_decay(key, cx);
+            });
+        });
+        while cx.executor().tick() {}
+        cx.executor()
+            .advance_clock(UNFOCUSED_SCROLL_FRAME_RATE_DECAY / 2);
+        while cx.executor().tick() {}
+        cx.update(|cx| assert!(controller.read(cx).wheel_decay_tasks.contains_key(&key)));
+        cx.executor()
+            .advance_clock(UNFOCUSED_SCROLL_FRAME_RATE_DECAY / 2);
+        while cx.executor().tick() {}
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                assert!(controller.wheel_decay_tasks.is_empty());
+                controller.schedule_wheel_decay(key, cx);
+                controller.set_focus(key.0, true);
+                assert!(controller.wheel_decay_tasks.is_empty());
+                controller.schedule_wheel_decay(key, cx);
+                controller.close_pane(key.0);
+                assert!(controller.wheel_decay_tasks.is_empty());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn shutdown_cancels_scheduled_browser_timers(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let controller =
+                cx.new(|cx| BrowserController::new(Err(BrowserError::AlreadyShutdown), cx));
+            controller.update(cx, |controller, cx| {
+                controller.arm_pump_timer(Duration::from_mins(1), cx);
+                controller.schedule_wheel_decay((PaneId(7), TabId(3)), cx);
+                let generation = controller.pump_generation;
+                drop(controller.shutdown(cx));
+                assert!(controller.pump_task.is_none());
+                assert!(controller.pump_deadline.is_none());
+                assert_ne!(controller.pump_generation, generation);
+                assert!(controller.wheel_decay_tasks.is_empty());
+            });
+        });
     }
 
     #[test]

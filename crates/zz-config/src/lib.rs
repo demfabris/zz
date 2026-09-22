@@ -53,7 +53,6 @@ pub const DEFAULT_USE_SYSTEM_TITLEBAR: bool = false;
 pub const DEFAULT_WINDOW_BACKGROUND_BLUR: bool = false;
 pub const DEFAULT_ANIMATIONS: bool = true;
 pub const DEFAULT_TRAY: bool = true;
-pub const DEFAULT_SHOW_FPS: bool = false;
 pub const DEFAULT_QUIT_DAEMON_ON_EXIT: bool = false;
 pub const DEFAULT_AUTO_RESTART_STALE_DAEMON: bool = false;
 pub const DEFAULT_CHECK_FOR_UPDATES: bool = true;
@@ -111,7 +110,6 @@ pub enum ConfigKey {
     WindowBackgroundBlur,
     Animations,
     Tray,
-    ShowFps,
     QuitDaemonOnExit,
     AutoRestartStaleDaemon,
     CheckForUpdates,
@@ -160,7 +158,6 @@ impl ConfigKey {
             Self::WindowBackgroundBlur => "window-background-blur",
             Self::Animations => "animations",
             Self::Tray => "tray",
-            Self::ShowFps => "show-fps",
             Self::QuitDaemonOnExit => "quit-daemon-on-exit",
             Self::AutoRestartStaleDaemon => "auto-restart-stale-daemon",
             Self::CheckForUpdates => "check-for-updates",
@@ -210,7 +207,6 @@ impl ConfigKey {
             "window-background-blur" => Some(Self::WindowBackgroundBlur),
             "animations" => Some(Self::Animations),
             "tray" => Some(Self::Tray),
-            "show-fps" => Some(Self::ShowFps),
             "quit-daemon-on-exit" => Some(Self::QuitDaemonOnExit),
             "auto-restart-stale-daemon" => Some(Self::AutoRestartStaleDaemon),
             "check-for-updates" => Some(Self::CheckForUpdates),
@@ -273,7 +269,6 @@ impl ConfigKey {
             | Self::WindowBackgroundBlur
             | Self::Animations
             | Self::Tray
-            | Self::ShowFps
             | Self::QuitDaemonOnExit
             | Self::AutoRestartStaleDaemon
             | Self::CheckForUpdates
@@ -422,7 +417,6 @@ pub struct AppConfig {
     pub window_background_blur: ConfigValue<bool>,
     pub animations: ConfigValue<bool>,
     pub tray: ConfigValue<bool>,
-    pub show_fps: ConfigValue<bool>,
     pub quit_daemon_on_exit: ConfigValue<bool>,
     pub auto_restart_stale_daemon: ConfigValue<bool>,
     pub check_for_updates: ConfigValue<bool>,
@@ -471,7 +465,6 @@ impl Default for AppConfig {
             window_background_blur: ConfigValue::from_default(DEFAULT_WINDOW_BACKGROUND_BLUR),
             animations: ConfigValue::from_default(DEFAULT_ANIMATIONS),
             tray: ConfigValue::from_default(DEFAULT_TRAY),
-            show_fps: ConfigValue::from_default(DEFAULT_SHOW_FPS),
             quit_daemon_on_exit: ConfigValue::from_default(DEFAULT_QUIT_DAEMON_ON_EXIT),
             auto_restart_stale_daemon: ConfigValue::from_default(DEFAULT_AUTO_RESTART_STALE_DAEMON),
             check_for_updates: ConfigValue::from_default(DEFAULT_CHECK_FOR_UPDATES),
@@ -526,7 +519,6 @@ impl AppConfig {
             ConfigKey::WindowBackgroundBlur => Some(&mut self.window_background_blur),
             ConfigKey::Animations => Some(&mut self.animations),
             ConfigKey::Tray => Some(&mut self.tray),
-            ConfigKey::ShowFps => Some(&mut self.show_fps),
             ConfigKey::QuitDaemonOnExit => Some(&mut self.quit_daemon_on_exit),
             ConfigKey::AutoRestartStaleDaemon => Some(&mut self.auto_restart_stale_daemon),
             ConfigKey::CheckForUpdates => Some(&mut self.check_for_updates),
@@ -1087,7 +1079,6 @@ pub fn parse_config(source: &str, system_font_family: &str) -> ParsedConfig {
             | ConfigKey::WindowBackgroundBlur
             | ConfigKey::Animations
             | ConfigKey::Tray
-            | ConfigKey::ShowFps
             | ConfigKey::QuitDaemonOnExit
             | ConfigKey::AutoRestartStaleDaemon
             | ConfigKey::CheckForUpdates

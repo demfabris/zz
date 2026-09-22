@@ -340,67 +340,6 @@ pub fn prune_stall_samples(dir: &Path) {
     }
 }
 
-#[derive(Debug, Default, Eq, PartialEq)]
-pub struct TimingDistribution {
-    pub sample_count: usize,
-    pub p50_us: u128,
-    pub p95_us: u128,
-    pub max_us: u128,
-}
-
-impl TimingDistribution {
-    #[must_use]
-    pub fn from_microseconds(mut values: Vec<u128>) -> Self {
-        values.sort_unstable();
-        Self {
-            sample_count: values.len(),
-            p50_us: nearest_rank_percentile(&values, 50),
-            p95_us: nearest_rank_percentile(&values, 95),
-            max_us: values.last().copied().unwrap_or_default(),
-        }
-    }
-}
-
-#[must_use]
-pub fn nearest_rank_percentile(sorted_values: &[u128], percentile: usize) -> u128 {
-    debug_assert!((1..=100).contains(&percentile));
-    if sorted_values.is_empty() {
-        return 0;
-    }
-    let rank = sorted_values.len().saturating_mul(percentile).div_ceil(100);
-    sorted_values[rank.saturating_sub(1).min(sorted_values.len() - 1)]
-}
-
-#[must_use]
-pub fn frames_per_second_thousandths(frame_count: usize, sample_duration: Duration) -> u128 {
-    rounded_scaled_ratio(
-        (frame_count as u128).saturating_mul(Duration::from_secs(1).as_nanos()),
-        sample_duration.as_nanos(),
-        1_000,
-    )
-}
-
-#[must_use]
-pub fn rounded_scaled_ratio(numerator: u128, denominator: u128, scale: u128) -> u128 {
-    if denominator == 0 {
-        return 0;
-    }
-    numerator
-        .saturating_mul(scale)
-        .saturating_add(denominator / 2)
-        / denominator
-}
-
-#[must_use]
-pub fn format_thousandths(value: u128) -> String {
-    format!("{}.{:03}", value / 1_000, value % 1_000)
-}
-
-#[must_use]
-pub fn format_hundredths(value: u128) -> String {
-    format!("{}.{:02}", value / 100, value % 100)
-}
-
 #[must_use]
 pub fn verbose_requested(arguments: &[OsString]) -> bool {
     arguments.iter().skip(1).any(|argument| {
@@ -874,24 +813,6 @@ mod tests {
     }
 
     #[test]
-    fn computes_nearest_rank_timing_percentiles() {
-        let distribution = TimingDistribution::from_microseconds(vec![40, 10, 50, 30, 20]);
-        assert_eq!(
-            distribution,
-            TimingDistribution {
-                sample_count: 5,
-                p50_us: 30,
-                p95_us: 50,
-                max_us: 50,
-            }
-        );
-        assert_eq!(
-            TimingDistribution::from_microseconds(Vec::new()),
-            TimingDistribution::default()
-        );
-    }
-
-    #[test]
     fn the_raw_terminal_client_never_mirrors_its_log_to_the_screen() {
         let dir = std::env::temp_dir().join(format!("zz-ring-mirror-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -923,21 +844,5 @@ mod tests {
         assert!(old.exists(), "previous generation was kept");
         assert!(fs::metadata(&path).unwrap().len() <= 33 * 2);
         let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn formats_frame_rates_and_invalidation_averages() {
-        assert_eq!(
-            frames_per_second_thousandths(1, Duration::from_secs(5)),
-            200
-        );
-        assert_eq!(
-            frames_per_second_thousandths(120, Duration::from_secs(5)),
-            24_000
-        );
-        assert_eq!(frames_per_second_thousandths(1, Duration::ZERO), 0);
-        assert_eq!(rounded_scaled_ratio(3, 2, 100), 150);
-        assert_eq!(format_thousandths(24_001), "24.001");
-        assert_eq!(format_hundredths(150), "1.50");
     }
 }

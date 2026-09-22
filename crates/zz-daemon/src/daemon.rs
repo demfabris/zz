@@ -5122,13 +5122,20 @@ impl Shared {
         let events = {
             let mut inner = self.inner.lock();
             inner.engine.set_format_now(unix_timestamp());
+            let clients = inner
+                .control_outputs
+                .iter()
+                .filter(|(_, output)| !output.subscriptions.is_empty())
+                .filter_map(|(client, _)| {
+                    Some((*client, client_attached_session(&inner, *client)?))
+                })
+                .collect::<Vec<_>>();
+            if clients.is_empty() {
+                return;
+            }
             let base_facts = format_hook_facts(&inner);
-            let clients = inner.control_outputs.keys().copied().collect::<Vec<_>>();
             let mut events = Vec::new();
-            for client in clients {
-                let Some(session) = client_attached_session(&inner, client) else {
-                    continue;
-                };
+            for (client, session) in clients {
                 let client_facts = client_format_facts(&inner, client, session);
                 let mut subscriptions = inner
                     .control_outputs
@@ -28724,21 +28731,43 @@ impl Shared {
         records.retain(|record| record.zz.is_none());
         let panes = {
             let inner = self.inner.lock();
+            if records.is_empty() && inner.claude_peer_states.is_empty() {
+                return;
+            }
+            let facts = inner.engine.format_facts();
             inner
                 .engine
                 .state
                 .windows
                 .values()
-                .flat_map(|window| window.panes.iter())
-                .filter(|(_, state)| matches!(state.kind, PaneKind::Terminal))
-                .map(|(pane, _)| {
-                    (
+                .flat_map(|window| {
+                    window
+                        .panes
+                        .iter()
+                        .map(move |(pane, state)| (window, pane, state))
+                })
+                .filter_map(|(window, pane, state)| {
+                    if !matches!(state.kind, PaneKind::Terminal) {
+                        return None;
+                    }
+                    let target = pane.to_string();
+                    if facts.user_option(
+                        &target,
+                        &window.id.to_string(),
+                        &window.session.to_string(),
+                        "@agent-peer-state",
+                    ) == Some("off")
+                    {
+                        return None;
+                    }
+                    Some((
                         *pane,
+                        target,
                         inner
                             .engine
                             .pane_runtime_facts(*pane)
                             .and_then(|runtime| runtime.pid),
-                    )
+                    ))
                 })
                 .collect::<Vec<_>>()
         };
@@ -28746,40 +28775,32 @@ impl Shared {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        for (pane, pane_pid) in panes {
-            let target = pane.to_string();
-            let value = claude_peers::record_for_pane(&records, &target, pane_pid)
-                .filter(|record| {
-                    let updated_at = if record.status_updated_at == 0 {
-                        record.updated_at
-                    } else {
-                        record.status_updated_at
-                    };
-                    !record.status.is_empty()
-                        && now.checked_sub(updated_at).is_some_and(|age| {
-                            u128::from(age) <= Duration::from_mins(10).as_millis()
-                        })
-                })
-                .map(|record| {
-                    if record.status == "busy" {
-                        "working"
-                    } else {
-                        "idle"
-                    }
-                });
+        let processes = std::cell::OnceCell::new();
+        for (pane, target, pane_pid) in panes {
+            let value = claude_peers::record_for_pane_with_processes(
+                &records, &target, pane_pid, &processes,
+            )
+            .filter(|record| {
+                let updated_at = if record.status_updated_at == 0 {
+                    record.updated_at
+                } else {
+                    record.status_updated_at
+                };
+                !record.status.is_empty()
+                    && now
+                        .checked_sub(updated_at)
+                        .is_some_and(|age| u128::from(age) <= Duration::from_mins(10).as_millis())
+            })
+            .map(|record| {
+                if record.status == "busy" {
+                    "working"
+                } else {
+                    "idle"
+                }
+            });
             let value = {
                 let mut inner = self.inner.lock();
-                let Some(window) = inner.engine.state.window_for_pane(pane) else {
-                    continue;
-                };
-                let session = inner.engine.state.windows[&window].session.to_string();
-                if inner.engine.format_facts().user_option(
-                    &target,
-                    &window.to_string(),
-                    &session,
-                    "@agent-peer-state",
-                ) == Some("off")
-                {
+                if inner.engine.state.window_for_pane(pane).is_none() {
                     continue;
                 }
                 if let Some(value) = value {
@@ -55889,6 +55910,49 @@ mod tests {
     }
 
     #[test]
+    fn empty_control_subscriptions_still_refresh_the_format_clock() {
+        for attached_control in [false, true] {
+            let shared = Arc::new(Shared::new(1));
+            if attached_control {
+                let (session, _, _) = shared
+                    .inner
+                    .lock()
+                    .engine
+                    .state
+                    .create_session("clock")
+                    .unwrap();
+                let (control, _) = shared.register_subscribed(
+                    ClientKind::Control,
+                    None,
+                    None,
+                    OutboundMailbox::new(),
+                );
+                shared.attach(control, session).unwrap();
+            }
+            {
+                let mut inner = shared.inner.lock();
+                assert!(
+                    inner
+                        .control_outputs
+                        .values()
+                        .all(|output| output.subscriptions.is_empty())
+                );
+                inner.engine.set_format_now(1);
+            }
+            let before = unix_timestamp();
+            shared.refresh_control_subscriptions();
+            let after = unix_timestamp();
+            let context = shared
+                .inner
+                .lock()
+                .engine
+                .format_status_context(None, None, None);
+            let now = u64::try_from(context.format_now.unwrap()).unwrap();
+            assert!((before..=after).contains(&now));
+        }
+    }
+
+    #[test]
     fn refresh_client_b_parses_replaces_removes_and_emits_changed_scopes() {
         assert!(matches!(
             parse_control_subscription("name:%*:#{pane_title}:tail"),
@@ -76828,18 +76892,32 @@ set-option -g @alias-mixed-next yes
                 record["status"] = "busy".into();
                 fs::write(path, serde_json::to_vec(&record).expect("record JSON"))
                     .expect("peer record");
-                shared
-                    .execute(
-                        ClientId(1),
-                        ClientKind::Command,
-                        &mut ExecutionContext::default(),
-                        &CommandInvocation::new(
-                            "set-option",
-                            ["-p", "-t", &target, "@agent-peer-state", "off"],
-                        ),
-                    )
-                    .expect("disable peer state");
-                shared.sync_claude_peer_states();
+                for scope in ["-g", "-p"] {
+                    shared
+                        .execute(
+                            ClientId(1),
+                            ClientKind::Command,
+                            &mut ExecutionContext::default(),
+                            &CommandInvocation::new(
+                                "set-option",
+                                [scope, "-t", &target, "@agent-peer-state", "off"],
+                            ),
+                        )
+                        .expect("disable peer state");
+                    shared.sync_claude_peer_states();
+                    assert!(!shared.inner.lock().claude_peer_states.contains_key(&pane));
+                    shared
+                        .execute(
+                            ClientId(1),
+                            ClientKind::Command,
+                            &mut ExecutionContext::default(),
+                            &CommandInvocation::new(
+                                "set-option",
+                                [scope, "-u", "-t", &target, "@agent-peer-state"],
+                            ),
+                        )
+                        .expect("clear peer state opt-out");
+                }
                 let state = shared
                     .execute(
                         ClientId(1),

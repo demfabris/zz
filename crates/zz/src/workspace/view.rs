@@ -4229,7 +4229,7 @@ mod tests {
             });
             captured_workspace.replace(Some(workspace.clone()));
             let shell = cx.new(|cx| {
-                crate::app_shell::AppShell::new(workspace, controller, agent_controller, window, cx)
+                crate::app_shell::AppShell::new(workspace, controller, agent_controller, cx)
             });
             crate::build_root(shell, window, cx)
         });

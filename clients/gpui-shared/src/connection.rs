@@ -206,6 +206,12 @@ pub struct Connection {
         AuthenticationPrompt,
         std::sync::mpsc::Sender<zz_daemon::AskpassReply>,
     )>,
+    #[cfg(target_os = "ios")]
+    resume: bool,
+    #[cfg(target_os = "ios")]
+    pending_session: Option<String>,
+    #[cfg(target_os = "ios")]
+    retry: Option<gpui::Task<()>>,
     pub core: ClientCore,
     pub status: String,
     pub connected: bool,
@@ -244,6 +250,12 @@ impl Connection {
             reader: None,
             #[cfg(target_os = "ios")]
             auth_prompt: None,
+            #[cfg(target_os = "ios")]
+            resume: false,
+            #[cfg(target_os = "ios")]
+            pending_session: None,
+            #[cfg(target_os = "ios")]
+            retry: None,
             core: ClientCore::new(),
             status: "Connecting…".into(),
             connected: false,
@@ -483,6 +495,7 @@ impl Connection {
         }
         #[cfg(target_os = "ios")]
         {
+            self.retry = None;
             self.reader = None;
             self.native = None;
             self.client = None;
@@ -552,6 +565,15 @@ impl Connection {
         self.attach_target(session.to_string(), cx);
     }
 
+    #[cfg(target_os = "ios")]
+    pub fn open_session(&mut self, session: String, cx: &mut Context<Self>) {
+        if self.connected {
+            self.attach_target(session, cx);
+        } else {
+            self.pending_session = Some(session);
+        }
+    }
+
     fn attach_target(&mut self, session: String, cx: &mut Context<Self>) {
         self.epoch = self.epoch.wrapping_add(1);
         self.attaching = true;
@@ -581,6 +603,12 @@ impl Connection {
     }
 
     pub fn set_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
+        #[cfg(target_os = "ios")]
+        if focused && !self.focused && self.resume && self.native.is_none() {
+            self.focused = true;
+            self.reconnect(cx);
+            return;
+        }
         if self.focused != focused {
             self.focused = focused;
             if !focused {
@@ -613,22 +641,22 @@ impl Connection {
                     self.pasted_images.clear();
                     self.agent_events.clear();
                     self.agent_cursors.clear();
-                    self.attach_target(
-                        self.remembered_session.map_or_else(
-                            || {
-                                #[cfg(target_os = "ios")]
-                                {
-                                    std::env::var("ZZ_GPUI_SESSION").unwrap_or_default()
-                                }
-                                #[cfg(not(target_os = "ios"))]
-                                {
-                                    String::new()
-                                }
-                            },
-                            |id| id.to_string(),
-                        ),
-                        cx,
+                    let target = self.remembered_session.map_or_else(
+                        || {
+                            #[cfg(target_os = "ios")]
+                            {
+                                std::env::var("ZZ_GPUI_SESSION").unwrap_or_default()
+                            }
+                            #[cfg(not(target_os = "ios"))]
+                            {
+                                String::new()
+                            }
+                        },
+                        |id| id.to_string(),
                     );
+                    #[cfg(target_os = "ios")]
+                    let target = self.pending_session.take().unwrap_or(target);
+                    self.attach_target(target, cx);
                 }
                 CoreEvent::Attached { session } => {
                     self.attaching = false;
@@ -799,6 +827,7 @@ impl Connection {
             };
             match event {
                 crate::transport::Event::Connected(client) => {
+                    self.resume = true;
                     let hello = client.server_hello().clone();
                     self.client = Some(client);
                     self.receive(ProtocolMessage::ServerHello(hello), cx);
@@ -845,6 +874,7 @@ impl Connection {
         if reply.send(answer).is_err() {
             self.disconnect_native("Authentication expired. Reconnect to try again.".into(), cx);
         } else if cancelled {
+            self.resume = false;
             self.disconnect_native("Authentication cancelled".into(), cx);
         } else {
             self.status = "Connecting…".into();
@@ -864,6 +894,18 @@ impl Connection {
         self.dialog_active = false;
         self.attaching = false;
         self.status = status;
+        if self.resume && self.focused {
+            self.retry = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(2))
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.native.is_none() {
+                        this.reconnect(cx);
+                    }
+                });
+            }));
+        }
         cx.notify();
     }
 

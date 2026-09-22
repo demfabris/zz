@@ -92,6 +92,7 @@ if [[ "$mode" == testflight ]]; then
     done
     plutil -replace CFBundleSupportedPlatforms -json '["iPhoneOS"]' "$plist"
     plutil -replace UIRequiredDeviceCapabilities -json '["arm64"]' "$plist"
+    plutil -replace CFBundleURLTypes -json '[{"CFBundleURLName": "dev.zz.session", "CFBundleURLSchemes": ["zz"]}]' "$plist"
     compile_icon "$app" iphoneos zz
     entitlements="$out/entitlements-$build_number.plist"
     write_entitlements "$entitlements" "$team" "$bundle_id" 0

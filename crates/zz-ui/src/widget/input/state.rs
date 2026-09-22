@@ -1264,6 +1264,7 @@ impl InputState {
             }
             return;
         }
+        window.request_virtual_keyboard();
 
         match event.click_count {
             0 | 1 => {

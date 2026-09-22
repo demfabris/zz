@@ -116,6 +116,33 @@ pub(crate) fn modifiers(flags: u64) -> Modifiers {
     }
 }
 
+pub fn key_command(shortcut: &str) -> Option<(String, usize)> {
+    let mut flags = 0;
+    let mut rest = shortcut;
+    while let Some((modifier, tail)) = rest.split_once('-')
+        && !tail.is_empty()
+    {
+        flags |= match modifier {
+            "S" => 1 << 17,
+            "C" => 1 << 18,
+            "M" => 1 << 19,
+            "D" => 1 << 20,
+            _ => return None,
+        };
+        rest = tail;
+    }
+    let mut characters = rest.chars();
+    match (characters.next(), characters.next()) {
+        (Some(character), None) => Some((character.to_lowercase().to_string(), flags)),
+        _ => match rest {
+            "Enter" => Some(("\r".into(), flags)),
+            "Tab" => Some(("\t".into(), flags)),
+            "Escape" => Some(("\u{1b}".into(), flags)),
+            _ => None,
+        },
+    }
+}
+
 fn printable(text: &str) -> bool {
     !text.is_empty()
         && !text.starts_with("UIKeyInput")

@@ -16,16 +16,19 @@ accesskit_ios = "0.1.2"
 anyhow = "1"
 async-task = "4.7"
 base64 = "0.23.1"
+block2 = "0.6.2"
 chrono = "0.4.45"
 image = { version = "=0.25.10", default-features = false }
 dispatch2 = "0.3.1"
 env_logger.workspace = true
 futures = "0.3"
 gpui.workspace = true
-gpui_wgpu = { git = "https://github.com/demfabris/zed", rev = "25655fcd99ebbdb4c8287ff01d540044d12fa10f" }
+gpui_wgpu = { git = "https://github.com/demfabris/zed", rev = "53a9c89f37923c10d87e3019068f9fa3b98e7347" }
 log.workspace = true
+memmap2 = "0.9.11"
 objc = "0.2"
 parking_lot.workspace = true
+percent-encoding = "2.3.2"
 raw-window-handle.workspace = true
 serde.workspace = true
 serde_json.workspace = true

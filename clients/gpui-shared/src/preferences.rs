@@ -38,6 +38,8 @@ pub struct Preferences {
     pub palette_host_prefix: String,
     pub palette_show_keys: bool,
     pub extend_bottom_safe_area: bool,
+    pub keep_screen_awake: bool,
+    pub system_text_size: bool,
 }
 
 impl Default for Preferences {
@@ -73,6 +75,8 @@ impl Default for Preferences {
             palette_host_prefix: "~".into(),
             palette_show_keys: true,
             extend_bottom_safe_area: false,
+            keep_screen_awake: false,
+            system_text_size: true,
         }
     }
 }

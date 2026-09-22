@@ -112,10 +112,28 @@ const BUFFER_HINTS: &[ChooserHint] = &[
     },
 ];
 
+#[cfg(target_os = "ios")]
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = zz, no_json)]
+pub(crate) struct OpenSession {
+    pub name: String,
+}
+
+#[cfg(target_os = "ios")]
+pub(crate) fn session_from_url(url: &str) -> Option<String> {
+    let (_, rest) = url.split_once("://")?;
+    let name = rest.strip_prefix("attach/")?.trim_end_matches('/');
+    let name = percent_encoding::percent_decode_str(name)
+        .decode_utf8()
+        .ok()?;
+    (!name.is_empty()).then(|| name.into_owned())
+}
+
 pub(crate) struct AppShell {
     connection: Entity<Connection>,
     connection_status: String,
     connected: bool,
+    idle_guard: Option<gpui::Task<()>>,
     #[cfg(target_os = "ios")]
     auth_prompt_id: Option<u64>,
     terminals: HashMap<PaneId, Entity<TerminalPane>>,
@@ -181,6 +199,7 @@ impl AppShell {
             {
                 this.connected = connection.connected;
                 this.connection_status.clone_from(&connection.status);
+                this.sync_idle_guard(cx);
                 cx.notify();
             }
         });
@@ -312,6 +331,7 @@ impl AppShell {
             connection,
             connection_status: String::new(),
             connected: false,
+            idle_guard: None,
             #[cfg(target_os = "ios")]
             auth_prompt_id: None,
             terminals: HashMap::new(),
@@ -364,7 +384,23 @@ impl AppShell {
         };
         this.connection.update(cx, Connection::start);
         this.preferences.apply(&this.connection, window, cx);
+        #[cfg(target_os = "ios")]
+        cx.set_menus(this.menus());
         this
+    }
+
+    pub(super) fn sync_idle_guard(&mut self, cx: &mut Context<Self>) {
+        let keep_awake = self.preferences.keep_screen_awake && self.connected;
+        if keep_awake == self.idle_guard.is_some() {
+            return;
+        }
+        self.idle_guard = keep_awake.then(|| {
+            let guard = cx.prevent_idle_sleep("zz connection");
+            cx.spawn(async move |_, _| {
+                let _guard = guard.await;
+                std::future::pending::<()>().await;
+            })
+        });
     }
 
     fn send_input(&self, input: InputMessage, cx: &mut App) {
@@ -577,14 +613,35 @@ impl AppShell {
             ChromeKeymap::for_profile(ChromeProfile::DesktopApple).resolve(UI_TABLE, &input)
         });
         match action {
-            Some(ChromeAction::OpenCommandPalette) => {
+            Some(
+                action @ (ChromeAction::OpenCommandPalette
+                | ChromeAction::OpenSettings
+                | ChromeAction::ToggleSidebar
+                | ChromeAction::UiZoomIn
+                | ChromeAction::UiZoomOut
+                | ChromeAction::UiZoomReset
+                | ChromeAction::ClosePane),
+            ) => self.chrome_command(action, window, cx),
+            _ => return,
+        }
+        cx.stop_propagation();
+    }
+
+    fn chrome_command(
+        &mut self,
+        action: ChromeAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            ChromeAction::OpenCommandPalette => {
                 self.open_palette(None, window, cx);
             }
-            Some(ChromeAction::OpenSettings) => {
+            ChromeAction::OpenSettings => {
                 self.settings = Some(SettingsSection::Appearance);
                 cx.notify();
             }
-            Some(ChromeAction::ToggleSidebar) => {
+            ChromeAction::ToggleSidebar => {
                 if self.slideover {
                     self.release_sidebar_focus(window, cx);
                 } else if !self.sidebar {
@@ -593,21 +650,21 @@ impl AppShell {
                     self.toggle_sidebar(window, cx);
                 }
             }
-            Some(ChromeAction::UiZoomIn) => {
+            ChromeAction::UiZoomIn => {
                 self.preferences
                     .change_zoom(0.1, &self.connection, window, cx);
                 self.sync_zoom_input(window, cx);
             }
-            Some(ChromeAction::UiZoomOut) => {
+            ChromeAction::UiZoomOut => {
                 self.preferences
                     .change_zoom(-0.1, &self.connection, window, cx);
                 self.sync_zoom_input(window, cx);
             }
-            Some(ChromeAction::UiZoomReset) => {
+            ChromeAction::UiZoomReset => {
                 self.preferences.reset_zoom(&self.connection, window, cx);
                 self.sync_zoom_input(window, cx);
             }
-            Some(ChromeAction::ClosePane) => {
+            ChromeAction::ClosePane => {
                 if self.settings.take().is_none()
                     && self.connection.read(cx).connected
                     && !self.connection.read(cx).core.attached_read_only()
@@ -616,9 +673,86 @@ impl AppShell {
                 }
                 cx.notify();
             }
-            _ => return,
+            ChromeAction::NewSession => self.tmux_command("new-session", cx),
+            ChromeAction::NewWindow => self.tmux_command("new-window", cx),
+            ChromeAction::SplitRight => self.tmux_command("split-window -h", cx),
+            ChromeAction::SplitDown => self.tmux_command("split-window -v", cx),
+            _ => {}
         }
-        cx.stop_propagation();
+    }
+
+    fn tmux_command(&mut self, command: &str, cx: &mut Context<Self>) {
+        let connection = self.connection.read(cx);
+        if !connection.connected || connection.core.attached_read_only() {
+            return;
+        }
+        let mut words = command.split_whitespace();
+        if let Some(name) = words.next() {
+            self.command(name, words.map(str::to_owned).collect(), cx);
+        }
+        cx.notify();
+    }
+
+    #[cfg(target_os = "ios")]
+    fn menus(&self) -> Vec<gpui::Menu> {
+        let bindings = self.chrome.bindings();
+        let chrome = |title: &'static str, action: ChromeAction| {
+            gpui::MenuItem::action(
+                title,
+                zz_gpui_ios::MenuCommand {
+                    id: action.name().into(),
+                    shortcut: bindings
+                        .iter()
+                        .find(|(table, _, bound)| table == UI_TABLE && *bound == action)
+                        .map(|(_, key, _)| key.clone().into()),
+                },
+            )
+        };
+        let tmux = |title: &'static str, command: &'static str| {
+            gpui::MenuItem::action(
+                title,
+                zz_gpui_ios::MenuCommand {
+                    id: format!("tmux:{command}").into(),
+                    shortcut: None,
+                },
+            )
+        };
+        vec![
+            gpui::Menu::new("zz").items([chrome("Settings…", ChromeAction::OpenSettings)]),
+            gpui::Menu::new("File").items([
+                chrome("New Session", ChromeAction::NewSession),
+                chrome("New Window", ChromeAction::NewWindow),
+                chrome("Split Right", ChromeAction::SplitRight),
+                chrome("Split Down", ChromeAction::SplitDown),
+                gpui::MenuItem::separator(),
+                chrome("Close Pane", ChromeAction::ClosePane),
+                tmux("Kill Window", "kill-window"),
+            ]),
+            gpui::Menu::new("View").items([
+                chrome("Command Palette…", ChromeAction::OpenCommandPalette),
+                tmux("Choose Window…", "choose-tree -w"),
+                chrome("Toggle Sidebar", ChromeAction::ToggleSidebar),
+                tmux("Zoom Pane", "resize-pane -Z"),
+                gpui::MenuItem::separator(),
+                chrome("Zoom In", ChromeAction::UiZoomIn),
+                chrome("Zoom Out", ChromeAction::UiZoomOut),
+                chrome("Reset Zoom", ChromeAction::UiZoomReset),
+            ]),
+        ]
+    }
+
+    #[cfg(target_os = "ios")]
+    fn menu_command(
+        &mut self,
+        command: &zz_gpui_ios::MenuCommand,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(command) = command.id.strip_prefix("tmux:") {
+            self.tmux_command(command, cx);
+        } else if let Some(action) = ChromeAction::from_name(&command.id) {
+            self.chrome_command(action, window, cx);
+        }
     }
 
     pub(super) fn open_palette(
@@ -2517,6 +2651,17 @@ impl Render for AppShell {
             overlays,
         )
         .track_focus(&self.focus)
+        .map(|shell| {
+            #[cfg(target_os = "ios")]
+            let shell = shell
+                .on_action(cx.listener(Self::menu_command))
+                .on_action(cx.listener(|this, action: &OpenSession, _, cx| {
+                    this.connection.update(cx, |connection, cx| {
+                        connection.open_session(action.name.clone(), cx);
+                    });
+                }));
+            shell
+        })
         .on_drag_move::<SidebarResizeDrag>(cx.listener(
             |this, event: &DragMoveEvent<SidebarResizeDrag>, window, cx| {
                 let previous = this.preferences.sidebar_width;

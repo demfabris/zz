@@ -101,8 +101,51 @@ its pane's content, and display-panes labels keep their tmux styles and alignmen
 Notices preserve severity, duration, and explicit clearing; a failed command reports
 as `command: error`.
 
-The software keyboard stays hidden. Use a hardware keyboard for terminal and
-agent input. The sidebar button reopens navigation on iPhone.
+The sidebar button reopens navigation on iPhone.
+
+## Keyboard
+
+Without a hardware keyboard, tapping a terminal, the agent composer, or any text
+field raises the on-screen keyboard. A row above it adds Escape, Tab, Control, Option,
+the arrows, and a hide button. Control and Option latch for the next key, so
+Control then C sends Ctrl-C. The workspace shrinks to the space above the docked
+keyboard; a floating keyboard leaves the layout alone. Attaching a hardware
+keyboard hides the on-screen one, and detaching it brings it back for the focused
+field. Autocorrect, smart punctuation, and capitalization stay off unless a field
+asks for them.
+
+The view implements `UITextInput`, so IME composition (Japanese, Chinese, Korean),
+dead keys, dictation, and Pencil handwriting reach the focused field. While text is
+being composed, hardware keys go to the input method first.
+
+## Windows, menus, and links
+
+- Each iPad window (Stage Manager, split view, or an external display) runs its own
+  workspace with its own connection. New windows come from the system's window controls.
+- The iPadOS menu bar and the Command-hold shortcut list show the zz, File, and View
+  commands with their Command shortcuts: Settings, New Session, New Window, Split Right,
+  Split Down, Close Pane, Kill Window, Command Palette, Choose Window, Toggle Sidebar,
+  Zoom Pane, and UI zoom.
+- `zz://attach/<session>` (`zz-dev://` for development builds) switches the frontmost
+  window to that session, or attaches to it after the next connect. Shortcuts can open it
+  with the Open URL action. The deprecated native dev app also claims `zz-dev://`; remove
+  it if links open the wrong app.
+- Long-press text in a terminal to select it; the system edit menu offers Copy, Paste,
+  and Select All.
+- Drop images onto the workspace to upload them to the focused pane, as with a pasted
+  image; dropped text or links paste as text.
+
+## Lifecycle
+
+The connection reconnects two seconds after it drops, and immediately when the app
+returns to the foreground. Leaving the app keeps the connection open for the short
+background time iPadOS allows. Settings › Advanced › Display can keep the screen
+awake while connected. Under thermal pressure or Low Power Mode, frames are capped
+at 60 per second. iPadOS text size scales the interface (turn it off in Advanced ›
+Display); Reduce Motion and Increase Contrast apply live. The text system loads the
+iOS system fonts, so Chinese, Japanese, Korean, Arabic, Hebrew, and other scripts
+render. Emoji still show as blank: GPUI's text system only treats Noto Color Emoji
+as a color font.
 
 ## Settings
 
@@ -122,14 +165,16 @@ iPhone uses a full-width page with a section menu and a back button.
   cursor, and padding remain visible as host-owned settings.
 - **Status bar:** session menu, window badges, and agent activity controls.
 - **Hosts:** the configured endpoint, connection status, and reconnect.
-- **Advanced:** command palette layout (tree or flat), host prefix, and command shortcuts.
+- **Advanced:** command palette layout (tree or flat), host prefix, and command shortcuts;
+  Display: drawing under the home indicator, matching the system text size, and keeping
+  the screen awake while connected.
 - **About:** app version and source link.
 
 The page omits desktop-only options and controls for unsupported pane kinds.
 Interface and pane preferences are saved atomically in the app container
 at `Library/Application Support/zz-gpui/preferences.json` and restored on launch.
-Touch controls work without a keyboard; editing numeric values or hex colors
-uses a hardware keyboard.
+Touch controls work without a keyboard; numeric values and hex colors open the
+on-screen keyboard.
 
 ## Terminal experiment
 
@@ -169,10 +214,14 @@ saved by this example.
 - A trackpad or mouse drives the app like a desktop pointer: hover states, two-finger and
   wheel scrolling, clicks and drags as mouse events, secondary click for context menus, and an
   I-beam pointer over text.
+- Finger flicks and two-finger trackpad scrolls coast with `UIScrollView`'s deceleration
+  (0.998 per ms); wheel ticks do not coast. Scroll views, lists, and the terminal's scrollback
+  rubber-band past their edges and spring back, and a fling that reaches an edge bounces off it.
+  Mouse-tracking applications, copy mode, and screens without scrollback keep plain scrolling.
+  The bounce lives in the gpui fork (`Overscroll::Bounce` in the backend's gesture tuning).
 
 The standalone example displays one active terminal pane. The main app supports
-multiple terminal and agent panes; full mux overlays remain a later step. The software keyboard stays hidden; composition through
-`UITextInput`, IME, and mobile editing controls still need work.
+multiple terminal and agent panes; full mux overlays remain a later step.
 
 ## Verification
 
@@ -202,6 +251,14 @@ rendered on iPad. Automated checks cover native key
 translation, terminal bindings, and the shared image cache; the web client also
 builds after adopting that cache.
 
+iPad Simulator checks on 2026-09-22 covered the on-screen keyboard, key row, Control
+latch, arrows, hide and system dismiss, tap to reopen, hiding on hardware keyboard
+attach, layout above the keyboard, Option-E dead keys, CJK/Arabic/Hebrew rendering,
+automatic reconnect after a daemon restart, live text size changes, the Command-D menu
+command, a second window scene, `zz://attach/<session>`, and long-press Copy/Paste.
+Drag and drop, dictation, Pencil handwriting, CJK input methods, and the menu bar
+itself were not exercised.
+
 Copy/paste of text copied within the app was verified. Text injected through
 `simctl pbcopy` was not readable from UIKit in this simulator session; cross-app
 paste still needs a device check. Physical keyboard layouts, dead keys, SSH
@@ -228,5 +285,6 @@ just web-build
 
 `crates/zz-gpui-ios` restores the small window/display adapter and scene startup
 from that work. It uses the pinned GPUI fork's wgpu renderer and CosmicText font
-system, with the web client's Inter and Lilex fonts. It explicitly selects Metal because
+system, with the web client's Inter and Lilex fonts plus the memory-mapped iOS
+system fonts. It explicitly selects Metal because
 GPUI's native wgpu convenience constructor defaults to Vulkan and GL.

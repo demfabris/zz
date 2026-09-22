@@ -51,10 +51,26 @@ impl gpui::Global for PlatformReduceMotion {}
 
 impl Preferences {
     pub(super) fn apply(&self, connection: &Entity<Connection>, window: &mut Window, cx: &mut App) {
+        #[cfg(target_os = "ios")]
+        let system = zz_gpui_ios::accessibility();
+        #[cfg(target_os = "ios")]
+        cx.set_global(PlatformReduceMotion(system.reduce_motion));
         if !cx.has_global::<PlatformReduceMotion>() {
             cx.set_global(PlatformReduceMotion(cx.reduce_motion()));
         }
         cx.set_reduce_motion(cx.global::<PlatformReduceMotion>().0 || !self.animations);
+        #[cfg(target_os = "ios")]
+        let (contrast, zoom) = (
+            self.contrast * if system.increase_contrast { 1.25 } else { 1.0 },
+            self.zoom
+                * if self.system_text_size {
+                    system.text_scale
+                } else {
+                    1.0
+                },
+        );
+        #[cfg(not(target_os = "ios"))]
+        let (contrast, zoom) = (self.contrast, self.zoom);
         let pinned = zz_ui::chrome_palette::pinned_theme_mode(self.theme_mode());
         #[cfg(target_os = "ios")]
         {
@@ -88,7 +104,7 @@ impl Preferences {
                 .map(|color| color.and_then(|value| zz_ui::parse_hex(&value).ok())),
         );
         Theme::global_mut(cx).radius = px(self.radius);
-        Theme::global_mut(cx).set_contrast(self.contrast);
+        Theme::global_mut(cx).set_contrast(contrast);
         Theme::global_mut(cx).shadow_strength = self.shadow_strength;
         Theme::global_mut(cx).pane_background_opacity = self.pane_background_opacity;
         Theme::global_mut(cx).pane_glow_strength = self.pane_glow_strength;
@@ -111,8 +127,8 @@ impl Preferences {
         let terminal =
             localized_font_appearance(&connection.read(cx).core, &available_fonts, "Lilex", cx);
         Theme::global_mut(cx).mono_font_family = terminal.font_families[0].clone().into();
-        cx.set_global(UiZoom(self.zoom));
-        window.set_zoom(self.zoom);
+        cx.set_global(UiZoom(zoom));
+        window.set_zoom(zoom);
         connection.update(cx, Connection::set_color_scheme);
         cx.refresh_windows();
     }
@@ -661,6 +677,59 @@ impl AppShell {
                                         this.preferences.extend_bottom_safe_area =
                                             !this.preferences.extend_bottom_safe_area;
                                         this.preferences.save();
+                                        cx.notify();
+                                    })),
+                                narrow,
+                            ))
+                            .child(with_control(
+                                SettingEntry::new(
+                                    "Match system text size",
+                                    "Scale the interface with the iPadOS text size setting.",
+                                )
+                                .title_actions(reset_button(
+                                    "settings-system-text-size-reset",
+                                    self.preferences.system_text_size
+                                        != Preferences::default().system_text_size,
+                                    |this, _, _| {
+                                        this.preferences.system_text_size =
+                                            Preferences::default().system_text_size;
+                                    },
+                                    cx,
+                                )),
+                                Switch::new("settings-system-text-size")
+                                    .checked(self.preferences.system_text_size)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.preferences.system_text_size =
+                                            !this.preferences.system_text_size;
+                                        this.preferences.save();
+                                        this.preferences.apply(&this.connection, window, cx);
+                                        cx.notify();
+                                    })),
+                                narrow,
+                            ))
+                            .child(with_control(
+                                SettingEntry::new(
+                                    "Keep the screen awake",
+                                    "Stop the display from sleeping while connected to a host.",
+                                )
+                                .title_actions(reset_button(
+                                    "settings-keep-awake-reset",
+                                    self.preferences.keep_screen_awake
+                                        != Preferences::default().keep_screen_awake,
+                                    |this, _, cx| {
+                                        this.preferences.keep_screen_awake =
+                                            Preferences::default().keep_screen_awake;
+                                        this.sync_idle_guard(cx);
+                                    },
+                                    cx,
+                                )),
+                                Switch::new("settings-keep-awake")
+                                    .checked(self.preferences.keep_screen_awake)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.preferences.keep_screen_awake =
+                                            !this.preferences.keep_screen_awake;
+                                        this.preferences.save();
+                                        this.sync_idle_guard(cx);
                                         cx.notify();
                                     })),
                                 narrow,

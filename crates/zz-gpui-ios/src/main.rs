@@ -27,16 +27,21 @@ mod transport;
 
 #[cfg(target_os = "ios")]
 fn main() {
-    use gpui::{App, AppContext, Application, WindowOptions, px};
+    use gpui::{App, Application, px};
     use std::{borrow::Cow, rc::Rc};
-    use zz_ui::{Root, Theme, UiZoom};
+    use zz_ui::{Theme, UiZoom};
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    Application::with_platform(Rc::new(
+    let application = Application::with_platform(Rc::new(
         zz_gpui_ios::IosPlatform::new().with_touch_gestures(true),
     ))
-    .with_assets(zz_ui::Assets)
-    .run(|cx: &mut App| {
+    .with_assets(zz_ui::Assets);
+    let (url_sender, mut url_receiver) = futures::channel::mpsc::unbounded::<Vec<String>>();
+    application.on_open_urls(move |urls| {
+        url_sender.unbounded_send(urls).ok();
+    });
+    application.on_reopen(open_workspace);
+    application.run(|cx: &mut App| {
         cx.text_system()
             .add_fonts(vec![
                 Cow::Borrowed(include_bytes!(
@@ -67,15 +72,32 @@ fn main() {
         theme.mono_font_family = "Lilex".into();
         theme.radius = px(6.);
         cx.set_global(UiZoom(1.0));
-        cx.open_window(WindowOptions::default(), |window, cx| {
-            window.set_default_corner_smoothing(4.0);
-            window.set_adaptive_corner_fraction(Some(0.45));
-            let app = cx.new(|cx| app::AppShell::new(window, cx));
-            window.focus(&app.read(cx).focus.clone(), cx);
-            cx.new(|cx| Root::new(app, window, cx).bordered(false))
+        open_workspace(cx);
+        cx.spawn(async move |cx| {
+            use futures::StreamExt as _;
+            while let Some(urls) = url_receiver.next().await {
+                for name in urls.iter().filter_map(|url| app::session_from_url(url)) {
+                    cx.update(|cx| cx.dispatch_action(&app::OpenSession { name }));
+                }
+            }
         })
-        .expect("open zz iOS window");
+        .detach();
     });
+}
+
+#[cfg(target_os = "ios")]
+fn open_workspace(cx: &mut gpui::App) {
+    use gpui::{AppContext, WindowOptions};
+    use zz_ui::Root;
+
+    cx.open_window(WindowOptions::default(), |window, cx| {
+        window.set_default_corner_smoothing(4.0);
+        window.set_adaptive_corner_fraction(Some(0.45));
+        let app = cx.new(|cx| app::AppShell::new(window, cx));
+        window.focus(&app.read(cx).focus.clone(), cx);
+        cx.new(|cx| Root::new(app, window, cx).bordered(false))
+    })
+    .expect("open zz iOS window");
 }
 
 #[cfg(not(target_os = "ios"))]

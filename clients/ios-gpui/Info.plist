@@ -2,6 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
     <key>CFBundleExecutable</key><string>ZZGPUI</string>
     <key>CFBundleIdentifier</key><string>dev.zz.gpui-poc</string>
     <key>CFBundleName</key><string>ZZ GPUI</string>
@@ -19,10 +20,15 @@
     <array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
     <key>UISupportedInterfaceOrientations~ipad</key>
     <array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationPortraitUpsideDown</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
+    <key>CFBundleURLTypes</key>
+    <array><dict>
+        <key>CFBundleURLName</key><string>dev.zz.session</string>
+        <key>CFBundleURLSchemes</key><array><string>zz-dev</string></array>
+    </dict></array>
     <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
     <key>UIApplicationSceneManifest</key>
     <dict>
-        <key>UIApplicationSupportsMultipleScenes</key><false/>
+        <key>UIApplicationSupportsMultipleScenes</key><true/>
         <key>UISceneConfigurations</key>
         <dict>
             <key>UIWindowSceneSessionRoleApplication</key>

@@ -16,10 +16,14 @@ use objc::{
 };
 use parking_lot::Mutex;
 use std::{
+    borrow::Cow,
     ffi::{c_char, c_int},
     path::{Path, PathBuf},
     rc::Rc,
-    sync::{Arc, Once, atomic::AtomicPtr, atomic::Ordering},
+    sync::{
+        Arc, Once,
+        atomic::{AtomicPtr, AtomicUsize, Ordering},
+    },
 };
 
 use crate::id;
@@ -27,10 +31,28 @@ use crate::id;
 static PLATFORM: AtomicPtr<IosPlatform> = AtomicPtr::new(std::ptr::null_mut());
 static REGISTER_DELEGATE: Once = Once::new();
 
-static WINDOW_SCENE: AtomicPtr<Object> = AtomicPtr::new(std::ptr::null_mut());
+static PENDING_SCENE: AtomicPtr<Object> = AtomicPtr::new(std::ptr::null_mut());
+static IDLE_GUARDS: AtomicUsize = AtomicUsize::new(0);
+static BACKGROUND_TASK: AtomicUsize = AtomicUsize::new(0);
 
-pub(crate) fn current_window_scene() -> id {
-    WINDOW_SCENE.load(Ordering::Acquire)
+pub(crate) fn take_window_scene() -> id {
+    let pending = PENDING_SCENE.swap(std::ptr::null_mut(), Ordering::AcqRel);
+    if !pending.is_null() {
+        return pending;
+    }
+    unsafe {
+        let application: id = msg_send![class!(UIApplication), sharedApplication];
+        let scenes: id = msg_send![application, connectedScenes];
+        let scenes: id = msg_send![scenes, allObjects];
+        let count: usize = msg_send![scenes, count];
+        (0..count)
+            .map(|index| -> id { msg_send![scenes, objectAtIndex: index] })
+            .find(|scene| {
+                let is_window_scene: BOOL = msg_send![*scene, isKindOfClass: class!(UIWindowScene)];
+                is_window_scene == YES
+            })
+            .unwrap_or(std::ptr::null_mut())
+    }
 }
 
 unsafe extern "C" {
@@ -50,9 +72,11 @@ pub(crate) struct IosPlatformState {
     text_system: Arc<dyn PlatformTextSystem>,
     finish_launching: Option<Box<dyn FnOnce()>>,
     reopen: Option<Box<dyn FnMut()>>,
-    activated_once: bool,
     touch_gestures: bool,
     appearance: Option<WindowAppearance>,
+    menus: crate::menu::MenuState,
+    menu_action: Option<Box<dyn FnMut(&dyn Action)>>,
+    open_urls: Option<Box<dyn FnMut(Vec<String>)>>,
 }
 
 impl Default for IosPlatform {
@@ -68,6 +92,7 @@ impl IosPlatform {
         let text_system: Arc<dyn PlatformTextSystem> = Arc::new(
             gpui_wgpu::CosmicTextSystem::new_without_system_fonts("Lilex"),
         );
+        text_system.add_fonts(system_fonts()).ok();
 
         Self(Mutex::new(IosPlatformState {
             background_executor: BackgroundExecutor::new(dispatcher.clone()),
@@ -75,15 +100,28 @@ impl IosPlatform {
             text_system,
             finish_launching: None,
             reopen: None,
-            activated_once: false,
             touch_gestures: false,
             appearance: None,
+            menus: Default::default(),
+            menu_action: None,
+            open_urls: None,
         }))
     }
 
     pub fn with_touch_gestures(self, enabled: bool) -> Self {
         self.0.lock().touch_gestures = enabled;
         self
+    }
+}
+
+struct IosGestures;
+
+impl gpui::PlatformGestures for IosGestures {
+    fn tuning(&self) -> gpui::GestureTuning {
+        gpui::GestureTuning {
+            overscroll: gpui::Overscroll::Bounce,
+            ..Default::default()
+        }
     }
 }
 
@@ -130,7 +168,7 @@ impl Platform for IosPlatform {
     }
 
     fn active_window(&self) -> Option<AnyWindowHandle> {
-        None
+        crate::window::active_window()
     }
 
     fn open_window(
@@ -182,7 +220,9 @@ impl Platform for IosPlatform {
             .detach();
     }
 
-    fn on_open_urls(&self, _callback: Box<dyn FnMut(Vec<String>)>) {}
+    fn on_open_urls(&self, callback: Box<dyn FnMut(Vec<String>)>) {
+        self.0.lock().open_urls = Some(callback);
+    }
 
     fn register_url_scheme(&self, _url: &str) -> Task<Result<()>> {
         Task::ready(Err(anyhow!("register_url_scheme unsupported on iOS")))
@@ -224,23 +264,44 @@ impl Platform for IosPlatform {
     fn on_system_sleep(&self, _callback: Box<dyn FnMut()>) {}
 
     fn prevent_idle_sleep(&self, _reason: &str) -> Task<Result<gpui::ActivityGuard>> {
-        Task::ready(Ok(gpui::ActivityGuard::noop()))
+        IDLE_GUARDS.fetch_add(1, Ordering::AcqRel);
+        schedule_idle_timer_sync();
+        Task::ready(Ok(gpui::ActivityGuard::new(|| {
+            IDLE_GUARDS.fetch_sub(1, Ordering::AcqRel);
+            schedule_idle_timer_sync();
+        })))
     }
 
     fn on_system_wake(&self, _callback: Box<dyn FnMut()>) {}
 
-    fn set_menus(&self, _menus: Vec<Menu>, _keymap: &Keymap) {}
+    fn set_menus(&self, menus: Vec<Menu>, _keymap: &Keymap) {
+        self.0.lock().menus = crate::menu::MenuState::new(menus);
+        crate::menu::rebuild();
+    }
 
     fn set_dock_menu(&self, _menu: Vec<MenuItem>, _keymap: &Keymap) {}
 
-    fn on_app_menu_action(&self, _callback: Box<dyn FnMut(&dyn Action)>) {}
+    fn on_app_menu_action(&self, callback: Box<dyn FnMut(&dyn Action)>) {
+        self.0.lock().menu_action = Some(callback);
+    }
 
     fn on_will_open_app_menu(&self, _callback: Box<dyn FnMut()>) {}
 
     fn on_validate_app_menu_command(&self, _callback: Box<dyn FnMut(&dyn Action) -> bool>) {}
 
     fn thermal_state(&self) -> ThermalState {
-        ThermalState::Nominal
+        unsafe {
+            let info: id = msg_send![class!(NSProcessInfo), processInfo];
+            let state: isize = msg_send![info, thermalState];
+            let low_power: BOOL = msg_send![info, isLowPowerModeEnabled];
+            match state {
+                3 => ThermalState::Critical,
+                2 => ThermalState::Serious,
+                _ if low_power == YES => ThermalState::Serious,
+                1 => ThermalState::Fair,
+                _ => ThermalState::Nominal,
+            }
+        }
     }
 
     fn on_thermal_state_change(&self, _callback: Box<dyn FnMut()>) {}
@@ -261,6 +322,10 @@ impl Platform for IosPlatform {
 
     fn is_cursor_visible(&self) -> bool {
         false
+    }
+
+    fn gestures(&self) -> Option<Rc<dyn gpui::PlatformGestures>> {
+        Some(Rc::new(IosGestures))
     }
 
     fn should_auto_hide_scrollbars(&self) -> bool {
@@ -339,6 +404,30 @@ impl Platform for IosPlatform {
     fn on_keyboard_layout_change(&self, _callback: Box<dyn FnMut()>) {}
 }
 
+fn system_fonts() -> Vec<Cow<'static, [u8]>> {
+    let root = PathBuf::from(std::env::var_os("IPHONE_SIMULATOR_ROOT").unwrap_or_default())
+        .join("System/Library/Fonts");
+    ["Core", "CoreAddition", "LanguageSupport", "UnicodeSupport"]
+        .into_iter()
+        .filter_map(|directory| std::fs::read_dir(root.join(directory)).ok())
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_stem().is_some_and(|stem| stem != "LastResort")
+                && path.extension().is_some_and(|extension| {
+                    matches!(extension.to_str(), Some("ttf" | "ttc" | "otf"))
+                })
+        })
+        .filter_map(|path| {
+            let file = std::fs::File::open(path).ok()?;
+            let map: &'static memmap2::Mmap =
+                Box::leak(Box::new(unsafe { memmap2::Mmap::map(&file) }.ok()?));
+            Some(Cow::Borrowed(&map[..]))
+        })
+        .collect()
+}
+
 struct IosKeyboardLayout;
 
 impl PlatformKeyboardLayout for IosKeyboardLayout {
@@ -352,15 +441,19 @@ impl PlatformKeyboardLayout for IosKeyboardLayout {
 }
 
 fn register_delegate_classes() {
-    let mut decl = ClassDecl::new("ZZGPUIAppDelegate", class!(NSObject)).unwrap();
+    let mut decl = ClassDecl::new("ZZGPUIAppDelegate", class!(UIResponder)).unwrap();
     unsafe {
+        decl.add_method(
+            sel!(buildMenuWithBuilder:),
+            build_menu as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(zzMenuCommand:),
+            menu_command as extern "C" fn(&Object, Sel, id),
+        );
         decl.add_method(
             sel!(application:didFinishLaunchingWithOptions:),
             did_finish_launching as extern "C" fn(&Object, Sel, id, id) -> BOOL,
-        );
-        decl.add_method(
-            sel!(applicationDidBecomeActive:),
-            did_become_active as extern "C" fn(&Object, Sel, id),
         );
     }
     decl.register();
@@ -382,12 +475,28 @@ fn register_scene_delegate_class() {
             scene_will_connect as extern "C" fn(&Object, Sel, id, id, id),
         );
         decl.add_method(
+            sel!(scene:openURLContexts:),
+            scene_open_urls as extern "C" fn(&Object, Sel, id, id),
+        );
+        decl.add_method(
+            sel!(sceneDidDisconnect:),
+            scene_did_disconnect as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
             sel!(sceneDidBecomeActive:),
             scene_did_become_active as extern "C" fn(&Object, Sel, id),
         );
         decl.add_method(
             sel!(sceneWillResignActive:),
             scene_will_resign_active as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(sceneDidEnterBackground:),
+            scene_did_enter_background as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(sceneWillEnterForeground:),
+            scene_will_enter_foreground as extern "C" fn(&Object, Sel, id),
         );
         decl.add_method(
             sel!(windowScene:didUpdateCoordinateSpace:interfaceOrientation:traitCollection:),
@@ -410,6 +519,31 @@ fn scene_manifest_present() -> bool {
     }
 }
 
+extern "C" fn build_menu(_: &Object, _: Sel, builder: id) {
+    let platform = PLATFORM.load(Ordering::Acquire);
+    if !platform.is_null() {
+        unsafe { (*platform).0.lock().menus.build(builder) };
+    }
+}
+
+extern "C" fn menu_command(_: &Object, _: Sel, command: id) {
+    let platform = PLATFORM.load(Ordering::Acquire);
+    let Some(index) = crate::menu::command_index(command) else {
+        return;
+    };
+    if platform.is_null() {
+        return;
+    }
+    let (action, callback) = {
+        let mut state = unsafe { (*platform).0.lock() };
+        (state.menus.action(index), state.menu_action.take())
+    };
+    if let (Some(action), Some(mut callback)) = (action, callback) {
+        callback(action.as_ref());
+        unsafe { (*platform).0.lock().menu_action = Some(callback) };
+    }
+}
+
 fn finish_launching() {
     let platform = PLATFORM.load(Ordering::Acquire);
     assert!(!platform.is_null(), "IosPlatform not registered before run");
@@ -426,62 +560,138 @@ extern "C" fn did_finish_launching(_this: &Object, _: Sel, _app: id, _opts: id) 
     YES
 }
 
-extern "C" fn scene_will_connect(_this: &Object, _: Sel, scene: id, _session: id, _options: id) {
+extern "C" fn scene_will_connect(_this: &Object, _: Sel, scene: id, _session: id, options: id) {
     unsafe {
         let is_window_scene: BOOL = msg_send![scene, isKindOfClass: class!(UIWindowScene)];
-        if is_window_scene == YES {
-            WINDOW_SCENE.store(scene, Ordering::Release);
+        if is_window_scene != YES {
+            return;
         }
     }
-    finish_launching();
+    PENDING_SCENE.store(scene, Ordering::Release);
+    let platform = PLATFORM.load(Ordering::Acquire);
+    let launching =
+        !platform.is_null() && unsafe { (*platform).0.lock().finish_launching.is_some() };
+    if launching {
+        finish_launching();
+    } else {
+        reopen();
+    }
+    if !options.is_null() {
+        open_urls(unsafe { msg_send![options, URLContexts] });
+    }
 }
 
-extern "C" fn scene_did_become_active(_this: &Object, _: Sel, _scene: id) {
-    crate::window::scene_active_changed(true);
-    became_active();
+extern "C" fn scene_open_urls(_: &Object, _: Sel, _: id, contexts: id) {
+    open_urls(contexts);
 }
 
-extern "C" fn scene_will_resign_active(_: &Object, _: Sel, _: id) {
-    crate::window::scene_active_changed(false);
+fn open_urls(contexts: id) {
+    let urls: Vec<String> = unsafe {
+        if contexts.is_null() {
+            return;
+        }
+        let contexts: id = msg_send![contexts, allObjects];
+        let count: usize = msg_send![contexts, count];
+        (0..count)
+            .filter_map(|index| {
+                let context: id = msg_send![contexts, objectAtIndex: index];
+                let url: id = msg_send![context, URL];
+                let string: id = msg_send![url, absoluteString];
+                crate::nsstring_to_string(string)
+            })
+            .collect()
+    };
+    let platform = PLATFORM.load(Ordering::Acquire);
+    if urls.is_empty() || platform.is_null() {
+        return;
+    }
+    let callback = unsafe { (*platform).0.lock().open_urls.take() };
+    if let Some(mut callback) = callback {
+        callback(urls);
+        unsafe { (*platform).0.lock().open_urls = Some(callback) };
+    }
+}
+
+extern "C" fn scene_did_disconnect(_: &Object, _: Sel, scene: id) {
+    crate::window::scene_disconnected(scene);
+}
+
+extern "C" fn scene_did_become_active(_this: &Object, _: Sel, scene: id) {
+    crate::window::scene_active_changed(scene, true);
+}
+
+extern "C" fn scene_will_resign_active(_: &Object, _: Sel, scene: id) {
+    crate::window::scene_active_changed(scene, false);
+}
+
+extern "C" fn scene_did_enter_background(_: &Object, _: Sel, _: id) {
+    end_background_task();
+    unsafe {
+        let application: id = msg_send![class!(UIApplication), sharedApplication];
+        let expired = block2::RcBlock::new(end_background_task);
+        let task: usize = msg_send![
+            application,
+            beginBackgroundTaskWithName: ns_string("zz connection")
+            expirationHandler: &*expired as *const block2::Block<dyn Fn()> as id
+        ];
+        BACKGROUND_TASK.store(task, Ordering::Release);
+    }
+}
+
+extern "C" fn scene_will_enter_foreground(_: &Object, _: Sel, _: id) {
+    end_background_task();
+}
+
+fn end_background_task() {
+    let task = BACKGROUND_TASK.swap(0, Ordering::AcqRel);
+    if task != 0 {
+        unsafe {
+            let application: id = msg_send![class!(UIApplication), sharedApplication];
+            let _: () = msg_send![application, endBackgroundTask: task];
+        }
+    }
+}
+
+fn schedule_idle_timer_sync() {
+    unsafe {
+        dispatch2::DispatchQueue::main().exec_async_f(std::ptr::null_mut(), sync_idle_timer);
+    }
+}
+
+extern "C" fn sync_idle_timer(_: *mut std::ffi::c_void) {
+    unsafe {
+        let application: id = msg_send![class!(UIApplication), sharedApplication];
+        let disabled = IDLE_GUARDS.load(Ordering::Acquire) > 0;
+        let _: () = msg_send![application, setIdleTimerDisabled: disabled as BOOL];
+    }
 }
 
 extern "C" fn scene_did_update_geometry(
     _this: &Object,
     _: Sel,
-    _scene: id,
+    scene: id,
     _previous_coordinate_space: id,
     _previous_orientation: i64,
     _previous_traits: id,
 ) {
-    crate::window::scene_geometry_changed();
+    crate::window::scene_geometry_changed(scene);
 }
 
 extern "C" fn scene_did_update_effective_geometry(
     _this: &Object,
     _: Sel,
-    _scene: id,
+    scene: id,
     _previous_geometry: id,
 ) {
-    crate::window::scene_geometry_changed();
+    crate::window::scene_geometry_changed(scene);
 }
 
-extern "C" fn did_become_active(_this: &Object, _: Sel, _app: id) {
-    became_active();
-}
-
-fn became_active() {
+fn reopen() {
     let platform = PLATFORM.load(Ordering::Acquire);
     if platform.is_null() {
         return;
     }
-    let callback = {
-        let mut state = unsafe { (*platform).0.lock() };
-        if !state.activated_once {
-            state.activated_once = true;
-            return;
-        }
-        state.reopen.take()
-    };
+    let callback = unsafe { (*platform).0.lock().reopen.take() };
     if let Some(mut callback) = callback {
         callback();
         unsafe { (*platform).0.lock().reopen = Some(callback) };

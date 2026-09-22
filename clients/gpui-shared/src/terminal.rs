@@ -6,7 +6,7 @@ use gpui::{
     KeyDownEvent, KeyUpEvent, Keystroke, ModifiersChangedEvent, MouseButton, MouseDownEvent,
     MouseExitEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Point, Render,
     ScrollWheelEvent, Subscription, Task, UTF16Selection, Window, anchored, canvas, deferred, div,
-    img, prelude::*, px,
+    img, point, prelude::*, px,
 };
 use zz_client::{
     ChromeAction, ChromeKeymap, ChromeProfile, ClientCore, CoreEvent, TERMINAL_TABLE,
@@ -125,6 +125,7 @@ pub struct TerminalPane {
     corner_radii: Corners<Pixels>,
     resize_suppressed: Rc<Cell<bool>>,
     scroll_rows: f32,
+    overscroll: gpui::RubberBand,
     geometry: Option<GridSize>,
     cache: RowRenderCache,
     row_revisions: Vec<u64>,
@@ -251,6 +252,7 @@ impl TerminalPane {
             corner_radii: Corners::default(),
             resize_suppressed: Rc::default(),
             scroll_rows: 0.,
+            overscroll: gpui::RubberBand::default(),
             geometry: None,
             cache: RowRenderCache::default(),
             row_revisions: Vec::new(),
@@ -922,6 +924,7 @@ impl TerminalPane {
             return;
         }
         if event.button == MouseButton::Left {
+            window.request_virtual_keyboard();
             self.force_local_selection =
                 event.click_count >= 3 && (event.modifiers.control || event.modifiers.platform);
             let tracking = self
@@ -1036,6 +1039,46 @@ impl TerminalPane {
         }
     }
 
+    fn overscroll(
+        &mut self,
+        delta: Pixels,
+        phase: gpui::TouchPhase,
+        window: &Window,
+        cx: &App,
+    ) -> Pixels {
+        if window.gesture_tuning().overscroll != gpui::Overscroll::Bounce {
+            return delta;
+        }
+        let Some(viewport) = self.viewport(&self.connection.read(cx).core) else {
+            return delta;
+        };
+        let bar = viewport.scrollbar;
+        if viewport.mouse_tracking
+            || bar.total <= bar.len
+            || matches!(viewport.mode, TerminalMode::Copy { .. })
+        {
+            return delta;
+        }
+        let forward = if bar.offset + bar.len < bar.total {
+            px(f32::MIN)
+        } else {
+            Pixels::ZERO
+        };
+        let back = if bar.offset > 0 {
+            px(f32::MAX)
+        } else {
+            Pixels::ZERO
+        };
+        self.overscroll.scroll(
+            Pixels::ZERO,
+            delta,
+            forward,
+            back,
+            self.surface_bounds.size.height,
+            phase,
+        )
+    }
+
     fn scrollbar_hit(&self, position: Point<Pixels>, cx: &App) -> bool {
         self.viewport(&self.connection.read(cx).core)
             .is_some_and(|viewport| {
@@ -1104,11 +1147,17 @@ impl TerminalPane {
         }));
     }
 
-    fn on_scroll(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
         let delta = event.delta.pixel_delta(self.line_height);
+        let stretched = self.overscroll.is_stretched();
+        let delta = self.overscroll(delta.y, event.touch_phase, window, cx);
+        if stretched || self.overscroll.is_stretched() {
+            cx.notify();
+            cx.stop_propagation();
+        }
         let lines = accumulate_scroll(
             &mut self.scroll_rows,
-            -f32::from(delta.y) / f32::from(self.line_height),
+            -f32::from(delta) / f32::from(self.line_height),
         );
         if lines != 0 {
             self.view(
@@ -1138,6 +1187,14 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<PaintState> {
+        let displacement = self.overscroll.displacement(bounds.size.height);
+        if self.overscroll.is_animating() {
+            window.request_animation_frame();
+        }
+        let shifted = Bounds::new(
+            bounds.origin + point(Pixels::ZERO, displacement),
+            bounds.size,
+        );
         let (paint, attached) = self.connection.clone().update(cx, |connection, cx| {
             for image in connection.take_retired_terminal_images() {
                 let _ = window.drop_image(image);
@@ -1190,7 +1247,7 @@ impl TerminalPane {
                         .then_some(self.marked_text.as_deref())
                         .flatten(),
                 },
-                bounds,
+                shifted,
                 window,
                 cx,
             );
@@ -1381,16 +1438,25 @@ impl TerminalPane {
                 window,
                 cx,
             ),
-            gpui::TouchPhase::Ended | gpui::TouchPhase::Cancelled => self.on_mouse_up(
-                &MouseUpEvent {
-                    button: MouseButton::Left,
-                    position,
-                    modifiers: gpui::Modifiers::default(),
-                    click_count: 1,
-                },
-                window,
-                cx,
-            ),
+            gpui::TouchPhase::Ended | gpui::TouchPhase::Cancelled => {
+                self.on_mouse_up(
+                    &MouseUpEvent {
+                        button: MouseButton::Left,
+                        position,
+                        modifiers: gpui::Modifiers::default(),
+                        click_count: 1,
+                    },
+                    window,
+                    cx,
+                );
+                #[cfg(target_os = "ios")]
+                if phase == gpui::TouchPhase::Ended {
+                    zz_gpui_ios::show_edit_menu(
+                        f32::from(position.x) * window.zoom(),
+                        f32::from(position.y) * window.zoom(),
+                    );
+                }
+            }
         }
     }
 

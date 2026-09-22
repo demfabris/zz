@@ -4,15 +4,20 @@
 
 mod dispatcher;
 mod display;
+mod drop;
 mod keyboard;
+mod menu;
+mod momentum;
 mod platform;
+mod text_input;
 mod window;
 
 pub(crate) use dispatcher::*;
 pub(crate) use display::*;
+pub use menu::MenuCommand;
 pub use platform::IosPlatform;
-pub use window::request_paste;
 pub(crate) use window::*;
+pub use window::{Accessibility, accessibility, request_paste, show_edit_menu};
 
 use objc::runtime::Object;
 
@@ -49,6 +54,19 @@ pub(crate) struct UIEdgeInsets {
     pub right: f64,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct NSRange {
+    pub location: usize,
+    pub length: usize,
+}
+
+unsafe impl objc::Encode for NSRange {
+    fn encode() -> objc::Encoding {
+        unsafe { objc::Encoding::from_str("{_NSRange=QQ}") }
+    }
+}
+
 unsafe impl objc::Encode for UIEdgeInsets {
     fn encode() -> objc::Encoding {
         unsafe { objc::Encoding::from_str("{UIEdgeInsets=dddd}") }
@@ -78,6 +96,11 @@ pub(crate) unsafe fn ns_string(string: &str) -> id {
     let c = std::ffi::CString::new(string).unwrap();
     let ns: id = msg_send![class!(NSString), stringWithUTF8String: c.as_ptr()];
     ns
+}
+
+pub(crate) unsafe fn ns_array(objects: &[id]) -> id {
+    use objc::{class, msg_send, sel, sel_impl};
+    msg_send![class!(NSArray), arrayWithObjects: objects.as_ptr() count: objects.len()]
 }
 
 pub(crate) unsafe fn nsstring_to_string(string: id) -> Option<String> {

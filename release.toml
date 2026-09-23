@@ -11,7 +11,7 @@ tag-name = "v{{version}}"
 
 [[pre-release-replacements]]
 file = "../../clients/web/Cargo.lock"
-search = '(?m)(name = "zz-ui"\nversion = ")[^"]+'
+search = '(?m)(name = "zz-(?:client|protocol|terminal|ui)"\nversion = ")[^"]+'
 replace = '${1}{{version}}'
-exactly = 1
+exactly = 4
 prerelease = true

@@ -1806,7 +1806,11 @@ fn advance_momentum(this: &Object) {
 }
 
 fn stop_momentum(this: &Object) {
-    let Some(momentum) = unsafe { get_window_state(this) }.borrow_mut().momentum.take() else {
+    let Some(momentum) = unsafe { get_window_state(this) }
+        .borrow_mut()
+        .momentum
+        .take()
+    else {
         return;
     };
     dispatch_event(

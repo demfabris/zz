@@ -46,4 +46,3 @@ impl Momentum {
         (delta, elapsed >= end)
     }
 }
-

@@ -434,6 +434,7 @@ comptime {
 
 pub const std_options: std.Options = opts: {
     var options: std.Options = .{};
+    if (terminal.options.c_abi) options.signal_stack_size = null;
 
     if (native_freestanding) {
         // Freestanding targets don't have an OS page size. We still need an

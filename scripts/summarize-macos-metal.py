@@ -230,7 +230,7 @@ def summarize_run(run_dir: Path) -> dict[str, object]:
         "observed_activity_span_seconds": observed_span_seconds,
         "command_buffers": {
             "count": len(command_starts),
-            "per_second": len(command_starts) / observed_span_seconds,
+            "per_second": len(command_starts) / configured_span_seconds,
             "submission_cpu_ms_total": sum(command_durations) / 1_000_000,
             "encoder_cpu_ms_total": sum(encoder_durations) / 1_000_000,
             "encoder_cpu_us_p50": percentile(encoder_durations, 0.50) / 1_000,
@@ -242,7 +242,7 @@ def summarize_run(run_dir: Path) -> dict[str, object]:
         },
         "presents": {
             "count": len(present_starts),
-            "per_second": len(present_starts) / observed_span_seconds,
+            "per_second": len(present_starts) / configured_span_seconds,
             "gap_ms_p50": percentile(present_gaps, 0.50) / 1_000_000,
             "gap_ms_p95": percentile(present_gaps, 0.95) / 1_000_000,
             "gap_ms_max": max(present_gaps, default=0) / 1_000_000,
@@ -252,7 +252,7 @@ def summarize_run(run_dir: Path) -> dict[str, object]:
             "interval_count": len(gpu_intervals),
             "execution_ms_raw": sum(gpu_durations) / 1_000_000,
             "execution_ms_union": gpu_union / 1_000_000,
-            "occupancy_percent": gpu_union / 1_000_000_000 / observed_span_seconds * 100,
+            "occupancy_percent": gpu_union / 1_000_000_000 / configured_span_seconds * 100,
             "cpu_to_gpu_latency_us_p50": percentile(gpu_latencies, 0.50) / 1_000,
             "cpu_to_gpu_latency_us_p95": percentile(gpu_latencies, 0.95) / 1_000,
             "channels": {

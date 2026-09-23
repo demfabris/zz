@@ -1007,7 +1007,9 @@ impl TerminalView {
                 .then(|| mux.kitty_images(pane))
                 .flatten();
             let mut changed = false;
-            if view.render_appearance.source.as_ref() != appearance.as_ref() {
+            if !Arc::ptr_eq(&view.render_appearance.source, &appearance)
+                && view.render_appearance.source.as_ref() != appearance.as_ref()
+            {
                 view.render_appearance = TerminalRenderAppearance::new(appearance);
                 view.last_grid_size = None;
                 view.hit_grid = None;

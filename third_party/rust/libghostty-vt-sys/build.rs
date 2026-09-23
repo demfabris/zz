@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Pinned ghostty commit. Update this to pull a newer version.
-const GHOSTTY_REPO: &str = "https://github.com/ghostty-org/ghostty.git";
-const GHOSTTY_COMMIT: &str = "20c3eae04dee606349eb21e2dd0293b203d47179";
+const GHOSTTY_REPO: &str = "https://github.com/demfabris/ghostty.git";
+const GHOSTTY_COMMIT: &str = "fa7986a9dc3e582c46ebe248f66571ed740c7afe";
 
 #[derive(Clone, Copy)]
 enum LinkMode {

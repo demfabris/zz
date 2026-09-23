@@ -1,4 +1,6 @@
-use std::{borrow::Cow, cmp::Ordering, collections::BTreeMap, fmt::Write as _, sync::Arc};
+use std::{
+    borrow::Cow, cell::OnceCell, cmp::Ordering, collections::BTreeMap, fmt::Write as _, sync::Arc,
+};
 
 use chrono::{Datelike as _, Local, TimeZone as _};
 use glob::{MatchOptions, Pattern};
@@ -956,8 +958,52 @@ impl FormatVariables for ResolvedFormatContext {
     }
 }
 
+pub struct FormatContextSnapshot<'a> {
+    engine: &'a MuxEngine,
+    format_client: FormatClient,
+    universe: OnceCell<Arc<FormatUniverse>>,
+}
+
+impl FormatContextSnapshot<'_> {
+    #[must_use]
+    pub fn status_context(
+        &self,
+        session: Option<SessionId>,
+        window: Option<WindowId>,
+        pane: Option<PaneId>,
+    ) -> StatusContext {
+        FormatContext {
+            session,
+            window,
+            pane,
+            active_session: self.format_client.attached_session(),
+            format_client: self.format_client,
+            format_type: FormatType::None,
+        }
+        .resolve_with_universe(
+            self.engine,
+            Arc::clone(self.universe.get_or_init(|| {
+                self.engine.build_format_universe(
+                    self.format_client.attached_session(),
+                    self.format_client,
+                )
+            })),
+        )
+        .values
+    }
+}
+
 impl FormatContext {
     fn resolve(self, engine: &MuxEngine) -> ResolvedFormatContext {
+        let universe = engine.build_format_universe(self.active_session, self.format_client);
+        self.resolve_with_universe(engine, universe)
+    }
+
+    fn resolve_with_universe(
+        self,
+        engine: &MuxEngine,
+        universe: Arc<FormatUniverse>,
+    ) -> ResolvedFormatContext {
         let state = &engine.state;
         let pane = self
             .pane
@@ -986,8 +1032,7 @@ impl FormatContext {
                 .map(|window| window.active_pane)
         });
         let mut values = engine.build_status_context(session, window, pane, self.format_client);
-        values.format_universe =
-            engine.build_format_universe(self.active_session, self.format_client);
+        values.format_universe = universe;
         ResolvedFormatContext {
             values,
             has_session: session.is_some(),
@@ -999,6 +1044,18 @@ impl FormatContext {
 }
 
 impl MuxEngine {
+    #[must_use]
+    pub fn format_context_snapshot(
+        &self,
+        format_client: FormatClient,
+    ) -> FormatContextSnapshot<'_> {
+        FormatContextSnapshot {
+            engine: self,
+            format_client,
+            universe: OnceCell::new(),
+        }
+    }
+
     #[must_use]
     pub fn format_status_context(
         &self,
@@ -5075,6 +5132,132 @@ mod tests {
 
     fn expand(format: &str) -> String {
         expand_status(format, &context(), &mut Stub)
+    }
+
+    #[test]
+    fn snapshot_contexts_share_universe_and_match_independent_formats() {
+        let mut engine = MuxEngine::default();
+        let (work, first_window, first_pane) = engine.state.create_session("work").unwrap();
+        let (other, _, _) = engine.state.create_session("other").unwrap();
+        engine
+            .state
+            .create_window(work, Some("logs".to_owned()), PaneKind::Terminal)
+            .unwrap();
+        let mut execution = crate::ExecutionContext::default();
+        for (name, args) in [
+            ("split-window", vec!["-d", "-t", "work:0"]),
+            ("set-option", vec!["-g", "@batch", "value"]),
+            ("set-environment", vec!["-g", "BATCH", "value"]),
+        ] {
+            engine
+                .execute(
+                    &mut execution,
+                    &zz_protocol::CommandInvocation::new(name, args),
+                )
+                .unwrap();
+        }
+        let mut targets = vec![
+            (None, None, None),
+            (Some(work), None, None),
+            (None, Some(first_window), None),
+            (None, None, Some(first_pane)),
+            (
+                Some(SessionId(u64::MAX)),
+                Some(WindowId(u64::MAX)),
+                Some(PaneId(u64::MAX)),
+            ),
+        ];
+        targets.extend(engine.state.windows.values().flat_map(|window| {
+            window
+                .panes
+                .keys()
+                .map(move |pane| (Some(window.session), Some(window.id), Some(*pane)))
+        }));
+        for client in [
+            FormatClient::NoClient,
+            FormatClient::Unattached,
+            FormatClient::Attached(work),
+            FormatClient::Attached(other),
+        ] {
+            let contexts = engine.format_context_snapshot(client);
+            assert!(contexts.universe.get().is_none());
+            let first = contexts.status_context(Some(work), Some(first_window), Some(first_pane));
+            assert_eq!(
+                first.session_active,
+                match client {
+                    FormatClient::NoClient => None,
+                    FormatClient::Unattached => Some(false),
+                    FormatClient::Attached(session) => Some(session == work),
+                }
+            );
+            for (session, window, pane) in &targets {
+                let expected = engine.format_status_context_with_format_client(
+                    *session, *window, *pane, *session, client,
+                );
+                let actual = contexts.status_context(*session, *window, *pane);
+                assert_eq!(actual, expected);
+                assert!(Arc::ptr_eq(&first.format_universe, &actual.format_universe));
+                for format in [
+                    "#S:#I:#W:#{pane_id}:#{session_active}:#{window_active}:#{pane_active}",
+                    "#{S:#{session_name}=#{session_active}:[#{W:#{window_name}:[#{P:#{pane_id}|}]}]}",
+                    "#{Og:#{option_name}=#{option_value}|}",
+                    "#{Vg:#{environ_name}=#{environ_value}|}",
+                ] {
+                    assert_eq!(
+                        expand_status(format, &actual, &mut Stub),
+                        expand_status(format, &expected, &mut Stub),
+                        "{client:?}: {format}",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn new_context_snapshot_observes_engine_mutations() {
+        let mut engine = MuxEngine::default();
+        let (session, window, pane) = engine.state.create_session("work").unwrap();
+        engine.set_format_now(1_700_000_000);
+        let first = engine
+            .format_context_snapshot(FormatClient::Attached(session))
+            .status_context(Some(session), Some(window), Some(pane));
+        let mut execution = crate::ExecutionContext::default();
+        for (name, args) in [
+            ("new-window", vec!["-d", "-t", "work:", "-n", "logs"]),
+            ("select-window", vec!["-t", "work:1"]),
+            ("set-option", vec!["-g", "@batch", "changed"]),
+            ("set-environment", vec!["-g", "BATCH", "changed"]),
+        ] {
+            engine
+                .execute(
+                    &mut execution,
+                    &zz_protocol::CommandInvocation::new(name, args),
+                )
+                .unwrap();
+        }
+        engine.set_format_now(1_700_000_001);
+        let second = engine
+            .format_context_snapshot(FormatClient::Attached(session))
+            .status_context(Some(session), Some(window), Some(pane));
+        assert!(!Arc::ptr_eq(
+            &first.format_universe,
+            &second.format_universe
+        ));
+        assert_eq!(first.window_active, Some(true));
+        assert_eq!(second.window_active, Some(false));
+        assert_eq!(first.format_now, Some(1_700_000_000));
+        assert_eq!(second.format_now, Some(1_700_000_001));
+        for format in [
+            "#{W:#{window_name}|}",
+            "#{Og:#{option_name}=#{option_value}|}",
+            "#{Vg:#{environ_name}=#{environ_value}|}",
+        ] {
+            assert_ne!(
+                expand_status(format, &first, &mut Stub),
+                expand_status(format, &second, &mut Stub),
+                "{format}",
+            );
+        }
     }
 
     #[test]

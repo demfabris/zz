@@ -3936,11 +3936,13 @@ impl MuxEngine {
         self.state.format_now()
     }
 
-    pub(crate) fn format_uid(&self) -> &str {
+    #[must_use]
+    pub fn format_uid(&self) -> &str {
         &self.format_uid
     }
 
-    pub(crate) fn format_user(&self) -> &str {
+    #[must_use]
+    pub fn format_user(&self) -> &str {
         &self.format_user
     }
 

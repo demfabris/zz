@@ -103,11 +103,10 @@ impl AgentToolText {
     pub fn new(source: impl Into<String>) -> Self {
         Self(Arc::new(RwLock::new(AgentMarkdownBuffer {
             source: source.into(),
-            rendered: String::new(),
+            rendered: None,
             revision: 0,
             replaced_at: 0,
             line_breaks: 0,
-            truncated: false,
         })))
     }
 
@@ -285,11 +284,10 @@ struct MarkdownState {
 #[derive(Default)]
 struct AgentMarkdownBuffer {
     source: String,
-    rendered: String,
+    rendered: Option<String>,
     revision: u64,
     replaced_at: u64,
     line_breaks: usize,
-    truncated: bool,
 }
 
 #[derive(Clone, Default)]
@@ -300,14 +298,13 @@ impl AgentMarkdown {
     pub fn new(source: impl Into<String>) -> Self {
         let source = source.into();
         let line_breaks = source.bytes().filter(|byte| *byte == b'\n').count();
-        let (rendered, truncated) = markdown_preview(&source, line_breaks);
+        let rendered = markdown_preview(&source, line_breaks);
         Self(Arc::new(RwLock::new(AgentMarkdownBuffer {
             source,
             rendered,
             revision: 0,
             replaced_at: 0,
             line_breaks,
-            truncated,
         })))
     }
 
@@ -322,16 +319,15 @@ impl AgentMarkdown {
             && buffer.source.as_bytes() == &source.as_bytes()[..len]
         {
             let appended = &source[len..];
-            buffer.source.push_str(appended);
-            buffer.line_breaks = buffer
+            let line_breaks = buffer
                 .line_breaks
                 .saturating_add(appended.bytes().filter(|byte| *byte == b'\n').count());
-            if buffer.truncated {
-                return;
-            }
-            if markdown_preview_end(&buffer.source, buffer.line_breaks).is_none() {
-                buffer.rendered.push_str(appended);
-                buffer.revision = buffer.revision.wrapping_add(1);
+            if buffer.rendered.is_some() || markdown_preview_end(source, line_breaks).is_none() {
+                buffer.source.push_str(appended);
+                buffer.line_breaks = line_breaks;
+                if buffer.rendered.is_none() {
+                    buffer.revision = buffer.revision.wrapping_add(1);
+                }
                 return;
             }
         }
@@ -358,7 +354,7 @@ impl AgentMarkdown {
 
     #[must_use]
     pub fn is_truncated(&self) -> bool {
-        self.0.read().truncated
+        self.0.read().rendered.is_some()
     }
 
     #[must_use]
@@ -372,32 +368,35 @@ impl AgentMarkdown {
 
     fn inspect<R>(&self, inspect: impl FnOnce(&str, u64, u64) -> R) -> R {
         let buffer = self.0.read();
-        inspect(&buffer.rendered, buffer.revision, buffer.replaced_at)
+        inspect(
+            buffer.rendered.as_deref().unwrap_or(&buffer.source),
+            buffer.revision,
+            buffer.replaced_at,
+        )
     }
 }
 
 fn replace_markdown_buffer(buffer: &mut AgentMarkdownBuffer, source: &str) {
     let line_breaks = source.bytes().filter(|byte| *byte == b'\n').count();
-    let (rendered, truncated) = markdown_preview(source, line_breaks);
+    let rendered = markdown_preview(source, line_breaks);
+    let changed = buffer.rendered.as_deref().unwrap_or(&buffer.source)
+        != rendered.as_deref().unwrap_or(source);
     buffer.source.clear();
     buffer.source.push_str(source);
     buffer.line_breaks = line_breaks;
-    buffer.truncated = truncated;
-    if buffer.rendered != rendered {
+    if changed {
         buffer.revision = buffer.revision.wrapping_add(1);
         buffer.replaced_at = buffer.revision;
-        buffer.rendered = rendered;
     }
+    buffer.rendered = rendered;
 }
 
-fn markdown_preview(source: &str, line_breaks: usize) -> (String, bool) {
-    let Some(end) = markdown_preview_end(source, line_breaks) else {
-        return (source.to_owned(), false);
-    };
+fn markdown_preview(source: &str, line_breaks: usize) -> Option<String> {
+    let end = markdown_preview_end(source, line_breaks)?;
     let prefix = &source[..end];
     let mut rendered = mend(prefix).unwrap_or_else(|| prefix.to_owned());
     rendered.push_str(MARKDOWN_PREVIEW_MARKER);
-    (rendered, true)
+    Some(rendered)
 }
 
 fn markdown_preview_end(source: &str, line_breaks: usize) -> Option<usize> {
@@ -4149,6 +4148,44 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_markdown_displays_the_original_allocation() {
+        let mut text = String::with_capacity(128);
+        text.push_str("héllo");
+        let allocation = text.as_ptr();
+        let source = AgentMarkdown::new(text);
+        source.inspect(|rendered, _, _| {
+            assert_eq!(rendered, "héllo");
+            assert_eq!(rendered.as_ptr(), allocation);
+        });
+        source.synchronize_append("héllo world");
+        source.inspect(|rendered, _, _| {
+            assert_eq!(rendered, "héllo world");
+            assert_eq!(rendered.as_ptr(), allocation);
+        });
+        source.replace("short replacement");
+        source.inspect(|rendered, _, _| {
+            assert_eq!(rendered, "short replacement");
+            assert_eq!(rendered.as_ptr(), allocation);
+        });
+    }
+
+    #[test]
+    fn appending_a_preview_marker_at_the_limit_updates_the_display_revision() {
+        let original = "line\n".repeat(MARKDOWN_PREVIEW_MAX_LINES);
+        let source = AgentMarkdown::new(original.clone());
+        assert!(!source.is_truncated());
+        let previous_revision = source.inspect(|_, revision, _| revision);
+        let appended = format!("{original}{MARKDOWN_PREVIEW_MARKER}");
+        source.synchronize_append(&appended);
+        assert!(source.is_truncated());
+        source.inspect(|rendered, revision, replaced_at| {
+            assert_eq!(rendered, appended);
+            assert_eq!(revision, previous_revision + 1);
+            assert_eq!(replaced_at, revision);
+        });
+    }
+
+    #[test]
     fn large_markdown_keeps_a_bounded_preview_and_full_copy() {
         let original = format!("# Result\n\n{}", "long response line\n".repeat(4_000));
         let source = AgentMarkdown::new(original.clone());
@@ -4160,11 +4197,20 @@ mod tests {
         });
         assert_eq!(source.full_text(), original);
 
+        let previous_preview = source
+            .inspect(|preview, revision, replaced_at| (preview.to_owned(), revision, replaced_at));
         let appended = format!("{original}tail that remains available to copy");
         source.synchronize_append(&appended);
         assert_eq!(source.full_text(), appended);
-        source.inspect(|preview, _, _| {
-            assert!(preview.ends_with(MARKDOWN_PREVIEW_MARKER));
+        source.inspect(|preview, revision, replaced_at| {
+            assert_eq!(
+                (preview, revision, replaced_at),
+                (
+                    previous_preview.0.as_str(),
+                    previous_preview.1,
+                    previous_preview.2
+                )
+            );
         });
 
         source.replace("short again");

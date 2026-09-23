@@ -305,7 +305,7 @@ The agent lane is the one lane whose overflow does **not** close the mailbox. An
 hundreds of small updates and a slow client should not lose its session over it, so `enqueue_agent`
 clears the pane's queued frames and puts a tiny `EventPayload::AgentLagged { pane, next_seq }` on the
 reliable lane instead; the client answers with `AgentReplay` from its own cursor and the fanout
-serves it out of the pane's 16 MiB replay ring, or out of the journal when the ask predates the ring.
+serves it out of the pane's 18 MiB replay ring, or out of the journal when the ask predates the ring.
 Agent frames also follow visibility like terminal frames do: `AgentUpdates` reaches only clients the
 pane is visible to (`visible_agents`, derived by `visible_agent_panes`), while the small typed
 `AgentState` goes to every client attached to the session so badges and permission prompts work for a

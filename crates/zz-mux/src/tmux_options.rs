@@ -956,6 +956,10 @@ pub(crate) fn tmux_option_table_order(name: &str) -> usize {
 }
 
 pub(crate) fn tmux_options() -> impl Iterator<Item = TmuxOption> {
+    tmux_option_names().map(|(scope, name)| build_tmux_option(scope, name))
+}
+
+fn tmux_option_names() -> impl Iterator<Item = (TmuxOptionScope, &'static str)> {
     [
         (TmuxOptionScope::Server, SERVER_OPTIONS),
         (TmuxOptionScope::Session, SESSION_OPTIONS),
@@ -963,15 +967,17 @@ pub(crate) fn tmux_options() -> impl Iterator<Item = TmuxOption> {
         (TmuxOptionScope::WindowPane, WINDOW_PANE_OPTIONS),
     ]
     .into_iter()
-    .flat_map(|(scope, names)| {
-        names.iter().copied().map(move |name| TmuxOption {
-            name,
-            scope,
-            default: tmux_option_default(name),
-            is_array: tmux_option_is_array(name),
-            metadata: crate::tmux_option_metadata::tmux_option_metadata(name),
-        })
-    })
+    .flat_map(|(scope, names)| names.iter().map(move |name| (scope, *name)))
+}
+
+fn build_tmux_option(scope: TmuxOptionScope, name: &'static str) -> TmuxOption {
+    TmuxOption {
+        name,
+        scope,
+        default: tmux_option_default(name),
+        is_array: tmux_option_is_array(name),
+        metadata: crate::tmux_option_metadata::tmux_option_metadata(name),
+    }
 }
 
 fn tmux_option_default(name: &str) -> Option<TmuxOptionDefault> {
@@ -1121,22 +1127,24 @@ pub(crate) fn parse_tmux_option(input: &str) -> Result<ParsedTmuxOption<'_>, ()>
 
 pub(crate) fn match_tmux_option(input: &str) -> Result<Option<TmuxOption>, ()> {
     let input = exact_tmux_option_name(input);
-    if let Some(exact) = tmux_options().find(|option| option.name == input) {
-        return Ok(Some(exact));
+    if let Some((scope, name)) = tmux_option_names().find(|(_, name)| *name == input) {
+        return Ok(Some(build_tmux_option(scope, name)));
     }
-    let mut matches = tmux_options().filter(|option| option.name.starts_with(input));
-    let Some(first) = matches.next() else {
+    let mut matches = tmux_option_names().filter(|(_, name)| name.starts_with(input));
+    let Some((scope, name)) = matches.next() else {
         return Ok(None);
     };
     if matches.next().is_some() {
         return Err(());
     }
-    Ok(Some(first))
+    Ok(Some(build_tmux_option(scope, name)))
 }
 
 pub(crate) fn exact_tmux_option(input: &str) -> Option<TmuxOption> {
     let name = exact_tmux_option_name(input);
-    tmux_options().find(|option| option.name == name)
+    tmux_option_names()
+        .find(|(_, candidate)| *candidate == name)
+        .map(|(scope, name)| build_tmux_option(scope, name))
 }
 
 fn exact_tmux_option_name(input: &str) -> &str {
@@ -1197,6 +1205,37 @@ mod tests {
         );
         assert!(match_tmux_option("status-l").is_err());
         assert_eq!(match_tmux_option("not-an-option"), Ok(None));
+    }
+
+    #[test]
+    fn lookups_match_full_catalog_for_every_name_alias_and_prefix() {
+        let options = tmux_options().collect::<Vec<_>>();
+        for option in &options {
+            assert_eq!(exact_tmux_option(option.name), Some(*option));
+            for end in 0..=option.name.len() {
+                let prefix = &option.name[..end];
+                let expected =
+                    if let Some(exact) = options.iter().find(|option| option.name == prefix) {
+                        Ok(Some(*exact))
+                    } else {
+                        let matches = options
+                            .iter()
+                            .filter(|option| option.name.starts_with(prefix))
+                            .collect::<Vec<_>>();
+                        match matches.as_slice() {
+                            [] => Ok(None),
+                            [option] => Ok(Some(**option)),
+                            _ => Err(()),
+                        }
+                    };
+                assert_eq!(match_tmux_option(prefix), expected, "{prefix}");
+            }
+        }
+        for (alias, name) in ALIASES {
+            let expected = options.iter().find(|option| option.name == *name).copied();
+            assert_eq!(exact_tmux_option(alias), expected, "{alias}");
+            assert_eq!(match_tmux_option(alias), Ok(expected), "{alias}");
+        }
     }
 
     #[test]

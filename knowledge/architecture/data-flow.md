@@ -67,7 +67,7 @@ composer ──AgentPrompt───────▶ daemon agent host ──sessi
    ▲                                  │
    │                                  ├──journal append (JSONL, per ACP session)
    │                                  ▼
-   │                          fanout: 25 ms coalesce, wire seq, 16 MiB replay ring
+   │                          fanout: 25 ms coalesce, wire seq, 18 MiB replay ring
    │                                  │
    │  AgentUpdates (JSON items) + AgentState                                     [agent lane]
    ▼                                  ▼

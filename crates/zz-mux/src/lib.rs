@@ -45,9 +45,9 @@ pub use copy_actions::{
     missing_copy_mode_actions, pinned_copy_action,
 };
 pub use formats::{
-    FormatClient, FormatClientRow, FormatEnvironRow, TmuxColour, delegated_format_variable_names,
-    display_width, format_true, fuzzy_match_columns, indexed_colour_rgb, parse_tmux_colour,
-    sanitize_client_output, utf8_sanitize,
+    FormatClient, FormatClientRow, FormatContextSnapshot, FormatEnvironRow, TmuxColour,
+    delegated_format_variable_names, display_width, format_true, fuzzy_match_columns,
+    indexed_colour_rgb, parse_tmux_colour, sanitize_client_output, utf8_sanitize,
 };
 pub use honest_knobs::{BellAction, PresetOptions, VisualBell, WindowSize};
 pub use layout::{CellLayout, SplitSize};

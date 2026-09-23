@@ -6,7 +6,9 @@ This directory is a source snapshot of `libghostty-vt-sys` from
 
 - Upstream crate version: `0.2.1`
 - Upstream Ghostty pin: `a887df42c56f6de86c0fe6da9c4eeca37931e083`
-- Local Ghostty pin: `20c3eae04dee606349eb21e2dd0293b203d47179`
+- Upstream Ghostty base: `20c3eae04dee606349eb21e2dd0293b203d47179`
+- Local Ghostty pin: [`demfabris/ghostty@fa7986a9`](https://github.com/demfabris/ghostty/commit/fa7986a9dc3e582c46ebe248f66571ed740c7afe)
+- Retained fork branch: `codex/cabi-signal-stack`
 - License: MIT OR Apache-2.0; the upstream MIT license is retained here.
 - Local override: the workspace patches the git-sourced sys package to this adjacent
   snapshot from the upstream v0.2.1 release commit. The safe wrapper is not
@@ -37,15 +39,51 @@ and updates the safe Kitty API.
 When replacing this snapshot, remove its git-source patch from the workspace, refresh `Cargo.lock`,
 and run the focused terminal tests plus the real macOS bundle build.
 
-## No local patch
+## Native memory patch
 
-Since 2026-09-18 zz carries no patch on the vendored terminal engine (fabrico;
-see the amendment in `knowledge/designs/tui-parity.md`). The `provenance.patch`
+The 2026-09-23 performance investigation authorizes measured dependency-fork
+changes. This pin adds one line to `lib_vt.zig`'s `std_options`:
+
+```zig
+if (terminal.options.c_abi) options.signal_stack_size = null;
+```
+
+The C ABI uses host-owned threads and single-threaded IO. It never registers
+Zig's alternate signal stack, but the default 256 KiB TLS buffer is instantiated
+for every Rust thread on macOS. This option removes that unused buffer while
+preserving signal handlers, unwinding, locks, and terminal behavior. Recheck
+this assumption if the C ABI starts using Zig-owned workers or startup code.
+
+Validation compares the actual built archives: all 780 exported symbols match,
+11 Rust wrapper tests pass, and C/Rust hosts retain the same signal handlers
+and alternate-stack state. Ghostty's Debug test suite also passes, but its
+default test runner supplies its own `std_options`; that suite does not test
+this override. The dated research record contains the allocation and daemon
+measurements: `knowledge/research/2026-09-23-macos-performance.md`.
+
+The normal build fetches this immutable fork commit directly. No build-time
+source rewriting is used. `GHOSTTY_SOURCE_DIR` remains authoritative, and an
+enabled `pkg-config` feature can select an installed library without this fix.
+When comparing overrides, use distinct source paths or rebuild the sys package:
+Cargo tracks the override environment value, not edits inside that directory.
+
+This is a native dependency, outside the Cargo-only `scripts/forks.conf` and
+`just forks` workflow. Maintain it using the native Ghostty section in
+`.agents/skills/fork-rebase/SKILL.md`. Preserve published commits through a
+retained branch or tag before rebasing. Drop the patch when upstream provides
+the same allocation behavior and diagnostics, then repin and rerun the terminal
+suite plus the real macOS bundle build. No binding or safe-wrapper change is
+needed for this option.
+
+## Earlier grid patches
+
+On 2026-09-18 fabrico removed the terminal grid patches; the corresponding
+capture decisions remain in `knowledge/designs/tui-parity.md`. The `provenance.patch`
 that retained explicit indexed foreground/background flags in spare style bits,
 the ICH hunk that kept the pin's stale cells after a wide insert, the build
 machinery that applied them, and the safe wrapper vendored to read those fields
-are all gone. `build.rs` fetches Ghostty at the pin above and builds it
-pristine; the pkg-config path accepts any installed libghostty-vt.
+are all gone. The native memory option above does not restore that machinery or
+change the grid's capture semantics.
 
 Tabs carry no provenance. The pin prints a literal tab for every cell a tab
 produced, and fabrico decided on 2026-09-18 that zz captures the spaces on

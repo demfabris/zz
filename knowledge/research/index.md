@@ -8,4 +8,5 @@
 * [tmux CLI compatibility and alias boundary](2026-08-22-tmux-cli-compatibility-audit.md) - A commit-pinned inventory of the tmux command, flag, option, format, hook, key, packaging, and native zz command surfaces, with the exact boundary around alias tmux=zz.
 * [Agent-to-agent messaging survey](2026-09-10-agent-messaging-survey.md) - How Claude Code, Codex, Gemini CLI, herdr, A2A, and ACP let one coding agent message another, with Claude Code's peer bus verified live on this machine, the delivery-timing taxonomy every tool converged on, and what it means for a zz message backbone.
 * [Interactive bughunt: Agent transcripts, Markdown, and terminal resizing](2026-09-16-interactive-bughunt.md) - Running investigation of disappearing Agent user messages in both providers, inline-code wrapping, and terminal corruption after pane or GUI resizing.
+* [macOS CPU, GPU, and memory investigation](2026-09-23-macos-performance.md) - Measured macOS resource costs, proven improvements, and deferred protocol and renderer designs from the September 2026 performance investigation.
 <!-- okf:listing:end -->

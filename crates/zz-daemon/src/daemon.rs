@@ -14127,7 +14127,7 @@ impl Shared {
         }
         let facts = format_hook_facts_for_client(&inner, client, context);
         let mut hooks = DaemonFormatHooks::command_with_optional_variables(&facts, None);
-        let mut output = Vec::new();
+        let mut rows = Vec::new();
         for (session, window, pane) in panes {
             let status = inner.engine.format_status_context_with_format_client(
                 Some(session),
@@ -14157,10 +14157,15 @@ impl Shared {
                 };
                 values.insert(key.to_owned(), serde_json::Value::String(value.to_owned()));
             }
+            rows.push((pane, values));
+        }
+        drop(inner);
+        let mut output = Vec::new();
+        for (_pane, mut values) in rows {
             #[cfg(feature = "agent")]
             let permission = self
                 .open_agent_runtime()
-                .and_then(|runtime| runtime.wire_state(pane))
+                .and_then(|runtime| runtime.wire_state(_pane))
                 .and_then(|state| state.pending_permission)
                 .map_or(serde_json::Value::Null, |permission| {
                     agent_permission_json(&permission)
@@ -35589,9 +35594,6 @@ fn client_format_facts(
         retained_size.map_or(80, |size| size.0)
     };
     let height = has_terminal.then(|| retained_size.map_or(24, |size| size.1));
-    let format_context = inner
-        .engine
-        .format_status_context(Some(session), Some(window), None);
     let tty = inner.client_ttys.get(&client).cloned().unwrap_or_default();
     let pid = inner.client_pids.get(&client).copied().unwrap_or_default();
     let name = client_format_name(inner, client);
@@ -35660,8 +35662,8 @@ fn client_format_facts(
             .map(|scheme| scheme.as_str().to_owned())
             .unwrap_or_default(),
         tty,
-        uid: format_context.uid,
-        user: format_context.user,
+        uid: inner.engine.format_uid().to_owned(),
+        user: inner.engine.format_user().to_owned(),
         utf8: usize::from(client_uses_utf8(inner, client)).to_string(),
         width: width.to_string(),
         written: written.to_string(),
@@ -36863,27 +36865,29 @@ fn stamp_snapshot_for_client(
     let facts = format_hook_facts(inner);
     let format_client = client_attached_session(inner, client)
         .map_or(FormatClient::Unattached, FormatClient::Attached);
+    let contexts = inner.engine.format_context_snapshot(format_client);
     expand_window_status_labels(
         &inner.engine,
         &inner.config_files,
         &facts,
-        format_client,
+        &contexts,
         snapshot,
     );
     stamp_pane_border_colours(
         &inner.engine,
         &inner.config_files,
         &facts,
-        format_client,
+        &contexts,
         snapshot,
     );
     stamp_pane_border_chrome(
         &inner.engine,
         &inner.config_files,
         &facts,
-        format_client,
+        &contexts,
         snapshot,
     );
+    drop(contexts);
     stamp_pane_modes(inner, &facts, snapshot);
 }
 
@@ -37018,7 +37022,7 @@ fn stamp_pane_border_chrome(
     engine: &MuxEngine,
     config_files: &str,
     facts: &FormatHookFacts,
-    format_client: FormatClient,
+    contexts: &zz_mux::FormatContextSnapshot<'_>,
     snapshot: &mut MuxSnapshot,
 ) {
     for session in &mut snapshot.sessions {
@@ -37034,15 +37038,9 @@ fn stamp_pane_border_chrome(
                 if format.is_empty() {
                     continue;
                 }
-                let context = server_format_context_with_format_client(
-                    engine,
-                    config_files,
-                    Some(session.id),
-                    Some(window.id),
-                    Some(*pane),
-                    Some(session.id),
-                    format_client,
-                );
+                let mut context =
+                    contexts.status_context(Some(session.id), Some(window.id), Some(*pane));
+                config_files.clone_into(&mut context.config_files);
                 let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(engine);
                 pane_snapshot.border_status_text = expand_status(&format, &context, &mut hooks);
             }
@@ -37054,7 +37052,7 @@ fn stamp_pane_border_colours(
     engine: &MuxEngine,
     config_files: &str,
     facts: &FormatHookFacts,
-    format_client: FormatClient,
+    contexts: &zz_mux::FormatContextSnapshot<'_>,
     snapshot: &mut MuxSnapshot,
 ) {
     if !engine.has_pane_border_style_settings() {
@@ -37062,15 +37060,8 @@ fn stamp_pane_border_colours(
     }
     let resolve = |value: Option<String>, session, window, pane| {
         let value = value?;
-        let context = server_format_context_with_format_client(
-            engine,
-            config_files,
-            Some(session),
-            Some(window),
-            Some(pane),
-            Some(session),
-            format_client,
-        );
+        let mut context = contexts.status_context(Some(session), Some(window), Some(pane));
+        config_files.clone_into(&mut context.config_files);
         let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(engine);
         let expanded = if value.contains("#{") {
             expand_format_values(&value, &context, &mut hooks)
@@ -37095,7 +37086,7 @@ fn expand_window_status_labels(
     engine: &MuxEngine,
     config_files: &str,
     facts: &FormatHookFacts,
-    format_client: FormatClient,
+    contexts: &zz_mux::FormatContextSnapshot<'_>,
     snapshot: &mut MuxSnapshot,
 ) {
     for session in &mut snapshot.sessions {
@@ -37106,15 +37097,12 @@ fn expand_window_status_labels(
             } else {
                 &formats.format
             };
-            let context = server_format_context_with_format_client(
-                engine,
-                config_files,
+            let mut context = contexts.status_context(
                 Some(session.id),
                 Some(window.id),
                 Some(window.active_pane),
-                Some(session.id),
-                format_client,
             );
+            config_files.clone_into(&mut context.config_files);
             let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(engine);
             let style = expand_window_status_style(&formats, &context, &mut hooks);
             let label = expand_status(format, &context, &mut hooks);
@@ -45577,7 +45565,7 @@ mod tests {
             &engine,
             "",
             &FormatHookFacts::default(),
-            FormatClient::NoClient,
+            &engine.format_context_snapshot(FormatClient::NoClient),
             &mut snapshot,
         );
         assert_eq!(
@@ -45616,7 +45604,7 @@ mod tests {
             &engine,
             "",
             &FormatHookFacts::default(),
-            FormatClient::NoClient,
+            &engine.format_context_snapshot(FormatClient::NoClient),
             &mut snapshot,
         );
         assert_eq!(
@@ -45819,7 +45807,7 @@ mod tests {
             &engine,
             "",
             &FormatHookFacts::default(),
-            FormatClient::NoClient,
+            &engine.format_context_snapshot(FormatClient::NoClient),
             &mut snapshot,
         );
         let main = &snapshot.sessions[0].windows[0];
@@ -45853,7 +45841,7 @@ mod tests {
             &engine,
             "",
             &FormatHookFacts::default(),
-            FormatClient::NoClient,
+            &engine.format_context_snapshot(FormatClient::NoClient),
             &mut snapshot,
         );
         let logs_style =
@@ -45889,7 +45877,7 @@ mod tests {
             &engine,
             "",
             &FormatHookFacts::default(),
-            FormatClient::NoClient,
+            &engine.format_context_snapshot(FormatClient::NoClient),
             &mut snapshot,
         );
         for window in &snapshot.sessions[0].windows {
@@ -53192,7 +53180,13 @@ mod tests {
         let facts = FormatHookFacts::default();
 
         let mut snapshot = engine.state.snapshot();
-        stamp_pane_border_colours(&engine, "", &facts, FormatClient::NoClient, &mut snapshot);
+        stamp_pane_border_colours(
+            &engine,
+            "",
+            &facts,
+            &engine.format_context_snapshot(FormatClient::NoClient),
+            &mut snapshot,
+        );
         for session in &snapshot.sessions {
             for window in &session.windows {
                 for pane in window.panes.values() {
@@ -53225,7 +53219,13 @@ mod tests {
             .expect("set active border style");
 
         let mut snapshot = engine.state.snapshot();
-        stamp_pane_border_colours(&engine, "", &facts, FormatClient::NoClient, &mut snapshot);
+        stamp_pane_border_colours(
+            &engine,
+            "",
+            &facts,
+            &engine.format_context_snapshot(FormatClient::NoClient),
+            &mut snapshot,
+        );
         let panes = &snapshot.sessions[0].windows[0].panes;
         assert_eq!(panes[&active].border_colour, Some(TmuxColour::Indexed(100)));
         assert_eq!(panes[&active].active_border_colour, None);
@@ -53274,7 +53274,13 @@ mod tests {
 
         let facts = FormatHookFacts::default();
         let mut snapshot = engine.state.snapshot();
-        stamp_pane_border_colours(&engine, "", &facts, FormatClient::NoClient, &mut snapshot);
+        stamp_pane_border_colours(
+            &engine,
+            "",
+            &facts,
+            &engine.format_context_snapshot(FormatClient::NoClient),
+            &mut snapshot,
+        );
         for pane in snapshot.sessions[0].windows[0].panes.values() {
             assert_eq!(pane.border_colour, Some(TmuxColour::Indexed(190)));
         }

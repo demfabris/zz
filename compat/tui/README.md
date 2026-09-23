@@ -7,15 +7,15 @@ the decoded screen: cells, styles, cursor, geometry, interaction. Escape-sequenc
 outside it. The contract is `knowledge/designs/tui-parity.md`; how a cycle runs is
 `knowledge/playbooks/tui-parity-campaign.md`.
 
-**Resuming?** `compat/tui/HANDOFF.md` is the current handoff: where the campaign stopped, which
-branches are waiting for a gate, and what a gate arriving cold has to know. Read it before the
-table below.
+The campaign closed on 2026-09-20 with all eighteen obligations verified. The ledger and
+`knowledge/tmux/tui-parity.md` hold the recorded proof; `HANDOFF.md` preserves earlier
+handoffs. Reopen an obligation only for new contrary evidence or explicitly added scope.
 
 This directory is the campaign's state, shaped like the tmux compat campaign one level up:
 
 | File | Role | tmux campaign counterpart |
 | --- | --- | --- |
-| `campaign.json` | The ledger: twelve obligations with acceptance clauses, dependencies, status and proof | `compat/tmux-gaps.json` |
+| `campaign.json` | The ledger: twelve baseline and six added obligations with acceptance clauses, dependencies, status and proof | `compat/tmux-gaps.json` |
 | `tracker.py` | Validates the ledger, generates the report, lists ready obligations | `compat/tmux-tracker.py` |
 | `tracker_test.py` | The validator's tests; `compat/check.sh` runs them | `compat/board_test.py` |
 | `verify_claims_test.py` | The re-measurement guard's tests, attribution included; `compat/check.sh` runs them | |
@@ -133,8 +133,8 @@ same close-out commit that records the cycle; prose alone has been forgotten eve
 
 ## Launching the deferred macOS run (macbook)
 
-Whenever fabrico is next on the macbook: this closes `TUI-013` with one attested run of the
-geometry fixture. `compat/tui/run-2.js` defaults to the macbook; every box fact is an `args`
+The procedure below is historical: `TUI-013` closed on 2026-09-20, as recorded below.
+`compat/tui/run-2.js` defaults to the macbook; every box fact is an `args`
 override (see `M` at its top).
 
 1. Preflight: `gh auth status` answers; `~/.claude/settings.json` carries the `Bash(rm:*)` allow

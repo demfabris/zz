@@ -2,7 +2,7 @@
 type: Design Plan
 title: TUI parity campaign
 description: "The terminal-client parity contract: tmux observable behavior by default, zz additions through superset commands, and proof tied to the tested revision."
-status: "Contract agreed 2026-09-09; cycles 1, 3, 4, 5, 6, 7 and 8 integrated (8/12 verified: TUI-001/002/003/004/005/007/009/010); wire protocol 102 shipped in zz 0.9.0 and 0.9.1 on 2026-09-14, so the next append opens 103 and compat/wire-version.py enforces it; cycle 9 ran its three lanes on alienware and was stopped before any gate for a machine move, leaving four branches unmerged (see compat/tui/HANDOFF.md): the mouse branch REJECTED on two regressions its own fixture cannot see, the choosers branch unreviewed with TUI-006 at review on its worker's account, the introspection branch approved with fixes; TUI-011 waits on its five children TUI-014 to TUI-018 and TUI-012 holds a complete proof at review behind TUI-008; cycle 10 (run-10.js) is written as stream, modes and capture, and its last gate closes the twelve-item baseline; lane zones are drawn around obligations rather than crates, and a verified claim is re-measured by compat/tui/verify-claims.py; the TUI portion of accepted native-presentation gaps follows this contract (triage 2026-09-10); TUI-013 (the macOS timeout) deferred as added scope"
+status: "Closed 2026-09-20: fixed baseline 12/12 and added scope 6/6 verified; recorded proof is owned by compat/tui/campaign.json."
 resource: compat/tui/campaign.json
 tags:
 - tui
@@ -180,6 +180,15 @@ without the hunk). The safe wrapper vendored to reach those fields went with the
 `libghostty-vt` resolves to upstream again and `build.rs` builds pristine Ghostty. The
 divergence is accepted: keeping any patch means carrying a fork of the engine's grid semantics
 for two capture spellings, which fabrico ruled not justified.
+
+Amendment 2026-09-23 (fabrico), during the macOS performance investigation:
+**measured dependency-fork improvements are allowed.** The native Ghostty pin
+now removes an unused C-host signal-stack TLS buffer through Zig's standard
+`std_options.signal_stack_size` option. Its exported ABI and terminal grid
+semantics stay the same. The tab, indexed-colour, and ICH capture decisions
+above remain the terminal contract. The [performance record](/research/2026-09-23-macos-performance.md)
+and `third_party/rust/libghostty-vt-sys/UPSTREAM.md` hold the evidence and
+maintenance conditions.
 
 # Scope boundary
 

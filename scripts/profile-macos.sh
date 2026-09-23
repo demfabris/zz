@@ -142,7 +142,7 @@ discover_owned_processes() {
         [[ "$candidate_pid" =~ ^[1-9][0-9]*$ ]] || continue
         candidate_command=$(ps -p "$candidate_pid" -o command= 2>/dev/null || true)
         candidate_command=${candidate_command#"${candidate_command%%[![:space:]]*}"}
-        if [[ "$candidate_command" == "$APP_BINARY --socket $PROFILE_SOCKET" ]]; then
+        if [[ "$candidate_command" == "$APP_BINARY --socket $PROFILE_SOCKET app" ]]; then
             GUI_PID=$candidate_pid
         fi
     done < <(pgrep -x zz 2>/dev/null || true)
@@ -325,7 +325,7 @@ if [[ "$PROFILE_MODE" == "startup" ]]; then
         --env "ZZ_SOCKET=$PROFILE_SOCKET" \
         --env "RUST_LOG=$RUST_LOG" \
         --target-stdout "$PROFILE_RUN_DIR/app.stdout.log" \
-        --launch -- "$APP_BINARY" --socket "$PROFILE_SOCKET" \
+        --launch -- "$APP_BINARY" --socket "$PROFILE_SOCKET" app \
         >"$PROFILE_RUN_DIR/xctrace.stdout.log" \
         2>"$PROFILE_RUN_DIR/app.stderr.log" &
     RECORDER_PID=$!
@@ -354,7 +354,7 @@ if [[ "$PROFILE_MODE" == "startup" ]]; then
     printf 'zz profiling: capture complete: %s\n' "$PROFILE_RUN_DIR"
     exit 0
 fi
-"$APP_BINARY" --socket "$PROFILE_SOCKET" \
+"$APP_BINARY" --socket "$PROFILE_SOCKET" app \
     >"$PROFILE_RUN_DIR/app.stdout.log" \
     2>"$PROFILE_RUN_DIR/app.stderr.log" &
 GUI_PID=$!

@@ -829,12 +829,14 @@ fn tool_content_payload(content: &ToolCallContent) -> ToolPayload {
             path: diff.path.display().to_string(),
             old: diff
                 .old_text
-                .clone()
-                .map(|old| capped(old, MAX_DIFF_SIDE_BYTES)),
-            new: capped(diff.new_text.clone(), MAX_DIFF_SIDE_BYTES),
+                .as_deref()
+                .map(|old| copied_capped(old, MAX_DIFF_SIDE_BYTES)),
+            new: copied_capped(&diff.new_text, MAX_DIFF_SIDE_BYTES),
         },
         ToolCallContent::Content(content) => match &content.content {
-            ContentBlock::Text(text) => ToolPayload::Text(capped_payload(text.text.clone())),
+            ContentBlock::Text(text) => {
+                ToolPayload::Text(copied_capped(&text.text, MAX_TOOL_PAYLOAD_BYTES))
+            }
             _ => ToolPayload::Json(capped_payload(pretty_json(content).unwrap_or_default())),
         },
         ToolCallContent::Terminal(terminal) => {
@@ -865,14 +867,81 @@ fn truncate_payload(text: &mut String, max_bytes: usize) {
     if text.len() <= max_bytes {
         return;
     }
+    text.truncate(payload_prefix_end(text, max_bytes));
+    text.push_str(TRUNCATION_MARKER);
+}
+
+fn copied_capped(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_owned();
+    }
+    let end = payload_prefix_end(text, max_bytes);
+    let mut retained = String::with_capacity(end + TRUNCATION_MARKER.len());
+    retained.push_str(&text[..end]);
+    retained.push_str(TRUNCATION_MARKER);
+    retained
+}
+
+fn payload_prefix_end(text: &str, max_bytes: usize) -> usize {
     let mut end = max_bytes.saturating_sub(TRUNCATION_MARKER.len());
     while end > 0 && !text.is_char_boundary(end) {
         end -= 1;
     }
-    text.truncate(end);
-    text.push_str(TRUNCATION_MARKER);
+    end
 }
 
 fn pretty_json_markdown(value: &impl serde::Serialize) -> String {
     pretty_json(value).map_or_else(String::new, |value| format!("```json\n{value}\n```"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copied_payloads_preserve_owned_truncation_behavior() {
+        let unicode = "é🙂".repeat(16);
+        for text in ["", "short", "already … [truncated]", unicode.as_str()] {
+            for limit in [
+                0,
+                1,
+                TRUNCATION_MARKER.len(),
+                TRUNCATION_MARKER.len() + 5,
+                128,
+            ] {
+                assert_eq!(copied_capped(text, limit), capped(text.to_owned(), limit));
+            }
+        }
+    }
+
+    #[test]
+    fn copied_tool_payloads_do_not_retain_discarded_storage() {
+        let input = "é".repeat(4 * MAX_TOOL_PAYLOAD_BYTES);
+        let text = ContentBlock::Text(agent_client_protocol_schema::v1::TextContent::new(
+            input.clone(),
+        ));
+        let ToolPayload::Text(retained_text) = tool_content_payload(&text.into()) else {
+            panic!("text content did not produce a text payload");
+        };
+        let diff = agent_client_protocol_schema::v1::Diff::new("file.rs", input.clone())
+            .old_text(input.clone());
+        let ToolPayload::Diff {
+            old: Some(old),
+            new,
+            ..
+        } = tool_content_payload(&diff.into())
+        else {
+            panic!("diff content did not preserve both sides");
+        };
+        for (retained, limit) in [
+            (retained_text, MAX_TOOL_PAYLOAD_BYTES),
+            (old, MAX_DIFF_SIDE_BYTES),
+            (new, MAX_DIFF_SIDE_BYTES),
+        ] {
+            assert!(retained.len() <= limit);
+            assert!(retained.ends_with(TRUNCATION_MARKER));
+            assert!(retained.capacity() <= limit);
+            assert_eq!(retained, capped(input.clone(), limit));
+        }
+    }
 }

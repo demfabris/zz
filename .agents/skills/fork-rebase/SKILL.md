@@ -1,6 +1,6 @@
 ---
 name: fork-rebase
-description: Maintain the carried-patch forks in scripts/forks.conf (currently demfabris/zed carrying gpui patches - RenderImage::into_frames, WgpuDeviceContext, the external-texture element, the window corner mask, superellipse corner smoothing, refresh_rate exposure, and more; see git log on zz-patches). Use whenever bumping gpui/zed or any dep resolved through a [patch] to a demfabris fork, when the user says "bump gpui", "update zed", "rebase forks", or "fork status", and before debugging weird gpui build errors after a dependency change.
+description: Maintain Cargo forks in scripts/forks.conf and the native Ghostty fork pinned in third_party/rust/libghostty-vt-sys/build.rs (currently demfabris/zed carrying gpui patches - RenderImage::into_frames, WgpuDeviceContext, the external-texture element, the window corner mask, superellipse corner smoothing, refresh_rate exposure, and more; see git log on zz-patches). Use whenever bumping gpui/zed or any dep resolved through a [patch] to a demfabris fork, when the user says "bump gpui", "update zed", "rebase forks", or "fork status", and before debugging weird gpui build errors after a dependency change.
 ---
 
 # Carried-patch forks
@@ -92,10 +92,12 @@ Current forks and why:
     brand-new transitive deps (hdrhistogram, crossbeam-channel from the
     profiler feature) — verify `just web-build` passes, since `--locked`
     is what catches it.
-  - Upstream unified perf tracking under gpui's `profiler` feature: zz must
-    enable it on the desktop crate's `gpui` dependency, not the shared workspace
-    dependency. The profiler uses native timing and crashes on WASM action
-    dispatch if inherited by `zz-ui`. `set_frame_trace_enabled` became
+  - Upstream unified perf tracking under gpui's `profiler` feature. Since
+    `66cad0ed` (2026-09-22), zz leaves it disabled in production to avoid its
+    collection overhead. Enable it only for diagnostic builds or fork validation,
+    on the desktop crate's `gpui` dependency, not the shared workspace dependency.
+    The profiler uses native timing and crashes on WASM action dispatch if
+    inherited by `zz-ui`. `set_frame_trace_enabled` became
     the shared `set_trace_enabled`, and collectors now yield
     `FrameEvent::{Draw,Present}` instead of bare `FrameTiming`.
 
@@ -114,6 +116,31 @@ Current forks and why:
 
   The gpui revision in diagnostics needs no manual bump: `crates/zz/build.rs`
   stamps `ZZ_GPUI_SOURCE` from `Cargo.lock` at build time.
+
+## Native Ghostty fork
+
+`libghostty-vt-sys/build.rs` fetches `demfabris/ghostty` directly at
+`fa7986a9dc3e582c46ebe248f66571ed740c7afe`, based on upstream `20c3eae04dee606349eb21e2dd0293b203d47179`.
+The retained branch is `codex/cabi-signal-stack`. Its one-line C ABI option
+removes unused Zig signal-stack TLS storage; it does not change terminal grid
+semantics. `third_party/rust/libghostty-vt-sys/UPSTREAM.md` owns its rationale,
+validation, and removal condition.
+
+`just forks`, `forks.conf`, and `fork-sync.sh` only handle Cargo forks. Do not
+add this native dependency to that manifest or use its Cargo rebase command.
+For a native update, inspect both upstream and fork histories, preserve the
+published pin through a retained branch or tag, and prepare a separate
+`codex/` branch. Recheck that C ABI code does not create Zig-owned workers or
+install a Zig signal stack. Publish the tested commit, update `GHOSTTY_REPO`
+and `GHOSTTY_COMMIT` in `build.rs`, and update the sys README, UPSTREAM record,
+and knowledge pages. No Cargo lock update is needed for a native-only change.
+
+Validate the actual archive and daemon: exported C symbols, terminal tests,
+signal-handler/alternate-stack behavior, and a normal macOS bundle build with
+no `GHOSTTY_SOURCE_DIR` or pkg-config bypass. Zig's default test runner uses its
+own `std_options`, so its pass alone does not exercise this C ABI option.
+When using local source overrides, edits at the same path do not trigger Cargo's
+native rebuild; use distinct paths or explicitly rebuild the sys package.
 
 ## Check status
 

@@ -301,7 +301,7 @@ just profile-terminal-summary <run-dir>
 ```
 
 `scripts/profile-macos.sh` creates a short private socket path and launches the profiling bundle
-directly with `--socket`, so the GUI cannot reuse the normal persistent daemon. It
+directly with `--socket PATH app`, so the GUI cannot reuse the normal persistent daemon. It
 waits for the daemon's private identity file, records the owned process tree at launch, capture
 start, and completion plus relevant `ZZ_BROWSER_*` controls, runs `xctrace`, then terminates only
 the GUI and daemon it launched.

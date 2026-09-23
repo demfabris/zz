@@ -15,8 +15,11 @@ exactly, with `default-features = false`, because crates.io v0.2.0 ignores OSC d
 The `-vt` crate is a safe Rust binding over `libghostty-vt-sys`. Until the wrapper publishes its own
 Zig 0.16 pin, the workspace replaces only that sys crate with the local snapshot documented in
 `third_party/rust/libghostty-vt-sys/UPSTREAM.md`; it statically builds Ghostty commit
-`20c3eae04dee606349eb21e2dd0293b203d47179`, which includes the upstream correction that makes the
-custom `memset` match the C ABI. The repository pins **Zig 0.16.0** in `.zigversion`,
+`fa7986a9dc3e582c46ebe248f66571ed740c7afe` from `demfabris/ghostty`, based on upstream
+`20c3eae04dee606349eb21e2dd0293b203d47179`. The base fixes the custom `memset` C ABI; the carried
+one-line `signal_stack_size = null` option removes the unused Zig signal-stack
+TLS allocation in C hosts. Rust retains ownership of thread startup and signal
+handling. See the [macOS measurements](/research/2026-09-23-macos-performance.md). The repository pins **Zig 0.16.0** in `.zigversion`,
 `mise.toml`, and CI so every native rebuild uses the required compiler. `zz-terminal` enables the
 wrapper's `kitty-graphics` feature and leaves the other defaults off. `session.rs` uses
 `Terminal::kitty_graphics`, `Terminal::set_kitty_image_storage_limit`, `PlacementIterator`, and the

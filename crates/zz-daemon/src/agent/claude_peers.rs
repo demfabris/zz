@@ -1,4 +1,3 @@
-use std::cell::OnceCell;
 use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::fs;
@@ -154,32 +153,74 @@ pub(crate) fn record_for_pane<'a>(
     pane: &str,
     pane_pid: Option<u32>,
 ) -> Option<&'a PeerRecord> {
-    record_for_pane_with_processes(records, pane, pane_pid, &OnceCell::new())
+    record_for_pane_with_parents(records, pane, pane_pid, parent_pid)
 }
 
-pub(crate) fn record_for_pane_with_processes<'a>(
+pub(crate) fn record_for_pane_with_parents<'a>(
     records: &'a [PeerRecord],
     pane: &str,
     pane_pid: Option<u32>,
-    processes: &OnceCell<Option<Vec<(u32, u32)>>>,
+    parent_of: impl Fn(u32) -> Option<u32>,
 ) -> Option<&'a PeerRecord> {
     let pane_pid = pane_pid?;
     let now = now_ms();
-    let mut candidates = records
-        .iter()
-        .filter(|record| {
-            matches_pane(&record.tmux, pane)
-                && pid_alive(record.pid)
-                && now.abs_diff(record.updated_at) <= 24 * 60 * 60 * 1000
-                && !record.messaging_socket_path.as_os_str().is_empty()
-        })
-        .peekable();
-    candidates.peek()?;
-    let parents = processes
-        .get_or_init(|| process_parents().ok())
-        .as_deref()?;
-    let pids = pane_process_ids(parents, pane_pid);
-    candidates.find(|record| pids.contains(&record.pid))
+    records.iter().find(|record| {
+        matches_pane(&record.tmux, pane)
+            && pid_alive(record.pid)
+            && now.abs_diff(record.updated_at) <= 24 * 60 * 60 * 1000
+            && !record.messaging_socket_path.as_os_str().is_empty()
+            && descends_from(record.pid, pane_pid, &parent_of)
+    })
+}
+
+fn descends_from(mut pid: u32, root: u32, parent_of: impl Fn(u32) -> Option<u32>) -> bool {
+    for _ in 0..64 {
+        if pid == root {
+            return true;
+        }
+        match parent_of(pid) {
+            Some(parent) if parent != pid && parent != 0 => pid = parent,
+            _ => return false,
+        }
+    }
+    false
+}
+
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
+fn parent_pid(pid: u32) -> Option<u32> {
+    let process_id = libc::pid_t::try_from(pid).ok().filter(|pid| *pid > 0)?;
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+    let size = i32::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
+    let result = unsafe {
+        libc::proc_pidinfo(
+            process_id,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    (result == size).then(|| unsafe { info.assume_init() }.pbi_ppid)
+}
+
+#[cfg(target_os = "linux")]
+fn parent_pid(pid: u32) -> Option<u32> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    stat.rsplit_once(')')?
+        .1
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn parent_pid(pid: u32) -> Option<u32> {
+    process_parents()
+        .ok()?
+        .into_iter()
+        .find_map(|(child, parent)| (child == pid).then_some(parent))
 }
 
 pub(crate) fn pane_process_ids(parents: &[(u32, u32)], pane_pid: u32) -> Vec<u32> {
@@ -918,8 +959,12 @@ mod tests {
     }
 
     #[test]
-    fn pane_lookup_loads_processes_only_for_matching_candidates() {
-        let processes = OnceCell::new();
+    fn pane_lookup_walks_parents_only_for_matching_candidates() {
+        let lookups = std::cell::Cell::new(0);
+        let parent_of = |pid| {
+            lookups.set(lookups.get() + 1);
+            parent_pid(pid)
+        };
         let me = std::process::id();
         let records = [PeerRecord {
             pid: me,
@@ -928,19 +973,26 @@ mod tests {
             updated_at: now_ms(),
             ..PeerRecord::default()
         }];
-        assert!(record_for_pane_with_processes(&[], "%0", Some(me), &processes).is_none());
-        assert!(record_for_pane_with_processes(&records, "%1", Some(me), &processes).is_none());
-        assert!(record_for_pane_with_processes(&records, "%0", None, &processes).is_none());
-        assert!(processes.get().is_none());
-        assert!(record_for_pane_with_processes(&records, "%0", Some(me), &processes).is_some());
-        assert!(processes.get().is_some());
+        assert!(record_for_pane_with_parents(&[], "%0", Some(me), parent_of).is_none());
+        assert!(record_for_pane_with_parents(&records, "%1", Some(me), parent_of).is_none());
+        assert!(record_for_pane_with_parents(&records, "%0", None, parent_of).is_none());
+        assert_eq!(lookups.get(), 0);
+        assert!(record_for_pane_with_parents(&records, "%0", Some(me), parent_of).is_some());
+        assert!(
+            record_for_pane(&records, "%0", Some(std::os::unix::process::parent_id())).is_some()
+        );
     }
 
     #[test]
     fn shared_process_snapshot_keeps_pane_routing_separate() {
         let me = std::process::id();
         let parent = std::os::unix::process::parent_id();
-        let processes = OnceCell::from(Some(vec![(me, 10), (parent, 20)]));
+        let table = [(me, 10), (parent, 20)];
+        let processes = |pid| {
+            table
+                .iter()
+                .find_map(|&(child, parent)| (child == pid).then_some(parent))
+        };
         let record = |pid, pane: &str| PeerRecord {
             pid,
             tmux: format!("work:@0.{pane}"),
@@ -950,16 +1002,16 @@ mod tests {
         };
         let records = [record(parent, "%0"), record(me, "%0"), record(parent, "%1")];
         assert_eq!(
-            record_for_pane_with_processes(&records, "%0", Some(10), &processes)
+            record_for_pane_with_parents(&records, "%0", Some(10), processes)
                 .map(|record| record.pid),
             Some(me)
         );
         assert_eq!(
-            record_for_pane_with_processes(&records, "%1", Some(20), &processes)
+            record_for_pane_with_parents(&records, "%1", Some(20), processes)
                 .map(|record| record.pid),
             Some(parent)
         );
-        assert!(record_for_pane_with_processes(&records, "%1", Some(10), &processes).is_none());
+        assert!(record_for_pane_with_parents(&records, "%1", Some(10), processes).is_none());
     }
 
     #[test]

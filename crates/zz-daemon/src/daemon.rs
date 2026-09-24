@@ -28788,29 +28788,26 @@ impl Shared {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        let processes = std::cell::OnceCell::new();
         for (pane, target, pane_pid) in panes {
-            let value = claude_peers::record_for_pane_with_processes(
-                &records, &target, pane_pid, &processes,
-            )
-            .filter(|record| {
-                let updated_at = if record.status_updated_at == 0 {
-                    record.updated_at
-                } else {
-                    record.status_updated_at
-                };
-                !record.status.is_empty()
-                    && now
-                        .checked_sub(updated_at)
-                        .is_some_and(|age| u128::from(age) <= Duration::from_mins(10).as_millis())
-            })
-            .map(|record| {
-                if record.status == "busy" {
-                    "working"
-                } else {
-                    "idle"
-                }
-            });
+            let value = claude_peers::record_for_pane(&records, &target, pane_pid)
+                .filter(|record| {
+                    let updated_at = if record.status_updated_at == 0 {
+                        record.updated_at
+                    } else {
+                        record.status_updated_at
+                    };
+                    !record.status.is_empty()
+                        && now.checked_sub(updated_at).is_some_and(|age| {
+                            u128::from(age) <= Duration::from_mins(10).as_millis()
+                        })
+                })
+                .map(|record| {
+                    if record.status == "busy" {
+                        "working"
+                    } else {
+                        "idle"
+                    }
+                });
             let value = {
                 let mut inner = self.inner.lock();
                 if inner.engine.state.window_for_pane(pane).is_none() {

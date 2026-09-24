@@ -36,7 +36,7 @@ pub use frame::{
     OsrFrame, OwnedBgraFrame,
 };
 #[cfg(target_os = "macos")]
-pub use frame::{MacGpuFrame, MacIoSurface};
+pub use frame::{MacFramePresenter, MacGpuFrame, MacIoSurface};
 #[cfg(target_os = "windows")]
 pub use frame::{WinGpuFrame, WinGpuTexture};
 pub use input::{

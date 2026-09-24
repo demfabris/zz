@@ -341,8 +341,12 @@ impl Render for AppShell {
                 notification_layer
                     .into_iter()
                     .map(IntoElement::into_any_element),
-            )
-            .collect::<Vec<_>>();
+            );
+        #[cfg(target_os = "macos")]
+        let overlays = overlays.chain(std::iter::once(
+            crate::browser::underlay::UnderlayFlush.into_any_element(),
+        ));
+        let overlays = overlays.collect::<Vec<_>>();
         let shell = app_shell_surface(
             "app-shell",
             if cfg!(target_os = "linux")

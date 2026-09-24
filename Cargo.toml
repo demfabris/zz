@@ -66,6 +66,7 @@ objc2-core-foundation = "0.3.2"
 objc2-foundation = { version = "0.3.2", default-features = false }
 objc2-io-surface = "0.3.2"
 objc2-metal = "0.3.2"
+objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std"] }
 oo7 = { version = "=0.6.0", default-features = false }
 parking_lot = "0.12.5"
 pbkdf2 = "=0.13.0"

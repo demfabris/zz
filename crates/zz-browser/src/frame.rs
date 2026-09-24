@@ -142,6 +142,9 @@ pub struct MacIoSurface {
 }
 
 #[cfg(target_os = "macos")]
+pub type MacFramePresenter = std::sync::Arc<dyn Fn(&MacIoSurface) + Send + Sync>;
+
+#[cfg(target_os = "macos")]
 impl MacIoSurface {
     pub(crate) fn new(inner: CFRetained<IOSurfaceRef>) -> Self {
         Self { inner }

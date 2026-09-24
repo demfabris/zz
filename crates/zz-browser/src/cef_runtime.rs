@@ -1829,6 +1829,11 @@ impl BrowserSession {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    pub fn set_frame_presenter(&self, presenter: Option<crate::MacFramePresenter>) {
+        self.metal_frames.set_presenter(presenter);
+    }
+
     pub fn set_focus(&self, focused: bool) {
         let Some(host) = self.browser.host() else {
             log::debug!(

@@ -7,6 +7,8 @@ use gpui::{
     GlobalElementId, InspectorElementId, IntoElement, LayoutId, Pixels, RenderImage, Window,
 };
 
+#[cfg(target_os = "macos")]
+use crate::browser::underlay::{self, UnderlayHandle};
 use crate::{browser::view::BrowserView, diagnostics, pane};
 
 const DIAGNOSTIC_TARGET: &str = "zz::diagnostics::browser_render";
@@ -16,6 +18,8 @@ pub(crate) struct BrowserElement {
     image: Option<Arc<RenderImage>>,
     #[cfg(target_os = "macos")]
     surface: Option<CVPixelBuffer>,
+    #[cfg(target_os = "macos")]
+    underlay: Option<UnderlayHandle>,
     corner_radii: Corners<Pixels>,
 }
 
@@ -30,6 +34,8 @@ impl BrowserElement {
             image,
             #[cfg(target_os = "macos")]
             surface: None,
+            #[cfg(target_os = "macos")]
+            underlay: None,
             corner_radii,
         }
     }
@@ -37,6 +43,12 @@ impl BrowserElement {
     #[cfg(target_os = "macos")]
     pub(crate) fn surface(mut self, surface: Option<CVPixelBuffer>) -> Self {
         self.surface = surface;
+        self
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn underlay(mut self, underlay: Option<UnderlayHandle>) -> Self {
+        self.underlay = underlay;
         self
     }
 }
@@ -53,6 +65,8 @@ pub(crate) struct BrowserPaintState {
     image: Option<Arc<RenderImage>>,
     #[cfg(target_os = "macos")]
     surface: Option<CVPixelBuffer>,
+    #[cfg(target_os = "macos")]
+    underlay: Option<UnderlayHandle>,
 }
 
 impl Element for BrowserElement {
@@ -102,6 +116,8 @@ impl Element for BrowserElement {
             image: self.image.clone(),
             #[cfg(target_os = "macos")]
             surface: self.surface.clone(),
+            #[cfg(target_os = "macos")]
+            underlay: self.underlay.clone(),
         }
     }
 
@@ -125,6 +141,13 @@ impl Element for BrowserElement {
             cx,
         );
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
+            #[cfg(target_os = "macos")]
+            if let Some(underlay) = state.underlay.take()
+                && underlay::place(window, &underlay, bounds)
+            {
+                window.paint_underlay_hole(bounds, self.corner_radii);
+                return;
+            }
             #[cfg(target_os = "macos")]
             if let Some(surface) = state.surface.take() {
                 window.paint_surface(bounds, self.corner_radii, surface);

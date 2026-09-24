@@ -57,6 +57,8 @@ use zz_ui::{
 
 #[cfg(target_os = "macos")]
 use crate::browser::macos_surface::MacBrowserSurfaceCache;
+#[cfg(target_os = "macos")]
+use crate::browser::underlay::PaneUnderlay;
 use zz_chrome_import as chrome_import;
 
 use super::recent_pages::{self, HistorySuggestion, RecentPage};
@@ -423,6 +425,8 @@ pub(crate) struct BrowserView {
     mac_surface: Option<CVPixelBuffer>,
     #[cfg(target_os = "macos")]
     mac_surface_cache: MacBrowserSurfaceCache,
+    #[cfg(target_os = "macos")]
+    underlay: Option<PaneUnderlay>,
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     gpu_texture: Option<wgpu::Texture>,
     #[cfg(target_os = "windows")]
@@ -761,6 +765,8 @@ impl BrowserView {
             mac_surface: None,
             #[cfg(target_os = "macos")]
             mac_surface_cache: MacBrowserSurfaceCache::default(),
+            #[cfg(target_os = "macos")]
+            underlay: None,
             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
             gpu_texture: None,
             #[cfg(target_os = "windows")]
@@ -1335,7 +1341,16 @@ impl BrowserView {
                     }
                 }
                 BrowserEvent::FrameReady { .. } if self.visible => {
+                    #[cfg(target_os = "macos")]
+                    let presented = (self.frame_session, self.mac_surface.is_some());
                     if !self.consume_frame(controller, cx) {
+                        return;
+                    }
+                    #[cfg(target_os = "macos")]
+                    if self.underlay.is_some()
+                        && presented == (self.frame_session, true)
+                        && self.mac_surface.is_some()
+                    {
                         return;
                     }
                 }
@@ -1608,6 +1623,12 @@ impl BrowserView {
                 {
                     self.mac_surface = None;
                     self.mac_surface_cache.clear();
+                    if self.underlay.take().is_some() {
+                        let pane = self.pane;
+                        controller.update(cx, |controller, _| {
+                            controller.set_frame_presenter(pane, None);
+                        });
+                    }
                 }
                 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
                 {
@@ -1653,6 +1674,15 @@ impl BrowserView {
                 ) {
                     Ok(surface) => {
                         self.mac_surface = Some(surface);
+                        if self.underlay.is_none() {
+                            let underlay = PaneUnderlay::new(io_surface);
+                            let presenter = underlay.presenter();
+                            let pane = self.pane;
+                            controller.update(cx, |controller, _| {
+                                controller.set_frame_presenter(pane, Some(presenter));
+                            });
+                            self.underlay = Some(underlay);
+                        }
                         ("mac_gpu", None)
                     }
                     Err(error) => {
@@ -3808,11 +3838,18 @@ impl Render for BrowserView {
         };
         let browser_element = BrowserElement::new(cx.entity(), visible_image, surface_radii);
         #[cfg(target_os = "macos")]
-        let browser_element = browser_element.surface(if shows_native_state {
-            None
-        } else {
-            self.mac_surface.clone()
-        });
+        let browser_element = browser_element
+            .surface(if shows_native_state {
+                None
+            } else {
+                self.mac_surface.clone()
+            })
+            .underlay(
+                self.underlay
+                    .as_ref()
+                    .filter(|_| !shows_native_state && self.mac_surface.is_some())
+                    .map(PaneUnderlay::handle),
+            );
         let mut content = round_div_radii(browser_surface.child(browser_element), surface_radii);
 
         if let Some(error) = self.error.clone() {

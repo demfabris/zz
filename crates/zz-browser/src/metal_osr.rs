@@ -17,7 +17,7 @@ use parking_lot::Mutex;
 use thiserror::Error;
 
 use crate::{
-    MacIoSurface, Viewport,
+    MacFramePresenter, MacIoSurface, Viewport,
     cef_runtime::{AcceleratedPoolLayout, ExpectedFrameSize, StalePoolFrame},
 };
 
@@ -42,6 +42,7 @@ struct MetalFrameProducerState {
     initialization_error: Option<String>,
     destinations: Option<DestinationSurfacePool>,
     sources: SourceTextureCache,
+    presenter: Option<MacFramePresenter>,
     in_flight_sequences: BTreeSet<u64>,
     last_published_sequence: Option<u64>,
 }
@@ -334,6 +335,7 @@ impl MetalFrameProducer {
                 initialization_error,
                 destinations: None,
                 sources: SourceTextureCache::default(),
+                presenter: None,
                 in_flight_sequences: BTreeSet::new(),
                 last_published_sequence: None,
             })),
@@ -348,6 +350,10 @@ impl MetalFrameProducer {
             state.destinations = None;
             state.sources.clear();
         }
+    }
+
+    pub(super) fn set_presenter(&self, presenter: Option<MacFramePresenter>) {
+        self.state.lock().presenter = presenter;
     }
 
     pub(super) fn produce<F>(
@@ -505,7 +511,7 @@ impl MetalFrameProducer {
                 let error = command_buffer
                     .error()
                     .map(|error| MetalFrameError::Blit(format!("{error:?}")));
-                let outcome = {
+                let (outcome, presenter) = {
                     let mut state = producer_state.lock();
                     if !state.in_flight_sequences.remove(&sequence) {
                         return;
@@ -520,7 +526,7 @@ impl MetalFrameProducer {
                         destination.in_flight_sequence = None;
                     }
 
-                    if let Some(error) = error {
+                    let outcome = if let Some(error) = error {
                         if state
                             .destinations
                             .as_ref()
@@ -570,8 +576,13 @@ impl MetalFrameProducer {
                                 },
                             }
                         }
-                    }
+                    };
+                    (outcome, state.presenter.clone())
                 };
+                if let (Some(presenter), MetalFrameCompletion::Frame(frame)) = (presenter, &outcome)
+                {
+                    presenter(&frame.io_surface);
+                }
                 completion(outcome);
             },
         );

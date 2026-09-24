@@ -84,8 +84,10 @@ core-foundation.workspace = true
 core-video.workspace = true
 libc.workspace = true
 objc2.workspace = true
-objc2-app-kit = { workspace = true, features = ["NSButton", "NSControl", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSMenu", "NSMenuItem", "NSScreen", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "objc2-core-foundation"] }
+objc2-app-kit = { workspace = true, features = ["NSButton", "NSControl", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSMenu", "NSMenuItem", "NSScreen", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "objc2-core-foundation", "objc2-quartz-core"] }
+objc2-core-foundation = { workspace = true, features = ["CFCGTypes"] }
 objc2-foundation = { workspace = true, features = ["NSBundle", "NSData", "NSPathUtilities", "NSString"] }
+objc2-quartz-core = { workspace = true, features = ["CALayer", "CATransaction", "objc2-core-foundation"] }
 raw-window-handle.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]

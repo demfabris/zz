@@ -598,6 +598,8 @@ pub struct BrowserController {
     active_tabs: BTreeMap<PaneId, TabId>,
     pane_viewports: BTreeMap<PaneId, Viewport>,
     focused_panes: BTreeSet<PaneId>,
+    #[cfg(target_os = "macos")]
+    frame_presenters: BTreeMap<PaneId, zz_browser::MacFramePresenter>,
     wheel_decay_tasks: BTreeMap<BrowserKey, (u64, Task<()>)>,
     wheel_decay_generation: u64,
     external_begin_frame_hot_until: BTreeMap<BrowserKey, Instant>,
@@ -651,6 +653,8 @@ impl BrowserController {
                     active_tabs: BTreeMap::new(),
                     pane_viewports: BTreeMap::new(),
                     focused_panes: BTreeSet::new(),
+                    #[cfg(target_os = "macos")]
+                    frame_presenters: BTreeMap::new(),
                     wheel_decay_tasks: BTreeMap::new(),
                     wheel_decay_generation: 0,
                     external_begin_frame_hot_until: BTreeMap::new(),
@@ -685,6 +689,8 @@ impl BrowserController {
                 active_tabs: BTreeMap::new(),
                 pane_viewports: BTreeMap::new(),
                 focused_panes: BTreeSet::new(),
+                #[cfg(target_os = "macos")]
+                frame_presenters: BTreeMap::new(),
                 wheel_decay_tasks: BTreeMap::new(),
                 wheel_decay_generation: 0,
                 external_begin_frame_hot_until: BTreeMap::new(),
@@ -750,6 +756,8 @@ impl BrowserController {
                 viewport.visible = false;
                 session.set_focus(false);
                 session.set_viewport(viewport);
+                #[cfg(target_os = "macos")]
+                session.set_frame_presenter(None);
             }
             self.wheel_decay_tasks.remove(&previous_key);
             self.external_begin_frame_hot_until.remove(&previous_key);
@@ -777,6 +785,8 @@ impl BrowserController {
             }
             session.set_focus(focused);
             session.set_frame_rate(frame_rate);
+            #[cfg(target_os = "macos")]
+            session.set_frame_presenter(self.frame_presenters.get(&pane).cloned());
             !was_visible && session.viewport().visible
         } else {
             false
@@ -1502,6 +1512,27 @@ impl BrowserController {
         );
     }
 
+    #[cfg(target_os = "macos")]
+    pub(crate) fn set_frame_presenter(
+        &mut self,
+        pane: PaneId,
+        presenter: Option<zz_browser::MacFramePresenter>,
+    ) {
+        match &presenter {
+            Some(presenter) => {
+                self.frame_presenters.insert(pane, presenter.clone());
+            }
+            None => {
+                self.frame_presenters.remove(&pane);
+            }
+        }
+        if let Some(tab) = self.active_tab(pane)
+            && let Some(session) = self.sessions.get(&(pane, tab))
+        {
+            session.set_frame_presenter(presenter);
+        }
+    }
+
     pub(crate) fn set_focus(&mut self, pane: PaneId, focused: bool) {
         log::trace!(target: "zz::diagnostics::browser", "set_focus pane={pane} focused={focused}");
         if focused {
@@ -1824,6 +1855,8 @@ impl BrowserController {
         self.active_tabs.remove(&pane);
         self.pane_viewports.remove(&pane);
         self.focused_panes.remove(&pane);
+        #[cfg(target_os = "macos")]
+        self.frame_presenters.remove(&pane);
     }
 
     #[must_use]
@@ -2440,6 +2473,10 @@ impl BrowserController {
             focused,
             self.wheel_decay_tasks.contains_key(&key),
         ));
+        #[cfg(target_os = "macos")]
+        if self.active_tab(key.0) == Some(key.1) {
+            session.set_frame_presenter(self.frame_presenters.get(&key.0).cloned());
+        }
         self.sessions.insert(key, session);
         if watch_first_frame {
             self.first_frame_watchdogs

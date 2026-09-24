@@ -12,6 +12,8 @@ pub(crate) mod recent_pages;
 pub(crate) mod screenshot;
 #[cfg(not(any(target_os = "ios", target_os = "windows")))]
 pub(crate) mod tui;
+#[cfg(target_os = "macos")]
+pub(crate) mod underlay;
 #[cfg(not(target_os = "ios"))]
 pub(crate) mod view;
 

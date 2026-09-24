@@ -14,6 +14,7 @@ pub(crate) struct BlinkCursor {
     visible: bool,
     paused: bool,
     epoch: usize,
+    idle_since: Option<web_time::Instant>,
 
     _task: Task<()>,
 }
@@ -24,11 +25,13 @@ impl BlinkCursor {
             visible: false,
             paused: false,
             epoch: 0,
+            idle_since: None,
             _task: Task::ready(()),
         }
     }
 
     pub fn start(&mut self, cx: &mut Context<Self>) {
+        self.idle_since = Some(cx.background_executor().now());
         self.blink(self.epoch, cx);
     }
 
@@ -50,6 +53,13 @@ impl BlinkCursor {
 
         self.visible = !self.visible;
         cx.notify();
+        if self.visible
+            && self.idle_since.is_some_and(|since| {
+                cx.background_executor().now() - since >= crate::widget::BLINK_IDLE_TIMEOUT
+            })
+        {
+            return;
+        }
 
         let epoch = self.next_epoch();
         self._task = cx.spawn(async move |this, cx| {
@@ -68,6 +78,7 @@ impl BlinkCursor {
     pub fn pause(&mut self, cx: &mut Context<Self>) {
         self.paused = true;
         self.visible = true;
+        self.idle_since = Some(cx.background_executor().now());
         cx.notify();
 
         let epoch = self.next_epoch();

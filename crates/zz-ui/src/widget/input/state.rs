@@ -1651,6 +1651,7 @@ pub(super) struct BlinkCursor {
     visible: bool,
     paused: bool,
     epoch: usize,
+    idle_since: Option<web_time::Instant>,
     _task: Task<()>,
 }
 
@@ -1663,6 +1664,7 @@ impl BlinkCursor {
             visible: false,
             paused: false,
             epoch: 0,
+            idle_since: None,
             _task: Task::ready(()),
         }
     }
@@ -1672,6 +1674,7 @@ impl BlinkCursor {
     }
 
     fn start(&mut self, cx: &mut Context<Self>) {
+        self.idle_since = Some(cx.background_executor().now());
         self.blink(self.epoch, cx);
     }
 
@@ -1695,6 +1698,13 @@ impl BlinkCursor {
 
         self.visible = !self.visible;
         cx.notify();
+        if self.visible
+            && self.idle_since.is_some_and(|since| {
+                cx.background_executor().now() - since >= crate::widget::BLINK_IDLE_TIMEOUT
+            })
+        {
+            return;
+        }
 
         let epoch = self.next_epoch();
         self._task = cx.spawn(async move |this, cx| {
@@ -1708,6 +1718,7 @@ impl BlinkCursor {
     fn pause(&mut self, cx: &mut Context<Self>) {
         self.paused = true;
         self.visible = true;
+        self.idle_since = Some(cx.background_executor().now());
         cx.notify();
 
         let epoch = self.next_epoch();
@@ -1740,6 +1751,28 @@ mod tests {
         assert_eq!(utf8_offset(text, 2), 1);
         assert_eq!(utf8_offset(text, 3), 5);
         assert_eq!(utf8_offset(text, 4), 6);
+    }
+
+    #[gpui::test]
+    fn an_idle_caret_settles_visible_and_input_restarts_it(cx: &mut gpui::TestAppContext) {
+        let blink = cx.new(|_| BlinkCursor::new());
+        blink.update(cx, BlinkCursor::start);
+        let steps = crate::widget::BLINK_IDLE_TIMEOUT.as_millis() / 250 + 8;
+        for _ in 0..steps {
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(250));
+            cx.run_until_parked();
+        }
+        let settled = blink.read_with(cx, |blink, _| (blink.visible(), blink.epoch));
+        assert!(settled.0);
+        cx.executor().advance_clock(BlinkCursor::INTERVAL * 4);
+        cx.run_until_parked();
+        assert_eq!(blink.read_with(cx, |blink, _| blink.epoch), settled.1);
+        blink.update(cx, BlinkCursor::pause);
+        cx.executor()
+            .advance_clock(BlinkCursor::PAUSE + BlinkCursor::INTERVAL * 2);
+        cx.run_until_parked();
+        assert!(blink.read_with(cx, |blink, _| blink.epoch) > settled.1 + 1);
     }
 
     #[test]

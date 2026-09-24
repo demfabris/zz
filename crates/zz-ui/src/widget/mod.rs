@@ -5,6 +5,8 @@
 //!
 //! [upstream]: https://github.com/longbridge/gpui-component
 
+pub(crate) const BLINK_IDLE_TIMEOUT: web_time::Duration = web_time::Duration::from_secs(10);
+
 pub mod button;
 #[cfg(feature = "editor")]
 pub mod code_editor;

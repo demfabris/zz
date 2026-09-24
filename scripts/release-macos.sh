@@ -113,9 +113,14 @@ preflight_notary() {
     require_command xcrun
     load_notary_profile
     note "Checking notary credentials in Keychain profile '$NOTARY_PROFILE'"
-    xcrun notarytool history \
-        --keychain-profile "$NOTARY_PROFILE" \
-        --output-format json >/dev/null
+    local attempt
+    for attempt in 1 2 3; do
+        xcrun notarytool history \
+            --keychain-profile "$NOTARY_PROFILE" \
+            --output-format json >/dev/null && return
+        note "Apple's notary service did not answer (attempt $attempt of 3)"
+    done
+    die "could not reach Apple's notary service with profile '$NOTARY_PROFILE'"
 }
 
 assert_app_layout() {

@@ -170,7 +170,10 @@ struct TmuxLabelCreationError {
 #[cfg(not(target_os = "ios"))]
 #[must_use]
 pub fn run_startup(socket_path: &Path, options: StartupOptions) -> Startup {
-    diagnostics::init();
+    diagnostics::init(bare_command_line_opens_application(
+        options.origin,
+        launched_by_launch_services(),
+    ));
     let arguments =
         match application_arguments(diagnostics::application_args(), socket_path.to_path_buf()) {
             Ok(arguments) => arguments,

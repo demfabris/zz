@@ -36,10 +36,10 @@ pub const RING_LOG_GENERATION_BYTES: u64 = 8 * 1024 * 1024;
 
 pub static VERBOSE_LOG: OnceLock<Option<PathBuf>> = OnceLock::new();
 
-pub fn init() {
+pub fn init(bare_opens_application: bool) {
     let arguments = std::env::args_os().collect::<Vec<_>>();
     let verbose = verbose_requested(&arguments);
-    let role = process_role(&arguments);
+    let role = process_role(&arguments, bare_opens_application);
 
     if !verbose {
         init_production(&role);
@@ -367,7 +367,7 @@ pub fn verbose_log_path(arguments: &[OsString]) -> Option<PathBuf> {
 }
 
 #[must_use]
-pub fn process_role(arguments: &[OsString]) -> String {
+pub fn process_role(arguments: &[OsString], bare_opens_application: bool) -> String {
     if let Some(process_type) = process_type(arguments) {
         return format!("cef-{process_type}");
     }
@@ -381,7 +381,10 @@ pub fn process_role(arguments: &[OsString]) -> String {
     if app_arguments.as_slice() == [OsStr::new("app")] {
         return "app".to_owned();
     }
-    if raw_terminal_command(arguments) && std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+    let bare_client = app_arguments.is_empty() && !bare_opens_application;
+    if (bare_client || raw_terminal_command(arguments))
+        && std::io::IsTerminal::is_terminal(&std::io::stdout())
+    {
         return "tui".to_owned();
     }
     let executable = arguments
@@ -391,7 +394,7 @@ pub fn process_role(arguments: &[OsString]) -> String {
         .unwrap_or("zz");
     if executable.contains("helper") {
         "cef-helper".to_owned()
-    } else if application_arguments(arguments).next().is_some() {
+    } else if bare_client || !app_arguments.is_empty() {
         "command".to_owned()
     } else {
         "app".to_owned()
@@ -728,30 +731,37 @@ mod tests {
     #[test]
     fn classifies_process_roles_after_global_flags() {
         assert_eq!(
-            process_role(&arguments(&["zz", "--verbose", "daemon"])),
+            process_role(&arguments(&["zz", "--verbose", "daemon"]), true),
             "daemon"
         );
-        assert_eq!(process_role(&arguments(&["zz", "--verbose"])), "app");
-        assert_eq!(process_role(&arguments(&["zz", "app"])), "app");
+        assert_eq!(process_role(&arguments(&["zz", "--verbose"]), true), "app");
+        assert_eq!(process_role(&arguments(&["zz", "app"]), true), "app");
         assert_eq!(
-            process_role(&arguments(&["zz", "--type=renderer", "--verbose"])),
+            process_role(&arguments(&["zz", "--type=renderer", "--verbose"]), true),
             "cef-renderer"
         );
         assert_eq!(
-            process_role(&arguments(&["zz", "--type", "utility", "--verbose"])),
+            process_role(&arguments(&["zz", "--type", "utility", "--verbose"]), true),
             "cef-utility"
         );
         assert_eq!(
-            process_role(&arguments(&["zz", "--socket", "/tmp/zz.sock"])),
+            process_role(&arguments(&["zz", "--socket", "/tmp/zz.sock"]), true),
             "app"
         );
         assert_eq!(
-            process_role(&arguments(&["zz", "--socket", "daemon"])),
+            process_role(&arguments(&["zz", "--socket", "daemon"]), true),
             "app"
         );
         assert_eq!(
-            process_role(&arguments(&["zz", "--socket", "/tmp/zz.sock", "daemon"])),
+            process_role(
+                &arguments(&["zz", "--socket", "/tmp/zz.sock", "daemon"]),
+                true
+            ),
             "daemon"
+        );
+        assert_ne!(
+            process_role(&arguments(&["zz", "--socket", "/tmp/zz.sock"]), false),
+            "app"
         );
     }
 

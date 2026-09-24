@@ -1,5 +1,8 @@
 # Update Log
 
+## 2026-09-24
+* **Update**: A visible browser page that has been quiet for 2 seconds now gets its keepalive BeginFrame every 100 ms instead of every 33 ms; input, scrolling and fresh paints still switch it back to the hot rate. Profiling bundle, static localhost page, two interleaved runs each: GUI 2.57 to 2.28% of a core, CEF helpers 1.04 to 0.65%. A page with a 1 s `setInterval` clock kept updating. Disabling Chromium's spare renderer was measured alongside and not shipped: it saves one 27 MB renderer, but cross-site navigations went from 39 to 80 ms median.
+
 ## 2026-09-23
 * **Update**: zz's ssh master now also passes `Compression=yes`. The 2026-09-22 netem rig measured interactive terminal frames 25-40x smaller and a 2 Mbit/100 ms flood's echo latency 9.4 s -> ~100 ms. Browser egress (`-D`) shares the master, so on fast links it pays too: a local sshd rig moved browser SOCKS downloads from ~510 to 44-62 MB/s with the remote sshd saturating a core. Chosen by fabrico over a separate uncompressed browser master, which would need a second ssh login.
 * **Update**: The gpui pin moved to `2d9f5676f5` (fork branch `codex-sprite-sort-texture`, one commit on the atlas-retirement pin `a64e53ec`). `Scene::finish` now sorts sprites by `(order, texture)` instead of `(order, tile_id)`: during a 1 line/ms output flood, main-thread samples in the monochrome sprite sort fell from 250 to 50 per 10 s, about 11% of GUI flood CPU. `zz-patches` still sits at `53a9c89f37`, so `just forks` reports the pin off-tip as before.

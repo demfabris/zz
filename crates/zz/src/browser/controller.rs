@@ -30,6 +30,8 @@ const DEFAULT_DISPLAY_FRAME_RATE_CEILING: i32 = 60;
 const MAX_DISPLAY_FRAME_RATE_CEILING: i32 = 240;
 const UNFOCUSED_SCROLL_FRAME_RATE_DECAY: Duration = Duration::from_secs(1);
 const EXTERNAL_BEGIN_FRAME_HOT_WINDOW: Duration = Duration::from_millis(500);
+const EXTERNAL_BEGIN_FRAME_COLD_AFTER: Duration = Duration::from_secs(2);
+const EXTERNAL_BEGIN_FRAME_COLD_INTERVAL: Duration = Duration::from_millis(100);
 const ADAPTIVE_BEGIN_FRAME_SAMPLE_WINDOW: Duration = Duration::from_secs(1);
 const ADAPTIVE_BEGIN_FRAME_PROBE_WINDOW: Duration = Duration::from_secs(2);
 const ADAPTIVE_BEGIN_FRAME_DOWNSHIFT_PERCENT: u64 = 85;
@@ -238,6 +240,16 @@ impl ExternalBeginFrameDeadline {
             self.next = next;
         }
         true
+    }
+}
+
+fn cold_external_begin_frame_interval(hot_until: Option<Instant>, now: Instant) -> Duration {
+    if hot_until
+        .is_some_and(|until| now.saturating_duration_since(until) < EXTERNAL_BEGIN_FRAME_COLD_AFTER)
+    {
+        VISIBLE_PUMP_WATCHDOG_INTERVAL
+    } else {
+        EXTERNAL_BEGIN_FRAME_COLD_INTERVAL
     }
 }
 
@@ -1021,7 +1033,10 @@ impl BrowserController {
                 if let Some(throttle) = self.adaptive_begin_frame_throttles.get_mut(key) {
                     throttle.set_hot(false, now);
                 }
-                VISIBLE_PUMP_WATCHDOG_INTERVAL
+                cold_external_begin_frame_interval(
+                    self.external_begin_frame_hot_until.get(key).copied(),
+                    now,
+                )
             };
             if external_begin_frame_due(
                 &mut self.next_external_begin_frame,
@@ -2622,6 +2637,30 @@ mod tests {
     use gpui::{AppContext as _, TestAppContext};
 
     use super::*;
+
+    #[test]
+    fn a_page_left_cold_gets_slower_begin_frames() {
+        let start = Instant::now();
+        let now = start + Duration::from_secs(10);
+        let recent = start + Duration::from_millis(9_500);
+        let stale = start + Duration::from_millis(7_999);
+        assert_eq!(
+            cold_external_begin_frame_interval(Some(now + Duration::from_millis(1)), now),
+            VISIBLE_PUMP_WATCHDOG_INTERVAL
+        );
+        assert_eq!(
+            cold_external_begin_frame_interval(Some(recent), now),
+            VISIBLE_PUMP_WATCHDOG_INTERVAL
+        );
+        assert_eq!(
+            cold_external_begin_frame_interval(Some(stale), now),
+            EXTERNAL_BEGIN_FRAME_COLD_INTERVAL
+        );
+        assert_eq!(
+            cold_external_begin_frame_interval(None, now),
+            EXTERNAL_BEGIN_FRAME_COLD_INTERVAL
+        );
+    }
 
     #[gpui::test(iterations = 20)]
     fn cef_work_runs_after_the_app_update_in_submission_order(cx: &mut TestAppContext) {

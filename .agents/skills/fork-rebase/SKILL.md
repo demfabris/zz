@@ -114,6 +114,14 @@ Current forks and why:
   directly, not the `zz-patches` branch, so any new fork tip must be written
   into `Cargo.toml` by hand as well.
 
+  Keep all three manifest locations aligned: the root and `clients/web`
+  patch tables, plus the direct `gpui_wgpu` dependency in
+  `crates/zz-gpui-ios/Cargo.toml`. The iOS dependency uses the fork URL directly,
+  so the upstream patch table does not replace it. A missed pin creates a second
+  GPUI dependency tree even if `cargo update --precise` changes its resolved SHA:
+  the old `?rev=` query remains a distinct source identity. Verify each lockfile
+  contains one fork source URL and that registry dependencies did not drift.
+
   The gpui revision in diagnostics needs no manual bump: `crates/zz/build.rs`
   stamps `ZZ_GPUI_SOURCE` from `Cargo.lock` at build time.
 
@@ -161,13 +169,13 @@ uncommitted work or unpublished fork commits.
 
 1. Check the cache clone's status and worktrees. Fetch both remotes, record the
    full remote patch tip and upstream target, and compare the patch tip with
-   both zz pins. Preserve any local-only commits.
+   all three zz manifest pins. Preserve any local-only commits.
 2. Create a backup branch at the old tip and a separate `codex/` branch in an
    isolated worktree. Rebase there. Keep zz's behavior when resolving conflicts;
    only drop a patch after proving upstream supplies its full behavior.
 3. Compare old and new patch series with `git range-diff`, inspect changed
    patches and GPU layouts, and run the carried regressions.
-4. Publish a separate candidate branch, then update both zz manifests and
+4. Publish a separate candidate branch, then update all three zz manifests and
    regenerate their lockfiles against that exact GitHub commit. Keep
    `zz-patches` at the old tip until validation finishes. Local Git URL
    overrides can work with a complete clone, but a blobless clone can fail
@@ -177,7 +185,7 @@ uncommitted work or unpublished fork commits.
 6. Publish the tested tip to `zz-patches` with an explicit
    `--force-with-lease=refs/heads/zz-patches:<recorded-old-tip>`. A changed remote
    tip requires reconciliation. Keep the backup and verify `just forks` and
-   both manifest/lock pairs after publication.
+   all three manifest pins and both lockfiles after publication.
 
 The 2026-09-12 rebase also needed explicit `gpui/profiler` validation: upstream's
 new debug-overlay `Quad` initializer omitted zz's smoothing and padding fields.

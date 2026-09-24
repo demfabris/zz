@@ -4,7 +4,7 @@ title: GPUI revision pin
 description: Where the patched Zed revision zz builds against is defined, how to read it, and what the carried GPUI patches do. gpui-component is not a dependency.
 resource: Cargo.toml
 tags: [gpui, zed, pin, reference, git-dependency]
-timestamp: 2026-09-22T00:00:00Z
+timestamp: 2026-09-23T00:00:00Z
 ---
 
 # Overview
@@ -12,16 +12,18 @@ timestamp: 2026-09-22T00:00:00Z
 zz's GPUI application layer comes from the `demfabris/zed` `zz-patches` branch rather than a
 published crate. The desktop and browser clients pin the same published fork revision through
 their manifests and lockfiles.
+The iOS platform crate pins `gpui_wgpu` directly to the same fork revision.
 On Linux, `gpui_platform` is built with `font-kit`, Wayland, and X11 enabled; the same crate
 selects the native macOS and Windows backends automatically.
 
-**Do not read a revision out of this document.** The normal pin lives in two manifests and
+**Do not read a revision out of this document.** The normal pin lives in three manifests and
 two lockfiles, which must agree outside a local experiment:
 
 | Place | Role |
 | --- | --- |
 | `Cargo.toml`, `[patch."https://github.com/zed-industries/zed"]` | The `rev = "…"` on `gpui` and `gpui_platform`. This is the authority . editing it is how the pin moves. |
 | `clients/web/Cargo.toml` | The browser client's independent workspace patch. Keep it on the desktop revision. |
+| `crates/zz-gpui-ios/Cargo.toml` | The direct `gpui_wgpu` fork dependency. Keep its `rev` aligned; it bypasses the upstream patch table. |
 | `Cargo.lock` and `clients/web/Cargo.lock` | The resolved `source = "git+https://github.com/demfabris/zed?rev=…"` for normal Git pins. Regenerated, never hand-edited. |
 
 The appearance diagnostics log line no longer holds a third copy to keep in sync:
@@ -30,7 +32,7 @@ The appearance diagnostics log line no longer holds a third copy to keep in sync
 trust this document:
 
 ```bash
-rg 'demfabris/zed|zz-forks/zed' Cargo.toml Cargo.lock clients/web/{Cargo.toml,Cargo.lock}
+rg 'demfabris/zed|zz-forks/zed' Cargo.toml Cargo.lock clients/web/{Cargo.toml,Cargo.lock} crates/zz-gpui-ios/Cargo.toml
 ```
 
 The fork itself is declared in `scripts/forks.conf` (`zed  zed-industries/zed  demfabris/zed
@@ -191,7 +193,8 @@ just forks   # confirm LOCK is "in sync" before appending a commit
 ```
 
 Bumping upstream means rebasing `zz-patches`, then moving the `rev` in `Cargo.toml`
-and `clients/web/Cargo.toml` before regenerating their lockfiles.
+`clients/web/Cargo.toml`, and `crates/zz-gpui-ios/Cargo.toml` before regenerating
+the two lockfiles.
 
 # Rebase checks from 2026-09-12
 

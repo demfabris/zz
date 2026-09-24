@@ -861,7 +861,11 @@ impl TerminalView {
                 .kitty_images(pane)
                 .unwrap_or_else(|| Arc::new(RwLock::new(KittyImageCache::default())))
         };
-        let observed_kitty_revision = kitty_images.read().revision();
+        let observed_kitty_revision = {
+            let mut images = kitty_images.write();
+            images.retain_view();
+            images.revision()
+        };
         let observed_pasted_image_revision = if command_output || popup {
             0
         } else {
@@ -993,6 +997,20 @@ impl TerminalView {
                 cx.notify(entity_id);
             }));
         }
+        let window_handle = window.window_handle();
+        cx.on_release(move |view, cx| {
+            let images = view.kitty_images.write().release_view();
+            if !images.is_empty() {
+                let _ = window_handle.update(cx, |_, window, _| {
+                    for image in images {
+                        if let Err(error) = window.drop_image(image) {
+                            log::warn!("failed to release Kitty image on pane close: {error}");
+                        }
+                    }
+                });
+            }
+        })
+        .detach();
         cx.observe(&mux, move |view, mux, cx| {
             let mux = mux.read(cx);
             let appearance = mux.appearance();
@@ -1065,11 +1083,16 @@ impl TerminalView {
                 }
                 view.observed_history_invalidations = history_invalidations;
             }
+            let mut retired_images = Vec::new();
             if let Some(kitty_images) = kitty_images {
                 let revision = kitty_images.read().revision();
-                if !Arc::ptr_eq(&kitty_images, &view.kitty_images)
-                    || revision != view.observed_kitty_revision
-                {
+                let cache_replaced = !Arc::ptr_eq(&kitty_images, &view.kitty_images);
+                if cache_replaced {
+                    retired_images = view.kitty_images.write().release_view();
+                    kitty_images.write().retain_view();
+                }
+                if cache_replaced || revision != view.observed_kitty_revision {
+                    retired_images.extend(kitty_images.write().take_retired());
                     view.kitty_images = kitty_images;
                     view.observed_kitty_revision = revision;
                     changed = true;
@@ -1077,6 +1100,7 @@ impl TerminalView {
             } else {
                 let revision = view.kitty_images.read().revision();
                 if revision != view.observed_kitty_revision {
+                    retired_images.extend(view.kitty_images.write().take_retired());
                     view.observed_kitty_revision = revision;
                     changed = true;
                 }
@@ -1098,6 +1122,17 @@ impl TerminalView {
                 .hovered_uri
                 .clone();
             view.observe_image_hover(hovered_uri, cx);
+            if !retired_images.is_empty() {
+                cx.defer(move |cx| {
+                    let _ = window_handle.update(cx, |_, window, _| {
+                        for image in retired_images {
+                            if let Err(error) = window.drop_image(image) {
+                                log::warn!("failed to release superseded Kitty image: {error}");
+                            }
+                        }
+                    });
+                });
+            }
             if changed {
                 cx.notify();
             }

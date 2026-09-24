@@ -721,6 +721,7 @@ pub(crate) struct KittyImageCache {
     images: HashMap<u32, KittyCachedImage>,
     retired: Vec<Arc<RenderImage>>,
     revision: u64,
+    view_count: usize,
 }
 
 impl KittyImageCache {
@@ -733,6 +734,23 @@ impl KittyImageCache {
 
     pub(crate) const fn revision(&self) -> u64 {
         self.revision
+    }
+
+    pub(crate) fn retain_view(&mut self) {
+        self.view_count += 1;
+    }
+
+    pub(crate) fn release_view(&mut self) -> Vec<Arc<RenderImage>> {
+        assert!(self.view_count > 0);
+        self.view_count -= 1;
+        if self.view_count != 0 {
+            return Vec::new();
+        }
+        self.images
+            .values()
+            .map(|cached| Arc::clone(&cached.image))
+            .chain(self.retired.drain(..))
+            .collect()
     }
 
     pub(crate) fn take_retired(&mut self) -> Vec<Arc<RenderImage>> {
@@ -8629,6 +8647,469 @@ mod tests {
                 cx,
             )
         })
+    }
+
+    struct KittyPaneLifecycleRoot {
+        terminal: Option<gpui::Entity<crate::terminal::view::TerminalView>>,
+        other: Option<gpui::Entity<crate::terminal::view::TerminalView>>,
+        shown: bool,
+    }
+
+    impl gpui::Render for KittyPaneLifecycleRoot {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            _cx: &mut gpui::Context<Self>,
+        ) -> impl gpui::IntoElement {
+            use gpui::prelude::*;
+            gpui::div()
+                .size_full()
+                .flex()
+                .child(
+                    gpui::div()
+                        .flex_1()
+                        .h_full()
+                        .children(self.shown.then(|| self.terminal.clone()).flatten()),
+                )
+                .child(gpui::div().flex_1().h_full().children(self.other.clone()))
+        }
+    }
+
+    fn install_kitty_lifecycle_image(
+        mux: &mut MuxClient,
+        pane: PaneId,
+        generation: u64,
+    ) -> Arc<RenderImage> {
+        let mut viewport = TerminalViewport::blank_with_appearance(
+            20,
+            12,
+            zz_terminal::SessionStatus::Starting,
+            &TerminalAppearance::default(),
+        );
+        viewport.generation = generation;
+        viewport.kitty_placements = Arc::from([zz_terminal::KittyPlacement {
+            image_id: 4,
+            image_generation: generation,
+            layer: zz_terminal::KittyLayer::AboveText,
+            viewport_col: 0,
+            viewport_row: 0,
+            absolute_row: 0,
+            cell_offset_x: 0,
+            cell_offset_y: 0,
+            grid_cols: 2,
+            grid_rows: 2,
+            pixel_width: 8,
+            pixel_height: 8,
+            source_rect: None,
+        }]);
+        mux.apply_terminal_viewport(pane, viewport);
+        mux.begin_kitty_image(pane, 4, generation, 8, 8, 256);
+        mux.push_kitty_image_chunk(pane, 4, generation, &[127; 256]);
+        mux.kitty_images(pane)
+            .unwrap()
+            .read()
+            .image(4, generation)
+            .unwrap()
+    }
+
+    struct KittyPaneHandoffRoot {
+        terminal: gpui::Entity<crate::terminal::view::TerminalView>,
+    }
+
+    impl gpui::Render for KittyPaneHandoffRoot {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            _cx: &mut gpui::Context<Self>,
+        ) -> impl gpui::IntoElement {
+            use gpui::prelude::*;
+            gpui::div().size_full().child(
+                self.terminal
+                    .clone()
+                    .cached(gpui::StyleRefinement::default().size_full()),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn kitty_atlas_image_survives_overlapping_view_handoff(cx: &mut TestAppContext) {
+        use crate::terminal::view::TerminalView;
+        use std::cell::Cell;
+
+        let (mux, image) = cx.update(|cx| {
+            zz_ui::init(cx);
+            let mux = test_mux(cx);
+            let image = mux.update(cx, |mux, _| {
+                install_kitty_lifecycle_image(mux, PaneId(7), 1)
+            });
+            (mux, image)
+        });
+        let (root, cx) = cx.add_window_view(|window, cx| {
+            let terminal = cx.new(|cx| {
+                TerminalView::new(PaneId(7), mux.clone(), Rc::new(Cell::new(true)), window, cx)
+            });
+            terminal.read(cx).focus().focus(window, cx);
+            KittyPaneHandoffRoot { terminal }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, _| assert!(window.has_image_atlas_entry(&image)));
+
+        let previous = cx.update(|window, cx| {
+            let previous = root.update(cx, |root, cx| {
+                let terminal = cx.new(|cx| {
+                    TerminalView::new(PaneId(7), mux.clone(), Rc::new(Cell::new(true)), window, cx)
+                });
+                terminal.read(cx).focus().focus(window, cx);
+                let previous = std::mem::replace(&mut root.terminal, terminal);
+                let weak = previous.downgrade();
+                drop(previous);
+                cx.notify();
+                weak
+            });
+            assert!(
+                previous.upgrade().is_some(),
+                "the previous frame's focused input handler must retain the old view"
+            );
+            window.draw(cx).clear(cx);
+            assert!(window.has_image_atlas_entry(&image));
+            previous
+        });
+        cx.run_until_parked();
+        assert!(previous.upgrade().is_none());
+        cx.update(|window, _| {
+            assert!(
+                window.has_image_atlas_entry(&image),
+                "releasing the old view evicted the replacement view's image"
+            );
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, _| assert!(window.has_image_atlas_entry(&image)));
+    }
+
+    #[gpui::test]
+    fn kitty_atlas_cache_replacement_survives_overlapping_view_handoff(cx: &mut TestAppContext) {
+        use crate::terminal::view::TerminalView;
+        use std::cell::Cell;
+
+        let (mux, first, old_cache) = cx.update(|cx| {
+            zz_ui::init(cx);
+            let mux = test_mux(cx);
+            let first = mux.update(cx, |mux, _| {
+                install_kitty_lifecycle_image(mux, PaneId(7), 1)
+            });
+            let cache = mux.read(cx).kitty_images(PaneId(7)).unwrap();
+            (mux, first, cache)
+        });
+        let (root, cx) = cx.add_window_view(|window, cx| {
+            let terminal = cx.new(|cx| {
+                TerminalView::new(PaneId(7), mux.clone(), Rc::new(Cell::new(true)), window, cx)
+            });
+            terminal.read(cx).focus().focus(window, cx);
+            KittyPaneHandoffRoot { terminal }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, _| assert!(window.has_image_atlas_entry(&first)));
+
+        let (previous, second, new_cache) = cx.update(|window, cx| {
+            let previous = root.update(cx, |root, cx| {
+                let terminal = cx.new(|cx| {
+                    TerminalView::new(PaneId(7), mux.clone(), Rc::new(Cell::new(true)), window, cx)
+                });
+                terminal.read(cx).focus().focus(window, cx);
+                let previous = std::mem::replace(&mut root.terminal, terminal);
+                let weak = previous.downgrade();
+                drop(previous);
+                cx.notify();
+                weak
+            });
+            assert!(previous.upgrade().is_some());
+            assert_eq!(old_cache.read().view_count, 2);
+            let second = mux.update(cx, |mux, cx| {
+                mux.clear_kitty_images(PaneId(7));
+                let image = install_kitty_lifecycle_image(mux, PaneId(7), 2);
+                cx.notify();
+                image
+            });
+            let new_cache = mux.read(cx).kitty_images(PaneId(7)).unwrap();
+            (previous, second, new_cache)
+        });
+        cx.run_until_parked();
+        cx.update(|_, _| {});
+        assert!(previous.upgrade().is_none());
+        assert_eq!(old_cache.read().view_count, 0);
+        assert_eq!(new_cache.read().view_count, 1);
+        cx.update(|window, _| {
+            assert!(!window.has_image_atlas_entry(&first));
+            assert!(window.has_image_atlas_entry(&second));
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, _| assert!(window.has_image_atlas_entry(&second)));
+    }
+
+    #[gpui::test]
+    fn kitty_atlas_view_registration_releases_after_window_close(cx: &mut TestAppContext) {
+        use crate::terminal::view::TerminalView;
+        use std::cell::Cell;
+
+        let (mux, image, cache) = cx.update(|cx| {
+            zz_ui::init(cx);
+            cx.set_quit_mode(gpui::QuitMode::Explicit);
+            let mux = test_mux(cx);
+            let image = mux.update(cx, |mux, _| {
+                install_kitty_lifecycle_image(mux, PaneId(7), 1)
+            });
+            let cache = mux.read(cx).kitty_images(PaneId(7)).unwrap();
+            (mux, image, cache)
+        });
+        let (root, cx) = cx.add_window_view(|window, cx| KittyPaneHandoffRoot {
+            terminal: cx.new(|cx| {
+                TerminalView::new(PaneId(7), mux.clone(), Rc::new(Cell::new(true)), window, cx)
+            }),
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, _| assert!(window.has_image_atlas_entry(&image)));
+        let retained = root.read_with(cx, |root, _| root.terminal.clone());
+        let weak = retained.downgrade();
+        drop(root);
+        cx.update(|window, _| window.remove_window());
+        cx.run_until_parked();
+        assert!(weak.upgrade().is_some());
+        assert_eq!(cache.read().view_count, 1);
+        cx.cx.update(|_| drop(retained));
+        cx.run_until_parked();
+        assert!(weak.upgrade().is_none());
+        assert_eq!(cache.read().view_count, 0);
+    }
+
+    #[gpui::test]
+    fn kitty_atlas_entries_follow_pane_and_cache_lifetimes(cx: &mut TestAppContext) {
+        use crate::terminal::view::TerminalView;
+        use std::cell::Cell;
+
+        let (mux, first, other_image) = cx.update(|cx| {
+            zz_ui::init(cx);
+            let mux = test_mux(cx);
+            let (first, other) = mux.update(cx, |mux, _| {
+                (
+                    install_kitty_lifecycle_image(mux, PaneId(7), 1),
+                    install_kitty_lifecycle_image(mux, PaneId(8), 1),
+                )
+            });
+            (mux, first, other)
+        });
+        let (root, cx) = cx.add_window_view(|window, cx| KittyPaneLifecycleRoot {
+            terminal: Some(cx.new(|cx| {
+                TerminalView::new(PaneId(7), mux.clone(), Rc::new(Cell::new(true)), window, cx)
+            })),
+            other: Some(cx.new(|cx| {
+                TerminalView::new(PaneId(8), mux.clone(), Rc::new(Cell::new(true)), window, cx)
+            })),
+            shown: true,
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, _| {
+            assert!(window.has_image_atlas_entry(&first));
+            assert!(window.has_image_atlas_entry(&other_image));
+        });
+
+        let first_view = root.update(cx, |root, cx| {
+            let view = root.terminal.take().unwrap();
+            let weak = view.downgrade();
+            drop(view);
+            cx.notify();
+            weak
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.run_until_parked();
+        assert!(first_view.upgrade().is_none());
+        cx.update(|window, _| {
+            assert!(
+                !window.has_image_atlas_entry(&first),
+                "closed terminal image remains in the atlas"
+            );
+            assert!(window.has_image_atlas_entry(&other_image));
+        });
+        cx.update(|window, cx| {
+            root.update(cx, |root, cx| {
+                root.terminal = Some(cx.new(|cx| {
+                    TerminalView::new(PaneId(7), mux.clone(), Rc::new(Cell::new(true)), window, cx)
+                }));
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+        });
+        cx.update(|window, _| assert!(window.has_image_atlas_entry(&first)));
+
+        root.update(cx, |root, cx| {
+            root.shown = false;
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let second = mux.update(cx, |mux, cx| {
+            let image = install_kitty_lifecycle_image(mux, PaneId(7), 2);
+            cx.notify();
+            image
+        });
+        cx.run_until_parked();
+        cx.update(|window, _| {
+            assert!(!window.has_image_atlas_entry(&first));
+            assert!(!window.has_image_atlas_entry(&second));
+            assert!(window.has_image_atlas_entry(&other_image));
+        });
+        root.update(cx, |root, cx| {
+            root.shown = true;
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, _| assert!(window.has_image_atlas_entry(&second)));
+
+        let third = mux.update(cx, |mux, cx| {
+            mux.clear_kitty_images(PaneId(7));
+            let image = install_kitty_lifecycle_image(mux, PaneId(7), 3);
+            cx.notify();
+            image
+        });
+        cx.run_until_parked();
+        cx.update(|window, _| assert!(!window.has_image_atlas_entry(&second)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, _| assert!(window.has_image_atlas_entry(&third)));
+
+        root.update(cx, |root, cx| {
+            root.shown = false;
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        mux.update(cx, |mux, cx| {
+            mux.remove_kitty_images(PaneId(7), &[4]);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.update(|window, _| assert!(!window.has_image_atlas_entry(&third)));
+        root.update(cx, |root, cx| {
+            root.shown = true;
+            cx.notify();
+        });
+
+        for generation in 4..7 {
+            let image = mux.update(cx, |mux, cx| {
+                let image = install_kitty_lifecycle_image(mux, PaneId(7), generation);
+                cx.notify();
+                image
+            });
+            cx.update(|window, cx| {
+                root.update(cx, |root, cx| {
+                    if root.terminal.is_none() {
+                        root.terminal = Some(cx.new(|cx| {
+                            TerminalView::new(
+                                PaneId(7),
+                                mux.clone(),
+                                Rc::new(Cell::new(true)),
+                                window,
+                                cx,
+                            )
+                        }));
+                        cx.notify();
+                    }
+                });
+                window.draw(cx).clear(cx);
+            });
+            cx.update(|window, _| assert!(window.has_image_atlas_entry(&image)));
+            let weak = root.update(cx, |root, cx| {
+                if generation == 6 {
+                    mux.update(cx, |mux, cx| {
+                        mux.forget_pane(PaneId(7));
+                        cx.notify();
+                    });
+                }
+                let view = root.terminal.take().unwrap();
+                let weak = view.downgrade();
+                drop(view);
+                cx.notify();
+                weak
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.run_until_parked();
+            assert!(weak.upgrade().is_none());
+            cx.update(|window, cx| {
+                assert!(!window.has_image_atlas_entry(&image));
+                assert!(window.has_image_atlas_entry(&other_image));
+                if generation < 6 {
+                    assert!(
+                        mux.read(cx)
+                            .kitty_images(PaneId(7))
+                            .unwrap()
+                            .read()
+                            .image(4, generation)
+                            .is_some()
+                    );
+                } else {
+                    assert!(mux.read(cx).kitty_images(PaneId(7)).is_none());
+                }
+            });
+        }
+
+        let (unpainted_image, unpainted_view) = cx.update(|window, cx| {
+            let image = mux.update(cx, |mux, _| {
+                install_kitty_lifecycle_image(mux, PaneId(7), 7)
+            });
+            let unpainted = cx.new(|cx| {
+                TerminalView::new(PaneId(7), mux.clone(), Rc::new(Cell::new(true)), window, cx)
+            });
+            mux.update(cx, |mux, cx| {
+                mux.forget_pane(PaneId(7));
+                cx.notify();
+            });
+            let weak = unpainted.downgrade();
+            drop(unpainted);
+            (image, weak)
+        });
+        cx.run_until_parked();
+        assert!(unpainted_view.upgrade().is_none());
+        cx.update(|window, _| {
+            assert!(!window.has_image_atlas_entry(&unpainted_image));
+            assert!(window.has_image_atlas_entry(&other_image));
+        });
+
+        let final_image = mux.update(cx, |mux, _| {
+            install_kitty_lifecycle_image(mux, PaneId(7), 8)
+        });
+        cx.update(|window, cx| {
+            root.update(cx, |root, cx| {
+                root.terminal = Some(cx.new(|cx| {
+                    TerminalView::new(PaneId(7), mux.clone(), Rc::new(Cell::new(true)), window, cx)
+                }));
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+        });
+        cx.update(|window, _| assert!(window.has_image_atlas_entry(&final_image)));
+        let (last_image, released_views) = root.update(cx, |root, cx| {
+            let last_image = mux.update(cx, |mux, _| {
+                install_kitty_lifecycle_image(mux, PaneId(7), 9)
+            });
+            let first = root.terminal.take().unwrap();
+            let second = root.other.take().unwrap();
+            let weak = [first.downgrade(), second.downgrade()];
+            drop((first, second));
+            cx.notify();
+            (last_image, weak)
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.run_until_parked();
+        assert!(released_views.iter().all(|view| view.upgrade().is_none()));
+        cx.update(|window, cx| {
+            for image in [&final_image, &last_image, &other_image] {
+                assert!(!window.has_image_atlas_entry(image));
+            }
+            for (pane, generation) in [(PaneId(7), 9), (PaneId(8), 1)] {
+                let cache = mux.read(cx).kitty_images(pane).unwrap();
+                assert!(cache.read().retired.is_empty());
+                assert!(cache.read().image(4, generation).is_some());
+            }
+        });
     }
 
     #[gpui::test]

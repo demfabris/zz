@@ -2169,6 +2169,11 @@ probe_source_file_depth() {
   if [ -n "$leaf" ]; then
     fixture_failure "$side loaded the file that source invocation 51 refused"
   fi
+  while IFS= read -r client; do
+    side_command "$side" display-message -c "$client" -d 1 '' ||
+      fixture_failure "$side could not release its held depth message"
+  done < <(side_command "$side" list-clients -F '#{client_name}')
+  wait_for_current_marker_absent "$side" "Too many nested files"
 }
 
 probe_source_file_output() {

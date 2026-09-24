@@ -298,7 +298,7 @@ writer thread (`recv()` priority: `reliable` → `command_output` → `agent` �
 |------------------------|---------|-----------|
 | `reliable: VecDeque<Vec<u8>>` | `ServerHello`, command responses, snapshots, non-terminal events | Never dropped; bounded at `MAX_RELIABLE_MESSAGES = 256` / `MAX_OUTBOUND_BYTES = 72 MiB` |
 | `command_output: Option<PendingCommandOutput>` | Native command-output viewport plus actor ID | One coalesced slot; the newest frame from the newest actor replaces stale work |
-| `agent: BTreeMap<PaneId, PendingAgent>` | Per-pane `AgentUpdates` batches, already coalesced into 25 ms windows by the fanout | FIFO per pane, round-robin across panes (one frame per pane per turn), capped at `MAX_PENDING_AGENT_BYTES = 4 MiB` |
+| `agent: BTreeMap<PaneId, PendingAgent>` | Per-pane `AgentUpdates` batches, already coalesced into 25 ms windows by the fanout | FIFO per pane, round-robin across panes (one frame per pane per turn), capped at `MAX_PENDING_AGENT_BYTES = MAX_AGENT_UPDATES_BYTES + MAX_GUI_TEXT_BYTES` (currently 9 MiB + 64 KiB) |
 | `terminals: BTreeMap<PaneId, PendingTerminal>` | Per-pane `TerminalViewport`/`TerminalPatch` frames | **One pending frame per pane**; newest replaces stale under backpressure |
 
 The agent lane is the one lane whose overflow does **not** close the mailbox. An ACP turn bursts

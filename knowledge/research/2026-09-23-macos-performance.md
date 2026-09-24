@@ -57,11 +57,12 @@ The final desktop comparison shows a smaller one-pane memory gain: GUI RSS
 are unchanged within the measured variation. Sustained output shows no
 repeatable regression after four alternating pairs.
 
-The main GPU follow-up is safe atlas retirement: visible image-pane churn
-retains about 76.6 MiB, but the first cleanup prototype exposes an existing
-in-flight overwrite race. That patch stays parked. A standalone Metal control
-also reproduces 224 MiB of driver backing on this Mac; application allocation
-counts alone cannot justify calling it a zz leak.
+The first atlas cleanup prototype exposed an in-flight overwrite race. The
+completion-aware follow-up below fixes that ordering and releases 36.28 MiB
+of resident graphics memory after ten matched image-pane closes. Its reupload
+latency remains a review tradeoff. A standalone Metal control also reproduces
+224 MiB of driver backing on this Mac; allocation counts alone cannot justify
+calling it a zz leak, and later aging evidence shows it is not permanent.
 
 ## Measurement setup
 
@@ -117,8 +118,8 @@ cleanup record are preserved under `discarded-cua-overlap/` and
 | --- | --- | --- |
 | Terminal wire | Existing per-view row patches, latest-frame mailboxes, exact sizing, and bounded buffer recycling | Preserve current convergence and backpressure guarantees; a blanket rewrite would duplicate work already done. |
 | Mux metadata | `publish_mux_snapshots` rebuilt the format universe for each window label while holding the daemon lock | Share one immutable, lazy universe within each client's update; preserve client-specific stamping. |
-| Status timer | Status refresh constructs a full snapshot and format facts before selecting recipients | Measure zero-recipient and multi-session cases; preserve interval and per-client semantics. |
-| Chromium bootstrap | macOS loads the CEF framework before first browser use | Standalone loader experiment shows a cost; the lazy-loading variant still needs GUI A/B and first-browser latency measurements. |
+| Status timer | Status refresh constructs a full snapshot and format facts before selecting recipients | Follow-up proves empty-recipient allocation savings and matching-recipient behavior; CPU runs encountered external builds, so the shortcut remains unapplied. |
+| Chromium bootstrap | macOS loads the CEF framework before first browser use | Follow-up GUI pairs prove 13.52–14.00 MiB terminal-only RSS savings from deferred loading; first-browser presentation latency remains unmeasured. |
 | Metal path target | Pinned GPUI allocates a full-window private path texture before knowing whether the scene uses paths | Controls show unused allocated texture storage is unresident at idle; the lazy-allocation proposal stays parked. |
 | Display link | Visible macOS windows keep `CVDisplayLink` callbacks active while GPUI skips clean frames | Attribute idle CPU separately from GPU presentation; demand scheduling needs animation, input, and wakeup correctness. |
 
@@ -679,9 +680,9 @@ missing removal leaves an occupied tile, not merely reusable atlas capacity.
 
 The desktop drains retired Kitty images during pane render. Closing an image
 pane can release that entity without another render. The original window-scoped lifecycle test subsequently proved logical
-ownership and close-path cleanup. Expanded retired-CPU and multiple-view
-tests in the final parked proposal were not run; the independent Metal
-ordering failure remains the acceptance blocker. Evidence: `render/atlas-lifetime-experiment.txt`.
+ownership and close-path cleanup. At the phase-1 commit, expanded retired-CPU and multiple-view
+tests in the parked proposal had not run; the independent Metal
+ordering failure blocked acceptance. Evidence: `render/atlas-lifetime-experiment.txt`.
 
 The actual GUI workload opens and closes twenty image-bearing split panes,
 keeping the original terminal visible. Computer-use inspection confirmed the
@@ -693,7 +694,7 @@ Evidence: `baseline-kitty-split-1/`, `render/kitty-lifecycle-baseline.log`, and
 `render/kitty-lifecycle-fixed.log`. The earlier new-window workload did not
 prove visibility and must not be used as GPU evidence.
 
-**The cleanup patch is parked because a separate GPU ordering test fails.**
+**At phase-1 commit `0f0d05aa`, cleanup remained parked because a separate GPU ordering test failed.**
 In the actual Metal atlas, a command buffer waits on a test event before reading
 an existing small tile. The CPU removes that image and uploads a replacement
 into the same texture coordinates, then releases the event. The earlier GPU
@@ -710,22 +711,649 @@ frame completes. It needs error-path and outstanding-frame tests, not an
 arbitrary delay or a fixed number of frames. Evidence:
 `render/atlas-reuse-experiment.txt` and `render/atlas-reuse-test.log`.
 
+## Follow-up: safe atlas cleanup
+
+After committing phase 1 as `0f0d05aa`, the user requested validation of the
+parked candidates one at a time. The first candidate combines desktop Kitty
+image cleanup with completion-based Metal atlas retirement. The matched
+application experiment now establishes a memory gain: ten image-pane closes
+leave 36.28125 MiB of additional graphics allocation in the baseline and none
+in the candidate. The candidate remains uncommitted and parked for review of
+the costs below; the fork's main branch has not been promoted.
+
+Fork candidate [`a64e53ec`](https://github.com/demfabris/zed/commit/a64e53ec8173bfa00c1cfa7d6a18d50be22f061b)
+adds a frame guard to the existing Metal completion block. Removed image keys
+leave lookup immediately. A rectangle inside a live shared texture remains
+unavailable until all older frames finish; a whole unused texture leaves the
+atlas while Metal retains the object for encoded work. Out-of-order completion,
+uncommitted buffers, failed encoding, and renderer destruction all release the
+same guard. The patch adds no GPU wait or fixed frame delay. Its main fork branch
+has not yet been promoted.
+
+Thirteen Metal tests pass with API Validation, including the previously failing
+old-reader pixel experiment. Four desktop lifecycle regressions cover image
+replacement, pane/cache release, overlapping focused views, and window closure.
+The focused input handler can keep an old view alive after its replacement paints.
+The first cleanup proposal therefore evicted an image still used by the new view;
+explicit cache view counts prevent that. The complete desktop library suite passes
+548 tests with one ignored test against the candidate fork.
+
+The primary application pair is `baseline-allocation-d` and
+`candidate-allocation-c`, executed candidate first on the same Mac. Each opens
+and closes ten fresh panes containing one 1,024 × 1,024 RGBA image. Every close
+has a preceding successful upload proof, and a final fresh upload succeeds
+after measurement. Native window dimensions, scale, pane layout, configuration,
+bundle versions, scenario settings, and capture-code hashes match. Both runs
+exit normally with all owned processes gone, no cleanup escalation, and no
+overlapping stall-watchdog sample.
+
+| Measured image-sized graphics storage | Baseline | Candidate |
+| --- | ---: | ---: |
+| 4,128 KiB mappings before / after | 2 / 11 | 1 / 1 |
+| Additional mappings after ten closes | 9 | 0 |
+| Additional mapped and resident bytes | 38,043,648 | 0 |
+| Additional mapped and resident MiB | 36.28125 | 0 |
+
+An earlier normally completed baseline retained ten extra mappings, or
+40.3125 MiB. The smaller primary result is retained. During its fifth close,
+the old pane paints a zero-image frame before disappearing. Baseline rendering
+already drains retired images when it gets another paint; that observed final
+paint is consistent with reclaiming this one texture. The successful eviction
+call is not logged, so this particular call attribution remains an inference.
+The patch covers teardown that receives no such final paint.
+
+The exact 4,227,072-byte mapping size matches the independently measured Metal
+allocation for this image. Full non-coalesced maps, the controlled fresh-image
+sequence, and lifecycle tests support the attribution; vmmap does not label
+objects with RenderImage IDs. These are image-allocation savings, not a causal
+estimate of total RSS/footprint, CPU, GPU utilization, or return-to-pane latency.
+Raw process memory observations remain in `allocation-paired-results.json`.
+The broader workspace checks, strict Clippy, and web build pass. Four unrelated
+failures in the initial workspace test run pass their isolated retries; the
+original full run itself was not clean.
+
+Four alternating renderer benchmark pairs show no consistent normal-frame CPU
+change. Median paired CPU changes are -0.66% for a fixed normal scene, -0.05% for
+one small image retired per frame, +1.50% for sixteen, and +1.73% for a 4 MiB
+upload per frame. Individual runs vary substantially and sometimes reverse
+those directions. These figures do not prove zero overhead. The harness renders
+monochrome sprites while allocating and retiring polychrome images; a separate
+gated GPU test proves old image contents remain intact. Completed batches retain
+stable resource bytes and release their atlas allocations after key removal.
+Warmed frame tracking performs no allocations in 100,000 single-frame and
+three-frame cycles on both the fork benchmark compiler (Rust 1.98.1) and the
+shipping app compiler (Rust 1.97.0).
+
+Ordinary window switching, hidden panes, zoom, and settings retain their terminal
+views and uploaded images. The new reupload case is a pane or window moved out of
+the attached session and returned after its last old view releases. That delay
+has not been measured. Safe retirement
+can also retain temporary rectangles while GPU readers remain outstanding.
+Neither drawable count nor command-buffer count supplies a universal bound on
+that temporary memory. These costs belong in the acceptance decision.
+
+A fifth Claude Opus 5.5 xhigh review found no runtime blocker and required the
+app change and fork pin to ship together. Source audits found no equivalent
+immediate overwrite in normal WGPU or Windows rendering: their upload APIs order
+replacement writes after earlier issued rendering. Linux and Windows runtime
+checks have not run. The independent iOS `gpui_wgpu` pin now moves with the root
+and web pins to avoid resolving two GPUI dependency trees.
+
+The archived follow-up evidence is under
+`target/performance/2026-09-23/followups/gpu-atlas/`, including both app bundles,
+symbols, raw captures, the separate fork patch, test logs, and an SHA-256 file
+manifest. Scratch originals live in
+`/tmp/zz-perf-20260923-followups/gpu-atlas/` and
+`/tmp/zz-perf-20260923/atlas-retirement/`. The former contains lifecycle tests,
+review output, harness controls, lockfile validation, and archived app builds;
+the latter contains the fork patch, Metal tests, renderer measurements, and
+cross-platform source audit. Rejected live preflights remain excluded. Both
+matched 0.13.0 bundles are built from release `136b9d84`, with the candidate
+patch applied on one side. Compiler binaries, native Ghostty, profile settings,
+CEF unsigned contents, and bundle versions match. The archived manifests and
+`matched-build-comparison.json` record the comparison.
+
+The follow-up also found a capture-isolation limit. A private socket and an
+existing private `XDG_CONFIG_HOME/zz/config` isolate daemon sessions and config,
+but production-identity macOS bundles still read and save
+`~/Library/Application Support/zz/window-state.json`. Browser roots and agent
+preferences also use the shared Application Support directory. There is no
+runtime data-root override for these stores. Captures must check observed native
+and pane geometry; matching it supports comparison without establishing full
+preference isolation. Candidate diagnostics failed when the window resized,
+lost active status, or left the onscreen inventory. They remain rejected. The
+first also triggered the stall watchdog's sampler. Source inspection did not
+establish the cause of the resize or focus change.
+
+The allocation-only follow-up records focus and position changes while requiring
+the same onscreen window, dimensions, scale, pane layout, and a fresh successful
+image upload before every pane closes. It does not require every window pixel
+to be unoccluded. Cached foreground-command labels are recorded but do not
+define pane geometry; they can lag the already-verified fixture output.
+It captures full non-coalesced memory maps to separate 4,128 KiB image storage
+from conditional driver backing. Its final fresh-image upload check is automatic:
+the native inspection tool selected the installed same-identifier app despite
+receiving the test bundle's path, so its screenshot was rejected. These runs
+cannot establish presentation, live visual correctness, CPU/GPU utilization,
+latency, or causal savings in total RSS/footprint. Metal pixel tests provide
+the separate correctness evidence. Earlier failed runs are not reclassified.
+
+An early app-inspection attempt also launched an extra scratch-bundle GUI while
+selecting the installed app's screenshot. That extra process was identified by
+its exact executable and start time, then terminated; the installed GUI and
+daemon stayed running. The final primary pair ran after this cleanup. Another
+candidate capture completed measurement but failed while tracking a short-lived
+process, so it remains diagnostic. The dedicated capture helper now treats an
+`EPERM` result as disappearance only when a separate existence check confirms
+that the process is gone. Live inaccessible targets still fail. Eight focused
+helper tests pass; the original phase-1 helper remains unchanged.
+
+The capture launcher now records its existing shutdown escalations and returns
+failure if an otherwise successful capture needed one. The lifecycle drivers
+reject those runs, require stable startup geometry, and keep final proof checks
+outside their measured intervals. Shell syntax and the four existing profiling
+summary tests pass; those summary tests do not exercise native process teardown.
+
+## Deferred macOS CEF loading follow-up
+
+The candidate moves framework loading from desktop bootstrap to the first
+browser-runtime start. It uses CEF's scoped macOS loader, retains its owner until
+the runtime drops, and reports a missing framework without panicking. Before
+calling versioned CEF APIs, it compares the complete loaded framework version
+with the compiled version. A mismatch reaches the browser error panel with a
+restart instruction. This matters when the app bundle changes while a
+terminal-only GUI remains open. The dedicated helper entry point is unchanged.
+
+The standalone integration binary exposed a missing native link declaration:
+the existing CEF sys adapter now links the macOS C++ standard library. The GUI
+had previously obtained it through other dependencies. The CLI/daemon's linked
+libraries remain unchanged. Browser tests pass, including a terminal-only
+bootstrap/pump/shutdown/drop that never maps CEF and a missing-framework start
+failure. The final targeted Claude Opus 5.5 xhigh review found no remaining
+blocker. A separate source audit checked cookie import, site-data clearing,
+profile/proxy contexts, popups, downloads, input, and DevTools for calls before
+runtime initialization and found no missing start gate.
+
+Both release bundles use the same temporary benchmark-only browser-data
+override, fresh profiles, compiler, build recipe, and preexisting changes. That
+override has been removed from production source. These bundles require their
+private data-directory environment variable and must not be installed. Their
+source patches differ only in the CEF runtime, its cold-runtime tests, and the
+sys adapter's link declaration and documentation. Build manifests retain full
+hashes; framework and CLI/daemon contents match after excluding signatures.
+
+The native correctness passes `correctness-baseline-2` and
+`correctness-candidate-1` both validate browser pixels in the owned native
+window, literal input, navigation, and cookie/localStorage persistence across
+closing and reopening a browser. Each exits through an exact-PID AppKit quit
+request, with no forced cleanup and no surviving owned process. Screenshot
+validation converts the embedded monitor ICC profile to sRGB in memory; the
+original PNG remains unchanged. These diagnostic passes do not establish
+resource or latency improvements.
+
+Precreated browser descriptors also initialize and render correctly in both
+builds. Their stricter shutdown controls revealed an existing problem: GPUI
+waits only 200 ms for quit futures, while browser shutdown permits two seconds
+of graceful closing followed by two seconds of forced closing. The unchanged
+baseline logged a quit timeout after about 216 ms. Both restored-browser runs
+therefore remain rejected as complete lifecycle proofs, despite passing their
+individual rendering assertions. Normal process exit does not prove completion
+of CEF shutdown. The candidate's never-initialized terminal-only shutdown does
+complete cleanly. This timeout is recorded separately, without changing it as
+part of the loading experiment.
+
+Initial runs rejected for incorrect screenshot color interpretation or forced
+SIGTERM teardown remain rejected. The revised comparison driver requests normal
+AppKit termination after measurement, then lets the profiling recipe stop its
+owned daemon. It checks PID start identities, exact executables, stable native
+and pane geometry, complete samples, and compiler/profiler inventories. Native
+proof and trace runs are excluded from resource comparisons. A separate
+memory-only mode records background test activity and excludes CPU and timing
+claims; ordinary comparisons retain the stricter quiet-process requirement.
+
+Three ordinary matched pairs passed with 30-second terminal intervals and 120
+memory samples per root process. The order was baseline/candidate,
+candidate/baseline, baseline/candidate. All six runs used a 1,505 by 1,662-point
+window at scale 2 and a 153 by 107-cell terminal, fresh browser profiles, five
+seconds of warmup, and no detected compiler/profiler conflicts at the guards.
+The memory-only fallback was not needed. The independent aggregation recomputes
+the summaries from the raw interval and rejects partial samples or mismatched
+settings, geometry, hashes, and cleanup.
+
+| Pair | Baseline GUI RSS | Candidate GUI RSS | RSS reduction | GUI footprint reduction |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 132.41 MiB | 118.41 MiB | 14.00 MiB | 10.70 MiB |
+| 2, reversed order | 132.06 MiB | 118.55 MiB | 13.52 MiB | 1.55 MiB |
+| 3 | 131.45 MiB | 117.47 MiB | 13.98 MiB | 10.84 MiB |
+
+The median paired RSS reduction is 13.98 MiB, about 10% of this terminal-only
+GUI's RSS. Footprint falls in all three paired medians, with a 10.70 MiB median
+reduction and a 1.55–10.84 MiB range. This range matters: candidate 2's saved
+post-interval map contains 8.56 MiB more dirty graphics memory than candidate
+1, close to their 8.59 MiB median footprint difference. The snapshot does not
+explain the initial within-interval drop or establish its cause. No equally
+large whole-app saving as the earlier standalone-loader experiment is claimed.
+Daemon memory is unchanged within 0.13 MiB. The benefit lasts until the first
+browser-runtime operation; Chromium remains loaded afterward.
+
+Idle GUI CPU spans 1.12–1.20% of one core in the baseline and 1.17–1.21% in the
+candidate. Paired differences are -0.009, +0.054, and +0.057 percentage points.
+These runs establish no idle CPU improvement or GPU-utilization improvement.
+The first-browser capture endpoint takes 263/189/205 ms in the baseline and
+218/271/272 ms in the candidate. Its paired differences span -45 to +82 ms;
+the median is +66 ms. Reopen takes 90–98 ms versus 98–100 ms. These are command
+request to RGB capture-return observations, including readback, encoding, and
+50 ms polling sleeps, not native presentation latency. They cannot rule out
+a first-browser delay from moving framework loading onto that operation.
+
+Decision on 2026-09-23: the terminal-only memory benefit is validated. Keep the
+uncommitted candidate for review because the loading cost moves to the first
+browser operation and a precise presentation-latency cost remains unmeasured.
+No installed or Dev app was replaced or restarted. The existing initialized
+CEF quit timeout remains a separate parked correctness issue.
+
+Evidence is archived at
+`target/performance/2026-09-23/followups/cef-lazy/`. Start with
+`resource-pairs-final.json`, `comparison-provenance.json`, the accepted native
+correctness directories, and `candidate.patch`. Raw rejected runs, oracle
+responses, both isolated bundles, tool versions, and build/test logs remain
+alongside them. The aggregation history also preserves a reporting-only
+floating-point timestamp arithmetic correction; no raw samples changed.
+
+Primary references: CEF's
+[scoped macOS loader](https://raw.githubusercontent.com/chromiumembedded/cef/708dc14/libcef_dll/wrapper/cef_scoped_library_loader_mac.mm)
+and [version interface](https://raw.githubusercontent.com/chromiumembedded/cef/708dc14/include/cef_version_info.h),
+plus Apple's [normal application termination](https://developer.apple.com/documentation/appkit/nsrunningapplication/terminate()).
+
+## Exceptional protocol-buffer capacity follow-up
+
+The retention inventory includes the daemon's inbound frame, the native client's
+`ProtocolReceiver::frame`, and its `ProtocolSender::frame`. All retain their
+largest capacity between messages. The sender was missing from the earlier
+inventory. The daemon's separate recycled outbound pool uses LIFO reuse, with
+eight entries and 8 MiB combined capacity. A frame-size limit does not describe
+all encoder allocation capacity or process RSS.
+
+The first experiment tests a 2 MiB retained-capacity ceiling at completed
+message boundaries. A native Unix-socket fixture uses the actual protocol
+encoder and decoder, releasing the decoded message before its idle measurement.
+Both endpoint buffers remain alive. Baseline retains capacity; the candidate
+drops an exceptional buffer after each completed send or receive. No timer,
+read timeout, allocator collection, or production code change is involved.
+Separate binaries use production mimalloc directly or an allocation counter
+around it, so instrumented allocation timings are not used for CPU comparison.
+
+| Check | Baseline | Exceptional-capacity ceiling |
+| --- | ---: | ---: |
+| Retained sender + receiver capacity after a 6 MiB prompt | 18,874,407 bytes | 0 bytes |
+| RSS after one prompt, unchanged through 3 seconds idle | 33.48 MiB | 33.48 MiB |
+| Footprint after one prompt, unchanged through 3 seconds idle | 32.50 MiB | 32.50 MiB |
+| Allocation + reallocation calls for four prompts, instrumented | 13 | 25 |
+| Cumulative requested allocation bytes for those four prompts | 50,332,333 | 125,830,756 |
+| Median process CPU for 32 prompts, five alternating-order pairs | 148.84 ms | 151.53 ms |
+| Median elapsed time for 32 prompts | 134.92 ms | 134.83 ms |
+
+CPU is higher in every large-message pair, with a 1.8% difference between the
+medians. Elapsed time is effectively unchanged in these short trials. The
+small-message control retains the same sender/receiver capacities and reuse
+counts; its timing is too short and noisy to claim a speedup. Compiler checks
+are clear at each boundary, but these are not controls for all background
+system activity. Requested live bytes and cumulative allocation bytes are
+distinct from allocator usable size, RSS, and physical footprint.
+
+The repeated-message memory result is worse. After 32 prompts, the baseline
+holds 33.47 MiB RSS and 32.48 MiB footprint; the candidate holds 52.06 MiB RSS
+and 51.08 MiB footprint. A separate native follow-up keeps both endpoints alive
+and observes the same 18.59 MiB excess at 0, 1, 3, and 10 seconds idle, despite
+zero retained candidate frame capacity. This demonstrates a resident-memory
+regression in this fixture; it does not identify the allocator's internal cause
+or quantify a complete desktop/daemon workload.
+
+Decision on 2026-09-23: reject the unconditional 2 MiB ceiling. It reduces
+retained requested bytes but does not meet the RSS/footprint objective and adds
+allocation work. No shipping buffer policy changed. Image, burst, and pooled
+traffic experiments were not expanded after this rejection. Timed pool decay
+and transport ownership changes remain separate unvalidated candidates. A
+read timeout alone is insufficient for inbound decay because an interrupted
+prefix/body read must preserve framing state.
+
+The fixture, dependency/source fingerprints, compiler arguments, all 28 exited
+process records, allocation counts, native memory observations, and the
+ten-second follow-up are retained in
+`target/performance/2026-09-23/followups/buffer-retention/`.
+
+Primary references: Rust's [`Vec::clear`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.clear)
+preserves capacity, and [mimalloc's purge policy](https://microsoft.github.io/mimalloc/environment.html)
+distinguishes freeing allocations from returning pages. Switching to
+[`BytesMut`](https://github.com/tokio-rs/bytes/blob/master/src/bytes_mut.rs)
+does not make `clear` release capacity. Hyper's
+[adaptive read strategy](https://raw.githubusercontent.com/hyperium/hyper/master/src/proto/h1/io.rs)
+adjusts future read size; its write-buffer reset still clears the vector.
+Neither is evidence that a buffer-library substitution solves this retention.
+
+## Native config observation follow-up
+
+The existing config observer checks candidate file stamps every 500 ms. A
+separate native helper compares that policy with the locked `notify`
+`RecommendedWatcher` on macOS, using FSEvents. Both modes use the same binary,
+allocator, config stamp detection, and candidate ordering. Candidate paths are
+recreated beneath a private directory; real configuration is only read.
+
+Six runs alternate polling/native order, with five seconds of warmup and
+30 seconds of idle sampling each. All 72 subsequent edits were detected,
+including in-place writes and atomic replacement. The table reports medians
+across three runs per mode; delivery medians use 18 edits per method and mode.
+
+| Measurement | Polling | Native observation |
+| --- | ---: | ---: |
+| Process CPU, percent of one core | 0.01822% | 0.000154% |
+| Kernel interrupt wakeups per second | 2.000 | 0.033 |
+| RSS | 6.55 MiB | 7.80 MiB |
+| Physical footprint | 2.38 MiB | 3.14 MiB |
+| In-place edit delivery after write completion | 215 ms | 11 ms |
+| Atomic replacement delivery after write completion | 325 ms | 11 ms |
+
+Native observation saves about 0.18 ms of process CPU per second, but costs
+1.25 MiB RSS and 0.77 MiB footprint in this helper. Native in-place delivery
+varies from 2.5 to 222 ms, so the median is not a latency bound. Kernel counters
+do not count every scheduler activation; package-idle wakeups were zero in all
+runs. No complete-app CPU or memory improvement is established: the helper
+omits GPUI timers, executor submission, and foreground resumption. Linked
+framework overhead is common to both modes.
+
+Decision on 2026-09-23: park the replacement as a resource tradeoff. A complete
+implementation would also need missing/recreated parent directories, candidate
+priority changes, symlinks, overflow/rescan recovery, and backend failure
+handling. This fixture covers existing parent directories only. The polling
+observer and the separate two-loop stall watchdog remain unchanged; removing
+the watchdog would lose automatic freeze diagnostics.
+
+All six owned helper processes exited after the driver's expected SIGTERM
+teardown, with no forced kill or survivors. Compiler checks were clear at run
+boundaries. Source, compiler arguments, dependency fingerprints, raw process
+counters, delivery observations, and summaries are retained in
+`target/performance/2026-09-23/followups/config-observation/`.
+
+Primary reference: [`notify`'s documented platform and editor caveats](https://docs.rs/notify/9.0.0-rc.5/notify/)
+explain why file replacement and parent-directory observation require explicit
+handling.
+
+## Demand-driven display-link follow-up
+
+The first native gate tests the cost of stopping the shared `CVDisplayLink`
+when its final subscriber becomes idle. It compiles the actual pinned
+`WindowFrameSource` implementation at `a64e53ec8173bfa00c1cfa7d6a18d50be22f061b`,
+with one common atomic callback counter. All 44 external dependencies match
+the fork lockfile. One optimized helper binary exercises continuous delivery,
+stop/restart for each request, and restarting a subscriber while a second
+subscriber keeps the same process's display link active.
+
+On the external 120 Hz display, the accepted expanded run contains two rounds
+in reversed mode order, with 24 requests per mode and cadence per round.
+Fixed delays are 500 ms; varied delays span 471–537 ms. These delays begin after
+the prior callback, so modes do not share absolute request schedules. Fixed
+cadence can align with display phase; the varied-cadence results stay separate.
+
+| Request to main-thread callback | Continuous | Sole-subscriber restart | Restart with active peer |
+| --- | ---: | ---: | ---: |
+| Fixed cadence median, 48 samples/mode | 1.45 ms | 9.94 ms | 1.61 ms |
+| Varied cadence median, 48 samples/mode | 4.05 ms | 10.45 ms | 4.32 ms |
+| Varied cadence observed p95 | 7.90 ms | 14.38 ms | 8.16 ms |
+
+The restart penalty repeats in both rounds: 8.46–8.50 ms for fixed cadence and
+6.93–7.62 ms for varied cadence, comparing each round's medians. The synchronous
+`start()` call is much shorter: median 50–69 microseconds for sole-subscriber
+restart. The extra wait occurs before callback delivery. This measures neither
+GPUI drawing nor physical screen presentation; it is a rejection gate for the
+underlying scheduling policy.
+
+There is a real resource benefit in the helper. Continuous delivery makes
+roughly 120 native/main-thread callbacks per second and uses 0.47–0.60% of one
+CPU core. Restart mode delivers exactly the 24 requested callbacks per stage,
+about 1.8/s, and uses 0.062–0.092% of one core. Kernel interrupt wakeups fall from
+about 124/s to 5.3–5.6/s, including fixture timers. Keeping a peer subscribed
+avoids the consistent restart penalty but retains the display's native ticks.
+These are instrumented mechanism results, not a complete zz performance claim.
+
+Decision on 2026-09-23: park stopping/restarting the sole display link because
+it adds a repeatable first-callback delay. No app dependency pin changed for
+this experiment. A three-file fork prototype and six proposed regression tests
+are retained for review, but were not compiled or executed after the rejection
+gate. Native presentation latency, live resize, tab activation, occlusion,
+display changes, sleep/wake, and complete terminal/browser animation behavior
+remain unvalidated. The result does not reject every demand-driven design;
+other native pacing policies require their own resource and latency proof.
+
+Claude Opus 5.5 at xhigh reviewed the architecture. Its concrete concerns were
+closed-window source recreation, consuming demand before a callback is
+available, retrying failed subscription despite pending demand, and preserving
+high-rate input sustain. The scratch prototype guards closure, preserves
+pending demand, and limits sustain rearming to the existing platform-waker
+contract. This review is not runtime proof. No stop-delay heuristic was added.
+
+Both helper runs exit normally with no forced cleanup, wrong-thread callbacks,
+or callbacks after source destruction. Compiler/profiler checks are clear at
+run boundaries; other system activity is not isolated. Source, lockfiles,
+binary, raw samples, summaries, patches, and oracle output are retained under
+`target/performance/2026-09-23/followups/display-demand/`.
+
+Primary references: [Chromium's per-client frame demand](https://chromium.googlesource.com/chromium/src/+/f5df2996766bb4af356663ae173765e157ba089b/components/viz/service/frame_sinks/external_begin_frame_source_mac.cc)
+and [Apple's display-aware pacing guidance](https://developer.apple.com/videos/play/wwdc2021/10147/).
+
+## Early status recipient selection follow-up
+
+`Shared::refresh_status_filtered` currently builds the mux snapshot, daemon
+format facts, and option snapshot before filtering recipients. The candidate
+keeps the format-clock update first, applies the identical recipient predicate
+through a `Peekable` iterator, and returns before those builders when nobody
+matches. Matching recipients retain the existing order and rendering path.
+There is no new cache or wire format.
+
+Fresh copies of the actual daemon module exercise the complete method.
+Dependency provenance includes the earlier option-lookup and borrowed-context
+improvements, linked protocol 106, and the pinned Ghostty archive. Separate
+instrumented and native binaries use production mimalloc. Twenty paired
+behavior cases pass: clocks update on empty calls, forced empty calls skip the
+renderer, and matching calls emit the same status contents in the same order.
+The comparison normalizes only event sequence numbers while checking their
+monotonic order separately; 16 first-publication events per variant are checked.
+
+| Complete refresh, 64-window fixture | Baseline allocations / reallocations | Candidate | Baseline cumulative requested bytes | Candidate |
+| --- | ---: | ---: | ---: | ---: |
+| Empty subscriber map | 12,445 / 166 | 0 / 0 | 913,302 | 0 |
+| Session filter matches nobody | 12,709 / 182 | 0 / 0 | 924,973 | 0 |
+| Client filter matches nobody | 12,544 / 166 | 0 / 0 | 918,639 | 0 |
+| Matching recipient, with or without explicit filter | 23,969 / 1,221 | Unchanged | 2,198,060 | Unchanged |
+
+These are allocation-counter results, not RSS or physical footprint. The CPU
+acceptance gate remains unresolved: both native timing attempts encountered
+transient external Cargo processes at a guard boundary. Their subcommands and
+ownership could not be recovered before they exited. The raw timings remain
+excluded rather than attributing them to a quiet machine. All 80 matrix
+children exited normally; no external process was stopped or altered.
+A separate bounded observation later caught real Cargo test compilation and
+linking in another project, confirming that external build load is present.
+It does not identify the earlier transient processes. That observation is
+retained in `target/performance/2026-09-23/followups/build-activity/`.
+
+Decision on 2026-09-23: retain the candidate for a controlled timing retry.
+Allocation elimination and behavior are proved in the fixture, but no CPU,
+elapsed-time, RSS, or end-to-end application gain is claimed. The production
+patch and proposed permanent test remain unapplied; Cargo tests and private
+CLI workload validation were not run for this candidate. Evidence and the
+dependency/source audit are retained under
+`target/performance/2026-09-23/followups/metadata-recipient/`.
+
+## Watchdog activity-observer correctness gate
+
+The existing stall detector observes progress on GPUI's foreground executor,
+which runs through the main dispatch queue. A native run-loop observer watches
+a different signal. A nested native loop can continue processing timers while
+the serial main queue remains inside an outer task and cannot run the next
+heartbeat. CEF's pump is called from a foreground task, so preserving this
+distinction matters; this experiment does not claim an actual CEF freeze.
+
+A standalone native helper reproduces the current chained 100 ms heartbeat,
+independent 100 ms monitor, and strict age greater than 500 ms threshold. It
+compares those semantics with a simple activity observer across three fresh
+processes. Each includes a native 20 ms timer and a roughly 900 ms test phase.
+
+| Case | Main-queue heartbeats during phase | Native timer firings | Heartbeat detector | Activity observer |
+| --- | ---: | ---: | --- | --- |
+| Healthy, 936 ms | 9 | 47 | No report | No report |
+| Blocked main task, 905 ms | 0 | 0 | Reports and recovers | Reports and recovers |
+| Nested native loop, 904 ms | 0 | 45 | Reports and recovers | Misses the stall |
+
+The nested case also records 46 before-wait and 47 after-wait transitions,
+plus nested entry and exit. The heartbeat detector reports at an observed age
+of 506.6 ms. All causal assertions pass; all processes exit normally and are
+reaped without signals. This is correctness evidence, not CPU or wakeup
+measurement. The helper omits the production detector's synchronous two-second
+stack-sampling subprocess, so its recovery timestamps are not production
+recovery latency.
+
+Decision on 2026-09-23: park the observer-only replacement because it loses
+existing queue-starvation coverage. No production diagnostic code changed.
+This does not reject every run-loop-aware design: preserving an outer work
+scope or another queue-progress signal would require additional integration
+and its own overhead validation. No such redesign was added here.
+
+Source, compiler command/log, binary, raw timestamps, process inventories, and
+assertion results are retained in
+`target/performance/2026-09-23/followups/watchdog-observation/`.
+Primary references: Apple's [serial main queue](https://developer.apple.com/documentation/dispatch/dispatchqueue/main)
+and [run-loop modes and observers](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/Multithreading/RunLoopManagement/RunLoopManagement.html),
+plus the matching [Chromium work-scope and nesting implementation](https://chromium.googlesource.com/chromium/src/+/refs/tags/152.0.7977.83/base/message_loop/message_pump_apple.mm).
+
+## Reserved journal buffer follow-up
+
+The fresh candidate writes JSON directly into the final newline-delimited
+buffer, starting with the same 128-byte reserve used by pinned `serde_json`.
+It keeps encoding in memory before the existing cap check and file write.
+This removes the separate record-to-line copy without changing serialization,
+delimiters, sequence numbering, or journal recovery rules.
+
+The accepted native gate uses production mimalloc, six alternating paired
+rounds, and 58 cases. A separate instrumented binary records allocations.
+All output comparisons and JSON parse checks pass. Cases cover short/tool
+records, escapes, Unicode, nested values, sizes through 1 MiB, both leading-LF
+states, sequence boundaries, and complete line lengths around 128/256/4096.
+Eighty process checks over the 10.41-second native capture find no active
+compiler/profiler. Both helpers exit normally without cleanup signals.
+
+Most cases improve: ordinary 64-byte chunks use about 5.6–5.9% less process
+CPU, 4 KiB chunks 3.5–4.3% less, and the 1 MiB tool record 4.6–5.2% less. There
+is a repeatable small drawback at growth boundaries:
+
+| Complete line | Leading LF | CPU change, median paired rounds | Baseline to candidate median CPU |
+| --- | --- | ---: | ---: |
+| 129 bytes | No | +6.31% | 90.78 to 96.03 ns |
+| 129 bytes | Yes | +5.87% | 89.09 to 94.13 ns |
+| Escaped, 257 bytes | No | +2.05% | 160.06 to 163.71 ns |
+| Boundary, 257 bytes | No | +2.38% | 141.22 to 146.32 ns |
+
+Each listed case is slower in all six rounds. The 129-byte cases make two
+allocation/reallocation calls in both variants, while returned capacity grows
+from 129/130 to 256 bytes and cumulative requested bytes from 257/258 to 384.
+These are allocator-API quantities; logical peak remains similar and no
+physical-memory conclusion follows. The roughly five-nanosecond difference is
+not evidence of a noticeable user delay or a complete append regression.
+
+Decision on 2026-09-23: keep the candidate for review under the requested
+tradeoff rule. It usually saves encoder work, but has a small repeatable
+short-record cost. No production source changed. The complete
+append/coalescing/flush gate was not run, so neither application CPU nor
+append throughput improvement is established. No reserve tuning or additional
+special case was added. The earlier unreserved and prefix-insertion variants
+remain rejected.
+
+Exact source, candidate patch, locked dependencies, native/allocation binaries,
+raw per-case samples and process checks are retained in
+`target/performance/2026-09-23/followups/journal-reserved/`.
+Primary reference: pinned [`serde_json` serialization source](https://docs.rs/serde_json/1.0.151/src/serde_json/ser.rs.html).
+
+## Selective Value JSON follow-up
+
+The fresh candidate narrows only the private `json_payload` helper to
+`serde_json::Value`, matching all four raw-input/output call paths. A top-level
+string or direct object string member larger than the existing 512 KiB cap
+selects bounded serialization. Ordinary values, nested shapes, arrays and
+escape-expanded smaller strings retain the current formatter. Generic typed
+content and Markdown serialization remain unchanged.
+
+The bounded writer distinguishes its own limit error from unrelated errors,
+repairs a partial UTF-8 tail, and uses the current truncation marker and cutoff.
+Two focused tests pass, including unrelated-error rejection. The complete-call
+fixture compares all 24 returned outputs and 205 cap-boundary cases exactly.
+It measures selection, formatting, truncation and returned-buffer destruction,
+with input construction outside the interval. Native timing and allocation
+counting use separate optimized binaries with the production runtime dependency
+versions, JSON features and mimalloc. Four build/procedural-macro dependencies
+resolve newer versions in the scratch lockfile: `cc`, `find-msvc-tools`, `syn`
+and `unicode-ident`. Both variants share them in the same binary; this is a
+paired scratch result, not a build with complete application-lockfile parity.
+
+Both captures pass the external-build/profiler guard: 74 checks during the
+9.85-second native run and five during the 0.46-second allocation run. Six
+alternating native rounds produce these results. Percentages below compare
+the median process CPU per call; raw paired changes are retained separately.
+
+| Payload | Baseline to candidate CPU per call | Change |
+| --- | ---: | ---: |
+| Null | 6.99 to 8.56 ns | +22.4% |
+| Boolean | 6.91 to 8.35 ns | +20.9% |
+| Large Unicode object string | 298 to 686 µs | +130.1% |
+| Large escape-heavy object string | 541 to 896 µs | +65.6% |
+| Direct Write content, 4 MiB | 1.198 to 1.076 ms | -10.1% |
+| Direct Edit strings, 4 MiB each | 2.350 to 1.099 ms | -53.2% |
+
+Each listed case changes in the same direction in all six paired rounds.
+The selected top-level string just one byte above the cap is also slower in
+five of six rounds, with a 4.1% ratio-of-medians increase. The Write/Edit cases
+reduce returned capacity from about 8 MiB each to 512 KiB. Selected cases
+request another 64 bytes for error handling. Ordinary cases retain their
+current allocation behavior; their added CPU cost is small in absolute terms.
+
+Decision on 2026-09-23: park this selective variant too. Preserving ordinary
+formatting does not eliminate measured regressions, and the large Unicode and
+escape-heavy cases show a substantial formatter cost despite reduced capacity.
+No production source changed. No full reducer, GUI, uncollected RSS or footprint
+gain is claimed; those later gates were unnecessary after the CPU drawback.
+Both helpers exited normally without signals. Source, patch, exact extraction
+checks, dependencies, binaries, raw samples and process inventories live in
+`target/performance/2026-09-23/followups/json-value-fastpath/`.
+Primary references: pinned [`serde_json` writer and error contract](https://docs.rs/serde_json/1.0.151/serde_json/fn.to_writer_pretty.html)
+and Rust's [`Write` contract](https://doc.rust-lang.org/std/io/trait.Write.html).
+
 ## Candidates kept for review
 
 | Candidate | Evidence | Reason it remains parked |
 | --- | --- | --- |
-| Kitty image cleanup on pane/cache release | Twenty visible close cycles retain about 76.6 MiB graphics allocation | A deterministic test proves small atlas tiles can be overwritten before an earlier GPU reader completes; requires completion-based retirement in the Metal backend. |
-| Defer macOS CEF framework loading | Standalone load adds about 57.6 MiB RSS / 15.5 MiB footprint | Moves roughly 19–24 ms warm-cache CPU to the first browser; needs GUI startup and first-browser comparison. |
+| Kitty image cleanup on pane/cache release | Matched app capture: ten closes retain 36.28125 MiB in baseline, zero in candidate | Memory gain and GPU ordering are validated. Moving a pane away and back can require reupload; its latency and added frame-bookkeeping cost remain review tradeoffs. |
+| Defer macOS CEF framework loading | Three matched GUI pairs save 13.52–14.00 MiB RSS and 1.55–10.84 MiB footprint before the first browser | Memory gain validated; first-browser capture differences range from -45 to +82 ms and do not establish presentation latency. Loading cost moves to the first browser. Candidate remains uncommitted for review. |
 | Allocate Metal path targets on first path | Isolated GPUI tests preserve pixels and reduce reported allocations by 14.625 MiB at 2,560 × 1,440 | The unused texture is unresident at idle, so no equal footprint saving is proved; first path also gains an allocation cost. |
-| Bounded JSON serialization | Representative raw-input capacity 96 → 4 MiB; reducer about 22 → 2.6 ms | Repeated short-input regressions, especially escaped Unicode; generic early abort can hide later serializer errors. |
+| Bounded JSON serialization | Earlier broad prototype reduced raw-input capacity 96 → 4 MiB; selective Value follow-up reduces Write/Edit capacity about 8 MiB each → 512 KiB | Selective variant preserves output/error handling but raises large Unicode/escaped formatter CPU 130%/66% and adds small ordinary-value costs. Both variants parked; no fresh app RSS gain claimed. |
 | Shrink oversized owned payloads | Large retention reduction | Repeated replacement helper elapsed time increased 11.6%. |
 | Explicit mimalloc collection | In an isolated 32 MiB allocation/free fixture, collection makes about 31.9 MiB reusable | Future page faults and thread-local behavior need workload proof; no periodic collection was added. |
 | Steady visible cursor preference | Hidden-cursor diagnostic releases 224 MiB graphics backing in the same GUI process | `cursor-style-blink = false` changes visible behavior and was not itself measured; no setting was changed. |
-| Demand-driven display scheduling | Idle GUI still receives display-link callbacks while clean frames skip presentation | Requires lost-wakeup, animation, input, occlusion, and ProMotion correctness; a frame cap is not an equivalent fix. |
-| Watchdog/config polling replacement | Two 100 ms watchdog loops and a 500 ms config poll | Disabling them removes diagnostics or discovery; a run-loop/event design needs separate correctness work. |
-| Remaining metadata facts / early recipient selection | Repeated facts and no-recipient work exist under the daemon lock | Reassess after the implemented option lookup and per-client format batch; preserve client formats and notification ordering. |
-| Inbound/buffer capacity decay | One inbound frame buffer can retain up to 64 MiB; mailbox pool up to 8 MiB/client | Returning capacity trades against later allocation; repeated-large-frame throughput remains unmeasured. |
-| Journal serialization | Writing directly into a reserved output buffer removes one allocation in the fixture | Timings overlapped compilation; unreserved writing regressed small records 58–63%, and simple in-place prefix insertion regressed a large torn-tail case. |
+| Demand-driven display scheduling | Native stop/restart helper cuts about 120 callbacks/s to 1.8/s and CPU from 0.47–0.60% to 0.062–0.092% of one core | Sole-link restart adds 6.9–8.5 ms to per-round median callback latency. Parked; scratch fork uncompiled, no pin change, full-app presentation/behavior unvalidated. |
+| Native config observation | Helper saves 0.018 percentage points of one CPU core and 1.97 interrupt wakeups/s; all 72 edits detected | Adds 1.25 MiB RSS and 0.77 MiB footprint. Parked; complete-app gains and missing-directory/recovery behavior remain unvalidated. |
+| Watchdog polling replacement | Native correctness gate shows a 904 ms nested loop advances 45 native timers but no main-queue heartbeat | Pure activity observer misses the stall that the current detector reports. Parked for lost diagnostic coverage; no performance gain claimed. |
+| Early status recipient selection | Real-method fixture passes 20 paired behavior cases; empty/nonmatching calls eliminate roughly 12,500 allocations plus reallocations and 0.9 MB requested bytes | Both timing attempts hit external Cargo guards. CPU acceptance unresolved; candidate and permanent test remain unapplied. Broader facts caching and wire deltas are separate. |
+| Inbound/buffer capacity decay | A 2 MiB immediate ceiling releases 18 MiB of frame capacity in the native fixture, but repeated large traffic leaves 18.59 MiB more RSS/footprint and uses 1.8% more median CPU | Immediate ceiling rejected. Timed pool decay and transport ownership changes remain unvalidated; mailbox recycling is already capped at 8 MiB/client. |
+| Journal serialization | Fresh mimalloc gate passes 58 output cases; reserved direct writing usually lowers CPU and allocation calls | 129-byte lines use about 5 ns more CPU in all six rounds, with larger requested capacity and no call saving. Parked; complete append gain unmeasured. Earlier unreserved and prefix-insertion variants remain rejected. |
+
+The final read-only metadata review finds no accepted post-phase-one measure
+of encoded bytes, serialization CPU, or client-render cost. Current evidence
+points primarily to status construction. Building a full snapshot and then
+diffing it would retain that cost while adding comparison and per-client base
+storage. Reconstructing the current full snapshot on the client would also
+retain its tree scans and coarse notifications. Smaller messages alone do not
+establish lower CPU or RSS. Broader facts caching and wire changes remain
+parked until their intended cost is measured separately. Source ownership,
+recipient differences, reliable admission side effects, all client consumers,
+and the required proof are recorded in
+`target/performance/2026-09-23/followups/metadata-wire-triage/`.
 
 A full metadata-delta wire format needs attach/resync checkpoints and typed
 patches with base/target revisions. Global mux generation alone cannot describe
@@ -735,7 +1363,7 @@ reducers must converge through attach, detach, split, resize, close, focus,
 reconnect, and slow-client recovery. The existing terminal row-patch protocol
 already handles a different part of this problem.
 
-The first delta prototype should compare complete personalized snapshots and
+If measurements justify a delta prototype, it should compare complete personalized snapshots and
 emit typed changes keyed by existing session/window/pane IDs. That retains the
 current arbitrary-format semantics while measuring byte-count and reducer
 effects. It still pays snapshot construction costs. Emitting patches directly
@@ -767,8 +1395,8 @@ and appearance-pointer patches. Evidence: `oracle/patch-review.stdout.txt`.
 
 A second review found the Markdown append-revision counterexample and questioned
 GPU atlas reuse. Both concerns reproduced. The Markdown fix now preserves the
-revision and passes its regression; Kitty cleanup remains parked behind proper
-GPU completion tracking. Evidence: `oracle/lifecycle-review.stdout.txt`. A third
+revision and passes its regression. At the phase-1 commit, Kitty cleanup remained
+parked behind proper GPU completion tracking; the follow-up above tests that fix. Evidence: `oracle/lifecycle-review.stdout.txt`. A third
 narrow review found no runtime defect in the shared format batch or Ghostty TLS
 option. It identified the test-runner distinction above and the old written
 no-patch policy. The current request explicitly permits measured fork changes,

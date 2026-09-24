@@ -4,7 +4,7 @@ title: Building and running zz
 description: How to build and run the zz GPUI client and its daemon, what the first build downloads, and how to exercise the browser pane with the loopback fixture.
 resource: crates/zz/src/lib.rs
 tags: [running, cargo, cef-download, daemon, browser-fixture, pacman, profiling, instruments]
-timestamp: 2026-09-22T00:00:00Z
+timestamp: 2026-09-23T00:00:00Z
 ---
 
 # Overview
@@ -305,7 +305,19 @@ directly with `--socket PATH app`, so the GUI cannot reuse the normal persistent
 waits for the daemon's private identity file, records the owned process tree at launch, capture
 start, and completion plus relevant `ZZ_BROWSER_*` controls, runs `xctrace`, then terminates only
 the GUI and daemon it launched.
-It refuses to start beside another copy of the profiling bundle because macOS UI automation cannot
+If shutdown needs a recorder or GUI `SIGKILL`, or the daemon needs `SIGTERM`
+after `kill-server`, the launcher records it in `cleanup-escalations.txt` and
+returns failure. Exclude such captures from accepted performance comparisons.
+
+The private socket isolates daemon sessions, not all GUI preferences. Ordinary
+macOS profiling bundles still read and save window state under
+`~/Library/Application Support/zz`, and share browser roots and agent preferences
+with installed zz. To isolate config, provide an existing `zz/config` under
+`XDG_CONFIG_HOME`; that does not redirect these Application Support stores.
+Record native window bounds, scale, visibility, and pane geometry for matched
+comparisons. The development identity described above is a compile-time choice.
+
+The launcher refuses to start beside another copy of the profiling bundle because macOS UI automation cannot
 reliably distinguish two windows with the same bundle identity. Metal capture attaches to the
 isolated GUI PID; an all-process Metal trace can omit the application's command-buffer submission
 rows even while recording unrelated system GPU work. Captures and metadata land in the git-ignored

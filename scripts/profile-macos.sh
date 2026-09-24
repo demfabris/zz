@@ -156,6 +156,7 @@ discover_owned_processes() {
 
 stop_owned_processes() {
     local exit_status=$?
+    local cleanup_escalated=false
     trap - EXIT INT TERM
 
     if [[ -n "$RECORDER_PID" ]] && kill -0 "$RECORDER_PID" 2>/dev/null; then
@@ -166,6 +167,8 @@ stop_owned_processes() {
             recorder_attempt=$((recorder_attempt + 1))
         done
         if kill -0 "$RECORDER_PID" 2>/dev/null; then
+            cleanup_escalated=true
+            printf 'role=recorder pid=%s signal=KILL\n' "$RECORDER_PID" >>"$PROFILE_RUN_DIR/cleanup-escalations.txt" || true
             kill -KILL "$RECORDER_PID" 2>/dev/null || true
         fi
         wait "$RECORDER_PID" 2>/dev/null || true
@@ -180,6 +183,8 @@ stop_owned_processes() {
             attempt=$((attempt + 1))
         done
         if kill -0 "$GUI_PID" 2>/dev/null; then
+            cleanup_escalated=true
+            printf 'role=gui pid=%s signal=KILL\n' "$GUI_PID" >>"$PROFILE_RUN_DIR/cleanup-escalations.txt" || true
             kill -KILL "$GUI_PID" 2>/dev/null || true
         fi
         wait "$GUI_PID" 2>/dev/null || true
@@ -193,6 +198,8 @@ stop_owned_processes() {
             daemon_attempt=$((daemon_attempt + 1))
         done
         if kill -0 "$DAEMON_PID" 2>/dev/null; then
+            cleanup_escalated=true
+            printf 'role=daemon pid=%s signal=TERM\n' "$DAEMON_PID" >>"$PROFILE_RUN_DIR/cleanup-escalations.txt" || true
             kill -TERM "$DAEMON_PID" 2>/dev/null || true
         fi
     fi
@@ -207,6 +214,9 @@ stop_owned_processes() {
                     "$PROFILE_RUNTIME_DIR" >&2
                 ;;
         esac
+    fi
+    if [[ "$cleanup_escalated" == true && "$exit_status" == 0 ]]; then
+        exit_status=1
     fi
     exit "$exit_status"
 }

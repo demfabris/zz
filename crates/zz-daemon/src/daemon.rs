@@ -47,12 +47,12 @@ use zz_protocol::{
     DisplayPanesAction, DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage,
     MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT, MAX_CHOOSE_BUFFER_QUERY_BYTES,
     MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_ITEM_TEXT_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES,
-    MAX_ENCODED_FRAME_BYTES, MAX_PANE_INDICATOR_LABEL_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES,
-    MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES,
-    MENU_ROW_MARGIN, MenuAction, MenuItem, MenuState, MuxOptionKey, MuxOptionSource, MuxOptions,
-    MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator,
-    PaneKindSnapshot, PaneMode, PasteUploadPurpose, PastedImageFormat, PopupAction,
-    PopupBorderLines, PopupPointer, PopupPointerButton, PopupState, PreparedCommand,
+    MAX_ENCODED_FRAME_BYTES, MAX_KITTY_IMAGE_REMOVALS, MAX_PANE_INDICATOR_LABEL_BYTES,
+    MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES,
+    MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction, MenuItem, MenuState, MuxOptionKey,
+    MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION,
+    PaneId, PaneIndicator, PaneKindSnapshot, PaneMode, PasteUploadPurpose, PastedImageFormat,
+    PopupAction, PopupBorderLines, PopupPointer, PopupPointerButton, PopupState, PreparedCommand,
     PreparedCommandResult, ProtocolError, ProtocolMessage, RawText, SPLIT_RATIO_BASIS, ServerError,
     ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId,
     canonical_key, encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
@@ -2277,14 +2277,18 @@ impl OutboundMailbox {
                 .filter(|image_id| delivered.contains_key(image_id))
                 .collect::<Vec<_>>()
         };
-        if image_ids.is_empty() {
-            return;
+        for image_ids in image_ids.chunks(MAX_KITTY_IMAGE_REMOVALS) {
+            let message = ProtocolMessage::Event(Event {
+                sequence: Shared::next_sequence(),
+                payload: EventPayload::KittyImagesRemoved {
+                    pane,
+                    image_ids: image_ids.to_vec(),
+                },
+            });
+            if !self.enqueue_reliable(&message) {
+                break;
+            }
         }
-        let message = ProtocolMessage::Event(Event {
-            sequence: Shared::next_sequence(),
-            payload: EventPayload::KittyImagesRemoved { pane, image_ids },
-        });
-        let _ = self.enqueue_reliable(&message);
     }
 
     fn enqueue_pasted_image(
@@ -81646,6 +81650,55 @@ bind - split-window -v -c "#{pane_current_path}"
             })] if *target == pane && image_ids == &[image_id]
         ));
         assert!(!mailbox.state.lock().delivered_images.contains_key(&pane));
+    }
+
+    #[test]
+    fn outbound_mailbox_batches_kitty_image_removals_without_losing_ids() {
+        for count in [MAX_KITTY_IMAGE_REMOVALS, MAX_KITTY_IMAGE_REMOVALS + 1] {
+            let mailbox = OutboundMailbox::new();
+            let pane = PaneId(9);
+            let other_pane = PaneId(10);
+            let image_ids = (1..=count)
+                .map(|id| u32::try_from(id).unwrap())
+                .collect::<Vec<_>>();
+            {
+                let mut state = mailbox.state.lock();
+                state
+                    .delivered_images
+                    .insert(pane, image_ids.iter().copied().map(|id| (id, 1)).collect());
+                state.delivered_images.insert(other_pane, [(1, 1)].into());
+            }
+            let mut requested = image_ids.clone();
+            requested.push(u32::MAX);
+            mailbox.enqueue_kitty_images_removed(pane, &requested);
+            let messages = take_reliable_messages(&mailbox);
+            assert_eq!(messages.len(), count.div_ceil(MAX_KITTY_IMAGE_REMOVALS));
+            let mut removed = Vec::new();
+            let mut last_sequence = None;
+            for message in messages {
+                let ProtocolMessage::Event(Event {
+                    sequence,
+                    payload:
+                        EventPayload::KittyImagesRemoved {
+                            pane: target,
+                            image_ids,
+                        },
+                }) = message
+                else {
+                    panic!("expected Kitty image removals");
+                };
+                assert_eq!(target, pane);
+                assert!(image_ids.len() <= MAX_KITTY_IMAGE_REMOVALS);
+                assert!(last_sequence.is_none_or(|previous| previous < sequence));
+                last_sequence = Some(sequence);
+                removed.extend(image_ids);
+            }
+            assert_eq!(removed, image_ids);
+            let state = mailbox.state.lock();
+            assert!(!state.delivered_images.contains_key(&pane));
+            assert_eq!(state.delivered_images[&other_pane][&1], 1);
+            assert!(!state.closed);
+        }
     }
 
     #[test]

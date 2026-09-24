@@ -33,11 +33,12 @@ pub use model::{
     ATTR_BLINK, ATTR_BOLD, ATTR_EXPLICIT_RGB, ATTR_FAINT, ATTR_HYPERLINK, ATTR_INVISIBLE,
     ATTR_ITALIC, ATTR_OVERLINE, ATTR_STRIKETHROUGH, CellWidth, Color, Cursor, CursorStyle,
     DEFAULT_HISTORY_LIMIT, GRAPHEME_TABLE_BIT, Glyph, IMAGE_PLACEHOLDER_SCHEME, KittyLayer,
-    KittyPlacement, MAX_HISTORY_LIMIT, MAX_KITTY_IMAGE_BYTES, NO_COLOR, OVERLAY_RECTANGLE,
-    OverlayKind, OverlaySpan, PackedCell, PackedStyle, PatchError, ScrollbarState, SearchStatus,
-    SessionStatus, TerminalDictionary, TerminalDictionaryPatch, TerminalDiffScratch,
-    TerminalExitStatus, TerminalMode, TerminalPatchRowIndices, TerminalPatchRows,
-    TerminalPresentation, TerminalViewport, TerminalViewportPatch, UnderlineStyle,
+    KittyPlacement, MAX_HISTORY_LIMIT, MAX_KITTY_IMAGE_BYTES, MAX_KITTY_PLACEMENTS, NO_COLOR,
+    OVERLAY_RECTANGLE, OverlayKind, OverlaySpan, PackedCell, PackedStyle, PatchError,
+    ScrollbarState, SearchStatus, SessionStatus, TerminalDictionary, TerminalDictionaryPatch,
+    TerminalDiffScratch, TerminalExitStatus, TerminalMode, TerminalPatchRowIndices,
+    TerminalPatchRows, TerminalPresentation, TerminalViewport, TerminalViewportPatch,
+    UnderlineStyle,
 };
 pub use paste::{PastePreparationError, prepare_paste_buffer};
 #[cfg(feature = "session")]

@@ -4,7 +4,7 @@ title: Packed terminal lanes (terminal_codec.rs)
 description: The hand-packed, fixed-width Terminal envelope lane that fans immutable terminal viewports and row patches out to clients with deduplicated style and grapheme dictionaries over one ordered stream, local or ssh-forwarded.
 resource: crates/zz-protocol/src/terminal_codec.rs
 tags: [protocol, terminal, wire, packing, fanout]
-timestamp: 2026-08-31T00:00:00-03:00
+timestamp: 2026-09-23T00:00:00-03:00
 ---
 
 # Overview
@@ -206,7 +206,17 @@ malformed text is still rejected without scanning valid metadata twice per frame
 | `MAX_GRAPHEME_COUNT` | 1 MiB |
 | `MAX_GRAPHEME_BYTES` | 16 MiB |
 | `MAX_OVERLAY_COUNT` | 1 MiB |
-| `MAX_KITTY_PLACEMENTS` | 512 |
+| `MAX_KITTY_PLACEMENTS` | 65,536 |
+
+`MAX_KITTY_PLACEMENTS` comes from `crates/zz-terminal/src/model.rs`; terminal extraction
+and both wire directions use the same bound. At 72 bytes per record, the maximum placement
+section occupies 4.5 MiB within the 64 MiB frame ceiling. Allocation follows the actual
+placement count. The limit is a zz resource budget, not a Kitty protocol restriction.
+It admits one crop per cell for a 512 by 128 grid, as used by
+[Yazi's legacy Kitty adapter](https://github.com/sxyazi/yazi/blob/v26.9.1/yazi-adapter/src/drivers/kgp_old.rs).
+Overlapping placements can exceed the number of viewport cells, so the budget does not
+depend on viewport area. `kitty_per_cell_image_placements_cover_large_previews` covers
+the 544-cell case that the old 512 limit truncated.
 
 `validate_viewport` / `validate_patch` further check: cell count matches `columns × rows`; every cell's
 `style_id` and grapheme index resolve; grapheme offsets are monotonic and UTF-8-valid; overlays and the

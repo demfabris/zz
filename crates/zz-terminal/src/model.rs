@@ -20,6 +20,7 @@ pub const DEFAULT_HISTORY_LIMIT: usize = 10_000;
 pub const MAX_HISTORY_LIMIT: usize = 1_000_000;
 /// Largest decoded Kitty image zz will move across the daemon boundary.
 pub const MAX_KITTY_IMAGE_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_KITTY_PLACEMENTS: usize = 64 * 1024;
 
 /// Wire scheme for a recognized agent-CLI image placeholder (`zz-image://2`).
 /// The daemon writes the URI; the client that holds the pixels resolves it.

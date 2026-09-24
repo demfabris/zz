@@ -48,12 +48,12 @@ use crate::{
     CopyJumpDirection, CopyModeAction, CopyModeCountPolicy, CopyModeSearch, CopySelectionMode,
     Cursor, CursorBlinkPolicy, CursorStyle, GRAPHEME_TABLE_BIT, IMAGE_PLACEHOLDER_SCHEME,
     KeyAction, KeyCode, KeyInput, KittyLayer, KittyPlacement, MAX_HISTORY_LIMIT,
-    MAX_KITTY_IMAGE_BYTES, Modifiers, OVERLAY_RECTANGLE, OverlayKind, OverlaySpan, PackedCell,
-    PackedStyle, PasteBufferAction, PointerCellEvent, ScrollbarState, SearchCase, SearchDirection,
-    SearchMode, SearchQuery, SearchStatus, SessionStatus, TerminalAppearance, TerminalColorScheme,
-    TerminalDictionary, TerminalMode, TerminalMouseButton, TerminalMouseInput, TerminalMousePhase,
-    TerminalPresentation, TerminalViewAction, TerminalViewId, TerminalViewport, UnderlineStyle,
-    WordSeparators,
+    MAX_KITTY_IMAGE_BYTES, MAX_KITTY_PLACEMENTS, Modifiers, OVERLAY_RECTANGLE, OverlayKind,
+    OverlaySpan, PackedCell, PackedStyle, PasteBufferAction, PointerCellEvent, ScrollbarState,
+    SearchCase, SearchDirection, SearchMode, SearchQuery, SearchStatus, SessionStatus,
+    TerminalAppearance, TerminalColorScheme, TerminalDictionary, TerminalMode, TerminalMouseButton,
+    TerminalMouseInput, TerminalMousePhase, TerminalPresentation, TerminalViewAction,
+    TerminalViewId, TerminalViewport, UnderlineStyle, WordSeparators,
 };
 
 mod mode_revision;
@@ -85,7 +85,6 @@ const TERMINATION_GRACE: Duration = Duration::from_millis(500);
 const TERMINATION_KILL_WAIT: Duration = Duration::from_millis(500);
 const MAX_SEARCH_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_WHEEL_REPEAT: u32 = 32;
-const MAX_KITTY_PLACEMENTS: usize = 512;
 const PTY_READ_BUFFER_BYTES: usize = 64 * 1024;
 const RAW_OUTPUT_TAP_PENDING_CHUNKS: usize = 4;
 const RAW_OUTPUT_PARSE_BACKLOG_BYTES: usize = 4 * 1024 * 1024;
@@ -15566,6 +15565,85 @@ mod tests {
         assert_eq!((image.width, image.height), (1, 1));
         assert_eq!(image.generation, placement.image_generation);
         assert_eq!(image.bgra, [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn kitty_per_cell_image_placements_cover_large_previews() {
+        let columns = 32_u16;
+        let row_count = 17_u16;
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: columns,
+            rows: row_count,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        terminal
+            .resize(columns, row_count, 8, 18)
+            .expect("terminal pixels");
+        let encoded = "/wAA".repeat(usize::from(columns) * usize::from(row_count));
+        terminal.vt_write(
+            format!("\x1b_Gq=2,a=t,f=24,s={columns},v={row_count},i=42;{encoded}\x1b\\").as_bytes(),
+        );
+        for row in 0..row_count {
+            for column in 0..columns {
+                let placement_id = u32::from(row) * u32::from(columns) + u32::from(column) + 1;
+                terminal.vt_write(
+                    format!(
+                        "\x1b[{};{}H\x1b_Gq=2,a=p,i=42,p={placement_id},x={column},y={row},w=1,h=1,c=1,r=1,z=-1,C=1\x1b\\",
+                        row + 1,
+                        column + 1,
+                    )
+                    .as_bytes(),
+                );
+            }
+        }
+
+        let mut render_state = RenderState::new().expect("render state");
+        let mut rows = RowIterator::new().expect("rows");
+        let mut cells = CellIterator::new().expect("cells");
+        let mut generations = ViewportGenerations::new().expect("Kitty iterator");
+        let mut dictionary = ViewportDictionary::default();
+        let viewport = snapshot(
+            &terminal,
+            &mut render_state,
+            &mut rows,
+            &mut cells,
+            &mut generations,
+            SnapshotChange::Content,
+            &mut dictionary,
+            None,
+            SessionStatus::Running,
+        )
+        .expect("Kitty snapshot");
+        let covered = viewport
+            .kitty_placements
+            .iter()
+            .map(|placement| {
+                assert_eq!(placement.image_id, 42);
+                assert_eq!(placement.layer, KittyLayer::BelowText);
+                assert_eq!((placement.grid_cols, placement.grid_rows), (1, 1));
+                assert_eq!(
+                    placement.source_rect,
+                    Some((
+                        u32::try_from(placement.viewport_col).expect("visible column"),
+                        u32::try_from(placement.viewport_row).expect("visible row"),
+                        1,
+                        1,
+                    )),
+                );
+                (placement.viewport_col, placement.viewport_row)
+            })
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            covered.len(),
+            usize::from(columns) * usize::from(row_count),
+            "every image cell must survive viewport extraction",
+        );
+        for row in 0..row_count {
+            for column in 0..columns {
+                assert!(covered.contains(&(i32::from(column), i32::from(row))));
+            }
+        }
     }
 
     #[test]

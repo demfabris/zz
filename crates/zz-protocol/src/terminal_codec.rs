@@ -4,17 +4,18 @@ use std::{
 };
 
 use zz_terminal::{
-    Color, Cursor, CursorStyle, GRAPHEME_TABLE_BIT, KittyLayer, KittyPlacement, NO_COLOR,
-    OverlayKind, OverlaySpan, PackedCell, PackedStyle, ScrollbarState, SearchStatus, SessionStatus,
-    TerminalDictionary, TerminalDictionaryPatch, TerminalMode, TerminalPatchRowIndices,
-    TerminalPatchRows, TerminalPresentation, TerminalViewport, TerminalViewportPatch,
+    Color, Cursor, CursorStyle, GRAPHEME_TABLE_BIT, KittyLayer, KittyPlacement,
+    MAX_KITTY_PLACEMENTS, NO_COLOR, OverlayKind, OverlaySpan, PackedCell, PackedStyle,
+    ScrollbarState, SearchStatus, SessionStatus, TerminalDictionary, TerminalDictionaryPatch,
+    TerminalMode, TerminalPatchRowIndices, TerminalPatchRows, TerminalPresentation,
+    TerminalViewport, TerminalViewportPatch,
 };
 
 use crate::message::{
     MAX_CLIENT_ENVIRONMENT_BYTES, MAX_CLIENT_ENVIRONMENT_ENTRIES,
     MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES, MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_KITTY_IMAGE_BYTES,
-    MAX_KITTY_IMAGE_CHUNK_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES,
-    MAX_STARTUP_CONFIG_CAUSES_BYTES, client_environment_is_valid,
+    MAX_KITTY_IMAGE_CHUNK_BYTES, MAX_KITTY_IMAGE_REMOVALS, MAX_STARTUP_CONFIG_CAUSE_BYTES,
+    MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES, client_environment_is_valid,
 };
 use crate::{
     AgentSessionOpKind, BrowserCommand, Event, EventPayload, MAX_AGENT_IMAGE_FORMAT_BYTES,
@@ -46,7 +47,6 @@ const MAX_STYLE_COUNT: usize = 65_536;
 const MAX_GRAPHEME_COUNT: usize = 1024 * 1024;
 const MAX_GRAPHEME_BYTES: usize = 16 * 1024 * 1024;
 const MAX_OVERLAY_COUNT: usize = 1024 * 1024;
-const MAX_KITTY_PLACEMENTS: usize = 512;
 const CONTROL_PAYLOAD_RESERVE: usize = 256;
 const ROW_RECORD_WIRE_BYTES: usize = 4;
 const CELL_WIRE_BYTES: usize = 8;
@@ -532,7 +532,7 @@ fn validate_control_message(message: &ProtocolMessage) -> Result<(), ProtocolErr
         payload: EventPayload::KittyImagesRemoved { image_ids, .. },
         ..
     }) = message
-        && image_ids.len() > MAX_KITTY_PLACEMENTS
+        && image_ids.len() > MAX_KITTY_IMAGE_REMOVALS
     {
         return invalid("kitty image removal list exceeds its wire limit");
     }
@@ -4845,6 +4845,68 @@ mod tests {
     }
 
     #[test]
+    fn terminal_lane_round_trips_dense_kitty_placements_through_the_limit() {
+        for (columns, rows) in [(32, 17), (256, 256)] {
+            let previous = TerminalViewport::blank(columns, rows, SessionStatus::Running);
+            let mut current = previous.clone();
+            current.generation = 1;
+            current.view_generation = 1;
+            current.kitty_placements = (0..rows)
+                .flat_map(|row| {
+                    (0..columns).map(move |column| KittyPlacement {
+                        image_id: 42,
+                        image_generation: 1,
+                        layer: KittyLayer::AboveText,
+                        viewport_col: i32::from(column),
+                        viewport_row: i32::from(row),
+                        absolute_row: u64::from(row),
+                        cell_offset_x: 0,
+                        cell_offset_y: 0,
+                        grid_cols: 1,
+                        grid_rows: 1,
+                        pixel_width: 8,
+                        pixel_height: 18,
+                        source_rect: Some((u32::from(column) * 8, u32::from(row) * 18, 8, 18)),
+                    })
+                })
+                .collect();
+            let count = usize::from(columns) * usize::from(rows);
+            assert_eq!(current.kitty_placements.len(), count);
+            assert!(count > 512 && count <= MAX_KITTY_PLACEMENTS);
+            let patch = TerminalViewport::diff(&previous, &current).expect("compatible viewport");
+            for payload in [
+                EventPayload::TerminalViewport {
+                    pane: PaneId(7),
+                    viewport: current.clone(),
+                },
+                EventPayload::TerminalPatch {
+                    pane: PaneId(7),
+                    patch,
+                },
+            ] {
+                let message = ProtocolMessage::Event(Event {
+                    sequence: 1,
+                    payload,
+                });
+                let encoded = encode_protocol_message(&message).expect("encode dense placements");
+                let decoded = decode_protocol_frame(&encoded).expect("decode dense placements");
+                assert_eq!(decoded, message);
+                if let ProtocolMessage::Event(Event {
+                    payload: EventPayload::TerminalPatch { patch, .. },
+                    ..
+                }) = decoded
+                {
+                    let mut applied = previous.clone();
+                    applied
+                        .apply_patch(patch)
+                        .expect("apply dense placement patch");
+                    assert_eq!(applied, current);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn terminal_lane_rejects_kitty_placement_caps_and_malformed_records() {
         let viewport = TerminalViewport::blank(1, 1, SessionStatus::Running);
         let message = ProtocolMessage::Event(Event {
@@ -4859,9 +4921,29 @@ mod tests {
         let count = u32::try_from(MAX_KITTY_PLACEMENTS + 1).expect("cap fits u32");
         let count_offset = capped.len() - 2 * size_of::<u32>();
         capped[count_offset..count_offset + size_of::<u32>()].copy_from_slice(&count.to_le_bytes());
+        let expected_error =
+            format!("kitty placement count {count} exceeds limit {MAX_KITTY_PLACEMENTS}");
         assert!(matches!(
             decode_protocol_frame(&capped),
-            Err(ProtocolError::InvalidTerminal(_))
+            Err(ProtocolError::InvalidTerminal(error)) if error == expected_error
+        ));
+        let previous = TerminalViewport::blank(1, 1, SessionStatus::Running);
+        let mut current = previous.clone();
+        current.generation = 1;
+        let patch = TerminalViewport::diff(&previous, &current).expect("compatible viewport");
+        let mut capped_patch = encode_protocol_message(&ProtocolMessage::Event(Event {
+            sequence: 1,
+            payload: EventPayload::TerminalPatch {
+                pane: PaneId(1),
+                patch,
+            },
+        }))
+        .expect("encode empty placement patch");
+        let count_offset = capped_patch.len() - size_of::<u32>();
+        capped_patch[count_offset..].copy_from_slice(&count.to_le_bytes());
+        assert!(matches!(
+            decode_protocol_frame(&capped_patch),
+            Err(ProtocolError::InvalidTerminal(error)) if error == expected_error
         ));
         let mut unclassed = encoded;
         let class_offset = unclassed.len() - size_of::<u32>();
@@ -4887,6 +4969,30 @@ mod tests {
             pixel_height: 1,
             source_rect: None,
         }]);
+        let mut oversized_viewport = viewport.clone();
+        oversized_viewport.kitty_placements =
+            vec![viewport.kitty_placements[0].clone(); MAX_KITTY_PLACEMENTS + 1].into();
+        let oversized_patch = TerminalViewport::diff(&previous, &oversized_viewport)
+            .expect("compatible oversized viewport");
+        for payload in [
+            EventPayload::TerminalViewport {
+                pane: PaneId(1),
+                viewport: oversized_viewport,
+            },
+            EventPayload::TerminalPatch {
+                pane: PaneId(1),
+                patch: oversized_patch,
+            },
+        ] {
+            assert!(matches!(
+                encode_protocol_message(&ProtocolMessage::Event(Event {
+                    sequence: 1,
+                    payload,
+                })),
+                Err(ProtocolError::InvalidTerminal(error))
+                    if error == "kitty placement count exceeds its wire limit"
+            ));
+        }
         let mut malformed = encode_protocol_message(&ProtocolMessage::Event(Event {
             sequence: 2,
             payload: EventPayload::TerminalViewport {
@@ -4972,5 +5078,27 @@ mod tests {
             encode_protocol_message(&oversized),
             Err(ProtocolError::InvalidTerminal(_))
         ));
+        for count in [MAX_KITTY_IMAGE_REMOVALS, MAX_KITTY_IMAGE_REMOVALS + 1] {
+            let message = ProtocolMessage::Event(Event {
+                sequence: 6,
+                payload: EventPayload::KittyImagesRemoved {
+                    pane,
+                    image_ids: (1..=count).map(|id| u32::try_from(id).unwrap()).collect(),
+                },
+            });
+            if count == MAX_KITTY_IMAGE_REMOVALS {
+                let frame = encode_protocol_message(&message).expect("encode removal limit");
+                assert_eq!(
+                    decode_protocol_frame(&frame).expect("decode removals"),
+                    message
+                );
+            } else {
+                assert!(matches!(
+                    encode_protocol_message(&message),
+                    Err(ProtocolError::InvalidTerminal(error))
+                        if error == "kitty image removal list exceeds its wire limit"
+                ));
+            }
+        }
     }
 }

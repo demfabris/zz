@@ -1,10 +1,10 @@
 ---
 type: Protocol
-title: zz wire protocol (v105)
+title: zz wire protocol (v106)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-09-17T00:00:00-03:00
+timestamp: 2026-09-23T00:00:00-03:00
 ---
 
 # Overview
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 105`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 106`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (105) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (106) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -682,7 +682,7 @@ invocation rather than in `args` for the commands whose payload is not an argume
 the server log still records the command the caller typed. See
 [the command stream channel](/designs/command-stream-channel.md) for the sinks and the bound.
 
-v105 is unreleased. The cycle-11 caller-stream correction appends
+v105 shipped in zz 0.13.0. The cycle-11 caller-stream correction appends
 `CommandInvocation.stdin_available: bool` with `#[serde(default)]` and
 `ClientFileOperation::ReadStdin { binary: bool }` after `Write`, then `ReadStdinChunk` after
 `ReadStdin`. A command client opts in to stdin requests. The daemon requests bytes when the reader
@@ -703,11 +703,23 @@ the end of the enum. These appends were written against an unreleased 104; zz 0.
 main's three `ServerError::Native*` variants and without them, so they moved to 105. The v103 and
 v104 entries describe released layouts and remain intact.
 
+v106 is unreleased as of 2026-09-23. It raises the terminal placement limit from 512 to
+65,536, using the shared `zz_terminal::MAX_KITTY_PLACEMENTS` for viewport extraction and
+both terminal-lane codecs. The 72-byte record layout stays unchanged. Older readers reject
+counts above 512, so this accepted-value expansion requires a version bump. Yazi's legacy
+Kitty adapter sends a cropped placement per cell; the old extraction limit left scattered
+holes in previews larger than 512 cells. The separate `MAX_KITTY_IMAGE_REMOVALS` limit
+remains 512 IDs per control message, and the daemon splits larger removal sets into
+ordered batches.
+
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 105`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 106`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v106 requires updated clients and daemon together. A v105 daemon retains the old
+  placement limit even after the GUI is rebuilt; restarting only the GUI cannot fix
+  incomplete image previews.
 - v105 carries the server-owned pane modes. v104 shipped in zz 0.11.0, so these builds require
   v105 on both sides of the connection. It appends `mode: Option<PaneMode>` after
   `PaneSnapshot.border_status_text` with `#[serde(default)]`; no existing field moves. The field carries the server-owned pane mode

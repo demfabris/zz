@@ -18,7 +18,7 @@ use crate::{Axis, ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, Sp
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 105;
+pub const PROTOCOL_VERSION: u16 = 106;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -121,6 +121,7 @@ pub const MAX_PASTE_UPLOAD_CHUNK_BYTES: usize = 1024 * 1024;
 pub const MAX_KITTY_IMAGE_BYTES: u32 = 16 * 1024 * 1024;
 /// Largest ordered slice of one decoded Kitty image.
 pub const MAX_KITTY_IMAGE_CHUNK_BYTES: usize = 1024 * 1024;
+pub const MAX_KITTY_IMAGE_REMOVALS: usize = 512;
 /// Longest file extension a paste upload may name.
 pub const MAX_PASTE_UPLOAD_EXTENSION_BYTES: usize = 8;
 pub(crate) const MAX_SERVER_CAPABILITIES: usize = 64;
@@ -5250,7 +5251,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 105);
+        assert_eq!(super::PROTOCOL_VERSION, 106);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

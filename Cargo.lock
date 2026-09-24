@@ -11436,7 +11436,7 @@ dependencies = [
 
 [[package]]
 name = "zz"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "agent-client-protocol",
  "async-channel",
@@ -11489,7 +11489,7 @@ dependencies = [
 
 [[package]]
 name = "zz-browser"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "async-channel",
  "base64 0.23.1",
@@ -11517,7 +11517,7 @@ dependencies = [
 
 [[package]]
 name = "zz-chrome-import"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "aes 0.9.3",
  "aes-gcm",
@@ -11544,7 +11544,7 @@ dependencies = [
 
 [[package]]
 name = "zz-cli"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "env_logger",
  "libc",
@@ -11566,7 +11566,7 @@ dependencies = [
 
 [[package]]
 name = "zz-client"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "agent-client-protocol-schema",
  "base64 0.23.1",
@@ -11584,7 +11584,7 @@ dependencies = [
 
 [[package]]
 name = "zz-client-ffi"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "agent-client-protocol-schema",
  "rustix",
@@ -11600,7 +11600,7 @@ dependencies = [
 
 [[package]]
 name = "zz-config"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "log",
  "semver",
@@ -11617,7 +11617,7 @@ dependencies = [
 
 [[package]]
 name = "zz-daemon"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "agent-client-protocol",
  "async-channel",
@@ -11652,7 +11652,7 @@ dependencies = [
 
 [[package]]
 name = "zz-gpui-ios"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "accesskit_ios",
  "anyhow",
@@ -11685,7 +11685,7 @@ dependencies = [
 
 [[package]]
 name = "zz-mux"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "chrono",
  "glob",
@@ -11701,7 +11701,7 @@ dependencies = [
 
 [[package]]
 name = "zz-protocol"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "base64 0.23.1",
  "postcard",
@@ -11715,7 +11715,7 @@ dependencies = [
 
 [[package]]
 name = "zz-terminal"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "async-channel",
  "crossbeam-channel",
@@ -11737,7 +11737,7 @@ dependencies = [
 
 [[package]]
 name = "zz-tui"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "async-signal",
  "base64 0.23.1",
@@ -11754,7 +11754,7 @@ dependencies = [
 
 [[package]]
 name = "zz-ui"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -11789,7 +11789,7 @@ dependencies = [
 
 [[package]]
 name = "zz-web"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "axum",
  "futures-util",
@@ -11807,7 +11807,7 @@ dependencies = [
 
 [[package]]
 name = "zz-xtask"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "cargo_metadata",
  "cef",

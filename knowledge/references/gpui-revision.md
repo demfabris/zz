@@ -4,7 +4,7 @@ title: GPUI revision pin
 description: Where the patched Zed revision zz builds against is defined, how to read it, and what the carried GPUI patches do. gpui-component is not a dependency.
 resource: Cargo.toml
 tags: [gpui, zed, pin, reference, git-dependency]
-timestamp: 2026-09-23T00:00:00Z
+timestamp: 2026-09-24T00:00:00Z
 ---
 
 # Overview
@@ -166,6 +166,12 @@ window mask have identical bounds, radii, and corner smoothing. Other intersecti
 mask multiplication, and material opacity remains independent. GPU pixel comparisons cover
 opaque and translucent fills, borders, circular and smoothed corners, partial tiling, and fractional
 positions. The user confirmed the correction in a native GNOME window on 2026-09-09.
+
+The pin sits two commits past `zz-patches` on branch `codex-sprite-sort-texture`:
+`a64e53ec` retires Metal atlas tiles only after the frames that read them complete, and
+`2d9f5676f5` sorts sprites by `(order, texture)` in `Scene::finish` instead of
+`(order, tile_id)`, which removed most of a per-frame sort during terminal output. Neither
+is on `zz-patches` yet, so `just forks` reports the lock off-tip.
 
 `Cargo.toml` no longer narrates the list; the branch's `git log` is the authority (it carries
 more commits than this list numbers, because a few patches landed as follow-up fixes to an entry

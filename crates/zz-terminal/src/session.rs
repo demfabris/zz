@@ -21370,9 +21370,10 @@ mod tests {
         assert!(bytes.windows(7).any(|window| window == b"AFTER\x01\x02"));
 
         session.disarm_raw_output_tap(9).expect("disarm tap");
+        while output.try_recv().is_ok() {}
         assert!(matches!(
-            output.recv_timeout(Duration::from_secs(2)),
-            Err(crossbeam_channel::RecvTimeoutError::Disconnected)
+            output.try_recv(),
+            Err(crossbeam_channel::TryRecvError::Disconnected)
         ));
         session.send_raw_input(Arc::from(b"third\n".as_slice()));
         wait_for_test_viewport(&session, |viewport| {

@@ -102,8 +102,8 @@ cef-dll-sys = { path = "third_party/rust/cef-dll-sys" }
 libghostty-vt-sys = { path = "third_party/rust/libghostty-vt-sys" }
 
 [patch."https://github.com/zed-industries/zed"]
-gpui = { git = "https://github.com/demfabris/zed", rev = "7f33860f41af16d373a3c65fc78dfe04870ea18f", version = "=0.2.2" }
-gpui_platform = { git = "https://github.com/demfabris/zed", rev = "7f33860f41af16d373a3c65fc78dfe04870ea18f" }
+gpui = { git = "https://github.com/demfabris/zed", rev = "9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6", version = "=0.2.2" }
+gpui_platform = { git = "https://github.com/demfabris/zed", rev = "9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

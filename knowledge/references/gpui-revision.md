@@ -167,11 +167,15 @@ mask multiplication, and material opacity remains independent. GPU pixel compari
 opaque and translucent fills, borders, circular and smoothed corners, partial tiling, and fractional
 positions. The user confirmed the correction in a native GNOME window on 2026-09-09.
 
-The pin sits two commits past `zz-patches` on branch `codex-sprite-sort-texture`:
-`a64e53ec` retires Metal atlas tiles only after the frames that read them complete, and
-`2d9f5676f5` sorts sprites by `(order, texture)` in `Scene::finish` instead of
-`(order, tile_id)`, which removed most of a per-frame sort during terminal output. Neither
-is on `zz-patches` yet, so `just forks` reports the lock off-tip.
+The 2026-09-23/24 performance work added four commits, all on `zz-patches` since
+2026-09-24: `a64e53ec` retires Metal atlas tiles only after the frames that read them
+complete; `2d9f5676f5` sorts sprites by `(order, texture)` in `Scene::finish` instead of
+`(order, tile_id)`, which removed most of a per-frame sort during terminal output;
+`7f33860f41` adds `Window::paint_underlay_hole` and `Window::set_underlay_active`, which zz
+uses to show macOS browser frames on a native layer under the window (see
+[OSR rendering](/browser/osr-rendering.md)); and `9b46226e6f` pauses a macOS window's
+display link after three vsyncs without frame demand, restarting it through `schedule_frame`
+and a new `frame_waker`, the same contract `gpui_web` uses for `requestAnimationFrame`.
 
 `Cargo.toml` no longer narrates the list; the branch's `git log` is the authority (it carries
 more commits than this list numbers, because a few patches landed as follow-up fixes to an entry

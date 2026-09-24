@@ -248,7 +248,8 @@ Recorded so later phases inherit intent, ordered roughly by expected sequence.
   silently-stalled forward (ssh alive, tunnel dead) detected . TCP keepalive equivalent,
   `ServerAliveInterval`, or protocol-level ping? Answered 2026-09-23: every zz ssh command
   passes `ServerAliveInterval=5` and `ServerAliveCountMax=3`, so the master notices a dead
-  link in about 18 s instead of never.
+  link in about 18 s instead of never. It also passes `Compression=yes`, which the browser
+  egress forward shares.
 
 # Related
 

@@ -616,7 +616,9 @@ fn append_ssh_options(command: &mut Command, endpoint: &SshEndpoint, session: Ss
         .arg("-o")
         .arg("ServerAliveInterval=5")
         .arg("-o")
-        .arg("ServerAliveCountMax=3");
+        .arg("ServerAliveCountMax=3")
+        .arg("-o")
+        .arg("Compression=yes");
     // Windows OpenSSH has no connection sharing, and any set `ControlPath` still routes children
     // into its broken mux stub, so both options are overridden rather than omitted.
     #[cfg(windows)]
@@ -1674,6 +1676,8 @@ mod tests {
             "ServerAliveInterval=5",
             "-o",
             "ServerAliveCountMax=3",
+            "-o",
+            "Compression=yes",
         ]
         .map(str::to_owned)
         .to_vec();
@@ -2058,6 +2062,8 @@ mod tests {
             "ServerAliveInterval=5".to_owned(),
             "-o".to_owned(),
             "ServerAliveCountMax=3".to_owned(),
+            "-o".to_owned(),
+            "Compression=yes".to_owned(),
             "-o".to_owned(),
             "ControlMaster=auto".to_owned(),
             "-o".to_owned(),

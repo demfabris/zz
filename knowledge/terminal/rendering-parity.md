@@ -4,7 +4,7 @@ title: Zed GPUI terminal rendering parity
 description: The effort to bring zz's terminal painting up to Zed's GPUI standard by mapping immutable renderer-neutral frames and dirty-row patches onto GPUI text, cursor, and overlay painting.
 resource: crates/zz-ui/src/terminal.rs
 tags: [rendering, gpui, zed, parity, cursor, ime, contrast, box-drawing, block-elements, local-scroll]
-timestamp: 2026-09-17T00:00:00Z
+timestamp: 2026-09-24T00:00:00Z
 ---
 
 # Overview
@@ -125,6 +125,12 @@ traffic; input activity resets it to visible. `TerminalView::set_visible` cancel
 hidden windows, zoomed-out panes, and panes covered by settings or replacement overlays. Focus loss
 and window deactivation also cancel it without waiting for the terminal to render again. Visible,
 focused terminals resume their configured blink interval.
+
+Blinking stops with the cursor shown 10 seconds (`CURSOR_BLINK_TIMEOUT`) after the last key, mouse,
+IME, or focus change, as GTK, kitty, and Alacritty do. Program output does not restart it. Each blink
+phase presents a whole window, and an idle focused pane otherwise draws about two frames a second
+forever. On the 2026-09-23 M4 Max host that kept about 224 MiB of Metal driver backing resident;
+the timeout drops idle presents from 1.93/s to about zero and GUI footprint from 399 to 154 MiB.
 
 There is no prediction layer any more. The provisional predicted-cell pass (dimmed glyph, underline,
 cursor pulled one cell past the newest prediction) and its `prediction_overlay` went with

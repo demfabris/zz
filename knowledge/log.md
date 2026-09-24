@@ -1,6 +1,7 @@
 # Update Log
 
 ## 2026-09-23
+* **Update**: Terminal cursor blinking now stops, shown, 10 seconds after the last key, mouse, IME, or focus change. Blink was on by default at every shell prompt and presented a whole window twice a second forever. Matched idle captures on the profiling bundle: presents 1.93/s to 0.02/s, GPU 4.2 to 0.04 ms/s, GUI footprint 399 to 154 MiB, GUI CPU about 32% lower. A same-process blink/steady/blink run reproduced the footprint change both ways, and the first frame after the driver retired its backing took the usual GPU time.
 * **Update**: Validated selective Value-only JSON formatting with exact output comparisons and separate CPU/allocation captures. Write/Edit capacity and CPU improve, but large Unicode/escaped payload CPU regresses substantially and ordinary values add small costs. Parked without production edits; recorded why larger metadata/wire changes lack a measured target.
 * **Update**: Revalidated reserved journal serialization with production mimalloc and 58 cases. Most encoder cases improve, but 129-byte records consistently add about five CPU nanoseconds and request a larger buffer without reducing allocator calls. Parked the small tradeoff; production encoder unchanged.
 * **Update**: Validated status recipient selection behavior and allocation savings in the real-method fixture, but parked CPU acceptance after both timing attempts encountered transient external Cargo activity. Shipping source unchanged; raw rejected timings and dependency provenance retained.

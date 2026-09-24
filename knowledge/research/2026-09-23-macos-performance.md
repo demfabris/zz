@@ -1325,6 +1325,30 @@ checks, dependencies, binaries, raw samples and process inventories live in
 Primary references: pinned [`serde_json` writer and error contract](https://docs.rs/serde_json/1.0.151/serde_json/fn.to_writer_pretty.html)
 and Rust's [`Write` contract](https://doc.rust-lang.org/std/io/trait.Write.html).
 
+## Cursor blink timeout follow-up
+
+The earlier hidden-cursor diagnostic left the steady visible cursor unmeasured. A same-process run on
+the profiling bundle switched one focused pane between DECSCUSR blinking and steady block phases:
+
+| Phase | Presents/s | GPU ms/s | Footprint | Owned graphics resident | GUI CPU, 20 s window |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Blinking | 1.91 | 4.18 | 400.5 MiB | 228.8 MiB | 259.7 ms |
+| Steady | 0 | 0 | 164.7 MiB | 4.8 MiB | 159.7 ms |
+| Blinking again | 1.90 | 4.07 | 400.1 MiB | 228.8 MiB | 266.1 ms |
+
+Instruments stayed attached, so CPU includes tracing overhead. After 45 seconds steady, the first
+frames took 0.10 and 2.08 ms of GPU time, the same as ordinary blink frames; no re-backing cost was
+visible. The shipped change stops blinking, cursor shown, 10 seconds after the last key, mouse, IME,
+or focus change. Program output does not restart it, matching GTK, kitty and Alacritty. The matched
+idle pair with no cursor escapes, baseline then candidate bundle:
+
+| Bundle | Presents/s | GPU ms/s | Footprint | GUI CPU, 20 s window |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline | 1.93 | 4.21 | 399.1 MiB | 245.6 ms |
+| Blink timeout | 0.02 | 0.04 | 154.1 MiB | 166.4 ms |
+
+Interrupt wakeups stay at about 120/s in every phase: the display link still ticks.
+
 ## Candidates kept for review
 
 | Candidate | Evidence | Reason it remains parked |
@@ -1335,7 +1359,7 @@ and Rust's [`Write` contract](https://doc.rust-lang.org/std/io/trait.Write.html)
 | Bounded JSON serialization | Earlier broad prototype reduced raw-input capacity 96 → 4 MiB; selective Value follow-up reduces Write/Edit capacity about 8 MiB each → 512 KiB | Selective variant preserves output/error handling but raises large Unicode/escaped formatter CPU 130%/66% and adds small ordinary-value costs. Both variants parked; no fresh app RSS gain claimed. |
 | Shrink oversized owned payloads | Large retention reduction | Repeated replacement helper elapsed time increased 11.6%. |
 | Explicit mimalloc collection | In an isolated 32 MiB allocation/free fixture, collection makes about 31.9 MiB reusable | Future page faults and thread-local behavior need workload proof; no periodic collection was added. |
-| Steady visible cursor preference | Hidden-cursor diagnostic releases 224 MiB graphics backing in the same GUI process | `cursor-style-blink = false` changes visible behavior and was not itself measured; no setting was changed. |
+| Steady visible cursor preference | Superseded by the shipped 10 s blink timeout above | Users who want no blink at all can still set `cursor-style-blink = false`. |
 | Demand-driven display scheduling | Native stop/restart helper cuts about 120 callbacks/s to 1.8/s and CPU from 0.47–0.60% to 0.062–0.092% of one core | Sole-link restart adds 6.9–8.5 ms to per-round median callback latency. Parked; scratch fork uncompiled, no pin change, full-app presentation/behavior unvalidated. |
 | Native config observation | Helper saves 0.018 percentage points of one CPU core and 1.97 interrupt wakeups/s; all 72 edits detected | Adds 1.25 MiB RSS and 0.77 MiB footprint. Parked; complete-app gains and missing-directory/recovery behavior remain unvalidated. |
 | Watchdog polling replacement | Native correctness gate shows a 904 ms nested loop advances 45 native timers but no main-queue heartbeat | Pure activity observer misses the stall that the current detector reports. Parked for lost diagnostic coverage; no performance gain claimed. |

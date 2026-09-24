@@ -85,6 +85,7 @@ const SELECTION_AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(33);
 const LOCAL_SCROLL_DEBOUNCE: Duration = Duration::from_millis(120);
 const LOCAL_SCROLL_TIMEOUT: Duration = Duration::from_secs(2);
 const IMAGE_HOVER_DWELL: Duration = Duration::from_millis(250);
+const CURSOR_BLINK_TIMEOUT: Duration = Duration::from_secs(10);
 const IMAGE_POPOVER_SIDE: f32 = 300.0;
 const MAX_PASTE_BYTES: usize = 4 * 1024 * 1024;
 const TERMINAL_KEY_CONTEXT: &str = "Terminal";
@@ -483,6 +484,8 @@ pub(crate) struct TerminalView {
     cursor_blink_visible: bool,
     cursor_blink_active: bool,
     cursor_blink_task: Task<()>,
+    cursor_blink_idle_since: Instant,
+    cursor_blink_expired: bool,
     cursor_focused: bool,
     visible: bool,
     selection_dragging: bool,
@@ -1185,6 +1188,8 @@ impl TerminalView {
             cursor_blink_visible: true,
             cursor_blink_active: false,
             cursor_blink_task: Task::ready(()),
+            cursor_blink_idle_since: cx.background_executor().now(),
+            cursor_blink_expired: false,
             cursor_focused: false,
             visible: true,
             selection_dragging: false,
@@ -2403,6 +2408,8 @@ impl TerminalView {
         self.cursor_blink_visible = true;
         self.cursor_blink_task = Task::ready(());
         self.cursor_blink_active = false;
+        self.cursor_blink_idle_since = cx.background_executor().now();
+        self.cursor_blink_expired = false;
         if self.cursor_should_blink() {
             self.start_cursor_blink(cx);
         }
@@ -2421,6 +2428,10 @@ impl TerminalView {
             return;
         }
         if self.cursor_blink_active {
+            return;
+        }
+        if self.cursor_blink_expired {
+            self.cursor_blink_visible = true;
             return;
         }
         self.start_cursor_blink(cx);
@@ -2442,6 +2453,14 @@ impl TerminalView {
                     }
                     view.cursor_blink_visible = !view.cursor_blink_visible;
                     cx.notify();
+                    if view.cursor_blink_visible
+                        && cx.background_executor().now() - view.cursor_blink_idle_since
+                            >= CURSOR_BLINK_TIMEOUT
+                    {
+                        view.cursor_blink_active = false;
+                        view.cursor_blink_expired = true;
+                        return false;
+                    }
                     true
                 }) else {
                     break;
@@ -2476,6 +2495,8 @@ impl Render for TerminalView {
             self.cursor_blink_visible = true;
             self.cursor_blink_task = Task::ready(());
             self.cursor_blink_active = false;
+            self.cursor_blink_idle_since = cx.background_executor().now();
+            self.cursor_blink_expired = false;
         }
         self.ensure_cursor_blink(cx);
         let appearance = Arc::clone(&self.render_appearance.source);
@@ -3637,6 +3658,53 @@ mod tests {
         terminal.update(cx, |view, _| {
             assert!(!view.cursor_blink_active);
             assert!(!view.cursor_focused);
+        });
+    }
+
+    #[gpui::test]
+    fn cursor_blinking_settles_visible_after_idle_until_input(cx: &mut gpui::TestAppContext) {
+        cx.update(zz_ui::init);
+        let (terminal, cx) = cx.add_window_view(|window, cx| {
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            TerminalView::new(PaneId(0), mux, Rc::new(Cell::new(false)), window, cx)
+        });
+        cx.update(|window, cx| {
+            window.activate_window();
+            terminal.update(cx, |view, cx| {
+                window.focus(&view.focus_handle, cx);
+                view.retained.write().viewport.cursor = Some(zz_terminal::Cursor::new(
+                    0,
+                    0,
+                    true,
+                    true,
+                    false,
+                    zz_terminal::CursorStyle::Block,
+                    zz_terminal::Color::rgb(1, 2, 3),
+                ));
+                view.cursor_focused = true;
+                view.reset_cursor_blink(cx);
+                assert!(view.cursor_blink_active);
+            });
+        });
+        for _ in 0..(CURSOR_BLINK_TIMEOUT.as_millis() / 250 + 8) {
+            cx.executor().advance_clock(Duration::from_millis(250));
+            cx.run_until_parked();
+        }
+        terminal.update(cx, |view, cx| {
+            assert!(!view.cursor_blink_active);
+            assert!(view.cursor_blink_expired);
+            assert!(view.cursor_blink_visible);
+            view.ensure_cursor_blink(cx);
+            assert!(!view.cursor_blink_active);
+            view.reset_cursor_blink(cx);
+            assert!(view.cursor_blink_active);
+            assert!(!view.cursor_blink_expired);
         });
     }
 

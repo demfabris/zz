@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use gpui::{ClipboardItem, Context, EventEmitter, Image, RenderImage};
+use gpui::{ClipboardItem, Context, EventEmitter, Image, RenderImage, Task};
 use image::{Frame as ImageFrame, ImageBuffer, Rgba};
 use parking_lot::RwLock;
 use zz_browser::{diagnostic_url, normalize_url};
@@ -1162,9 +1162,32 @@ pub struct MuxClient {
     shutting_down: bool,
     next_row_revision: u64,
     command_output_diff: TerminalDiffScratch,
+    font_names: Option<Arc<[String]>>,
+    font_scan: Task<()>,
 }
 
 impl MuxClient {
+    fn scan_font_names(&mut self, cx: &mut Context<Self>) {
+        let text_system = cx.text_system().clone();
+        let scan = cx
+            .background_executor()
+            .spawn(async move { Arc::<[String]>::from(text_system.all_font_names()) });
+        self.font_scan = cx.spawn(async move |this, cx| {
+            let names = scan.await;
+            this.update(cx, |this, _| this.font_names = Some(names))
+                .ok();
+        });
+    }
+
+    fn available_font_names(&mut self, cx: &mut Context<Self>) -> Arc<[String]> {
+        let names = self
+            .font_names
+            .clone()
+            .unwrap_or_else(|| cx.text_system().all_font_names().into());
+        self.scan_font_names(cx);
+        names
+    }
+
     #[cfg(not(target_os = "ios"))]
     pub(crate) fn local_server_id(&self) -> Option<u64> {
         self.connections
@@ -1286,7 +1309,10 @@ impl MuxClient {
             shutting_down: false,
             next_row_revision: 1,
             command_output_diff: TerminalDiffScratch::default(),
+            font_names: None,
+            font_scan: Task::ready(()),
         };
+        state.scan_font_names(cx);
         if has_local {
             match client {
                 Some(Ok(client)) => {
@@ -1403,7 +1429,7 @@ impl MuxClient {
         localize_terminal_font_families(
             &mut appearance,
             &provenance,
-            &cx.text_system().all_font_names(),
+            &self.available_font_names(cx),
         );
         self.terminal_font_size_offset_points =
             apply_terminal_font_size_offset(&mut appearance, self.terminal_font_size_offset_points);
@@ -4226,7 +4252,7 @@ impl MuxClient {
         localize_terminal_font_families(
             &mut appearance,
             &provenance,
-            &cx.text_system().all_font_names(),
+            &self.available_font_names(cx),
         );
         self.terminal_font_size_offset_points =
             apply_terminal_font_size_offset(&mut appearance, self.terminal_font_size_offset_points);

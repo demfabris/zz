@@ -4,7 +4,7 @@ title: zz-daemon crate
 description: The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions and Agent-pane ACP adapter children, and the fan-out engine that streams coalesced terminal frames and agent transcripts to attached and short-lived clients over a socket or named pipe.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [crate, daemon, ipc, fanout, transport, agent]
-timestamp: 2026-08-30T00:00:00-03:00
+timestamp: 2026-09-24T00:00:00-03:00
 ---
 
 # Overview
@@ -78,8 +78,10 @@ send-keys, and client events. It contains no GPUI or CEF code; live browser rend
    It loads the zz-owned `zz/mux.conf` [in tmux grammar](/tmux/conf-parser.md), or explicit
    `-f` paths in argument order. tmux files enter only through `import-tmux-config [path]`. A fresh daemon remains empty and unarmed unless config
    creates a session. The first default Interactive attach lazily creates the next numeric session.
-4. Loops on a **non-blocking** `accept()`. Unix waits in `poll(2)` for listener readiness, with a
-   100 ms timeout bounding shutdown detection; Windows retains the 20 ms fallback poll. Every
+4. Loops on a **non-blocking** `accept()`. Unix waits in `poll(2)` for listener readiness or the
+   `AcceptWake` socket pair, which every path that sets `stopping` writes to; a 5 s timeout only
+   bounds a stop path that forgets to wake it. The old 100 ms poll was 10 of the idle daemon's ~11
+   wakeups/s. Windows retains the 20 ms fallback poll. Every
    accepted stream is reset to blocking mode (required on BSD-derived Unix hosts where accepted
    sockets may inherit `O_NONBLOCK`), and a `zz-client` thread is spawned per connection until
    `stopping` is set.

@@ -101,11 +101,11 @@ use crate::{
         warm_terminfo_entries,
     },
     terminal_features::{terminal_colour_count, terminal_feature_mask, terminal_features_list},
-    transport::{LocalTransport, Transport, TransportListener, TransportStream},
+    transport::{AcceptWake, LocalTransport, Transport, TransportListener, TransportStream},
 };
 
 #[cfg(unix)]
-const ACCEPT_WAIT_TIMEOUT: Duration = Duration::from_millis(100);
+const ACCEPT_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(windows)]
 const ACCEPT_WAIT_TIMEOUT: Duration = Duration::from_millis(20);
 const DIAGNOSTIC_STATE_INTERVAL: Duration = Duration::from_secs(5);
@@ -1703,7 +1703,7 @@ fn accept_connections<T: Transport>(
                 }
             }
             Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                listener.wait_for_incoming(ACCEPT_WAIT_TIMEOUT)?;
+                listener.wait_for_incoming(ACCEPT_WAIT_TIMEOUT, &shared.accept_wake)?;
             }
             Err(error) => return Err(error.into()),
         }
@@ -3298,6 +3298,7 @@ struct BackgroundInsertions {
 
 struct Shared {
     inner: Mutex<ServerState>,
+    accept_wake: AcceptWake,
     client_writers: Mutex<BTreeMap<ClientId, Arc<OutboundMailbox>>>,
     /// One flag per connection that owns a command queue. `server_client_lost`
     /// frees the lost client's `cmdq`, so every queue loop this client owns
@@ -4388,6 +4389,7 @@ impl Shared {
         let (client_message_deadline_tx, client_message_deadline_rx) =
             crossbeam_channel::unbounded();
         Self {
+            accept_wake: AcceptWake::new(),
             inner: Mutex::new(state),
             client_writers: Mutex::new(BTreeMap::new()),
             command_queue_cancels: Mutex::new(BTreeMap::new()),
@@ -4822,6 +4824,7 @@ impl Shared {
             return;
         }
         self.stopping.store(true, Ordering::Release);
+        self.accept_wake.wake();
         self.startup_changed.notify_all();
         let events = self.stop_shutdown_resources(true, run_hooks);
         if run_hooks && !self.shutdown_drops_event_hooks.load(Ordering::Acquire) {
@@ -5874,6 +5877,7 @@ impl Shared {
             let cold_shutdown = inner.cold_bootstrap.unregister(client);
             if cold_shutdown {
                 self.stopping.store(true, Ordering::Release);
+                self.accept_wake.wake();
             }
             let shutdown = cold_shutdown || self.should_shutdown_if_empty(&inner);
             (

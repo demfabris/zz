@@ -1594,7 +1594,6 @@ fn handle_core_event(
         CoreEvent::Attached { session } => {
             *attempt = AttachAttempt::Idle;
             model.attached_session = Some(session);
-            model.viewports.clear();
             model.set_command_output(None, None);
             model.set_popup(None);
             model.popup_keys_down.clear();
@@ -1602,7 +1601,20 @@ fn handle_core_event(
             model.confirm = None;
             model.confirm_reply_pending = false;
             model.client_message = None;
-            model.update_snapshot(Arc::clone(lock_core(core).snapshot()));
+            let (snapshot, viewports) = {
+                let core = lock_core(core);
+                let snapshot = Arc::clone(core.snapshot());
+                let viewports = snapshot
+                    .sessions
+                    .iter()
+                    .flat_map(|session| &session.windows)
+                    .flat_map(|window| window.panes.keys())
+                    .filter_map(|pane| Some((*pane, core.viewport(*pane)?.clone())))
+                    .collect();
+                (snapshot, viewports)
+            };
+            model.update_snapshot(snapshot);
+            model.viewports = viewports;
             if let Some(input) = model.finish_client_focus_attach() {
                 client
                     .send_input(input)

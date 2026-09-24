@@ -1,7 +1,7 @@
 {
   "schema": 3,
   "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
-  "updated_on": "2026-09-19",
+  "updated_on": "2026-09-24",
   "gaps": [
     {
       "id": "aliases.remote-client-preflight",
@@ -162,6 +162,32 @@
       ],
       "depends_on": [],
       "reason": "Independent GUI clients and per-client sizing are core zz behavior. Widened 2026-09-02 for semantic:per-client-active-pane, relocated from clients.active-pane, which is now empty. The pin really does keep a per-client active pane: `refresh-client -f active-pane` sets CLIENT_ACTIVEPANE, `server_client_set_pane` stores the pane on a per-client-and-window record and `server_client_get_pane` reads it back, feeding target resolution through `cmd_find_from_client`, the active border and highlight in screen-redraw.c and window-border.c, `run-shell` with no target, and the tty cursor. Measured on a throwaway pin server with two attached 80x24 pty clients and a two-pane window. The flag is retained and reported: `#{client_flags}` answers `attached,focused,active-pane,UTF-8` for the client that asked and `attached,focused,UTF-8` for the other, which zz already matches. What the measurement adds is how little of it is observable in the format layer: `format_cb_pane_active` compares `ft->wp` with `wp->window->active`, so `#{pane_active}` and every `list-panes` row stay window-global on the pin too, and a per-client selection never shows up there. It is also unreachable from the CLI: `cmd_select_pane_exec` takes the per-client branch only when `cmdq_get_client(item)` has a session, and a command client's session is NULL, so `select-pane -t %1` typed on the command line moved the WINDOW's active pane from %0 to %1 and moved the rows with it even while an attached client carried the flag. Only a command running on the attached client's own queue reaches `server_client_set_pane`. The product stance: in zz the pane a window is on is model state, one shared fact that every client sees and that the snapshot carries, while per-client view state - the focused window, the client size, copy and view mode, the chooser and the sidebar - already lives on the client, which is what semantic:per-client-current-window in this group settles. Adding a per-client active pane would move a model field into the view layer and split pane targeting per client, and zz's answer is that clients differ by which WINDOW they look at, not by which pane inside it is active. The flag stays retained and reported so scripts that set it are not refused. Reopen only if zz moves the active pane out of the mux model. Widened 2026-09-06 for semantic:popup-underlay-focus-events, measured by the proof-debt lane while closing a hole in compat/attached-client.sh: the popup underlay probe waited for the focus pair on the tmux side only, and its byte assertion passed on zz precisely BECAUSE nothing arrived, so the zz side proved nothing. With focus-events on and a display-popup opened over a pane whose program has set DECSET 1004, the pin writes the focus-out sequence ESC [ O (27 91 79) to the covered pane when the popup takes focus and ESC [ I (27 91 73) when it gives focus back, three pairs across the probe's three popups; zz writes neither byte, and the covered pane's next read is the ordinary z (122) the probe types at the end. The victim is any pane program that acts on focus, vim's autoread being the common one: opening a popup over vim on the pin makes vim recheck the file, and on zz it does not. The stance stays native and no zz code changed here: focus is a per-client fact in zz and a popup is a client overlay, not a window the pane loses focus to. What changed is the proof - compat/attached-client.sh now waits on BOTH sides, positively on the pin through wait_for_pane_marker and as a bounded absence on zz through assert_pane_marker_absent, and assert_popup_underlay_result counts the focus markers against the side's own focus_pairs (6 on the pin, 0 on zz) instead of accepting the shared final byte alone. Reopen if zz grows a server-owned notion of a pane losing focus to an overlay."
+    },
+    {
+      "id": "commands.cold-parse-diagnostics",
+      "title": "Report a cold CLI parse error as the parse error",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
+      "impact": [
+        "scripts"
+      ],
+      "owner": "client",
+      "items": [
+        "semantic:cold-cli-parse-error-message"
+      ],
+      "evidence": [
+        "resource:crates/zz-cli/src/lib.rs",
+        "file:crates/zz-cli/tests/cli_binary.rs",
+        "file:compat/scenarios/smoke/fixtures/cli-chain-parse-abort.sh",
+        "scenario:compat/scenarios/smoke/cli-chain-parse-abort.txt"
+      ],
+      "acceptance": [
+        "Against a missing local socket, an invalid command chain exits 1 without spawning a daemon and prints the chain's own parse diagnostic, such as `unknown command: frobnicate`, where the pin prints `error connecting to <socket> (No such file or directory)`."
+      ],
+      "depends_on": [],
+      "reason": "Settled 2026-09-15 with the CLI exit-code contract for agents that script zz. The pin dials the server before it parses a command-line chain, so a typo against a socket that is not running reports a connect failure that names neither the command nor the flag at fault. zz already validates the whole raw vector before autospawn under the closed mux.local-cli-autospawn-parse-abort, and since the exit-code contract it prints that validation's own diagnostic instead of the pin's connect text; exit status 1, no daemon spawn, and no effects still match the pin. The same local parse is what lets a usage error such as `list-sessions -F x --json` exit 2. crates/zz-cli/tests/cli_binary.rs asserts the diagnostic in usage_errors_keep_their_surface_status_without_a_daemon, non_start_server_commands_do_not_spawn_a_daemon, and cold_cli_parse_errors_do_not_start_or_mutate_a_daemon, and the cli-chain-parse-abort fixture expects the parse message on the zz side and the connect message on the pin for its nine invalid cold chains. Reopen if a named script depends on the connect text."
     },
     {
       "id": "commands.json-output",

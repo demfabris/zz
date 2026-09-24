@@ -4,7 +4,7 @@ title: tmux compatibility gap report
 description: "Live TODO and status report for tmux compatibility gaps, decisions, evidence, and acceptance gates."
 resource: compat/tmux-gaps.json
 tags: [tmux, compatibility, gaps, tracker]
-timestamp: 2026-09-19T00:00:00-03:00
+timestamp: 2026-09-24T00:00:00-03:00
 ---
 
 # Overview
@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **43**. Classified items: **352**.
+Tracked gap groups: **44**. Classified items: **353**.
 
-- Status: open: 3, accepted: 40.
-- Decision: adopt: 3, native: 31, never: 9.
-- Priority: now: 1, next: 2, none: 40.
+- Status: open: 3, accepted: 41.
+- Decision: adopt: 3, native: 32, never: 9.
+- Priority: now: 1, next: 2, none: 41.
 - Closed history entries: 210.
-- Surface: command: 3, flag: 23, extension-flag: 10, native-command: 25, option: 31, format: 43, key: 28, binding: 37, native-key: 91, semantic: 52, presentation: 8, protocol: 1.
+- Surface: command: 3, flag: 23, extension-flag: 10, native-command: 25, option: 31, format: 43, key: 28, binding: 37, native-key: 91, semantic: 53, presentation: 8, protocol: 1.
 
 ## Measured surface
 
@@ -68,6 +68,7 @@ structure as proof.
 | `capture.rich-transports` | Add rich capture transports | native | accepted | none | terminal | scripts | none |
 | `clients.interactive-refresh` | Complete interactive client commands | native | accepted | none | client | remote | none |
 | `clients.read-only-and-focus` | Retain native client focus semantics | native | accepted | none | daemon | daily, remote | none |
+| `commands.cold-parse-diagnostics` | Report a cold CLI parse error as the parse error | native | accepted | none | client | scripts | none |
 | `commands.json-output` | Keep --json on the list verbs a zz-only flag | native | accepted | none | protocol | scripts | none |
 | `commands.native-client-tools` | Use native client tools | native | accepted | none | gui | daily, gui | none |
 | `commands.native-superset` | Keep the zz-native command namespace explicit | native | accepted | none | protocol | daily, gui, scripts | none |
@@ -216,6 +217,25 @@ Independent GUI clients and per-client sizing are core zz behavior. Widened 2026
   - `The divergence matrix documents per-client focus and single-user read-only policy; imported tmux command syntax keeps its meaning.`
   - `The active-pane client flag is retained and reported, while the pane a window is on stays one shared model fact that every client sees.`
   - `A pane a display-popup covers keeps the pin's focus routing on the pin and gets none on zz; the attached fixture waits on both sides, positively on the pin and as a bounded absence on zz, so neither side can pass by accident.`
+
+### `commands.cold-parse-diagnostics`: Report a cold CLI parse error as the parse error
+
+Settled 2026-09-15 with the CLI exit-code contract for agents that script zz. The pin dials the server before it parses a command-line chain, so a typo against a socket that is not running reports a connect failure that names neither the command nor the flag at fault. zz already validates the whole raw vector before autospawn under the closed mux.local-cli-autospawn-parse-abort, and since the exit-code contract it prints that validation's own diagnostic instead of the pin's connect text; exit status 1, no daemon spawn, and no effects still match the pin. The same local parse is what lets a usage error such as `list-sessions -F x --json` exit 2. crates/zz-cli/tests/cli_binary.rs asserts the diagnostic in usage_errors_keep_their_surface_status_without_a_daemon, non_start_server_commands_do_not_spawn_a_daemon, and cold_cli_parse_errors_do_not_start_or_mutate_a_daemon, and the cli-chain-parse-abort fixture expects the parse message on the zz side and the connect message on the pin for its nine invalid cold chains. Reopen if a named script depends on the connect text.
+
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
+- Owner: `client`
+- User impact: scripts
+- Items: `semantic:cold-cli-parse-error-message`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-cli/src/lib.rs`
+  - `file:crates/zz-cli/tests/cli_binary.rs`
+  - `file:compat/scenarios/smoke/fixtures/cli-chain-parse-abort.sh`
+  - `scenario:compat/scenarios/smoke/cli-chain-parse-abort.txt`
+- Acceptance:
+  - `Against a missing local socket, an invalid command chain exits 1 without spawning a daemon and prints the chain's own parse diagnostic, such as `unknown command: frobnicate`, where the pin prints `error connecting to <socket> (No such file or directory)`.`
 
 ### `commands.json-output`: Keep --json on the list verbs a zz-only flag
 

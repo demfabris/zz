@@ -57,7 +57,6 @@ cold_socket="/tmp/zz-cli-chain-cold-$$.sock"
 cold_out="$HOME/cli-chain-cold.out"
 cold_err="$HOME/cli-chain-cold.err"
 cold_expected="$HOME/cli-chain-cold.expected"
-printf 'error connecting to %s (No such file or directory)\n' "$cold_socket" >"$cold_expected"
 if [ -n "${ZZ_SMOKE_ZZ_BIN:-}" ]; then
     cold_client() {
         "$ZZ_SMOKE_ZZ_BIN" --socket "$cold_socket" "$@"
@@ -70,6 +69,12 @@ fi
 
 cold_clean=1
 probe_cold() {
+    if [ -n "${ZZ_SMOKE_ZZ_BIN:-}" ] && [ -n "$1" ]; then
+        printf '%s\n' "$1" >"$cold_expected"
+    else
+        printf 'error connecting to %s (No such file or directory)\n' "$cold_socket" >"$cold_expected"
+    fi
+    shift
     rm -f "$cold_socket" "${cold_socket}.identity" "${cold_socket}.lock" "$cold_out" "$cold_err"
     set +e
     cold_client "$@" >"$cold_out" 2>"$cold_err"
@@ -85,17 +90,23 @@ probe_cold() {
     fi
 }
 
-probe_cold new-session -d -s before ';' frobnicate
-probe_cold new-session -d -s before ';' list-sessions -Z
-probe_cold new-session -d -s before ';' list-sessions extra
-probe_cold new -d -s before ';' lscm -Z
-probe_cold new-session -d -s before ';' clock-mode -Z
-probe_cold new -d -s before ';' suspendc extra
-probe_cold attach ';' frobnicate
-probe_cold attach-session ';' frobnicate
-probe_cold -N new-session -s before ';' frobnicate
-probe_cold -N attach
-probe_cold -N attach-session
+probe_cold 'unknown command: frobnicate' \
+    new-session -d -s before ';' frobnicate
+probe_cold 'command list-sessions: unknown flag -Z' \
+    new-session -d -s before ';' list-sessions -Z
+probe_cold 'command list-sessions: too many arguments (need at most 0)' \
+    new-session -d -s before ';' list-sessions extra
+probe_cold 'command list-commands: unknown flag -Z' \
+    new -d -s before ';' lscm -Z
+probe_cold 'command clock-mode: unknown flag -Z' \
+    new-session -d -s before ';' clock-mode -Z
+probe_cold 'command suspend-client: too many arguments (need at most 0)' \
+    new -d -s before ';' suspendc extra
+probe_cold 'unknown command: frobnicate' attach ';' frobnicate
+probe_cold 'unknown command: frobnicate' attach-session ';' frobnicate
+probe_cold 'unknown command: frobnicate' -N new-session -s before ';' frobnicate
+probe_cold '' -N attach
+probe_cold '' -N attach-session
 rm -f "$cold_socket" "${cold_socket}.identity" "${cold_socket}.lock"
 
 if [ "$parse_clean" -eq 1 ] && [ "$parse_count" -eq 6 ] && [ "$cold_clean" -eq 1 ]; then

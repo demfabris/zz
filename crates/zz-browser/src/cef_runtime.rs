@@ -369,6 +369,11 @@ pub enum BrowserError {
     #[cfg(target_os = "macos")]
     #[error("CEF could not load the Chromium Embedded Framework")]
     FrameworkLoad,
+    #[cfg(target_os = "macos")]
+    #[error(
+        "CEF framework version does not match this app (loaded {0}); restart zz after updating"
+    )]
+    FrameworkVersion(String),
 }
 
 #[derive(Clone, Copy)]
@@ -508,7 +513,44 @@ pub struct BrowserRuntime {
     log_file: Option<PathBuf>,
     background_color: u32,
     #[cfg(target_os = "macos")]
-    _loader: cef::library_loader::LibraryLoader,
+    _loader: Option<MacFrameworkLoader>,
+}
+
+#[cfg(target_os = "macos")]
+struct MacFrameworkLoader(std::ptr::NonNull<std::ffi::c_void>);
+
+#[cfg(target_os = "macos")]
+impl MacFrameworkLoader {
+    fn load() -> Result<Self, BrowserError> {
+        let loader = std::ptr::NonNull::new(cef::scoped_library_loader_create(0))
+            .map(Self)
+            .ok_or(BrowserError::FrameworkLoad)?;
+        unsafe extern "C" {
+            fn cef_version_full() -> *const std::ffi::c_char;
+        }
+        let version = unsafe { cef_version_full() };
+        let version = (!version.is_null()).then(|| unsafe { std::ffi::CStr::from_ptr(version) });
+        validate_framework_version(version)?;
+        Ok(loader)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn validate_framework_version(version: Option<&std::ffi::CStr>) -> Result<(), BrowserError> {
+    if version.is_some_and(|version| version.to_bytes_with_nul() == cef::sys::CEF_VERSION) {
+        return Ok(());
+    }
+    Err(BrowserError::FrameworkVersion(version.map_or_else(
+        || "unknown".to_owned(),
+        |version| version.to_string_lossy().into_owned(),
+    )))
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for MacFrameworkLoader {
+    fn drop(&mut self) {
+        cef::scoped_library_loader_free(self.0.as_ptr().cast());
+    }
 }
 
 struct ProfileContext {
@@ -598,6 +640,19 @@ impl BrowserRuntime {
             return Ok(());
         }
 
+        let started = diagnostic_timer();
+        #[cfg(target_os = "macos")]
+        if self._loader.is_none() {
+            match MacFrameworkLoader::load() {
+                Ok(loader) => self._loader = Some(loader),
+                Err(error) => {
+                    self.message_pump.set_phase(RuntimePhase::Failed);
+                    return Err(error);
+                }
+            }
+            let _ = api_hash(cef::sys::CEF_API_VERSION, 0);
+        }
+
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
             if let Err(error) = cef::sys::load_library() {
@@ -612,7 +667,6 @@ impl BrowserRuntime {
             self.remote_debugging_port.load(Ordering::Relaxed),
         )?;
         self.remote_debugging_port.store(port, Ordering::Relaxed);
-        let started = diagnostic_timer();
         let settings = Settings {
             no_sandbox: 0,
             external_message_pump: 1,
@@ -1950,17 +2004,12 @@ fn bootstrap_args_with_paths(
     profile_paths: Option<BrowserProfilePaths>,
 ) -> Result<BrowserBootstrap, BrowserError> {
     let started = diagnostic_timer();
+    #[cfg(any(target_os = "macos", all(target_os = "linux", target_arch = "x86_64")))]
+    let dispatch = has_subprocess_switch(std::env::args_os().skip(1));
+    #[cfg(not(any(target_os = "macos", all(target_os = "linux", target_arch = "x86_64"))))]
+    let dispatch = true;
     #[cfg(target_os = "macos")]
-    let loader = {
-        let loader = cef::library_loader::LibraryLoader::new(
-            &std::env::current_exe().map_err(|error| BrowserError::Profile(error.into()))?,
-            false,
-        );
-        if !loader.load() {
-            return Err(BrowserError::FrameworkLoad);
-        }
-        loader
-    };
+    let loader = dispatch.then(MacFrameworkLoader::load).transpose()?;
 
     let (signal_tx, signal_rx) = async_channel::unbounded();
     let remote_debugging_port = Arc::new(AtomicU16::new(0));
@@ -1969,10 +2018,6 @@ fn bootstrap_args_with_paths(
         Arc::clone(&remote_debugging_port),
         RuntimeRenderProcessHandler::new(RendererSideRouter::new(element_picker_router_config())),
     );
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    let dispatch = has_subprocess_switch(std::env::args_os().skip(1));
-    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-    let dispatch = true;
     if dispatch {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         cef::sys::load_library().map_err(BrowserError::LibraryLoad)?;
@@ -2098,7 +2143,7 @@ pub fn run_subprocess() -> i32 {
     if result < 0 { 1 } else { result }
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[cfg(any(target_os = "macos", all(target_os = "linux", target_arch = "x86_64")))]
 fn has_subprocess_switch(arguments: impl IntoIterator<Item = impl AsRef<OsStr>>) -> bool {
     arguments.into_iter().any(|argument| {
         let argument = argument.as_ref();
@@ -4895,7 +4940,7 @@ fn ensure_no_active_data_operations(active_operations: &AtomicU64) -> Result<(),
 mod tests {
     use super::*;
 
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[cfg(any(target_os = "macos", all(target_os = "linux", target_arch = "x86_64")))]
     #[test]
     fn subprocess_switch_accepts_chromium_forms_without_matching_other_flags() {
         assert!(has_subprocess_switch(["--type=renderer"]));
@@ -4903,6 +4948,27 @@ mod tests {
         assert!(!has_subprocess_switch(["--typewriter=renderer"]));
         assert!(!has_subprocess_switch(["--url=--type=renderer"]));
         assert!(!has_subprocess_switch(["--verbose"]));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn framework_version_requires_the_complete_compiled_version() {
+        let expected = std::ffi::CStr::from_bytes_with_nul(cef::sys::CEF_VERSION).unwrap();
+        assert!(validate_framework_version(Some(expected)).is_ok());
+        for version in [None, Some(c""), Some(c"0.0.0+gunknown+chromium-0.0.0.0")] {
+            assert!(matches!(
+                validate_framework_version(version),
+                Err(BrowserError::FrameworkVersion(_))
+            ));
+        }
+        let mut different_build = expected.to_bytes().to_vec();
+        let last = different_build.last_mut().unwrap();
+        *last = if *last == b'0' { b'1' } else { b'0' };
+        let different_build = std::ffi::CString::new(different_build).unwrap();
+        assert!(matches!(
+            validate_framework_version(Some(&different_build)),
+            Err(BrowserError::FrameworkVersion(_))
+        ));
     }
 
     #[test]

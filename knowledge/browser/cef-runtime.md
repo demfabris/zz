@@ -1,18 +1,17 @@
 ---
 type: Subsystem
 title: CEF runtime & subprocess dispatch
-description: CEF Alloy OSR bootstrap with deferred initialization, single-binary subprocess dispatch, frame-rate policy, external BeginFrames, message pumping, and safe foreground command dispatch.
+description: CEF Alloy OSR bootstrap with deferred loading and initialization, platform-specific subprocess dispatch, frame-rate policy, external BeginFrames, message pumping, and safe foreground command dispatch.
 resource: crates/zz-browser/src/cef_runtime.rs
 tags: [browser, cef, runtime, subprocess, begin-frame, frame-pacing]
-timestamp: 2026-09-22T00:00:00Z
+timestamp: 2026-09-23T20:52:00Z
 ---
 
 # Overview
 
 The CEF runtime subsystem is `cef_runtime.rs` plus the crate root `lib.rs`. It owns
-the one-time global CEF Alloy initialization, the **single-binary multi-process
-model** (one executable acts as the browser process and every Chromium
-subprocess), and the **external message pump** that steps CEF from GPUI's
+the one-time global CEF Alloy initialization, the platform-specific Chromium
+subprocess entry points, and the **external message pump** that steps CEF from GPUI's
 foreground executor instead of a CEF-owned loop. CEF is pinned to Rust package
 `152.2.0+152.0.6`, backed by **Chromium `152.0.7977.83`**; upgrading is an
 explicit dependency bump requiring all platform bundle smoke tests
@@ -22,11 +21,13 @@ CEF binding types never cross the crate boundary. The runtime translates CEF
 callbacks into browser-neutral [`BrowserEvent`](/browser/lifecycle.md) values and
 publishes owned frames into a [mailbox](/browser/osr-rendering.md).
 
-# Single-binary multi-process model
+# Subprocess dispatch
 
-zz ships one executable that Chromium re-executes for its zygote, GPU, renderer,
-and utility subprocesses. For Chromium subprocesses, `bootstrap()` calls CEF
-`execute_process` before GPUI starts:
+Chromium subprocesses dispatch before GPUI starts. macOS uses the dedicated
+helper app, Linux re-executes the desktop executable, and Windows uses its
+sandbox bootstrap. Main-process bootstrap on macOS and Linux x86_64 skips
+`execute_process`; it prepares an `Uninitialized` runtime without loading CEF.
+For paths that call `execute_process`, the result determines dispatch:
 
 - `execute_process` returns `>= 0` → this is a **subprocess**; return
   `BrowserBootstrap::SubprocessExit(code)` and never start GPUI.
@@ -49,9 +50,12 @@ the runtime without loading Chromium. A `--type` subprocess loads it before
 calling `execute_process`. The adapter checks its complete symbol table and
 keeps the library handle for the process lifetime.
 
-On macOS, `bootstrap_args_with_paths` loads the CEF framework before starting
-GPUI. Linux ARM64 and Windows retain upstream loading behavior. These paths
-prepare the runtime and subprocess dispatch without calling `cef::initialize`.
+On macOS, main-process bootstrap also leaves Chromium unloaded.
+`BrowserRuntime::start` uses CEF's scoped framework loader and checks the complete
+loaded version against the compiled bindings before entering versioned CEF APIs.
+Missing or mismatched frameworks produce a browser-pane error; a mismatch asks
+the user to restart zz. Dedicated macOS helpers still load before subprocess
+dispatch. Linux ARM64 and Windows retain upstream loading behavior.
 `BrowserController::new` leaves its message pump stopped while the runtime is
 `Uninitialized`.
 
@@ -59,14 +63,15 @@ When a browser or browser-data operation calls
 `BrowserController::ensure_runtime_started`, the controller schedules
 `start_runtime` on the foreground executor. That task takes the runtime out of
 the controller, calls `BrowserRuntime::start` outside GPUI app borrows, then
-returns it to the controller. On Linux x86_64, `start` first loads the browser
+returns it to the controller. On Linux x86_64 and macOS, `start` first loads the browser
 library and reports any failure through `BrowserError`. It then calls
 `cef::initialize` on the main thread. The controller replays deferred callbacks
-and starts pumping. Terminal-only startup on Linux x86_64 does not map Chromium;
+and starts pumping. Terminal-only startup on Linux x86_64 and macOS does not map Chromium;
 the other targets still load its library before the first browser operation.
 
 The lifecycle log target `zz_browser::diagnostics::lifecycle` records separate
 `cold runtime prepared` and `runtime initialized` durations in microseconds.
+The initialization duration includes deferred library loading.
 See `crates/zz-browser/src/cef_runtime.rs` `bootstrap_args_with_paths` and
 `BrowserRuntime::start`, and `crates/zz/src/browser/controller.rs`
 `BrowserController::new`, `ensure_runtime_started`, and `start_runtime`.

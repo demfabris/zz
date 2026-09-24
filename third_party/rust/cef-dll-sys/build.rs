@@ -1,4 +1,7 @@
 fn main() -> anyhow::Result<()> {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") && !cfg!(feature = "dox") {
+        println!("cargo::rustc-link-lib=dylib=c++");
+    }
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("linux")
         || std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("x86_64")
         || cfg!(feature = "dox")

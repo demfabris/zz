@@ -1,7 +1,7 @@
 use std::io::Cursor;
 
 use async_channel::Sender;
-use image::{ImageFormat, imageops::FilterType};
+use image::ImageFormat;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, Sel};
 use objc2::{
     AnyThread as _, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
@@ -20,12 +20,11 @@ use super::{
 
 const TRAY_GLYPH_PNG: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/zz.icon/Assets/layer-z-1024.png"
+    "/../../assets/macos/tray-glyph-36.png"
 ));
 
 // 18pt is the macOS menu bar's conventional status-item size; 36px is its 2x raster.
 const TRAY_IMAGE_POINTS: f64 = 18.0;
-const TRAY_IMAGE_PIXELS: u32 = 36;
 
 /// A live status item. Dropping it removes the icon from the menu bar.
 pub(super) struct StatusItem {
@@ -90,26 +89,24 @@ pub(super) fn spawn(sender: Sender<TrayEvent>, source: Source) -> Option<StatusI
     })
 }
 
-fn tray_image() -> Option<Retained<NSImage>> {
+fn tray_glyph(rgb: [u8; 3]) -> image::RgbaImage {
     let mut glyph = image::load_from_memory_with_format(TRAY_GLYPH_PNG, ImageFormat::Png)
         .expect("the embedded zz glyph must be a valid PNG")
         .into_rgba8();
     for pixel in glyph.chunks_exact_mut(4) {
-        pixel[..3].copy_from_slice(if zz_protocol::app_identity::DEVELOPMENT {
-            &[242, 140, 40]
-        } else {
-            &[0, 0, 0]
-        });
+        pixel[..3].copy_from_slice(&rgb);
     }
-    let scaled = image::imageops::resize(
-        &glyph,
-        TRAY_IMAGE_PIXELS,
-        TRAY_IMAGE_PIXELS,
-        FilterType::Lanczos3,
-    );
+    glyph
+}
 
+fn tray_image() -> Option<Retained<NSImage>> {
+    let glyph = tray_glyph(if zz_protocol::app_identity::DEVELOPMENT {
+        [242, 140, 40]
+    } else {
+        [0, 0, 0]
+    });
     let mut png = Vec::new();
-    if let Err(error) = scaled.write_to(&mut Cursor::new(&mut png), ImageFormat::Png) {
+    if let Err(error) = glyph.write_to(&mut Cursor::new(&mut png), ImageFormat::Png) {
         log::warn!(target: "zz::tray", "could not encode the tray icon: {error}");
         return None;
     }
@@ -255,6 +252,29 @@ impl TrayTarget {
     fn send(&self, event: TrayEvent) {
         if let Err(error) = self.ivars().sender.try_send(event) {
             log::warn!(target: "zz::tray", "dropped a tray event: {error}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use image::{ImageFormat, imageops::FilterType};
+
+    #[test]
+    fn the_prescaled_glyph_matches_the_icon_source() {
+        let source = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/zz.icon/Assets/layer-z-1024.png"
+        ));
+        for rgb in [[0, 0, 0], [242, 140, 40]] {
+            let mut glyph = image::load_from_memory_with_format(source, ImageFormat::Png)
+                .unwrap()
+                .into_rgba8();
+            for pixel in glyph.chunks_exact_mut(4) {
+                pixel[..3].copy_from_slice(&rgb);
+            }
+            let scaled = image::imageops::resize(&glyph, 36, 36, FilterType::Lanczos3);
+            assert_eq!(super::tray_glyph(rgb).as_raw(), scaled.as_raw());
         }
     }
 }

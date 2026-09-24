@@ -102,7 +102,7 @@ stop:
 |---------|-----------|
 | `MuxEffect::KillServer` | Unconditional. `kill-server` stops the daemon regardless of sessions or clients. |
 | `Shared::request_shutdown_if_empty` | `exit_empty_armed` **and** `state.engine.state.sessions.is_empty()` **and** `state.subscribers.is_empty()`. |
-| Unix `SIGTERM` / `SIGINT` listener | Unconditional. The signal thread requests the same graceful shutdown; Windows keeps its existing behavior. |
+| Unix `SIGTERM` / `SIGINT` listener | Unconditional. The first signal requests the same graceful shutdown and gives shutdown blockers `SIGNAL_SHUTDOWN_GRACE` (2 s) to finish; after that, or on a repeated signal, `force_shutdown` stops past them. Windows keeps its existing behavior. |
 
 The second condition is the change from tmux's `exit-empty`. tmux can key on sessions alone because
 its last client exits at the same instant; zz's GUI client outlives its last pane, so zero sessions
@@ -138,11 +138,14 @@ behind every admitted Command and Control response.
 
 `ShutdownBlocker` covers admitted foreground `run-shell` and `if-shell` jobs plus a command queue
 that has observed force. `shutdown_pending` rejects new registrations while those blockers finish;
-the final blocker drop resumes the recorded forced or quiet cause. A zero-delay detached command-mode
-callback holds a detached blocker, so it can finish after an alias requests shutdown. In that case
-the daemon drops the forced structural-hook batch instead of starting more detached work. A
-non-detached delayed job checks `stopping` before it launches, so forced shutdown cancels delayed
-hook work that has not started.
+the final blocker drop resumes the recorded forced or quiet cause. `kill-server` waits for every
+blocker, but a signal waits only for the grace period: `force_shutdown` then closes the gate and
+stops anyway. Shutdown-blocking jobs sit in `shell_jobs` beside the managed background jobs, so that
+stop kills their process groups. A zero-delay detached command-mode callback holds a detached
+blocker, so it can finish after an alias requests shutdown. In that case the daemon drops the
+forced structural-hook batch instead of starting more detached work. A non-detached delayed job
+checks `stopping` before it launches, so forced shutdown cancels delayed hook work that has not
+started.
 
 Each queue buffers `PendingHookEvent`s until its outer boundary. Normal completion runs the buffered
 events after every child. Force discards events collected before `kill-server`, destroys the
@@ -263,7 +266,8 @@ The daemon is thread-per-connection with dedicated writer and per-pane watcher t
 | `zz-client-message` | `start_client_message_deadline_dispatcher` | One deadline per client: retire that client's ordinary or alert-produced status message, token-validated against `ServerState.client_messages` |
 | `zz-daemon-diagnostics` | `start_diagnostic_sampler` | Periodic state snapshot logging (only when trace logging is on) |
 | `zz-daemon-status` | `start_status_sampler` | Re-render the [status line](/tmux/status-line.md) every `status-interval`, re-running its `#()` commands |
-| `zz-daemon-signals` (Unix) | `DaemonSignalGuard` | Wait for `SIGTERM`/`SIGINT` or ordinary shutdown cancellation, then request the same graceful stop as `kill-server` |
+| `zz-daemon-signals` (Unix) | `DaemonSignalGuard` | Listen for `SIGTERM`/`SIGINT` until ordinary shutdown cancellation; the first signal requests the same graceful stop as `kill-server`, a repeated one forces it |
+| `zz-daemon-shutdown-grace` (Unix) | `Shared::request_signal_shutdown` | Wait up to `SIGNAL_SHUTDOWN_GRACE` for `stopping`, then `force_shutdown` |
 | `zz-copy-pipe` | `spawn_copy_pipe` | Run a `copy-pipe` child, feed selection on stdin (bounded pool) |
 | `zz-agent-{n}` | `AgentHost::open` | Block on one pane's ACP connection: adapter child stdio, prompt dispatch, permission responders, Git-summary result adoption, journal appends |
 | `zz-agent-git-{pane}-{refresh}` | `AgentHost::start_git_refresh` | Capture one bounded worktree summary after session readiness, a session switch, or prompt completion; stale generation, refresh, or cwd results are discarded |

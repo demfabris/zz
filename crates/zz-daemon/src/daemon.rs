@@ -194,6 +194,8 @@ const MAX_PASTED_IMAGE_BYTES_PER_PANE: usize = 24 * 1024 * 1024;
 const SHUTDOWN_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
 const SHUTDOWN_WRITER_TIMEOUT: Duration = Duration::from_secs(2);
 #[cfg(unix)]
+const SIGNAL_SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
+#[cfg(unix)]
 static TMUX_SHIM_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 fn terminal_status_should_close(status: &zz_terminal::SessionStatus) -> bool {
@@ -1650,18 +1652,19 @@ impl DaemonSignalGuard {
             .spawn(move || {
                 use futures_lite::{StreamExt as _, future};
 
-                let signalled = future::block_on(future::race(
-                    async {
-                        let _ = signals.next().await;
-                        true
-                    },
-                    async {
+                while let Some(signal) =
+                    future::block_on(future::race(async { Some(signals.next().await) }, async {
                         let _ = stopped.recv().await;
-                        false
-                    },
-                ));
-                if signalled && let Some(shared) = shared.upgrade() {
-                    shared.request_shutdown();
+                        None
+                    }))
+                {
+                    let Some(shared) = shared.upgrade() else {
+                        return;
+                    };
+                    shared.request_signal_shutdown(SIGNAL_SHUTDOWN_GRACE);
+                    if !matches!(signal, Some(Ok(_))) {
+                        return;
+                    }
                 }
             })
             .map_err(|error| DaemonError::Thread(error.to_string()))?;
@@ -3348,6 +3351,8 @@ struct Shared {
     shutdown_announced: AtomicBool,
     shutdown_blockers: Mutex<ShutdownBlockerState>,
     shutdown_drops_event_hooks: AtomicBool,
+    #[cfg(unix)]
+    signal_shutdown_requested: AtomicBool,
     startup_ready: Mutex<bool>,
     startup_changed: Condvar,
     startup_config_causes: Mutex<Option<Vec<String>>>,
@@ -4433,6 +4438,8 @@ impl Shared {
             shutdown_announced: AtomicBool::new(false),
             shutdown_blockers: Mutex::new(ShutdownBlockerState::default()),
             shutdown_drops_event_hooks: AtomicBool::new(false),
+            #[cfg(unix)]
+            signal_shutdown_requested: AtomicBool::new(false),
             startup_ready: Mutex::new(true),
             startup_changed: Condvar::new(),
             startup_config_causes: Mutex::new(None),
@@ -4823,6 +4830,10 @@ impl Shared {
         if !self.close_shutdown_blockers() {
             return;
         }
+        self.begin_stopping(run_hooks);
+    }
+
+    fn begin_stopping(self: &Arc<Self>, run_hooks: bool) {
         self.stopping.store(true, Ordering::Release);
         self.accept_wake.wake();
         self.startup_changed.notify_all();
@@ -4830,6 +4841,57 @@ impl Shared {
         if run_hooks && !self.shutdown_drops_event_hooks.load(Ordering::Acquire) {
             self.run_shutdown_event_hooks(events);
         }
+    }
+
+    #[cfg(unix)]
+    fn request_signal_shutdown(self: &Arc<Self>, grace: Duration) {
+        if self.signal_shutdown_requested.swap(true, Ordering::AcqRel) {
+            self.force_shutdown();
+            return;
+        }
+        let deadline = Instant::now() + grace;
+        let shared = Arc::clone(self);
+        if let Err(error) = thread::Builder::new()
+            .name("zz-daemon-shutdown-grace".to_owned())
+            .spawn(move || {
+                if !shared.wait_for_stopping(deadline) {
+                    shared.force_shutdown();
+                }
+            })
+        {
+            log::warn!("could not start the shutdown grace timer: {error}");
+        }
+        self.request_shutdown();
+    }
+
+    #[cfg(unix)]
+    fn wait_for_stopping(&self, deadline: Instant) -> bool {
+        let mut ready = self.startup_ready.lock();
+        while !self.stopping.load(Ordering::Acquire) {
+            if self
+                .startup_changed
+                .wait_until(&mut ready, deadline)
+                .timed_out()
+            {
+                return self.stopping.load(Ordering::Acquire);
+            }
+        }
+        true
+    }
+
+    #[cfg(unix)]
+    fn force_shutdown(self: &Arc<Self>) {
+        if self.stopping.load(Ordering::Acquire) {
+            return;
+        }
+        log::warn!(
+            "stopping past {} active shutdown blockers",
+            self.active_shutdown_blockers()
+        );
+        self.shutdown_forced.store(true, Ordering::Release);
+        self.shutdown_pending.store(true, Ordering::Release);
+        self.close_shutdown_blockers();
+        self.begin_stopping(true);
     }
 
     fn stop_shutdown_resources(
@@ -37777,7 +37839,7 @@ impl ShellJobPermit {
         inner.next_shell_job_token = inner.next_shell_job_token.wrapping_add(1).max(1);
         let token = inner.next_shell_job_token;
         let process = Arc::new(Mutex::new(None));
-        let managed = !detached && !shutdown_blocking;
+        let managed = !detached || shutdown_blocking;
         inner.active_shell_jobs += 1;
         if managed {
             inner.shell_jobs.insert(token, Arc::clone(&process));
@@ -96753,6 +96815,110 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(!shared.stopping.load(Ordering::Acquire));
         drop(permit);
         assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[cfg(unix)]
+    fn spawn_foreground_shell_job(
+        shared: &Arc<Shared>,
+        client: ClientId,
+        command: String,
+    ) -> thread::JoinHandle<Result<Execution, DaemonError>> {
+        let worker_shared = Arc::clone(shared);
+        let worker = thread::spawn(move || {
+            worker_shared.execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("run-shell", [command]),
+            )
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let registered = {
+                let inner = shared.inner.lock();
+                inner.shell_jobs.len() == 1
+                    && inner
+                        .shell_jobs
+                        .values()
+                        .all(|process| process.lock().is_some())
+            };
+            if registered && shared.active_shutdown_blockers() == 1 {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "foreground shell job never started"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        worker
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signal_shutdown_waits_for_a_foreground_job_that_ends_within_its_grace() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let marker = directory.path().join("finished");
+        let shared = Arc::new(Shared::new(1));
+        let worker = spawn_foreground_shell_job(
+            &shared,
+            ClientId(301),
+            format!("sleep 0.2; printf finished > {}", shell_quote(&marker)),
+        );
+
+        shared.request_signal_shutdown(Duration::from_secs(30));
+
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        worker
+            .join()
+            .expect("foreground shell worker")
+            .expect("foreground shell result");
+        assert_eq!(fs::read_to_string(&marker).expect("job marker"), "finished");
+        assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signal_shutdown_stops_a_foreground_job_that_outlives_its_grace() {
+        let shared = Arc::new(Shared::new(1));
+        let worker = spawn_foreground_shell_job(&shared, ClientId(302), "sleep 30".to_owned());
+        let grace = Duration::from_millis(200);
+        let signalled = Instant::now();
+
+        shared.request_signal_shutdown(grace);
+
+        let deadline = signalled + Duration::from_secs(10);
+        while !shared.stopping.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(shared.stopping.load(Ordering::Acquire));
+        assert!(signalled.elapsed() >= grace);
+        assert!(
+            worker.join().expect("foreground shell worker").is_err(),
+            "the stopped job reports failure"
+        );
+        assert!(signalled.elapsed() < Duration::from_secs(10));
+        assert_eq!(shared.active_shutdown_blockers(), 0);
+        assert!(shared.inner.lock().shell_jobs.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repeated_signal_stops_past_active_shutdown_blockers() {
+        let shared = Arc::new(Shared::new(1));
+        let blocker = ShutdownBlocker::acquire(&shared, false).expect("blocker admitted");
+
+        shared.request_signal_shutdown(Duration::from_secs(30));
+
+        assert!(shared.shutdown_pending.load(Ordering::Acquire));
+        assert!(!shared.stopping.load(Ordering::Acquire));
+
+        shared.request_signal_shutdown(Duration::from_secs(30));
+
+        assert!(shared.stopping.load(Ordering::Acquire));
+        assert!(ShutdownBlocker::acquire(&shared, false).is_none());
+        drop(blocker);
+        assert_eq!(shared.active_shutdown_blockers(), 0);
     }
 
     #[cfg(unix)]

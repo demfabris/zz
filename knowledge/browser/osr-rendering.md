@@ -4,7 +4,7 @@ title: Off-screen rendering & the frame mailbox
 description: How CEF frames cross the one-slot mailbox through the universal readback tier, Linux wgpu tier, macOS Metal-IOSurface tier, or Windows D3D11 tier, and how zz paces visible sessions.
 resource: crates/zz-browser/src/frame.rs
 tags: [browser, osr, frame, gpu, iosurface, hidpi, wayland, pacing]
-timestamp: 2026-09-22T00:00:00Z
+timestamp: 2026-09-24T00:00:00Z
 ---
 
 # Overview
@@ -61,8 +61,8 @@ external-texture element are unchanged by the macOS tier.
 IOSurface-backed destination textures. For each accelerated paint it:
 
 1. validates BGRA metadata and the coded size;
-2. retains CEF's callback-scoped `IOSurface` and wraps it as a source Metal
-   texture;
+2. retains CEF's callback-scoped `IOSurface` and looks up its source Metal
+   texture by `IOSurfaceGetID`, wrapping the surface only on a cache miss;
 3. blits into the next zz-owned pool surface;
 4. attaches a command-buffer completion handler, commits the blit, and returns
    to CEF without waiting;
@@ -85,14 +85,25 @@ through the fork's single-plane BGRA shader with premultiplied alpha and the
 pane's corner mask. `IOSurface` is the cross-device sharing boundary, not
 `MTLTexture`.
 
-Unlike the Linux tier, the blit tier tracks **no CEF pool identity**: macOS viz
-hands out fresh IOSurface handles continually, so slot bookkeeping churned a new
-destination pool every few frames and grew retired-slot state without bound
-(gradual frame-rate decay, `CVMetalTextureCache` accumulation on the GPUI side).
-The only invalidation is dimension agreement with the viewport;
-`pool_generation` increments only when the destination pool is (re)created for
-a new size, keeping the app's `CVPixelBuffer` cache and GPUI's texture cache
-pinned to five stable surfaces.
+Unlike the Linux tier, the destination pool tracks **no CEF pool identity**:
+macOS viz hands out fresh IOSurface handles (new `IOSurfaceRef` objects) on
+every callback, so slot bookkeeping keyed on handles churned a new destination
+pool every few frames and grew retired-slot state without bound (gradual
+frame-rate decay, `CVMetalTextureCache` accumulation on the GPUI side). The
+only invalidation is dimension agreement with the viewport; `pool_generation`
+increments only when the destination pool is (re)created for a new size,
+keeping the app's `CVPixelBuffer` cache and GPUI's texture cache pinned to five
+stable surfaces.
+
+The handles are fresh but the surfaces behind them are not: CEF's frame
+capturer cycles a small buffer pool, so `IOSurfaceGetID` repeats (seven
+distinct IDs across 2,400 frames at 120 fps). The source texture cache keys on
+that ID, holds up to ten entries, and retains each entry's surface so the ID
+cannot be reassigned while it is cached. Entries drop when the frame size
+changes. Creating the Metal texture is a kernel call
+(`IOGPUResourceCreate`); doing it per frame was about 40% of the main thread's
+busy time at 120 fps. Misses log at debug level on
+`zz_browser::accelerated_paint` with running hit and miss counts.
 
 ## Windows D3D11
 

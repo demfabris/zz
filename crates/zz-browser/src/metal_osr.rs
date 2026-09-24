@@ -3,9 +3,9 @@ use std::{collections::BTreeSet, ptr::NonNull, sync::Arc};
 use block2::RcBlock;
 use cef::{AcceleratedPaintInfo, ColorType};
 use objc2::{rc::Retained, runtime::ProtocolObject};
-use objc2_core_foundation::{CFDictionary, CFNumber, CFRetained, CFType};
+use objc2_core_foundation::{CFDictionary, CFNumber, CFRetained, CFType, Type};
 use objc2_io_surface::{
-    IOSurfaceRef, kIOSurfaceBytesPerElement, kIOSurfaceHeight, kIOSurfacePixelFormat,
+    IOSurfaceID, IOSurfaceRef, kIOSurfaceBytesPerElement, kIOSurfaceHeight, kIOSurfacePixelFormat,
     kIOSurfaceWidth,
 };
 use objc2_metal::{
@@ -24,6 +24,7 @@ use crate::{
 // Five: GPUI's CAMetalLayer allows three drawables in flight plus two producer writes.
 const DESTINATION_POOL_SLOT_COUNT: usize = 5;
 const MAX_IN_FLIGHT_BLITS: usize = 2;
+const SOURCE_TEXTURE_CACHE_CAPACITY: usize = 10;
 const BGRA_PIXEL_FORMAT: i64 = 0x4247_5241;
 
 #[link(name = "CoreGraphics", kind = "framework")]
@@ -40,6 +41,7 @@ struct MetalFrameProducerState {
     context: Option<MetalContext>,
     initialization_error: Option<String>,
     destinations: Option<DestinationSurfacePool>,
+    sources: SourceTextureCache,
     in_flight_sequences: BTreeSet<u64>,
     last_published_sequence: Option<u64>,
 }
@@ -53,6 +55,21 @@ struct DestinationSurface {
     io_surface: CFRetained<IOSurfaceRef>,
     texture: Retained<ProtocolObject<dyn MTLTexture>>,
     in_flight_sequence: Option<u64>,
+}
+
+struct SourceTexture {
+    id: IOSurfaceID,
+    width: u32,
+    height: u32,
+    _io_surface: CFRetained<IOSurfaceRef>,
+    texture: Retained<ProtocolObject<dyn MTLTexture>>,
+}
+
+#[derive(Default)]
+struct SourceTextureCache {
+    entries: Vec<SourceTexture>,
+    hits: u64,
+    misses: u64,
 }
 
 struct RetainedSourceSurface(CFRetained<IOSurfaceRef>);
@@ -76,6 +93,8 @@ impl RetainedSourceSurface {
 // mutation of these handles is serialized by MetalFrameProducer's mutex.
 unsafe impl Send for DestinationSurface {}
 unsafe impl Sync for DestinationSurface {}
+unsafe impl Send for SourceTexture {}
+unsafe impl Sync for SourceTexture {}
 
 struct DestinationSurfacePool {
     generation: u64,
@@ -216,6 +235,55 @@ impl MetalContext {
     }
 }
 
+impl SourceTextureCache {
+    fn texture(
+        &mut self,
+        context: &MetalContext,
+        surface: &IOSurfaceRef,
+        width: u32,
+        height: u32,
+        storage_mode: MTLStorageMode,
+    ) -> Option<Retained<ProtocolObject<dyn MTLTexture>>> {
+        let id = surface.id();
+        self.entries
+            .retain(|entry| entry.width == width && entry.height == height);
+        if let Some(entry) = self.entries.iter().find(|entry| entry.id == id) {
+            self.hits += 1;
+            return Some(entry.texture.clone());
+        }
+        let texture = context.texture_for_surface(
+            surface,
+            width,
+            height,
+            MTLPixelFormat::BGRA8Unorm,
+            storage_mode,
+        )?;
+        self.misses += 1;
+        if self.entries.len() >= SOURCE_TEXTURE_CACHE_CAPACITY {
+            self.entries.remove(0);
+        }
+        self.entries.push(SourceTexture {
+            id,
+            width,
+            height,
+            _io_surface: surface.retain(),
+            texture: texture.clone(),
+        });
+        log::debug!(
+            target: "zz_browser::accelerated_paint",
+            "metal source texture cache miss surface_id={id} cached={} hits={} misses={}",
+            self.entries.len(),
+            self.hits,
+            self.misses,
+        );
+        Some(texture)
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
 impl DestinationSurfacePool {
     fn new(
         context: &MetalContext,
@@ -265,6 +333,7 @@ impl MetalFrameProducer {
                 context,
                 initialization_error,
                 destinations: None,
+                sources: SourceTextureCache::default(),
                 in_flight_sequences: BTreeSet::new(),
                 last_published_sequence: None,
             })),
@@ -277,6 +346,7 @@ impl MetalFrameProducer {
         if state.expected != expected {
             state.expected = expected;
             state.destinations = None;
+            state.sources.clear();
         }
     }
 
@@ -345,12 +415,13 @@ impl MetalFrameProducer {
         } else {
             MTLStorageMode::Managed
         };
-        let source_texture = context
-            .texture_for_surface(
+        let source_texture = state
+            .sources
+            .texture(
+                &context,
                 source_surface.as_ref(),
                 layout.width.cast_unsigned(),
                 layout.height.cast_unsigned(),
-                MTLPixelFormat::BGRA8Unorm,
                 source_storage_mode,
             )
             .ok_or(MetalFrameError::SourceTexture)?;

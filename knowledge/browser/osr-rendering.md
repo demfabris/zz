@@ -17,7 +17,7 @@ payload depends on the active rendering tier:
 | --- | --- | --- | --- | --- |
 | Readback | Universal fallback | `on_paint` | `OsrFrame::OwnedBgra` with owned premultiplied BGRA bytes | `RenderImage` through `BrowserElement::paint_image` |
 | Linux wgpu | Linux/FreeBSD where GPUI exposes its wgpu context | `on_accelerated_paint` | `OsrFrame::Gpu` with a zz-owned destination texture | GPUI `external_texture` |
-| macOS Metal-IOSurface | macOS | `on_accelerated_paint` | `OsrFrame::MacGpu` with a retained zz-owned `IOSurface` | `CVPixelBuffer` through GPUI `paint_surface` |
+| macOS Metal-IOSurface | macOS | `on_accelerated_paint` | `OsrFrame::MacGpu` with a retained zz-owned `IOSurface` | a per-pane `CALayer` under the window behind a GPUI `paint_underlay_hole`; `CVPixelBuffer` through `paint_surface` until the layer exists |
 | Windows D3D11 | Windows where GPUI exposes its DirectX context | `on_accelerated_paint` | `OsrFrame::WinGpu` with a zz-owned `ID3D11Texture2D` | GPUI `external_texture` |
 
 All tiers are bounded by a one-slot `FrameMailbox`: a slow consumer cannot build
@@ -83,7 +83,35 @@ The app caches a `CVPixelBuffer` wrapper per destination surface and pool
 generation. GPUI imports that buffer on its own Metal device and samples it
 through the fork's single-plane BGRA shader with premultiplied alpha and the
 pane's corner mask. `IOSurface` is the cross-device sharing boundary, not
-`MTLTexture`.
+`MTLTexture`. That path now only covers the first frame of a pane.
+
+### Native underlay layer
+
+Once a pane has a frame, `underlay.rs` gives it its own `CALayer` and frames
+stop going through GPUI:
+
+- a host `NSView` holding a layer-hosting root sits in the window's content
+  view, ordered below GPUI's view (the same trick GPUI uses for its blur view);
+- the view registers a `MacFramePresenter` with the controller, which hands it
+  to the session's `MetalFrameProducer`; on Metal's completion thread each
+  finished blit becomes the pane layer's `contents` inside a
+  `CATransaction` with actions disabled;
+- `BrowserElement::paint` places the layer at the pane's bounds and calls the
+  fork's `paint_underlay_hole`, which clears that rounded rect in GPUI's
+  drawable so the layer shows through;
+- `UnderlayFlush`, painted last by `AppShell`, hides layers that were not
+  placed this frame and calls `Window::set_underlay_active`, which makes GPUI's
+  Metal layer non-opaque and presents with the Core Animation transaction only
+  while some pane uses a layer;
+- the view stops notifying on `FrameReady` once its layer presents, so a
+  browser frame no longer redraws the window.
+
+Geometry traps: the layer-hosting root ignores `geometryFlipped`, so `y` is
+computed from the host view's height, and AppKit points are GPUI pixels times
+`window.zoom()` because the fork folds UI zoom into the scale factor. Moving
+from per-frame GPUI draws to the layer cut the main thread from about 22% to
+11% of a core on a 120 fps animation (after the source texture cache and the
+cached sidebar); the rest is CEF's own per-frame IPC and pump turns.
 
 Unlike the Linux tier, the destination pool tracks **no CEF pool identity**:
 macOS viz hands out fresh IOSurface handles (new `IOSurfaceRef` objects) on
@@ -261,6 +289,7 @@ suppressed by equality checks.
 | `crates/zz/src/browser/controller.rs` | Tier decoding, frame-rate policy, fallback recreation, and external BeginFrame activity state. |
 | `crates/zz/src/browser/view.rs` | Latest-frame consumption, retained surfaces, and hot/idle BeginFrame scheduling. |
 | `crates/zz/src/browser/macos_surface.rs` | Cached `IOSurface` to `CVPixelBuffer` wrapping. |
+| `crates/zz/src/browser/underlay.rs` | macOS per-pane `CALayer`, host view, placement, and the end-of-frame `UnderlayFlush`. |
 | `crates/zz/src/browser/element.rs` | GPUI image, wgpu external-texture, and macOS surface painting. |
 
 # Related

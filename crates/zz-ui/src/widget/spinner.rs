@@ -58,7 +58,8 @@ impl RenderOnce for Spinner {
                     "spinner-rotation",
                     Animation::new(ROTATION_PERIOD)
                         .repeat()
-                        .with_easing(ease_in_out),
+                        .with_easing(ease_in_out)
+                        .with_max_fps(30.0),
                     |this, delta| this.transform(Transformation::rotate(percentage(delta))),
                 ),
         )

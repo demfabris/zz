@@ -1,6 +1,7 @@
 # Update Log
 
 ## 2026-09-23
+* **Update**: The shared `Spinner` animation is capped at 30 fps. Uncapped, any visible spinner re-rendered and presented the whole window every display refresh; the sidebar shows one for as long as a host is connecting or reconnecting, which retries forever. Profiling bundle with its daemon killed (local host reconnecting): 117.8 to 23.8 presents/s, GPU 325 to 58 ms/s, GUI CPU 17.3% to 6.8% of a core.
 * **Update**: Peer inboxes (terminal panes with `@name`, agent panes, the `--wait` peer) now block in `poll(2)` on their listener and a wake socket pair instead of retrying `accept` every 100 ms. Each inbox cost about 9.3 interrupt wakeups/s; a daemon with one named pane idles at 1.15/s instead of 10.4/s. Delivery and teardown behave as before.
 * **Update**: Claude peer-state sync no longer forks `ps -axo pid=,ppid=` every second to decide whether a Claude record belongs to a pane. It walks the record pid's parent chain up to the pane pid (`proc_pidinfo` on macOS, `/proc/<pid>/stat` on Linux). Headless daemon with one matching Claude record: 14.3 to 0.17 ms CPU per second including children, same `@agent_state`.
 * **Update**: The daemon's accept loop now sleeps in `poll(2)` until a connection arrives or a stop path writes its wake socket pair, instead of waking every 100 ms. Headless idle daemon: 10.8 to 1.2 interrupt wakeups/s. Shutdown also got faster because nothing waits out the poll: `kill-server` 110 to 22 ms, last-session exit 110 to 21 ms, SIGTERM 18 to 3 ms (five runs each).

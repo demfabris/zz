@@ -147,6 +147,19 @@ forced structural-hook batch instead of starting more detached work. A non-detac
 checks `stopping` before it launches, so forced shutdown cancels delayed hook work that has not
 started.
 
+Clients that registered before the flip are handled in `handle_connection`. Once `shutdown_pending`
+is set, the loop drops every Interactive and Control message. A Command client still gets three
+through: `ClientFileResponse`, so a request admitted before the flip can finish reading the caller's
+stdin; `PrepareCommandList`, which only reads the command table; and `CommandRequest`.
+`execute_command_request_with_prepared_into` never admits a Command request while shutdown is
+pending or response admissions are frozen. It answers with the `server exited unexpectedly` error
+that a refused registration gets, using the request's own id, so the CLI prints that line and exits
+1. Before this, a CLI in a foreground `run-shell` job that connected before `kill-server` and sent
+its request afterwards waited forever. The job never exited, its blocker never dropped, and the
+daemon waited on its own job. tmux avoids the same wait because `server_send_exit` marks every
+client `CLIENT_EXIT`, so a command client inside a job is told to exit. A late Control request is
+still dropped without a reply.
+
 Each queue buffers `PendingHookEvent`s until its outer boundary. Normal completion runs the buffered
 events after every child. Force discards events collected before `kill-server`, destroys the
 remaining sessions, and derives a fresh `session-closed` / `window-unlinked` batch from that final

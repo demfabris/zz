@@ -6192,7 +6192,16 @@ impl Shared {
         command: &CommandInvocation,
         prepared: bool,
     ) -> bool {
-        let Some(mut admission) = ResponseAdmissionGuard::new(self) else {
+        let admission =
+            if kind == ClientKind::Command && self.shutdown_pending.load(Ordering::Acquire) {
+                None
+            } else {
+                ResponseAdmissionGuard::new(self)
+            };
+        let Some(mut admission) = admission else {
+            if kind == ClientKind::Command {
+                let _ = outbound.enqueue_reliable(&server_stopping_response(request_id));
+            }
             return false;
         };
         let response = self.execute_command_request_with_prepared(
@@ -43805,7 +43814,15 @@ fn handle_connection<S: TransportStream>(
             inbound_frame.len(),
             inbound_frame.capacity(),
         );
-        if shared.shutdown_pending.load(Ordering::Acquire) {
+        if shared.shutdown_pending.load(Ordering::Acquire)
+            && !(hello.kind == ClientKind::Command
+                && matches!(
+                    message,
+                    ProtocolMessage::CommandRequest(_)
+                        | ProtocolMessage::PrepareCommandList { .. }
+                        | ProtocolMessage::ClientFileResponse(_)
+                ))
+        {
             continue;
         }
         match message {
@@ -44116,14 +44133,17 @@ fn best_effort_protocol_mismatch_reply(stream: &mut impl Write, client: u16) {
     }
 }
 
-fn best_effort_server_stopping_reply(stream: &mut impl Write) {
-    let message = ProtocolMessage::CommandResponse(CommandResponse::Error {
-        request_id: 0,
+fn server_stopping_response(request_id: u64) -> ProtocolMessage {
+    ProtocolMessage::CommandResponse(CommandResponse::Error {
+        request_id,
         error: ServerError::InvalidCommand("server exited unexpectedly".to_owned()),
         output: RawText::default(),
-    });
+    })
+}
+
+fn best_effort_server_stopping_reply(stream: &mut impl Write) {
     let mut frame = Vec::new();
-    if encode_protocol_message_into(&message, &mut frame).is_ok() {
+    if encode_protocol_message_into(&server_stopping_response(0), &mut frame).is_ok() {
         let _ = stream.write_all(&frame).and_then(|()| stream.flush());
     }
 }
@@ -52020,7 +52040,12 @@ mod tests {
                 false,
             ));
             assert!(!shared.stopping.load(Ordering::Acquire));
-            assert_eq!(outbound.queued_reliable(), Some((0, 0)));
+            let refusals = take_reliable_messages(&outbound);
+            if kind == ClientKind::Command {
+                assert_eq!(refusals, [server_stopping_response(41)]);
+            } else {
+                assert!(refusals.is_empty());
+            }
             let state = shared.response_admissions.lock();
             assert!(state.frozen);
             assert_eq!(state.active, 0);
@@ -96555,6 +96580,141 @@ bind - split-window -v -c "#{pane_current_path}"
         );
         assert!(!branch_marker.exists());
         assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn direct_shutdown_answers_command_clients_connected_before_it() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let release = directory.path().join("release");
+        let shared = Arc::new(Shared::new(1));
+        let (mut client, server) = std::os::unix::net::UnixStream::pair().expect("pair");
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("read timeout");
+        let server_shared = Arc::clone(&shared);
+        let connection = thread::spawn(move || handle_connection(server, &server_shared));
+        zz_protocol::write_protocol_message(
+            &mut client,
+            &ProtocolMessage::ClientHello(ClientHello {
+                protocol_version: PROTOCOL_VERSION,
+                client_instance_id: ClientInstanceId(1),
+                kind: ClientKind::Command,
+                device_name: None,
+                capabilities: Vec::new(),
+                color_scheme: None,
+                origin: None,
+                environment: Vec::new(),
+                working_directory: None,
+                process_id: 0,
+            }),
+        )
+        .expect("hello");
+        assert!(matches!(
+            zz_protocol::read_protocol_message(&mut client).expect("server hello"),
+            ProtocolMessage::ServerHello(_)
+        ));
+        let mut load = CommandInvocation::new("load-buffer", ["-b", "late", "-"]);
+        load.set_stdin_available(true);
+        zz_protocol::write_protocol_message(
+            &mut client,
+            &ProtocolMessage::CommandRequest(CommandRequest {
+                request_id: 1,
+                command: load,
+                prepared: false,
+            }),
+        )
+        .expect("load-buffer request");
+        let ProtocolMessage::ClientFileRequest(file) =
+            zz_protocol::read_protocol_message(&mut client).expect("stdin request")
+        else {
+            panic!("load-buffer did not ask for stdin");
+        };
+
+        let worker_shared = Arc::clone(&shared);
+        let job = format!(
+            "while [ ! -e {} ]; do sleep 0.01; done",
+            shell_quote(&release)
+        );
+        let shell = thread::spawn(move || {
+            worker_shared.execute(
+                ClientId(201),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("run-shell", [job]),
+            )
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while shared.active_shutdown_blockers() != 1 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(shared.active_shutdown_blockers(), 1);
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("kill-server", [] as [&str; 0]),
+            )
+            .expect("direct shutdown");
+        assert!(shared.shutdown_pending.load(Ordering::Acquire));
+        assert!(!shared.stopping.load(Ordering::Acquire));
+
+        zz_protocol::write_protocol_message(
+            &mut client,
+            &ProtocolMessage::ClientFileResponse(ClientFileResponse {
+                request_id: file.request_id,
+                data: b"payload".to_vec(),
+                error: None,
+            }),
+        )
+        .expect("stdin reply");
+        assert!(matches!(
+            zz_protocol::read_protocol_message(&mut client).expect("admitted response"),
+            ProtocolMessage::CommandResponse(CommandResponse::Success {
+                request_id: 1,
+                exit_code: 0,
+                ..
+            })
+        ));
+        zz_protocol::write_protocol_message(
+            &mut client,
+            &ProtocolMessage::PrepareCommandList {
+                request_id: 2,
+                commands: vec![CommandInvocation::new("list-sessions", [] as [&str; 0])],
+            },
+        )
+        .expect("late prepare");
+        assert!(matches!(
+            zz_protocol::read_protocol_message(&mut client).expect("late prepare response"),
+            ProtocolMessage::PreparedCommandList { request_id: 2, .. }
+        ));
+        zz_protocol::write_protocol_message(
+            &mut client,
+            &ProtocolMessage::CommandRequest(CommandRequest {
+                request_id: 3,
+                command: CommandInvocation::new("list-sessions", [] as [&str; 0]),
+                prepared: true,
+            }),
+        )
+        .expect("late request");
+        assert_eq!(
+            zz_protocol::read_protocol_message(&mut client).expect("late request response"),
+            server_stopping_response(3)
+        );
+        assert!(!shared.stopping.load(Ordering::Acquire));
+
+        fs::write(&release, b"").expect("release foreground job");
+        shell
+            .join()
+            .expect("foreground shell worker")
+            .expect("foreground shell result");
+        assert!(shared.stopping.load(Ordering::Acquire));
+        drop(client);
+        connection
+            .join()
+            .expect("connection thread")
+            .expect("connection result");
     }
 
     #[cfg(unix)]

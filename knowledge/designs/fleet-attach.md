@@ -246,7 +246,9 @@ Recorded so later phases inherit intent, ordered roughly by expected sequence.
   connection when its endpoint line changes or disappears on config reload?
 - ssh child management: reuse `ControlMaster` when the user's ssh config has it? How is a
   silently-stalled forward (ssh alive, tunnel dead) detected . TCP keepalive equivalent,
-  `ServerAliveInterval`, or protocol-level ping?
+  `ServerAliveInterval`, or protocol-level ping? Answered 2026-09-23: every zz ssh command
+  passes `ServerAliveInterval=5` and `ServerAliveCountMax=3`, so the master notices a dead
+  link in about 18 s instead of never.
 
 # Related
 

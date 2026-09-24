@@ -610,7 +610,13 @@ fn ssh_failure_reason(stderr: &str, status: &str) -> String {
 
 #[cfg(any(unix, windows, test))]
 fn append_ssh_options(command: &mut Command, endpoint: &SshEndpoint, session: SshSession<'_>) {
-    command.arg("-o").arg("ConnectTimeout=10");
+    command
+        .arg("-o")
+        .arg("ConnectTimeout=10")
+        .arg("-o")
+        .arg("ServerAliveInterval=5")
+        .arg("-o")
+        .arg("ServerAliveCountMax=3");
     // Windows OpenSSH has no connection sharing, and any set `ControlPath` still routes children
     // into its broken mux stub, so both options are overridden rather than omitted.
     #[cfg(windows)]
@@ -1661,7 +1667,16 @@ mod tests {
     fn a_session_without_a_master_uses_platform_safe_options() {
         let endpoint = test_ssh_endpoint(None, None);
         let command = ssh_probe_command(&endpoint, SshSession::default());
-        let mut expected = ["-o", "ConnectTimeout=10"].map(str::to_owned).to_vec();
+        let mut expected = [
+            "-o",
+            "ConnectTimeout=10",
+            "-o",
+            "ServerAliveInterval=5",
+            "-o",
+            "ServerAliveCountMax=3",
+        ]
+        .map(str::to_owned)
+        .to_vec();
         #[cfg(windows)]
         expected.extend(["-o", "ControlMaster=no", "-o", "ControlPath=none"].map(str::to_owned));
         expected.extend(["--", "host", "sh", "-lc", &remote_socket_probe()].map(str::to_owned));
@@ -2039,6 +2054,10 @@ mod tests {
         vec![
             "-o".to_owned(),
             "ConnectTimeout=10".to_owned(),
+            "-o".to_owned(),
+            "ServerAliveInterval=5".to_owned(),
+            "-o".to_owned(),
+            "ServerAliveCountMax=3".to_owned(),
             "-o".to_owned(),
             "ControlMaster=auto".to_owned(),
             "-o".to_owned(),

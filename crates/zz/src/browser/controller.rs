@@ -2101,6 +2101,8 @@ impl BrowserController {
                     controller.deferred_runtime_signals.clear();
                     controller.fail(error.to_string(), cx);
                 } else {
+                    #[cfg(any(target_os = "macos", target_os = "linux"))]
+                    crate::quit_signal::reclaim();
                     controller.replay_deferred_runtime_signals(cx);
                     controller.schedule_pump(0, cx);
                 }

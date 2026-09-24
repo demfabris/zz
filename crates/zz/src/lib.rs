@@ -16,6 +16,8 @@ mod menus;
 mod mux;
 mod pane;
 mod profile;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod quit_signal;
 mod status_bar;
 mod terminal;
 mod theme;
@@ -262,6 +264,8 @@ fn run_app(
             cx.set_global(fonts);
             cx.set_global(profile);
             diagnostics::start_main_thread_watchdog(cx);
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            quit_signal::init(cx);
             #[cfg(all(target_os = "linux", target_env = "gnu"))]
             start_heap_trim(cx);
             #[cfg(target_os = "macos")]

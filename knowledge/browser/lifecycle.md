@@ -4,7 +4,7 @@ title: Browser runtime & session lifecycle
 description: Runtime/profile-context/session state machines and the browser-neutral events that CEF callbacks translate into.
 resource: crates/zz-browser/src/lifecycle.rs
 tags: [browser, lifecycle, events, state-machine]
-timestamp: 2026-09-07T00:00:00Z
+timestamp: 2026-09-24T00:00:00Z
 ---
 
 # Overview
@@ -57,6 +57,17 @@ only when CEF never initialized; a failure after successful init still follows
 `Arc<AtomicU64>` incremented when preparing ordinary sessions or popups. An
 `ActiveCountGuard` releases each count once through `on_before_close`,
 `mark_closed`, or destruction of an aborted creation's state.
+
+`cef::initialize` installs Chromium's SIGTERM, SIGINT, and SIGHUP handlers. They
+exit through a task posted to the UI thread (`ExitHandler` → `chrome::AttemptExit`
+→ `[NSApp terminate:]` on macOS), and under the external pump that task can stall:
+on 2026-09-24 four profiling runs whose window never reached the screen stayed
+alive after SIGTERM, with Chromium's detector parked in `ExitPosted` and an idle
+main thread. The desktop client owns these signals instead
+(`crates/zz/src/quit_signal.rs`): a one-shot handler installed at startup, and
+again once the runtime starts, asks gpui to quit through the normal
+`on_app_quit` path, and the process `_exit`s with 128 + signal if it is still
+alive 2 s later. A second signal gets the default action.
 
 A remote pane uses a local composite request context named
 `<profile>@egress-<hash8>`. Once that context becomes ready, the controller points

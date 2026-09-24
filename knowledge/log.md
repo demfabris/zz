@@ -1,6 +1,7 @@
 # Update Log
 
 ## 2026-09-24
+* **Update**: The desktop client now owns SIGTERM, SIGINT, and SIGHUP. Chromium installs its own handlers when CEF initializes and exits through a UI-thread task that ends in `[NSApp terminate:]`; four profiling runs whose window never reached the screen stayed alive 20 s after SIGTERM with that task posted and the main thread idle (not reproducible on demand). `quit_signal.rs` installs a one-shot handler at startup and again after CEF starts: the signal requests the normal gpui quit (window state, mux detach, browser and agent shutdown), and the process `_exit`s with 128 + signal if it is still alive 2 s later. Dev bundle: SIGTERM with a browser pane exits in 0.235 s through the zz quit path, without one in 0.023 s (previously an immediate kill that skipped the quit hooks), and with `-[NSApplication terminate:]` stalled under lldb it exits with 143 after 2.03 s where the previous build was still alive at 15 s.
 * **Update**: A visible browser page that has been quiet for 2 seconds now gets its keepalive BeginFrame every 100 ms instead of every 33 ms; input, scrolling and fresh paints still switch it back to the hot rate. Profiling bundle, static localhost page, two interleaved runs each: GUI 2.57 to 2.28% of a core, CEF helpers 1.04 to 0.65%. A page with a 1 s `setInterval` clock kept updating. Disabling Chromium's spare renderer was measured alongside and not shipped: it saves one 27 MB renderer, but cross-site navigations went from 39 to 80 ms median.
 
 ## 2026-09-23

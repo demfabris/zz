@@ -416,6 +416,7 @@ pub(crate) struct BrowserView {
     page_buttons_down: u8,
     viewport: Viewport,
     visible: bool,
+    window_visible: bool,
     image: Option<Arc<RenderImage>>,
     retired_images: Vec<Arc<RenderImage>>,
     #[cfg(target_os = "macos")]
@@ -700,6 +701,9 @@ impl BrowserView {
                 controller.set_focus(blur_pane, false);
             });
         });
+        let window_visibility = cx.observe_window_visibility(window, |view, visibility, _, cx| {
+            view.set_window_visible(visibility.is_visible(), cx);
+        });
 
         let error = controller.read(cx).startup_error();
         let recoverable = controller.read(cx).runtime_phase() == Some(RuntimePhase::Running);
@@ -750,6 +754,7 @@ impl BrowserView {
             page_buttons_down: 0,
             viewport,
             visible: false,
+            window_visible: window.is_visible(),
             image: None,
             retired_images: Vec::new(),
             #[cfg(target_os = "macos")]
@@ -793,12 +798,27 @@ impl BrowserView {
                 controller_subscription,
                 focus_in,
                 focus_out,
+                window_visibility,
             ],
         }
     }
 
     pub(crate) fn focus_handle(&self) -> FocusHandle {
         self.focus_handle.clone()
+    }
+
+    fn set_window_visible(&mut self, window_visible: bool, cx: &mut Context<Self>) {
+        if self.window_visible == window_visible {
+            return;
+        }
+        self.window_visible = window_visible;
+        let visible = self.visible && window_visible;
+        if self.viewport.visible != visible {
+            self.viewport.visible = visible;
+            self.controller.update(cx, |controller, cx| {
+                controller.set_viewport(self.pane, self.viewport, cx);
+            });
+        }
     }
 
     /// The handle pane chrome should focus: the address bar while it is being
@@ -907,7 +927,7 @@ impl BrowserView {
             self.cancel_element_pick(cx);
         }
         self.visible = visible;
-        self.viewport.visible = visible;
+        self.viewport.visible = visible && self.window_visible;
         self.controller.update(cx, |controller, cx| {
             controller.set_viewport(self.pane, self.viewport, cx);
             controller.set_focus(self.pane, visible);
@@ -1052,7 +1072,7 @@ impl BrowserView {
             window_zoom: window.zoom(),
             screen_x: rounded_coordinate(window_bounds.origin.x + bounds.origin.x * window.zoom()),
             screen_y: rounded_coordinate(window_bounds.origin.y + bounds.origin.y * window.zoom()),
-            visible: self.visible,
+            visible: self.visible && self.window_visible,
         }
         .sanitized();
         if next != self.viewport {

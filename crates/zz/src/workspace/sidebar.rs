@@ -267,6 +267,10 @@ impl WorkspaceSidebar {
         self.route
     }
 
+    pub(crate) const fn width(&self) -> f32 {
+        self.width
+    }
+
     pub(crate) fn settings_view(&self) -> Option<Entity<SettingsView>> {
         self.settings.clone()
     }

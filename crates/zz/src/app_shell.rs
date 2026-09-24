@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, Context, DragMoveEvent, Entity, IntoElement, KeyUpEvent, MouseButton, Render,
-    Window, div, prelude::*,
+    AnyElement, AnyView, App, Context, DragMoveEvent, Entity, IntoElement, KeyUpEvent, MouseButton,
+    Render, StyleRefinement, Window, div, prelude::*, px,
 };
 use zz_ui::shell::{app_shell_surface, app_titlebar_strip};
 use zz_ui::{
@@ -304,13 +304,24 @@ impl AppShell {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (route, mode) = {
+        let (route, mode, sidebar_width) = {
             let sidebar = self.sidebar.read(cx);
-            (sidebar.route(), sidebar.mode())
+            (sidebar.route(), sidebar.mode(), sidebar.width())
         };
         let (sidebar, titlebar) = match (route, mode) {
-            (WorkspaceRoute::Settings, _) | (WorkspaceRoute::App, ChromeMode::Sidebar) => (
+            (WorkspaceRoute::Settings, _) => (
                 self.sidebar.clone().into_any_element(),
+                self.render_control_strip(window, cx),
+            ),
+            (WorkspaceRoute::App, ChromeMode::Sidebar) => (
+                AnyView::from(self.sidebar.clone())
+                    .cached(
+                        StyleRefinement::default()
+                            .h_full()
+                            .w(px(sidebar_width))
+                            .flex_none(),
+                    )
+                    .into_any_element(),
                 self.render_control_strip(window, cx),
             ),
             (WorkspaceRoute::App, ChromeMode::Titlebar) => (

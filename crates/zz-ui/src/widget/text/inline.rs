@@ -38,6 +38,46 @@ const CODE_FILL_PAD_Y: f32 = 1.0;
 /// ever lowers the radius.
 const CODE_FILL_RADIUS_MAX: f32 = 6.0;
 
+fn selectable_line_bounds(
+    lines: &[Arc<WrappedLineLayout>],
+    origin: Point<Pixels>,
+    line_height: Pixels,
+    mask_bounds: Bounds<Pixels>,
+) -> Vec<Bounds<Pixels>> {
+    let mut line_bounds = Vec::new();
+    let mut top = origin.y;
+    for (index, line) in lines.iter().enumerate() {
+        let layout = &line.unwrapped_layout;
+        let newline_width = if index + 1 < lines.len() {
+            line_height.half()
+        } else {
+            px(0.0)
+        };
+        let rows = line.wrap_boundaries.len() + 1;
+        let mut row_start = 0;
+        for (row, row_end) in line
+            .wrap_boundaries
+            .iter()
+            .map(|boundary| layout.runs[boundary.run_ix].glyphs[boundary.glyph_ix].index)
+            .chain([line.len()])
+            .enumerate()
+        {
+            let mut width = layout.x_for_index(row_end) - layout.x_for_index(row_start);
+            if row + 1 == rows {
+                width += newline_width;
+            }
+            let bounds = Bounds::new(point(origin.x, top), gpui::size(width, line_height))
+                .intersect(&mask_bounds);
+            if bounds.size.width > px(0.) && bounds.size.height > px(0.) {
+                line_bounds.push(bounds);
+            }
+            top += line_height;
+            row_start = row_end;
+        }
+    }
+    line_bounds
+}
+
 fn code_fill_bounds(
     text: &str,
     range: Range<usize>,
@@ -294,57 +334,6 @@ impl Inline {
         (true, true, selection)
     }
 
-    fn text_line_bounds(
-        &self,
-        text_layout: &TextLayout,
-        line_height: Pixels,
-        mask_bounds: Bounds<Pixels>,
-    ) -> Vec<Bounds<Pixels>> {
-        let mut line_bounds = Vec::new();
-        let mut current_line_y = None;
-        let mut current_bounds: Option<Bounds<Pixels>> = None;
-        let mut offset = 0;
-
-        for c in self.text.chars() {
-            let next_offset = offset + c.len_utf8();
-            let Some(pos) = text_layout.position_for_index(offset) else {
-                offset = next_offset;
-                continue;
-            };
-
-            let mut char_width = line_height.half();
-            if let Some(next_pos) = text_layout.position_for_index(next_offset) {
-                if next_pos.y == pos.y {
-                    char_width = next_pos.x - pos.x;
-                }
-            }
-
-            let bounds = Bounds::from_corners(pos, point(pos.x + char_width, pos.y + line_height))
-                .intersect(&mask_bounds);
-            if bounds.size.width > px(0.) && bounds.size.height > px(0.) {
-                if current_line_y == Some(pos.y) {
-                    if let Some(current) = current_bounds.as_mut() {
-                        *current = current.union(&bounds);
-                    }
-                } else {
-                    if let Some(current) = current_bounds.take() {
-                        line_bounds.push(current);
-                    }
-                    current_line_y = Some(pos.y);
-                    current_bounds = Some(bounds);
-                }
-            }
-
-            offset = next_offset;
-        }
-
-        if let Some(current) = current_bounds {
-            line_bounds.push(current);
-        }
-
-        line_bounds
-    }
-
     fn paint_selection(
         selection: &Selection,
         text_layout: &TextLayout,
@@ -544,8 +533,9 @@ impl Element for Inline {
 
         if is_selectable {
             if let Some(text_view_state) = TextGlobal::current_view(cx).cloned() {
-                let text_bounds = self.text_line_bounds(
-                    &text_layout,
+                let text_bounds = selectable_line_bounds(
+                    &text_layout.line_layouts(),
+                    text_layout.bounds().origin,
                     text_layout.line_height(),
                     window.content_mask().bounds,
                 );
@@ -730,7 +720,7 @@ fn point_in_text_selection(
 mod tests {
     use super::{
         Bounds, CODE_FILL_PAD_X, CODE_FILL_PAD_Y, InlineState, TextAlign, code_fill_bounds,
-        is_openable, point_in_text_selection,
+        is_openable, point_in_text_selection, selectable_line_bounds,
     };
     use gpui::{
         FontId, GlyphId, LineLayout, ShapedGlyph, ShapedRun, WrapBoundary, WrappedLineLayout,
@@ -774,6 +764,37 @@ mod tests {
             wrap_boundaries: boundaries,
             wrap_width: Some(px(400.0)),
         })
+    }
+
+    #[test]
+    fn selectable_bounds_cover_each_visual_row_once() {
+        let first = "wrapped first line";
+        let lines = [
+            code_line(first, &[8]),
+            code_line("", &[]),
+            code_line("tail", &[]),
+        ];
+        let mask = Bounds::from_corners(point(px(0.0), px(0.0)), point(px(400.0), px(400.0)));
+        let bounds = selectable_line_bounds(&lines, point(px(5.0), px(10.0)), px(20.0), mask);
+        let rows = bounds
+            .iter()
+            .map(|row| (row.left(), row.top(), row.size.width))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rows,
+            [
+                (px(5.0), px(10.0), px(80.0)),
+                (px(5.0), px(30.0), px(100.0 + 10.0)),
+                (px(5.0), px(50.0), px(10.0)),
+                (px(5.0), px(70.0), px(40.0)),
+            ]
+        );
+        let clipped = Bounds::from_corners(point(px(0.0), px(25.0)), point(px(50.0), px(60.0)));
+        let bounds = selectable_line_bounds(&lines, point(px(5.0), px(10.0)), px(20.0), clipped);
+        assert_eq!(bounds.len(), 3);
+        assert!(bounds.iter().all(|row| row.right() <= px(50.0)
+            && row.top() >= px(25.0)
+            && row.bottom() <= px(60.0)));
     }
 
     #[test]

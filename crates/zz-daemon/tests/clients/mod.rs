@@ -11,7 +11,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use zz_daemon::{CommandClient, Daemon, DaemonError, InteractiveClient};
+use zz_daemon::{
+    ClientTerminalFlags, CommandClient, Daemon, DaemonError, InteractiveClient,
+    set_client_terminal_flags,
+};
 use zz_protocol::{CommandInvocation, PaneId};
 use zz_terminal::TerminalColorScheme;
 
@@ -27,6 +30,10 @@ pub struct Clients {
 impl Clients {
     /// Start a daemon carrying one detached session per name.
     pub fn start(name: &str, sessions: &[&str]) -> Self {
+        set_client_terminal_flags(ClientTerminalFlags {
+            utf8: true,
+            ..ClientTerminalFlags::default()
+        });
         let socket = PathBuf::from(format!("/tmp/zz-{name}-{}.sock", std::process::id()));
         let _ = fs::remove_file(&socket);
         let daemon = Daemon::new(&socket).without_user_config();

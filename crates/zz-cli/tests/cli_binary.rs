@@ -4909,8 +4909,12 @@ mod daemon_autostart {
         ) -> Vec<String> {
             let deadline = Instant::now() + Duration::from_secs(10);
             loop {
-                let listed =
-                    fixture.run(&["list-clients", "-F", "#{client_name}\t#{client_flags}"]);
+                let listed = fixture.run(&[
+                    "-u",
+                    "list-clients",
+                    "-F",
+                    "#{client_name}\t#{client_flags}",
+                ]);
                 let names = String::from_utf8_lossy(&listed.stdout)
                     .lines()
                     .filter_map(|line| {

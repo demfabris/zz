@@ -64,6 +64,7 @@ use crate::{
 };
 
 const AGENT_KEY_CONTEXT: &str = "Agent";
+const STICK_FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_micros(16_667);
 
 impl gpui::EventEmitter<PaneDrag> for AgentView {}
 
@@ -2602,16 +2603,17 @@ impl AgentView {
         cx.notify();
     }
 
-    /// Ask for one spring frame, at most one callback in flight. Each step
-    /// notifies while it still has travel left, which re-enters `render` and
-    /// arms the next frame; the loop stops itself once the spring parks.
+    /// Ask for one spring frame, at most one callback in flight, paced to
+    /// 60 fps. Each step notifies while it still has travel left, which
+    /// re-enters `render` and arms the next frame; the loop stops itself once
+    /// the spring parks.
     fn drive_stick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if cx.reduce_motion() || !self.stick.wants_frame(&self.timeline_scroll) {
             return;
         }
         self.stick.arm();
-        let view = cx.weak_entity();
-        window.on_next_frame(move |_, cx| {
+        cx.spawn_in(window, async move |view, cx| {
+            cx.background_executor().timer(STICK_FRAME_INTERVAL).await;
             view.update(cx, |view: &mut Self, cx| {
                 let list = view.timeline_scroll.clone();
                 if view.stick.step(&list) {
@@ -2619,7 +2621,8 @@ impl AgentView {
                 }
             })
             .ok();
-        });
+        })
+        .detach();
     }
 }
 

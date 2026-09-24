@@ -629,7 +629,7 @@ pub(crate) struct PeerInbox {
     record_path: PathBuf,
     stopped: Arc<AtomicBool>,
     active: Arc<Mutex<Option<UnixStream>>>,
-    listener_thread: Option<std::thread::Thread>,
+    wake: UnixStream,
 }
 
 impl PeerInbox {
@@ -678,27 +678,41 @@ impl PeerInbox {
         };
         let _ = fs::remove_file(&socket);
         let listener = UnixListener::bind(&socket)?;
-        let mut inbox = Self {
+        let (wake_reader, wake) = UnixStream::pair()?;
+        wake.set_nonblocking(true)?;
+        let inbox = Self {
             record,
             record_path,
             stopped: Arc::new(AtomicBool::new(false)),
             active: Arc::new(Mutex::new(None)),
-            listener_thread: None,
+            wake,
         };
         listener.set_nonblocking(true)?;
         fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
         write_record(&inbox.record_path, &inbox.record)?;
         let stopped = Arc::clone(&inbox.stopped);
         let active = Arc::clone(&inbox.active);
-        let thread = std::thread::Builder::new()
+        std::thread::Builder::new()
             .name(format!("zz-peer-{pid}"))
             .spawn(move || {
                 while !stopped.load(Ordering::Acquire) {
                     let stream = match listener.accept() {
                         Ok((stream, _)) => stream,
                         Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                            std::thread::park_timeout(Duration::from_millis(100));
-                            continue;
+                            let mut fds = [
+                                rustix::event::PollFd::new(&listener, rustix::event::PollFlags::IN),
+                                rustix::event::PollFd::new(
+                                    &wake_reader,
+                                    rustix::event::PollFlags::IN,
+                                ),
+                            ];
+                            match rustix::event::poll(&mut fds, None) {
+                                Ok(_) | Err(rustix::io::Errno::INTR) => continue,
+                                Err(error) => {
+                                    log::debug!("agent peer listener poll failed: {error}");
+                                    break;
+                                }
+                            }
                         }
                         Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                         Err(error) => {
@@ -719,7 +733,6 @@ impl PeerInbox {
                     active.lock().take();
                 }
             })?;
-        inbox.listener_thread = Some(thread.thread().clone());
         Ok(inbox)
     }
 
@@ -750,9 +763,7 @@ impl Drop for PeerInbox {
         if let Some(stream) = self.active.lock().take() {
             let _ = stream.shutdown(Shutdown::Both);
         }
-        if let Some(thread) = &self.listener_thread {
-            thread.unpark();
-        }
+        let _ = (&self.wake).write(&[1]);
         let _ = fs::remove_file(&self.record_path);
         let _ = fs::remove_file(self.socket_path());
     }

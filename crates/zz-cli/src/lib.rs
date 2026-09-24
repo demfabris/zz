@@ -1,3 +1,5 @@
+#[cfg(not(windows))]
+extern crate mimalloc;
 #[cfg(all(test, not(target_os = "ios")))]
 use zz_daemon::{CommandStdinSink, append_stdin_payload};
 mod control_mode;
@@ -297,6 +299,23 @@ fn configure_application_working_directory() {
         );
     }
 }
+#[cfg(not(windows))]
+const MI_OPTION_PURGE_DELAY: std::ffi::c_int = 15;
+
+#[cfg(not(windows))]
+#[allow(unsafe_code)]
+unsafe extern "C" {
+    fn mi_option_set(option: std::ffi::c_int, value: std::ffi::c_long);
+}
+
+#[cfg(not(windows))]
+#[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
+fn purge_freed_memory_promptly() {
+    if std::env::var_os("MIMALLOC_PURGE_DELAY").is_none() {
+        unsafe { mi_option_set(MI_OPTION_PURGE_DELAY, 0) };
+    }
+}
+
 #[cfg(target_os = "windows")]
 pub fn attach_parent_console() {
     use windows::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
@@ -780,6 +799,8 @@ fn run_command_mode(
                 return Some(exit_code_for(CliFailure::Usage));
             }
         };
+        #[cfg(not(windows))]
+        purge_freed_memory_promptly();
         let mut daemon =
             Daemon::new(socket_path).with_mux_config_files(mux_config_files.iter().cloned());
         if let Some(server_id) = bootstrap.server_id {
@@ -3973,5 +3994,18 @@ mod tests {
             super::startup_directory_environment(Path::new("/tmp/a project")),
             std::ffi::OsString::from("ZZ_APP_STARTUP_DIRECTORY=/tmp/a project")
         );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    #[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
+    fn purge_delay_names_mimallocs_v3_option() {
+        if std::env::var_os("MIMALLOC_PURGE_DELAY").is_some() {
+            return;
+        }
+        unsafe extern "C" {
+            fn mi_option_get(option: std::ffi::c_int) -> std::ffi::c_long;
+        }
+        assert_eq!(unsafe { mi_option_get(super::MI_OPTION_PURGE_DELAY) }, 1000);
     }
 }

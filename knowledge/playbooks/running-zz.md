@@ -263,7 +263,13 @@ C libraries allocate through glibc, which otherwise keeps pages freed after
 startup inside its heap; the trim returns about 2 MiB on an idle window. A
 periodic `mi_collect(false)` for mimalloc was measured and dropped: it only
 collects the calling thread's pages, so it did not reach memory retained by
-other threads. Idle-heap regressions are easiest to find with a dhat build;
+other threads. The daemon sets mimalloc's `purge_delay` option to 0 at startup unless
+`MIMALLOC_PURGE_DELAY` is already set (`purge_freed_memory_promptly` in
+`crates/zz-cli/src/lib.rs`). mimalloc v3 purges freed pages only at a later free or
+collect after the delay, which an idle daemon never reaches: after closing 63 of 64
+panes it held 199.9 MiB footprint for good, and 76.7 MiB with the delay at 0. A
+96-pane create, output, and close churn cost about 2.6% more daemon CPU.
+Idle-heap regressions are easiest to find with a dhat build;
 the 2026-09-22 profile traced 20 MiB of retained arena to the tray pixmap,
 which zbus expands to one boxed value per byte, so the Linux tray now sends
 a 48 px icon.

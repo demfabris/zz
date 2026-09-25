@@ -107982,16 +107982,24 @@ bind - split-window -v -c "#{pane_current_path}"
                     .iter()
                     .any(|item| matches!(item.payload, AgentStreamPayload::SessionReady { .. }))
             });
-            let before = workspace
-                .shared
-                .inner
-                .lock()
-                .engine
-                .state
-                .pane(workspace.agent)
-                .unwrap()
-                .kind
-                .clone();
+            let deadline = Instant::now() + DEADLINE;
+            let before = loop {
+                let kind = workspace
+                    .shared
+                    .inner
+                    .lock()
+                    .engine
+                    .state
+                    .pane(workspace.agent)
+                    .unwrap()
+                    .kind
+                    .clone();
+                if matches!(&kind, PaneKind::Agent(descriptor) if descriptor.session_id.is_some()) {
+                    break kind;
+                }
+                assert!(Instant::now() < deadline, "agent session id never landed");
+                thread::sleep(Duration::from_millis(5));
+            };
             let other = OutboundMailbox::new();
             let _ = workspace.shared.register_subscribed(
                 ClientKind::Interactive,

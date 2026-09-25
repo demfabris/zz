@@ -4273,21 +4273,18 @@ mod daemon_autostart {
         if !local_socket_bind_available(&fixture.socket) {
             return;
         }
-        let created = fixture.run(&["new-session", "-d", "-s", "outer"]);
-        assert_eq!(created.status.code(), Some(0));
-
         let nested_attach = format!(
-            "{} -f {} -S {} attach",
+            "{} -f {} -S {} attach; exec cat",
             env!("CARGO_BIN_EXE_zz_cli"),
             fixture.config.display(),
             fixture.socket.display(),
         );
-        let sent = fixture.run(&["send-keys", "-t", "outer", &nested_attach, "Enter"]);
+        let created = fixture.run(&["new-session", "-d", "-s", "outer", &nested_attach]);
         assert_eq!(
-            sent.status.code(),
+            created.status.code(),
             Some(0),
             "stderr: {}",
-            String::from_utf8_lossy(&sent.stderr)
+            String::from_utf8_lossy(&created.stderr)
         );
 
         let deadline = Instant::now() + Duration::from_secs(10);

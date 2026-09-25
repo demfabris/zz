@@ -770,7 +770,6 @@ impl StatusRenderer {
     pub(crate) fn render_changed(
         &mut self,
         requests: &[StatusRequest],
-        refresh: bool,
     ) -> Vec<(ClientId, StatusLine)> {
         let mut touched = BTreeSet::new();
         let mut changed = Vec::new();
@@ -779,7 +778,7 @@ impl StatusRenderer {
                 &mut self.shell_cache,
                 &mut touched,
                 request,
-                refresh,
+                false,
                 self.tmux_shim.as_deref(),
                 self.zz_executable.as_deref(),
                 self.job_waker.as_ref(),
@@ -789,10 +788,6 @@ impl StatusRenderer {
             }
             self.published.insert(request.client, status.clone());
             changed.push((request.client, status));
-        }
-        if refresh {
-            self.shell_cache
-                .retain(|command, _| touched.contains(command));
         }
         changed
     }
@@ -2881,7 +2876,7 @@ mod tests {
             engine_request(2, &engine, Some(beta)),
         ];
         let mut renderer = StatusRenderer::default();
-        let first = renderer.render_changed(&requests, false);
+        let first = renderer.render_changed(&requests);
         assert_eq!(first.len(), 2);
         let alpha_status = &first[0].1;
         let beta_status = &first[1].1;
@@ -2906,7 +2901,7 @@ mod tests {
         assert_ne!(alpha_status.rows, beta_status.rows);
         assert_eq!(alpha_status.validate(), Ok(()));
         assert_eq!(beta_status.validate(), Ok(()));
-        assert!(renderer.render_changed(&requests, false).is_empty());
+        assert!(renderer.render_changed(&requests).is_empty());
     }
 
     #[test]
@@ -3159,17 +3154,17 @@ mod tests {
         let mut renderer = StatusRenderer::default();
         let requests = [request(1, "[#S]", ""), request(2, "[#S]", "")];
 
-        let first = renderer.render_changed(&requests, false);
+        let first = renderer.render_changed(&requests);
         assert_eq!(first.len(), 2);
         assert_eq!(first[0].1.left, "[work]");
-        assert!(renderer.render_changed(&requests, false).is_empty());
+        assert!(renderer.render_changed(&requests).is_empty());
 
         let renamed = [request(1, "[#S]", ""), {
             let mut request = request(2, "[#S]", "");
             request.context.session_name = "infra".to_owned();
             request
         }];
-        let second = renderer.render_changed(&renamed, false);
+        let second = renderer.render_changed(&renamed);
         assert_eq!(second.len(), 1);
         assert_eq!(second[0].0, ClientId(2));
         assert_eq!(second[0].1.left, "[infra]");
@@ -3409,7 +3404,7 @@ mod tests {
         let format = format!("#({command})");
         let requests = [request(1, &format, "")];
 
-        let first = renderer.render_changed(&requests, false);
+        let first = renderer.render_changed(&requests);
         assert_eq!(
             first[0].1.left, "",
             "a first render starts the command without waiting"
@@ -3497,35 +3492,6 @@ mod tests {
         assert_eq!(renderer.shell_cache.len(), 2);
         renderer.forget(ClientId(1));
         assert_eq!(renderer.shell_cache.len(), 1);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn status_command_cache_prunes_clients_missing_from_a_full_refresh() {
-        let directory = tempfile::tempdir().expect("working directory fixture");
-        let first_cwd = directory.path().join("first");
-        let second_cwd = directory.path().join("second");
-        std::fs::create_dir(&first_cwd).expect("first cwd");
-        std::fs::create_dir(&second_cwd).expect("second cwd");
-        let first_cwd = std::fs::canonicalize(first_cwd).expect("first cwd resolves");
-        let second_cwd = std::fs::canonicalize(second_cwd).expect("second cwd resolves");
-        let mut first = request(1, "#(pwd -P)", "");
-        first.context.session_path = first_cwd.to_string_lossy().into_owned();
-        first.facts.client = Some(ClientFormatFacts::default());
-        let mut second = request(2, "#(pwd -P)", "");
-        second.context.session_path = second_cwd.to_string_lossy().into_owned();
-        second.facts.client = Some(ClientFormatFacts::default());
-        let mut renderer = StatusRenderer::default();
-
-        renderer.render_changed(&[first, second], true);
-        assert_eq!(renderer.shell_cache.len(), 2);
-        let mut remaining = request(1, "#(pwd -P)", "");
-        remaining.context.session_path = first_cwd.to_string_lossy().into_owned();
-        remaining.facts.client = Some(ClientFormatFacts::default());
-        renderer.render_changed(&[remaining], true);
-
-        assert_eq!(renderer.shell_cache.len(), 1);
-        assert_eq!(renderer.shell_cache.keys().next().unwrap().0, ClientId(1));
     }
 
     #[cfg(unix)]
@@ -3702,22 +3668,6 @@ mod tests {
         assert_eq!(
             settled(&mut renderer, &status_request).left,
             format!("status|{socket}")
-        );
-    }
-
-    #[test]
-    fn a_tick_forgets_commands_no_format_names_any_more() {
-        let mut renderer = StatusRenderer::default();
-        renderer.render_changed(&[request(1, "#(echo kept)", "#(echo dropped)")], true);
-        assert_eq!(renderer.shell_cache.len(), 2);
-        renderer.render_changed(&[request(1, "#(echo kept)", "")], true);
-        assert_eq!(
-            renderer
-                .shell_cache
-                .keys()
-                .map(|(_, _, command)| command.as_str())
-                .collect::<Vec<_>>(),
-            ["echo kept"]
         );
     }
 

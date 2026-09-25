@@ -5097,17 +5097,16 @@ impl Shared {
         exit_unattached || sessions_empty
     }
 
-    fn refresh_status(&self, refresh: bool) {
-        self.refresh_status_for_sessions(refresh, None);
+    fn refresh_status(&self) {
+        self.refresh_status_for_sessions(None);
     }
 
-    fn refresh_status_for_sessions(&self, refresh: bool, sessions: Option<&BTreeSet<SessionId>>) {
-        self.refresh_status_filtered(refresh, sessions, None);
+    fn refresh_status_for_sessions(&self, sessions: Option<&BTreeSet<SessionId>>) {
+        self.refresh_status_filtered(sessions, None);
     }
 
     fn refresh_status_filtered(
         &self,
-        refresh: bool,
         sessions: Option<&BTreeSet<SessionId>>,
         clients: Option<&BTreeSet<ClientId>>,
     ) {
@@ -5144,7 +5143,7 @@ impl Shared {
         if requests.is_empty() {
             return;
         }
-        let changed = self.status.lock().render_changed(&requests, refresh);
+        let changed = self.status.lock().render_changed(&requests);
         if !changed.is_empty() {
             let mut inner = self.inner.lock();
             for (client, status) in &changed {
@@ -5394,7 +5393,7 @@ impl Shared {
                     }
                     let jobs_changed = shared.status.lock().poll_jobs();
                     if !jobs_changed.is_empty() {
-                        shared.refresh_status_filtered(false, None, Some(&jobs_changed));
+                        shared.refresh_status_filtered(None, Some(&jobs_changed));
                     }
                     if Instant::now() >= next_tick {
                         next_tick = Instant::now() + CONTROL_SUBSCRIPTION_INTERVAL;
@@ -5443,7 +5442,7 @@ impl Shared {
                         })
                         .collect::<BTreeSet<_>>();
                     if !sessions.is_empty() {
-                        shared.refresh_status_for_sessions(false, Some(&sessions));
+                        shared.refresh_status_for_sessions(Some(&sessions));
                     }
                 }
             })
@@ -10177,9 +10176,9 @@ impl Shared {
         if snapshot_changed {
             self.publish_snapshot();
         } else if status_formats_changed {
-            self.refresh_status(false);
+            self.refresh_status();
         } else if !status_refresh_sessions.is_empty() {
-            self.refresh_status_for_sessions(false, Some(&status_refresh_sessions));
+            self.refresh_status_for_sessions(Some(&status_refresh_sessions));
         }
         let replay_client = context.replay_client();
         let source_client = replay_client.unwrap_or(client);
@@ -11093,11 +11092,11 @@ impl Shared {
             .first()
             .filter(|command| !command.is_empty())
         else {
-            self.refresh_status(false);
+            self.refresh_status();
             return Ok(Execution::default());
         };
         if parsed.has('o') && had_pipe {
-            self.refresh_status(false);
+            self.refresh_status();
             return Ok(Execution::default());
         }
         let pipe_input = parsed.has('I');
@@ -11228,7 +11227,7 @@ impl Shared {
         let _ = start.send(());
         drop(_serial);
         self.refresh_control_output_taps();
-        self.refresh_status(false);
+        self.refresh_status();
         Ok(Execution::default())
     }
 
@@ -11247,7 +11246,7 @@ impl Shared {
             }
         };
         if removed {
-            self.refresh_status(false);
+            self.refresh_status();
         }
     }
 
@@ -11286,7 +11285,7 @@ impl Shared {
         };
         if let Some(pipe) = pipe {
             stop_pane_pipe(pipe);
-            self.refresh_status(false);
+            self.refresh_status();
         }
     }
 
@@ -11305,7 +11304,7 @@ impl Shared {
         };
         if let Some(pipe) = pipe {
             stop_pane_pipe(pipe);
-            self.refresh_status(false);
+            self.refresh_status();
         }
     }
 
@@ -24896,7 +24895,7 @@ impl Shared {
 
     fn publish_snapshot_state(&self) {
         self.publish_mux_snapshots();
-        self.refresh_status(false);
+        self.refresh_status();
         self.refresh_terminal_visibility();
         #[cfg(feature = "agent")]
         self.refresh_agent_visibility();
@@ -25114,7 +25113,7 @@ impl Shared {
             *carried != before
         };
         if changed {
-            self.refresh_status(true);
+            self.refresh_status();
         }
     }
 
@@ -25137,7 +25136,7 @@ impl Shared {
                 != Some(term_type)
         };
         if changed {
-            self.refresh_status(true);
+            self.refresh_status();
         }
     }
 
@@ -49389,7 +49388,7 @@ mod tests {
             assert!(Instant::now() < deadline, "the fixture title did not sync");
             thread::sleep(Duration::from_millis(5));
         }
-        shared.refresh_status(false);
+        shared.refresh_status();
         let focus_state = || {
             let inner = shared.inner.lock();
             (
@@ -70484,7 +70483,7 @@ set-option -g @alias-mixed-next yes
                 )
                 .expect("fixed status half");
         }
-        shared.refresh_status(false);
+        shared.refresh_status();
         take_reliable_messages(&alpha_mailbox);
         take_reliable_messages(&beta_mailbox);
 
@@ -105957,7 +105956,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 "beta",
             )
             .expect("attach beta");
-        shared.refresh_status(false);
+        shared.refresh_status();
         drain_reliable_messages_until_quiet(&[&alpha_mailbox, &beta_mailbox]);
         let sequence_boundary = Shared::next_sequence();
 

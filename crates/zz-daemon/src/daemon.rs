@@ -24131,9 +24131,7 @@ impl Shared {
                     .state
                     .pane(pane)
                     .is_some_and(|pane| matches!(pane.kind, PaneKind::Agent(_)));
-                let mut previous_foreground = None::<Option<u32>>;
                 let mut previous_bar_state = ProgressBarState::Hidden;
-                let mut current_command = String::new();
                 let mut diff_scratch = TerminalDiffScratch::default();
                 let mut mode_memo = BTreeMap::new();
                 while let Ok(event) = events.recv_blocking() {
@@ -24153,11 +24151,7 @@ impl Shared {
                                 |(_, viewport)| Arc::clone(viewport),
                             );
                             if !terminal_status_should_close(&runtime_viewport.status) {
-                                let foreground = terminal.foreground_process_id();
-                                if previous_foreground != Some(foreground) {
-                                    current_command = terminal_current_command(&terminal);
-                                    previous_foreground = Some(foreground);
-                                }
+                                let current_command = terminal_current_command(&terminal);
                                 shared.synchronize_pane_runtime(
                                     pane,
                                     &terminal,
@@ -70245,6 +70239,43 @@ set-option -g @alias-mixed-next yes
         let inner = shared.inner.lock();
         assert!(inner.engine.state.generation() > generation);
         assert_ne!(inner.engine.pane_runtime_facts(pane), Some(&facts));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pane_current_command_follows_an_exec_in_the_same_process() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(90),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "a", "read -r line; exec cat"]),
+            )
+            .expect("session");
+        let pane = context.pane.expect("session pane");
+        wait_for_pane_runtime_facts(&shared, &[pane]);
+        let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        assert!(terminal.send_raw_input(Arc::from(b"go\nafter-exec\n".as_slice())));
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let command = shared
+                .inner
+                .lock()
+                .engine
+                .pane_runtime_facts(pane)
+                .map(|facts| facts.current_command.clone())
+                .unwrap_or_default();
+            if command == "cat" {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "pane_current_command stayed {command:?} after the shell exec'd cat"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     fn two_session_pair(

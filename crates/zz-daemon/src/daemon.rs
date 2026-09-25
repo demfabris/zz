@@ -72501,17 +72501,23 @@ set-option -g @alias-mixed-next yes
             .expect("session");
         let pane = context.pane.expect("pane");
         wait_for_pane_runtime_facts(shared, &[pane]);
-        let command = shared
+        let target = pane.to_string();
+        shared
             .execute(
                 ClientId(1),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("display-message", ["-p", "#{pane_current_command}"]),
+                &CommandInvocation::new(
+                    "send-keys",
+                    ["-t", &target, "printf 'PROGRESS_%s\\n' READY", "Enter"],
+                ),
             )
-            .expect("current command")
-            .output
-            .trim()
-            .to_owned();
+            .expect("ready probe");
+        wait_for_capture(shared, ClientId(1), &target, |screen| {
+            screen.contains("PROGRESS_READY")
+        });
+        let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        let command = terminal_current_command(&terminal);
         assert!(!command.is_empty());
         (pane, command)
     }

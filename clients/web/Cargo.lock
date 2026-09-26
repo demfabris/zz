@@ -1017,7 +1017,7 @@ dependencies = [
 [[package]]
 name = "collections"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "gpui_util",
  "indexmap 2.14.2",
@@ -1504,7 +1504,7 @@ dependencies = [
 [[package]]
 name = "derive_refineable"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2455,7 +2455,7 @@ dependencies = [
 [[package]]
 name = "gpui"
 version = "0.2.2"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -2484,6 +2484,8 @@ dependencies = [
  "log",
  "lyon",
  "num_cpus",
+ "objc2-core-foundation",
+ "objc2-core-video",
  "parking",
  "parking_lot",
  "pin-project",
@@ -2507,7 +2509,6 @@ dependencies = [
  "sum_tree",
  "taffy",
  "thiserror 2.0.20",
- "tracing",
  "ttf-parser",
  "url",
  "usvg",
@@ -2519,19 +2520,17 @@ dependencies = [
  "windows 0.62.2",
  "zed-font-kit",
  "zed-scap",
- "ztracing",
 ]
 
 [[package]]
 name = "gpui_apple"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "anyhow",
- "block",
+ "block2 0.6.2",
  "cbindgen",
  "cocoa 0.26.0",
- "collections",
  "core-foundation 0.10.1",
  "core-video",
  "derive_more",
@@ -2549,7 +2548,7 @@ dependencies = [
 [[package]]
 name = "gpui_linux"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -2595,13 +2594,12 @@ dependencies = [
 [[package]]
 name = "gpui_macos"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "accesskit",
  "accesskit_macos",
  "anyhow",
  "async-task",
- "block",
  "block2 0.6.2",
  "cocoa 0.26.0",
  "collections",
@@ -2621,11 +2619,11 @@ dependencies = [
  "libc",
  "log",
  "mach2",
- "media",
- "metal",
  "objc",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
+ "objc2-core-graphics",
+ "objc2-core-media",
  "objc2-foundation 0.3.2",
  "objc2-screen-capture-kit",
  "objc2-user-notifications",
@@ -2642,7 +2640,7 @@ dependencies = [
 [[package]]
 name = "gpui_macros"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -2653,8 +2651,9 @@ dependencies = [
 [[package]]
 name = "gpui_platform"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
+ "anyhow",
  "console_error_panic_hook",
  "gpui",
  "gpui_linux",
@@ -2666,7 +2665,7 @@ dependencies = [
 [[package]]
 name = "gpui_shared_string"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "schemars 1.2.2",
  "serde",
@@ -2676,7 +2675,7 @@ dependencies = [
 [[package]]
 name = "gpui_util"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "anyhow",
  "log",
@@ -2686,7 +2685,7 @@ dependencies = [
 [[package]]
 name = "gpui_web"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -2714,7 +2713,7 @@ dependencies = [
 [[package]]
 name = "gpui_wgpu"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -2740,7 +2739,7 @@ dependencies = [
 [[package]]
 name = "gpui_windows"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "accesskit",
  "accesskit_windows",
@@ -2921,7 +2920,7 @@ dependencies = [
 [[package]]
 name = "http_client"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -3744,20 +3743,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "media"
-version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
-dependencies = [
- "anyhow",
- "bindgen",
- "core-foundation 0.10.1",
- "core-video",
- "foreign-types",
- "metal",
- "objc",
-]
-
-[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4284,6 +4269,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-core-audio"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1eebcea8b0dbff5f7c8504f3107c68fc061a3eb44932051c8cf8a68d969c3b2"
+dependencies = [
+ "dispatch2",
+ "objc2 0.6.4",
+ "objc2-core-audio-types",
+ "objc2-core-foundation",
+]
+
+[[package]]
+name = "objc2-core-audio-types"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a89f2ec274a0cf4a32642b2991e8b351a404d290da87bb6a9a9d8632490bd1c"
+dependencies = [
+ "bitflags 2.13.2",
+ "objc2 0.6.4",
+]
+
+[[package]]
 name = "objc2-core-data"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4339,6 +4346,34 @@ checksum = "ca347214e24bc973fc025fd0d36ebb179ff30536ed1f80252706db19ee452009"
 dependencies = [
  "objc2 0.6.4",
  "objc2-foundation 0.3.2",
+]
+
+[[package]]
+name = "objc2-core-media"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05ec576860167a15dd9fce7fbee7512beb4e31f532159d3482d1f9c6caedf31d"
+dependencies = [
+ "bitflags 2.13.2",
+ "dispatch2",
+ "objc2 0.6.4",
+ "objc2-core-audio",
+ "objc2-core-audio-types",
+ "objc2-core-foundation",
+ "objc2-core-video",
+]
+
+[[package]]
+name = "objc2-core-video"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d425caf1df73233f29fd8a5c3e5edbc30d2d4307870f802d18f00d83dc5141a6"
+dependencies = [
+ "bitflags 2.13.2",
+ "objc2 0.6.4",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-io-surface",
 ]
 
 [[package]]
@@ -4441,8 +4476,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "74b7c5390f477482f001bc354d6571a70db7e4f8d5288e860c45521fbce11394"
 dependencies = [
  "block2 0.6.2",
+ "dispatch2",
  "objc2 0.6.4",
  "objc2-core-graphics",
+ "objc2-core-media",
  "objc2-foundation 0.3.2",
 ]
 
@@ -4670,7 +4707,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 [[package]]
 name = "perf"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "collections",
  "serde",
@@ -5379,7 +5416,7 @@ dependencies = [
 [[package]]
 name = "refineable"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "derive_refineable",
 ]
@@ -5617,7 +5654,7 @@ dependencies = [
 [[package]]
 name = "scheduler"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "async-task",
  "backtrace",
@@ -6213,7 +6250,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sum_tree"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "heapless",
  "log",
@@ -7013,7 +7050,7 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 [[package]]
 name = "util_macros"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "perf",
  "quote",
@@ -8424,7 +8461,7 @@ checksum = "34b31d188d9d685a4f9c7b46d6e36631b07058d2cfe190267adce54dc230bf12"
 [[package]]
 name = "zlog"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "anyhow",
  "chrono",
@@ -8441,7 +8478,7 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 [[package]]
 name = "ztracing"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 dependencies = [
  "tracing",
  "tracing-subscriber",
@@ -8452,7 +8489,7 @@ dependencies = [
 [[package]]
 name = "ztracing_macro"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6#9b46226e6f89d093c3e36d1afbdcbdc47ee88cb6"
+source = "git+https://github.com/demfabris/zed?rev=beca360ad31c8ad1d93c846d26a57a41fadfcb80#beca360ad31c8ad1d93c846d26a57a41fadfcb80"
 
 [[package]]
 name = "zune-core"

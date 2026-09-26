@@ -180,7 +180,12 @@ impl AppShell {
         let connection = cx.new(Connection::new);
         let window_handle = window.window_handle();
         let key_listener = cx.listener(move |this, event: &gpui::KeystrokeEvent, window, cx| {
-            if window.window_handle() == window_handle {
+            if window.window_handle() == window_handle
+                && !matches!(
+                    event.keystroke.key.as_str(),
+                    "shift" | "control" | "alt" | "platform" | "function"
+                )
+            {
                 this.key_down(
                     &KeyDownEvent {
                         keystroke: event.keystroke.clone(),

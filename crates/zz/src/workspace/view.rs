@@ -908,7 +908,12 @@ impl AppView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if window.window_handle() != self.window_handle {
+        if window.window_handle() != self.window_handle
+            || matches!(
+                event.keystroke.key.as_str(),
+                "shift" | "control" | "alt" | "platform" | "function"
+            )
+        {
             return;
         }
         if self.reconcile_dialog_prefix(window, cx) {
@@ -4255,6 +4260,29 @@ mod tests {
             workspace.read_with(cx, |workspace, _| workspace.input_router.owner()),
             zz_client::InputOwner::None
         );
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn standalone_modifier_tap_leaves_the_armed_prefix_waiting(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        let Some((client, _server)) = input_test_client() else {
+            return;
+        };
+        let (workspace, cx) = input_test_workspace(cx, client);
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        mux.update(cx, |mux, cx| mux.set_prefix_armed_for_test(true, cx));
+        let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+        cx.simulate_modifiers_change(Modifiers::shift());
+        cx.simulate_modifiers_change(Modifiers::none());
+        cx.run_until_parked();
+        assert!(
+            !input
+                .borrow()
+                .iter()
+                .any(|message| matches!(message, InputMessage::Key { .. }))
+        );
+        assert!(mux.read_with(cx, |mux, _| mux.prefix_armed()));
     }
 
     #[gpui::test]

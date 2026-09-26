@@ -509,7 +509,7 @@ impl PlatformWindow for IosWindow {
     fn update_ime_position(&self, _bounds: Bounds<Pixels>) {}
 
     fn gpu_specs(&self) -> Option<gpui::GpuSpecs> {
-        Some(self.0.borrow_mut().renderer.gpu_specs())
+        self.0.borrow().renderer.gpu_specs()
     }
     fn a11y_init(&self, callbacks: gpui::A11yCallbacks) {
         let view = self.0.borrow_mut().native_view;

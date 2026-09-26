@@ -297,10 +297,12 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                                 });
 
                                 let _subscription = window.subscribe(&menu, cx, {
-                                    let shared_state = shared_state.clone();
+                                    let shared_state = Rc::downgrade(&shared_state);
                                     move |_, _: &DismissEvent, window, _cx| {
-                                        shared_state.borrow_mut().open = false;
-                                        window.refresh();
+                                        if let Some(shared_state) = shared_state.upgrade() {
+                                            shared_state.borrow_mut().open = false;
+                                            window.refresh();
+                                        }
                                     }
                                 });
 
@@ -384,6 +386,34 @@ mod tests {
                         ),
                 )
         }
+    }
+
+    #[gpui::test]
+    fn closing_the_window_with_the_menu_open_releases_the_menu(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let before = cx.update(|cx| cx.leak_detector_snapshot());
+
+        {
+            let (_, cx) = cx.add_window_view(|_, cx| TestRoot {
+                content_focus: cx.focus_handle(),
+                received: Rc::new(Cell::new(false)),
+            });
+            cx.update(|window, cx| _ = window.draw(cx));
+            cx.simulate_event(MouseDownEvent {
+                button: MouseButton::Right,
+                position: point(px(50.), px(70.)),
+                modifiers: Default::default(),
+                click_count: 1,
+                first_mouse: false,
+            });
+            cx.run_until_parked();
+            cx.update(|window, cx| _ = window.draw(cx));
+
+            cx.update(|window, _| window.remove_window());
+            cx.run_until_parked();
+        }
+
+        cx.update(|cx| cx.assert_no_new_leaks(&before));
     }
 
     #[gpui::test]

@@ -103,15 +103,15 @@ where
                         });
                         menu.focus_handle(cx).focus(window, cx);
 
-                        let popover_state = cx.entity();
+                        let popover_state = cx.entity().downgrade();
                         window
                             .subscribe(&menu, cx, {
-                                let menu_state = menu_state.clone();
+                                let menu_state = menu_state.downgrade();
                                 move |_, _: &DismissEvent, window, cx| {
-                                    popover_state.update(cx, |state, cx| {
+                                    _ = popover_state.update(cx, |state, cx| {
                                         state.dismiss(window, cx);
                                     });
-                                    menu_state.update(cx, |state, _| {
+                                    _ = menu_state.update(cx, |state, _| {
                                         state.menu = None;
                                     });
                                 }
@@ -124,5 +124,51 @@ where
 
                 menu.clone()
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{
+        Modifiers, ParentElement as _, Render, TestAppContext, VisualTestContext, div, point, px,
+    };
+
+    use super::*;
+    use crate::menu::PopupMenuItem;
+
+    struct Host;
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                Button::new("more")
+                    .label("More")
+                    .dropdown_menu(|menu, _, _| menu.item(PopupMenuItem::new("Open"))),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn closing_the_window_with_the_menu_open_releases_the_menu(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let before = cx.update(|cx| cx.leak_detector_snapshot());
+
+        {
+            let (_, cx) = cx.add_window_view(|_, _| Host);
+            let draw = |cx: &mut VisualTestContext| {
+                cx.run_until_parked();
+                cx.update(|window, cx| _ = window.draw(cx));
+            };
+            draw(cx);
+            cx.simulate_click(point(px(8.), px(8.)), Modifiers::default());
+            draw(cx);
+            draw(cx);
+            assert!(cx.update(|window, cx| window.focused(cx).is_some()));
+
+            cx.update(|window, _| window.remove_window());
+            cx.run_until_parked();
+        }
+
+        cx.update(|cx| cx.assert_no_new_leaks(&before));
     }
 }

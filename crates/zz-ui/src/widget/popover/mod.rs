@@ -300,14 +300,14 @@ impl PopoverState {
             self.previous_focus_handle = window.focused(cx);
             self.focus_handle.focus(window, cx);
 
-            let state = cx.entity();
-            self.dismiss_subscription =
-                Some(
-                    window.subscribe(&cx.entity(), cx, move |_, _: &DismissEvent, window, cx| {
-                        state.update(cx, |state, cx| state.dismiss(window, cx));
-                        window.refresh();
-                    }),
-                );
+            self.dismiss_subscription = Some(window.subscribe(
+                &cx.entity(),
+                cx,
+                move |state, _: &DismissEvent, window, cx| {
+                    state.update(cx, |state, cx| state.dismiss(window, cx));
+                    window.refresh();
+                },
+            ));
         } else {
             self.dismiss_subscription = None;
             if let Some(prev) = self.previous_focus_handle.take()
@@ -344,9 +344,45 @@ impl EventEmitter<DismissEvent> for PopoverState {}
 
 #[cfg(test)]
 mod tests {
-    use gpui::size;
+    use gpui::{Modifiers, Render, TestAppContext, VisualTestContext, size};
 
     use super::*;
+    use crate::button::Button;
+
+    struct Host;
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                Popover::new("popover")
+                    .trigger(Button::new("open").label("Open"))
+                    .content(|_, _, _| div().child("panel")),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn closing_the_window_with_the_popover_open_releases_its_state(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let before = cx.update(|cx| cx.leak_detector_snapshot());
+
+        {
+            let (_, cx) = cx.add_window_view(|_, _| Host);
+            let draw = |cx: &mut VisualTestContext| {
+                cx.run_until_parked();
+                cx.update(|window, cx| _ = window.draw(cx));
+            };
+            draw(cx);
+            cx.simulate_click(point(8., 8.), Modifiers::default());
+            draw(cx);
+            assert!(cx.update(|window, cx| window.focused(cx).is_some()));
+
+            cx.update(|window, _| window.remove_window());
+            cx.run_until_parked();
+        }
+
+        cx.update(|cx| cx.assert_no_new_leaks(&before));
+    }
 
     fn trigger_bounds() -> Bounds<Pixels> {
         Bounds {

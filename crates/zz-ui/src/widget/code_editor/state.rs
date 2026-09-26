@@ -1413,6 +1413,28 @@ mod tests {
     }
 
     #[gpui::test]
+    fn a_new_edit_after_undo_drops_the_redo_stack(cx: &mut gpui::TestAppContext) {
+        let (editor, cx) = with_editor(cx);
+        type_text(&editor, "hello", cx);
+
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| editor.undo(&Undo, window, cx));
+        });
+        assert_eq!(editor.read_with(cx, |editor, _| editor.value()), "");
+
+        type_text(&editor, "x", cx);
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| editor.redo(&Redo, window, cx));
+        });
+        assert_eq!(editor.read_with(cx, |editor, _| editor.value()), "x");
+
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| editor.undo(&Undo, window, cx));
+        });
+        assert_eq!(editor.read_with(cx, |editor, _| editor.value()), "");
+    }
+
+    #[gpui::test]
     fn shaping_generation_tracks_content_and_language_but_not_selection(
         cx: &mut gpui::TestAppContext,
     ) {

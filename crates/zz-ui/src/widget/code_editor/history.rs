@@ -81,6 +81,7 @@ where
         let mut item = item;
         item.set_version(version);
         self.undos.push(item);
+        self.redos.clear();
     }
 
     pub fn clear(&mut self) {
@@ -169,19 +170,14 @@ mod tests {
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].tab_index, 2);
 
+        let changes = history.redo().unwrap();
+        assert_eq!(changes[0].tab_index, 2);
+
+        let changes = history.undo().unwrap();
+        assert_eq!(changes[0].tab_index, 2);
+
         history.push(5.into());
-
-        let changes = history.redo().unwrap();
-        assert_eq!(changes[0].tab_index, 2);
-
-        let changes = history.redo().unwrap();
-        assert_eq!(changes[0].tab_index, 1);
-
-        let changes = history.undo().unwrap();
-        assert_eq!(changes[0].tab_index, 1);
-
-        let changes = history.undo().unwrap();
-        assert_eq!(changes[0].tab_index, 2);
+        assert!(history.redo().is_none());
 
         let changes = history.undo().unwrap();
         assert_eq!(changes[0].tab_index, 5);

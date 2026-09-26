@@ -58,6 +58,7 @@ pub struct TerminalRenderInput<'a> {
     pub history: Option<&'a dyn TerminalHistorySource>,
     pub images: Option<&'a dyn TerminalImageSource>,
     pub local_scroll_target: Option<u32>,
+    pub scroll_pixel_offset: Pixels,
     pub command_output: bool,
     pub appearance: &'a TerminalAppearance,
     pub appearance_hash: u64,
@@ -74,6 +75,7 @@ pub struct TerminalGeometry {
     pub surface_bounds: Bounds<Pixels>,
     pub cell_width: Pixels,
     pub line_height: Pixels,
+    pub content_offset: Pixels,
     pub input_bounds: Option<Bounds<Pixels>>,
     pub link_hover_bounds: Option<Bounds<Pixels>>,
 }
@@ -434,6 +436,8 @@ pub struct PaintState {
     pub geometry: TerminalGeometry,
     focused: bool,
     buffers: PaintBuffers,
+    row_clip: Option<Bounds<Pixels>>,
+    scrollbar: Option<PaintQuad>,
     cursor_glyph: Option<PositionedLine>,
     composition: Option<PositionedLine>,
     cell_width: Pixels,
@@ -695,6 +699,48 @@ fn local_live_projection(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct GridPlacement {
+    bottom_anchored: bool,
+    project_from_bottom: bool,
+}
+
+fn grid_placement(
+    viewport: &TerminalViewport,
+    command_output: bool,
+    scrolled_locally: bool,
+) -> GridPlacement {
+    let anchorable = matches!(viewport.mode, zz_terminal::TerminalMode::Live)
+        && !command_output
+        && viewport.search.is_none();
+    let at_live_bottom = viewport
+        .scrollbar
+        .offset
+        .saturating_add(viewport.scrollbar.len)
+        >= viewport.scrollbar.total;
+    let scrolled_back = scrolled_locally || !at_live_bottom;
+    let last_row_filled = last_visible_row_has_content(viewport, viewport.rows);
+    GridPlacement {
+        bottom_anchored: anchorable && (scrolled_back || last_row_filled),
+        project_from_bottom: anchorable && !scrolled_back && last_row_filled,
+    }
+}
+
+fn peek_row_source(
+    top_offset: u32,
+    server_offset: u32,
+    live_rows: u16,
+    history_rows: usize,
+) -> Option<LocalRowSource> {
+    let source = local_row_source(
+        top_offset.checked_sub(1)?,
+        server_offset,
+        live_rows,
+        history_rows,
+    );
+    (source != LocalRowSource::Shimmer).then_some(source)
+}
+
 impl RowRenderCache {
     pub fn prepaint(
         &mut self,
@@ -743,17 +789,38 @@ impl RowRenderCache {
         let columns = measured.columns;
         let rows = measured.rows;
         let spare_height = (bounds.size.height - line_height * usize::from(rows)).max(px(0.0));
-        let bottom_anchored = local_scroll_target.is_none()
-            && matches!(viewport.mode, zz_terminal::TerminalMode::Live)
-            && !command_output
-            && viewport.search.is_none()
-            && viewport
-                .scrollbar
-                .offset
-                .saturating_add(viewport.scrollbar.len)
-                >= viewport.scrollbar.total
-            && last_visible_row_has_content(viewport, viewport.rows);
-        let row_projection = RowProjection::new(viewport.rows, rows, bottom_anchored);
+        let scroll_shift = if input.scroll_pixel_offset > px(0.0) {
+            snap(input.scroll_pixel_offset.min(line_height), scale)
+        } else {
+            px(0.0)
+        };
+        let GridPlacement {
+            bottom_anchored,
+            project_from_bottom,
+        } = grid_placement(
+            viewport,
+            command_output,
+            local_scroll_target.is_some() || scroll_shift > px(0.0),
+        );
+        let history_rows = input.history.map_or(0, TerminalHistorySource::row_count);
+        let peek = (scroll_shift > px(0.0))
+            .then(|| {
+                peek_row_source(
+                    local_scroll_target.unwrap_or(viewport.scrollbar.offset),
+                    viewport.scrollbar.offset,
+                    viewport.rows,
+                    history_rows,
+                )
+            })
+            .flatten();
+        let peek_revision = match peek {
+            Some(LocalRowSource::History(index)) => input
+                .history
+                .and_then(|history| history.row(index))
+                .map(|row| row.revision),
+            _ => None,
+        };
+        let row_projection = RowProjection::new(viewport.rows, rows, project_from_bottom);
         let live_row_projection = local_scroll_target.map_or(row_projection, |target_offset| {
             local_live_projection(
                 target_offset,
@@ -775,14 +842,21 @@ impl RowRenderCache {
             ),
         );
         let grid_bounds = terminal_grid_bounds(origin, columns, rows, cell_width, line_height);
+        let content_origin = point(origin.x, origin.y + scroll_shift);
+        let row_clip = (scroll_shift > px(0.0)).then(|| {
+            Bounds::new(
+                point(bounds.origin.x, grid_bounds.origin.y),
+                size(bounds.size.width, grid_bounds.size.height),
+            )
+        });
         let cursor = viewport.cursor;
         let cursor_cell =
             cursor.and_then(|cursor| cursor_cell(viewport, cursor, columns, live_row_projection));
         let cursor_bounds = cursor_cell.map(|cursor| {
             Bounds::new(
                 point(
-                    origin.x + cell_width * cursor.column,
-                    origin.y + line_height * cursor.row,
+                    content_origin.x + cell_width * cursor.column,
+                    content_origin.y + line_height * cursor.row,
                 ),
                 size(cell_width * cursor.width, line_height),
             )
@@ -847,13 +921,14 @@ impl RowRenderCache {
                 },
                 row_revision_epoch,
                 local_scroll_target.is_some(),
-                (0..input.history.map_or(0, TerminalHistorySource::row_count))
+                (0..history_rows)
                     .filter(|_| local_scroll_target.is_some())
                     .filter_map(|index| input.history.and_then(|history| history.row(index)))
                     .map(|row| row.revision)
-                    .chain(row_revisions.iter().copied()),
+                    .chain(row_revisions.iter().copied())
+                    .chain(peek_revision),
             );
-            for offset in 0..row_projection.count {
+            let projected_rows = (0..row_projection.count).map(|offset| {
                 let source_row = row_projection
                     .source_row(offset)
                     .expect("projection offset is bounded by its count");
@@ -864,9 +939,20 @@ impl RowRenderCache {
                             target_offset.saturating_add(u32::from(source_row)),
                             viewport.scrollbar.offset,
                             viewport.rows,
-                            input.history.map_or(0, TerminalHistorySource::row_count),
+                            history_rows,
                         )
                     });
+                (Some(row_index), source)
+            });
+            for (row_index, source) in peek
+                .map(|source| (None, source))
+                .into_iter()
+                .chain(projected_rows)
+            {
+                let row_origin = row_index.map_or(
+                    point(content_origin.x, content_origin.y - line_height),
+                    |row_index| point(content_origin.x, content_origin.y + line_height * row_index),
+                );
                 let resolved = match source {
                     LocalRowSource::Live(live_row) => Some((
                         viewport.row(live_row).unwrap_or_default(),
@@ -884,7 +970,7 @@ impl RowRenderCache {
                     uncached_rows += 1;
                     buffers.backgrounds.push(fill(
                         Bounds::new(
-                            point(origin.x, origin.y + line_height * row_index),
+                            row_origin,
                             size(cell_width * usize::from(columns), line_height),
                         ),
                         color(viewport.foreground, 0.04),
@@ -893,7 +979,7 @@ impl RowRenderCache {
                 };
                 let hidden_columns = hidden_composition_cells
                     .as_ref()
-                    .filter(|(hidden_row, _)| is_live && *hidden_row == row_index)
+                    .filter(|(hidden_row, _)| is_live && Some(*hidden_row) == row_index)
                     .map(|(_, columns)| columns.clone());
                 if hidden_columns.is_some() {
                     uncached_rows += 1;
@@ -913,9 +999,8 @@ impl RowRenderCache {
                         window,
                     ));
                     position_text_row(
-                        row_index,
                         &masked,
-                        origin,
+                        row_origin,
                         cell_width,
                         line_height,
                         box_stroke,
@@ -950,9 +1035,8 @@ impl RowRenderCache {
                         }
                     };
                     position_text_row(
-                        row_index,
                         cached,
-                        origin,
+                        row_origin,
                         cell_width,
                         line_height,
                         box_stroke,
@@ -977,9 +1061,8 @@ impl RowRenderCache {
                         window,
                     ));
                     position_text_row(
-                        row_index,
                         &cached,
-                        origin,
+                        row_origin,
                         cell_width,
                         line_height,
                         box_stroke,
@@ -997,7 +1080,7 @@ impl RowRenderCache {
                 input.appearance,
                 live_row_projection,
                 hidden_composition_cells.as_ref(),
-                origin,
+                content_origin,
                 cell_width,
                 line_height,
                 box_stroke,
@@ -1017,7 +1100,7 @@ impl RowRenderCache {
                 images,
                 local_scroll_target,
                 row_projection,
-                origin,
+                content_origin,
                 grid_bounds,
                 cell_width,
                 line_height,
@@ -1030,7 +1113,7 @@ impl RowRenderCache {
             input.appearance,
             live_row_projection,
             columns,
-            origin,
+            content_origin,
             cell_width,
             line_height,
             scale,
@@ -1042,7 +1125,7 @@ impl RowRenderCache {
                 offset: target_offset,
                 len: viewport.scrollbar.len,
             });
-        push_scrollbar_quad(scrollbar, bounds, cx, &mut buffers.overlays);
+        let scrollbar = scrollbar_quad(scrollbar, bounds, cx);
         let focused = input.focused;
         let cursor_visible =
             cursor_visible_for_paint(cursor, composing, focused, input.cursor_blink_visible);
@@ -1087,12 +1170,13 @@ impl RowRenderCache {
             let cache = &*self;
             log::trace!(
                 target: "zz::diagnostics::terminal_render",
-                "prepaint bounds={bounds:?} scale_factor={} grid={grid_size:?} origin={origin:?} raw_line_height={} snapped_line_height={} spare_height={} bottom_anchored={} appearance_hash={} viewport_generation={} viewport_view_generation={} viewport_dictionary_generation={} viewport_columns={} viewport_rows={} viewport_cells={} viewport_overlays={} row_revision_epoch={} row_revisions={} cached_row_hits={} cached_row_misses={} uncached_rows={} cache_rows={} cache_selection_rows={} cache_live_revisions={} cache_paint_backgrounds_capacity={} cache_paint_overlays_capacity={} cache_paint_box_connectors_capacity={} cache_paint_cursor_capacity={} cache_paint_text_capacity={} cache_paint_decorations_capacity={} prepared_backgrounds={} prepared_overlays={} prepared_box_connectors={} prepared_cursor={} prepared_text_rows={} prepared_decorations={} cursor_style={:?} cursor_width={} blink_policy={:?} composition={} cursor_suppressed_by_composition={} elapsed_us={}",
+                "prepaint bounds={bounds:?} scale_factor={} grid={grid_size:?} origin={origin:?} raw_line_height={} snapped_line_height={} spare_height={} bottom_anchored={} scroll_shift={} appearance_hash={} viewport_generation={} viewport_view_generation={} viewport_dictionary_generation={} viewport_columns={} viewport_rows={} viewport_cells={} viewport_overlays={} row_revision_epoch={} row_revisions={} cached_row_hits={} cached_row_misses={} uncached_rows={} cache_rows={} cache_selection_rows={} cache_live_revisions={} cache_paint_backgrounds_capacity={} cache_paint_overlays_capacity={} cache_paint_box_connectors_capacity={} cache_paint_cursor_capacity={} cache_paint_text_capacity={} cache_paint_decorations_capacity={} prepared_backgrounds={} prepared_overlays={} prepared_box_connectors={} prepared_cursor={} prepared_text_rows={} prepared_decorations={} cursor_style={:?} cursor_width={} blink_policy={:?} composition={} cursor_suppressed_by_composition={} elapsed_us={}",
                 scale,
                 f32::from(raw_line_height),
                 f32::from(line_height),
                 f32::from(spare_height),
                 bottom_anchored,
+                f32::from(scroll_shift),
                 input.appearance_hash,
                 viewport.generation,
                 viewport.view_generation,
@@ -1137,11 +1221,14 @@ impl RowRenderCache {
                 surface_bounds: bounds,
                 cell_width,
                 line_height,
+                content_offset: scroll_shift,
                 input_bounds,
                 link_hover_bounds,
             },
             focused,
             buffers,
+            row_clip,
+            scrollbar,
             cursor_glyph,
             composition,
             cell_width,
@@ -1168,7 +1255,10 @@ impl RowRenderCache {
         let text_count = paint.buffers.text.len();
         let decoration_count = paint.buffers.decorations.len();
         let had_composition = paint.composition.is_some();
-        window.with_content_mask(Some(ContentMask { bounds }), |window| {
+        let row_clip = paint
+            .row_clip
+            .map_or(bounds, |row_clip| row_clip.intersect(&bounds));
+        window.with_content_mask(Some(ContentMask { bounds: row_clip }), |window| {
             paint_kitty_images(&mut paint.buffers.kitty_below_bg, window);
             for quad in paint.buffers.backgrounds.drain(..) {
                 window.paint_quad(quad);
@@ -1176,6 +1266,13 @@ impl RowRenderCache {
             for quad in paint.buffers.overlays.drain(..) {
                 window.paint_quad(quad);
             }
+        });
+        if let Some(quad) = paint.scrollbar.take() {
+            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                window.paint_quad(quad);
+            });
+        }
+        window.with_content_mask(Some(ContentMask { bounds: row_clip }), |window| {
             for graphic in paint.buffers.box_connectors.drain(..) {
                 match graphic {
                     TerminalGraphicPaint::Quad(quad) => window.paint_quad(quad),
@@ -1513,14 +1610,13 @@ fn copy_cursor_line_color(appearance: &TerminalAppearance) -> Hsla {
     color
 }
 
-fn push_scrollbar_quad(
+fn scrollbar_quad(
     scrollbar: ScrollbarState,
     bounds: Bounds<Pixels>,
     cx: &App,
-    output: &mut Vec<PaintQuad>,
-) {
+) -> Option<PaintQuad> {
     if scrollbar.total <= scrollbar.len || scrollbar.total == 0 {
-        return;
+        return None;
     }
     let track_height = bounds.size.height - THUMB_INSET * 2.0;
     let ratio = scrollbar.len as f32 / scrollbar.total as f32;
@@ -1532,13 +1628,13 @@ fn push_scrollbar_quad(
         bounds.right() - THUMB_WIDTH - THUMB_INSET,
         bounds.origin.y + THUMB_INSET + travel * progress,
     );
-    output.push(
+    Some(
         fill(
             Bounds::new(origin, size(THUMB_WIDTH, thumb_height)),
             cx.theme().foreground.wash(),
         )
         .corner_radii(thumb_radius(THUMB_WIDTH, cx)),
-    );
+    )
 }
 
 fn push_background(
@@ -2059,7 +2155,6 @@ fn push_cell_text_run(
 }
 
 fn position_text_row(
-    row: usize,
     cached: &Rc<CachedTextRow>,
     origin: Point<Pixels>,
     cell_width: Pixels,
@@ -2068,16 +2163,13 @@ fn position_text_row(
     scale: f32,
     output: &mut PaintBuffers,
 ) {
-    let y = origin.y + line_height * row;
+    let y = origin.y;
     output
         .backgrounds
         .extend(cached.backgrounds.iter().map(|background| {
             fill(
                 Bounds::new(
-                    point(
-                        origin.x + cell_width * background.start_column,
-                        origin.y + line_height * row,
-                    ),
+                    point(origin.x + cell_width * background.start_column, y),
                     size(cell_width * background.cell_count, line_height),
                 ),
                 color(background.color, 1.0),
@@ -4260,5 +4352,162 @@ mod tests {
         assert!(!cursor_visible_for_paint(Some(cursor), false, true, false));
         assert!(cursor_visible_for_paint(Some(cursor), false, false, false));
         assert!(!cursor_visible_for_paint(Some(cursor), true, false, true));
+    }
+
+    fn filled_viewport(columns: u16, rows: u16, glyph: char) -> TerminalViewport {
+        let mut viewport =
+            TerminalViewport::blank(columns, rows, zz_terminal::SessionStatus::Running);
+        viewport.cells = (0..usize::from(columns) * usize::from(rows))
+            .map(|_| PackedCell::new(u32::from(glyph), 0, CellWidth::Narrow))
+            .collect();
+        viewport
+    }
+
+    #[test]
+    fn scrolled_grids_stay_bottom_anchored_so_a_gesture_never_jumps_by_the_spare_strip() {
+        let mut viewport = TerminalViewport::blank(8, 4, zz_terminal::SessionStatus::Running);
+        viewport.scrollbar = ScrollbarState {
+            total: 40,
+            offset: 36,
+            len: 4,
+        };
+        let top = GridPlacement {
+            bottom_anchored: false,
+            project_from_bottom: false,
+        };
+        let scrolled = GridPlacement {
+            bottom_anchored: true,
+            project_from_bottom: false,
+        };
+        assert_eq!(grid_placement(&viewport, false, false), top);
+        assert_eq!(grid_placement(&viewport, false, true), scrolled);
+
+        let mut filled = filled_viewport(8, 4, 'x');
+        filled.scrollbar = viewport.scrollbar;
+        let live_bottom = GridPlacement {
+            bottom_anchored: true,
+            project_from_bottom: true,
+        };
+        assert_eq!(grid_placement(&filled, false, false), live_bottom);
+        assert_eq!(grid_placement(&filled, false, true), scrolled);
+        filled.scrollbar.offset = 20;
+        assert_eq!(grid_placement(&filled, false, false), scrolled);
+        viewport.scrollbar.offset = 20;
+        assert_eq!(grid_placement(&viewport, false, false), scrolled);
+
+        assert_eq!(grid_placement(&filled, true, true), top);
+        filled.search = Some(zz_terminal::SearchStatus::new(0, 0));
+        assert_eq!(grid_placement(&filled, false, true), top);
+    }
+
+    #[test]
+    fn the_peek_row_comes_from_the_ring_and_never_shimmers() {
+        assert_eq!(
+            peek_row_source(100, 100, 4, 3),
+            Some(LocalRowSource::History(2))
+        );
+        assert_eq!(
+            peek_row_source(98, 100, 4, 3),
+            Some(LocalRowSource::History(0))
+        );
+        assert_eq!(peek_row_source(97, 100, 4, 3), None);
+        assert_eq!(peek_row_source(100, 100, 4, 0), None);
+        assert_eq!(peek_row_source(0, 0, 4, 3), None);
+    }
+
+    struct RingRows(Vec<Vec<PackedCell>>, TerminalDictionary);
+
+    impl TerminalHistorySource for RingRows {
+        fn row_count(&self) -> usize {
+            self.0.len()
+        }
+
+        fn row(&self, index: usize) -> Option<TerminalHistoryRow<'_>> {
+            self.0.get(index).map(|cells| TerminalHistoryRow {
+                cells,
+                dictionary: &self.1,
+                revision: 1_000 + index as u64,
+            })
+        }
+    }
+
+    #[gpui::test]
+    fn a_pixel_offset_shifts_rows_down_and_peeks_the_ring_row_above(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let cx = cx.add_empty_window();
+        let mut viewport = filled_viewport(8, 4, 'x');
+        viewport.scrollbar = ScrollbarState {
+            total: 40,
+            offset: 36,
+            len: 4,
+        };
+        let ring = RingRows(
+            vec![vec![PackedCell::new(u32::from('h'), 0, CellWidth::Narrow); 8]; 2],
+            TerminalDictionary::default(),
+        );
+        let revisions = [1, 2, 3, 4];
+        let appearance = TerminalAppearance::default();
+        cx.update(|window, cx| {
+            let mut cache = RowRenderCache::default();
+            let mut prepaint = |offset: Pixels, height: Pixels, window: &mut Window| {
+                cache.prepaint(
+                    TerminalRenderInput {
+                        viewport: &viewport,
+                        row_revisions: &revisions,
+                        revision_epoch: 1,
+                        history: Some(&ring),
+                        images: None,
+                        local_scroll_target: None,
+                        scroll_pixel_offset: offset,
+                        command_output: false,
+                        appearance: &appearance,
+                        appearance_hash: 0,
+                        text_opacity: 1.0,
+                        focused: false,
+                        cursor_blink_visible: true,
+                        marked_text: None,
+                    },
+                    Bounds::new(point(px(0.0), px(0.0)), size(px(400.0), height)),
+                    window,
+                    cx,
+                )
+            };
+            let line_height = prepaint(px(0.0), px(400.0), window).geometry.line_height;
+            let height = line_height * 4.0 + px(3.0);
+            let rest = prepaint(px(0.0), height, window);
+            let shifted = prepaint(px(5.0), height, window);
+            let rows = |paint: &PaintState| {
+                paint
+                    .buffers
+                    .text
+                    .iter()
+                    .map(|row| row.origin.y)
+                    .collect::<Vec<_>>()
+            };
+            let rest_rows = rows(&rest);
+            let shifted_rows = rows(&shifted);
+
+            assert_eq!(rest.geometry.grid.rows, 4);
+            assert_eq!(rest.geometry.grid_bounds.origin.y, px(3.0));
+            assert_eq!(shifted.geometry.grid_bounds, rest.geometry.grid_bounds);
+            assert_eq!(rest.geometry.content_offset, px(0.0));
+            assert_eq!(shifted.geometry.content_offset, px(5.0));
+            assert_eq!(rest_rows.len(), 4);
+            assert_eq!(shifted_rows.len(), 5);
+            assert_eq!(shifted_rows[0], rest_rows[0] + px(5.0) - line_height);
+            for (shifted, rest) in shifted_rows[1..].iter().zip(&rest_rows) {
+                assert_eq!(*shifted, *rest + px(5.0));
+            }
+            assert!(rest.row_clip.is_none());
+            assert_eq!(
+                shifted.row_clip,
+                Some(Bounds::new(
+                    point(px(0.0), px(3.0)),
+                    size(px(400.0), line_height * 4.0),
+                ))
+            );
+            assert!(shifted.scrollbar.is_some());
+            assert!(cache.rows.contains_key(&1_001));
+        });
     }
 }

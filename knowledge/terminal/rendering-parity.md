@@ -4,7 +4,7 @@ title: Zed GPUI terminal rendering parity
 description: The effort to bring zz's terminal painting up to Zed's GPUI standard by mapping immutable renderer-neutral frames and dirty-row patches onto GPUI text, cursor, and overlay painting.
 resource: crates/zz-ui/src/terminal.rs
 tags: [rendering, gpui, zed, parity, cursor, ime, contrast, box-drawing, block-elements, local-scroll]
-timestamp: 2026-09-24T00:00:00Z
+timestamp: 2026-09-25T00:00:00Z
 ---
 
 # Overview
@@ -64,6 +64,15 @@ vanish once the target scrolls clear of it. The scrollbar thumb is drawn from th
 than the frame's own offset. Rows the ring cannot cover paint the shimmer fill and nothing else, so a
 scroll ahead of the backfill reads as empty rather than as stale content.
 
+A trackpad pixel offset (`TerminalRenderInput::scroll_pixel_offset`) adds one row above the grid,
+resolved through `peek_row_source` from the row before the target (normally the ring's newest row),
+and shifts every row, the cursor, IME, overlays, selection text, and Kitty images down by the offset
+snapped to device pixels. Rows, overlays, and images are clipped to the unshifted grid, so the peek row
+shows exactly the offset and the bottom row loses the same amount; the scrollbar stays on the element
+bounds. A peek row the ring does not hold is skipped instead of shimmered, and its revision joins the
+cache retention set. Whole device-pixel moves keep both shaped rows and glyph rasters cached.
+`TerminalGeometry::content_offset` reports the applied shift for hit testing.
+
 # Typography and grid geometry
 
 - Each regular, bold, italic, and bold-italic Ghostty family stack maps to one GPUI font stack; an
@@ -110,10 +119,12 @@ scroll ahead of the backfill reads as empty rather than as stale content.
   `TextSystem::underline_thickness` accessor, carried patch 13 in
   [gpui-revision](/references/gpui-revision.md). Underline, strikethrough, and overline still paint one
   device pixel rather than this thickness.
-- When the viewport follows live output, spare vertical pixels sit above the grid so the bottom row stays
-  anchored; scrollback, copy mode, search, command-output views, and an active local scroll stay
-  top-anchored. During a live resize, retained rows are projected from the bottom so the prompt does not
-  flash stale content.
+- In Live mode spare vertical pixels sit above the grid so the bottom row stays anchored, both when the
+  viewport follows live output with a filled last row and whenever it is scrolled back (by the server,
+  a local target, or a pixel offset), so starting or ending a trackpad gesture never moves the grid by
+  the spare strip. Copy mode, search, command-output views, and a live bottom whose last row is empty
+  stay top-anchored. During a live resize at the live bottom, retained rows are projected from the
+  bottom so the prompt does not flash stale content.
 
 # Cursor, IME, and paint order
 

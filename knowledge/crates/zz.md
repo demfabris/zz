@@ -4,7 +4,7 @@ title: zz crate (the GPUI client)
 description: The long-lived GPUI desktop client, linking zz-cli for CLI dispatch, daemon spawning, and terminal attach, and hosting terminal, Chromium browser, and native Agent panes.
 resource: crates/zz/src/lib.rs
 tags: [gpui, crate, client, terminal, browser, agent, ui]
-timestamp: 2026-09-22T00:00:00Z
+timestamp: 2026-09-25T00:00:00Z
 ---
 
 # Overview
@@ -501,12 +501,15 @@ or typography input change forces a fresh measurement.
 Two latency features live on `TerminalView` and exist only to make a WAN-attached pane feel local.
 
 **Local scroll.** When the pane is in Live mode, mouse tracking is off, the scrollbar has something to
-scroll, and the pane's `HistoryRing` is non-empty, a wheel or scrollbar drag repaints straight from
-the ring and records a `LocalScroll { target_offset, started }`. A `ScrollToOffset` for that target
-goes out after a `LOCAL_SCROLL_DEBOUNCE` of 120ms, so a flick sends one message instead of dozens.
-The overlay retires when the server's offset reaches the target, when the ring is invalidated (the
-`history_invalidations` counter moved), or after `LOCAL_SCROLL_TIMEOUT` of 2s. Scrolling near the
-front of the ring triggers a prefetch of the next chunk.
+scroll, and the pane's `HistoryRing` is non-empty, a scrollbar drag, a downward wheel, or any trackpad
+pixel delta repaints straight from the ring and records a `LocalScroll`. Trackpad pixels also keep a
+`sub_row` offset, so the pane moves by pixels and a partial ring row peeks in at the top; a discrete
+upward wheel still goes to the daemon. While a gesture runs, the daemon is asked to follow in steps of
+under a screen, and a `ScrollToOffset` for the final target goes out after a `LOCAL_SCROLL_DEBOUNCE` of
+120ms. The overlay retires when the server's offset reaches the target with nothing else in flight,
+when the ring is invalidated (the `history_invalidations` counter moved), or after
+`LOCAL_SCROLL_TIMEOUT` of 2s. Scrolling near the front of the ring triggers a prefetch of the next
+chunk. See [terminal interaction](/terminal/interaction.md#local-scroll-client-side).
 
 **No predictive echo.** `terminal/predict.rs` and its `Predictor` were deleted on 2026-08-01: the
 overlay only ever rendered above a 40 ms transport RTT, which the deleted QUIC arm was the reason

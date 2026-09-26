@@ -4,7 +4,7 @@ title: End-to-end data flow
 description: How terminal frames, browser pixels, ACP updates, and user input move among the daemon, GUI, PTY workers, CEF, and agents.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [architecture, data-flow, frames, input, rendering]
-timestamp: 2026-09-08T00:00:00Z
+timestamp: 2026-09-25T00:00:00Z
 ---
 
 # Overview
@@ -118,9 +118,9 @@ GPUI event ─┬─ prefix chord (any focus) ─▶ window-root claim ─▶ mu
   feed the synchronized CEF sink. The prefix claim remains available from the page.
 - Browser input translation (pointer, wheel, keyboard, committed text, IME, focus, resize) lives in
   [input translation](/browser/input-translation.md).
-- Wheel scroll over a live pane with a warm history ring repaints from the ring on the next frame and
-  tells the daemon once, through a `ScrollToOffset` debounced by 120 ms. See
-  [terminal interaction](/terminal/interaction.md).
+- Trackpad scroll over a live pane with a warm history ring repaints from the ring on the next frame,
+  by pixels, and tells the daemon through follow steps plus one `ScrollToOffset` debounced by 120 ms.
+  A discrete upward wheel still goes to the daemon. See [terminal interaction](/terminal/interaction.md).
 
 # Configuration & appearance flow
 

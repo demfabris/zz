@@ -522,6 +522,7 @@ impl TerminalApp {
                     .pane(pane)
                     .map(|images| images as &dyn zz_ui::terminal::TerminalImageSource),
                 local_scroll_target: None,
+                scroll_pixel_offset: px(0.0),
                 command_output: false,
                 appearance: &appearance,
                 appearance_hash: appearance.stable_hash(),

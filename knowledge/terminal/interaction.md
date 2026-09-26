@@ -4,7 +4,7 @@ title: Terminal interaction (input, selection, paste, words)
 description: The renderer-neutral pointer, keyboard, word-boundary, and paste layer that turns client gestures into libghostty encoding, native selection, and copy-mode actions, plus the client-side local scroll overlay.
 resource: crates/zz-terminal/src/interaction.rs
 tags: [interaction, input, mouse, selection, paste, copy-mode, keyboard]
-timestamp: 2026-08-10T00:00:00Z
+timestamp: 2026-09-25T00:00:00Z
 ---
 
 # Overview
@@ -99,30 +99,55 @@ opener for unsupported schemes or when that window has no browser pane.
 
 # Local scroll (client side)
 
-Scrollbar drags and desktop page navigation do not always have to cost a round trip. When the pane is in
+Scrollbar drags and trackpad scrolling do not always have to cost a round trip. When the pane is in
 `Live` mode, mouse tracking is off, the scrollbar has room to move, and the pane's client-side `HistoryRing`
 holds rows,
-`TerminalView` (`crates/zz/src/terminal/view.rs`) records a `LocalScroll { target_offset, started }`
+`TerminalView` (`crates/zz/src/terminal/view.rs`) records a `LocalScroll { target_offset, .. }`
 and the next frame paints from the
 ring: rows above the live viewport come out of the ring, rows still inside it come from the server
 frame, rows the ring cannot cover yet paint as a dim shimmer, and the scrollbar thumb is drawn from
 the local target. Cursor, selection, and overlay spans are projected onto whatever slice of the live
-viewport remains visible. A target older than the ring's coverage or newer than the server's offset
-skips the overlay and takes the round trip instead, and a target near the cold edge of the ring
+viewport remains visible. A scrollbar target older than the ring's coverage or newer than the server's
+offset skips the overlay and takes the round trip instead, and a target near the cold edge of the ring
 triggers a `HistoryRequest` prefetch.
 
-An upward wheel still bypasses this overlay and asks the daemon, which owns rows the ring may not cover.
-If a local scrollbar position is still pending, the client sends its `ScrollToOffset` first and cancels the
-debounced duplicate; the ordered wheel action then lands on exactly the viewport the user was looking at.
+**Trackpad pixels.** A `ScrollDelta::Pixels` event (trackpad, Magic Mouse, macOS momentum, Wayland
+touchpad) on a terminal pane moves by pixels instead of whole rows. `TerminalView::sub_row` holds how far
+the content sits below the whole-row target, in `[0, line_height)`, and `pixel_scroll_position` carries
+each whole row into the local target in both directions. The position is clamped to what the client
+can paint: no newer than the server's offset (the live bottom when the server is there), and no older
+than the ring's oldest row, so the partial row peeking in at the top always comes from the ring and
+never from the shimmer. The renderer draws that row above the grid, shifts every row, the cursor, the
+overlays, and Kitty images down by the snapped offset, and clips them to the unshifted grid; hit
+testing subtracts the same offset. Popups and command-output panes keep whole rows.
 
-The daemon hears about it once. `ScrollToOffset(target)` goes out after a 120 ms
-`LOCAL_SCROLL_DEBOUNCE`, so one local navigation gesture sends one message rather than dozens. The overlay
-retires when the server's offset reaches the target, when the ring is invalidated, or after
-`LOCAL_SCROLL_TIMEOUT` of 2 s.
+The ring only covers rows above the server's viewport, so the daemon has to stay close to the gesture.
+`daemon_follow_offset` sends a `ScrollToOffset` half a screen below the target whenever the server's
+viewport, or the last one asked for, drifts more than a quarter screen too close (scrolling down) or
+three quarters too far (scrolling up). Scrolling down after a pause therefore stalls at most one round
+trip before the ring holds rows ahead, and the final sync never jumps a full screen, which would make
+the daemon's diff a full replacement and drop the ring. `LocalScroll` remembers the last requested
+offset and the lowest one still in flight; the gesture never moves past that lowest request, so the
+daemon never lands above rows already on screen.
+
+A discrete wheel (`ScrollDelta::Lines`), mouse-tracking apps, the alternate screen, copy mode, and a
+cold ring keep the whole-row path and drop any pixel offset. An upward whole-row wheel still bypasses
+the overlay and asks the daemon, which owns rows the ring may not cover. If a local position is still
+pending, the client sends its `ScrollToOffset` first and cancels the debounced duplicate; the ordered
+wheel action then lands on exactly the viewport the user was looking at. A mouse press does the same
+before its `Mouse` action, keeping the overlay until the daemon arrives, so a selection starts on the
+row under the pointer.
+
+The daemon hears the final position once. `ScrollToOffset(target)` goes out after a 120 ms
+`LOCAL_SCROLL_DEBOUNCE`, so one gesture sends the follow steps plus one sync rather than a message per row.
+The overlay retires when the server's offset reaches the target with no other request outstanding,
+when the ring is invalidated, or after `LOCAL_SCROLL_TIMEOUT` of 2 s. At rest the server sits on the
+target and `sub_row` stays local, so a pane can rest partway through a row.
 
 Input that moves the server's view outranks a pending sync. A keystroke, committed IME text, a paste,
 a search edit, and search next/previous all call `cancel_local_scroll`, which bumps the generation
-counter the debounced task captured, so the queued `ScrollToOffset` never fires.
+counter the debounced task captured, so the queued `ScrollToOffset` never fires, and clears `sub_row`.
+A ring invalidation, a failed gate, or a scrollbar drag clears it too.
 
 # Pane search and status (desktop)
 

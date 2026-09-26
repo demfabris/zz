@@ -121,6 +121,7 @@ impl Element for TerminalElement {
         let focused = view.focus().is_focused(window);
         let command_output = view.is_command_output();
         let local_scroll_target = view.local_scroll_target();
+        let scroll_pixel_offset = view.scroll_pixel_offset();
         let paint = self.row_cache.borrow_mut().prepaint(
             TerminalRenderInput {
                 viewport: &retained.viewport,
@@ -129,6 +130,7 @@ impl Element for TerminalElement {
                 history: Some(&retained.history),
                 images: Some(&*images),
                 local_scroll_target,
+                scroll_pixel_offset,
                 command_output,
                 appearance: &self.appearance,
                 appearance_hash: self.appearance_hash,
@@ -149,6 +151,7 @@ impl Element for TerminalElement {
                 geometry.surface_bounds,
                 geometry.cell_width,
                 geometry.line_height,
+                geometry.content_offset,
                 geometry.input_bounds,
                 geometry.link_hover_bounds,
                 cx,

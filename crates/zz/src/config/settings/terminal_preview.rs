@@ -194,6 +194,7 @@ impl Render for TerminalPreview {
                                         history: None,
                                         images: None,
                                         local_scroll_target: None,
+                                        scroll_pixel_offset: px(0.0),
                                         command_output: true,
                                         appearance: &appearance,
                                         appearance_hash: appearance.stable_hash(),

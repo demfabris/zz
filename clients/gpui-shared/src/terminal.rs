@@ -1235,6 +1235,7 @@ impl TerminalPane {
                         None
                     },
                     local_scroll_target: None,
+                    scroll_pixel_offset: px(0.0),
                     command_output: self.surface == TerminalSurface::CommandOutput,
                     appearance: &appearance,
                     appearance_hash: appearance.stable_hash(),

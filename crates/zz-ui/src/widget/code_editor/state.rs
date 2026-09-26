@@ -406,6 +406,7 @@ impl CodeEditorState {
         if self.render_text.as_ref() == value.as_ref() {
             return;
         }
+        let old_len = self.text.len();
         self.text = Rope::from(value.as_ref());
         self.render_text = value.as_ref().to_string().into();
         let end = self.text.len();
@@ -421,7 +422,8 @@ impl CodeEditorState {
         self.scroll = Point::default();
         self.reset_scroll = true;
         self.follow_cursor = false;
-        self.display_map.set_text(&self.text, cx);
+        self.display_map
+            .on_text_changed(&self.text, &(0..old_len), &self.text, cx);
         self.rebuild_highlighter();
         self.invalidate_shaping();
         cx.notify();
@@ -587,7 +589,7 @@ impl CodeEditorState {
             new_end_position,
         };
         self.display_map
-            .on_text_changed(&old_text, &range, &self.text, cx);
+            .on_text_changed(&self.text, &range, &Rope::from(inserted.as_str()), cx);
         self.update_highlighter(edit);
         self.invalidate_shaping();
         self.selected_range = (new_end..new_end).into();
@@ -627,7 +629,7 @@ impl CodeEditorState {
             new_end_position: self.text.offset_to_point(new_end),
         };
         self.display_map
-            .on_text_changed(&old_text, &range, &self.text, cx);
+            .on_text_changed(&self.text, &range, &Rope::from(inserted), cx);
         self.update_highlighter(edit);
         self.invalidate_shaping();
         self.selected_range = (new_end..new_end).into();
@@ -1432,6 +1434,64 @@ mod tests {
             editor.update(cx, |editor, cx| editor.undo(&Undo, window, cx));
         });
         assert_eq!(editor.read_with(cx, |editor, _| editor.value()), "");
+    }
+
+    #[gpui::test]
+    fn display_map_rows_follow_every_edit(cx: &mut gpui::TestAppContext) {
+        let (editor, cx) = with_editor(cx);
+        let assert_in_sync = |cx: &mut gpui::VisualTestContext| {
+            editor.read_with(cx, |editor, _| {
+                let map = &editor.display_map;
+                assert_eq!(map.text().to_string(), editor.text.to_string());
+                let rows = (0..map.buffer_line_count())
+                    .map(|row| map.line(row).map(|line| line.len()))
+                    .collect::<Vec<_>>();
+                let lines = editor
+                    .text
+                    .to_string()
+                    .split('\n')
+                    .map(|line| Some(line.len()))
+                    .collect::<Vec<_>>();
+                assert_eq!(rows, lines);
+            });
+        };
+
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.set_value("one\ntwo\nthree\nfour", window, cx);
+                editor.set_selected_range(4..4, cx);
+            });
+        });
+        assert_in_sync(cx);
+
+        type_text(&editor, "x", cx);
+        assert_in_sync(cx);
+        type_text(&editor, "\nnew", cx);
+        assert_in_sync(cx);
+
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.set_selected_range(8..14, cx);
+                editor.backspace(&Backspace, window, cx);
+            });
+        });
+        assert_in_sync(cx);
+
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| editor.undo(&Undo, window, cx));
+        });
+        assert_in_sync(cx);
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| editor.redo(&Redo, window, cx));
+        });
+        assert_in_sync(cx);
+
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| editor.set_value("short", window, cx));
+        });
+        assert_in_sync(cx);
+        type_text(&editor, "\nend", cx);
+        assert_in_sync(cx);
     }
 
     #[gpui::test]

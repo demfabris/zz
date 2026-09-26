@@ -25,8 +25,8 @@ const SMALL_TEXT_SIZE: f32 = 13.;
 pub enum InputContentType {
     Url,
     EmailAddress,
-    /// A password: the rendered text is masked, single-line only. The value is
-    /// untouched, so copy still yields the real text.
+    /// A password: the rendered text is masked, single-line only. Copy and cut
+    /// do nothing, and word motions treat the value as one word.
     Password,
 }
 

@@ -620,6 +620,9 @@ impl InputState {
     }
 
     fn previous_word_start(&self, from: usize) -> usize {
+        if self.masked {
+            return 0;
+        }
         let text: &str = &self.text;
         let from = self.clamp_offset(from);
         let mut offset = from;
@@ -649,6 +652,9 @@ impl InputState {
     }
 
     fn next_word_end(&self, from: usize) -> usize {
+        if self.masked {
+            return self.text.len();
+        }
         let text: &str = &self.text;
         let from = self.clamp_offset(from);
         let mut offset = from;
@@ -690,6 +696,9 @@ impl InputState {
     }
 
     fn word_range_at(&self, offset: usize) -> Range<usize> {
+        if self.masked {
+            return 0..self.text.len();
+        }
         let text: &str = &self.text;
         let offset = self.clamp_offset(offset);
         let before = text[..offset].chars().next_back().map(class_of);
@@ -1181,8 +1190,12 @@ impl InputState {
 }
 
 impl InputState {
+    fn is_copyable(&self) -> bool {
+        !self.masked && !self.selection.is_empty()
+    }
+
     fn selected_text(&self) -> Option<String> {
-        if self.selection.is_empty() {
+        if !self.is_copyable() {
             return None;
         }
         let text: &str = &self.text;
@@ -1384,7 +1397,7 @@ impl InputState {
         let state = cx.entity();
         let focus_handle = self.focus_handle.clone();
         let editable = !self.disabled;
-        let has_selection = !self.selection.is_empty();
+        let copyable = self.is_copyable();
         let has_text = !self.text.is_empty();
         let can_paste = cx
             .read_from_clipboard()
@@ -1395,20 +1408,16 @@ impl InputState {
             menu.action_context(focus_handle)
                 .item(
                     PopupMenuItem::new("Cut")
-                        .disabled(!editable || !has_selection)
+                        .disabled(!editable || !copyable)
                         .on_click({
                             let state = state.clone();
                             move |_, _, cx| state.update(cx, InputState::cut_selection)
                         }),
                 )
-                .item(
-                    PopupMenuItem::new("Copy")
-                        .disabled(!has_selection)
-                        .on_click({
-                            let state = state.clone();
-                            move |_, _, cx| state.update(cx, InputState::copy_selection)
-                        }),
-                )
+                .item(PopupMenuItem::new("Copy").disabled(!copyable).on_click({
+                    let state = state.clone();
+                    move |_, _, cx| state.update(cx, InputState::copy_selection)
+                }))
                 .item(
                     PopupMenuItem::new("Paste")
                         .disabled(!editable || !can_paste)
@@ -1815,6 +1824,60 @@ mod tests {
         let value = state.read_with(cx, |state, _| state.value().to_string());
         let heard = heard.borrow().clone();
         (value, heard)
+    }
+
+    #[gpui::test]
+    fn a_masked_field_keeps_its_value_out_of_the_clipboard(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let (state, cx) = cx.add_window_view(InputState::new);
+        let cx: &mut gpui::VisualTestContext = cx;
+        let clipboard = |cx: &mut gpui::VisualTestContext| {
+            cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()))
+        };
+        cx.update(|window, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string("sentinel".to_owned()));
+            state.update(cx, |state, cx| {
+                state.set_value("hunter2", window, cx);
+                state.masked = true;
+                state.set_selection(0..7, false, cx);
+                state.copy_selection(cx);
+                state.cut_selection(cx);
+            });
+        });
+        assert_eq!(clipboard(cx).as_deref(), Some("sentinel"));
+        assert_eq!(
+            state.read_with(cx, |state, _| state.value().to_string()),
+            "hunter2"
+        );
+        assert!(!state.read_with(cx, |state, _| state.is_copyable()));
+
+        state.update(cx, |state, cx| {
+            state.masked = false;
+            assert!(state.is_copyable());
+            state.copy_selection(cx);
+        });
+        assert_eq!(clipboard(cx).as_deref(), Some("hunter2"));
+    }
+
+    #[gpui::test]
+    fn a_masked_field_hides_its_word_boundaries(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let (state, cx) = cx.add_window_view(InputState::new);
+        let cx: &mut gpui::VisualTestContext = cx;
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| {
+                state.set_value("aaa bbb ccc", window, cx);
+                state.masked = true;
+                assert_eq!(state.previous_word_start(7), 0);
+                assert_eq!(state.next_word_end(4), 11);
+                assert_eq!(state.word_range_at(5), 0..11);
+
+                state.masked = false;
+                assert_eq!(state.previous_word_start(7), 4);
+                assert_eq!(state.next_word_end(4), 7);
+                assert_eq!(state.word_range_at(5), 4..7);
+            });
+        });
     }
 
     #[gpui::test]

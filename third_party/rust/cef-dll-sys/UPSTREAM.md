@@ -23,10 +23,12 @@ threads, and function pointers can outlive individual sessions.
 Linux ARM64 and Windows forward upstream unchanged. macOS forwards upstream
 bindings and native wrapper builds, and adds the wrapper's required `libc++`
 link dependency. This keeps consumers of CEF's scoped loader independent of
-whether another crate happens to link the C++ runtime. Native ARM64
-qualification remains outstanding: CEF reports include static TLS allocation
-failures when loading Chromium with `dlopen`
-([CEF issue 3803](https://github.com/chromiumembedded/cef/issues/3803)).
+whether another crate happens to link the C++ runtime. Linux ARM64 keeps the
+upstream link because deferred loading there has not been qualified. The static
+TLS failure that used to block loading `libcef.so` with `dlopen` on ARM64
+([CEF issue 3803](https://github.com/chromiumembedded/cef/issues/3803)) was
+fixed in CEF M139, so what remains is running the loading tests and the native
+browser checks on ARM64 hardware.
 
 ## Updating the pin
 

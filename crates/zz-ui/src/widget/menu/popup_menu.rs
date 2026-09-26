@@ -731,10 +731,7 @@ impl PopupMenu {
     }
 
     fn dismiss(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
-        if self.active_submenu().is_some() {
-            return;
-        }
-
+        self.selected_index = None;
         cx.emit(DismissEvent);
 
         let focus_moved_away =
@@ -754,7 +751,6 @@ impl PopupMenu {
         };
 
         _ = parent_menu.update(cx, |view, cx| {
-            view.selected_index = None;
             view.dismiss(&Cancel, window, cx);
         });
     }
@@ -771,6 +767,10 @@ impl PopupMenu {
                     return;
                 }
             }
+        }
+
+        if self.active_submenu().is_some() {
+            return;
         }
 
         self.dismiss(&Cancel, window, cx);
@@ -1369,6 +1369,101 @@ mod tests {
         let (_, child) = draw(cx);
         cx.simulate_mouse_move(child, None, gpui::Modifiers::default());
         draw(cx);
+    }
+
+    fn menu_with_open_submenu(
+        clicks: Rc<std::cell::Cell<usize>>,
+        cx: &mut gpui::TestAppContext,
+    ) -> (
+        Entity<PopupMenu>,
+        Rc<std::cell::Cell<usize>>,
+        &mut gpui::VisualTestContext,
+    ) {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        struct Host(Entity<PopupMenu>);
+        impl Render for Host {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                v_flex().size_full().items_start().child(self.0.clone())
+            }
+        }
+        let (host, cx) = cx.add_window_view(|window, cx| {
+            Host(cx.new(|cx| {
+                let mut menu = PopupMenu::new(cx).submenu_with_icon(
+                    None,
+                    "More",
+                    window,
+                    cx,
+                    move |mut submenu, _, _| {
+                        let clicks = Rc::clone(&clicks);
+                        submenu = submenu.item(
+                            PopupMenuItem::new("Open")
+                                .on_click(move |_, _, _| clicks.set(clicks.get() + 1)),
+                        );
+                        submenu.selected_index = Some(0);
+                        submenu
+                    },
+                );
+                menu.selected_index = Some(0);
+                menu.focus_handle.focus(window, cx);
+                menu
+            }))
+        });
+        let menu = host.read_with(cx, |host, _| host.0.clone());
+        let dismissed = Rc::new(std::cell::Cell::new(0));
+        let count = Rc::clone(&dismissed);
+        cx.update(|window, cx| {
+            window
+                .subscribe(&menu, cx, move |_, _: &DismissEvent, _, _| {
+                    count.set(count.get() + 1)
+                })
+                .detach();
+        });
+        (menu, dismissed, cx)
+    }
+
+    #[gpui::test]
+    fn escape_closes_the_chain_while_a_hovered_submenu_is_open(cx: &mut gpui::TestAppContext) {
+        let clicks = Rc::new(std::cell::Cell::new(0));
+        let (menu, dismissed, cx) = menu_with_open_submenu(Rc::clone(&clicks), cx);
+        assert!(menu.read_with(cx, |menu, _| menu.active_submenu().is_some()));
+
+        cx.simulate_keystrokes("escape");
+
+        assert_eq!(dismissed.get(), 1);
+        assert!(menu.read_with(cx, |menu, _| menu.active_submenu().is_none()));
+        assert_eq!(clicks.get(), 0);
+    }
+
+    #[gpui::test]
+    fn clicking_a_submenu_item_runs_it_before_the_chain_closes(cx: &mut gpui::TestAppContext) {
+        let clicks = Rc::new(std::cell::Cell::new(0));
+        let (menu, dismissed, cx) = menu_with_open_submenu(Rc::clone(&clicks), cx);
+        cx.run_until_parked();
+        let leaf = cx.update(|window, cx| {
+            _ = window.draw(cx);
+            let quad = window
+                .painted_quads()
+                .into_iter()
+                .find(|quad| {
+                    quad.background == gpui::solid_background(cx.theme().selection_background())
+                })
+                .expect("selected submenu leaf");
+            let center = quad.bounds.center();
+            gpui::point(
+                px(center.x.0 / window.scale_factor()),
+                px(center.y.0 / window.scale_factor()),
+            )
+        });
+
+        assert!(!menu.read_with(cx, |menu, _| menu.bounds.contains(&leaf)));
+
+        cx.simulate_click(leaf, gpui::Modifiers::default());
+
+        assert_eq!(clicks.get(), 1);
+        assert_eq!(dismissed.get(), 1);
     }
 
     #[gpui::test]

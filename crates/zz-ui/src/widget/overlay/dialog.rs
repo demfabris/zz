@@ -351,8 +351,9 @@ impl RenderOnce for Dialog {
             .min((view_size.width - EDGE_MARGIN * 2.).max(px(0.)));
         let x = (view_size.width - width) / 2.;
         #[allow(clippy::cast_precision_loss)]
-        let y = view_size.height / 10. + px(layer_ix as f32 * LAYER_OFFSET);
-        let max_height = (view_size.height - y - EDGE_MARGIN).max(px(0.));
+        let layer_offset = px(layer_ix as f32 * LAYER_OFFSET);
+        let top_room = (view_size.height / 10. - EDGE_MARGIN).max(px(0.));
+        let max_height = (view_size.height - EDGE_MARGIN * 2. - layer_offset).max(px(0.));
 
         let animation = Animation::new(ANIMATION_DURATION).with_easing(ease_out_quint());
         let shadow_color = cx.theme().scrim;
@@ -401,8 +402,8 @@ impl RenderOnce for Dialog {
             .absolute()
             .occlude()
             .relative()
+            .flex_shrink_0()
             .left(x)
-            .top(y)
             .w(width)
             .max_h(max_height)
             .child(
@@ -475,7 +476,7 @@ impl RenderOnce for Dialog {
                     inset: false,
                 },
             ]);
-        let body = surface_enter(body, "dialog-open", y);
+        let body = surface_enter(body, "dialog-open", px(0.));
 
         anchored()
             .position(point(paddings.left, paddings.top))
@@ -486,6 +487,10 @@ impl RenderOnce for Dialog {
                     .occlude()
                     .w(view_size.width)
                     .h(view_size.height)
+                    .flex()
+                    .flex_col()
+                    .pt(EDGE_MARGIN + layer_offset)
+                    .pb(EDGE_MARGIN)
                     .when(is_topmost, |this| {
                         this.window_control_area(WindowControlArea::Drag)
                             .on_any_mouse_down(move |event, window, cx| {
@@ -503,6 +508,7 @@ impl RenderOnce for Dialog {
                                 }
                             })
                     })
+                    .child(div().flex_shrink_1().flex_basis(top_room))
                     .child(body)
                     .with_animation(
                         ("dialog-backdrop", self.instance_id),
@@ -739,6 +745,36 @@ mod tests {
             "{bounds:?}"
         );
         assert!(footer.bottom() <= bounds.bottom(), "{footer:?} {bounds:?}");
+    }
+
+    #[gpui::test]
+    fn an_oversized_dialog_moves_up_to_the_edge_margin(cx: &mut TestAppContext) {
+        let viewport = size(px(360.), px(600.));
+        let cx = window(cx, viewport);
+        open(cx, |dialog, _, _| {
+            dialog.title("Tall").child(div().h(px(1000.)))
+        });
+
+        let bounds = surface(cx, 0);
+        assert_eq!(bounds.origin.y, EDGE_MARGIN);
+        assert_eq!(bounds.bottom(), viewport.height - EDGE_MARGIN);
+    }
+
+    #[gpui::test]
+    fn a_dialog_that_almost_fits_rises_only_as_far_as_it_must(cx: &mut TestAppContext) {
+        let viewport = size(px(1000.), px(800.));
+        let cx = window(cx, viewport);
+        open(cx, |dialog, _, _| {
+            dialog
+                .title("Nearly")
+                .child(div().h(px(650.)))
+                .footer(div().h(px(32.)))
+        });
+
+        let bounds = surface(cx, 0);
+        assert!(bounds.origin.y > EDGE_MARGIN, "{bounds:?}");
+        assert!(bounds.origin.y < px(80.), "{bounds:?}");
+        assert_eq!(bounds.bottom(), viewport.height - EDGE_MARGIN);
     }
 
     #[gpui::test]

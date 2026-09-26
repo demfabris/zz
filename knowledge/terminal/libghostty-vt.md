@@ -11,7 +11,8 @@ timestamp: 2026-09-25T23:59:00-03:00
 
 `libghostty-vt` is the VT engine inside [`zz-terminal`](/crates/zz-terminal.md). The
 workspace pins `Uzaaft/libghostty-rs` commit `359ef751c189540eafb9110b2de89ad95ce48fc3` exactly,
-with `default-features = false`. That is the head of the open stacked PR #99 (render hold and the
+fetched from the `demfabris/libghostty-rs` fork (branch `zz-2026-09-25`), with
+`default-features = false`. That is the head of the open stacked PR #99 (render hold and the
 resize scrollback pull option, over #84's Ghostty `56dbc4a` bindings and #83's Kitty PNG fixes);
 no crates.io release after v0.2.1 carries the updated C API. The `-vt` crate is a safe Rust binding
 over `libghostty-vt-sys`, and the workspace replaces that sys crate with the local snapshot documented

@@ -56,7 +56,7 @@ getrandom = "0.4.3"
 image = { version = "=0.25.10", default-features = false }
 libc = "0.2.189"
 interprocess = "2.4.4"
-libghostty-vt = { version = "=0.2.1", git = "https://github.com/uzaaft/libghostty-rs", rev = "359ef751c189540eafb9110b2de89ad95ce48fc3", default-features = false }
+libghostty-vt = { version = "=0.2.1", git = "https://github.com/demfabris/libghostty-rs", rev = "359ef751c189540eafb9110b2de89ad95ce48fc3", default-features = false }
 log = "0.4.34"
 merman = { version = "=0.6.2", features = ["render"] }
 mimalloc = "0.1.52"
@@ -98,7 +98,7 @@ zeroize = "=1.9.0"
 [patch.crates-io]
 cef-dll-sys = { path = "third_party/rust/cef-dll-sys" }
 
-[patch."https://github.com/uzaaft/libghostty-rs"]
+[patch."https://github.com/demfabris/libghostty-rs"]
 libghostty-vt-sys = { path = "third_party/rust/libghostty-vt-sys" }
 
 [patch."https://github.com/zed-industries/zed"]

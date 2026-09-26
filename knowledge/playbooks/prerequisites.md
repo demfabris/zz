@@ -78,7 +78,7 @@ components = ["clippy", "rustfmt"]
 | `rust-toolchain.toml` | Pins the Rust channel and required components |
 | `mise.toml` | Selects Zig 0.16.0 for raw local Cargo commands when mise is active |
 | `.zigversion` | Mirrors the Zig pin for compatible Zig-specific tooling |
-| `Cargo.toml` | `workspace.package.rust-version = "1.97"`; `libghostty-vt` pinned to a `Uzaaft/libghostty-rs` commit plus the local `libghostty-vt-sys` patch |
+| `Cargo.toml` | `workspace.package.rust-version = "1.97"`; `libghostty-vt` pinned to a `Uzaaft/libghostty-rs` commit (fetched from the `demfabris/libghostty-rs` fork) plus the local `libghostty-vt-sys` patch |
 | `third_party/rust/libghostty-vt-sys/UPSTREAM.md` | Records the wrapper commit, Ghostty `6fce227c` fork pin and upstream base, generated bindings, and removal condition |
 | `.github/workflows/ci.yml` | Authoritative list of Linux system packages and the Zig setup action, run across `ubuntu-24.04`, `macos-15`, `windows-2025` |
 | `packaging/arch/PKGBUILD` | Native Arch package metadata and filesystem layout for the validated Linux bundle |

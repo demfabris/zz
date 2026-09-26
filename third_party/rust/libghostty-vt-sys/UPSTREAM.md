@@ -11,8 +11,11 @@ This directory is a source snapshot of `libghostty-vt-sys` from
 - Local Ghostty pin: [`demfabris/ghostty@6fce227c`](https://github.com/demfabris/ghostty/commit/6fce227c55d288e35c9fedfd090f286cc74a8ad8)
 - Fork branch: `zz-2026-09-25`; the previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
 - License: MIT OR Apache-2.0; the upstream MIT license is retained here.
+- Wrapper source: [`demfabris/libghostty-rs`](https://github.com/demfabris/libghostty-rs)
+  branch `zz-2026-09-25`, a fork holding the same commit so a rebase of the PR branch
+  cannot make it unfetchable.
 - Local override: the workspace patches the git-sourced sys package to this adjacent
-  snapshot. The safe wrapper is not vendored: `libghostty-vt` resolves to upstream
+  snapshot. The safe wrapper is not vendored: `libghostty-vt` resolves to the fork
   at the same commit.
 
 ## Why an unreleased wrapper
@@ -26,9 +29,10 @@ behind `6301810a`. The only header change in those ten commits is additive (rend
 overscan and row ids), so the wrapper at #99 builds unchanged and its 22 unit tests, 3 sys
 tests, and 20 doctests pass against `6301810a` with bindings regenerated from its headers.
 
-The wrapper commit lives on a PR branch that Uzaaft rebases. Cargo fetches it by rev,
-which works while GitHub keeps the object. Move to the first libghostty-rs release that
-contains this stack (likely 0.3.0) as soon as it exists.
+The wrapper commit lives on a PR branch that Uzaaft rebases, so the workspace fetches it
+from the `demfabris/libghostty-rs` fork, where branch `zz-2026-09-25` keeps it reachable.
+Move back to upstream at the first libghostty-rs release that contains this stack (likely
+0.3.0), and change both the dependency URL and the `[patch]` key in `Cargo.toml`.
 
 ## Local delta
 

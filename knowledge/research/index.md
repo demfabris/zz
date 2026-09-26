@@ -9,4 +9,5 @@
 * [Agent-to-agent messaging survey](2026-09-10-agent-messaging-survey.md) - How Claude Code, Codex, Gemini CLI, herdr, A2A, and ACP let one coding agent message another, with Claude Code's peer bus verified live on this machine, the delivery-timing taxonomy every tool converged on, and what it means for a zz message backbone.
 * [Interactive bughunt: Agent transcripts, Markdown, and terminal resizing](2026-09-16-interactive-bughunt.md) - Running investigation of disappearing Agent user messages in both providers, inline-code wrapping, and terminal corruption after pane or GUI resizing.
 * [macOS CPU, GPU, and memory investigation](2026-09-23-macos-performance.md) - Measured macOS resource costs, proven improvements, and deferred protocol and renderer designs from the September 2026 performance investigation.
+* [Terminal augmentation survey](2026-09-25-terminal-augmentation-survey.md) - Which tmux plugins, terminal features, and agent-era tools augment the shell with overlays (pickers, hints, command blocks, agent inboxes), how each one works, what zz already has to build them natively, and a ranked idea list with mockups.
 <!-- okf:listing:end -->

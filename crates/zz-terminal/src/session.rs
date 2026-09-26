@@ -3,6 +3,7 @@ use std::io::Read;
 use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
+    convert::Infallible,
     io::Write,
     path::PathBuf,
     rc::Rc,
@@ -1499,6 +1500,39 @@ pub enum RawOutputTapError {
     Unavailable,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActorRequestError {
+    TimedOut,
+    ActorStopped,
+}
+
+impl From<ActorRequestError> for TerminalCaptureError {
+    fn from(error: ActorRequestError) -> Self {
+        match error {
+            ActorRequestError::TimedOut => Self::TimedOut,
+            ActorRequestError::ActorStopped => Self::ActorStopped,
+        }
+    }
+}
+
+impl From<ActorRequestError> for KittyImageRequestError {
+    fn from(error: ActorRequestError) -> Self {
+        match error {
+            ActorRequestError::TimedOut => Self::TimedOut,
+            ActorRequestError::ActorStopped => Self::ActorStopped,
+        }
+    }
+}
+
+impl From<ActorRequestError> for RawOutputTapError {
+    fn from(error: ActorRequestError) -> Self {
+        match error {
+            ActorRequestError::TimedOut => Self::TimedOut,
+            ActorRequestError::ActorStopped => Self::ActorStopped,
+        }
+    }
+}
+
 impl std::fmt::Debug for TerminalSession {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -1522,10 +1556,12 @@ impl TerminalSession {
         let (command_tx, command_rx) = command_channel();
         let (input_tx, input_rx) = input_channel();
         let (wake, wake_rx) = actor_wake();
+        let (alive, liveness) = crossbeam_channel::bounded(0);
         let commands = CommandSender {
             queues: Box::new(CommandQueues {
                 control: command_tx,
                 input: Some(input_tx),
+                liveness,
             }),
             wake: wake.clone(),
         };
@@ -1562,6 +1598,7 @@ impl TerminalSession {
                     wake,
                     wake_rx,
                 );
+                drop(alive);
             })
         {
             publisher.fail(&WorkerError::Thread(error.to_string()));
@@ -1643,10 +1680,12 @@ impl TerminalSession {
         frozen: bool,
     ) -> Self {
         let (command_tx, command_rx) = command_channel();
+        let (alive, liveness) = crossbeam_channel::bounded(0);
         let commands = CommandSender {
             queues: Box::new(CommandQueues {
                 control: command_tx,
                 input: None,
+                liveness,
             }),
             wake: ActorWake::none(),
         };
@@ -1684,6 +1723,7 @@ impl TerminalSession {
                     max_scrollback,
                     frozen,
                 );
+                drop(alive);
             })
         {
             publisher.fail(&WorkerError::Thread(error.to_string()));
@@ -1777,24 +1817,8 @@ impl TerminalSession {
     /// `window_copy_clone_screen` runs on the source pane, so the revision a
     /// `copy-mode -s` entry needs has to be built on that pane's own worker.
     pub fn capture_copy_source(&self) -> Result<CapturedCopySource, TerminalCaptureError> {
-        let (reply, response) = crossbeam_channel::bounded(1);
-        let started = Instant::now();
         self.commands
-            .send_timeout(Command::CaptureCopySource { reply }, CAPTURE_TIMEOUT)
-            .map_err(|error| match error {
-                crossbeam_channel::SendTimeoutError::Timeout(_) => TerminalCaptureError::TimedOut,
-                crossbeam_channel::SendTimeoutError::Disconnected(_) => {
-                    TerminalCaptureError::ActorStopped
-                }
-            })?;
-        response
-            .recv_timeout(CAPTURE_TIMEOUT.saturating_sub(started.elapsed()))
-            .map_err(|error| match error {
-                crossbeam_channel::RecvTimeoutError::Timeout => TerminalCaptureError::TimedOut,
-                crossbeam_channel::RecvTimeoutError::Disconnected => {
-                    TerminalCaptureError::ActorStopped
-                }
-            })?
+            .request(|reply| Command::CaptureCopySource { reply })?
     }
 
     /// Hands a retained pane its expanded `remain-on-exit-format` while the
@@ -1872,27 +1896,9 @@ impl TerminalSession {
 
     /// Copy one stored Kitty image from the actor-owned VT as premultiplied BGRA8.
     pub fn kitty_image(&self, image_id: u32) -> Result<Option<KittyImage>, KittyImageRequestError> {
-        let (reply, response) = crossbeam_channel::bounded(1);
-        let started = Instant::now();
         self.commands
-            .send_timeout(
-                Command::KittyImage(Box::new(KittyImageRequest { image_id, reply })),
-                CAPTURE_TIMEOUT,
-            )
-            .map_err(|error| match error {
-                crossbeam_channel::SendTimeoutError::Timeout(_) => KittyImageRequestError::TimedOut,
-                crossbeam_channel::SendTimeoutError::Disconnected(_) => {
-                    KittyImageRequestError::ActorStopped
-                }
-            })?;
-        response
-            .recv_timeout(CAPTURE_TIMEOUT.saturating_sub(started.elapsed()))
-            .map_err(|error| match error {
-                crossbeam_channel::RecvTimeoutError::Timeout => KittyImageRequestError::TimedOut,
-                crossbeam_channel::RecvTimeoutError::Disconnected => {
-                    KittyImageRequestError::ActorStopped
-                }
-            })
+            .request(|reply| Command::KittyImage(Box::new(KittyImageRequest { image_id, reply })))
+            .map_err(Into::into)
     }
 
     /// Read an image's current storage generation without copying its pixels.
@@ -1900,30 +1906,14 @@ impl TerminalSession {
         &self,
         image_id: u32,
     ) -> Result<Option<u64>, KittyImageRequestError> {
-        let (reply, response) = crossbeam_channel::bounded(1);
-        let started = Instant::now();
         self.commands
-            .send_timeout(
+            .request(|reply| {
                 Command::KittyImageGeneration(Box::new(KittyImageGenerationRequest {
                     image_id,
                     reply,
-                })),
-                CAPTURE_TIMEOUT,
-            )
-            .map_err(|error| match error {
-                crossbeam_channel::SendTimeoutError::Timeout(_) => KittyImageRequestError::TimedOut,
-                crossbeam_channel::SendTimeoutError::Disconnected(_) => {
-                    KittyImageRequestError::ActorStopped
-                }
-            })?;
-        response
-            .recv_timeout(CAPTURE_TIMEOUT.saturating_sub(started.elapsed()))
-            .map_err(|error| match error {
-                crossbeam_channel::RecvTimeoutError::Timeout => KittyImageRequestError::TimedOut,
-                crossbeam_channel::RecvTimeoutError::Disconnected => {
-                    KittyImageRequestError::ActorStopped
-                }
+                }))
             })
+            .map_err(Into::into)
     }
 
     #[must_use]
@@ -2064,55 +2054,21 @@ impl TerminalSession {
         token: u64,
         output: Sender<Arc<[u8]>>,
     ) -> Result<(), RawOutputTapError> {
-        let (reply, response) = crossbeam_channel::bounded(1);
-        let started = Instant::now();
-        self.commands
-            .send_timeout(
-                Command::ArmRawOutputTap {
-                    token,
-                    output,
-                    reply,
-                },
-                CAPTURE_TIMEOUT,
-            )
-            .map_err(|error| match error {
-                crossbeam_channel::SendTimeoutError::Timeout(_) => RawOutputTapError::TimedOut,
-                crossbeam_channel::SendTimeoutError::Disconnected(_) => {
-                    RawOutputTapError::ActorStopped
-                }
-            })?;
-        match response.recv_timeout(CAPTURE_TIMEOUT.saturating_sub(started.elapsed())) {
-            Ok(true) => Ok(()),
-            Ok(false) => Err(RawOutputTapError::Unavailable),
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => Err(RawOutputTapError::TimedOut),
-            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                Err(RawOutputTapError::ActorStopped)
-            }
+        if self.commands.request(|reply| Command::ArmRawOutputTap {
+            token,
+            output,
+            reply,
+        })? {
+            Ok(())
+        } else {
+            Err(RawOutputTapError::Unavailable)
         }
     }
 
     pub fn disarm_raw_output_tap(&self, token: u64) -> Result<(), RawOutputTapError> {
-        let (reply, response) = crossbeam_channel::bounded(1);
-        let started = Instant::now();
         self.commands
-            .send_timeout(
-                Command::DisarmRawOutputTap { token, reply },
-                CAPTURE_TIMEOUT,
-            )
-            .map_err(|error| match error {
-                crossbeam_channel::SendTimeoutError::Timeout(_) => RawOutputTapError::TimedOut,
-                crossbeam_channel::SendTimeoutError::Disconnected(_) => {
-                    RawOutputTapError::ActorStopped
-                }
-            })?;
-        response
-            .recv_timeout(CAPTURE_TIMEOUT.saturating_sub(started.elapsed()))
-            .map_err(|error| match error {
-                crossbeam_channel::RecvTimeoutError::Timeout => RawOutputTapError::TimedOut,
-                crossbeam_channel::RecvTimeoutError::Disconnected => {
-                    RawOutputTapError::ActorStopped
-                }
-            })
+            .request(|reply| Command::DisarmRawOutputTap { token, reply })
+            .map_err(Into::into)
     }
 
     /// Open the observation window that binds one pasted image to the next
@@ -2140,56 +2096,21 @@ impl TerminalSession {
         column: u16,
         row: u16,
     ) -> Result<PointerContext, TerminalCaptureError> {
-        let (reply, response) = crossbeam_channel::bounded(1);
-        let started = Instant::now();
         self.commands
-            .send_timeout(
+            .request(|reply| {
                 Command::PointerContext(Box::new(PointerContextRequest {
                     view,
                     column,
                     row,
                     reply,
-                })),
-                CAPTURE_TIMEOUT,
-            )
-            .map_err(|error| match error {
-                crossbeam_channel::SendTimeoutError::Timeout(_) => TerminalCaptureError::TimedOut,
-                crossbeam_channel::SendTimeoutError::Disconnected(_) => {
-                    TerminalCaptureError::ActorStopped
-                }
-            })?;
-        response
-            .recv_timeout(CAPTURE_TIMEOUT.saturating_sub(started.elapsed()))
-            .map_err(|error| match error {
-                crossbeam_channel::RecvTimeoutError::Timeout => TerminalCaptureError::TimedOut,
-                crossbeam_channel::RecvTimeoutError::Disconnected => {
-                    TerminalCaptureError::ActorStopped
-                }
+                }))
             })
+            .map_err(Into::into)
     }
 
     pub fn capture(&self, options: CaptureOptions) -> Result<String, TerminalCaptureError> {
-        let (reply, response) = crossbeam_channel::bounded(1);
-        let started = Instant::now();
         self.commands
-            .send_timeout(
-                Command::Capture(Box::new(CaptureRequest { options, reply })),
-                CAPTURE_TIMEOUT,
-            )
-            .map_err(|error| match error {
-                crossbeam_channel::SendTimeoutError::Timeout(_) => TerminalCaptureError::TimedOut,
-                crossbeam_channel::SendTimeoutError::Disconnected(_) => {
-                    TerminalCaptureError::ActorStopped
-                }
-            })?;
-        response
-            .recv_timeout(CAPTURE_TIMEOUT.saturating_sub(started.elapsed()))
-            .map_err(|error| match error {
-                crossbeam_channel::RecvTimeoutError::Timeout => TerminalCaptureError::TimedOut,
-                crossbeam_channel::RecvTimeoutError::Disconnected => {
-                    TerminalCaptureError::ActorStopped
-                }
-            })?
+            .request(|reply| Command::Capture(Box::new(CaptureRequest { options, reply })))?
     }
 
     /// Answers `capture-pane` on a pane whose worker has already returned. The
@@ -2232,31 +2153,13 @@ impl TerminalSession {
         ),
         TerminalCaptureError,
     > {
-        let (reply, response) = crossbeam_channel::bounded(1);
-        let started = Instant::now();
-        self.commands
-            .send_timeout(
-                Command::History(Box::new(HistoryCommand {
-                    start,
-                    count,
-                    reply,
-                })),
-                CAPTURE_TIMEOUT,
-            )
-            .map_err(|error| match error {
-                crossbeam_channel::SendTimeoutError::Timeout(_) => TerminalCaptureError::TimedOut,
-                crossbeam_channel::SendTimeoutError::Disconnected(_) => {
-                    TerminalCaptureError::ActorStopped
-                }
-            })?;
-        response
-            .recv_timeout(CAPTURE_TIMEOUT.saturating_sub(started.elapsed()))
-            .map_err(|error| match error {
-                crossbeam_channel::RecvTimeoutError::Timeout => TerminalCaptureError::TimedOut,
-                crossbeam_channel::RecvTimeoutError::Disconnected => {
-                    TerminalCaptureError::ActorStopped
-                }
-            })?
+        self.commands.request(|reply| {
+            Command::History(Box::new(HistoryCommand {
+                start,
+                count,
+                reply,
+            }))
+        })?
     }
 
     /// Extracts the last completed command and its output from the pane actor.
@@ -2267,27 +2170,8 @@ impl TerminalSession {
     /// [`TerminalCaptureError::NoSemanticMarks`] when the shell emits no OSC 133
     /// marks, plus the same failures as [`Self::capture`].
     pub fn capture_last_command(&self) -> Result<LastCommandCapture, TerminalCaptureError> {
-        let (reply, response) = crossbeam_channel::bounded(1);
-        let started = Instant::now();
         self.commands
-            .send_timeout(
-                Command::SemanticCapture(Box::new(LastCommandRequest { reply })),
-                CAPTURE_TIMEOUT,
-            )
-            .map_err(|error| match error {
-                crossbeam_channel::SendTimeoutError::Timeout(_) => TerminalCaptureError::TimedOut,
-                crossbeam_channel::SendTimeoutError::Disconnected(_) => {
-                    TerminalCaptureError::ActorStopped
-                }
-            })?;
-        response
-            .recv_timeout(CAPTURE_TIMEOUT.saturating_sub(started.elapsed()))
-            .map_err(|error| match error {
-                crossbeam_channel::RecvTimeoutError::Timeout => TerminalCaptureError::TimedOut,
-                crossbeam_channel::RecvTimeoutError::Disconnected => {
-                    TerminalCaptureError::ActorStopped
-                }
-            })?
+            .request(|reply| Command::SemanticCapture(Box::new(LastCommandRequest { reply })))?
     }
 
     /// Feed bytes straight into a PTY-free session's parser, as if a child
@@ -2742,6 +2626,7 @@ fn actor_wake() -> (ActorWake, WakeReceiver) {
 struct CommandQueues {
     control: Sender<Command>,
     input: Option<InputSender>,
+    liveness: Receiver<Infallible>,
 }
 
 struct CommandSender {
@@ -2790,6 +2675,30 @@ impl CommandSender {
             self.wake.notify();
         }
         result
+    }
+
+    fn request<T>(
+        &self,
+        command: impl FnOnce(Sender<T>) -> Command,
+    ) -> Result<T, ActorRequestError> {
+        let (reply, response) = crossbeam_channel::bounded(1);
+        let started = Instant::now();
+        self.send_timeout(command(reply), CAPTURE_TIMEOUT)
+            .map_err(|error| match error {
+                crossbeam_channel::SendTimeoutError::Timeout(_) => ActorRequestError::TimedOut,
+                crossbeam_channel::SendTimeoutError::Disconnected(_) => {
+                    ActorRequestError::ActorStopped
+                }
+            })?;
+        crossbeam_channel::select_biased! {
+            recv(response) -> reply => reply.map_err(|_| ActorRequestError::ActorStopped),
+            recv(self.queues.liveness) -> _ => {
+                response.try_recv().map_err(|_| ActorRequestError::ActorStopped)
+            }
+            default(CAPTURE_TIMEOUT.saturating_sub(started.elapsed())) => {
+                Err(ActorRequestError::TimedOut)
+            }
+        }
     }
 
     fn try_send(&self, command: Command) -> Result<(), crossbeam_channel::TrySendError<Command>> {
@@ -16015,6 +15924,32 @@ mod tests {
     }
 
     #[test]
+    fn request_stranded_behind_a_stopped_worker_fails_without_waiting_out_the_timeout() {
+        let (control, stranded) = command_channel();
+        let (alive, liveness) = crossbeam_channel::bounded(0);
+        let commands = CommandSender {
+            queues: Box::new(CommandQueues {
+                control,
+                input: None,
+                liveness,
+            }),
+            wake: ActorWake::none(),
+        };
+        drop(alive);
+
+        let started = Instant::now();
+        assert_eq!(
+            commands.request(|reply| Command::Capture(Box::new(CaptureRequest {
+                options: CaptureOptions::default(),
+                reply,
+            }))),
+            Err(ActorRequestError::ActorStopped)
+        );
+        assert!(started.elapsed() < CAPTURE_TIMEOUT);
+        assert_eq!(stranded.len(), 1);
+    }
+
+    #[test]
     fn pty_input_lane_preserves_paste_order_and_keeps_view_actions_on_control() {
         let (control, control_rx) = command_channel();
         let (input, input_rx) = input_channel();
@@ -16022,6 +15957,7 @@ mod tests {
             queues: Box::new(CommandQueues {
                 control,
                 input: Some(input),
+                liveness: crossbeam_channel::never(),
             }),
             wake: ActorWake::none(),
         };

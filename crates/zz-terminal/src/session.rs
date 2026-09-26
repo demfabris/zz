@@ -16,7 +16,7 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 use libghostty_vt::{
-    RenderState, Terminal, TerminalOptions,
+    RenderState, Terminal,
     alloc::{Allocator, Bytes},
     fmt::{Format, Formatter, FormatterOptions},
     focus, key,
@@ -3691,7 +3691,9 @@ impl KittyGraphicsState {
         let height = image.height()?;
         let generation = image.generation()?;
         let format = image.format()?;
-        let input = image.data()?;
+        let Some(input) = image.data()? else {
+            return Ok(None);
+        };
         let Some(output_len) = usize::try_from(width)
             .ok()
             .and_then(|width| {
@@ -4381,6 +4383,18 @@ const fn ghostty_color_scheme(value: TerminalColorScheme) -> ColorScheme {
     }
 }
 
+fn new_terminal<'alloc: 'cb, 'cb>(
+    cols: u16,
+    rows: u16,
+    history_limit: usize,
+) -> Result<Terminal<'alloc, 'cb>, libghostty_vt::Error> {
+    let mut terminal = Terminal::new(cols, rows)?;
+    terminal
+        .set_scrollback_max_bytes(None)?
+        .set_scrollback_max_lines(Some(history_limit.min(MAX_HISTORY_LIMIT)))?;
+    Ok(terminal)
+}
+
 fn clipboard_write_request<'a>(
     location: ClipboardLocation,
     contents: impl Iterator<Item = ClipboardContent<'a>>,
@@ -4401,7 +4415,7 @@ fn clipboard_write_request<'a>(
         ClipboardLocation::Standard => ClipboardTarget::Clipboard,
         ClipboardLocation::Selection | ClipboardLocation::Primary => ClipboardTarget::Primary,
     };
-    Ok((target, content.data.to_owned()))
+    Ok((target, String::from_utf8_lossy(content.data).into_owned()))
 }
 
 fn register_clipboard_write(
@@ -4409,10 +4423,14 @@ fn register_clipboard_write(
     publisher: Publisher,
 ) -> Result<(), WorkerError> {
     terminal.on_clipboard_write(move |_, write| {
-        let (target, text) = clipboard_write_request(write.location(), write.contents())?;
-        publisher
-            .clipboard_set(target, text)
-            .map_err(|_| ClipboardWriteError::Busy)
+        let result = clipboard_write_request(write.location(), write.contents()).and_then(
+            |(target, text)| {
+                publisher
+                    .clipboard_set(target, text)
+                    .map_err(|_| ClipboardWriteError::Busy)
+            },
+        );
+        write.reply(result, false);
     })?;
     Ok(())
 }
@@ -4451,11 +4469,7 @@ fn run_output_view(
 ) -> Result<(), WorkerError> {
     install_kitty_png_decoder();
     let mut geometry = Geometry::default();
-    let mut terminal = Terminal::new(TerminalOptions {
-        cols: geometry.columns,
-        rows: geometry.rows,
-        max_scrollback,
-    })?;
+    let mut terminal = new_terminal(geometry.columns, geometry.rows, max_scrollback)?;
     let reported_color_scheme = Rc::new(Cell::new(ghostty_color_scheme(appearance.color_scheme)));
     let color_scheme_source = Rc::clone(&reported_color_scheme);
     terminal.on_color_scheme(move |_| Some(color_scheme_source.get()))?;
@@ -5265,11 +5279,7 @@ fn run_terminal(
     let reported_size = Rc::new(Cell::new(geometry.size_report()));
     let size_source = Rc::clone(&reported_size);
 
-    let mut terminal = Terminal::new(TerminalOptions {
-        cols: geometry.columns,
-        rows: geometry.rows,
-        max_scrollback,
-    })?;
+    let mut terminal = new_terminal(geometry.columns, geometry.rows, max_scrollback)?;
     terminal.resize(
         geometry.columns,
         geometry.rows,
@@ -14458,12 +14468,7 @@ mod tests {
         }
         bytes.extend_from_slice(b"\x1b[?1049h");
         for chunk_size in [1, 7, bytes.len()] {
-            let mut terminal = Terminal::new(TerminalOptions {
-                cols: 80,
-                rows: 24,
-                max_scrollback: 2000,
-            })
-            .expect("terminal");
+            let mut terminal = new_terminal(80, 24, 2000).expect("terminal");
             let mut filter = EngineFilter::default();
             let mut renames = Vec::new();
             let mut bar = None;
@@ -14542,12 +14547,7 @@ mod tests {
         row: u16,
         word_separators: &WordSeparators,
     ) -> PointerContext {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 80,
-            rows: 24,
-            max_scrollback: 2000,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(80, 24, 2000).expect("terminal");
         let mut filter = EngineFilter::default();
         let mut renames = Vec::new();
         let mut bar = None;
@@ -14665,12 +14665,7 @@ mod tests {
     }
 
     fn pointer_scrollback_terminal<'alloc>(word: &str) -> Terminal<'alloc, 'static> {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 80,
-            rows: 24,
-            max_scrollback: 2000,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(80, 24, 2000).expect("terminal");
         terminal.vt_write(&pointer_scrollback_sample(word));
         terminal
     }
@@ -14740,12 +14735,7 @@ mod tests {
         knobs: EngineKnobs,
         chunks: &[&[u8]],
     ) -> (String, Vec<String>, ProgressBar) {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 20,
-            rows: 4,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(20, 4, 16).expect("terminal");
         let mut filter = EngineFilter::default();
         let mut renames = Vec::new();
         let mut bar = None;
@@ -14827,12 +14817,7 @@ mod tests {
 
     #[test]
     fn engine_filter_tracks_command_status_until_the_next_completion() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 20,
-            rows: 4,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(20, 4, 16).expect("terminal");
         let mut filter = EngineFilter::default();
         let mut status = None;
         for (payload, expected) in [
@@ -14874,12 +14859,7 @@ mod tests {
     fn engine_filter_reads_command_status_across_writes() {
         let bytes = b"\x1b]133;D;7\x1b\\";
         for split in 1..bytes.len() {
-            let mut terminal = Terminal::new(TerminalOptions {
-                cols: 20,
-                rows: 4,
-                max_scrollback: 16,
-            })
-            .expect("terminal");
+            let mut terminal = new_terminal(20, 4, 16).expect("terminal");
             let mut filter = EngineFilter::default();
             let mut status = None;
             for chunk in [&bytes[..split], &bytes[split..]] {
@@ -15093,12 +15073,7 @@ mod tests {
 
     #[test]
     fn engine_filter_passes_split_sequences_through_untouched() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 20,
-            rows: 4,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(20, 4, 16).expect("terminal");
         let mut filter = EngineFilter::default();
         let mut renames = Vec::new();
         for chunk in [
@@ -15166,24 +15141,14 @@ mod tests {
             ("clears", &clears),
         ] {
             for round in 0..3 {
-                let mut terminal = Terminal::new(TerminalOptions {
-                    cols: 200,
-                    rows: 50,
-                    max_scrollback: 1000,
-                })
-                .expect("terminal");
+                let mut terminal = new_terminal(200, 50, 1000).expect("terminal");
                 let mut passthrough = PassthroughFilter::default();
                 let started = Instant::now();
                 for chunk in input.chunks(65536) {
                     passthrough.write(chunk, |bytes| terminal.vt_write(bytes));
                 }
                 let base = started.elapsed();
-                let mut terminal = Terminal::new(TerminalOptions {
-                    cols: 200,
-                    rows: 50,
-                    max_scrollback: 1000,
-                })
-                .expect("terminal");
+                let mut terminal = new_terminal(200, 50, 1000).expect("terminal");
                 let mut passthrough = PassthroughFilter::default();
                 let mut filter = EngineFilter::default();
                 let mut renames = Vec::new();
@@ -15415,12 +15380,7 @@ mod tests {
         selected: bool,
         starts_at_bottom: bool,
     ) -> bool {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(b"zero\r\none\r\ntwo\r\nthree\r\nfour\r\nfive");
         let mut live_selection = None;
         let mut copy_mode = None;
@@ -15519,12 +15479,7 @@ mod tests {
 
     #[test]
     fn kitty_vt_write_exports_placement_metadata_and_owned_pixels() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.resize(8, 2, 8, 18).expect("terminal pixels");
         terminal.vt_write(b"\x1b_Ga=T,f=24,s=1,v=1,i=42;/wAA\x1b\\");
 
@@ -15571,12 +15526,7 @@ mod tests {
     fn kitty_per_cell_image_placements_cover_large_previews() {
         let columns = 32_u16;
         let row_count = 17_u16;
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: columns,
-            rows: row_count,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(columns, row_count, 16).expect("terminal");
         terminal
             .resize(columns, row_count, 8, 18)
             .expect("terminal pixels");
@@ -15648,12 +15598,7 @@ mod tests {
 
     #[test]
     fn kitty_storage_quota_admits_wire_cap_sized_images() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.resize(8, 2, 8, 18).expect("terminal pixels");
         configure_kitty_storage(&mut terminal).expect("raise Kitty storage quota");
 
@@ -15707,12 +15652,7 @@ mod tests {
             .write_image(&[255, 0, 0, 128], 1, 1, image::ExtendedColorType::Rgba8)
             .expect("encode PNG fixture");
         let payload = test_base64(&png);
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(format!("\x1b_Ga=T,f=100,i=43;{payload}\x1b\\").as_bytes());
 
         let mut kitty = KittyGraphicsState::new().expect("Kitty iterator");
@@ -16629,12 +16569,7 @@ mod tests {
 
     #[test]
     fn live_dictionary_compaction_rebuilds_the_visible_working_set() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         let mut render_state = RenderState::new().expect("render state");
         let mut rows = RowIterator::new().expect("rows");
         let mut cells = CellIterator::new().expect("cells");
@@ -16811,12 +16746,7 @@ mod tests {
 
     #[test]
     fn byte_paste_uses_terminal_mode_without_forcing_utf8() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         let mut output = Vec::new();
 
         write_paste_bytes(&terminal, b"a\nb\xff".to_vec(), false, &mut output)
@@ -16837,12 +16767,7 @@ mod tests {
 
     #[test]
     fn prepared_buffer_paste_preserves_exact_bytes_and_only_adds_requested_brackets() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         let mut output = Vec::new();
 
         write_prepared_paste_bytes(&terminal, b"a\nb\0\xff", true, &mut output)
@@ -16863,12 +16788,7 @@ mod tests {
 
     #[test]
     fn snapshot_copies_styled_and_wide_cells() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(b"\x1b]2;fixture\x07\x1b[1;38;2;12;34;56mA\xe7\x95\x8c\x1b[0m");
 
         let mut render_state = RenderState::new().expect("render state");
@@ -16923,12 +16843,7 @@ mod tests {
                 Color::rgb(index, u8::MAX - index, index.wrapping_mul(37));
         }
 
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 256,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(256, 2, 16).expect("terminal");
         apply_terminal_appearance(&mut terminal, &appearance).expect("apply appearance");
         assert_eq!(
             snapshot_fixture(&terminal).cursor.expect("cursor").style(),
@@ -16974,12 +16889,7 @@ mod tests {
             cursor_style: CursorStyle::Underline,
             ..TerminalAppearance::default()
         };
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 4,
-            rows: 1,
-            max_scrollback: 0,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(4, 1, 0).expect("terminal");
         apply_terminal_appearance(&mut terminal, &appearance).expect("apply appearance");
 
         terminal.vt_write(b"\x1b[5 q");
@@ -17009,12 +16919,7 @@ mod tests {
     fn osc_palette_override_takes_precedence_over_configured_palette() {
         let mut appearance = TerminalAppearance::default();
         appearance.palette[42] = Color::rgb(1, 2, 3);
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 2,
-            rows: 1,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(2, 1, 16).expect("terminal");
         apply_terminal_appearance(&mut terminal, &appearance).expect("apply appearance");
         terminal.vt_write(b"\x1b]4;42;rgb:12/34/56\x1b\\\x1b[38;5;42mX");
 
@@ -17028,12 +16933,7 @@ mod tests {
 
     #[test]
     fn snapshot_cells_keep_the_colour_class_the_program_wrote() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 6,
-            rows: 1,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(6, 1, 16).expect("terminal");
         apply_terminal_appearance(&mut terminal, &TerminalAppearance::default())
             .expect("apply appearance");
         terminal.vt_write(
@@ -17074,12 +16974,7 @@ mod tests {
         appearance.palette[1] = Color::rgb(0x12, 0x34, 0x56);
         appearance.palette[42] = appearance.palette[200];
         appearance.palette_classes = vec![(1, ColourClass::Rgb), (42, ColourClass::Palette(200))];
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 4,
-            rows: 1,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(4, 1, 16).expect("terminal");
         apply_terminal_appearance(&mut terminal, &appearance).expect("apply appearance");
         terminal.vt_write(b"\x1b[31mR\x1b[0m\x1b[38;5;42mI\x1b[0m\x1b[32mG\x1b[0m\x1b[41mB\x1b[0m");
         fn cell_classes(
@@ -17158,12 +17053,7 @@ mod tests {
         appearance.background = appearance.palette[4];
         appearance.default_classes = [Some(ColourClass::Palette(2)), Some(ColourClass::Palette(4))];
         let hints = ClassHints::new(&appearance);
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 4,
-            rows: 1,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(4, 1, 16).expect("terminal");
         apply_terminal_appearance(&mut terminal, &appearance).expect("apply appearance");
         let classes = |terminal: &Terminal<'_, '_>, text: &[u8]| {
             let mut terminal_output = text.to_vec();
@@ -17243,12 +17133,7 @@ mod tests {
         let mut styled = TerminalAppearance::default();
         styled.foreground = styled.palette[2];
         styled.background = styled.palette[4];
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 4,
-            rows: 1,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(4, 1, 16).expect("terminal");
         apply_terminal_appearance(&mut terminal, &theme).expect("apply theme");
         terminal.vt_write(
             b"\x1b]10;rgb:ff/00/00\x1b\\\x1b]11;rgb:00/00/80\x1b\\\x1b]110\x1b\\\x1b]111\x1b\\",
@@ -17277,12 +17162,7 @@ mod tests {
 
     #[test]
     fn overlay_snapshots_reuse_cells_and_dictionary_tables() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(b"one");
         let mut render_state = RenderState::new().expect("render state");
         let mut rows = RowIterator::new().expect("rows");
@@ -17377,12 +17257,7 @@ mod tests {
 
     #[test]
     fn dirty_snapshots_reuse_a_released_packed_cell_plane() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         let mut render_state = RenderState::new().expect("render state");
         let mut rows = RowIterator::new().expect("rows");
         let mut cells = CellIterator::new().expect("cells");
@@ -17441,12 +17316,7 @@ mod tests {
 
     #[test]
     fn dictionary_tables_publish_only_the_changed_plane() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write("e\u{301}".as_bytes());
         let mut render_state = RenderState::new().expect("render state");
         let mut rows = RowIterator::new().expect("rows");
@@ -17524,12 +17394,7 @@ mod tests {
 
     #[test]
     fn single_click_stays_hidden_until_selection_crosses_a_cell() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(b"hello");
         let mut selection = None;
         let pointer = |column| PointerCellEvent {
@@ -17626,12 +17491,7 @@ mod tests {
 
     #[test]
     fn out_of_range_pointer_selection_clamps_and_pty_free_worker_survives() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 3,
-            rows: 2,
-            max_scrollback: 4,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(3, 2, 4).expect("terminal");
         terminal.vt_write(b"abc\r\ndef");
         let event = PointerCellEvent {
             column: u16::MAX,
@@ -17668,12 +17528,7 @@ mod tests {
 
     #[test]
     fn out_of_space_selection_reinstall_clears_pending_selection_without_error() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 3,
-            rows: 2,
-            max_scrollback: 4,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(3, 2, 4).expect("terminal");
         terminal.vt_write(b"abc");
         let mut view = TerminalViewState::for_screen(Screen::Primary);
         selection_press(
@@ -17703,12 +17558,7 @@ mod tests {
 
     #[test]
     fn desktop_word_selection_uses_the_compiled_tmux_boundaries() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 16,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(16, 2, 16).expect("terminal");
         terminal.vt_write(b"foo.bar baz");
         let mut selection = None;
         let event = PointerCellEvent {
@@ -17734,12 +17584,7 @@ mod tests {
             "foo.bar"
         );
 
-        let mut adjacent = Terminal::new(TerminalOptions {
-            cols: 16,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("adjacent terminal");
+        let mut adjacent = new_terminal(16, 2, 16).expect("adjacent terminal");
         adjacent.vt_write(b"foo. bar");
         let mut adjacent_selection = None;
         selection_press(
@@ -17769,12 +17614,7 @@ mod tests {
 
     #[test]
     fn client_views_restore_isolated_viewport_and_selection_state() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(b"zero\r\none\r\ntwo\r\nthree");
 
         let first_id = TerminalViewId(1);
@@ -17893,12 +17733,7 @@ mod tests {
 
     #[test]
     fn primary_and_alternate_screens_keep_independent_native_view_state() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(b"zero\r\none\r\ntwo\r\nthree");
         let mut view = TerminalViewState::for_screen(Screen::Primary);
         let word_separators = WordSeparators::default();
@@ -17975,12 +17810,7 @@ mod tests {
 
     #[test]
     fn select_all_covers_retained_history_without_trailing_blank_rows() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(b"old\r\nmid\r\nnew");
         let mut selection = None;
         select_all_history(&terminal, &mut selection).expect("select all");
@@ -17991,13 +17821,31 @@ mod tests {
     }
 
     #[test]
+    fn history_limit_counts_retained_lines() {
+        let retained = |limit: usize| {
+            let mut terminal = new_terminal(80, 24, limit).expect("terminal");
+            let mut output = Vec::new();
+            for line in 0..30_000 {
+                output.extend_from_slice(format!("line {line}\r\n").as_bytes());
+            }
+            terminal.vt_write(&output);
+            terminal.scrollback_rows().expect("history")
+        };
+        let default_limit = retained(10_000);
+        let small_limit = retained(2_000);
+        assert!(
+            (9_000..=10_000).contains(&default_limit),
+            "history-limit 10000 kept {default_limit} rows"
+        );
+        assert!(
+            (1_000..=2_000).contains(&small_limit),
+            "history-limit 2000 kept {small_limit} rows"
+        );
+    }
+
+    #[test]
     fn xterm_history_erase_keeps_visible_content() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(b"old\r\nvisible\r\nlast");
         assert!(terminal.scrollback_rows().expect("history") > 0);
         terminal.vt_write(b"\x1b[3J");
@@ -18010,12 +17858,7 @@ mod tests {
 
     #[test]
     fn osc8_hover_uses_terminal_link_metadata_and_contiguous_span() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 12,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(12, 2, 16).expect("terminal");
         terminal.vt_write(b"\x1b]8;;https://example.com/docs\x1b\\link\x1b]8;;\x1b\\ plain");
         let mut scratch = Vec::with_capacity(LINK_URI_SCRATCH_BYTES);
         let allocation = scratch.as_ptr();
@@ -18064,12 +17907,7 @@ mod tests {
 
     #[test]
     fn osc8_hover_rejects_active_content_schemes() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(b"\x1b]8;;javascript:alert(1)\x1b\\bad\x1b]8;;\x1b\\");
         let mut scratch = Vec::with_capacity(LINK_URI_SCRATCH_BYTES);
 
@@ -18092,12 +17930,7 @@ mod tests {
 
     #[test]
     fn plain_uri_hover_trims_wrappers_and_trailing_punctuation() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 40,
-            rows: 1,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(40, 1, 16).expect("terminal");
         let uri = "https://example.com/docs";
         terminal.vt_write(format!("({uri}), after").as_bytes());
         let mut scratch = Vec::new();
@@ -18122,12 +17955,7 @@ mod tests {
 
     #[test]
     fn image_placeholder_hover_spans_the_bracketed_text_and_carries_the_number() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 40,
-            rows: 1,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(40, 1, 16).expect("terminal");
         terminal.vt_write(b"read [Image #12] now");
         let mut scratch = Vec::new();
         let bound = HashSet::from([12]);
@@ -18170,12 +17998,7 @@ mod tests {
 
     #[test]
     fn image_placeholder_hover_ignores_other_bracketed_text() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 40,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(40, 2, 16).expect("terminal");
         terminal.vt_write(b"[Pasted text #1]\r\n[Image #]");
         let mut scratch = Vec::new();
 
@@ -18201,12 +18024,7 @@ mod tests {
 
     #[test]
     fn pending_paste_baseline_ignores_existing_placeholder_occurrences() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 40,
-            rows: 3,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(40, 3, 16).expect("terminal");
         terminal.vt_write(b"[Image #1]");
         let now = Instant::now();
         let mut bindings = PastedImageBindings::default();
@@ -18219,12 +18037,7 @@ mod tests {
 
     #[test]
     fn pending_paste_binds_the_highest_new_placeholder_number() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 40,
-            rows: 3,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(40, 3, 16).expect("terminal");
         let mut bindings = PastedImageBindings::default();
         bindings
             .open(&terminal, 8, Instant::now())
@@ -18238,12 +18051,7 @@ mod tests {
 
     #[test]
     fn pending_paste_rebinds_when_an_existing_number_count_increases() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 40,
-            rows: 3,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(40, 3, 16).expect("terminal");
         terminal.vt_write(b"[Image #1]");
         let mut bindings = PastedImageBindings::default();
         bindings
@@ -18257,12 +18065,7 @@ mod tests {
 
     #[test]
     fn pending_paste_counts_the_live_grid_even_when_a_viewport_is_scrolled_back() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 40,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(40, 2, 16).expect("terminal");
         terminal.vt_write(b"old\r\nlive\r\n[Image #7]");
         terminal.scroll_viewport(ScrollViewport::Top);
         let mut bindings = PastedImageBindings::default();
@@ -18277,12 +18080,7 @@ mod tests {
 
     #[test]
     fn placeholder_output_outside_a_pending_window_never_binds() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 40,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(40, 2, 16).expect("terminal");
         terminal.vt_write(b"response echoes [Image #2]");
         let mut bindings = PastedImageBindings::default();
 
@@ -18292,12 +18090,7 @@ mod tests {
 
     #[test]
     fn pending_paste_expiry_returns_its_token_without_binding() {
-        let terminal = Terminal::new(TerminalOptions {
-            cols: 40,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let terminal = new_terminal(40, 2, 16).expect("terminal");
         let now = Instant::now();
         let mut bindings = PastedImageBindings::default();
         bindings.open(&terminal, 10, now).expect("open window");
@@ -18318,12 +18111,7 @@ mod tests {
 
     #[test]
     fn unbinding_a_pasted_image_removes_its_link() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 40,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(40, 2, 16).expect("terminal");
         let mut bindings = PastedImageBindings::default();
         bindings
             .open(&terminal, 11, Instant::now())
@@ -18353,12 +18141,7 @@ mod tests {
 
     #[test]
     fn plain_uri_hover_rejects_unsafe_and_overlong_tokens() {
-        let mut unsafe_terminal = Terminal::new(TerminalOptions {
-            cols: 32,
-            rows: 1,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut unsafe_terminal = new_terminal(32, 1, 16).expect("terminal");
         unsafe_terminal.vt_write(b"javascript:alert(1)");
         let mut scratch = Vec::new();
         let point = PointerCellEvent {
@@ -18374,12 +18157,7 @@ mod tests {
         );
 
         let columns = u16::try_from(MAX_LINK_URI_BYTES + 2).expect("bounded terminal width");
-        let mut long_terminal = Terminal::new(TerminalOptions {
-            cols: columns,
-            rows: 1,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut long_terminal = new_terminal(columns, 1, 16).expect("terminal");
         long_terminal.vt_write(format!("https://{}", "a".repeat(MAX_LINK_URI_BYTES)).as_bytes());
         assert_eq!(
             hover_link_at(&long_terminal, point, &mut scratch, &HashSet::new())
@@ -18391,12 +18169,7 @@ mod tests {
 
     #[test]
     fn capture_reads_visible_rows_and_full_canonical_history() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(b"old-0\r\nold-1\r\nview-0\r\nview-1");
 
         let visible =
@@ -18417,12 +18190,7 @@ mod tests {
 
     #[test]
     fn capture_can_join_soft_wrapped_rows() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 4,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(4, 2, 16).expect("terminal");
         terminal.vt_write(b"abcdefgh");
 
         let output = capture_terminal(
@@ -18445,12 +18213,7 @@ mod tests {
             ("界\t\r\nNEXT", "界\nNEXT\n\n\n"),
             ("ABC\tDEF\r\x1b[4G\x1b[P\r\nNEXT", "ABC    DEF\nNEXT\n\n\n"),
         ] {
-            let mut terminal = Terminal::new(TerminalOptions {
-                cols: 80,
-                rows: 24,
-                max_scrollback: 64,
-            })
-            .unwrap();
+            let mut terminal = new_terminal(80, 24, 64).unwrap();
             terminal.vt_write(input.as_bytes());
             let options = CaptureOptions {
                 end: CaptureBoundary::Relative(4),
@@ -18466,12 +18229,7 @@ mod tests {
 
     #[test]
     fn capture_clears_the_cells_a_wide_insert_crosses() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 80,
-            rows: 24,
-            max_scrollback: 64,
-        })
-        .unwrap();
+        let mut terminal = new_terminal(80, 24, 64).unwrap();
         terminal.vt_write(b"\x1b[71GABCDEFGHIJ\r\x1b[70G\x1b[6@\x1b[5;1HNEXT");
         let options = CaptureOptions {
             end: CaptureBoundary::Relative(4),
@@ -18509,12 +18267,7 @@ mod tests {
                 "\x1b[1;4m\x1b[31mONE\x1b[0;4m\x1b[31mTWO\x1b[0m",
             ),
         ] {
-            let mut terminal = Terminal::new(TerminalOptions {
-                cols: 80,
-                rows: 24,
-                max_scrollback: 64,
-            })
-            .expect("terminal");
+            let mut terminal = new_terminal(80, 24, 64).expect("terminal");
             terminal.vt_write(input.as_bytes());
             for escaped in [false, true] {
                 let output = capture_terminal(
@@ -18540,12 +18293,7 @@ mod tests {
 
     #[test]
     fn styled_numbered_capture_preserves_the_row_after_three_wrapped_rows() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 80,
-            rows: 24,
-            max_scrollback: 64,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(80, 24, 64).expect("terminal");
         terminal.vt_write(format!("\x1b[31m{}\x1b[0m\r\nNEXT", "A".repeat(170)).as_bytes());
         let output = capture_terminal(
             &terminal,
@@ -18574,12 +18322,7 @@ mod tests {
     #[test]
     fn styled_capture_trims_erased_backgrounds_to_text_extent() {
         for erase in ["\x1b[2K", "\x1b[2J"] {
-            let mut terminal = Terminal::new(TerminalOptions {
-                cols: 80,
-                rows: 24,
-                max_scrollback: 64,
-            })
-            .expect("terminal");
+            let mut terminal = new_terminal(80, 24, 64).expect("terminal");
             terminal.vt_write(format!("\x1b[41m{erase}\x1b[0m\r\nNEXT").as_bytes());
             for join_wrapped in [false, true] {
                 let output = capture_terminal(
@@ -18611,12 +18354,7 @@ mod tests {
     #[test]
     fn styled_capture_preserves_default_padding_before_wide_wraps() {
         for cols in [80, 100] {
-            let mut terminal = Terminal::new(TerminalOptions {
-                cols,
-                rows: 24,
-                max_scrollback: 64,
-            })
-            .expect("terminal");
+            let mut terminal = new_terminal(cols, 24, 64).expect("terminal");
             let text = "A".repeat(usize::from(cols - 1));
             terminal.vt_write(format!("\x1b[31m{text}界界\x1b[0mNEXT").as_bytes());
             for preserve_trailing in [false, true] {
@@ -18657,12 +18395,7 @@ mod tests {
 
     #[test]
     fn live_styled_capture_keeps_sgr_and_uses_lf_between_rows() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 4,
-            rows: 3,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(4, 3, 16).expect("terminal");
         terminal.vt_write(b"\x1b[31mabcdef\r\ngh");
         for (join_wrapped, lines) in [(false, 3), (true, 2)] {
             let captured = capture_terminal(
@@ -18683,12 +18416,7 @@ mod tests {
 
     #[test]
     fn history_search_maps_matches_back_to_cells() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 12,
-            rows: 2,
-            max_scrollback: 32,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(12, 2, 32).expect("terminal");
         terminal.vt_write(b"alpha\r\nbeta target\r\ngamma\r\n");
         let search = search_history(&terminal, "target").expect("search");
         assert_eq!(search.matches.len(), 1);
@@ -18702,12 +18430,7 @@ mod tests {
 
     #[test]
     fn history_snapshot_reuses_oversized_grapheme_scratch_across_rows() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 4,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(4, 2, 16).expect("terminal");
         let cluster = format!("a{}", "\u{301}".repeat(12));
         terminal.vt_write(format!("{cluster}\r\n{cluster}").as_bytes());
 
@@ -18743,12 +18466,7 @@ mod tests {
 
     #[test]
     fn history_search_supports_regex_case_modes_and_cancellation() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 16,
-            rows: 3,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(16, 3, 16).expect("terminal");
         terminal.vt_write(b"Alpha 123\r\nalpha 456\r\nomega");
         let snapshot = HistorySearchSnapshot::capture(&terminal).expect("search snapshot");
         let mut query = SearchQuery {
@@ -18780,12 +18498,7 @@ mod tests {
 
     #[test]
     fn incremental_history_search_reuses_match_storage() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 16,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(16, 2, 16).expect("terminal");
         terminal.vt_write(b"target target\r\ntarget");
         let snapshot = HistorySearchSnapshot::capture(&terminal).expect("snapshot");
         let query = SearchQuery::literal("target");
@@ -19054,12 +18767,7 @@ mod tests {
 
     #[test]
     fn stale_background_search_results_cannot_mutate_a_newer_view_request() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 12,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(12, 2, 16).expect("terminal");
         terminal.vt_write(b"target\r\nother");
         let snapshot = HistorySearchSnapshot::capture(&terminal).expect("snapshot");
         let query = SearchQuery::literal("target");
@@ -19145,12 +18853,7 @@ mod tests {
 
     #[test]
     fn current_search_result_for_a_detached_view_recycles_its_match_storage() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 80,
-            rows: 24,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(80, 24, 16).expect("terminal");
         let mut active = ActiveTerminalViews::new();
         let mut inactive = InactiveTerminalViews::new();
         let view_id = TerminalViewId(99);
@@ -19197,12 +18900,7 @@ mod tests {
 
     #[test]
     fn copy_mode_word_and_line_motions_use_terminal_cells() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 16,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(16, 2, 16).expect("terminal");
         terminal.vt_write(b"alpha beta!");
         let columns = terminal.cols().expect("columns");
         let rows = u32::try_from(terminal.total_rows().expect("rows")).expect("small fixture");
@@ -19233,12 +18931,7 @@ mod tests {
 
     #[test]
     fn native_copy_mode_word_motion_honors_separator_runs_and_empty_values() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 16,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(16, 2, 16).expect("terminal");
         terminal.vt_write(b"foo..bar baz");
         let mut selection = None;
         let mut copy_mode = None;
@@ -19322,12 +19015,7 @@ mod tests {
 
     #[test]
     fn native_copy_mode_percent_matches_nested_brackets() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 24,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(24, 2, 16).expect("terminal");
         terminal.vt_write(b"foo..bar baz (a[b]c)");
         let mut selection = None;
         let mut copy_mode = None;
@@ -19365,12 +19053,7 @@ mod tests {
 
     #[test]
     fn counted_copy_mode_actions_apply_pinned_parity_brackets_and_line_span() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 24,
-            rows: 4,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(24, 4, 16).expect("terminal");
         terminal.vt_write(b"(a[b]c)\r\ntwo\r\nthree\r\nfour");
         let mut live_selection = None;
         let mut copy_mode = None;
@@ -19496,12 +19179,7 @@ mod tests {
 
     #[test]
     fn counted_copy_mode_once_policy_runs_stateful_actions_once() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(b"abcdef");
         let mut live_selection = None;
         let mut copy_mode = None;
@@ -19594,12 +19272,7 @@ mod tests {
 
     #[test]
     fn osc133_prompt_navigation_finds_prompts_and_command_output() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 24,
-            rows: 8,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(24, 8, 16).expect("terminal");
         terminal.vt_write(
             b"\x1b]133;A\x1b\\$ \x1b]133;B\x1b\\one\x1b]133;C\x1b\\\r\nout-one\r\n\x1b]133;D;0\x1b\\\x1b]133;A\x1b\\$ \x1b]133;B\x1b\\two\x1b]133;C\x1b\\\r\nout-two",
         );
@@ -19643,12 +19316,7 @@ mod tests {
 
     #[test]
     fn last_command_capture_skips_the_fresh_prompt_and_keeps_the_previous_output() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 24,
-            rows: 8,
-            max_scrollback: 64,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(24, 8, 64).expect("terminal");
         terminal.vt_write(
             b"\x1b]133;A\x1b\\$ \x1b]133;B\x1b\\one\x1b]133;C\x1b\\\r\nout-one\r\n\x1b]133;D;0\x1b\\\
               \x1b]133;A\x1b\\$ \x1b]133;B\x1b\\two --flag\x1b]133;C\x1b\\\r\nout-two\r\nmore-two\r\n\x1b]133;D;1\x1b\\\
@@ -19690,12 +19358,7 @@ mod tests {
 
     #[test]
     fn scroll_on_clear_keeps_the_prompt_mark_of_the_erased_origin_row() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 20,
-            rows: 4,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(20, 4, 16).expect("terminal");
         let mut filter = EngineFilter::default();
         let mut renames = Vec::new();
         let mut bar = None;
@@ -19720,12 +19383,7 @@ mod tests {
 
     #[test]
     fn last_command_capture_tolerates_duplicate_osc133_marks() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 80,
-            rows: 8,
-            max_scrollback: 64,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(80, 8, 64).expect("terminal");
         terminal.vt_write(
             b"\x1b]133;A\x07\x1b]133;A\x07$ \x1b]133;B\x07\x1b]133;B\x07echo hi\r\n\
               \x1b]133;C\x07\x1b]133;C\x07hi\r\n\x1b]133;D;0\x07\x1b]133;D;0\x07\
@@ -19746,12 +19404,7 @@ mod tests {
 
     #[test]
     fn last_command_capture_reports_missing_shell_integration() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 24,
-            rows: 4,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(24, 4, 16).expect("terminal");
         terminal.vt_write(b"$ ls\r\nfile-a\r\n$ ");
 
         assert_eq!(
@@ -19762,12 +19415,7 @@ mod tests {
 
     #[test]
     fn last_command_capture_caps_long_output_by_rows() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 24,
-            rows: 8,
-            max_scrollback: 4096,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(24, 8, 4096).expect("terminal");
         let mut bytes = b"\x1b]133;A\x1b\\$ \x1b]133;B\x1b\\loop\x1b]133;C\x1b\\\r\n".to_vec();
         for index in 0..(MAX_LAST_COMMAND_LINES + 25) {
             bytes.extend_from_slice(format!("line-{index}\r\n").as_bytes());
@@ -19789,12 +19437,7 @@ mod tests {
 
     #[test]
     fn last_command_capture_walks_past_prompts_the_user_only_sat_on() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 24,
-            rows: 8,
-            max_scrollback: 64,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(24, 8, 64).expect("terminal");
         terminal.vt_write(
             b"\x1b]133;A\x1b\\$ \x1b]133;B\x1b\\one\x1b]133;C\x1b\\\r\nout-one\r\n\x1b]133;D;0\x1b\\\
               \x1b]133;A\x1b\\$ \x1b]133;B\x1b\\\r\n\
@@ -19825,12 +19468,7 @@ mod tests {
 
     #[test]
     fn copy_mode_tracks_a_native_cursor() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(b"one\r\ntwo\r\nthree");
         let mut selection = None;
         let mut copy_mode = None;
@@ -19852,12 +19490,7 @@ mod tests {
 
     #[test]
     fn copy_mode_fixed_rows_reset_column() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 3,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 3, 16).expect("terminal");
         terminal.vt_write(b"abcdefgh\r\nmiddle\r\nxy");
         let mut selection = None;
         let mut copy_mode = None;
@@ -19973,12 +19606,7 @@ mod tests {
 
     #[test]
     fn scroll_exit_latches_only_on_fresh_copy_mode_entry() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         let mut selection = None;
         let mut copy_mode = None;
 
@@ -20030,12 +19658,7 @@ mod tests {
 
     #[test]
     fn hide_position_latches_on_entry_and_leaves_scroll_exit_alone() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         for (scroll_exit, hide_position) in
             [(false, false), (true, false), (false, true), (true, true)]
         {
@@ -20060,12 +19683,7 @@ mod tests {
 
     #[test]
     fn absolute_scroll_clamps_and_restores_follow_bottom() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 3,
-            max_scrollback: 32,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 3, 32).expect("terminal");
         terminal.vt_write(b"zero\r\none\r\ntwo\r\nthree\r\nfour\r\nfive");
         let maximum = terminal
             .scrollbar()
@@ -20140,12 +19758,7 @@ mod tests {
 
     #[test]
     fn frozen_copy_formatter_preserves_code_whitespace_and_line_structure() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 16,
-            rows: 4,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(16, 4, 16).expect("terminal");
         terminal.vt_write(b"  one\r\n\r\n    two");
         let revision = ModeRevision::capture(&mut terminal).expect("revision");
         let row_with = |needle| {
@@ -20191,12 +19804,7 @@ mod tests {
 
     #[test]
     fn frozen_copy_formatter_preserves_wrapped_and_rectangular_columns() {
-        let mut wrapped = Terminal::new(TerminalOptions {
-            cols: 5,
-            rows: 3,
-            max_scrollback: 16,
-        })
-        .expect("wrapped terminal");
+        let mut wrapped = new_terminal(5, 3, 16).expect("wrapped terminal");
         wrapped.vt_write(b"ab  cdef");
         let revision = ModeRevision::capture(&mut wrapped).expect("wrapped revision");
         let first = (0..revision.total_rows())
@@ -20216,12 +19824,7 @@ mod tests {
             "ab  cdef"
         );
 
-        let mut rectangle = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("rectangle terminal");
+        let mut rectangle = new_terminal(8, 2, 16).expect("rectangle terminal");
         rectangle.vt_write(b"ab  z\r\nc   y");
         let revision = ModeRevision::capture(&mut rectangle).expect("rectangle revision");
         let first = (0..revision.total_rows())
@@ -20258,12 +19861,7 @@ mod tests {
 
     #[test]
     fn vi_copy_keeps_the_final_newline_when_the_right_edge_passes_the_last_line() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 12,
-            rows: 4,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(12, 4, 16).expect("terminal");
         terminal.vt_write(b"abc\r\ndef\r\n\r\nghi");
         let revision = ModeRevision::capture(&mut terminal).expect("revision");
         let first = (0..revision.total_rows())
@@ -20305,12 +19903,7 @@ mod tests {
     #[test]
     fn copy_mode_text_round_trips_through_the_paste_encoder() {
         let expected = "    let  x = 1";
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 16,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(16, 2, 16).expect("terminal");
         terminal.vt_write(expected.as_bytes());
         let mut live_selection = None;
         let mut copy_mode = None;
@@ -20397,12 +19990,7 @@ mod tests {
 
     #[test]
     fn counted_copy_mode_end_of_line_spans_the_requested_rows_once() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 4,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 4, 16).expect("terminal");
         terminal.vt_write(b"abcdef\r\nghijkl\r\nmnopqr");
         let mut live_selection = None;
         let mut copy_mode = None;
@@ -20460,12 +20048,7 @@ mod tests {
 
     #[test]
     fn copy_mode_copy_variants_preserve_clear_and_cancel_independently() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(b"abcdef");
         let mut live_selection = None;
         let mut copy_mode = None;
@@ -20582,12 +20165,7 @@ mod tests {
 
     #[test]
     fn copy_mode_marks_paragraphs_and_selection_modes_use_the_frozen_revision() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 12,
-            rows: 4,
-            max_scrollback: 32,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(12, 4, 32).expect("terminal");
         terminal.vt_write(b"  one\r\n\r\ntwo\r\nthree\r\n\r\nfour");
         let mut live_selection = None;
         let mut copy_mode = None;
@@ -20797,12 +20375,7 @@ mod tests {
 
     #[test]
     fn incremental_copy_mode_search_keeps_its_original_anchor() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(b"one\r\ntwo\r\nthree");
         let mut selection = None;
         let mut copy_mode = None;
@@ -20855,12 +20428,7 @@ mod tests {
 
     #[test]
     fn copy_mode_revision_stays_frozen_across_output_resize_and_screen_switch() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 16,
-            rows: 3,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(16, 3, 16).expect("terminal");
         terminal.vt_write(b"old-one\r\nold-two\r\n\x1b[1;31mfrozen-marker\x1b[0m");
         let mut selection = None;
         let mut mode = None;
@@ -21430,12 +20998,7 @@ mod tests {
     fn terminal_responses_reuse_one_ordered_actor_buffer() {
         let effects = Rc::new(RefCell::new(PtyEffects::new()));
         let effect_sink = Rc::clone(&effects);
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal
             .on_pty_write(move |_, bytes| effect_sink.borrow_mut().push(bytes))
             .expect("PTY response callback");
@@ -21460,12 +21023,7 @@ mod tests {
     fn device_attributes_answer_da1_after_kitty_probe_queries() {
         let effects = Rc::new(RefCell::new(PtyEffects::new()));
         let effect_sink = Rc::clone(&effects);
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal
             .on_pty_write(move |_, bytes| effect_sink.borrow_mut().push(bytes))
             .expect("PTY response callback");
@@ -21476,15 +21034,24 @@ mod tests {
     }
 
     #[test]
+    fn title_report_queries_stay_unanswered_like_the_pinned_tmux() {
+        let effects = Rc::new(RefCell::new(PtyEffects::new()));
+        let effect_sink = Rc::clone(&effects);
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
+        terminal
+            .on_pty_write(move |_, bytes| effect_sink.borrow_mut().push(bytes))
+            .expect("PTY response callback");
+
+        terminal.vt_write(b"\x1b]2;echo pwned\x07\x1b[21t");
+        assert_eq!(terminal.title().expect("title"), "echo pwned");
+        assert!(effects.borrow().bytes.is_empty());
+    }
+
+    #[test]
     fn terminal_reports_configured_colors_for_osc_10_and_11_queries() {
         let effects = Rc::new(RefCell::new(PtyEffects::new()));
         let effect_sink = Rc::clone(&effects);
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal
             .on_pty_write(move |_, bytes| effect_sink.borrow_mut().push(bytes))
             .expect("PTY response callback");
@@ -21510,12 +21077,7 @@ mod tests {
             ))),
             state: Arc::clone(&event_state),
         };
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         register_clipboard_write(&mut terminal, publisher).expect("clipboard write callback");
 
         terminal.vt_write(b"\x1b]52;c;enogY2xpcGJvYXJk\x07");
@@ -21554,12 +21116,7 @@ mod tests {
             ))),
             state: Arc::clone(&event_state),
         };
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         register_bell(&mut terminal, publisher).expect("bell callback");
 
         terminal.vt_write(b"\x07\x07");
@@ -21581,11 +21138,11 @@ mod tests {
     fn clipboard_writes_prefer_plain_text_and_refuse_oversize_payloads() {
         let html = ClipboardContent {
             mime: "text/html",
-            data: "<b>hi</b>",
+            data: b"<b>hi</b>",
         };
         let plain = ClipboardContent {
             mime: CLIPBOARD_TEXT_MIME,
-            data: "hi",
+            data: b"hi",
         };
 
         assert_eq!(
@@ -21607,7 +21164,7 @@ mod tests {
                 ClipboardLocation::Standard,
                 std::iter::once(ClipboardContent {
                     mime: CLIPBOARD_TEXT_MIME,
-                    data: &oversize,
+                    data: oversize.as_bytes(),
                 })
             ),
             Err(ClipboardWriteError::Denied)
@@ -21627,12 +21184,7 @@ mod tests {
 
     #[test]
     fn unmodified_motion_hovers_only_bound_image_placeholders() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 40,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(40, 2, 16).expect("terminal");
         terminal.vt_write(b"read [Image #4]");
         let input = TerminalMouseInput::new(
             TerminalMousePhase::Motion,
@@ -21732,12 +21284,7 @@ mod tests {
 
     #[test]
     fn unmodified_image_hover_survives_alternate_screen_mouse_passthrough() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 40,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(40, 2, 16).expect("terminal");
         terminal.vt_write(b"\x1b[?1049h\x1b[?1000h\x1b[?1006h[Image #6]");
         let input = TerminalMouseInput::new(
             TerminalMousePhase::Motion,
@@ -21787,12 +21334,7 @@ mod tests {
 
     #[test]
     fn pane_reset_scrolls_the_used_rows_into_history_like_the_pinned_send_keys_r() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 20,
-            rows: 6,
-            max_scrollback: 1 << 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(20, 6, 1 << 16).expect("terminal");
         for line in 1..=20 {
             terminal.vt_write(format!("L{line:02}\r\n").as_bytes());
         }
@@ -21827,12 +21369,7 @@ mod tests {
 
     #[test]
     fn pane_reset_restores_the_pinned_default_tab_stops() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 40,
-            rows: 6,
-            max_scrollback: 1 << 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(40, 6, 1 << 16).expect("terminal");
         terminal.vt_write(b"\x1b[3g\x1b[1;5H\x1bH\x1b[2;1H\t");
         assert_eq!(terminal.cursor_x().expect("cursor x"), 4);
 
@@ -21848,12 +21385,7 @@ mod tests {
 
     #[test]
     fn pane_reset_clears_the_pane_palette_and_the_active_pen() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 20,
-            rows: 4,
-            max_scrollback: 1 << 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(20, 4, 1 << 16).expect("terminal");
         terminal.vt_write(b"\x1b]4;42;rgb:12/34/56\x1b\\\x1b[38;5;42mA");
         let before = snapshot_fixture(&terminal);
         let cell = before.row(0).expect("first row")[0];
@@ -21865,12 +21397,7 @@ mod tests {
         reset_pane_screen(&mut terminal).expect("reset");
         terminal.vt_write(b"B\x1b[38;5;42mC");
 
-        let mut fresh = Terminal::new(TerminalOptions {
-            cols: 20,
-            rows: 4,
-            max_scrollback: 1 << 16,
-        })
-        .expect("terminal");
+        let mut fresh = new_terminal(20, 4, 1 << 16).expect("terminal");
         fresh.vt_write(b"B\x1b[38;5;42mC");
         let expected = snapshot_fixture(&fresh);
         let expected_row = expected.row(0).expect("first row");
@@ -21895,12 +21422,7 @@ mod tests {
 
     #[test]
     fn pane_reset_drops_the_scroll_region_and_abandons_a_partial_sequence() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 20,
-            rows: 6,
-            max_scrollback: 1 << 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(20, 6, 1 << 16).expect("terminal");
         terminal.vt_write(b"one\r\ntwo\r\n\x1b[2;4r\x1bPtmux;partial");
         let before = terminal.scrollback_rows().expect("scrollback");
 
@@ -21923,12 +21445,7 @@ mod tests {
 
     #[test]
     fn pane_reset_drops_the_modes_the_pin_clears_with_send_keys_r() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 20,
-            rows: 4,
-            max_scrollback: 1 << 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(20, 4, 1 << 16).expect("terminal");
         let mut key_encoder = key::Encoder::new().expect("key encoder");
         let mut key_event = key::Event::new().expect("key event");
         let mut writer: Box<dyn Write + Send> = Box::new(std::io::sink());
@@ -22023,12 +21540,7 @@ mod tests {
 
     #[test]
     fn backspace_encodes_the_pinned_default_erase_byte() {
-        let terminal = Terminal::new(TerminalOptions {
-            cols: 80,
-            rows: 24,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let terminal = new_terminal(80, 24, 16).expect("terminal");
         let mut key_encoder = key::Encoder::new().expect("key encoder");
         let mut key_event = key::Event::new().expect("key event");
         let mut writer: Box<dyn Write + Send> = Box::new(std::io::sink());
@@ -22060,12 +21572,7 @@ mod tests {
 
     #[test]
     fn clearing_the_whole_screen_keeps_history_where_the_pin_scrolls_into_it() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 20,
-            rows: 5,
-            max_scrollback: 1 << 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(20, 5, 1 << 16).expect("terminal");
         for line in 1..=12 {
             terminal.vt_write(format!("L{line:02}\r\n").as_bytes());
         }
@@ -22082,12 +21589,7 @@ mod tests {
 
     #[test]
     fn key_and_mouse_encoding_reuse_the_actor_scratch_buffer() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 80,
-            rows: 24,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(80, 24, 16).expect("terminal");
         terminal.vt_write(b"\x1b[?1000h\x1b[?1006h");
 
         let mut key_encoder = key::Encoder::new().expect("key encoder");
@@ -22186,12 +21688,7 @@ mod tests {
 
     #[test]
     fn focus_events_only_reach_applications_that_enable_reporting() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         let mut output = Vec::new();
         write_focus_event(&terminal, true, &mut output).expect("disabled focus event");
         assert!(output.is_empty());
@@ -22204,12 +21701,7 @@ mod tests {
 
     #[test]
     fn wheel_routing_prioritizes_application_mouse_then_alternate_scroll() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         assert_eq!(
             wheel_route(&terminal, false).expect("primary route"),
             WheelRoute::Viewport
@@ -22240,12 +21732,7 @@ mod tests {
 
     #[test]
     fn a_grid_without_history_reports_nothing_to_scroll_into() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 3,
-            max_scrollback: 32,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 3, 32).expect("terminal");
         terminal.vt_write(b"zero\r\none\r\ntwo");
         let scrollbar = terminal.scrollbar().expect("scrollbar");
         assert_eq!(scrollbar.total, scrollbar.len);
@@ -22261,12 +21748,7 @@ mod tests {
 
     #[test]
     fn alternate_scroll_emits_bounded_normal_and_application_cursor_keys() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(b"\x1b[?1049h");
         let mut output = Vec::new();
 
@@ -22388,7 +21870,7 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_and_startup_output_views_use_their_distinct_byte_caps() {
+    fn ordinary_and_startup_output_views_use_their_distinct_scrollback_caps() {
         let ordinary = TerminalSession::spawn_output_view(String::new(), String::new());
         let startup = TerminalSession::spawn_startup_output_view_with_appearance(
             String::new(),
@@ -23351,12 +22833,7 @@ PS1='zz-path-fixture> '
         cols: u16,
         rows: u16,
     ) -> (Option<SelectionState>, CopyModeSlot) {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols,
-            rows,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(cols, rows, 16).expect("terminal");
         terminal.vt_write(text);
         let mut selection = None;
         let mut copy_mode = None;
@@ -23380,12 +22857,7 @@ PS1='zz-path-fixture> '
         start: PointCoordinate,
         actions: &[CopyModeAction],
     ) -> CopyModeState {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols,
-            rows,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(cols, rows, 16).expect("terminal");
         terminal.vt_write(text);
         let mut selection = None;
         let mut copy_mode = None;
@@ -23679,12 +23151,7 @@ PS1='zz-path-fixture> '
         count: u32,
         starts_at_bottom: bool,
     ) -> Option<Box<CopyModeState>> {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(b"zero\r\none\r\ntwo\r\nthree\r\nfour\r\nfive");
         let mut selection = None;
         let mut copy_mode = None;
@@ -23757,12 +23224,7 @@ PS1='zz-path-fixture> '
 
     #[test]
     fn a_rearmed_scroll_exit_latch_drives_the_plain_downward_actions() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 2,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 2, 16).expect("terminal");
         terminal.vt_write(b"zero\r\none\r\ntwo\r\nthree");
         let mut selection = None;
         let mut copy_mode = None;
@@ -23842,12 +23304,7 @@ PS1='zz-path-fixture> '
     }
 
     fn copy_mode_over_thirty_lines() -> CopyModeSlot {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 10,
-            rows: 6,
-            max_scrollback: 64,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(10, 6, 64).expect("terminal");
         let lines = (0..30)
             .map(|index| format!("l{index:02}"))
             .collect::<Vec<_>>()
@@ -23941,12 +23398,7 @@ PS1='zz-path-fixture> '
     fn page_movement_pinned_at_the_bottom_keeps_the_remembered_column_unclamped() {
         let separators = WordSeparators::default();
         for (vi, start, landed) in [(true, 1, 1), (false, 1, 1), (true, 2, 0), (false, 2, 1)] {
-            let mut terminal = Terminal::new(TerminalOptions {
-                cols: 10,
-                rows: 6,
-                max_scrollback: 64,
-            })
-            .expect("terminal");
+            let mut terminal = new_terminal(10, 6, 64).expect("terminal");
             let lines = (0..30)
                 .map(|index| {
                     if index == 28 {
@@ -24121,12 +23573,7 @@ PS1='zz-path-fixture> '
 
     #[test]
     fn cursor_centre_actions_park_the_cursor_mid_view_and_mid_row() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 9,
-            rows: 4,
-            max_scrollback: 16,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(9, 4, 16).expect("terminal");
         terminal.vt_write(b"zero\r\none\r\ntwo\r\nthree\r\nfour\r\nfive");
         let mut selection = None;
         let mut copy_mode = None;
@@ -24188,12 +23635,7 @@ PS1='zz-path-fixture> '
 
     #[test]
     fn scroll_placement_moves_the_view_and_leaves_the_cursor_line_alone() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 3,
-            max_scrollback: 32,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 3, 32).expect("terminal");
         terminal.vt_write(b"a\r\nb\r\nc\r\nd\r\ne\r\nf\r\ng\r\nh\r\ni");
         let mut selection = None;
         let mut copy_mode = None;
@@ -24246,12 +23688,7 @@ PS1='zz-path-fixture> '
 
     #[test]
     fn goto_line_scrolls_back_from_the_bottom_and_holds_the_cursor_screen_row() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 3,
-            max_scrollback: 64,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 3, 64).expect("terminal");
         for line in 0..20_u32 {
             terminal.vt_write(format!("L{line}\r\n").as_bytes());
         }
@@ -24337,12 +23774,7 @@ PS1='zz-path-fixture> '
 
     #[test]
     fn scroll_placement_does_nothing_when_the_revision_cannot_reach_that_far() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 3,
-            max_scrollback: 32,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 3, 32).expect("terminal");
         terminal.vt_write(b"a\r\nb\r\nc\r\nd\r\ne\r\nf");
         let mut selection = None;
         let mut copy_mode = None;
@@ -24404,12 +23836,7 @@ PS1='zz-path-fixture> '
 
     #[test]
     fn recentre_cycles_middle_top_bottom_and_restarts_on_a_new_line() {
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols: 8,
-            rows: 3,
-            max_scrollback: 32,
-        })
-        .expect("terminal");
+        let mut terminal = new_terminal(8, 3, 32).expect("terminal");
         terminal.vt_write(b"a\r\nb\r\nc\r\nd\r\ne\r\nf\r\ng\r\nh\r\ni");
         let mut selection = None;
         let mut copy_mode = None;

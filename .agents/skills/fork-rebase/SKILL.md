@@ -128,20 +128,28 @@ Current forks and why:
 ## Native Ghostty fork
 
 `libghostty-vt-sys/build.rs` fetches `demfabris/ghostty` directly at
-`fa7986a9dc3e582c46ebe248f66571ed740c7afe`, based on upstream `20c3eae04dee606349eb21e2dd0293b203d47179`.
-The retained branch is `codex/cabi-signal-stack`. Its one-line C ABI option
-removes unused Zig signal-stack TLS storage; it does not change terminal grid
+`6fce227c55d288e35c9fedfd090f286cc74a8ad8` (branch `zz-2026-09-25`), based on upstream
+`6301810a48aaa3426887a4316668f18833a40138`. Earlier pins stay on their own branches
+(`codex/cabi-signal-stack` holds `fa7986a9` on `20c3eae`). Its one-line C ABI option
+removes unused Zig signal-stack TLS storage from ReleaseSafe builds (TinyIo already
+removed it from release builds); it does not change terminal grid
 semantics. `third_party/rust/libghostty-vt-sys/UPSTREAM.md` owns its rationale,
 validation, and removal condition.
 
 `just forks`, `forks.conf`, and `fork-sync.sh` only handle Cargo forks. Do not
 add this native dependency to that manifest or use its Cargo rebase command.
 For a native update, inspect both upstream and fork histories, preserve the
-published pin through a retained branch or tag, and prepare a separate
-`codex/` branch. Recheck that C ABI code does not create Zig-owned workers or
+published pin through a retained branch or tag, and push the new pin as a
+new dated branch (`zz-YYYY-MM-DD`); never force-push an existing one. When the
+upstream base is new to the fork, create the branch at the upstream commit
+with `gh api repos/demfabris/ghostty/git/refs` (the fork network already holds
+the objects) and push only the carried commit on top. Recheck that C ABI code does not create Zig-owned workers or
 install a Zig signal stack. Publish the tested commit, update `GHOSTTY_REPO`
 and `GHOSTTY_COMMIT` in `build.rs`, and update the sys README, UPSTREAM record,
 and knowledge pages. No Cargo lock update is needed for a native-only change.
+A base move that changes the C headers also needs a safe wrapper that speaks
+the new API and bindings regenerated with the snapshot's `gen-bindings` tool;
+the 2026-09-25 bump records how in UPSTREAM.md.
 
 Validate the actual archive and daemon: exported C symbols, terminal tests,
 signal-handler/alternate-stack behavior, and a normal macOS bundle build with

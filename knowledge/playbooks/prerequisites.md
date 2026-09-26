@@ -23,7 +23,7 @@ flow that consumes CMake/Ninja.
 | Requirement | Pin / version | Checked against | Why it's needed |
 | --- | --- | --- | --- |
 | Rust | `1.97.0`, minimal profile, `clippy` + `rustfmt` components | `rust-toolchain.toml`; `workspace.package.rust-version = "1.97"` in `Cargo.toml` | Toolchain auto-selected by `rustup` when present |
-| Zig | `0.16.0` | `mise.toml`, mirrored in `.zigversion`; `mlugg/setup-zig@v2.2.1` with `version: 0.16.0` in CI | Builds `libghostty-vt` v0.2.1 with the local sys crate and a native fork removing unused C-host signal-stack storage |
+| Zig | `0.16.0` | `mise.toml`, mirrored in `.zigversion`; `mlugg/setup-zig@v2.2.1` with `version: 0.16.0` in CI | Builds `libghostty-vt` with the local sys crate and a native fork removing unused C-host signal-stack storage |
 | CMake | `3.21` or newer | `cmake_minimum_required(VERSION 3.21)` in the CEF distribution's own `CMakeLists.txt`; `cmake` in the CI apt list | Configures the CEF C++ wrapper build invoked by `xtask`/`cef::build_util` |
 | Ninja | any recent | `ninja-build` in the CI apt list | Build backend for the CEF C++ wrapper |
 | Linux system libs | see the apt line below | CI `apt-get install` list | Font discovery plus GPUI's dual Wayland/X11 backend (`gpui_platform` features `["wayland", "x11"]`) |
@@ -78,8 +78,8 @@ components = ["clippy", "rustfmt"]
 | `rust-toolchain.toml` | Pins the Rust channel and required components |
 | `mise.toml` | Selects Zig 0.16.0 for raw local Cargo commands when mise is active |
 | `.zigversion` | Mirrors the Zig pin for compatible Zig-specific tooling |
-| `Cargo.toml` | `workspace.package.rust-version = "1.97"`; upstream `libghostty-vt = "=0.2.1"` plus the local `libghostty-vt-sys` patch |
-| `third_party/rust/libghostty-vt-sys/UPSTREAM.md` | Records the wrapper release, Ghostty `fa7986a9` fork pin and upstream base, generated bindings, and removal condition |
+| `Cargo.toml` | `workspace.package.rust-version = "1.97"`; `libghostty-vt` pinned to a `Uzaaft/libghostty-rs` commit plus the local `libghostty-vt-sys` patch |
+| `third_party/rust/libghostty-vt-sys/UPSTREAM.md` | Records the wrapper commit, Ghostty `6fce227c` fork pin and upstream base, generated bindings, and removal condition |
 | `.github/workflows/ci.yml` | Authoritative list of Linux system packages and the Zig setup action, run across `ubuntu-24.04`, `macos-15`, `windows-2025` |
 | `packaging/arch/PKGBUILD` | Native Arch package metadata and filesystem layout for the validated Linux bundle |
 

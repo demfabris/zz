@@ -1,25 +1,26 @@
 ---
 type: Subsystem
 title: libghostty-vt embedding
-description: How zz-terminal embeds libghostty-vt v0.2.1 over a pinned Ghostty Zig 0.16 snapshot, including terminal color-query replies and single-worker-thread ownership.
+description: How zz-terminal embeds libghostty-vt over a pinned Ghostty snapshot, including line-counted scrollback, terminal color-query replies, and single-worker-thread ownership.
 resource: crates/zz-terminal/src/session.rs
 tags: [libghostty, ghostty, vt, zig, worker-thread, mode-revision, kitty-graphics]
-timestamp: 2026-08-19T11:49:46-03:00
+timestamp: 2026-09-25T23:59:00-03:00
 ---
 
 # Overview
 
 `libghostty-vt` is the VT engine inside [`zz-terminal`](/crates/zz-terminal.md). The
-workspace pins the upstream v0.2.1 release commit `46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0`
-exactly, with `default-features = false`, because crates.io v0.2.0 ignores OSC dynamic-color queries.
-The `-vt` crate is a safe Rust binding over `libghostty-vt-sys`. Until the wrapper publishes its own
-Zig 0.16 pin, the workspace replaces only that sys crate with the local snapshot documented in
-`third_party/rust/libghostty-vt-sys/UPSTREAM.md`; it statically builds Ghostty commit
-`fa7986a9dc3e582c46ebe248f66571ed740c7afe` from `demfabris/ghostty`, based on upstream
-`20c3eae04dee606349eb21e2dd0293b203d47179`. The base fixes the custom `memset` C ABI; the carried
-one-line `signal_stack_size = null` option removes the unused Zig signal-stack
-TLS allocation in C hosts. Rust retains ownership of thread startup and signal
-handling. See the [macOS measurements](/research/2026-09-23-macos-performance.md). The repository pins **Zig 0.16.0** in `.zigversion`,
+workspace pins `Uzaaft/libghostty-rs` commit `359ef751c189540eafb9110b2de89ad95ce48fc3` exactly,
+with `default-features = false`. That is the head of the open stacked PR #99 (render hold and the
+resize scrollback pull option, over #84's Ghostty `56dbc4a` bindings and #83's Kitty PNG fixes);
+no crates.io release after v0.2.1 carries the updated C API. The `-vt` crate is a safe Rust binding
+over `libghostty-vt-sys`, and the workspace replaces that sys crate with the local snapshot documented
+in `third_party/rust/libghostty-vt-sys/UPSTREAM.md`. It statically builds Ghostty commit
+`6fce227c55d288e35c9fedfd090f286cc74a8ad8` from `demfabris/ghostty` branch `zz-2026-09-25`, based on
+upstream `6301810a48aaa3426887a4316668f18833a40138` (2026-09-25). The carried one-line
+`signal_stack_size = null` option removes the unused Zig signal-stack TLS allocation in C hosts; since
+upstream's TinyIo change, release builds no longer carry it, but the ReleaseSafe dev and test builds
+still do. Rust retains ownership of thread startup and signal handling. See the [macOS measurements](/research/2026-09-23-macos-performance.md). The repository pins **Zig 0.16.0** in `.zigversion`,
 `mise.toml`, and CI so every native rebuild uses the required compiler. `zz-terminal` enables the
 wrapper's `kitty-graphics` feature and leaves the other defaults off. `session.rs` uses
 `Terminal::kitty_graphics`, `Terminal::set_kitty_image_storage_limit`, `PlacementIterator`, and the
@@ -35,7 +36,7 @@ The worker uses these libghostty facilities (imports in `session.rs` and `sessio
 
 | Facility | Types used | Used for |
 | --- | --- | --- |
-| Terminal state | `Terminal<'alloc,'callbacks>`, `TerminalOptions`, `Screen`, `Mode` | VT parsing of PTY bytes, grid + scrollback, primary/alternate screens. |
+| Terminal state | `Terminal<'alloc,'callbacks>`, `Screen`, `Mode` | VT parsing of PTY bytes, grid + scrollback, primary/alternate screens. |
 | Render extraction | `RenderState`, `RowIterator`, `CellIterator`, `Dirty`, `CursorVisualStyle` | Walk dirty rows/cells into [`PackedCell`](/concepts/terminal-frame.md) frames. |
 | Cell semantics | `CellWide`, `CellSemanticContent`, `RowSemanticPrompt`, `TrackedGridRef`, `PointCoordinate` | Wide-glyph spacers, OSC 133 prompt/input/output marks, stable scroll-safe references. |
 | Key encoding | `key::Encoder`, `key::Event`, `key::Key`, `OptionAsAlt` | Encode [`KeyInput`](/terminal/interaction.md) to terminal bytes (Kitty keyboard aware). |
@@ -46,9 +47,33 @@ The worker uses these libghostty facilities (imports in `session.rs` and `sessio
 | Formatting / misc | `fmt::Formatter`, `focus`, `ScrollViewport`, `SizeReportSize`, `ColorScheme` | `capture-pane` output, focus reporting, scrollback paging, size/scheme reports. |
 
 The worker also registers libghostty callbacks: `on_pty_write` (terminal responses collected in
-`PtyEffects` and drained to the PTY writer), `on_size`, `on_color_scheme`, and `on_xtversion`.
+`PtyEffects` and drained to the PTY writer), `on_size`, `on_color_scheme`, `on_xtversion`, and
+`on_clipboard_write`, which answers every write through the request's `reply` before returning.
 Default colors and the full 256-color palette are pushed into every terminal via
 `apply_terminal_appearance` before any PTY output is processed.
+
+# Scrollback limit
+
+`new_terminal` in `session.rs` builds every Ghostty terminal: `Terminal::new(cols, rows)`, then
+`set_scrollback_max_bytes(None)` and `set_scrollback_max_lines(Some(limit))`, with the limit clamped
+to `MAX_HISTORY_LIMIT`. Panes pass tmux's `history-limit`, fixed at spawn as tmux does. Before the
+2026-09-25 bump the pin read that number as a byte budget, so every pane kept about one page of
+history (924 rows at 80 columns) whatever the option said. Ghostty prunes whole pages, so history
+settles somewhat under the limit rather than at it: at 80x24, 10,000 keeps 9,883 rows and 2,000 keeps
+1,609 (`history_limit_counts_retained_lines`). tmux drops a tenth of the limit when it fills, so both
+keep a band below the limit. Small limits keep about one page instead: every limit from 0 to 1,000
+kept 427 rows at 80 columns, where tmux keeps exactly that few. Command-output views pass 100,000 and the startup diagnostics view
+64 MiB, which the clamp turns into one million lines.
+
+# Replies tmux does not give
+
+At this pin libghostty answers some queries the pinned tmux answers differently or not at all, and
+it offers no option to turn them off, so zz passes them through: XTGETTCAP (`DCS + q`) is answered from
+Ghostty's own terminfo entry whenever a PTY write callback is installed, where tmux stays silent;
+DECRQSS answers SGR, DECSTBM, DECSLRM, and DECSCUSR, where tmux answers only the cursor style and
+reports every other request as invalid. ANSI DECRQM is answered by both, with tmux knowing only IRM.
+Title reports (`CSI 21 t`) stay off, the libghostty default and the pin's behavior
+(`title_report_queries_stay_unanswered_like_the_pinned_tmux`).
 
 # Dynamic color queries
 

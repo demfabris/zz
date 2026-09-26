@@ -4,7 +4,7 @@ title: GPUI revision pin
 description: Where the patched Zed revision zz builds against is defined, how to read it, and what the carried GPUI patches do. gpui-component is not a dependency.
 resource: Cargo.toml
 tags: [gpui, zed, pin, reference, git-dependency]
-timestamp: 2026-09-24T00:00:00Z
+timestamp: 2026-09-25T00:00:00Z
 ---
 
 # Overview
@@ -229,6 +229,32 @@ The fork passed 332 GPUI tests, six Apple tests including Metal pixel comparison
 and 32 WGPU tests. The profiler suite passed 386 tests with one spring timing
 failure that passed alone; all six debug-overlay tests passed. These checks ran
 on macOS with Rust 1.97.1. Native Linux and Windows validation needs those hosts.
+
+# Rebase checks from 2026-09-25
+
+The 59 commits on `zz-patches` (`9b46226e6f`) were replayed onto upstream
+`933d8d93819c749a607e561883855a9b95c79cea` (203 upstream commits) as the branch
+`zz-patches-2026-09-25`, which zz pins while `zz-patches` still points at the old tip.
+Two commits were dropped because upstream now covers them: the Windows manifest path
+(upstream #62525) and the `TestWindow` raw handle error (upstream already returns an
+error instead of panicking). One commit was added: `Quad` is padded to 44 words because
+upstream's WebGL quad decoder reads whole 16-byte texels at a fixed stride.
+
+Upstream moved the wgpu renderer's device, pipelines, and per-frame state into
+`WgpuRendererCore` behind `RendererState`, so the corner mask, shadow clipping, external
+textures, and lazily allocated path textures now live on the core. `KeystrokeEvent::is_held`
+is threaded through the new `&Keystroke` dispatch, Metal atlas retirement sits in the
+`AtlasState` backend, and the Linux desktop font generation also bumps upstream's
+`TextSystem` font generation so cached line layouts are dropped. Keystroke interceptors
+now also see standalone Shift, Control, Alt, Cmd, and Fn taps, which zz's two interceptors
+ignore.
+
+WGPU layout tests now expect 44 words for `Quad`. The fork passed 410 GPUI tests plus 17
+profiler and bench tests (these share global state and pass with `--test-threads=1`),
+14 Apple tests including the Metal atlas retirement and pixel tests, 12 macOS tests, and
+47 WGPU tests including WGSL validation. `gpui_linux` and `gpui_wgpu` were type-checked
+for Linux (musl target, zig as the C compiler) and `gpui_windows` for
+`x86_64-pc-windows-msvc`. Nothing ran on a Linux or Windows host.
 
 # Related
 

@@ -203,6 +203,18 @@ gestures, visual viewports, and keyboard/safe-area insets must pass through zz's
 content-zoom conversion. See `knowledge/references/gpui-revision.md` for the
 dated checks and shader layout sizes.
 
+The 2026-09-25 rebase hit three upstream changes. The wgpu renderer's GPU state moved
+into `WgpuRendererCore` (shared with the headless renderer), so carried per-frame state
+belongs on the core, not on `WgpuRenderer`. The WebGL quad loader became a fixed decoder
+over whole texels, so `Quad` must stay a multiple of 16 bytes (it is 44 words). Keystroke
+dispatch now passes `&Keystroke` and delivers standalone modifier taps to interceptors.
+Linux and Windows can be type-checked from macOS: `cargo check --target
+x86_64-unknown-linux-musl` with a `zig cc -target x86_64-linux-musl` wrapper named
+`x86_64-linux-musl-gcc` (drop cc-rs's `--target=` flag; a `zig c++` twin as `-g++`),
+`RUST_FONTCONFIG_DLOPEN=1`, and
+`FREETYPE2_NO_PKG_CONFIG=1`; and `cargo +1.97.0 check -p gpui_windows --target
+x86_64-pc-windows-msvc` with `RC_x86_64_pc_windows_msvc` set to Homebrew's `llvm-rc`.
+
 The older combined command remains available:
 
 ```

@@ -1,23 +1,25 @@
 # CEF artifact lock
 
-zz resolves `cef` and `cef-dll-sys` to `152.2.0+152.0.6` in `Cargo.lock`.
-That release maps to CEF `152.0.6+g708dc14+chromium-152.0.7977.83`.
+zz resolves `cef` and `cef-dll-sys` to `154.0.0+154.0.23` in `Cargo.lock`.
+That release maps to CEF `154.0.23+g062ebe4+chromium-154.0.8037.17`.
 `download-cef` verifies the selected minimal distribution against the SHA-1
 published in CEF's official `index.json` before extracting it.
 
 | Rust target | Minimal distribution | SHA-1 |
 | --- | --- | --- |
-| `x86_64-unknown-linux-gnu` | `cef_binary_152.0.6+g708dc14+chromium-152.0.7977.83_linux64_minimal.tar.bz2` | `9711b86c105fb590da576fe5a829802f1a79d520` |
-| `aarch64-unknown-linux-gnu` | `cef_binary_152.0.6+g708dc14+chromium-152.0.7977.83_linuxarm64_minimal.tar.bz2` | `d05e22542515b1022820651c75ba0c91fb9d8ad2` |
-| `arm-unknown-linux-gnueabi` | `cef_binary_152.0.6+g708dc14+chromium-152.0.7977.83_linuxarm_minimal.tar.bz2` | `55ce872fd4fe9a06f83644151e6587ca31493a8d` |
-| `x86_64-apple-darwin` | `cef_binary_152.0.6+g708dc14+chromium-152.0.7977.83_macosx64_minimal.tar.bz2` | `fed74cac2af95dec716000e9a35ebed8eb4f9a25` |
-| `aarch64-apple-darwin` | `cef_binary_152.0.6+g708dc14+chromium-152.0.7977.83_macosarm64_minimal.tar.bz2` | `426836139b0ea7b7278aa0915cfae90eb460551f` |
-| `x86_64-pc-windows-msvc` | `cef_binary_152.0.6+g708dc14+chromium-152.0.7977.83_windows64_minimal.tar.bz2` | `e5e3020627f4528bd43e22f4c4970000b0458e99` |
-| `aarch64-pc-windows-msvc` | `cef_binary_152.0.6+g708dc14+chromium-152.0.7977.83_windowsarm64_minimal.tar.bz2` | `7bf72d53750608d7f733f7488dbb80813bf043fb` |
-| `i686-pc-windows-msvc` | `cef_binary_152.0.6+g708dc14+chromium-152.0.7977.83_windows32_minimal.tar.bz2` | `3e7d117c24da4847fefacb6bdf694de29a595d43` |
+| `x86_64-unknown-linux-gnu` | `cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_linux64_minimal.tar.bz2` | `01c4df39ce79c441950cd8bf2f385c0b886bd5d3` |
+| `aarch64-unknown-linux-gnu` | `cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_linuxarm64_minimal.tar.bz2` | `08c08229946992685b90b50ee08e7a59e192b601` |
+| `arm-unknown-linux-gnueabi` | `cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_linuxarm_minimal.tar.bz2` | `736a5b863dbbab85c72c60620473ac48fe30fec9` |
+| `x86_64-apple-darwin` | `cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_macosx64_minimal.tar.bz2` | `ae3b583f32a980f373d32e82e120eac45848d1fb` |
+| `aarch64-apple-darwin` | `cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_macosarm64_minimal.tar.bz2` | `9fdef241a8c682d98743c9fc6b27f5e54045551e` |
+| `x86_64-pc-windows-msvc` | `cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_windows64_minimal.tar.bz2` | `d9f11d9175a5b5daffc2fbe82e695c1ab05aff22` |
+| `aarch64-pc-windows-msvc` | `cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_windowsarm64_minimal.tar.bz2` | `4a5bebb6325722163aadb92d453e6a67987a929c` |
+| `i686-pc-windows-msvc` | `cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_windows32_minimal.tar.bz2` | `3b8c1169ff9193dc624872914a9627d0e6890df2` |
 
 The values above were read from `https://cef-builds.spotifycdn.com/index.json`
-on 2026-09-12. This table is a reviewable mirror; `download-cef` fetches and
+on 2026-09-25. The index lists 154.0.23 twice, as a beta build and a stable
+rebuild with different archives; `download-cef` takes the first match, which is
+the stable build above. This table is a reviewable mirror; `download-cef` fetches and
 verifies against the official index directly. When updating CEF, refresh the
 Cargo lock, this table, the CI cache key, and all three platform bundle
 checks together.

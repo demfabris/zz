@@ -10,9 +10,9 @@ parser.add_argument("source", type=Path)
 parser.add_argument("--check", action="store_true")
 args = parser.parse_args()
 source = args.source.read_bytes()
-expected_hash = "f728edbd534f5b0dceb304c4d5da72d087ffab40cb522bd3f987210694c1cf85"
+expected_hash = "46bb59c1d9197f3a07fd3ee6b89499b40df20bb8cd57d18a19fe92f62fd28f43"
 if hashlib.sha256(source).hexdigest() != expected_hash:
-    raise SystemExit("bindings differ from the published cef-dll-sys 152.2.0+152.0.6 source")
+    raise SystemExit("bindings differ from the published cef-dll-sys 154.0.0+154.0.23 source")
 
 functions = []
 for block in re.findall(r'unsafe extern "C" \{\n(.*?)\n\}', source.decode(), re.DOTALL):
@@ -23,8 +23,8 @@ for block in re.findall(r'unsafe extern "C" \{\n(.*?)\n\}', source.decode(), re.
     if "..." in declaration:
         raise SystemExit("variadic CEF API requires an explicit loader design")
     functions.append(declaration)
-if len(functions) != 194:
-    raise SystemExit(f"expected 194 CEF functions, found {len(functions)}")
+if len(functions) != 193:
+    raise SystemExit(f"expected 193 CEF functions, found {len(functions)}")
 
 outputs = {
     "functions.rs": "cef_functions! {\n" + "\n".join(f"    fn {function};" for function in functions) + "\n}\n",

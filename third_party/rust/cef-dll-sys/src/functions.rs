@@ -117,7 +117,6 @@ cef_functions! {
     fn cef_v8_value_create_function( name: *const cef_string_t, handler: *mut cef_v8_handler_t, ) -> *mut cef_v8_value_t;
     fn cef_v8_value_create_promise() -> *mut cef_v8_value_t;
     fn cef_v8_stack_trace_get_current( frame_limit: ::std::os::raw::c_int, ) -> *mut cef_v8_stack_trace_t;
-    fn cef_register_extension( extension_name: *const cef_string_t, javascript_code: *const cef_string_t, handler: *mut cef_v8_handler_t, ) -> ::std::os::raw::c_int;
     fn cef_register_scheme_handler_factory( scheme_name: *const cef_string_t, domain_name: *const cef_string_t, factory: *mut cef_scheme_handler_factory_t, ) -> ::std::os::raw::c_int;
     fn cef_clear_scheme_handler_factories() -> ::std::os::raw::c_int;
     fn cef_execute_process( args: *const cef_main_args_t, application: *mut cef_app_t, windows_sandbox_info: *mut ::std::os::raw::c_void, ) -> ::std::os::raw::c_int;

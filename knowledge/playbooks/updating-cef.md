@@ -4,7 +4,7 @@ title: Updating the CEF pin
 description: The coordinated steps required to bump zz's CEF dependency, refresh its artifact reference and cache key, and run all three platform bundle smoke tests.
 resource: third_party/cef/ARTIFACTS.md
 tags: [cef, upgrade, playbook, sha1, coordinated-change]
-timestamp: 2026-07-15T02:25:00Z
+timestamp: 2026-09-25T22:30:00Z
 ---
 
 # Overview
@@ -19,8 +19,10 @@ the build consumes (see [build/verify a CEF bundle](/playbooks/build-cef-bundle.
 # Steps
 
 1. **Choose the new CEF release.** Find the target `cef`/`cef-dll-sys` Rust package version (format
-   `<rust-pkg-version>+<cef-version>`, e.g. current `152.2.0+152.0.6` mapping to CEF
-   `152.0.6+g708dc14+chromium-152.0.7977.83`).
+   `<rust-pkg-version>+<cef-version>`, e.g. current `154.0.0+154.0.23` mapping to CEF
+   `154.0.23+g062ebe4+chromium-154.0.8037.17`). The CEF build is whatever the published
+   `cef-dll-sys` names after the `+`; a newer patch build of the same milestone needs a new cef-rs
+   release, because the upstream build script rejects a newer archive.
 2. **Check which wgpu major the release wants.** `accelerated_osr` hands GPUI's own
    `wgpu::Device` to `cef::osr_texture_import`, so the `cef` crate's `wgpu` dependency must be the
    *same* major as [GPUI's](/references/gpui-revision.md) . two majors in the graph is a type
@@ -28,10 +30,15 @@ the build consumes (see [build/verify a CEF bundle](/playbooks/build-cef-bundle.
    was still on 29, which is why the 151 bump also carried a gpui patch (fork commit
    `gpui: build the wgpu renderer against wgpu 30`) and a `wgpu = "=30.0.0"` workspace bump. Check
    the crate's changelog for a `update wgpu to vN` entry before assuming a bump is dependency-only.
-3. **Bump the workspace dependency.** Update `cef = "=152.2.0"` in the root `Cargo.toml` if the
-   Rust package's major/minor version changed, then regenerate the lock:
+3. **Bump the workspace dependency and the adapter.** Update `cef = "=154.0.0"` in the root
+   `Cargo.toml` if the Rust package's major/minor version changed. `cef-dll-sys` is patched to
+   `third_party/rust/cef-dll-sys`, so bump its package version, its cef-rs `rev`, and
+   `generate.py`'s binding hash and function count together, and regenerate its declarations as
+   its `UPSTREAM.md` describes. Then refresh both lockfiles (the lock holds two `cef-dll-sys`
+   packages, so name the adapter by path):
    ```sh
-   cargo update -p cef -p cef-dll-sys
+   cargo update -p cef -p 'path+file://'"$PWD"'/third_party/rust/cef-dll-sys'
+   cargo update --manifest-path third_party/rust/cef-dll-sys/Cargo.toml --workspace
    ```
    Confirm `Cargo.lock` now resolves to the new `<rust-pkg-version>+<cef-version>` string.
 4. **Fetch the new `index.json`.** Read
@@ -56,7 +63,7 @@ the build consumes (see [build/verify a CEF bundle](/playbooks/build-cef-bundle.
    See [build/verify a CEF bundle](/playbooks/build-cef-bundle.md) for what this exercises locally.
 7. **Bump the CI cache key.** `.github/workflows/ci.yml`, `.github/workflows/release.yml`, and
    `.github/workflows/nightly-corpus.yml` cache the downloaded distribution under
-   `cef-152.0.6-${{ runner.os }}-${{ runner.arch }}`; update all five keys for the new pin.
+   `cef-154.0.23-${{ runner.os }}-${{ runner.arch }}`; update all five keys for the new pin.
 8. **Commit everything together.** `Cargo.lock`, `Cargo.toml` (if changed), `ARTIFACTS.md`, and the
    CI cache-key bump belong in one change, verified against all three platforms before merge.
 
@@ -64,7 +71,8 @@ the build consumes (see [build/verify a CEF bundle](/playbooks/build-cef-bundle.
 
 | File | Role |
 | --- | --- |
-| `Cargo.toml` | `cef = "=152.2.0"` workspace version constraint, and the `wgpu` pin that must match it |
+| `Cargo.toml` | `cef = "=154.0.0"` workspace version constraint, and the `wgpu` pin that must match it |
+| `third_party/rust/cef-dll-sys/` | Adapter patched over `cef-dll-sys`: cef-rs `rev`, generated symbol table, `UPSTREAM.md` |
 | `Cargo.lock` | Exact resolved `cef`/`cef-dll-sys` version (`<rust-pkg>+<cef-version>`) |
 | `third_party/cef/ARTIFACTS.md` | Reviewable mirror of the official per-target archive name + SHA-1 table |
 | `.github/workflows/ci.yml`, `release.yml`, `nightly-corpus.yml` | `CEF_PATH` cache keyed on the CEF version, matrix across all three OSes |

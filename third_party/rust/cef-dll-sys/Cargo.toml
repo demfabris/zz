@@ -1,6 +1,6 @@
 [package]
 name = "cef-dll-sys"
-version = "152.2.0+152.0.6"
+version = "154.0.0+154.0.23"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 publish = false
@@ -13,15 +13,15 @@ dox = ["upstream/dox"]
 sandbox = ["upstream/sandbox"]
 
 [target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
-upstream = { package = "cef-dll-sys", git = "https://github.com/tauri-apps/cef-rs", rev = "207bdd2917c038283635022ffcf7767496bcc7e6", features = ["dox"] }
+upstream = { package = "cef-dll-sys", git = "https://github.com/tauri-apps/cef-rs", rev = "6a6ed14be68c5b8d90b1e5f5a6705a7f899b18b7", features = ["dox"] }
 libloading = "0.9"
 
 [target.'cfg(not(all(target_os = "linux", target_arch = "x86_64")))'.dependencies]
-upstream = { package = "cef-dll-sys", git = "https://github.com/tauri-apps/cef-rs", rev = "207bdd2917c038283635022ffcf7767496bcc7e6" }
+upstream = { package = "cef-dll-sys", git = "https://github.com/tauri-apps/cef-rs", rev = "6a6ed14be68c5b8d90b1e5f5a6705a7f899b18b7" }
 
 [build-dependencies]
 anyhow = "1"
-download-cef = { git = "https://github.com/tauri-apps/cef-rs", rev = "207bdd2917c038283635022ffcf7767496bcc7e6" }
+download-cef = { git = "https://github.com/tauri-apps/cef-rs", rev = "6a6ed14be68c5b8d90b1e5f5a6705a7f899b18b7" }
 
 [lib]
 doctest = false

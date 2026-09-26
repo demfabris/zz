@@ -13,7 +13,7 @@ The CEF runtime subsystem is `cef_runtime.rs` plus the crate root `lib.rs`. It o
 the one-time global CEF Alloy initialization, the platform-specific Chromium
 subprocess entry points, and the **external message pump** that steps CEF from GPUI's
 foreground executor instead of a CEF-owned loop. CEF is pinned to Rust package
-`152.2.0+152.0.6`, backed by **Chromium `152.0.7977.83`**; upgrading is an
+`154.0.0+154.0.23`, backed by **Chromium `154.0.8037.17`**; upgrading is an
 explicit dependency bump requiring all platform bundle smoke tests
 (see [updating CEF](/playbooks/updating-cef.md)).
 

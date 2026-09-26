@@ -92,7 +92,7 @@ jobs:
         uses: actions/cache@v6.1.0
         with:
           path: ${{ github.workspace }}/.cef-cache
-          key: cef-152.0.6-${{ runner.os }}-${{ runner.arch }}
+          key: cef-154.0.23-${{ runner.os }}-${{ runner.arch }}
 
       - name: Install just
         env:
@@ -226,7 +226,7 @@ jobs:
         uses: actions/cache@v6.1.0
         with:
           path: ${{ github.workspace }}/.cef-cache
-          key: cef-152.0.6-${{ runner.os }}-${{ runner.arch }}
+          key: cef-154.0.23-${{ runner.os }}-${{ runner.arch }}
 
       - name: Build the CEF bundle
         run: cargo xtask bundle-cef --release --output dist/zz
@@ -313,7 +313,7 @@ jobs:
         uses: actions/cache@v6.1.0
         with:
           path: ${{ github.workspace }}/.cef-cache
-          key: cef-152.0.6-${{ runner.os }}-${{ runner.arch }}
+          key: cef-154.0.23-${{ runner.os }}-${{ runner.arch }}
 
       - name: Build the CEF bundle
         run: cargo xtask bundle-cef --release --output dist/zz

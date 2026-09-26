@@ -429,10 +429,10 @@ steps:
     uses: actions/cache@v5
     with:
       path: ${{ github.workspace }}/.cef-cache
-      key: cef-152.0.6-${{ runner.os }}-${{ runner.arch }}
+      key: cef-154.0.23-${{ runner.os }}-${{ runner.arch }}
 ```
 
-Bump the cache key's version segment (`cef-152.0.6-...`) whenever the CEF pin changes; see
+Bump the cache key's version segment (`cef-154.0.23-...`) whenever the CEF pin changes; see
 [updating CEF](/playbooks/updating-cef.md).
 
 ## Exercising the browser pane: the loopback fixture

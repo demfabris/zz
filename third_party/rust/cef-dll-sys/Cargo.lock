@@ -130,20 +130,21 @@ dependencies = [
 
 [[package]]
 name = "cef-dll-sys"
-version = "152.2.0+152.0.6"
+version = "154.0.0+154.0.23"
 dependencies = [
  "anyhow",
- "cef-dll-sys 152.2.0+152.0.6 (git+https://github.com/tauri-apps/cef-rs?rev=207bdd2917c038283635022ffcf7767496bcc7e6)",
+ "cef-dll-sys 154.0.0+154.0.23 (git+https://github.com/tauri-apps/cef-rs?rev=6a6ed14be68c5b8d90b1e5f5a6705a7f899b18b7)",
  "download-cef",
  "libloading",
 ]
 
 [[package]]
 name = "cef-dll-sys"
-version = "152.2.0+152.0.6"
-source = "git+https://github.com/tauri-apps/cef-rs?rev=207bdd2917c038283635022ffcf7767496bcc7e6#207bdd2917c038283635022ffcf7767496bcc7e6"
+version = "154.0.0+154.0.23"
+source = "git+https://github.com/tauri-apps/cef-rs?rev=6a6ed14be68c5b8d90b1e5f5a6705a7f899b18b7#6a6ed14be68c5b8d90b1e5f5a6705a7f899b18b7"
 dependencies = [
  "anyhow",
+ "cc",
  "cmake",
  "download-cef",
  "serde_json",
@@ -289,7 +290,7 @@ dependencies = [
 [[package]]
 name = "download-cef"
 version = "3.0.0"
-source = "git+https://github.com/tauri-apps/cef-rs?rev=207bdd2917c038283635022ffcf7767496bcc7e6#207bdd2917c038283635022ffcf7767496bcc7e6"
+source = "git+https://github.com/tauri-apps/cef-rs?rev=6a6ed14be68c5b8d90b1e5f5a6705a7f899b18b7#6a6ed14be68c5b8d90b1e5f5a6705a7f899b18b7"
 dependencies = [
  "bzip2",
  "clap",
@@ -1397,7 +1398,3 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
-
-[[patch.unused]]
-name = "gpui_wgpu"
-version = "0.1.0"

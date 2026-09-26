@@ -1,12 +1,12 @@
 # CEF bindings with deferred Linux loading
 
-This package preserves the `cef-dll-sys` 152.2.0+152.0.6 API and re-exports its types
-from cef-rs commit `207bdd2917c038283635022ffcf7767496bcc7e6`. The workspace patches
+This package preserves the `cef-dll-sys` 154.0.0+154.0.23 API and re-exports its types
+from cef-rs commit `6a6ed14be68c5b8d90b1e5f5a6705a7f899b18b7`. The workspace patches
 the crates.io package to this adapter. Cargo resolves the adapter's upstream
 dependency from its pinned Git source, which avoids a dependency cycle.
 
 On Linux x86_64, the upstream `dox` feature supplies generated types without its
-native `-lcef` link. The adapter resolves 194 C functions with `libloading` when
+native `-lcef` link. The adapter resolves 193 C functions with `libloading` when
 `load_library()` first runs. It validates the complete symbol table before
 publishing it and keeps the library handle for the process lifetime. Calls through
 the generated wrappers require a successful load. zz checks this before subprocess
@@ -46,6 +46,20 @@ For an upgrade, review the new published source and update the commit, package
 version, binding hash, expected function count, and CEF distribution version
 together. Regenerate without `--check`, then run the adapter's loading tests,
 zz-browser tests, and native browser smoke tests. Keep the ABI checks intact.
+
+The CEF distribution follows the build metadata of two package versions. This
+adapter's version picks it on Linux x86_64; everywhere else the upstream
+`cef-dll-sys` build script picks it from its own version, and `download-cef`
+rejects a configured `CEF_PATH` archive newer than that. Keep the adapter's
+`+<cef-version>` equal to the pinned upstream release, so a newer CEF patch
+build needs a cef-rs release (or a fork) rather than an adapter-only edit.
+Two packages named `cef-dll-sys` sit in the lock, so select this one by path
+when refreshing it:
+
+```sh
+cargo update -p cef -p 'path+file://'"$PWD"'/third_party/rust/cef-dll-sys'
+cargo update --manifest-path third_party/rust/cef-dll-sys/Cargo.toml --workspace
+```
 
 ## Native probe
 

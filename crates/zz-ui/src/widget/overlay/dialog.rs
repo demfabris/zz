@@ -34,6 +34,7 @@ pub(super) const ANIMATION_DURATION: Duration = SURFACE_ENTER_DURATION;
 pub(super) const CONTENT_PADDING: Pixels = px(12.);
 const MIN_HEIGHT: Pixels = px(80.);
 const LAYER_OFFSET: f32 = 16.;
+const EDGE_MARGIN: Pixels = px(16.);
 pub(super) const DEFAULT_WIDTH: Pixels = px(400.);
 pub(super) const TITLE_TEXT_SIZE: Pixels = px(13.);
 pub(super) const DESCRIPTION_TEXT_SIZE: Pixels = px(12.);
@@ -344,9 +345,14 @@ impl RenderOnce for Dialog {
                 paddings.left + paddings.right,
                 paddings.top + paddings.bottom,
             );
-        let x = view_size.width / 2. - self.props.width / 2.;
+        let width = self
+            .props
+            .width
+            .min((view_size.width - EDGE_MARGIN * 2.).max(px(0.)));
+        let x = (view_size.width - width) / 2.;
         #[allow(clippy::cast_precision_loss)]
         let y = view_size.height / 10. + px(layer_ix as f32 * LAYER_OFFSET);
+        let max_height = (view_size.height - y - EDGE_MARGIN).max(px(0.));
 
         let animation = Animation::new(ANIMATION_DURATION).with_easing(ease_out_quint());
         let shadow_color = cx.theme().scrim;
@@ -354,6 +360,7 @@ impl RenderOnce for Dialog {
 
         let body = v_flex()
             .id(layer_ix)
+            .debug_selector(move || format!("dialog-{layer_ix}"))
             .role(self.a11y_role)
             .track_focus(&self.focus_handle)
             .bg(cx.theme().background.opaque())
@@ -396,7 +403,8 @@ impl RenderOnce for Dialog {
             .relative()
             .left(x)
             .top(y)
-            .w(self.props.width)
+            .w(width)
+            .max_h(max_height)
             .child(
                 v_flex()
                     .flex_1()
@@ -651,9 +659,108 @@ impl AlertDialog {
 
 #[cfg(test)]
 mod tests {
-    use gpui::TestAppContext;
+    use gpui::{
+        App, AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement,
+        ParentElement as _, Pixels, Render, Styled as _, TestAppContext, VisualTestContext, Window,
+        div, px, size,
+    };
 
-    use super::{Dialog, DialogButtonProps};
+    use super::{Dialog, DialogButtonProps, EDGE_MARGIN, Root};
+    use crate::WindowExt as _;
+
+    struct DialogHost;
+
+    impl Render for DialogHost {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .children(Root::render_dialog_layer(window, cx))
+        }
+    }
+
+    fn window(cx: &mut TestAppContext, viewport: gpui::Size<Pixels>) -> &mut VisualTestContext {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|_| DialogHost);
+            Root::new(view, window, cx)
+        });
+        cx.simulate_resize(viewport);
+        cx.update(|window, cx| _ = window.draw(cx));
+        cx
+    }
+
+    fn open(
+        cx: &mut VisualTestContext,
+        build: impl Fn(Dialog, &mut Window, &mut App) -> Dialog + 'static,
+    ) {
+        cx.update(|window, cx| window.open_dialog(cx, build));
+        cx.run_until_parked();
+        cx.update(|window, cx| _ = window.draw(cx));
+        cx.update(|window, cx| _ = window.draw(cx));
+    }
+
+    fn surface(cx: &mut VisualTestContext, layer_ix: usize) -> Bounds<Pixels> {
+        cx.debug_bounds(["dialog-0", "dialog-1"][layer_ix])
+            .unwrap_or_else(|| panic!("dialog layer {layer_ix} was not painted"))
+    }
+
+    #[gpui::test]
+    fn a_dialog_that_fits_keeps_its_width_and_top_offset(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(1000.), px(800.)));
+        open(cx, |dialog, _, _| dialog.title("Fits").child("body"));
+
+        let bounds = surface(cx, 0);
+        assert_eq!(bounds.size.width, px(400.));
+        assert_eq!(bounds.origin.x, px(300.));
+        assert_eq!(bounds.origin.y, px(80.));
+    }
+
+    #[gpui::test]
+    fn a_dialog_larger_than_the_window_stays_inside_it(cx: &mut TestAppContext) {
+        let viewport = size(px(360.), px(300.));
+        let cx = window(cx, viewport);
+        open(cx, |dialog, _, _| {
+            dialog
+                .width(px(800.))
+                .title("Too big")
+                .child(div().h(px(1000.)).child("tall body"))
+                .footer(div().h(px(32.)).debug_selector(|| "footer-probe".into()))
+        });
+
+        let bounds = surface(cx, 0);
+        let footer = cx.debug_bounds("footer-probe").expect("footer");
+        assert_eq!(bounds.origin.x, EDGE_MARGIN);
+        assert_eq!(bounds.right(), viewport.width - EDGE_MARGIN);
+        assert!(
+            bounds.bottom() <= viewport.height - EDGE_MARGIN,
+            "{bounds:?}"
+        );
+        assert!(footer.bottom() <= bounds.bottom(), "{footer:?} {bounds:?}");
+    }
+
+    #[gpui::test]
+    fn stacked_dialogs_each_fit_the_window(cx: &mut TestAppContext) {
+        let viewport = size(px(360.), px(300.));
+        let cx = window(cx, viewport);
+        open(cx, |dialog, _, _| {
+            dialog.title("First").child(div().h(px(1000.)))
+        });
+        open(cx, |dialog, _, _| {
+            dialog.title("Second").child(div().h(px(1000.)))
+        });
+
+        let first = surface(cx, 0);
+        let second = surface(cx, 1);
+        assert_eq!(second.origin.y, first.origin.y + px(16.));
+        assert!(first.bottom() <= viewport.height - EDGE_MARGIN, "{first:?}");
+        assert!(
+            second.bottom() <= viewport.height - EDGE_MARGIN,
+            "{second:?}"
+        );
+    }
 
     #[gpui::test]
     fn custom_dialog_actions_enable_the_visible_default_footer(cx: &mut TestAppContext) {

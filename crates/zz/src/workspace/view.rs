@@ -3955,6 +3955,7 @@ mod tests {
             | CoreEvent::StatusChanged
             | CoreEvent::PrefixArmed { .. }
             | CoreEvent::PrefixCancelled { .. }
+            | CoreEvent::KeyTableChanged
             | CoreEvent::CommandOutputChanged
             | CoreEvent::PaneRemoved { .. }
             | CoreEvent::Bell { .. }

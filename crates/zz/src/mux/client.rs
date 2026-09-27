@@ -4194,6 +4194,7 @@ impl MuxClient {
             // ingested rather than received; the frame path never reaches the
             // core, so its two viewport events cannot fire here.
             CoreEvent::KeyTablesChanged
+            | CoreEvent::KeyTableChanged
             | CoreEvent::HelloReceived
             | CoreEvent::ViewportChanged { .. }
             | CoreEvent::StatusChanged

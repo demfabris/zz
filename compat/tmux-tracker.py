@@ -583,7 +583,7 @@ def validate_manifest(manifest, oracle, include_report):
             if not isinstance(binding, dict):
                 errors.append(f"{location} must be an object")
                 continue
-            expected_fields = {"table", "key", "repeat", "command"}
+            expected_fields = {"table", "key", "repeat", "command", "note"}
             if set(binding) != expected_fields:
                 errors.append(f"{location} fields must be {', '.join(sorted(expected_fields))}")
             table = binding.get("table")
@@ -597,6 +597,9 @@ def validate_manifest(manifest, oracle, include_report):
                 errors.append(f"{location}.command must be one nonempty line")
             if not isinstance(binding.get("repeat"), bool):
                 errors.append(f"{location}.repeat must be a boolean")
+            note = binding.get("note")
+            if not isinstance(note, str) or "\n" in note:
+                errors.append(f"{location}.note must be one line")
             if (
                 isinstance(table, str)
                 and isinstance(key, str)

@@ -23,15 +23,16 @@ use zz_protocol::StatusLine;
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferState, ChooseTreeState, ClientMessageKind,
     ClipboardProducer, CommandInvocation, CommandPromptState, CommandResponse, ConfirmState,
-    DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage, KeyBindingSnapshot,
+    DisplayPanesState, Event, EventPayload, GitMark, GuiResponse, InputMessage, KeyBindingSnapshot,
     LayoutNode, MenuState, MuxOptionKey, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY,
-    PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PastedImageFormat, PopupState, ProtocolError,
-    ProtocolMessage, ServerError, ServerHello, SessionId, TerminalUiCommand, WindowSnapshot,
+    PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PastedImageFormat, PathEntry, PathListRoot,
+    PopupState, ProtocolError, ProtocolMessage, ServerError, ServerHello, SessionId,
+    TerminalUiCommand, WindowSnapshot,
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, GRAPHEME_TABLE_BIT, IMAGE_PLACEHOLDER_SCHEME,
     PackedCell, ScrollbarState, TerminalAppearance, TerminalColorScheme, TerminalDictionary,
-    TerminalDiffScratch, TerminalViewport, TerminalViewportPatch,
+    TerminalDiffScratch, TerminalViewAction, TerminalViewport, TerminalViewportPatch,
 };
 
 use crate::{
@@ -273,6 +274,28 @@ impl PaneImageSnapshots {
             self.revision = self.revision.wrapping_add(1).max(1);
         }
     }
+}
+
+pub(crate) enum PathPickerUpdate {
+    Open {
+        pane: PaneId,
+        start_dir: Option<String>,
+    },
+    Begin {
+        request_id: u64,
+        result: Result<PathListRoot, String>,
+    },
+    Chunk {
+        request_id: u64,
+        entries: Vec<PathEntry>,
+        done: bool,
+        truncated: bool,
+    },
+    Git {
+        request_id: u64,
+        marks: Vec<(String, GitMark)>,
+    },
+    Close,
 }
 
 /// A pasted image a terminal pane asked to reopen.
@@ -1141,6 +1164,9 @@ pub struct MuxClient {
     pane_images: BTreeMap<PaneId, PaneImageSnapshots>,
     pasted_image_assemblies: BTreeMap<(PaneId, u32), PastedImageAssembly>,
     pending_pasted_image_previews: BTreeSet<(PaneId, u32)>,
+    path_list_requests: BTreeSet<u64>,
+    #[cfg(test)]
+    path_list_sink: Option<std::rc::Rc<std::cell::RefCell<Vec<ProtocolMessage>>>>,
     pending_commands_revision: u64,
     command_output: Option<CommandOutputModel>,
     command_prompt_revision: u64,
@@ -1288,6 +1314,9 @@ impl MuxClient {
             pane_images: BTreeMap::new(),
             pasted_image_assemblies: BTreeMap::new(),
             pending_pasted_image_previews: BTreeSet::new(),
+            path_list_requests: BTreeSet::new(),
+            #[cfg(test)]
+            path_list_sink: None,
             pending_commands_revision: 0,
             command_output: None,
             command_prompt_revision: 0,
@@ -2419,6 +2448,15 @@ impl MuxClient {
         self.attached_connection().is_connected()
     }
 
+    #[cfg(test)]
+    pub(crate) fn record_path_lists_for_test(
+        &mut self,
+    ) -> std::rc::Rc<std::cell::RefCell<Vec<ProtocolMessage>>> {
+        let sink = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        self.path_list_sink = Some(std::rc::Rc::clone(&sink));
+        sink
+    }
+
     /// Collect what the views send to panes, so a test can assert delivery.
     #[cfg(test)]
     pub(crate) fn record_input_for_test(
@@ -2859,6 +2897,63 @@ impl MuxClient {
         }
     }
 
+    pub(crate) fn request_path_list(&mut self, pane: PaneId, dir: Option<String>) -> Option<u64> {
+        #[cfg(test)]
+        if let Some(sink) = &self.path_list_sink {
+            let sent = sink
+                .borrow()
+                .iter()
+                .filter(|message| matches!(message, ProtocolMessage::PathListRequest { .. }))
+                .count();
+            let request_id = u64::try_from(sent).unwrap_or(u64::MAX) + 1;
+            sink.borrow_mut().push(ProtocolMessage::PathListRequest {
+                request_id,
+                pane,
+                dir,
+            });
+            self.path_list_requests.insert(request_id);
+            return Some(request_id);
+        }
+        let client = self.attached_connection().client.as_ref()?;
+        match client.request_path_list(pane, dir) {
+            Ok(request_id) => {
+                self.path_list_requests.insert(request_id);
+                Some(request_id)
+            }
+            Err(error) => {
+                log::warn!("failed to request a path listing: {error}");
+                None
+            }
+        }
+    }
+
+    pub(crate) fn cancel_path_list(&mut self, request_id: u64) {
+        if self.path_list_requests.remove(&request_id) {
+            self.send_path_list_cancel(request_id);
+        }
+    }
+
+    fn send_path_list_cancel(&self, request_id: u64) {
+        #[cfg(test)]
+        if let Some(sink) = &self.path_list_sink {
+            sink.borrow_mut()
+                .push(ProtocolMessage::PathListCancel { request_id });
+            return;
+        }
+        if let Some(client) = &self.attached_connection().client
+            && let Err(error) = client.cancel_path_list(request_id)
+        {
+            log::warn!("failed to cancel path listing {request_id}: {error}");
+        }
+    }
+
+    pub(crate) fn paste_to_pane(&self, pane: PaneId, text: String) -> bool {
+        self.send_input(InputMessage::TerminalView {
+            pane,
+            action: TerminalViewAction::Paste(text),
+        })
+    }
+
     pub(crate) fn send_prefix_cancel(&mut self) -> Option<u64> {
         let request_id = self.next_prefix_cancel_request.saturating_add(1).max(1);
         if self.send_input(InputMessage::CancelPrefix { request_id }) {
@@ -3220,7 +3315,11 @@ impl MuxClient {
         self.confirm_revision = self.confirm_revision.wrapping_add(1).max(1);
     }
 
-    fn reset_session_state(&mut self, _cx: &mut Context<Self>) {
+    fn reset_session_state(&mut self, cx: &mut Context<Self>) {
+        for request_id in std::mem::take(&mut self.path_list_requests) {
+            self.send_path_list_cancel(request_id);
+        }
+        cx.emit(PathPickerUpdate::Close);
         self.reset_client_focus_attach();
         let connection = self.attached_connection_mut();
         connection.resync_pending = false;
@@ -4199,8 +4298,10 @@ impl MuxClient {
             | CoreEvent::HelloReceived
             | CoreEvent::ViewportChanged { .. }
             | CoreEvent::StatusChanged
-            | CoreEvent::CommandOutputChanged
-            | CoreEvent::OpenPathPicker { .. } => {}
+            | CoreEvent::CommandOutputChanged => {}
+            CoreEvent::OpenPathPicker { pane, start_dir } => {
+                cx.emit(PathPickerUpdate::Open { pane, start_dir });
+            }
         }
     }
 
@@ -4419,6 +4520,31 @@ impl MuxClient {
             ProtocolMessage::PastedImageUnavailable { pane, number } => {
                 self.pasted_image_unavailable(pane, number);
             }
+            ProtocolMessage::PathListBegin { request_id, result } => {
+                if result.is_err() {
+                    self.path_list_requests.remove(&request_id);
+                }
+                cx.emit(PathPickerUpdate::Begin { request_id, result });
+            }
+            ProtocolMessage::PathListChunk {
+                request_id,
+                entries,
+                done,
+                truncated,
+            } => {
+                if done {
+                    self.path_list_requests.remove(&request_id);
+                }
+                cx.emit(PathPickerUpdate::Chunk {
+                    request_id,
+                    entries,
+                    done,
+                    truncated,
+                });
+            }
+            ProtocolMessage::PathListGit { request_id, marks } => {
+                cx.emit(PathPickerUpdate::Git { request_id, marks });
+            }
             _ => {}
         }
     }
@@ -4593,6 +4719,8 @@ impl EventEmitter<ClientNotificationCleared> for MuxClient {}
 impl EventEmitter<AttachmentPreviewRequest> for MuxClient {}
 
 impl EventEmitter<SshPromptRequest> for MuxClient {}
+
+impl EventEmitter<PathPickerUpdate> for MuxClient {}
 
 fn adjusted_terminal_font_size(current: f32, adjustment: TerminalFontSizeAdjustment) -> f32 {
     (current + adjustment.delta_points())

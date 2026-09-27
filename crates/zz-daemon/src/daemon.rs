@@ -5861,6 +5861,8 @@ impl Shared {
             inner.client_terminals.remove(&client);
             inner.native_terminal_search_clients.remove(&client);
             inner.native_chooser_clients.remove(&client);
+            inner.path_picker_clients.remove(&client);
+            inner.path_list_roots.remove(&client);
             inner.utf8_clients.remove(&client);
             inner.client_features.remove(&client);
             inner.client_terminal_types.remove(&client);
@@ -8952,6 +8954,65 @@ impl Shared {
                         );
                         inner.swallowed_keys.remove(&client);
                         direct_events.push(EventPayload::FocusSidebar);
+                    }
+                    MuxEffect::ChoosePath { pane, start_dir } => {
+                        if kind != ClientKind::Interactive
+                            || !inner.subscribers.contains_key(&client)
+                        {
+                            return Err(ServerError::InvalidCommand(
+                                "choose-path requires an interactive client".to_owned(),
+                            )
+                            .into());
+                        }
+                        if !inner.path_picker_clients.contains(&client) {
+                            return Err(ServerError::InvalidCommand(
+                                "choose-path needs the zz desktop app".to_owned(),
+                            )
+                            .into());
+                        }
+                        if !client_is_attached_to_pane(&inner, client, *pane)
+                            || inner.engine.state.window_for_pane(*pane)
+                                != client_focused_window_for_attachment(&inner, client)
+                        {
+                            return Err(ServerError::PaneNotAttached(*pane).into());
+                        }
+                        if inner.client_flags.contains(client) {
+                            return Err(ServerError::InvalidCommand(
+                                "client is read-only".to_owned(),
+                            )
+                            .into());
+                        }
+                        if inner
+                            .copy_sessions
+                            .get(&client)
+                            .is_some_and(|session| session.pane == *pane)
+                        {
+                            return Err(ServerError::InvalidCommand(
+                                "choose-path cannot run while the pane is in copy mode".to_owned(),
+                            )
+                            .into());
+                        }
+                        if !inner.terminals.contains_key(pane) {
+                            return Err(ServerError::InvalidCommand(
+                                "choose-path needs a terminal pane".to_owned(),
+                            )
+                            .into());
+                        }
+                        dismiss_overlays(
+                            &mut inner,
+                            client,
+                            None,
+                            &mut direct_events,
+                            &mut retired_command_outputs,
+                            &mut retired_popups,
+                            &mut resume_client_terminals,
+                        );
+                        inner.swallowed_keys.remove(&client);
+                        inner.path_list_roots.remove(&client);
+                        direct_events.push(EventPayload::OpenPathPicker {
+                            pane: *pane,
+                            start_dir: start_dir.clone(),
+                        });
                     }
                     MuxEffect::CommandPrompt {
                         steps,
@@ -30817,6 +30878,8 @@ struct ServerState {
     client_terminals: BTreeSet<ClientId>,
     native_terminal_search_clients: BTreeSet<ClientId>,
     native_chooser_clients: BTreeSet<ClientId>,
+    path_picker_clients: BTreeSet<ClientId>,
+    path_list_roots: BTreeMap<ClientId, PathBuf>,
     /// The clients that raised tmux's `CLIENT_UTF8`. A client not in here is
     /// one `server_client_print` sanitizes its output for.
     utf8_clients: BTreeSet<ClientId>,
@@ -43658,6 +43721,14 @@ fn handle_connection<S: TransportStream>(
                 .any(|capability| capability == ClientHello::CLIENT_NATIVE_CHOOSER_CAPABILITY)
         {
             inner.native_chooser_clients.insert(client);
+        }
+        if hello.kind == ClientKind::Interactive
+            && hello
+                .capabilities
+                .iter()
+                .any(|capability| capability == ClientHello::CLIENT_PATH_PICKER_CAPABILITY)
+        {
+            inner.path_picker_clients.insert(client);
         }
         if client_nested_fact(&hello.capabilities) {
             inner.nested_clients.insert(client);
@@ -102441,6 +102512,135 @@ bind - split-window -v -c "#{pane_current_path}"
             DaemonError::Server(ServerError::InvalidCommand(message))
                 if message.contains("interactive client")
         ));
+    }
+
+    fn choose_path_error(result: Result<(), DaemonError>) -> String {
+        match result {
+            Err(DaemonError::Server(ServerError::InvalidCommand(message))) => message,
+            other => panic!("expected an invalid command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn choose_path_opens_only_for_desktop_clients_in_a_usable_terminal_pane() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "pick"]),
+            )
+            .expect("session");
+        let session = context.session.expect("session id");
+        let pane = context.pane.expect("pane id");
+        shared.attach(client, session).expect("attach session");
+        take_reliable_messages(&mailbox);
+        let choose_path = |kind: ClientKind, context: &mut ExecutionContext, args: &[&str]| {
+            shared
+                .execute(
+                    client,
+                    kind,
+                    context,
+                    &CommandInvocation::new("choose-path", args.iter().copied()),
+                )
+                .map(|_| ())
+        };
+
+        assert!(
+            choose_path_error(choose_path(ClientKind::Command, &mut context, &[]))
+                .contains("interactive client")
+        );
+        assert_eq!(
+            choose_path_error(choose_path(ClientKind::Interactive, &mut context, &[])),
+            "choose-path needs the zz desktop app"
+        );
+
+        shared.inner.lock().path_picker_clients.insert(client);
+        shared
+            .inner
+            .lock()
+            .path_list_roots
+            .insert(client, PathBuf::from("/stale"));
+        choose_path(
+            ClientKind::Interactive,
+            &mut context,
+            &["-c", "/tmp/#{session_name}"],
+        )
+        .expect("open path picker");
+        let messages = take_reliable_messages(&mailbox);
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::OpenPathPicker { pane: opened, start_dir },
+                ..
+            }) if *opened == pane && start_dir.as_deref() == Some("/tmp/pick")
+        )));
+        assert!(!shared.inner.lock().path_list_roots.contains_key(&client));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-window", [] as [&str; 0]),
+            )
+            .expect("second window");
+        let result = choose_path(
+            ClientKind::Interactive,
+            &mut context,
+            &["-t", &pane.to_string()],
+        );
+        assert!(matches!(
+            result,
+            Err(DaemonError::Server(ServerError::PaneNotAttached(refused))) if refused == pane
+        ));
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("select-window", ["-t", &pane.to_string()]),
+            )
+            .expect("back to the first window");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+
+        shared.inner.lock().client_flags.insert(client);
+        assert_eq!(
+            choose_path_error(choose_path(ClientKind::Interactive, &mut context, &[])),
+            "client is read-only"
+        );
+        shared.inner.lock().client_flags.remove(client);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("copy-mode", [] as [&str; 0]),
+            )
+            .expect("enter copy mode");
+        assert!(shared.inner.lock().copy_sessions.contains_key(&client));
+        assert!(
+            choose_path_error(choose_path(ClientKind::Interactive, &mut context, &[]))
+                .contains("copy mode")
+        );
+        shared.inner.lock().copy_sessions.remove(&client);
+
+        let terminal = shared.inner.lock().terminals.remove(&pane);
+        assert_eq!(
+            choose_path_error(choose_path(ClientKind::Interactive, &mut context, &[])),
+            "choose-path needs a terminal pane"
+        );
+        drop(terminal);
+
+        shared.unregister(client);
+        assert!(!shared.inner.lock().path_picker_clients.contains(&client));
     }
 
     #[test]

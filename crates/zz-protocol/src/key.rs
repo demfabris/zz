@@ -445,6 +445,15 @@ impl Default for KeyTables {
                 },
             );
         }
+        tables.bind(
+            "prefix",
+            "F",
+            Binding {
+                commands: vec![CommandInvocation::new("choose-path", Vec::<String>::new())],
+                repeat: false,
+                note: Some("Pick a path and insert it at the cursor".to_owned()),
+            },
+        );
         for digit in 0..=9_u32 {
             tables.bind(
                 "prefix",

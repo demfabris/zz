@@ -543,7 +543,12 @@ fn connect_interactive_client(
     path: &Path,
     color_scheme: TerminalColorScheme,
 ) -> Result<InteractiveClient, DaemonError> {
-    zz_cli::connect_interactive_client_with_config(path, color_scheme, &[])
+    zz_cli::connect_interactive_client_with_config(
+        path,
+        color_scheme,
+        &[],
+        &[zz_protocol::ClientHello::CLIENT_PATH_PICKER_CAPABILITY],
+    )
 }
 #[cfg(target_os = "ios")]
 fn connect_interactive_client(

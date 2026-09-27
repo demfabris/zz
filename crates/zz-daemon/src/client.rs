@@ -514,6 +514,7 @@ impl InteractiveClient {
             false,
             false,
             startup_config_owner,
+            &[],
             EndpointFactsScope::LocalControlTerminalIdentity,
         )?;
         Ok(Self::from_connected(connected))
@@ -529,6 +530,7 @@ impl InteractiveClient {
             None,
             true,
             false,
+            &[],
         )
     }
 
@@ -543,6 +545,23 @@ impl InteractiveClient {
             None,
             client_has_terminal,
             false,
+            &[],
+        )
+    }
+
+    pub fn connect_with_capabilities(
+        path: &Path,
+        color_scheme: TerminalColorScheme,
+        client_has_terminal: bool,
+        capabilities: &[&str],
+    ) -> Result<Self, DaemonError> {
+        Self::connect_endpoint_with_prompts_and_terminal(
+            &Endpoint::Local(path.to_owned()),
+            Some(color_scheme),
+            None,
+            client_has_terminal,
+            false,
+            capabilities,
         )
     }
 
@@ -580,6 +599,7 @@ impl InteractiveClient {
             None,
             client_has_terminal,
             true,
+            &[],
         )
     }
 
@@ -593,6 +613,7 @@ impl InteractiveClient {
             None,
             true,
             true,
+            &[],
         )
     }
 
@@ -607,6 +628,7 @@ impl InteractiveClient {
             None,
             client_has_terminal,
             true,
+            &[],
         )
     }
 
@@ -624,6 +646,23 @@ impl InteractiveClient {
             prompts,
             true,
             false,
+            &[],
+        )
+    }
+
+    pub fn connect_endpoint_with_prompts_and_capabilities(
+        endpoint: &Endpoint,
+        color_scheme: TerminalColorScheme,
+        prompts: Option<crate::askpass::SshPrompts>,
+        capabilities: &[&str],
+    ) -> Result<Self, DaemonError> {
+        Self::connect_endpoint_with_prompts_and_terminal(
+            endpoint,
+            Some(color_scheme),
+            prompts,
+            true,
+            false,
+            capabilities,
         )
     }
 
@@ -638,6 +677,7 @@ impl InteractiveClient {
             prompts,
             true,
             true,
+            &[],
         )
     }
 
@@ -655,6 +695,7 @@ impl InteractiveClient {
             None,
             client_has_terminal,
             true,
+            &[],
         )
     }
 
@@ -671,12 +712,13 @@ impl InteractiveClient {
         prompts: Option<crate::askpass::SshPrompts>,
         client_has_terminal: bool,
         terminal_surface: bool,
+        extra_capabilities: &[&str],
     ) -> Result<Self, DaemonError> {
         let device_name = short_device_name();
         match endpoint {
             Endpoint::Local(path) => {
                 let stream = LocalTransport::connect(path)?;
-                let connected = connect_stream(
+                let connected = connect_stream_with_startup_owner(
                     ClientStream::Local(stream),
                     path.display(),
                     ClientKind::Interactive,
@@ -684,6 +726,8 @@ impl InteractiveClient {
                     color_scheme,
                     client_has_terminal,
                     false,
+                    false,
+                    extra_capabilities,
                     if terminal_surface {
                         EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal
                     } else {
@@ -696,7 +740,7 @@ impl InteractiveClient {
                 #[cfg(target_os = "ios")]
                 {
                     let (russh_forward, stream) = RusshForward::start(endpoint, prompts)?;
-                    let connected = connect_stream(
+                    let connected = connect_stream_with_startup_owner(
                         ClientStream::Ssh(stream),
                         endpoint,
                         ClientKind::Interactive,
@@ -704,6 +748,8 @@ impl InteractiveClient {
                         color_scheme,
                         client_has_terminal,
                         false,
+                        false,
+                        extra_capabilities,
                         if terminal_surface {
                             EndpointFactsScope::PortableTerminalSize
                         } else {
@@ -718,7 +764,7 @@ impl InteractiveClient {
                 {
                     let ssh_forward = SshForward::start(endpoint, prompts)?;
                     let stream = LocalTransport::connect(ssh_forward.local_socket())?;
-                    let connected = connect_stream(
+                    let connected = connect_stream_with_startup_owner(
                         ClientStream::Local(stream),
                         endpoint,
                         ClientKind::Interactive,
@@ -726,6 +772,8 @@ impl InteractiveClient {
                         color_scheme,
                         client_has_terminal,
                         false,
+                        false,
+                        extra_capabilities,
                         if terminal_surface {
                             EndpointFactsScope::PortableTerminalSize
                         } else {
@@ -1657,6 +1705,7 @@ fn connect_stream<S: TransportStream>(
         client_has_terminal,
         send_origin,
         false,
+        &[],
         client_facts,
     )
 }
@@ -1671,6 +1720,7 @@ fn connect_stream_with_startup_owner<S: TransportStream>(
     client_has_terminal: bool,
     send_origin: bool,
     startup_config_owner: bool,
+    extra_capabilities: &[&str],
     client_facts: EndpointFactsScope,
 ) -> Result<Connected<S>, DaemonError> {
     let started = diagnostic_timer();
@@ -1705,6 +1755,11 @@ fn connect_stream_with_startup_owner<S: TransportStream>(
             capabilities.push(ClientHello::CLIENT_NATIVE_CHOOSER_CAPABILITY.to_owned());
         }
     }
+    capabilities.extend(
+        extra_capabilities
+            .iter()
+            .map(|capability| (*capability).to_owned()),
+    );
     terminal_facts_capabilities(
         client_facts,
         std::env::var_os("TMUX").is_some_and(|value| !value.is_empty()),
@@ -2290,11 +2345,11 @@ mod tests {
     #[cfg(all(unix, feature = "daemon"))]
     #[test]
     fn handshake_advertises_native_ui_only_for_graphical_terminal_clients() {
-        use super::{ProtocolReceiver, ProtocolSender, connect_stream};
+        use super::{ProtocolReceiver, ProtocolSender, connect_stream_with_startup_owner};
         use crate::transport::{LocalTransport, Transport, TransportListener};
         use zz_protocol::{CommandResponse, ProtocolMessage, ServerError};
 
-        for (kind, client_has_terminal, scope, expected) in [
+        for (kind, client_has_terminal, scope, expected, desktop) in [
             (
                 ClientKind::Interactive,
                 true,
@@ -2332,7 +2387,21 @@ mod tests {
                 false,
             ),
             (ClientKind::Control, true, EndpointFactsScope::None, false),
-        ] {
+        ]
+        .into_iter()
+        .map(|row| (row, false))
+        .chain([(
+            (
+                ClientKind::Interactive,
+                true,
+                EndpointFactsScope::LocalHostWorkingDirectory,
+                true,
+            ),
+            true,
+        )])
+        .map(|((kind, client_has_terminal, scope, expected), desktop)| {
+            (kind, client_has_terminal, scope, expected, desktop)
+        }) {
             let directory = tempfile::Builder::new()
                 .prefix("zz-search-")
                 .tempdir_in("/tmp")
@@ -2361,7 +2430,12 @@ mod tests {
                     .expect("finish handshake");
                 hello
             });
-            let result = connect_stream(
+            let extra: &[&str] = if desktop {
+                &[ClientHello::CLIENT_PATH_PICKER_CAPABILITY]
+            } else {
+                &[]
+            };
+            let result = connect_stream_with_startup_owner(
                 LocalTransport::connect(&socket).expect("connect handshake client"),
                 socket.display(),
                 kind,
@@ -2369,6 +2443,8 @@ mod tests {
                 None,
                 client_has_terminal,
                 false,
+                false,
+                extra,
                 scope,
             );
             assert!(
@@ -2393,6 +2469,13 @@ mod tests {
                     .iter()
                     .any(|capability| capability == ClientHello::CLIENT_TERMINAL_CAPABILITY),
                 kind == ClientKind::Interactive && client_has_terminal,
+            );
+            assert_eq!(
+                hello
+                    .capabilities
+                    .iter()
+                    .any(|capability| capability == ClientHello::CLIENT_PATH_PICKER_CAPABILITY),
+                desktop,
             );
         }
     }

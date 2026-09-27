@@ -129,6 +129,10 @@ pub enum CoreEvent {
         pane: PaneId,
     },
     FocusSidebar,
+    OpenPathPicker {
+        pane: PaneId,
+        start_dir: Option<String>,
+    },
     Detached {
         session: SessionId,
         by: Option<String>,
@@ -756,6 +760,10 @@ impl ClientCore {
             EventPayload::ServerStopping => self.events.push_back(CoreEvent::ServerStopping),
             EventPayload::Bell { pane } => self.events.push_back(CoreEvent::Bell { pane }),
             EventPayload::FocusSidebar => self.events.push_back(CoreEvent::FocusSidebar),
+            EventPayload::OpenPathPicker { pane, start_dir } => {
+                self.events
+                    .push_back(CoreEvent::OpenPathPicker { pane, start_dir });
+            }
             EventPayload::ClientMessage { pane, kind, text } => {
                 self.events.push_back(CoreEvent::ClientMessage {
                     pane,

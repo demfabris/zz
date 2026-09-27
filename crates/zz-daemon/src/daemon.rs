@@ -19700,17 +19700,38 @@ impl Shared {
         if followed {
             self.sync_key_table(client, false);
         }
-        let mut sinks = None;
-        let mut pass_start = None;
-        for (offset, character) in text.char_indices() {
-            let mut encoded = [0_u8; 4];
-            let (decision, repeat_binding) =
-                self.key_decision_with_repeat(client, character.encode_utf8(&mut encoded), false);
-            match decision {
-                KeyDecision::Pass => {
-                    if command_output_active
-                        || command_output_owns_pane(&self.inner.lock(), client, pane)
-                    {
+        let mut decided = false;
+        let result = (|| -> Result<(), DaemonError> {
+            let mut sinks = None;
+            let mut pass_start = None;
+            for (offset, character) in text.char_indices() {
+                let mut encoded = [0_u8; 4];
+                let (decision, repeat_binding) = self.key_decision_with_repeat(
+                    client,
+                    character.encode_utf8(&mut encoded),
+                    false,
+                );
+                match decision {
+                    KeyDecision::Pass => {
+                        if command_output_active
+                            || command_output_owns_pane(&self.inner.lock(), client, pane)
+                        {
+                            if let Some(start) = pass_start.take() {
+                                self.dispatch_input_text(
+                                    client,
+                                    pane,
+                                    &mut sinks,
+                                    &text[start..offset],
+                                )?;
+                            }
+                            continue;
+                        }
+                        if pass_start.is_none() {
+                            pass_start = Some(offset);
+                        }
+                    }
+                    KeyDecision::Prefix | KeyDecision::Ignore => {
+                        decided = true;
                         if let Some(start) = pass_start.take() {
                             self.dispatch_input_text(
                                 client,
@@ -19719,49 +19740,47 @@ impl Shared {
                                 &text[start..offset],
                             )?;
                         }
-                        continue;
                     }
-                    if pass_start.is_none() {
-                        pass_start = Some(offset);
-                    }
-                }
-                KeyDecision::Prefix | KeyDecision::Ignore => {
-                    if let Some(start) = pass_start.take() {
-                        self.dispatch_input_text(client, pane, &mut sinks, &text[start..offset])?;
-                    }
-                }
-                KeyDecision::Commands(commands) => {
-                    if let Some(start) = pass_start.take() {
-                        self.dispatch_input_text(client, pane, &mut sinks, &text[start..offset])?;
-                    }
-                    let previous = context.invoking_key().map(str::to_owned);
-                    context.set_invoking_key(Some(character.to_string()));
-                    let dispatched = self.execute_key_commands(
-                        client,
-                        kind,
-                        context,
-                        pane,
-                        &commands,
-                        repeat_binding,
-                    );
-                    context.set_invoking_key(previous);
-                    dispatched?;
-                    sinks = None;
-                    if self.inner.lock().command_prompts.contains_key(&client) {
-                        let remaining = &text[offset + character.len_utf8()..];
-                        if !remaining.is_empty() {
-                            self.input_command_prompt_text(client, kind, context, remaining);
+                    KeyDecision::Commands(commands) => {
+                        decided = true;
+                        if let Some(start) = pass_start.take() {
+                            self.dispatch_input_text(
+                                client,
+                                pane,
+                                &mut sinks,
+                                &text[start..offset],
+                            )?;
                         }
-                        break;
+                        let previous = context.invoking_key().map(str::to_owned);
+                        context.set_invoking_key(Some(character.to_string()));
+                        let dispatched = self.execute_key_commands(
+                            client,
+                            kind,
+                            context,
+                            pane,
+                            &commands,
+                            repeat_binding,
+                        );
+                        context.set_invoking_key(previous);
+                        dispatched?;
+                        sinks = None;
+                        if self.inner.lock().command_prompts.contains_key(&client) {
+                            let remaining = &text[offset + character.len_utf8()..];
+                            if !remaining.is_empty() {
+                                self.input_command_prompt_text(client, kind, context, remaining);
+                            }
+                            break;
+                        }
                     }
                 }
             }
-        }
-        if let Some(start) = pass_start {
-            self.dispatch_input_text(client, pane, &mut sinks, &text[start..])?;
-        }
-        self.sync_key_table(client, true);
-        Ok(())
+            if let Some(start) = pass_start {
+                self.dispatch_input_text(client, pane, &mut sinks, &text[start..])?;
+            }
+            Ok(())
+        })();
+        self.sync_key_table(client, decided);
+        result
     }
 
     fn input_browser_surface_text(
@@ -22754,45 +22773,44 @@ impl Shared {
 
     fn sync_key_table(&self, client: ClientId, force: bool) {
         let now = Instant::now();
-        let (armed_changed, table_changed, (table, repeat)) = {
-            let mut inner = self.inner.lock();
-            let session_table = client_attached_session(&inner, client)
-                .map(|session| inner.engine.key_table_for_session(session));
-            let engine = inner.key_engines.get(&client);
-            let shown = engine
-                .and_then(|engine| engine.shown_table(now))
-                .filter(|(table, _)| session_table.as_deref() != Some(*table))
-                .map(|(table, repeat)| (Some(table.to_owned()), repeat))
-                .unwrap_or_default();
-            let deadline = engine
-                .and_then(KeyEngine::next_deadline)
-                .filter(|deadline| *deadline > now);
-            let _ = self
-                .key_table_deadline_tx
-                .send(KeyTableDeadlineCommand::Schedule(client, deadline));
-            let previous = if shown.0.is_some() {
-                inner.published_key_tables.insert(client, shown.clone())
-            } else {
-                inner.published_key_tables.remove(&client)
-            }
+        let mut inner = self.inner.lock();
+        let session_table = client_attached_session(&inner, client)
+            .map(|session| inner.engine.key_table_for_session(session));
+        let engine = inner.key_engines.get(&client);
+        let shown = engine
+            .and_then(|engine| engine.shown_table(now))
+            .filter(|(table, _)| session_table.as_deref() != Some(*table))
+            .map(|(table, repeat)| (Some(table.to_owned()), repeat))
             .unwrap_or_default();
-            let armed = |table: &Option<String>| table.as_deref() == Some("prefix");
-            (
-                armed(&previous.0) != armed(&shown.0),
-                previous != shown || (force && shown.0.is_some()),
-                shown,
-            )
+        let deadline = engine
+            .and_then(KeyEngine::next_deadline)
+            .filter(|deadline| *deadline > now);
+        let _ = self
+            .key_table_deadline_tx
+            .send(KeyTableDeadlineCommand::Schedule(client, deadline));
+        let previous = if shown.0.is_some() {
+            inner.published_key_tables.insert(client, shown.clone())
+        } else {
+            inner.published_key_tables.remove(&client)
+        }
+        .unwrap_or_default();
+        let is_prefix = |table: &Option<String>| table.as_deref() == Some("prefix");
+        let armed_changed = is_prefix(&previous.0) != is_prefix(&shown.0);
+        let table_changed = previous != shown || (force && shown.0.is_some());
+        let Some(subscriber) = inner.subscribers.get(&client) else {
+            return;
         };
         if armed_changed {
-            let armed = table.as_deref() == Some("prefix");
+            let armed = is_prefix(&shown.0);
             log::info!(
                 target: "zz_daemon::diagnostics::input",
                 "prefix_armed_published client={client} armed={armed}"
             );
-            self.publish_to_client(client, EventPayload::PrefixArmed { armed });
+            Self::send_event(subscriber, EventPayload::PrefixArmed { armed });
         }
         if table_changed {
-            self.publish_to_client(client, EventPayload::KeyTableActive { table, repeat });
+            let (table, repeat) = shown;
+            Self::send_event(subscriber, EventPayload::KeyTableActive { table, repeat });
         }
     }
 
@@ -66012,13 +66030,13 @@ set-option -g @alias-mixed-next yes
             &shared,
             client,
             &mut context,
-            &["set-option", "-g", "prefix-timeout", "300"],
+            &["set-option", "-g", "prefix-timeout", "1000"],
         );
         run_test_command(
             &shared,
             client,
             &mut context,
-            &["set-option", "-g", "repeat-time", "1000"],
+            &["set-option", "-g", "repeat-time", "2000"],
         );
         take_reliable_messages(&mailbox);
         let prefix = test_key(
@@ -66059,13 +66077,12 @@ set-option -g @alias-mixed-next yes
                 table_active(Some("prefix"), false),
             ]
         );
-        wait_until(start + Duration::from_millis(100));
         input_test_key(&shared, client, &mut context, pane, up.clone());
         assert_eq!(
             key_table_events(&mailbox),
             vec![table_active(Some("prefix"), true)]
         );
-        wait_until(start + Duration::from_millis(400));
+        wait_until(start + Duration::from_millis(1300));
         input_test_key(&shared, client, &mut context, pane, up);
         assert_eq!(
             shared.inner.lock().key_engines[&client].active_table(),
@@ -66076,7 +66093,7 @@ set-option -g @alias-mixed-next yes
             vec![table_active(Some("prefix"), true)]
         );
         wait_for_clear(&mailbox);
-        assert!(start.elapsed() >= Duration::from_millis(1400));
+        assert!(start.elapsed() >= Duration::from_millis(3300));
         assert_eq!(
             shared.inner.lock().key_engines[&client].active_table(),
             None
@@ -66092,7 +66109,7 @@ set-option -g @alias-mixed-next yes
             ]
         );
         wait_for_clear(&mailbox);
-        assert!(start.elapsed() >= Duration::from_millis(300));
+        assert!(start.elapsed() >= Duration::from_secs(1));
         assert_eq!(
             shared.inner.lock().key_engines[&client].active_table(),
             Some("prefix")

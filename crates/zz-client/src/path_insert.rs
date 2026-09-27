@@ -92,7 +92,7 @@ pub fn insert_text(
     }
     let mut out = match style {
         InsertStyle::Shell(shell) => {
-            if is_relative && text.starts_with(['-', '=']) {
+            if is_relative && text.starts_with(['-', '=', '+']) {
                 text.insert_str(0, "./");
             }
             quote_shell(shell, &text)
@@ -165,9 +165,11 @@ fn quote_shell(shell: ShellKind, text: &str) -> String {
 
 fn claude_mention(text: &str, full: String) -> String {
     let last_ok = text
+        .strip_suffix('/')
+        .unwrap_or(text)
         .chars()
         .last()
-        .is_some_and(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '/'));
+        .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
     if last_ok && text.chars().all(mention_bare) {
         format!("@{text}")
     } else if !text.contains(['"', '#']) {
@@ -272,8 +274,37 @@ mod tests {
                 cwd,
                 InsertStyle::Claude,
                 false,
-                "@./ ",
+                "@\"./\" ",
             ),
+            (
+                "/home/me/src",
+                "lib",
+                DIR,
+                cwd,
+                InsertStyle::Claude,
+                false,
+                "@lib/ ",
+            ),
+            (
+                "/home/me/src",
+                "build-",
+                DIR,
+                cwd,
+                InsertStyle::Claude,
+                false,
+                "@\"build-/\" ",
+            ),
+            (
+                "/home/me/src",
+                "v1.",
+                DIR,
+                cwd,
+                InsertStyle::Claude,
+                false,
+                "@\"v1./\" ",
+            ),
+            ("/", "", DIR, None, InsertStyle::Claude, false, "@\"/\" "),
+            ("/home/me/src", "+q", FILE, cwd, POSIX, false, "./+q "),
             (
                 "/home/me",
                 "src",

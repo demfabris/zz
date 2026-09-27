@@ -196,13 +196,16 @@ tested as a table:
   becomes `.`), else absolute. Never a `~/` form (the shell's `$HOME` may differ from the daemon's).
   Dirs end in `/`.
 - `Posix`: bare when every character is in `[A-Za-z0-9_./:@%+,=-]`, else POSIX single quotes (`'`
-  becomes `'\''`). A relative path starting with `-` or `=` gets `./` first, in every shell kind.
+  becomes `'\''`). A relative path starting with `-`, `=` or `+` gets `./` first, in every shell kind (`+cmd` is an
+  ex command to `vim` and `less` even when quoted).
 - `Fish`: single quotes, with `\` written `\\` and `'` written `\'`.
 - `Pwsh`: single quotes with `''`; backslash is literal and allowed bare; names starting with `@` and
   names containing `,` are quoted.
 - `Nu`: `r#'...'#` with one more `#` than the longest run following a `'` in the path.
-- `Claude`: `@path` when every character is in `[A-Za-z0-9_./-]` and the last is alphanumeric, `_` or
-  `/`; else `@"path"` when the path has no `"` and no `#`; else the plain absolute path.
+- `Claude`: `@path` when every character is in `[A-Za-z0-9_./-]` and the last one before any
+  trailing `/` is alphanumeric or `_`; else `@"path"` when the path has no `"` and no `#`; else the
+  plain absolute path. Claude Code reads a bare mention up to a word boundary, so `@./`, `@build-/`
+  and `@v1./` would name nothing or the wrong dir.
 - `Codex`: the bare path, or `"path"` when it contains whitespace and no `"`. No `@`.
 - One trailing space in every form. Returns `None` for a path with control characters (backstop; the
   walker already drops them).
@@ -361,7 +364,7 @@ Tests:
   - `sync_key_table`: copy-mode stays silent, `switch-client -T` shows, prefix clears, the stuck-prefix
     regression (`bind -r x list-keys`, press, close the output, `active_table()` is `None`).
 - zz-client: the insert-text table (every shell kind, Claude, Codex, `-rf.txt` becomes `./-rf.txt`,
-  `=foo` becomes `./=foo`, picking the cwd gives `./` and `@./`), `path_rank`.
+  `=foo` becomes `./=foo`, `+q` becomes `./+q`, picking the cwd gives `./` and `@"./"`), `path_rank`.
 - zz-ui: gpui tests for picker keys, and for which-key: after `C-b`, its key-up, and
   `KeyTableActive{Some("prefix")}`, the sheet shows past the delay; a key-down in a custom table hides it.
 - Manual: zz Dev with zsh, fish, claude and codex panes, on the local host and an ssh host.

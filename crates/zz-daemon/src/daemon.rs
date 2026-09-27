@@ -5864,6 +5864,8 @@ impl Shared {
         }) {
             return false;
         }
+        self.inner.lock().published_key_tables.remove(&client);
+        self.sync_key_table(client, false);
         let startup_delivery = match (target, pending.as_ref().and_then(|causes| causes.as_ref())) {
             (Some((kind, pane)), Some(causes)) => {
                 self.deliver_startup_config_causes(client, kind, pane, causes, outbound)
@@ -5969,6 +5971,7 @@ impl Shared {
             inner.key_engines.remove(&client);
             inner.copy_sessions.remove(&client);
             inner.published_key_tables.remove(&client);
+            inner.scheduled_key_table_deadlines.remove(&client);
             inner.swallowed_keys.remove(&client);
             inner.suppressed_text.remove(&client);
             inner.pending_committed_text.remove(&client);
@@ -22857,9 +22860,20 @@ impl Shared {
         let deadline = engine
             .and_then(KeyEngine::next_deadline)
             .filter(|deadline| *deadline > now);
-        let _ = self
-            .key_table_deadline_tx
-            .send(KeyTableDeadlineCommand::Schedule(client, deadline));
+        let rescheduled = match deadline {
+            Some(deadline) => {
+                inner.scheduled_key_table_deadlines.insert(client, deadline) != Some(deadline)
+            }
+            None => inner
+                .scheduled_key_table_deadlines
+                .remove(&client)
+                .is_some(),
+        };
+        if rescheduled {
+            let _ = self
+                .key_table_deadline_tx
+                .send(KeyTableDeadlineCommand::Schedule(client, deadline));
+        }
         let previous = if shown.0.is_some() {
             inner.published_key_tables.insert(client, shown.clone())
         } else {
@@ -31059,6 +31073,7 @@ struct ServerState {
     key_engines: BTreeMap<ClientId, KeyEngine>,
     copy_sessions: BTreeMap<ClientId, CopySession>,
     published_key_tables: BTreeMap<ClientId, (Option<String>, bool)>,
+    scheduled_key_table_deadlines: BTreeMap<ClientId, Instant>,
     swallowed_keys: BTreeMap<ClientId, BTreeSet<String>>,
     suppressed_text: BTreeMap<ClientId, BTreeMap<char, u32>>,
     pending_committed_text: BTreeMap<ClientId, VecDeque<PendingCommittedText>>,
@@ -66089,6 +66104,35 @@ set-option -g @alias-mixed-next yes
                 .lock()
                 .published_key_tables
                 .contains_key(&client)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_reattach_republishes_the_live_key_table() {
+        let (shared, client, mut context, _, mailbox) = key_table_fixture("key-table-attach");
+        run_test_command(
+            &shared,
+            client,
+            &mut context,
+            &["switch-client", "-T", "prefix"],
+        );
+        assert_eq!(
+            key_table_events(&mailbox),
+            vec![
+                EventPayload::PrefixArmed { armed: true },
+                table_active(Some("prefix"), false),
+            ]
+        );
+        let session = context.session.expect("session");
+        let snapshot = shared.attach(client, session).expect("attach session");
+        assert!(shared.send_attached(client, &mailbox, session, snapshot));
+        assert_eq!(
+            key_table_events(&mailbox),
+            vec![
+                EventPayload::PrefixArmed { armed: true },
+                table_active(Some("prefix"), false),
+            ]
         );
     }
 

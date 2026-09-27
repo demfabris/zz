@@ -1028,7 +1028,9 @@ impl AppView {
         {
             return;
         }
-        self.hide_which_key(cx);
+        if !(event.is_held && self.mux.read(cx).prefix_armed()) {
+            self.hide_which_key(cx);
+        }
         if self.reconcile_dialog_prefix(window, cx) {
             return;
         }
@@ -4789,6 +4791,28 @@ mod tests {
                 .iter()
                 .any(|message| matches!(message, InputMessage::CancelPrefix { .. }))
         );
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn a_held_prefix_key_keeps_the_which_key_timer(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        let Some((client, _server)) = input_test_client() else {
+            return;
+        };
+        let (workspace, cx) = input_test_workspace(cx, client);
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        mux.update(cx, |mux, cx| mux.set_prefix_armed_for_test(true, cx));
+        publish_key_table(&mux, Some("prefix"), false, cx);
+        wait_for_which_key(cx, 200);
+        cx.simulate_event(gpui::KeyDownEvent {
+            keystroke: Keystroke::parse("ctrl-a").unwrap(),
+            is_held: true,
+            prefer_character_input: false,
+        });
+        cx.run_until_parked();
+        wait_for_which_key(cx, 201);
+        assert!(which_key_visible(&workspace, cx));
     }
 
     #[cfg(unix)]

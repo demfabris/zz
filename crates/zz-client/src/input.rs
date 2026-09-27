@@ -262,7 +262,7 @@ impl InputRouter {
         {
             if matches!(
                 self.claim
-                    .press(key, pane, input.action == KeyAction::Repeat),
+                    .press(key, pane, input.action == KeyAction::Repeat && prefix.armed),
                 PressDisposition::Forward { .. }
             ) {
                 self.effects.push(Effect::ForwardKey {
@@ -469,6 +469,41 @@ mod tests {
         assert_eq!(router.key(&input, CLAIMED), Disposition::Native);
         input.key = KeyCode::Character('z');
         assert_eq!(router.key(&input, CLAIMED), Disposition::Native);
+        assert!(router.drain_effects().is_empty());
+    }
+
+    #[test]
+    fn custom_table_repeats_are_forwarded_and_release_once() {
+        let mut router = router();
+        activate(&mut router, P);
+        let table = PrefixView {
+            armed: false,
+            claimed: true,
+        };
+        let press = press(KeyCode::ArrowLeft);
+        let mut repeat = press.clone();
+        repeat.action = KeyAction::Repeat;
+        let mut release = press.clone();
+        release.action = KeyAction::Release;
+        for input in [&press, &repeat, &repeat] {
+            assert_eq!(router.key(input, table), Disposition::Consumed);
+            assert_eq!(
+                router.drain_effects(),
+                vec![Effect::ForwardKey {
+                    pane: P,
+                    input: input.clone()
+                }]
+            );
+        }
+        assert_eq!(router.key(&release, table), Disposition::Consumed);
+        assert_eq!(
+            router.drain_effects(),
+            vec![Effect::ForwardKey {
+                pane: P,
+                input: release.clone()
+            }]
+        );
+        assert_eq!(router.key(&release, table), Disposition::Native);
         assert!(router.drain_effects().is_empty());
     }
 

@@ -591,7 +591,7 @@ impl AppShell {
             && !event.keystroke.modifiers.function
             && core.claims_prefix_input(&input)
         {
-            if !event.is_held
+            if (!event.is_held || !core.prefix_armed())
                 && let Some(pane) = self.active_window(cx).map(|window| window.active_pane)
             {
                 self.send_input(

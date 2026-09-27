@@ -125,6 +125,11 @@ browser-remote-debugging-port = 0
 #
 # browser-element-selector-hotkey = cmd-shift-c
 
+# Milliseconds to wait after the prefix key, or inside a switch-client -T
+# table, before a sheet lists the keys you can press next (0..=2000). Set to 0
+# to turn the sheet off.
+which-key-delay = 400
+
 # The Editor pane, in logical pixels (8..=32) for the font and booleans for
 # the rest. Relative line numbers count outward from the cursor's line and
 # only apply while editor-line-numbers is on.

@@ -21,6 +21,7 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 
 mod chooser_presentation;
+pub(crate) mod path_listing;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
     CUSTOMIZE_MENU_ITEMS, CUSTOMIZE_OUTSIDE_MENU_ITEMS, CellLayout, CommandAliasResolution,
@@ -454,6 +455,17 @@ fn terminal_working_directory(terminal: &TerminalSession) -> Option<PathBuf> {
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn terminal_working_directory(_terminal: &TerminalSession) -> Option<PathBuf> {
     None
+}
+
+fn home_directory_for(engine: &MuxEngine, user: &str) -> Option<String> {
+    if user.is_empty() {
+        engine
+            .global_environment_variable("HOME")
+            .filter(|home| !home.is_empty())
+            .or_else(|| zz_mux::user_home(None))
+    } else {
+        zz_mux::user_home(Some(user))
+    }
 }
 
 fn terminal_current_command(terminal: &TerminalSession) -> String {
@@ -6406,17 +6418,7 @@ impl Shared {
         let inner = self.inner.lock();
         users
             .iter()
-            .map(|user| {
-                if user.is_empty() {
-                    inner
-                        .engine
-                        .global_environment_variable("HOME")
-                        .filter(|home| !home.is_empty())
-                        .or_else(|| zz_mux::user_home(None))
-                } else {
-                    zz_mux::user_home(Some(user))
-                }
-            })
+            .map(|user| home_directory_for(&inner.engine, user))
             .collect()
     }
 
@@ -43863,6 +43865,7 @@ fn handle_connection<S: TransportStream>(
             (None, None, Some(context))
         };
 
+    let mut path_list: Option<(u64, Arc<AtomicBool>)> = None;
     let result = loop {
         let message = match read_protocol_message_into(&mut stream, &mut inbound_frame) {
             Ok(message) => message,
@@ -43940,6 +43943,33 @@ fn handle_connection<S: TransportStream>(
                     request_id,
                     homes,
                 });
+            }
+            ProtocolMessage::PathListRequest {
+                request_id,
+                pane,
+                dir,
+            } => {
+                if let Some((_, cancel)) = path_list.take() {
+                    cancel.store(true, Ordering::Release);
+                }
+                let cancel = Arc::new(AtomicBool::new(false));
+                path_list = Some((request_id, Arc::clone(&cancel)));
+                shared.start_path_list(
+                    client,
+                    hello.kind,
+                    (request_id, pane, dir),
+                    &outbound,
+                    &cancel,
+                );
+            }
+            ProtocolMessage::PathListCancel { request_id } => {
+                if path_list
+                    .as_ref()
+                    .is_some_and(|(active, _)| *active == request_id)
+                    && let Some((_, cancel)) = path_list.take()
+                {
+                    cancel.store(true, Ordering::Release);
+                }
             }
             ProtocolMessage::EnvironmentRequest { request_id, names } => {
                 let values = shared.resolve_environment(&names);
@@ -44138,6 +44168,9 @@ fn handle_connection<S: TransportStream>(
     };
 
     command_queue_cancel.store(true, Ordering::Release);
+    if let Some((_, cancel)) = path_list.take() {
+        cancel.store(true, Ordering::Release);
+    }
     shared.detach(client);
     registration.unregister();
     drop(command_sender);

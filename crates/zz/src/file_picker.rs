@@ -167,10 +167,7 @@ fn scan_directories(
                 continue;
             }
             let relative = entry.path().strip_prefix(root).unwrap_or(entry.path());
-            let name = entry.file_name().to_str().unwrap_or_default();
-            if matches!(name, "node_modules" | "target" | "__pycache__" | "venv")
-                || relative.ends_with("go/pkg/mod")
-            {
+            if !zz_daemon::path_walk_enters(relative, false) {
                 continue;
             }
             let Some(label) = relative.to_str() else {
@@ -181,20 +178,8 @@ fn scan_directories(
                 absolute: Arc::from(entry.path()),
                 prior: entry_prior(depth + 1, entry.path().join(".git").exists()),
             });
-            let media_root = depth == 0
-                && matches!(
-                    name,
-                    "Applications"
-                        | "Library"
-                        | "Movies"
-                        | "Music"
-                        | "Pictures"
-                        | "Public"
-                        | "Templates"
-                        | "Videos"
-                        | "snap"
-                );
-            if depth + 1 < DIRECTORY_SCAN_DEPTH && !media_root {
+            if depth + 1 < DIRECTORY_SCAN_DEPTH && zz_daemon::path_walk_enters(relative, depth == 0)
+            {
                 pending.push_back((entry.path().to_path_buf(), depth + 1));
             }
             if !published

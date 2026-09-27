@@ -1028,6 +1028,20 @@ impl InteractiveClient {
         Ok(request_id)
     }
 
+    pub fn request_path_list(&self, pane: PaneId, dir: Option<String>) -> Result<u64, DaemonError> {
+        let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
+        self.send(&ProtocolMessage::PathListRequest {
+            request_id,
+            pane,
+            dir,
+        })?;
+        Ok(request_id)
+    }
+
+    pub fn cancel_path_list(&self, request_id: u64) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::PathListCancel { request_id })
+    }
+
     pub fn request_environment(&self, names: Vec<String>) -> Result<u64, DaemonError> {
         let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
         self.send(&ProtocolMessage::EnvironmentRequest { request_id, names })?;

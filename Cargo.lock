@@ -11670,6 +11670,7 @@ dependencies = [
  "futures-lite",
  "getrandom 0.4.3",
  "glob",
+ "ignore",
  "interprocess",
  "libc",
  "log",

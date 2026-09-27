@@ -256,7 +256,7 @@ impl PathPickerView {
     pub fn apply_chunk(
         &mut self,
         request_id: u64,
-        entries: Vec<PathEntry>,
+        entries: impl Into<Arc<[PathEntry]>>,
         done: bool,
         truncated: bool,
         cx: &mut Context<Self>,
@@ -264,13 +264,17 @@ impl PathPickerView {
         if self.finished || self.request != Some(request_id) {
             return;
         }
+        let entries = entries.into();
         if !entries.is_empty() {
-            self.chunks.push(Arc::from(entries));
+            self.chunks.push(entries);
         }
+        let settled = (self.done, self.truncated);
         self.done |= done;
         self.truncated |= truncated;
         self.refresh(cx);
-        cx.notify();
+        if settled != (self.done, self.truncated) {
+            cx.notify();
+        }
     }
 
     pub fn apply_git(
@@ -418,6 +422,21 @@ impl PathPickerView {
         }
     }
 
+    fn settle(&mut self) {
+        if self.shown_query == self.query {
+            return;
+        }
+        let snapshot = Snapshot {
+            chunks: self.chunks.clone(),
+            base: self.base.clone(),
+            query: self.query.clone(),
+            marks: Arc::clone(&self.marks),
+        };
+        self.rows = rank_rows(&snapshot);
+        self.shown_query = snapshot.query;
+        self.selected = 0;
+    }
+
     fn navigate(&mut self, direction: isize, cx: &mut Context<Self>) {
         let count = self.rows.len();
         if count == 0 {
@@ -457,6 +476,7 @@ impl PathPickerView {
     }
 
     fn enter_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.settle();
         let Some(entry) = self
             .rows
             .get(self.selected)
@@ -514,10 +534,11 @@ impl PathPickerView {
         if !self.done || self.ranking.is_some() {
             return "Listing…".into();
         }
-        if self.query.is_empty() {
-            "This folder is empty".into()
-        } else {
-            "No matches".into()
+        match (self.query.is_empty(), self.truncated) {
+            (true, false) => "This folder is empty".into(),
+            (false, false) => "No matches".into(),
+            (true, true) => "The listing stopped early, try again".into(),
+            (false, true) => "No matches in the partial listing".into(),
         }
     }
 
@@ -555,6 +576,7 @@ impl PathPickerView {
     }
 
     fn accept(&mut self, _: &Enter, _: &mut Window, cx: &mut Context<Self>) {
+        self.settle();
         self.insert(self.selected, false, cx);
         cx.stop_propagation();
     }
@@ -565,6 +587,7 @@ impl PathPickerView {
             modifiers.control && !modifiers.alt && !modifiers.shift && !modifiers.platform;
         match event.keystroke.key.as_str() {
             "enter" if modifiers.alt && !modifiers.control && !modifiers.platform => {
+                self.settle();
                 self.insert(self.selected, true, cx);
             }
             "n" if plain_control => self.navigate(1, cx),

@@ -1420,7 +1420,7 @@ impl AppView {
             } => {
                 if let Some(picker) = &self.path_picker {
                     picker.view.update(cx, |view, cx| {
-                        view.apply_chunk(*request_id, entries.clone(), *done, *truncated, cx);
+                        view.apply_chunk(*request_id, Arc::clone(entries), *done, *truncated, cx);
                     });
                 }
             }

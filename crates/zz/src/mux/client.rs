@@ -287,7 +287,7 @@ pub(crate) enum PathPickerUpdate {
     },
     Chunk {
         request_id: u64,
-        entries: Vec<PathEntry>,
+        entries: Arc<[PathEntry]>,
         done: bool,
         truncated: bool,
     },
@@ -4024,6 +4024,12 @@ impl MuxClient {
                 &message,
                 ProtocolMessage::CommandResponse(CommandResponse::Success { .. })
             );
+        let path_list = matches!(
+            &message,
+            ProtocolMessage::PathListBegin { .. }
+                | ProtocolMessage::PathListChunk { .. }
+                | ProtocolMessage::PathListGit { .. }
+        );
         log::trace!(
             target: "zz::diagnostics::mux",
             "handle_message begin message={message:#?}"
@@ -4070,7 +4076,7 @@ impl MuxClient {
             self.viewports.len(),
             self.attached_connection().resync_pending,
         );
-        if !status_only && !quiet_success {
+        if !status_only && !quiet_success && !path_list {
             cx.notify();
         }
     }
@@ -4557,7 +4563,7 @@ impl MuxClient {
                 }
                 cx.emit(PathPickerUpdate::Chunk {
                     request_id,
-                    entries,
+                    entries: entries.into(),
                     done,
                     truncated,
                 });

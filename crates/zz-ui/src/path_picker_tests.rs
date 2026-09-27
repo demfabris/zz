@@ -461,6 +461,64 @@ fn git_marks_apply_by_prefix_and_rank_changed_files_first(cx: &mut TestAppContex
 }
 
 #[gpui::test]
+fn enter_and_tab_act_on_the_current_query_before_its_rank_lands(cx: &mut TestAppContext) {
+    let mut picker = mount(cx, None);
+    picker.feed(1, tree(), false);
+    assert_eq!(picker.selected(), "docs");
+    picker.picker.update(picker.cx, |picker, cx| {
+        "guide".clone_into(&mut picker.query);
+        picker.refresh(cx);
+    });
+    picker.cx.simulate_keystrokes("enter");
+    picker.cx.run_until_parked();
+    assert_eq!(
+        picker.calls.borrow().last(),
+        Some(&Call::Insert(
+            "/home/me/work".to_owned(),
+            "docs/guide.md".to_owned(),
+            false
+        ))
+    );
+
+    let mut picker = mount(cx, None);
+    picker.feed(1, tree(), false);
+    picker.picker.update(picker.cx, |picker, cx| {
+        "lib".clone_into(&mut picker.query);
+        picker.refresh(cx);
+    });
+    picker.cx.simulate_keystrokes("tab");
+    picker.cx.run_until_parked();
+    assert_eq!(
+        picker
+            .picker
+            .read_with(picker.cx, |picker, _| picker.prefix()),
+        SharedString::from("~/work/src/lib/")
+    );
+}
+
+#[gpui::test]
+fn a_truncated_listing_says_so_when_nothing_shows(cx: &mut TestAppContext) {
+    let mut picker = mount(cx, None);
+    picker.feed(1, Vec::new(), true);
+    let message = |picker: &mut Mounted<'_>| {
+        picker
+            .picker
+            .read_with(picker.cx, |picker, _| picker.empty_message())
+    };
+    assert_eq!(
+        message(&mut picker),
+        SharedString::from("The listing stopped early, try again")
+    );
+    picker.feed(1, tree(), true);
+    picker.cx.simulate_input("zzz");
+    picker.cx.run_until_parked();
+    assert_eq!(
+        message(&mut picker),
+        SharedString::from("No matches in the partial listing")
+    );
+}
+
+#[gpui::test]
 fn an_error_begin_shows_the_message(cx: &mut TestAppContext) {
     let picker = mount(cx, None);
     picker.picker.update(picker.cx, |picker, cx| {

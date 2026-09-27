@@ -9,15 +9,25 @@ use std::{
 const MAX_STDERR_BYTES: usize = 256 * 1024;
 
 pub(crate) fn run_output_until(
+    command: Command,
+    max_stdout: usize,
+    deadline: Instant,
+) -> Result<Output, String> {
+    run_output_until_cancelled(command, max_stdout, deadline, &|| false)
+}
+
+pub(crate) fn run_output_until_cancelled(
     mut command: Command,
     max_stdout: usize,
     deadline: Instant,
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<Output, String> {
     let timeout = deadline.saturating_duration_since(Instant::now());
     if timeout.is_zero() {
         return Err("git timed out".to_owned());
     }
-    let (output, truncated) = collect_output(spawn_output(&mut command)?, max_stdout, timeout)?;
+    let (output, truncated) =
+        collect_output(spawn_output(&mut command)?, max_stdout, timeout, cancelled)?;
     if truncated {
         return Err(format!("git output exceeded {max_stdout} bytes"));
     }
@@ -42,6 +52,7 @@ fn collect_output(
     mut child: Child,
     max_stdout: usize,
     timeout: Duration,
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<(Output, bool), String> {
     let stdout = child
         .stdout
@@ -102,6 +113,10 @@ fn collect_output(
         if Instant::now() >= deadline {
             let _ = terminate_output(&mut child);
             return Err(format!("git timed out after {} seconds", timeout.as_secs()));
+        }
+        if status.is_none() && cancelled() {
+            let _ = terminate_output(&mut child);
+            return Err("git was cancelled".to_owned());
         }
         thread::sleep(Duration::from_millis(10));
     }
@@ -199,9 +214,27 @@ mod tests {
             spawn_output(&mut command).expect("command should start"),
             1024,
             Duration::from_millis(50),
+            &|| false,
         )
         .expect_err("command should time out");
         assert!(error.contains("timed out"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_output_stops_when_cancelled() {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg("while :; do sleep 1; done");
+        let started = Instant::now();
+        let error = run_output_until_cancelled(
+            command,
+            1024,
+            Instant::now() + Duration::from_secs(10),
+            &|| started.elapsed() >= Duration::from_millis(50),
+        )
+        .expect_err("command should stop");
+        assert!(error.contains("cancelled"), "{error}");
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 }

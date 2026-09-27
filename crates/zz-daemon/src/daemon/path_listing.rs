@@ -10,6 +10,8 @@ use zz_protocol::{
 const PATH_LIST_BUDGET: Duration = Duration::from_secs(3);
 const PATH_LIST_HIGH_WATER_BYTES: usize = 256 * 1024;
 const PATH_LIST_POLL_INTERVAL: Duration = Duration::from_millis(1);
+const PATH_LIST_MAX_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const PATH_LIST_STALL_LIMIT: Duration = Duration::from_secs(5);
 const PATH_LIST_TURN_POLL: Duration = Duration::from_millis(10);
 const PATH_LIST_FLUSH_INTERVAL: Duration = Duration::from_millis(30);
 const PATH_LIST_MESSAGE_OVERHEAD: usize = 32;
@@ -30,6 +32,17 @@ const HOME_MEDIA_ROOTS: &[&str] = &[
     "snap",
 ];
 const REMOTE_FOREGROUND_COMMANDS: &[&str] = &["ssh", "mosh", "mosh-client", "tmux", "zz_cli"];
+const PROMPT_SHELLS: &[&str] = &[
+    "sh",
+    "bash",
+    "zsh",
+    "fish",
+    "dash",
+    "ksh",
+    "nu",
+    "pwsh",
+    "powershell",
+];
 
 static LIVE_PATH_WALKERS: AtomicUsize = AtomicUsize::new(0);
 
@@ -243,6 +256,7 @@ fn parse_git_status(output: &[u8], prefix: &str) -> Vec<(String, GitMark)> {
 fn git_command(root: &Path, args: &[&str]) -> std::process::Command {
     let mut command = std::process::Command::new("git");
     command
+        .args(["-c", "core.fsmonitor=false"])
         .arg("-C")
         .arg(root)
         .args(args)
@@ -251,13 +265,31 @@ fn git_command(root: &Path, args: &[&str]) -> std::process::Command {
     command
 }
 
-fn git_marks(root: &Path) -> Vec<(String, GitMark)> {
+fn git_filter_drivers(names: &[u8]) -> Option<BTreeSet<&str>> {
+    let mut drivers = BTreeSet::new();
+    for key in names.split(|byte| *byte == 0).filter(|key| !key.is_empty()) {
+        let key = std::str::from_utf8(key).ok()?;
+        let (driver, _) = key.strip_prefix("filter.")?.rsplit_once('.')?;
+        if driver.contains('=') {
+            return None;
+        }
+        drivers.insert(driver);
+    }
+    Some(drivers)
+}
+
+fn git_marks(root: &Path, cancelled: &dyn Fn() -> bool) -> Vec<(String, GitMark)> {
     let deadline = Instant::now() + GIT_MARK_TIMEOUT;
-    let Ok(prefix) = crate::bounded_command::run_output_until(
-        git_command(root, &["rev-parse", "--show-prefix"]),
-        MAX_GIT_MARK_OUTPUT_BYTES,
-        deadline,
-    ) else {
+    let run = |args: &[&str]| {
+        crate::bounded_command::run_output_until_cancelled(
+            git_command(root, args),
+            MAX_GIT_MARK_OUTPUT_BYTES,
+            deadline,
+            cancelled,
+        )
+        .ok()
+    };
+    let Some(prefix) = run(&["rev-parse", "--show-prefix"]) else {
         return Vec::new();
     };
     if !prefix.status.success() {
@@ -266,22 +298,45 @@ fn git_marks(root: &Path) -> Vec<(String, GitMark)> {
     let Ok(prefix) = String::from_utf8(prefix.stdout) else {
         return Vec::new();
     };
-    let Ok(status) = crate::bounded_command::run_output_until(
-        git_command(
-            root,
-            &[
-                "status",
-                "--porcelain=v1",
-                "-z",
-                "--no-renames",
-                "--ignore-submodules=dirty",
-                "--",
-                ".",
-            ],
-        ),
-        MAX_GIT_MARK_OUTPUT_BYTES,
-        deadline,
-    ) else {
+    let Some(filters) = run(&[
+        "config",
+        "-z",
+        "--name-only",
+        "--get-regexp",
+        r"^filter\..*\.(clean|process)$",
+    ]) else {
+        return Vec::new();
+    };
+    if !(filters.status.success() || filters.status.code() == Some(1)) {
+        return Vec::new();
+    }
+    let Some(drivers) = git_filter_drivers(&filters.stdout) else {
+        return Vec::new();
+    };
+    let overrides = drivers
+        .iter()
+        .flat_map(|driver| {
+            [
+                format!("filter.{driver}.clean="),
+                format!("filter.{driver}.process="),
+                format!("filter.{driver}.required=false"),
+            ]
+        })
+        .collect::<Vec<_>>();
+    let mut args = overrides
+        .iter()
+        .flat_map(|setting| ["-c", setting.as_str()])
+        .collect::<Vec<_>>();
+    args.extend([
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--no-renames",
+        "--ignore-submodules=dirty",
+        "--",
+        ".",
+    ]);
+    let Some(status) = run(&args) else {
         return Vec::new();
     };
     if !status.status.success() {
@@ -306,6 +361,9 @@ impl PathListStream<'_> {
     }
 
     fn send(&self, message: &ProtocolMessage) -> bool {
+        let mut pause = PATH_LIST_POLL_INTERVAL;
+        let mut lowest = usize::MAX;
+        let mut progressed = Instant::now();
         loop {
             if self.cancelled() {
                 return false;
@@ -318,7 +376,16 @@ impl PathListStream<'_> {
                 {
                     break;
                 }
-                Some(_) => thread::sleep(PATH_LIST_POLL_INTERVAL),
+                Some((bytes, _)) => {
+                    if bytes < lowest {
+                        lowest = bytes;
+                        progressed = Instant::now();
+                    } else if progressed.elapsed() >= PATH_LIST_STALL_LIMIT {
+                        return false;
+                    }
+                    thread::sleep(pause);
+                    pause = (pause * 2).min(PATH_LIST_MAX_POLL_INTERVAL);
+                }
             }
         }
         self.outbound.enqueue_reliable(message)
@@ -624,6 +691,7 @@ fn insert_style(
     basename: &str,
 ) -> InsertStyle {
     foreground
+        .filter(|_| !PROMPT_SHELLS.contains(&basename))
         .and_then(|foreground| agent_insert_style(pane, pane_pid, foreground))
         .unwrap_or(InsertStyle::Shell(shell_kind(basename)))
 }
@@ -645,21 +713,29 @@ impl Shared {
     ) {
         let (request_id, pane, dir) = request;
         let (cancel, turn) = walk;
-        let refusal = if kind != ClientKind::Interactive {
-            Some("path listing needs an interactive client")
-        } else if self.inner.lock().client_flags.contains(client) {
-            Some("client is read-only")
-        } else {
-            None
+        let refusal = {
+            let inner = self.inner.lock();
+            if kind != ClientKind::Interactive {
+                Some("path listing needs an interactive client".to_owned())
+            } else if !inner.path_picker_clients.contains(&client) {
+                Some("path listing needs the zz desktop app".to_owned())
+            } else if inner.client_flags.contains(client) {
+                Some("client is read-only".to_owned())
+            } else if !client_is_attached_to_pane(&inner, client, pane) {
+                Some(format!("{pane} is not in an attached session"))
+            } else {
+                None
+            }
         };
         if let Some(refusal) = refusal {
             let _ = outbound.enqueue_reliable(&ProtocolMessage::PathListBegin {
                 request_id,
-                result: Err(refusal.to_owned()),
+                result: Err(refusal),
             });
             return;
         }
-        let expanded = self.record_requested_path_list_root(client, request_id, dir.as_deref());
+        let (expanded, previous) =
+            self.record_requested_path_list_root(client, request_id, dir.as_deref());
         let shared = Arc::clone(self);
         let walker_outbound = Arc::clone(outbound);
         let walker_cancel = Arc::clone(cancel);
@@ -681,6 +757,7 @@ impl Shared {
                         break turn;
                     }
                     if waited.elapsed() >= PATH_LIST_BUDGET {
+                        shared.restore_path_list_root(client, request_id, previous);
                         let _ = stream
                             .begin(Err("an earlier path listing is still running".to_owned()));
                         return;
@@ -692,6 +769,7 @@ impl Shared {
                 let listing = match shared.resolve_path_list(pane, dir.as_deref(), expanded) {
                     Ok(listing) => listing,
                     Err(error) => {
+                        shared.restore_path_list_root(client, request_id, previous);
                         let _ = stream.begin(Err(error));
                         return;
                     }
@@ -711,10 +789,12 @@ impl Shared {
                 }
                 let (marks_sender, marks) = mpsc::sync_channel(1);
                 let git_root = listing.root.clone();
+                let git_cancel = Arc::clone(&walker_cancel);
                 let git = thread::Builder::new()
                     .name(format!("zz-path-git-{}", client.0))
                     .spawn(move || {
-                        let _ = marks_sender.send(git_marks(&git_root));
+                        let _ = marks_sender
+                            .send(git_marks(&git_root, &|| git_cancel.load(Ordering::Acquire)));
                     })
                     .is_ok();
                 let _ = stream.walk(
@@ -737,7 +817,7 @@ impl Shared {
         client: ClientId,
         request_id: u64,
         dir: Option<&str>,
-    ) -> Option<PathBuf> {
+    ) -> (Option<PathBuf>, Option<PathBuf>) {
         let mut inner = self.inner.lock();
         let base = inner
             .path_list_roots
@@ -751,7 +831,16 @@ impl Shared {
         inner
             .path_list_roots
             .insert(client, (request_id, expanded.clone()));
-        expanded
+        (expanded, base)
+    }
+
+    fn restore_path_list_root(&self, client: ClientId, request_id: u64, root: Option<PathBuf>) {
+        let mut inner = self.inner.lock();
+        if let Some((current, stored)) = inner.path_list_roots.get_mut(&client)
+            && *current == request_id
+        {
+            *stored = root;
+        }
     }
 
     fn record_resolved_path_list_root(
@@ -811,9 +900,15 @@ impl Shared {
                     .then(|| PathBuf::from(&start_path))
                     .filter(|path| path.is_dir())
             });
-        let requested = expanded
-            .or_else(|| dir.and_then(|dir| expand_directory(dir, fallback.as_deref(), |_| None)))
-            .filter(|path| path.is_dir());
+        let requested = match dir {
+            Some(dir) => Some(
+                expanded
+                    .or_else(|| expand_directory(dir, fallback.as_deref(), |_| None))
+                    .filter(|path| path.is_dir())
+                    .ok_or_else(|| format!("{dir} is not a directory"))?,
+            ),
+            None => None,
+        };
         let root = requested
             .or(fallback)
             .ok_or_else(|| format!("{pane} has no working directory"))?;
@@ -1328,26 +1423,19 @@ mod tests {
         );
     }
 
-    #[test]
-    fn git_marks_come_from_a_real_repository_subdirectory() {
-        let git = |root: &Path, args: &[&str]| {
-            std::process::Command::new("git")
-                .arg("-C")
-                .arg(root)
-                .args(args)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .is_ok_and(|status| status.success())
-        };
-        let scratch = tempfile::tempdir().expect("temp dir");
-        let root = scratch.path();
-        if !git(root, &["init", "--quiet"]) {
-            return;
-        }
-        touch(root, "sub/tracked.txt");
-        touch(root, "outside.txt");
+    fn git(root: &Path, args: &[&str]) -> bool {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    fn git_commit_all(root: &Path) {
         assert!(git(root, &["add", "."]));
         assert!(git(
             root,
@@ -1364,11 +1452,23 @@ mod tests {
                 "seed",
             ]
         ));
+    }
+
+    #[test]
+    fn git_marks_come_from_a_real_repository_subdirectory() {
+        let scratch = tempfile::tempdir().expect("temp dir");
+        let root = scratch.path();
+        if !git(root, &["init", "--quiet"]) {
+            return;
+        }
+        touch(root, "sub/tracked.txt");
+        touch(root, "outside.txt");
+        git_commit_all(root);
         fs::write(root.join("sub/tracked.txt"), b"changed").expect("edit");
         fs::write(root.join("outside.txt"), b"changed").expect("edit outside");
         touch(root, "sub/fresh/new.txt");
 
-        let mut marks = git_marks(&root.join("sub"));
+        let mut marks = git_marks(&root.join("sub"), &|| false);
         marks.sort_by(|left, right| left.0.cmp(&right.0));
 
         assert_eq!(
@@ -1378,7 +1478,55 @@ mod tests {
                 ("tracked.txt".to_owned(), GitMark::Modified),
             ]
         );
-        assert!(git_marks(&std::env::temp_dir().join("zz-no-such-repo")).is_empty());
+        assert!(git_marks(&std::env::temp_dir().join("zz-no-such-repo"), &|| false).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_marks_never_run_repository_fsmonitor_or_filter_commands() {
+        let scratch = tempfile::tempdir().expect("temp dir");
+        let root = scratch.path().join("repo");
+        fs::create_dir_all(&root).expect("repo dir");
+        if !git(&root, &["init", "--quiet"]) {
+            return;
+        }
+        fs::write(root.join(".gitattributes"), "*.txt filter=evil\n").expect("attributes");
+        touch(&root, "tracked.txt");
+        git_commit_all(&root);
+        let sentinel = scratch.path().join("ran");
+        let command = format!("touch '{}'", sentinel.display());
+        for (key, value) in [
+            ("core.fsmonitor", format!("{command}; false")),
+            ("filter.evil.clean", command.clone()),
+            ("filter.evil.process", command.clone()),
+            ("filter.evil.required", "true".to_owned()),
+        ] {
+            assert!(git(&root, &["config", key, &value]));
+        }
+        fs::write(root.join("tracked.txt"), b"changed").expect("edit");
+        touch(&root, "fresh.rs");
+
+        let mut marks = git_marks(&root, &|| false);
+        marks.sort_by(|left, right| left.0.cmp(&right.0));
+
+        assert!(!sentinel.exists());
+        assert_eq!(
+            marks,
+            vec![
+                ("fresh.rs".to_owned(), GitMark::Untracked),
+                ("tracked.txt".to_owned(), GitMark::Modified),
+            ]
+        );
+    }
+
+    #[test]
+    fn git_filter_drivers_are_read_from_config_names() {
+        assert_eq!(
+            git_filter_drivers(b"filter.lfs.clean\0filter.lfs.process\0filter.a.b.clean\0"),
+            Some(BTreeSet::from(["a.b", "lfs"]))
+        );
+        assert_eq!(git_filter_drivers(b""), Some(BTreeSet::new()));
+        assert_eq!(git_filter_drivers(b"filter.a=b.clean\0"), None);
     }
 
     #[test]
@@ -1656,6 +1804,7 @@ mod tests {
         let foreground_shell = crate::agent::codex_queue::group_runs_codex(shell_group);
         let codex_style = insert_style(PaneId(1), None, Some(leader_group), "node");
         let shell_style = insert_style(PaneId(1), None, Some(shell_group), "zsh");
+        let prompt_style = insert_style(PaneId(1), None, Some(leader_group), "bash");
 
         for child in [&mut leader, &mut background, &mut shell] {
             let _ = rustix::process::kill_process_group(
@@ -1667,6 +1816,7 @@ mod tests {
         assert!(!foreground_shell);
         assert_eq!(codex_style, InsertStyle::Codex);
         assert_eq!(shell_style, InsertStyle::Shell(ShellKind::Posix));
+        assert_eq!(prompt_style, InsertStyle::Shell(ShellKind::Posix));
         assert_eq!(
             crate::agent::claude_peers::process_group(std::process::id()),
             u32::try_from(rustix::process::getpgrp().as_raw_nonzero().get()).ok()
@@ -1731,6 +1881,28 @@ mod tests {
             )
             .expect("session");
         let pane = context.pane.expect("pane id");
+        let refused = listing(&shared, client, ClientKind::Interactive, (4, pane, None));
+        assert!(
+            matches!(
+                refused.as_slice(),
+                [ProtocolMessage::PathListBegin { result: Err(error), .. }]
+                    if error == "path listing needs the zz desktop app"
+            ),
+            "{refused:?}"
+        );
+        shared.inner.lock().path_picker_clients.insert(client);
+        let refused = listing(&shared, client, ClientKind::Interactive, (4, pane, None));
+        assert!(
+            matches!(
+                refused.as_slice(),
+                [ProtocolMessage::PathListBegin { result: Err(error), .. }]
+                    if error.contains("not in an attached session")
+            ),
+            "{refused:?}"
+        );
+        shared
+            .attach(client, context.session.expect("session id"))
+            .expect("attach session");
         let scratch = tempfile::tempdir().expect("temp dir");
         let root = scratch.path().canonicalize().expect("canonical temp dir");
         touch(&root, "a.txt");
@@ -1777,13 +1949,38 @@ mod tests {
             Some(ProtocolMessage::PathListBegin { request_id: 6, result: Ok(begin) })
                 if Path::new(&begin.root) == root.join("sub")
         ));
+        let messages = listing(
+            &shared,
+            client,
+            ClientKind::Interactive,
+            (20, pane, Some("missing".to_owned())),
+        );
+        assert!(
+            matches!(
+                messages.as_slice(),
+                [ProtocolMessage::PathListBegin { request_id: 20, result: Err(error) }]
+                    if error == "missing is not a directory"
+            ),
+            "{messages:?}"
+        );
+        let messages = listing(
+            &shared,
+            client,
+            ClientKind::Interactive,
+            (21, pane, Some("..".to_owned())),
+        );
+        assert!(matches!(
+            messages.first(),
+            Some(ProtocolMessage::PathListBegin { request_id: 21, result: Ok(begin) })
+                if begin.root == root_text
+        ));
 
         let refusals = [
             (ClientKind::Command, pane, "interactive client"),
             (
                 ClientKind::Interactive,
                 PaneId(9_999),
-                "not a terminal pane",
+                "not in an attached session",
             ),
         ];
         for (kind, target, expected) in refusals {
@@ -1817,6 +2014,10 @@ mod tests {
                 &CommandInvocation::new("new-session", ["-d", "-s", "roots"]),
             )
             .expect("session");
+        shared
+            .attach(client, context.session.expect("session id"))
+            .expect("attach session");
+        shared.inner.lock().path_picker_clients.insert(client);
         (shared, client, context.pane.expect("pane id"))
     }
 
@@ -1826,15 +2027,15 @@ mod tests {
         let root = Path::new("/r/a/b");
         assert_eq!(
             shared.record_requested_path_list_root(client, 1, root.to_str()),
-            Some(root.to_path_buf())
+            (Some(root.to_path_buf()), None)
         );
         assert_eq!(
             shared.record_requested_path_list_root(client, 2, Some("..")),
-            Some(PathBuf::from("/r/a"))
+            (Some(PathBuf::from("/r/a")), Some(root.to_path_buf()))
         );
         assert_eq!(
             shared.record_requested_path_list_root(client, 3, Some("..")),
-            Some(PathBuf::from("/r"))
+            (Some(PathBuf::from("/r")), Some(PathBuf::from("/r/a")))
         );
 
         let cancel = AtomicBool::new(false);

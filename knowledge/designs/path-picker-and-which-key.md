@@ -98,12 +98,16 @@ command). Synchronize-panes fans the paste out, the same as a typed or pasted pa
 
 Handled in the per-client connection loop, next to `HomeDirectoryRequest`, before the catch-all arm.
 One active walk per client: a local `Option<(request_id, Arc<AtomicBool>)>`; a new request,
-`PathListCancel`, or loop exit sets the flag. Read-only clients get an error `Begin`.
+`PathListCancel`, or loop exit sets the flag. Clients that are read-only, lack
+`client-path-picker-v1`, or are not attached to the pane's session get an error `Begin`.
 
 **Root**, in order, each step checked with `is_dir()`:
 
 1. `-c` start directory or the request's `dir`, expanded on the daemon (reuse the lookup inside
-   `resolve_home_directories` for `~user`).
+   `resolve_home_directories` for `~user`). When `dir` is given and is not a directory, the `Begin` is
+   an error ("<dir> is not a directory") and the client's relative base goes back to what it was before
+   that request, so a failed Tab, `..` or typed root never lands silently in the cwd. The steps below
+   only run when `dir` is `None`.
 2. The live `terminal_working_directory(terminal)` `PathBuf` (foreground process group leader's cwd).
 3. The OSC 7 reported path, through a small parser: strip `file://` (or `kitty-shell-cwd://`), split
    host from path, try the raw path first (zz's zsh, bash and PowerShell emitters do not encode), then a
@@ -125,7 +129,9 @@ the wrong machine's.
 - Codex: a member of the `fg` group whose basename is `codex` (one `ps -axo pid=,pgid=,comm=` on macOS,
   `/proc` on Linux). This also catches the npm `node` leader with a native `codex` child, and rejects a
   suspended or background codex.
-- Both checks exist only under `cfg(all(feature = "agent", unix))`. Elsewhere, and otherwise:
+- Both checks exist only under `cfg(all(feature = "agent", unix))`, and are skipped when the
+  foreground basename is a shell at its prompt (`sh`, `bash`, `zsh`, `fish`, `dash`, `ksh`, `nu`,
+  `pwsh`, `powershell`), which spares a `ps` spawn per listing on macOS. Elsewhere, and otherwise:
   `Shell(kind)` from the foreground basename, lowercased, `.exe` stripped: `fish`, `pwsh`/`powershell`,
   `nu`, else `Posix`.
 - `@agent_state` is never consulted: it stays set after the agent exits.
@@ -151,15 +157,24 @@ moved into zz-daemon and extended to files. `ignore` walks depth-first only, so 
 (`MAX_RELIABLE_MESSAGES`, `close_outbound_too_far_behind`), and terminal frames share that queue. So:
 
 - chunks are capped at about 64 KiB encoded;
-- before each enqueue the walker waits, polling every 1 ms and checking cancel, while
-  `queued_reliable()` reports at least `CONTROL_PENDING_MESSAGE_LIMIT` messages or 256 KiB;
-- it stops on cancel, on `queued_reliable() == None`, or when `enqueue_reliable` returns false (the
-  result is `#[must_use]`).
+- before each enqueue the walker waits, polling from 1 ms backing off to 50 ms and checking cancel,
+  while `queued_reliable()` reports at least `CONTROL_PENDING_MESSAGE_LIMIT` messages or 256 KiB;
+- it stops on cancel, on `queued_reliable() == None`, when `enqueue_reliable` returns false (the
+  result is `#[must_use]`), or when the queue has not drained at all for 5 s, so a stalled client
+  cannot hold a walker slot forever.
 
-**Git**, alongside the walk, with `GIT_OPTIONAL_LOCKS=0`:
+**Git**, alongside the walk, with `GIT_OPTIONAL_LOCKS=0` and `-c core.fsmonitor=false`. The root can
+be any directory the user browsed to, including an untrusted repo, so git must not run repo-configured
+commands:
 
 - `git -C <root> rev-parse --show-prefix`, then
-  `git -C <root> status --porcelain=v1 -z --no-renames --ignore-submodules=dirty -- .`
+  `git -C <root> config -z --name-only --get-regexp '^filter\..*\.(clean|process)$'` (reading config
+  runs nothing), then
+  `git -C <root> status --porcelain=v1 -z --no-renames --ignore-submodules=dirty -- .` with
+  `-c filter.<name>.clean= -c filter.<name>.process= -c filter.<name>.required=false` for every
+  driver found. A driver name containing `=` means no marks. LFS files whose stat does not match the
+  index can show a false Modified.
+- The walk's cancel flag also kills git, so fast navigation does not stack `git status` runs.
 - Strip the prefix; drop paths outside it. `??` = Untracked; `U` in either column, `AA` or `DD` =
   Conflicted; `A` in X = Added; other `M`, `T`, `A` = Modified; `D` skipped.
 - 2 s deadline and 2 MiB cap; any failure, cap hit included, means no marks.

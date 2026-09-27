@@ -207,6 +207,7 @@ unpaired keys.
 `OpenUri { pane, uri }`, `FocusSidebar`, `PrefixArmed { armed }`,
 `PrefixCancelled { request_id }`, `Bell { pane }`,
 `KeyTablesChanged { tables }`, `KeyTableActive { table, repeat }`,
+`OpenPathPicker { pane, start_dir }`,
 `Detached { session: SessionId, by: Option<String>, reason: DetachReason }`, `HistoryChunk { pane, start: u32, total: u32,
 offset: u32, columns: u16, rows: Vec<Vec<PackedCell>>, dictionary: TerminalDictionary }`,
 `KittyImageBegin { pane, image_id, generation, width, height, total_bytes }`
@@ -722,7 +723,8 @@ another key. `key_table_active_appends_after_the_command_client_exit` pins the t
 
 v107 adds the shell path picker ([design](/designs/path-picker-and-which-key.md)). The desktop
 advertises `ClientHello::CLIENT_PATH_PICKER_CAPABILITY` (`client-path-picker-v1`); iOS, web, the
-TUI and FFI clients do not, and `choose-path` answers them with an error. `EventPayload` gains
+TUI and FFI clients do not, and `choose-path` answers them with an error, as does a
+`PathListRequest` from them or for a pane outside the client's attached session. `EventPayload` gains
 `OpenPathPicker { pane, start_dir }` after `KeyTableActive`, pushed only to the invoking client.
 `ProtocolMessage` gains five variants after `ClientTerminalType`: `PathListRequest { request_id,
 pane, dir }`, `PathListBegin { request_id, result: Result<PathListRoot, String> }`, `PathListChunk

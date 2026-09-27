@@ -1,8 +1,8 @@
 ---
 type: Design Plan
 title: Shell path picker and which-key
-description: Proposed plan for two desktop overlays over protocol v107 - a path picker anchored at the terminal cursor whose listing, git marks, and insert style come from the daemon that owns the pane while the client ranks and pastes, and a which-key sheet that follows the prefix and custom key tables through a new KeyTableActive event, with the stock notes brought to tmux parity.
-status: Proposed
+description: Shipped plan for two desktop overlays over protocol v107 - a path picker anchored at the terminal cursor whose listing, git marks, and insert style come from the daemon that owns the pane while the client ranks and pastes, and a which-key sheet that follows the prefix and custom key tables through a new KeyTableActive event, with the stock notes brought to tmux parity.
+status: Shipped
 tags:
 - picker
 - which-key

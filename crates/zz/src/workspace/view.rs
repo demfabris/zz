@@ -3377,7 +3377,13 @@ impl Render for AppView {
             self.which_key = None;
         }
         if let Some(sheet) = &self.which_key {
-            overlays.push(sheet.element(pane_margin + px(8.0)));
+            let canvas = self.pane_canvas_bounds.get().size;
+            let canvas = if canvas.width > px(0.) && canvas.height > px(0.) {
+                canvas
+            } else {
+                window.viewport_size()
+            };
+            overlays.push(sheet.element(canvas_top, pane_margin, canvas));
         }
         let measured_canvas_bounds = self.pane_canvas_bounds.clone();
         let content = div().relative().size_full().child(
@@ -4464,7 +4470,10 @@ mod tests {
         let viewport = cx.update(|window, _| window.viewport_size());
         assert!(sheet.bottom() <= viewport.height);
         assert!(sheet.bottom() > viewport.height - px(40.0));
+        assert!(sheet.top() >= px(0.));
         assert!(sheet.left() >= px(16.0));
+        let canvas = workspace.read_with(cx, |workspace, _| workspace.pane_canvas_bounds.get());
+        assert!(sheet.top() >= canvas.top(), "{sheet:?} {canvas:?}");
         let terminal =
             workspace.read_with(cx, |workspace, _| workspace.terminals[&PaneId(0)].clone());
         assert!(cx.update(|window, cx| terminal.read(cx).focus().is_focused(window)));

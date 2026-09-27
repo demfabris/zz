@@ -2402,32 +2402,18 @@ impl MuxClient {
         self.core.prefix_armed()
     }
 
-    /// The key table the daemon says this client is in, other than the
-    /// session's own, with whether a repeat window holds it.
     #[must_use]
     pub(crate) fn key_table(&self) -> Option<(&str, bool)> {
         self.attached_connection().client.as_ref()?;
         self.core.key_table()
     }
 
-    /// Every daemon-published key table, or empty while disconnected.
     #[must_use]
     pub(crate) fn key_tables(&self) -> &[KeyTableSnapshot] {
         if self.attached_connection().client.is_none() {
             return &[];
         }
         self.core.key_tables()
-    }
-
-    /// The daemon-published `prefix` option as written, or `None` while
-    /// disconnected.
-    #[must_use]
-    pub(crate) fn prefix_option(&self) -> Option<&str> {
-        self.attached_connection().client.as_ref()?;
-        self.core
-            .mux_options()
-            .get(MuxOptionKey::Prefix)
-            .map(|option| option.value.as_str())
     }
 
     #[must_use]
@@ -4226,10 +4212,10 @@ impl MuxClient {
                 let _ = (pane, request_id, result);
             }
             CoreEvent::Message(message) => self.handle_unreduced_message(*message, cx),
+            CoreEvent::KeyTableChanged => cx.emit(KeyTableChanged),
             // Key tables are read straight off the core; the handshake is
             // ingested rather than received; the frame path never reaches the
             // core, so its two viewport events cannot fire here.
-            CoreEvent::KeyTableChanged => cx.emit(KeyTableChanged),
             CoreEvent::KeyTablesChanged
             | CoreEvent::HelloReceived
             | CoreEvent::ViewportChanged { .. }

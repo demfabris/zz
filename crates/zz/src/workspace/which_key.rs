@@ -1,14 +1,16 @@
 use std::{sync::Arc, time::Duration};
 
 use gpui::{
-    AnyElement, IntoElement, ParentElement as _, Pixels, SharedString, Styled as _, div, px,
+    AnyElement, IntoElement, ParentElement as _, Pixels, SharedString, Size, Styled as _, div, px,
+    size,
 };
 use zz_ui::which_key::{WhichKeyHeader, WhichKeyRow, WhichKeyView};
 
 use crate::mux::{client::MuxClient, prefix::display_keystroke};
 
-const SHEET_MAX_WIDTH: f32 = 920.0;
+const SHEET_MAX_WIDTH: f32 = 1360.0;
 const SHEET_INSET: f32 = 16.0;
+const SHEET_GAP: f32 = 8.0;
 
 pub(super) struct WhichKeySheet {
     header: WhichKeyHeader,
@@ -17,16 +19,14 @@ pub(super) struct WhichKeySheet {
 
 impl WhichKeySheet {
     pub(super) fn build(mux: &MuxClient, table: &str) -> Option<Self> {
-        let rows = zz_client::which_key::rows(
-            mux.key_tables(),
-            table,
-            mux.prefix_option().unwrap_or("C-b"),
-        );
+        let prefix = mux.canonical_prefix();
+        let rows =
+            zz_client::which_key::rows(mux.key_tables(), table, prefix.as_deref().unwrap_or("C-b"));
         if rows.is_empty() {
             return None;
         }
         let prefix = if table == "prefix" {
-            mux.canonical_prefix().unwrap_or_default()
+            prefix.unwrap_or_default()
         } else {
             String::new()
         };
@@ -62,24 +62,23 @@ impl WhichKeySheet {
         &self.rows
     }
 
-    pub(super) fn element(&self, bottom: Pixels) -> AnyElement {
+    pub(super) fn element(&self, top: Pixels, bottom: Pixels, canvas: Size<Pixels>) -> AnyElement {
+        let available = size(
+            (canvas.width - px(2.0 * SHEET_INSET)).min(px(SHEET_MAX_WIDTH)),
+            canvas.height - px(2.0 * SHEET_GAP),
+        );
         div()
             .absolute()
             .left_0()
             .right_0()
-            .bottom(bottom)
+            .top(top + px(SHEET_GAP))
+            .bottom(bottom + px(SHEET_GAP))
             .px(px(SHEET_INSET))
             .flex()
-            .justify_center()
-            .child(
-                div()
-                    .w_full()
-                    .max_w(px(SHEET_MAX_WIDTH))
-                    .child(WhichKeyView::new(
-                        self.header.clone(),
-                        Arc::clone(&self.rows),
-                    )),
-            )
+            .flex_col()
+            .justify_end()
+            .items_center()
+            .child(WhichKeyView::new(self.header.clone(), Arc::clone(&self.rows)).fit(available))
             .into_any_element()
     }
 }

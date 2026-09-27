@@ -1644,6 +1644,17 @@ impl TerminalView {
         self.marked_text.clone()
     }
 
+    pub(crate) fn cursor_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.cursor_bounds
+            .filter(|_| self.visible && self.search_query.is_none() && self.marked_text.is_none())
+    }
+
+    pub(crate) fn grid_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.hit_grid
+            .filter(|_| self.visible)
+            .map(|grid| grid.bounds)
+    }
+
     pub(crate) fn focus(&self) -> FocusHandle {
         if self.search_query.is_some() {
             self.search_focus.clone()

@@ -18,7 +18,7 @@ use crate::{Axis, ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, Sp
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 106;
+pub const PROTOCOL_VERSION: u16 = 107;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -3491,6 +3491,10 @@ pub enum EventPayload {
         output: RawText,
     },
     CommandClientExit,
+    KeyTableActive {
+        table: Option<String>,
+        repeat: bool,
+    },
 }
 
 impl EventPayload {
@@ -4944,6 +4948,31 @@ mod tests {
     }
 
     #[test]
+    fn key_table_active_appends_after_the_command_client_exit() {
+        let exit = postcard::to_stdvec(&super::Event {
+            sequence: 0,
+            payload: super::EventPayload::CommandClientExit,
+        })
+        .expect("encode client exit")[1];
+        for (table, repeat) in [
+            (Some("prefix".to_owned()), false),
+            (Some("resize".to_owned()), true),
+            (None, false),
+        ] {
+            let event = super::Event {
+                sequence: 3,
+                payload: super::EventPayload::KeyTableActive { table, repeat },
+            };
+            let bytes = postcard::to_stdvec(&event).expect("encode key table active");
+            assert_eq!(bytes[1], exit + 1);
+            assert_eq!(
+                postcard::from_bytes::<super::Event>(&bytes).expect("decode key table active"),
+                event
+            );
+        }
+    }
+
+    #[test]
     fn command_prompt_appends_type_mode_and_no_freeze() {
         assert_eq!(
             super::CommandPromptType::default(),
@@ -5251,7 +5280,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 106);
+        assert_eq!(super::PROTOCOL_VERSION, 107);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

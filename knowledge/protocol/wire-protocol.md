@@ -1,10 +1,10 @@
 ---
 type: Protocol
-title: zz wire protocol (v106)
+title: zz wire protocol (v107)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-09-23T00:00:00-03:00
+timestamp: 2026-09-27T00:00:00-03:00
 ---
 
 # Overview
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 106`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 107`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (106) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (107) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -206,7 +206,7 @@ unpaired keys.
 `PaneRemoved(PaneId)`, `ServerStopping`,
 `OpenUri { pane, uri }`, `FocusSidebar`, `PrefixArmed { armed }`,
 `PrefixCancelled { request_id }`, `Bell { pane }`,
-`KeyTablesChanged { tables }`,
+`KeyTablesChanged { tables }`, `KeyTableActive { table, repeat }`,
 `Detached { session: SessionId, by: Option<String>, reason: DetachReason }`, `HistoryChunk { pane, start: u32, total: u32,
 offset: u32, columns: u16, rows: Vec<Vec<PackedCell>>, dictionary: TerminalDictionary }`,
 `KittyImageBegin { pane, image_id, generation, width, height, total_bytes }`
@@ -712,9 +712,17 @@ holes in previews larger than 512 cells. The separate `MAX_KITTY_IMAGE_REMOVALS`
 remains 512 IDs per control message, and the daemon splits larger removal sets into
 ordered batches.
 
+v107 is unreleased as of 2026-09-27. It appends `EventPayload::KeyTableActive { table:
+Option<String>, repeat: bool }` after `CommandClientExit`, sent to one client when the key table
+it is inside changes: `prefix` or a `switch-client -T` table, never copy-mode, and never the
+session's own `key-table`. `repeat` is true while a `-r` window holds the table. The daemon also
+re-sends it after every key decided inside a table, and a per-client deadline thread re-syncs when
+the repeat window or prefix-timeout runs out, so `PrefixArmed` and `KeyTableActive` clear without
+another key. `key_table_active_appends_after_the_command_client_exit` pins the tag.
+
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 106`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 107`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
 - v106 requires updated clients and daemon together. A v105 daemon retains the old

@@ -1556,6 +1556,30 @@ impl KeyEngine {
         }
     }
 
+    #[must_use]
+    pub fn shown_table(&self, now: Instant) -> Option<(&str, bool)> {
+        if self.mode_table {
+            return None;
+        }
+        let table = self.table.as_deref()?;
+        if self.repeat_deadline.is_some_and(|deadline| now >= deadline) {
+            return None;
+        }
+        let repeat = self.repeat_deadline.is_some();
+        if table == "prefix"
+            && !repeat
+            && self.prefix_deadline.is_some_and(|deadline| now >= deadline)
+        {
+            return None;
+        }
+        Some((table, repeat))
+    }
+
+    #[must_use]
+    pub fn next_deadline(&self) -> Option<Instant> {
+        self.repeat_deadline.or(self.prefix_deadline)
+    }
+
     /// Consume the copy-mode repeat prefix the way `window_copy_command` reads
     /// `wme->prefix` and then resets it to 1: one command spends the count and
     /// the next one starts over.
@@ -3742,6 +3766,54 @@ mod tests {
             ),
             KeyDecision::Commands(vec![CommandInvocation::new("display-message", ["custom"],)])
         );
+    }
+
+    #[test]
+    fn shown_table_and_next_deadline_follow_prefix_timeout_and_repeat_windows() {
+        let tables = KeyTables::default();
+        let start = Instant::now();
+        let prefix_timeout = Duration::from_millis(300);
+        let repeat_time = Duration::from_millis(500);
+        let ms = |millis| start + Duration::from_millis(millis);
+        let press = |engine: &mut KeyEngine, key, at| {
+            engine.handle_with_repeat_times(
+                &tables,
+                key,
+                at,
+                repeat_time,
+                Duration::ZERO,
+                prefix_timeout,
+                "root",
+            )
+        };
+        let up = KeyDecision::Commands(vec![CommandInvocation::new("select-pane", ["-U"])]);
+
+        let mut idle = KeyEngine::default();
+        assert_eq!(press(&mut idle, "C-b", start), KeyDecision::Prefix);
+        assert_eq!(idle.shown_table(start), Some(("prefix", false)));
+        assert_eq!(idle.next_deadline(), Some(ms(300)));
+        assert_eq!(idle.shown_table(ms(299)), Some(("prefix", false)));
+        assert_eq!(idle.shown_table(ms(300)), None);
+        assert_eq!(idle.active_table(), Some("prefix"));
+
+        let mut engine = KeyEngine::default();
+        assert_eq!(press(&mut engine, "C-b", start), KeyDecision::Prefix);
+        assert_eq!(press(&mut engine, "Up", ms(100)), up);
+        assert_eq!(engine.shown_table(ms(100)), Some(("prefix", true)));
+        assert_eq!(engine.next_deadline(), Some(ms(600)));
+        assert_eq!(engine.shown_table(ms(400)), Some(("prefix", true)));
+        assert_eq!(press(&mut engine, "Up", ms(400)), up);
+        assert_eq!(engine.next_deadline(), Some(ms(900)));
+        assert_eq!(engine.shown_table(ms(899)), Some(("prefix", true)));
+        assert_eq!(engine.shown_table(ms(900)), None);
+        assert_eq!(engine.next_deadline(), Some(ms(900)));
+
+        let mut copy = KeyEngine::default();
+        copy.switch_table(Some("copy-mode".to_owned()));
+        assert_eq!(copy.shown_table(start), None);
+        assert_eq!(copy.next_deadline(), None);
+        copy.switch_client_table(Some("copy-mode".to_owned()));
+        assert_eq!(copy.shown_table(start), Some(("copy-mode", false)));
     }
 
     #[test]

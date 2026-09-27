@@ -1649,6 +1649,10 @@ impl TerminalView {
             .filter(|_| self.visible && self.search_query.is_none() && self.marked_text.is_none())
     }
 
+    pub(crate) fn paste_text(&mut self, text: String, cx: &mut Context<Self>) {
+        self.request_paste(text, cx);
+    }
+
     pub(crate) fn grid_bounds(&self) -> Option<Bounds<Pixels>> {
         self.hit_grid
             .filter(|_| self.visible)

@@ -12,6 +12,7 @@ url.workspace = true
 thiserror.workspace = true
 agent-client-protocol-schema = "1.7.0"
 base64.workspace = true
+neo_frizbee = "=0.11.0"
 serde.workspace = true
 serde_json.workspace = true
 unicode-width = "0.2.2"

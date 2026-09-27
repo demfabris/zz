@@ -24,9 +24,10 @@ use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferState, ChooseTreeState, ClientMessageKind,
     ClipboardProducer, CommandInvocation, CommandPromptState, CommandResponse, ConfirmState,
     DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage, KeyBindingSnapshot,
-    LayoutNode, MenuState, MuxOptionKey, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY,
-    PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PastedImageFormat, PopupState, ProtocolError,
-    ProtocolMessage, ServerError, ServerHello, SessionId, TerminalUiCommand, WindowSnapshot,
+    KeyTableSnapshot, LayoutNode, MenuState, MuxOptionKey, MuxSnapshot,
+    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PastedImageFormat,
+    PopupState, ProtocolError, ProtocolMessage, ServerError, ServerHello, SessionId,
+    TerminalUiCommand, WindowSnapshot,
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, GRAPHEME_TABLE_BIT, IMAGE_PLACEHOLDER_SCHEME,
@@ -838,6 +839,8 @@ pub(crate) struct ClientNotificationCleared {
 pub(crate) struct InitialConnectionFinished;
 
 pub(crate) struct AgentStateChanged;
+
+pub(crate) struct KeyTableChanged;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct StaleDaemonInfo {
@@ -2399,6 +2402,34 @@ impl MuxClient {
         self.core.prefix_armed()
     }
 
+    /// The key table the daemon says this client is in, other than the
+    /// session's own, with whether a repeat window holds it.
+    #[must_use]
+    pub(crate) fn key_table(&self) -> Option<(&str, bool)> {
+        self.attached_connection().client.as_ref()?;
+        self.core.key_table()
+    }
+
+    /// Every daemon-published key table, or empty while disconnected.
+    #[must_use]
+    pub(crate) fn key_tables(&self) -> &[KeyTableSnapshot] {
+        if self.attached_connection().client.is_none() {
+            return &[];
+        }
+        self.core.key_tables()
+    }
+
+    /// The daemon-published `prefix` option as written, or `None` while
+    /// disconnected.
+    #[must_use]
+    pub(crate) fn prefix_option(&self) -> Option<&str> {
+        self.attached_connection().client.as_ref()?;
+        self.core
+            .mux_options()
+            .get(MuxOptionKey::Prefix)
+            .map(|option| option.value.as_str())
+    }
+
     #[must_use]
     pub(crate) const fn prefix_cancelled_request(&self) -> Option<u64> {
         self.prefix_cancelled_request
@@ -3220,7 +3251,8 @@ impl MuxClient {
         self.confirm_revision = self.confirm_revision.wrapping_add(1).max(1);
     }
 
-    fn reset_session_state(&mut self, _cx: &mut Context<Self>) {
+    fn reset_session_state(&mut self, cx: &mut Context<Self>) {
+        let key_table_changed = self.core.key_table().is_some();
         self.reset_client_focus_attach();
         let connection = self.attached_connection_mut();
         connection.resync_pending = false;
@@ -3247,6 +3279,9 @@ impl MuxClient {
         self.confirm_revision = self.confirm_revision.wrapping_add(1).max(1);
         self.clear_all_kitty_images();
         self.clear_all_pasted_images();
+        if key_table_changed {
+            cx.emit(KeyTableChanged);
+        }
     }
 
     fn kitty_image_cache(&mut self, pane: PaneId) -> Arc<RwLock<KittyImageCache>> {
@@ -4194,8 +4229,8 @@ impl MuxClient {
             // Key tables are read straight off the core; the handshake is
             // ingested rather than received; the frame path never reaches the
             // core, so its two viewport events cannot fire here.
+            CoreEvent::KeyTableChanged => cx.emit(KeyTableChanged),
             CoreEvent::KeyTablesChanged
-            | CoreEvent::KeyTableChanged
             | CoreEvent::HelloReceived
             | CoreEvent::ViewportChanged { .. }
             | CoreEvent::StatusChanged
@@ -4587,6 +4622,7 @@ impl MuxClient {
 
 impl EventEmitter<InitialConnectionFinished> for MuxClient {}
 impl EventEmitter<AgentStateChanged> for MuxClient {}
+impl EventEmitter<KeyTableChanged> for MuxClient {}
 impl EventEmitter<ClientNotification> for MuxClient {}
 impl EventEmitter<ClientNotificationCleared> for MuxClient {}
 

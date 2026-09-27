@@ -14,7 +14,7 @@ use gpui::{
     Animation, AnimationExt as _, AnyElement, AnyView, AnyWindowHandle, App, Bounds, Context,
     Corners, CursorStyle, DragMoveEvent, Entity, EntityId, FocusHandle, IntoElement, KeyUpEvent,
     Keystroke, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    Point, Render, Size, StyleRefinement, Window, div, ease_out_quint, prelude::*, px,
+    Point, Render, Size, StyleRefinement, Task, Window, div, ease_out_quint, prelude::*, px,
 };
 #[cfg(test)]
 use zz_client::pane_swap_command;
@@ -56,6 +56,7 @@ use super::{
         ChromeMode, SidebarModeChanged, SidebarReleaseFocus, SidebarRouteChanged, WorkspaceRoute,
         WorkspaceSidebar,
     },
+    which_key::{self, WhichKeySheet},
 };
 use crate::{
     agent::AgentView,
@@ -74,8 +75,8 @@ use crate::{
     editor::EditorView,
     mux::{
         client::{
-            AttachmentPreviewRequest, ClientNotification, ClientNotificationCleared, MuxClient,
-            SshPromptRequest,
+            AttachmentPreviewRequest, ClientNotification, ClientNotificationCleared,
+            KeyTableChanged, MuxClient, SshPromptRequest,
         },
         hosts::HostId,
         nav::{TreeTarget, kill_target_command, picker_split_command, select_window_command},
@@ -600,6 +601,9 @@ pub struct AppView {
     dialog_prefix_cancel_sent: bool,
     dialog_prefix_cancel_pending: Option<u64>,
     synchronized_signature: Option<SynchronizeSignature>,
+    which_key: Option<WhichKeySheet>,
+    which_key_timer: Option<Task<()>>,
+    which_key_generation: u64,
 }
 
 impl AppView {
@@ -758,6 +762,10 @@ impl AppView {
             },
         )
         .detach();
+        cx.subscribe_in(&mux, window, |view, _, _: &KeyTableChanged, window, cx| {
+            view.key_table_changed(window, cx);
+        })
+        .detach();
         cx.subscribe_in(
             &mux,
             window,
@@ -897,6 +905,9 @@ impl AppView {
             dialog_prefix_cancel_sent: false,
             dialog_prefix_cancel_pending: None,
             synchronized_signature: None,
+            which_key: None,
+            which_key_timer: None,
+            which_key_generation: 0,
         };
         view.register_agent_panes(cx);
         view
@@ -916,17 +927,12 @@ impl AppView {
         {
             return;
         }
+        self.hide_which_key(cx);
         if self.reconcile_dialog_prefix(window, cx) {
             return;
         }
         let keystroke = &event.keystroke;
-        let overlay_open = self.popup.is_some()
-            || self.menu.is_some()
-            || self.confirm.is_some()
-            || self.command_palette.as_ref().is_some_and(|palette| {
-                palette.read(cx).is_local() || palette.read(cx).is_window_chooser()
-            })
-            || self.sidebar.read(cx).route() == WorkspaceRoute::Settings;
+        let overlay_open = self.overlay_open(cx);
         if !overlay_open
             && keystroke.key == "escape"
             && self
@@ -1085,6 +1091,75 @@ impl AppView {
         if disposition == Disposition::Consumed {
             cx.stop_propagation();
         }
+    }
+
+    fn overlay_open(&self, cx: &App) -> bool {
+        self.popup.is_some()
+            || self.menu.is_some()
+            || self.confirm.is_some()
+            || self.command_palette.as_ref().is_some_and(|palette| {
+                palette.read(cx).is_local() || palette.read(cx).is_window_chooser()
+            })
+            || self.sidebar.read(cx).route() == WorkspaceRoute::Settings
+    }
+
+    fn which_key_blocked(&self, window: &Window, cx: &App) -> bool {
+        self.overlay_open(cx)
+            || self.visible_overlay(cx).is_some()
+            || self.pane_drag.is_some()
+            || cx.has_active_drag()
+            || window
+                .root::<zz_ui::Root>()
+                .flatten()
+                .is_some_and(|root| root.read(cx).has_active_dialog())
+    }
+
+    fn hide_which_key(&mut self, cx: &mut Context<Self>) {
+        self.which_key_timer = None;
+        self.which_key_generation = self.which_key_generation.wrapping_add(1);
+        if self.which_key.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    fn key_table_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.hide_which_key(cx);
+        let Some((table, false)) = self.mux.read(cx).key_table() else {
+            return;
+        };
+        let table = table.to_owned();
+        let Some(delay) = which_key::delay(config::resolved_config(cx).which_key_delay.value)
+        else {
+            return;
+        };
+        let generation = self.which_key_generation;
+        self.which_key_timer = Some(cx.spawn_in(window, async move |view, cx| {
+            cx.background_executor().timer(delay).await;
+            view.update_in(cx, |view, window, cx| {
+                view.show_which_key(generation, &table, window, cx);
+            })
+            .ok();
+        }));
+    }
+
+    fn show_which_key(
+        &mut self,
+        generation: u64,
+        table: &str,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        if generation != self.which_key_generation {
+            return;
+        }
+        self.which_key_timer = None;
+        if self.mux.read(cx).key_table() != Some((table, false))
+            || self.which_key_blocked(window, cx)
+        {
+            return;
+        }
+        self.which_key = WhichKeySheet::build(self.mux.read(cx), table);
+        cx.notify();
     }
 
     fn reconcile_dialog_prefix(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -3295,6 +3370,15 @@ impl Render for AppView {
         if let Some(confirm) = self.confirm_overlay(canvas_origin, cx) {
             overlays.push(confirm);
         }
+        if (self.which_key.is_some() || self.which_key_timer.is_some())
+            && self.which_key_blocked(window, cx)
+        {
+            self.which_key_timer = None;
+            self.which_key = None;
+        }
+        if let Some(sheet) = &self.which_key {
+            overlays.push(sheet.element(pane_margin + px(8.0)));
+        }
         let measured_canvas_bounds = self.pane_canvas_bounds.clone();
         let content = div().relative().size_full().child(
             div()
@@ -4285,6 +4369,244 @@ mod tests {
                 .any(|message| matches!(message, InputMessage::Key { .. }))
         );
         assert!(mux.read_with(cx, |mux, _| mux.prefix_armed()));
+    }
+
+    #[cfg(unix)]
+    fn publish_key_table(
+        mux: &Entity<MuxClient>,
+        table: Option<&str>,
+        repeat: bool,
+        cx: &mut gpui::VisualTestContext,
+    ) {
+        mux.update(cx, |mux, cx| {
+            mux.handle_message_for_test(
+                zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 0,
+                    payload: zz_protocol::EventPayload::KeyTableActive {
+                        table: table.map(str::to_owned),
+                        repeat,
+                    },
+                }),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+    }
+
+    #[cfg(unix)]
+    fn which_key_visible(workspace: &Entity<AppView>, cx: &mut gpui::VisualTestContext) -> bool {
+        workspace.read_with(cx, |workspace, _| workspace.which_key.is_some())
+    }
+
+    #[cfg(unix)]
+    fn wait_for_which_key(cx: &mut gpui::VisualTestContext, milliseconds: u64) {
+        cx.executor()
+            .advance_clock(Duration::from_millis(milliseconds));
+        cx.run_until_parked();
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn which_key_shows_after_the_prefix_pause_and_hides_on_the_next_key(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        let Some((client, _server)) = input_test_client() else {
+            return;
+        };
+        let (workspace, cx) = input_test_workspace(cx, client);
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+        let stroke = Keystroke::parse("ctrl-a").unwrap();
+        cx.simulate_event(gpui::KeyDownEvent {
+            keystroke: stroke.clone(),
+            is_held: false,
+            prefer_character_input: false,
+        });
+        publish_key_table(&mux, Some("prefix"), false, cx);
+        cx.simulate_event(KeyUpEvent {
+            keystroke: stroke.clone(),
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            input.borrow().as_slice(),
+            &[
+                InputMessage::Key {
+                    pane: PaneId(0),
+                    input: terminal_key_input(&stroke, TerminalKeyAction::Press),
+                    text_follows: false
+                },
+                InputMessage::Key {
+                    pane: PaneId(0),
+                    input: terminal_key_input(&stroke, TerminalKeyAction::Release),
+                    text_follows: false
+                },
+            ]
+        );
+        wait_for_which_key(cx, 399);
+        assert!(!which_key_visible(&workspace, cx));
+        wait_for_which_key(cx, 2);
+        assert!(which_key_visible(&workspace, cx));
+        workspace.read_with(cx, |workspace, _| {
+            let sheet = workspace.which_key.as_ref().unwrap();
+            assert_eq!(sheet.header().table.as_ref(), "prefix");
+            assert_eq!(sheet.header().prefix_raw.as_ref(), "C-a");
+            assert!(sheet.header().prefix.is_some());
+            let split = sheet
+                .rows()
+                .iter()
+                .find(|row| row.raw.as_ref() == "%")
+                .unwrap();
+            assert_eq!(split.group.as_deref(), Some("Panes"));
+            assert!(split.key.is_some());
+            assert!(!split.yours);
+        });
+        assert!(workspace.read_with(cx, |workspace, _| workspace.focused_overlay.is_none()));
+        let sheet = cx.debug_bounds("which-key").unwrap();
+        let viewport = cx.update(|window, _| window.viewport_size());
+        assert!(sheet.bottom() <= viewport.height);
+        assert!(sheet.bottom() > viewport.height - px(40.0));
+        assert!(sheet.left() >= px(16.0));
+        let terminal =
+            workspace.read_with(cx, |workspace, _| workspace.terminals[&PaneId(0)].clone());
+        assert!(cx.update(|window, cx| terminal.read(cx).focus().is_focused(window)));
+        cx.simulate_keystrokes("c");
+        assert!(!which_key_visible(&workspace, cx));
+        assert!(
+            input
+                .borrow()
+                .iter()
+                .any(|message| matches!(message, InputMessage::Key { input, .. } if input.text.as_deref() == Some("c")))
+        );
+        assert!(
+            !input
+                .borrow()
+                .iter()
+                .any(|message| matches!(message, InputMessage::CancelPrefix { .. }))
+        );
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn which_key_hides_for_a_repeat_window_and_a_cleared_table(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        let Some((client, _server)) = input_test_client() else {
+            return;
+        };
+        let (workspace, cx) = input_test_workspace(cx, client);
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        publish_key_table(&mux, Some("prefix"), false, cx);
+        wait_for_which_key(cx, 401);
+        assert!(which_key_visible(&workspace, cx));
+        publish_key_table(&mux, Some("prefix"), true, cx);
+        assert!(!which_key_visible(&workspace, cx));
+        wait_for_which_key(cx, 2_000);
+        assert!(!which_key_visible(&workspace, cx));
+        publish_key_table(&mux, Some("prefix"), false, cx);
+        wait_for_which_key(cx, 200);
+        publish_key_table(&mux, None, false, cx);
+        wait_for_which_key(cx, 2_000);
+        assert!(!which_key_visible(&workspace, cx));
+        assert!(workspace.read_with(cx, |workspace, _| workspace.which_key_timer.is_none()));
+        publish_key_table(&mux, Some("prefix"), false, cx);
+        wait_for_which_key(cx, 401);
+        assert!(which_key_visible(&workspace, cx));
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.open_command_palette(None, window, cx);
+        });
+        cx.run_until_parked();
+        assert!(!which_key_visible(&workspace, cx));
+        assert!(workspace.read_with(cx, |workspace, _| {
+            workspace.focused_overlay == Some(OverlayKind::CommandPalette)
+        }));
+        publish_key_table(&mux, Some("prefix"), false, cx);
+        wait_for_which_key(cx, 401);
+        assert!(!which_key_visible(&workspace, cx));
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn which_key_lists_a_custom_table_flat_and_hides_on_its_keys(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        let Some((client, _server)) = input_test_client() else {
+            return;
+        };
+        let (workspace, cx) = input_test_workspace(cx, client);
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        let mut tables = zz_protocol::KeyTables::default();
+        for (key, direction) in [("h", "-L"), ("l", "-R")] {
+            tables.bind(
+                "resize",
+                key,
+                zz_protocol::Binding {
+                    commands: vec![CommandInvocation::new("resize-pane", [direction])],
+                    repeat: true,
+                    note: None,
+                },
+            );
+        }
+        mux.update(cx, |mux, cx| {
+            mux.handle_message_for_test(
+                zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 0,
+                    payload: zz_protocol::EventPayload::KeyTablesChanged {
+                        tables: tables.snapshot(),
+                    },
+                }),
+                cx,
+            );
+        });
+        publish_key_table(&mux, Some("resize"), false, cx);
+        let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+        wait_for_which_key(cx, 401);
+        workspace.read_with(cx, |workspace, _| {
+            let sheet = workspace.which_key.as_ref().unwrap();
+            assert_eq!(sheet.header().table.as_ref(), "resize");
+            assert!(sheet.header().prefix.is_none());
+            assert_eq!(
+                sheet
+                    .rows()
+                    .iter()
+                    .map(|row| row.raw.as_ref())
+                    .collect::<Vec<_>>(),
+                ["h", "l"]
+            );
+            assert!(
+                sheet
+                    .rows()
+                    .iter()
+                    .all(|row| row.group.is_none() && row.repeat)
+            );
+        });
+        cx.simulate_keystrokes("h");
+        assert!(!which_key_visible(&workspace, cx));
+        assert!(
+            input
+                .borrow()
+                .iter()
+                .any(|message| matches!(message, InputMessage::Key { input, .. } if input.text.as_deref() == Some("h")))
+        );
+        publish_key_table(&mux, Some("resize"), false, cx);
+        wait_for_which_key(cx, 401);
+        assert!(which_key_visible(&workspace, cx));
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn which_key_delay_zero_never_shows(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        let Some((client, _server)) = input_test_client() else {
+            return;
+        };
+        let (workspace, cx) = input_test_workspace(cx, client);
+        cx.update(|_, cx| {
+            let mut config = config::resolved_config(cx);
+            config.which_key_delay = zz_config::ConfigValue::from_default(0.0);
+            cx.set_global(config);
+        });
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        publish_key_table(&mux, Some("prefix"), false, cx);
+        assert!(workspace.read_with(cx, |workspace, _| workspace.which_key_timer.is_none()));
+        wait_for_which_key(cx, 5_000);
+        assert!(!which_key_visible(&workspace, cx));
     }
 
     #[gpui::test]

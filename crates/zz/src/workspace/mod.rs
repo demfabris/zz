@@ -4,6 +4,7 @@ pub(crate) mod sidebar;
 mod ssh_prompt;
 pub(crate) mod tree;
 mod view;
+mod which_key;
 
 pub use view::AppView;
 /// Re-exported for the desktop-only binders (`macos_app`, the real browser view).

@@ -850,6 +850,47 @@ mod tests {
     }
 
     #[test]
+    fn a_custom_key_table_routes_plain_keys_to_the_daemon() {
+        let mut core = crate::ClientCore::new();
+        core.handle_message(zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+            sequence: 0,
+            payload: zz_protocol::EventPayload::KeyTableActive {
+                table: Some("resize".to_owned()),
+                repeat: false,
+            },
+        }));
+        let input = press(KeyCode::Character('h'));
+        let view = PrefixView {
+            armed: core.prefix_armed(),
+            claimed: core.claims_prefix_input(&input),
+        };
+        assert!(!view.armed);
+        let mut router = router();
+        activate(&mut router, P);
+        assert_eq!(router.key(&input, view), Disposition::Consumed);
+        assert_eq!(
+            router.drain_effects(),
+            vec![Effect::ForwardKey {
+                pane: P,
+                input: input.clone()
+            }]
+        );
+        let mut release = input;
+        release.action = KeyAction::Release;
+        assert_eq!(
+            router.key(&release, PrefixView::default()),
+            Disposition::Consumed
+        );
+        assert_eq!(
+            router.drain_effects(),
+            vec![Effect::ForwardKey {
+                pane: P,
+                input: release
+            }]
+        );
+    }
+
+    #[test]
     fn shifted_letters_require_shift() {
         let mut input = press(KeyCode::Character('g'));
         assert_ne!(zz_protocol::input_key_name(&input).as_str(), "G");

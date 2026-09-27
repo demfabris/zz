@@ -202,7 +202,7 @@ mod tests {
         sorted.sort();
         assert_eq!(ranks, sorted);
         assert_eq!(find(&rows, "d").label, "Detach the current client");
-        assert_eq!(find(&rows, "c").label, "Create a window");
+        assert_eq!(find(&rows, "c").label, "Create a new window");
     }
 
     #[test]

@@ -59,7 +59,7 @@ event payload, and message enums say so, and a tail test pins the order).
 - `EventPayload::OpenPathPicker { pane, start_dir: Option<String> }`, pushed into `direct_events` for
   the invoking client only.
 - `ProtocolMessage::PathListRequest { request_id, pane, dir: Option<String> }`. `dir` is the raw text:
-  `None` means the pane's cwd; `~`, `~user`, relative-to-current-root and absolute forms are expanded
+  `None` means the pane's cwd; `~`, `~user`, relative (joined on the connection thread against the last root this client requested) and absolute forms are expanded
   and joined by the daemon, never by the client.
 - `ProtocolMessage::PathListBegin { request_id, result }`, where `result` is either
   `{ root, display_root, cwd: Option<String>, insert: InsertStyle }` or an error message.
@@ -114,7 +114,7 @@ One active walk per client: a local `Option<(request_id, Arc<AtomicBool>)>`; a n
 A root that is not UTF-8 or contains control characters is refused. `cwd` in `Begin` is filled only from
 step 2, because relative inserts are only safe against the live cwd.
 
-**Refusals in Begin**: foreground basename `ssh`, `mosh`, `tmux` or `zz_cli`, since the files would be
+**Refusals in Begin**: foreground basename `ssh`, `mosh`, `mosh-client`, `tmux` or `zz_cli`, since the files would be
 the wrong machine's.
 
 **Insert style**, computed off the `inner` lock from the foreground process group `fg` (`tcgetpgrp`):
@@ -145,7 +145,7 @@ moved into zz-daemon and extended to files. `ignore` walks depth-first only, so 
 - Stay on the root's `st_dev`, checked before a child directory is queued. A root of `/` lists its
   children only.
 - Limits: depth 8, 50k entries, 3 s; `truncated` when one stops the walk. A daemon-wide cap of 4 live
-  walker threads bounds leaks from hung mounts; a request over the cap gets `done, truncated` at once.
+  walker threads bounds leaks from hung mounts; a request over the cap gets its `Begin` and then an empty `done, truncated` chunk. Walks for one client run one at a time behind a per-connection lock; a superseded request that is still waiting sends nothing, and one that waits more than 3 s gets an error `Begin`. Git marks go out after the last entry chunk and before a final empty `done` chunk, so they only name entries already sent.
 
 **Flow control.** The client outbound queue closes a client that falls 256 reliable messages behind
 (`MAX_RELIABLE_MESSAGES`, `close_outbound_too_far_behind`), and terminal frames share that queue. So:
@@ -177,11 +177,11 @@ link zz-daemon with default features off and stay free of it.
 One pure function in zz-client, `insert_text(root, rel, kind, cwd, style, absolute) -> Option<String>`,
 tested as a table:
 
-- Path: `root.join(rel)`. Relative when `Path::strip_prefix(cwd)` succeeds and `absolute` is false (empty
+- Path: `root` joined with `rel` using `/`, compared as path parts (not `std::path::Path`, whose rules follow the client's OS while the host may differ). Relative when every part of `cwd` prefixes it and `absolute` is false (empty
   becomes `.`), else absolute. Never a `~/` form (the shell's `$HOME` may differ from the daemon's).
   Dirs end in `/`.
 - `Posix`: bare when every character is in `[A-Za-z0-9_./:@%+,=-]`, else POSIX single quotes (`'`
-  becomes `'\''`). A relative path starting with `-` or `=` gets `./` first.
+  becomes `'\''`). A relative path starting with `-` or `=` gets `./` first, in every shell kind.
 - `Fish`: single quotes, with `\` written `\\` and `'` written `\'`.
 - `Pwsh`: single quotes with `''`; backslash is literal and allowed bare; names starting with `@` and
   names containing `,` are quoted.
@@ -223,10 +223,12 @@ The client then sends `TerminalView { Paste(text) }` to the pane.
 pub trait PathPickerBackend {
     fn list(&self, dir: Option<&str>, cx: &mut App) -> Option<u64>;
     fn cancel(&self, request_id: u64, cx: &mut App);
-    fn insert(&self, text: String, cx: &mut App);
+    fn insert(&self, root: &PathListRoot, entry: &PathEntry, absolute: bool, cx: &mut App);
 }
 ```
 
+- The view never builds insert text: the host's backend calls `zz_client::path_insert::insert_text` and
+  pastes the result. `display_root` arrives ending in `/`.
 - Surface: `CommandPaletteSurface` with the `display_root` as the input prefix (`~/dev/zz/`), rows from
   `command_palette_entry` (Folder/File icon, muted directory prefix, byte-range match highlights, the git
   letter on the right), `PaletteHint` footer. At most 10 visible rows in a `uniform_list`.
@@ -260,7 +262,7 @@ pub trait PathPickerBackend {
 ## Daemon
 
 - Two read-only accessors on `KeyEngine` (`crates/zz-protocol/src/key.rs`), whose fields are private:
-  - `shown_table(now) -> Option<(&str, bool)>`: `None` for mode tables (copy-mode, copy-mode-vi), once
+  - `shown_table(now) -> Option<(&str, bool)>`: `None` for mode tables and for tables named copy-mode or copy-mode-vi, once
     the repeat deadline has passed, and for `prefix` after prefix-timeout when no repeat is held (`>=`,
     so a wake landing exactly on the deadline counts). The bool is "repeat held".
   - `next_deadline() -> Option<Instant>`: the repeat deadline, else the prefix deadline.
@@ -314,8 +316,9 @@ pub trait PathPickerBackend {
   the Settings route.
 - Rows, built in zz-client:
   - stock prefix bindings equal to the default at the same key go into groups by a fixed key-to-group
-    map (Panes, Windows, Sessions, Copy and paste, Other), with a unit test that no stock key falls to
-    Other;
+    map (Panes, Windows, Sessions, Copy and paste, Other), which names every stock key explicitly (`:`,
+    `?`, `i`, `~`, `r`, `e` and the send-prefix key go to Other), with a unit test that every default
+    prefix key is in the map;
   - Yours: bindings whose `(commands, repeat)` differ from `KeyTables::default()` with the client's
     prefix applied, or that the default lacks (notes ignored);
   - custom tables render as one flat list; mouse and wheel keys are dropped; `-r` keys are marked;

@@ -478,3 +478,65 @@ fn an_error_begin_shows_the_message(cx: &mut TestAppContext) {
     });
     assert!(picker.cx.debug_bounds("path-picker-empty").is_some());
 }
+
+#[gpui::test]
+fn a_typed_path_reroots_at_every_slash(cx: &mut TestAppContext) {
+    let mut picker = mount(cx, None);
+    picker.feed(1, tree(), false);
+    picker.cx.simulate_input("src/");
+    picker.cx.run_until_parked();
+    assert_eq!(picker.lists().len(), 1);
+    picker
+        .cx
+        .simulate_keystrokes("backspace backspace backspace backspace");
+    picker.cx.simulate_input("/");
+    picker.cx.run_until_parked();
+    assert_eq!(picker.lists().last(), Some(&(Some("/".to_owned()), 2)));
+    picker.feed(
+        2,
+        vec![entry("etc", PathKind::Dir), entry("usr", PathKind::Dir)],
+        false,
+    );
+    picker.cx.simulate_input("etc/");
+    picker.cx.run_until_parked();
+    assert_eq!(picker.lists().last(), Some(&(Some("etc".to_owned()), 3)));
+    assert!(picker.picker.read_with(picker.cx, |picker, cx| {
+        picker.input.read(cx).value().is_empty()
+    }));
+    picker.feed(
+        3,
+        vec![
+            entry("hosts", PathKind::File),
+            entry("ssh", PathKind::Dir),
+            entry("ssh/config", PathKind::File),
+        ],
+        false,
+    );
+    picker.cx.simulate_input("ssh/");
+    picker.cx.run_until_parked();
+    assert_eq!(picker.lists().len(), 3);
+    assert_eq!(picker.labels(), ["config"]);
+    assert_eq!(
+        picker
+            .picker
+            .read_with(picker.cx, |picker, _| picker.prefix()),
+        SharedString::from("~/work/ssh/")
+    );
+}
+
+#[gpui::test]
+fn a_pending_request_resets_the_local_base(cx: &mut TestAppContext) {
+    let mut picker = mount(cx, None);
+    picker.feed(1, tree(), false);
+    picker.select("src");
+    picker.cx.simulate_keystrokes("tab");
+    picker.cx.simulate_input("../");
+    picker.cx.run_until_parked();
+    assert_eq!(
+        picker.lists().last(),
+        Some(&(Some("src/../".to_owned()), 2))
+    );
+    picker.cx.simulate_input("../");
+    picker.cx.run_until_parked();
+    assert_eq!(picker.lists().last(), Some(&(Some("../".to_owned()), 3)));
+}

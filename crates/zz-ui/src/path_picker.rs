@@ -172,6 +172,7 @@ pub struct PathPickerView {
     ranking: Option<Task<()>>,
     scroll_handle: UniformListScrollHandle,
     finished: bool,
+    typed_root: bool,
 }
 
 impl PathPickerView {
@@ -213,6 +214,7 @@ impl PathPickerView {
             ranking: None,
             scroll_handle: UniformListScrollHandle::new(),
             finished: false,
+            typed_root: false,
         }
     }
 
@@ -318,6 +320,8 @@ impl PathPickerView {
         }
         self.request = Some(request);
         self.done = false;
+        self.base.clear();
+        self.error = None;
         self.chunks.clear();
         self.rows = Arc::from([]);
         self.selected = 0;
@@ -341,8 +345,15 @@ impl PathPickerView {
                 dir.to_owned()
             };
             let rest = rest.to_owned();
+            self.typed_root = true;
             self.set_query(&rest, window, cx);
             self.request(&dir, cx);
+            return;
+        }
+        if self.typed_root
+            && let Some(entry) = value.strip_suffix('/').and_then(|dir| self.named_dir(dir))
+        {
+            self.open_dir(&entry, window, cx);
             return;
         }
         value.trim().clone_into(&mut self.query);
@@ -433,6 +444,18 @@ impl PathPickerView {
         self.close(cx);
     }
 
+    fn named_dir(&self, dir: &str) -> Option<PathEntry> {
+        if dir.is_empty() {
+            return None;
+        }
+        let rel = format!("{}{dir}", self.base);
+        self.chunks
+            .iter()
+            .flat_map(|chunk| chunk.iter())
+            .find(|entry| entry.kind == PathKind::Dir && entry.rel.trim_end_matches('/') == rel)
+            .cloned()
+    }
+
     fn enter_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(entry) = self
             .rows
@@ -442,6 +465,10 @@ impl PathPickerView {
         else {
             return;
         };
+        self.open_dir(&entry, window, cx);
+    }
+
+    fn open_dir(&mut self, entry: &PathEntry, window: &mut Window, cx: &mut Context<Self>) {
         let base = format!("{}/", entry.rel.trim_end_matches('/'));
         let local = self.done
             && !self.truncated

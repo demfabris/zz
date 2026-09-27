@@ -38,7 +38,7 @@ struct Column<'a> {
 }
 
 fn columns(rows: &[WhichKeyRow]) -> Vec<Column<'_>> {
-    if rows.iter().all(|row| row.group.is_none() && !row.yours) {
+    if rows.iter().all(|row| row.group.is_none()) {
         return vec![Column {
             title: None,
             rows: rows.iter().collect(),
@@ -246,6 +246,11 @@ mod tests {
         assert_eq!(flat.len(), 1);
         assert!(flat[0].title.is_none());
         assert_eq!(flat[0].rows.len(), 2);
+        let custom = [row("a", "One", None, true), row("b", "Two", None, true)];
+        let custom = columns(&custom);
+        assert_eq!(custom.len(), 1);
+        assert!(custom[0].title.is_none());
+        assert_eq!(custom[0].rows.len(), 2);
     }
 
     struct Host {

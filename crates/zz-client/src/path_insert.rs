@@ -120,7 +120,7 @@ fn quote_shell(shell: ShellKind, text: &str) -> String {
             }
         }
         ShellKind::Fish => {
-            if text.chars().all(posix_bare) {
+            if !text.starts_with('%') && text.chars().all(posix_bare) {
                 text.to_owned()
             } else {
                 format!("'{}'", text.replace('\\', r"\\").replace('\'', r"\'"))
@@ -128,6 +128,7 @@ fn quote_shell(shell: ShellKind, text: &str) -> String {
         }
         ShellKind::Pwsh => {
             if !text.starts_with('@')
+                && !pwsh_number_like(text)
                 && text
                     .chars()
                     .all(|c| c == '\\' || (c != ',' && posix_bare(c)))
@@ -178,6 +179,15 @@ fn claude_mention(text: &str, full: String) -> String {
 
 fn posix_bare(c: char) -> bool {
     c.is_ascii_alphanumeric() || "_./:@%+,=-".contains(c)
+}
+
+fn pwsh_number_like(text: &str) -> bool {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_digit() => true,
+        Some('.' | '+') => chars.next().is_some_and(|c| c.is_ascii_digit()),
+        _ => false,
+    }
 }
 
 fn mention_bare(c: char) -> bool {
@@ -392,6 +402,12 @@ mod tests {
             ("/home/me/src", "a,b", FILE, cwd, PWSH, false, "'a,b' "),
             ("/home/me/src", "@args", FILE, cwd, PWSH, false, "'@args' "),
             ("/home/me/src", "x@y", FILE, cwd, PWSH, false, "x@y "),
+            ("/home/me/src", "1kb", FILE, cwd, PWSH, false, "'1kb' "),
+            ("/home/me/src", "0x10", FILE, cwd, PWSH, false, "'0x10' "),
+            ("/home/me/src", ".5", FILE, cwd, PWSH, false, "'.5' "),
+            ("/home/me/src", "a1", FILE, cwd, PWSH, false, "a1 "),
+            ("/home/me/src", "%self", FILE, cwd, FISH, false, "'%self' "),
+            ("/home/me/src", "a%b", FILE, cwd, FISH, false, "a%b "),
             ("/home/me/src", "it's", FILE, cwd, NU, false, "r#'it's'# "),
             ("/home/me/src", "a'#b", FILE, cwd, NU, false, "r##'a'#b'## "),
             (

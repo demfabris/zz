@@ -94,6 +94,53 @@ pub(crate) fn pane_runs_codex(pane_pid: u32) -> bool {
         })
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) fn group_runs_codex(group: u32) -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+            .is_some_and(|pid| {
+                claude_peers::process_group(pid) == Some(group)
+                    && std::fs::read_link(format!("/proc/{pid}/exe")).is_ok_and(|path| {
+                        path.file_name()
+                            .and_then(std::ffi::OsStr::to_str)
+                            .is_some_and(|name| {
+                                name.strip_suffix(" (deleted)").unwrap_or(name) == "codex"
+                            })
+                    })
+            })
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn group_runs_codex(group: u32) -> bool {
+    let Ok(output) = Command::new("ps")
+        .args(["-axo", "pid=,pgid=,comm="])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return false;
+    };
+    String::from_utf8_lossy(&output.stdout).lines().any(|line| {
+        let Some((_, rest)) = line.trim_start().split_once(char::is_whitespace) else {
+            return false;
+        };
+        let Some((pgid, command)) = rest.trim_start().split_once(char::is_whitespace) else {
+            return false;
+        };
+        pgid.parse::<u32>().ok() == Some(group)
+            && std::path::Path::new(command.trim())
+                .file_name()
+                .is_some_and(|name| name == "codex")
+    })
+}
+
 fn executable_path() -> Result<std::ffi::OsString, QueueError> {
     let agent =
         AcpAgent::from_str("codex").map_err(|error| QueueError::Failed(error.to_string()))?;

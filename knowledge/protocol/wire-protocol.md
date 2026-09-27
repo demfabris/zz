@@ -703,7 +703,7 @@ the end of the enum. These appends were written against an unreleased 104; zz 0.
 main's three `ServerError::Native*` variants and without them, so they moved to 105. The v103 and
 v104 entries describe released layouts and remain intact.
 
-v106 is unreleased as of 2026-09-23. It raises the terminal placement limit from 512 to
+v106 shipped in zz 0.14.0. It raises the terminal placement limit from 512 to
 65,536, using the shared `zz_terminal::MAX_KITTY_PLACEMENTS` for viewport extraction and
 both terminal-lane codecs. The 72-byte record layout stays unchanged. Older readers reject
 counts above 512, so this accepted-value expansion requires a version bump. Yazi's legacy
@@ -720,11 +720,29 @@ re-sends it after every key decided inside a table, and a per-client deadline th
 the repeat window or prefix-timeout runs out, so `PrefixArmed` and `KeyTableActive` clear without
 another key. `key_table_active_appends_after_the_command_client_exit` pins the tag.
 
+v107 adds the shell path picker ([design](/designs/path-picker-and-which-key.md)). The desktop
+advertises `ClientHello::CLIENT_PATH_PICKER_CAPABILITY` (`client-path-picker-v1`); iOS, web, the
+TUI and FFI clients do not, and `choose-path` answers them with an error. `EventPayload` gains
+`OpenPathPicker { pane, start_dir }` after `KeyTableActive`, pushed only to the invoking client.
+`ProtocolMessage` gains five variants after `ClientTerminalType`: `PathListRequest { request_id,
+pane, dir }`, `PathListBegin { request_id, result: Result<PathListRoot, String> }`, `PathListChunk
+{ request_id, entries, done, truncated }`, `PathListGit { request_id, marks }` and
+`PathListCancel { request_id }`, with the types in `crates/zz-protocol/src/path_list.rs`. The
+daemon answers a request with one `Begin`, chunks of at most 64 KiB encoded, any git marks for
+entries it already sent, and a final chunk with `done`. A request that is cancelled or superseded
+before its `Begin` sends nothing. Walks run one at a time per client; a request that waits more
+than 3 s behind an earlier walk gets an error `Begin`, and one that finds all four daemon-wide walker
+slots busy gets its `Begin` followed at once by an empty `done, truncated` chunk. Every path
+string is capped at `MAX_PATH_LIST_TEXT_BYTES` (4096) and a chunk or mark batch at
+`MAX_PATH_LIST_ENTRIES` (50,000) during deserialization. `path_picker_variants_append_at_the_wire_tails_and_round_trip` pins the
+tags.
+
 # Versioning & compatibility
 
 - **`PROTOCOL_VERSION: u16 = 107`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v107 requires updated clients and daemon together, including the daemon on every ssh host.
 - v106 requires updated clients and daemon together. A v105 daemon retains the old
   placement limit even after the GUI is rebuilt; restarting only the GUI cannot fix
   incomplete image previews.

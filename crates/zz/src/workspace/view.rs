@@ -3960,6 +3960,7 @@ mod tests {
             | CoreEvent::PaneRemoved { .. }
             | CoreEvent::Bell { .. }
             | CoreEvent::FocusSidebar
+            | CoreEvent::OpenPathPicker { .. }
             | CoreEvent::Detached { .. }
             | CoreEvent::ServerStopping
             | CoreEvent::CommandResponse(_)

@@ -14,7 +14,14 @@ use zz_terminal::{
     TerminalDictionary, TerminalViewAction, TerminalViewport, TerminalViewportPatch,
 };
 
-use crate::{Axis, ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId, WindowId};
+use crate::{
+    Axis, ClientId, ClientInstanceId, GitMark, MuxSnapshot, PaneId, PathEntry, PathListRoot,
+    SessionId, SplitId, WindowId,
+    path_list::{
+        deserialize_git_marks, deserialize_optional_path_list_text, deserialize_path_entries,
+        deserialize_path_list_result,
+    },
+};
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
@@ -1028,7 +1035,7 @@ where
     Ok(text)
 }
 
-fn deserialize_bounded_optional_text<'de, D>(
+pub(crate) fn deserialize_bounded_optional_text<'de, D>(
     deserializer: D,
     limit: usize,
 ) -> Result<Option<String>, D::Error>
@@ -1549,6 +1556,7 @@ impl ClientHello {
     pub const CLIENT_NATIVE_TERMINAL_SEARCH_CAPABILITY: &'static str =
         "client-native-terminal-search-v1";
     pub const CLIENT_NATIVE_CHOOSER_CAPABILITY: &'static str = "client-native-chooser-v1";
+    pub const CLIENT_PATH_PICKER_CAPABILITY: &'static str = "client-path-picker-v1";
     pub const CLIENT_NESTED_CAPABILITY: &'static str = CLIENT_NESTED_CAPABILITY;
     pub const CLIENT_TTY_CAPABILITY_PREFIX: &'static str = CLIENT_TTY_CAPABILITY_PREFIX;
     pub const CLIENT_SIZE_CAPABILITY_PREFIX: &'static str = CLIENT_SIZE_CAPABILITY_PREFIX;
@@ -3495,6 +3503,11 @@ pub enum EventPayload {
         table: Option<String>,
         repeat: bool,
     },
+    OpenPathPicker {
+        pane: PaneId,
+        #[serde(deserialize_with = "deserialize_optional_path_list_text")]
+        start_dir: Option<String>,
+    },
 }
 
 impl EventPayload {
@@ -3765,6 +3778,32 @@ pub enum ProtocolMessage {
     ClientTerminalType {
         #[serde(deserialize_with = "deserialize_client_terminal_type")]
         term_type: String,
+    },
+    PathListRequest {
+        request_id: u64,
+        pane: PaneId,
+        #[serde(deserialize_with = "deserialize_optional_path_list_text")]
+        dir: Option<String>,
+    },
+    PathListBegin {
+        request_id: u64,
+        #[serde(deserialize_with = "deserialize_path_list_result")]
+        result: Result<PathListRoot, String>,
+    },
+    PathListChunk {
+        request_id: u64,
+        #[serde(deserialize_with = "deserialize_path_entries")]
+        entries: Vec<PathEntry>,
+        done: bool,
+        truncated: bool,
+    },
+    PathListGit {
+        request_id: u64,
+        #[serde(deserialize_with = "deserialize_git_marks")]
+        marks: Vec<(String, GitMark)>,
+    },
+    PathListCancel {
+        request_id: u64,
     },
 }
 
@@ -5338,6 +5377,132 @@ mod tests {
                 postcard::from_bytes::<super::Event>(&bytes).expect("detached event decodes"),
                 event
             );
+        }
+    }
+
+    #[test]
+    fn path_picker_variants_append_at_the_wire_tails_and_round_trip() {
+        let exit = super::Event {
+            sequence: 0,
+            payload: super::EventPayload::CommandClientExit,
+        };
+        let exit_tag = postcard::to_stdvec(&exit).expect("encode client exit")[1];
+        let open = super::Event {
+            sequence: 0,
+            payload: super::EventPayload::OpenPathPicker {
+                pane: crate::PaneId(4),
+                start_dir: Some("~/dev".to_owned()),
+            },
+        };
+        let bytes = postcard::to_stdvec(&open).expect("encode open path picker");
+        assert_eq!(bytes[1], exit_tag + 2);
+        assert_eq!(
+            postcard::from_bytes::<super::Event>(&bytes).expect("decode open path picker"),
+            open
+        );
+
+        let message_tag = |message: &super::ProtocolMessage| {
+            postcard::to_stdvec(message).expect("message encodes")[0]
+        };
+        let base = message_tag(&super::ProtocolMessage::ClientTerminalType {
+            term_type: String::new(),
+        });
+        let root = crate::PathListRoot {
+            root: "/home/u/dev".to_owned(),
+            display_root: "~/dev".to_owned(),
+            cwd: Some("/home/u/dev".to_owned()),
+            insert: crate::InsertStyle::Shell(crate::ShellKind::Fish),
+        };
+        for (offset, message) in [
+            super::ProtocolMessage::PathListRequest {
+                request_id: 7,
+                pane: crate::PaneId(4),
+                dir: Some("../x".to_owned()),
+            },
+            super::ProtocolMessage::PathListBegin {
+                request_id: 7,
+                result: Ok(root),
+            },
+            super::ProtocolMessage::PathListChunk {
+                request_id: 7,
+                entries: vec![crate::PathEntry {
+                    rel: "src/main.rs".to_owned(),
+                    kind: crate::PathKind::File,
+                    symlink: false,
+                }],
+                done: true,
+                truncated: false,
+            },
+            super::ProtocolMessage::PathListGit {
+                request_id: 7,
+                marks: vec![("src/".to_owned(), crate::GitMark::Untracked)],
+            },
+            super::ProtocolMessage::PathListCancel { request_id: 7 },
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let bytes = postcard::to_stdvec(&message).expect("path list message encodes");
+            assert_eq!(
+                bytes[0],
+                base + 1 + u8::try_from(offset).expect("small offset")
+            );
+            assert_eq!(
+                postcard::from_bytes::<super::ProtocolMessage>(&bytes)
+                    .expect("path list message decodes"),
+                message
+            );
+        }
+        let error = super::ProtocolMessage::PathListBegin {
+            request_id: 8,
+            result: Err("no such directory".to_owned()),
+        };
+        let bytes = postcard::to_stdvec(&error).expect("error begin encodes");
+        assert_eq!(
+            postcard::from_bytes::<super::ProtocolMessage>(&bytes).expect("error begin decodes"),
+            error
+        );
+    }
+
+    #[test]
+    fn path_picker_text_is_bounded_on_the_wire() {
+        let long = "a".repeat(crate::MAX_PATH_LIST_TEXT_BYTES + 1);
+        for message in [
+            super::ProtocolMessage::PathListRequest {
+                request_id: 1,
+                pane: crate::PaneId(1),
+                dir: Some(long.clone()),
+            },
+            super::ProtocolMessage::PathListBegin {
+                request_id: 1,
+                result: Err(long.clone()),
+            },
+            super::ProtocolMessage::PathListBegin {
+                request_id: 1,
+                result: Ok(crate::PathListRoot {
+                    root: long.clone(),
+                    display_root: String::new(),
+                    cwd: None,
+                    insert: crate::InsertStyle::Claude,
+                }),
+            },
+            super::ProtocolMessage::PathListChunk {
+                request_id: 1,
+                entries: vec![crate::PathEntry {
+                    rel: long.clone(),
+                    kind: crate::PathKind::Dir,
+                    symlink: true,
+                }],
+                done: false,
+                truncated: false,
+            },
+            super::ProtocolMessage::PathListGit {
+                request_id: 1,
+                marks: vec![(long.clone(), crate::GitMark::Modified)],
+            },
+        ] {
+            let bytes = postcard::to_stdvec(&message).expect("oversized message encodes");
+            assert!(postcard::from_bytes::<super::ProtocolMessage>(&bytes).is_err());
         }
     }
 }

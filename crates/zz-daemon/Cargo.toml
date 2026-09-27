@@ -25,6 +25,7 @@ daemon = [
     "dep:chrono",
     "dep:crossbeam-channel",
     "dep:futures-lite",
+    "dep:ignore",
     "dep:zz-mux",
     "zz-terminal/session",
 ]
@@ -39,6 +40,7 @@ chrono = { workspace = true, optional = true }
 futures-lite = { workspace = true, optional = true }
 getrandom.workspace = true
 glob = "0.3"
+ignore = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 smol = { workspace = true, optional = true }

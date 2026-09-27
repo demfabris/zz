@@ -2415,8 +2415,15 @@ pub fn connect_interactive_client_with_config(
     path: &Path,
     color_scheme: TerminalColorScheme,
     mux_config_files: &[PathBuf],
+    capabilities: &[&str],
 ) -> Result<InteractiveClient, DaemonError> {
-    connect_interactive_client_with_config_and_terminal(path, color_scheme, mux_config_files, true)
+    connect_or_spawn_daemon(
+        path,
+        Some(color_scheme),
+        mux_config_files,
+        |_| InteractiveClient::connect_with_capabilities(path, color_scheme, true, capabilities),
+        InteractiveClient::server_hello,
+    )
 }
 
 #[cfg(not(target_os = "ios"))]

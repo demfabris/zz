@@ -201,7 +201,7 @@ Prefix table (partial, the canonical zz set):
 | `[` | `copy-mode` | `?` | `list-keys -N` |
 | `=` | `choose-buffer -Z` | `s` / `w` | `choose-tree -Zs` / `-Zw` |
 | `q` | `display-panes` | `r` | `reload-config` |
-| `e` | `send-last-output` *(zz-native)* | | |
+| `e` | `send-last-output` *(zz-native)* | `F` | `choose-path` *(zz-native)* |
 | `z` | `resize-pane -Z` | `;` | `last-pane` |
 | `{` / `}` | `swap-pane -U` / `-D` | `:` | `command-prompt` |
 | `$` | `command-prompt -I #S 'rename-session -- %%'` | `,` | `command-prompt -I #W 'rename-window -- %%'` |

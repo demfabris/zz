@@ -1863,10 +1863,11 @@ impl MuxClient {
         let connect_thread = thread::Builder::new()
             .name("zz-host-connect".to_owned())
             .spawn(move || {
-                let result = InteractiveClient::connect_endpoint_with_prompts(
+                let result = InteractiveClient::connect_endpoint_with_prompts_and_capabilities(
                     &endpoint,
                     color_scheme,
                     prompts,
+                    &[zz_protocol::ClientHello::CLIENT_PATH_PICKER_CAPABILITY],
                 );
                 let _ = results.send_blocking(result);
             });
@@ -4198,7 +4199,8 @@ impl MuxClient {
             | CoreEvent::HelloReceived
             | CoreEvent::ViewportChanged { .. }
             | CoreEvent::StatusChanged
-            | CoreEvent::CommandOutputChanged => {}
+            | CoreEvent::CommandOutputChanged
+            | CoreEvent::OpenPathPicker { .. } => {}
         }
     }
 

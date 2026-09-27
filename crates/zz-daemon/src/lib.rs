@@ -40,6 +40,8 @@ const TMUX_SHIM_DIRECTORY_ENVIRONMENT_VARIABLE: &str = "ZZ_TMUX_SHIM_DIR";
 mod agent;
 #[cfg_attr(target_os = "ios", allow(dead_code))]
 mod askpass;
+#[cfg(feature = "daemon")]
+mod bounded_command;
 mod client;
 #[cfg(feature = "daemon")]
 mod daemon;
@@ -82,6 +84,8 @@ pub use client::{
     set_client_terminal_flags,
 };
 pub use client::{CommandClient, CommandOutcome, InteractiveClient, short_device_name};
+#[cfg(feature = "daemon")]
+pub use daemon::path_listing::path_walk_enters;
 #[cfg(feature = "daemon")]
 pub use daemon::{
     CommandStdinSink, Daemon, agent_send_reads_stdin, append_stdin_payload, command_stdin_sink,

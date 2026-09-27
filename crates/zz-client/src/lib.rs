@@ -18,6 +18,7 @@ mod layout;
 mod menu;
 pub mod navigation;
 pub mod pane_separator;
+pub mod path_rank;
 mod status;
 mod status_bar;
 

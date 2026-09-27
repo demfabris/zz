@@ -815,8 +815,8 @@ The desktop composer footer places the combined project picker opposite the Git 
 button shows the cwd's last component and its full path in a tooltip. Local panes discover folders
 through `DirectoryCatalog`; remote panes offer directories from their provider session catalog.
 The browser client retains its daemon-backed directory picker and separate session controls.
-The desktop chooser in `crates/zz/src/file_picker.rs` uses `neo_frizbee`, fff's typo-tolerant
-matcher, directly for folders. The full `fff-search` index remains the editor file-search backend;
+The desktop chooser in `crates/zz/src/file_picker.rs` ranks folders with
+`zz_client::path_rank`, which wraps `neo_frizbee`, fff's typo-tolerant matcher. The full `fff-search` index remains the editor file-search backend;
 its directory API also indexes files and cannot stream or bound discovery, so it is unsuitable for
 the home-folder chooser. Folder discovery uses `ignore` off the UI thread, visits shallow folders
 first, and publishes the first folder immediately. Later batches keep existing rows visible.

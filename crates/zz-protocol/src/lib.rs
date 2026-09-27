@@ -9,6 +9,7 @@ mod key;
 pub mod layout;
 mod menu;
 mod message;
+mod path_list;
 mod snapshot;
 mod style;
 mod terminal_codec;
@@ -69,6 +70,10 @@ pub use message::{
 };
 pub use message::{
     MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES,
+};
+pub use path_list::{
+    GitMark, InsertStyle, MAX_PATH_LIST_CHUNK_BYTES, MAX_PATH_LIST_DEPTH, MAX_PATH_LIST_ENTRIES,
+    MAX_PATH_LIST_TEXT_BYTES, PathEntry, PathKind, PathListRoot, ShellKind,
 };
 pub use snapshot::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, BrowserProfileNameError,

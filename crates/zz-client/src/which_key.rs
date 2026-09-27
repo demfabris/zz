@@ -64,7 +64,7 @@ pub fn rows(tables: &[KeyTableSnapshot], table: &str, prefix: &str) -> Vec<Which
     let shown = bindings
         .bindings
         .iter()
-        .filter(|binding| !is_mouse_key(&binding.key));
+        .filter(|binding| !is_mouse_key(&binding.key) && binding.key != "None");
     if table != "prefix" {
         return shown.map(|binding| row(binding, None, false)).collect();
     }
@@ -86,7 +86,7 @@ pub fn rows(tables: &[KeyTableSnapshot], table: &str, prefix: &str) -> Vec<Which
             if !stock {
                 return row(binding, None, true);
             }
-            let group_key = if binding.key == baseline_prefix {
+            let group_key = if binding.key == baseline_prefix && is_send_prefix(binding) {
                 "C-b"
             } else {
                 binding.key.as_str()
@@ -131,6 +131,10 @@ fn label(binding: &KeyBindingSnapshot) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ; ")
+}
+
+fn is_send_prefix(binding: &KeyBindingSnapshot) -> bool {
+    matches!(binding.commands.as_slice(), [command] if command.name == "send-prefix" && command.args.is_empty())
 }
 
 fn is_mouse_key(key: &str) -> bool {
@@ -210,6 +214,25 @@ mod tests {
         assert!(!send.yours);
         assert_eq!(send.group, Some(WhichKeyGroup::Other));
         assert!(rows.iter().all(|row| row.key != "C-b"));
+        assert!(rows.iter().all(|row| !row.yours));
+    }
+
+    #[test]
+    fn prefix_on_a_stock_key_keeps_that_key_group() {
+        let mut tables = default_tables();
+        tables.set_prefix("C-o");
+        let rows = rows(&tables.snapshot(), "prefix", "C-o");
+        let rotate = find(&rows, "C-o");
+        assert!(!rotate.yours);
+        assert_eq!(rotate.group, Some(WhichKeyGroup::Panes));
+    }
+
+    #[test]
+    fn none_prefix_shows_no_row() {
+        let mut tables = default_tables();
+        tables.set_prefix("None");
+        let rows = rows(&tables.snapshot(), "prefix", "None");
+        assert!(rows.iter().all(|row| row.key != "None"));
         assert!(rows.iter().all(|row| !row.yours));
     }
 

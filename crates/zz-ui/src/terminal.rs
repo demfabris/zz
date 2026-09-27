@@ -710,9 +710,8 @@ fn grid_placement(
     command_output: bool,
     scrolled_locally: bool,
 ) -> GridPlacement {
-    let anchorable = matches!(viewport.mode, zz_terminal::TerminalMode::Live)
-        && !command_output
-        && viewport.search.is_none();
+    let anchorable =
+        !matches!(viewport.mode, zz_terminal::TerminalMode::View { .. }) && !command_output;
     let at_live_bottom = viewport
         .scrollbar
         .offset
@@ -4396,8 +4395,38 @@ mod tests {
         assert_eq!(grid_placement(&viewport, false, false), scrolled);
 
         assert_eq!(grid_placement(&filled, true, true), top);
-        filled.search = Some(zz_terminal::SearchStatus::new(0, 0));
+        filled.mode = zz_terminal::TerminalMode::View {
+            position: 1,
+            total: 40,
+        };
         assert_eq!(grid_placement(&filled, false, true), top);
+    }
+
+    #[test]
+    fn entering_copy_mode_keeps_the_live_placement() {
+        let mut filled = filled_viewport(8, 4, 'x');
+        filled.scrollbar = ScrollbarState {
+            total: 40,
+            offset: 36,
+            len: 4,
+        };
+        let live = grid_placement(&filled, false, false);
+        filled.mode = zz_terminal::TerminalMode::Copy {
+            position: 40,
+            total: 40,
+            hide_position: false,
+        };
+        assert_eq!(grid_placement(&filled, false, false), live);
+        filled.search = Some(zz_terminal::SearchStatus::new(0, 0));
+        assert_eq!(grid_placement(&filled, false, false), live);
+        filled.scrollbar.offset = 20;
+        assert_eq!(
+            grid_placement(&filled, false, false),
+            GridPlacement {
+                bottom_anchored: true,
+                project_from_bottom: false,
+            }
+        );
     }
 
     #[test]

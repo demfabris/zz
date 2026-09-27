@@ -262,7 +262,7 @@ impl InputRouter {
         {
             if matches!(
                 self.claim
-                    .press(key, pane, input.action == KeyAction::Repeat),
+                    .press(key, pane, input.action == KeyAction::Repeat && prefix.armed),
                 PressDisposition::Forward { .. }
             ) {
                 self.effects.push(Effect::ForwardKey {
@@ -469,6 +469,41 @@ mod tests {
         assert_eq!(router.key(&input, CLAIMED), Disposition::Native);
         input.key = KeyCode::Character('z');
         assert_eq!(router.key(&input, CLAIMED), Disposition::Native);
+        assert!(router.drain_effects().is_empty());
+    }
+
+    #[test]
+    fn custom_table_repeats_are_forwarded_and_release_once() {
+        let mut router = router();
+        activate(&mut router, P);
+        let table = PrefixView {
+            armed: false,
+            claimed: true,
+        };
+        let press = press(KeyCode::ArrowLeft);
+        let mut repeat = press.clone();
+        repeat.action = KeyAction::Repeat;
+        let mut release = press.clone();
+        release.action = KeyAction::Release;
+        for input in [&press, &repeat, &repeat] {
+            assert_eq!(router.key(input, table), Disposition::Consumed);
+            assert_eq!(
+                router.drain_effects(),
+                vec![Effect::ForwardKey {
+                    pane: P,
+                    input: input.clone()
+                }]
+            );
+        }
+        assert_eq!(router.key(&release, table), Disposition::Consumed);
+        assert_eq!(
+            router.drain_effects(),
+            vec![Effect::ForwardKey {
+                pane: P,
+                input: release.clone()
+            }]
+        );
+        assert_eq!(router.key(&release, table), Disposition::Native);
         assert!(router.drain_effects().is_empty());
     }
 
@@ -847,6 +882,47 @@ mod tests {
             Disposition::Native
         );
         assert!(router.drain_effects().is_empty());
+    }
+
+    #[test]
+    fn a_custom_key_table_routes_plain_keys_to_the_daemon() {
+        let mut core = crate::ClientCore::new();
+        core.handle_message(zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+            sequence: 0,
+            payload: zz_protocol::EventPayload::KeyTableActive {
+                table: Some("resize".to_owned()),
+                repeat: false,
+            },
+        }));
+        let input = press(KeyCode::Character('h'));
+        let view = PrefixView {
+            armed: core.prefix_armed(),
+            claimed: core.claims_prefix_input(&input),
+        };
+        assert!(!view.armed);
+        let mut router = router();
+        activate(&mut router, P);
+        assert_eq!(router.key(&input, view), Disposition::Consumed);
+        assert_eq!(
+            router.drain_effects(),
+            vec![Effect::ForwardKey {
+                pane: P,
+                input: input.clone()
+            }]
+        );
+        let mut release = input;
+        release.action = KeyAction::Release;
+        assert_eq!(
+            router.key(&release, PrefixView::default()),
+            Disposition::Consumed
+        );
+        assert_eq!(
+            router.drain_effects(),
+            vec![Effect::ForwardKey {
+                pane: P,
+                input: release
+            }]
+        );
     }
 
     #[test]

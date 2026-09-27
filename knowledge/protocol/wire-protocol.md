@@ -1,10 +1,10 @@
 ---
 type: Protocol
-title: zz wire protocol (v106)
+title: zz wire protocol (v107)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-09-23T00:00:00-03:00
+timestamp: 2026-09-27T00:00:00-03:00
 ---
 
 # Overview
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 106`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 107`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (106) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (107) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -206,7 +206,8 @@ unpaired keys.
 `PaneRemoved(PaneId)`, `ServerStopping`,
 `OpenUri { pane, uri }`, `FocusSidebar`, `PrefixArmed { armed }`,
 `PrefixCancelled { request_id }`, `Bell { pane }`,
-`KeyTablesChanged { tables }`,
+`KeyTablesChanged { tables }`, `KeyTableActive { table, repeat }`,
+`OpenPathPicker { pane, start_dir }`,
 `Detached { session: SessionId, by: Option<String>, reason: DetachReason }`, `HistoryChunk { pane, start: u32, total: u32,
 offset: u32, columns: u16, rows: Vec<Vec<PackedCell>>, dictionary: TerminalDictionary }`,
 `KittyImageBegin { pane, image_id, generation, width, height, total_bytes }`
@@ -703,7 +704,7 @@ the end of the enum. These appends were written against an unreleased 104; zz 0.
 main's three `ServerError::Native*` variants and without them, so they moved to 105. The v103 and
 v104 entries describe released layouts and remain intact.
 
-v106 is unreleased as of 2026-09-23. It raises the terminal placement limit from 512 to
+v106 shipped in zz 0.14.0. It raises the terminal placement limit from 512 to
 65,536, using the shared `zz_terminal::MAX_KITTY_PLACEMENTS` for viewport extraction and
 both terminal-lane codecs. The 72-byte record layout stays unchanged. Older readers reject
 counts above 512, so this accepted-value expansion requires a version bump. Yazi's legacy
@@ -712,11 +713,38 @@ holes in previews larger than 512 cells. The separate `MAX_KITTY_IMAGE_REMOVALS`
 remains 512 IDs per control message, and the daemon splits larger removal sets into
 ordered batches.
 
+v107 is unreleased as of 2026-09-27. It appends `EventPayload::KeyTableActive { table:
+Option<String>, repeat: bool }` after `CommandClientExit`, sent to one client when the key table
+it is inside changes: `prefix` or a `switch-client -T` table, never copy-mode, and never the
+session's own `key-table`. `repeat` is true while a `-r` window holds the table. The daemon also
+re-sends it after every key decided inside a table, and a per-client deadline thread re-syncs when
+the repeat window or prefix-timeout runs out, so `PrefixArmed` and `KeyTableActive` clear without
+another key. `key_table_active_appends_after_the_command_client_exit` pins the tag.
+
+v107 adds the shell path picker ([design](/designs/path-picker-and-which-key.md)). The desktop
+advertises `ClientHello::CLIENT_PATH_PICKER_CAPABILITY` (`client-path-picker-v1`); iOS, web, the
+TUI and FFI clients do not, and `choose-path` answers them with an error, as does a
+`PathListRequest` from them or for a pane outside the client's attached session. `EventPayload` gains
+`OpenPathPicker { pane, start_dir }` after `KeyTableActive`, pushed only to the invoking client.
+`ProtocolMessage` gains five variants after `ClientTerminalType`: `PathListRequest { request_id,
+pane, dir }`, `PathListBegin { request_id, result: Result<PathListRoot, String> }`, `PathListChunk
+{ request_id, entries, done, truncated }`, `PathListGit { request_id, marks }` and
+`PathListCancel { request_id }`, with the types in `crates/zz-protocol/src/path_list.rs`. The
+daemon answers a request with one `Begin`, chunks of at most 64 KiB encoded, any git marks for
+entries it already sent, and a final chunk with `done`. A request that is cancelled or superseded
+before its `Begin` sends nothing. Walks run one at a time per client; a request that waits more
+than 3 s behind an earlier walk gets an error `Begin`, and one that finds all four daemon-wide walker
+slots busy gets its `Begin` followed at once by an empty `done, truncated` chunk. Every path
+string is capped at `MAX_PATH_LIST_TEXT_BYTES` (4096) and a chunk or mark batch at
+`MAX_PATH_LIST_ENTRIES` (50,000) during deserialization. `path_picker_variants_append_at_the_wire_tails_and_round_trip` pins the
+tags.
+
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 106`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 107`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v107 requires updated clients and daemon together, including the daemon on every ssh host.
 - v106 requires updated clients and daemon together. A v105 daemon retains the old
   placement limit even after the GUI is rebuilt; restarting only the GUI cannot fix
   incomplete image previews.

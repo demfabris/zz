@@ -11,8 +11,8 @@ default-run = "zz"
 [features]
 default = ["desktop", "agent-pane"]
 desktop = []
-agent-pane = ["dep:agent-client-protocol", "dep:fff-search", "dep:ignore", "dep:neo_frizbee", "zz-ui/agent"]
-editor-pane = ["dep:fff-search", "dep:ignore", "dep:neo_frizbee", "zz-ui/editor"]
+agent-pane = ["dep:agent-client-protocol", "dep:fff-search", "dep:ignore", "zz-ui/agent"]
+editor-pane = ["dep:fff-search", "dep:ignore", "zz-ui/editor"]
 
 [lib]
 crate-type = ["rlib", "cdylib"]
@@ -47,10 +47,9 @@ chrono.workspace = true
 env_logger.workspace = true
 gpui.workspace = true
 fff-search = { version = "=0.10.6", optional = true }
-ignore = { version = "0.4.33", optional = true }
+ignore = { workspace = true, optional = true }
 image = { workspace = true, features = ["bmp", "gif", "ico", "jpeg", "png", "pnm", "tiff", "webp"] }
 log.workspace = true
-neo_frizbee = { version = "=0.11.0", optional = true }
 parking_lot.workspace = true
 serde.workspace = true
 serde_json.workspace = true

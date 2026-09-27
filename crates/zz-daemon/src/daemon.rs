@@ -21,6 +21,7 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 
 mod chooser_presentation;
+pub(crate) mod path_listing;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
     CUSTOMIZE_MENU_ITEMS, CUSTOMIZE_OUTSIDE_MENU_ITEMS, CellLayout, CommandAliasResolution,
@@ -454,6 +455,17 @@ fn terminal_working_directory(terminal: &TerminalSession) -> Option<PathBuf> {
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn terminal_working_directory(_terminal: &TerminalSession) -> Option<PathBuf> {
     None
+}
+
+fn home_directory_for(engine: &MuxEngine, user: &str) -> Option<String> {
+    if user.is_empty() {
+        engine
+            .global_environment_variable("HOME")
+            .filter(|home| !home.is_empty())
+            .or_else(|| zz_mux::user_home(None))
+    } else {
+        zz_mux::user_home(Some(user))
+    }
 }
 
 fn terminal_current_command(terminal: &TerminalSession) -> String {
@@ -3338,6 +3350,8 @@ struct Shared {
     display_panes_deadline_tx: crossbeam_channel::Sender<DisplayPanesDeadlineCommand>,
     display_panes_deadline_rx:
         Mutex<Option<crossbeam_channel::Receiver<DisplayPanesDeadlineCommand>>>,
+    key_table_deadline_tx: crossbeam_channel::Sender<KeyTableDeadlineCommand>,
+    key_table_deadline_rx: Mutex<Option<crossbeam_channel::Receiver<KeyTableDeadlineCommand>>>,
     silence_deadline_tx: crossbeam_channel::Sender<SilenceDeadlineCommand>,
     silence_deadline_rx: Mutex<Option<crossbeam_channel::Receiver<SilenceDeadlineCommand>>>,
     client_message_deadline_tx: crossbeam_channel::Sender<ClientMessageDeadlineCommand>,
@@ -3921,6 +3935,10 @@ enum DisplayPanesDeadlineCommand {
     Cancel { client: ClientId, token: u64 },
 }
 
+enum KeyTableDeadlineCommand {
+    Schedule(ClientId, Option<Instant>),
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct SilenceDeadline {
     window: WindowId,
@@ -4390,6 +4408,7 @@ impl Shared {
                 .set(option, value, MuxOptionSource::Default);
         }
         let (display_panes_deadline_tx, display_panes_deadline_rx) = crossbeam_channel::unbounded();
+        let (key_table_deadline_tx, key_table_deadline_rx) = crossbeam_channel::unbounded();
         let (silence_deadline_tx, silence_deadline_rx) = crossbeam_channel::unbounded();
         let (client_message_deadline_tx, client_message_deadline_rx) =
             crossbeam_channel::unbounded();
@@ -4426,6 +4445,8 @@ impl Shared {
             status: Mutex::new(StatusRenderer::default()),
             display_panes_deadline_tx,
             display_panes_deadline_rx: Mutex::new(Some(display_panes_deadline_rx)),
+            key_table_deadline_tx,
+            key_table_deadline_rx: Mutex::new(Some(key_table_deadline_rx)),
             silence_deadline_tx,
             silence_deadline_rx: Mutex::new(Some(silence_deadline_rx)),
             client_message_deadline_tx,
@@ -4494,6 +4515,7 @@ impl Shared {
         initial_client_working_directory: Option<&Path>,
     ) -> Result<(), DaemonError> {
         self.start_display_panes_deadline_dispatcher()?;
+        self.start_key_table_deadline_dispatcher()?;
         self.start_silence_deadline_dispatcher()?;
         self.start_client_message_deadline_dispatcher()?;
         let mut context = ExecutionContext::default();
@@ -4600,6 +4622,67 @@ impl Shared {
                             {
                                 deadlines.remove(&client);
                             }
+                        }
+                    }
+                }
+            })
+            .map_err(|error| DaemonError::Thread(error.to_string()))?;
+        ready_rx
+            .recv()
+            .map_err(|error| DaemonError::Thread(error.to_string()))
+    }
+
+    fn start_key_table_deadline_dispatcher(self: &Arc<Self>) -> Result<(), DaemonError> {
+        let Some(receiver) = self.key_table_deadline_rx.lock().take() else {
+            return Ok(());
+        };
+        let shared = Arc::downgrade(self);
+        let (ready_tx, ready_rx) = crossbeam_channel::bounded(1);
+        thread::Builder::new()
+            .name("zz-key-table".to_owned())
+            .spawn(move || {
+                if ready_tx.send(()).is_err() {
+                    return;
+                }
+                let mut deadlines = BTreeMap::<ClientId, Instant>::new();
+                loop {
+                    let next = deadlines
+                        .iter()
+                        .min_by_key(|(_, deadline)| **deadline)
+                        .map(|(client, deadline)| (*client, *deadline));
+                    let command = if let Some((client, deadline)) = next {
+                        if deadline <= Instant::now() {
+                            deadlines.remove(&client);
+                            let Some(shared) = shared.upgrade() else {
+                                return;
+                            };
+                            shared.sync_key_table(client, false);
+                            continue;
+                        }
+                        match receiver.recv_deadline(deadline) {
+                            Ok(command) => command,
+                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                                deadlines.remove(&client);
+                                let Some(shared) = shared.upgrade() else {
+                                    return;
+                                };
+                                shared.sync_key_table(client, false);
+                                continue;
+                            }
+                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
+                        }
+                    } else {
+                        let Ok(command) = receiver.recv() else {
+                            return;
+                        };
+                        command
+                    };
+                    match command {
+                        KeyTableDeadlineCommand::Schedule(client, Some(deadline)) => {
+                            deadlines.insert(client, deadline);
+                        }
+                        KeyTableDeadlineCommand::Schedule(client, None) => {
+                            deadlines.remove(&client);
                         }
                     }
                 }
@@ -5781,6 +5864,8 @@ impl Shared {
         }) {
             return false;
         }
+        self.inner.lock().published_key_tables.remove(&client);
+        self.sync_key_table(client, false);
         let startup_delivery = match (target, pending.as_ref().and_then(|causes| causes.as_ref())) {
             (Some((kind, pane)), Some(causes)) => {
                 self.deliver_startup_config_causes(client, kind, pane, causes, outbound)
@@ -5861,6 +5946,8 @@ impl Shared {
             inner.client_terminals.remove(&client);
             inner.native_terminal_search_clients.remove(&client);
             inner.native_chooser_clients.remove(&client);
+            inner.path_picker_clients.remove(&client);
+            inner.path_list_roots.remove(&client);
             inner.utf8_clients.remove(&client);
             inner.client_features.remove(&client);
             inner.client_terminal_types.remove(&client);
@@ -5883,7 +5970,8 @@ impl Shared {
             inner.control_outputs.remove(&client);
             inner.key_engines.remove(&client);
             inner.copy_sessions.remove(&client);
-            inner.prefix_armed.remove(&client);
+            inner.published_key_tables.remove(&client);
+            inner.scheduled_key_table_deadlines.remove(&client);
             inner.swallowed_keys.remove(&client);
             inner.suppressed_text.remove(&client);
             inner.pending_committed_text.remove(&client);
@@ -6404,17 +6492,7 @@ impl Shared {
         let inner = self.inner.lock();
         users
             .iter()
-            .map(|user| {
-                if user.is_empty() {
-                    inner
-                        .engine
-                        .global_environment_variable("HOME")
-                        .filter(|home| !home.is_empty())
-                        .or_else(|| zz_mux::user_home(None))
-                } else {
-                    zz_mux::user_home(Some(user))
-                }
-            })
+            .map(|user| home_directory_for(&inner.engine, user))
             .collect()
     }
 
@@ -8953,6 +9031,74 @@ impl Shared {
                         inner.swallowed_keys.remove(&client);
                         direct_events.push(EventPayload::FocusSidebar);
                     }
+                    MuxEffect::ChoosePath { pane, start_dir } => {
+                        if kind != ClientKind::Interactive
+                            || !inner.subscribers.contains_key(&client)
+                        {
+                            return Err(ServerError::InvalidCommand(
+                                "choose-path requires an interactive client".to_owned(),
+                            )
+                            .into());
+                        }
+                        if !inner.path_picker_clients.contains(&client) {
+                            return Err(ServerError::InvalidCommand(
+                                "choose-path needs the zz desktop app".to_owned(),
+                            )
+                            .into());
+                        }
+                        if !client_is_attached_to_pane(&inner, client, *pane)
+                            || inner.engine.state.window_for_pane(*pane)
+                                != client_focused_window_for_attachment(&inner, client)
+                        {
+                            return Err(ServerError::PaneNotAttached(*pane).into());
+                        }
+                        if inner.client_flags.contains(client) {
+                            return Err(ServerError::InvalidCommand(
+                                "client is read-only".to_owned(),
+                            )
+                            .into());
+                        }
+                        if inner
+                            .copy_sessions
+                            .get(&client)
+                            .is_some_and(|session| session.pane == *pane)
+                        {
+                            return Err(ServerError::InvalidCommand(
+                                "choose-path cannot run while the pane is in copy mode".to_owned(),
+                            )
+                            .into());
+                        }
+                        if !inner.terminals.contains_key(pane) {
+                            return Err(ServerError::InvalidCommand(
+                                "choose-path needs a terminal pane".to_owned(),
+                            )
+                            .into());
+                        }
+                        if start_dir.as_deref().is_some_and(|start_dir| {
+                            start_dir.len() > zz_protocol::MAX_PATH_LIST_TEXT_BYTES
+                                || start_dir.chars().any(char::is_control)
+                        }) {
+                            return Err(ServerError::InvalidCommand(
+                                "choose-path start directory cannot be listed".to_owned(),
+                            )
+                            .into());
+                        }
+                        dismiss_overlays(
+                            &mut inner,
+                            client,
+                            None,
+                            &mut direct_events,
+                            &mut retired_command_outputs,
+                            &mut retired_popups,
+                            &mut resume_client_terminals,
+                        );
+                        inner.swallowed_keys.remove(&client);
+                        inner.path_list_roots.remove(&client);
+                        direct_events.push(EventPayload::OpenPathPicker {
+                            pane: *pane,
+                            start_dir: start_dir.clone(),
+                        });
+                    }
                     MuxEffect::CommandPrompt {
                         steps,
                         template,
@@ -9946,7 +10092,7 @@ impl Shared {
             );
         }
         for (client, output) in retired_command_outputs {
-            Self::retire_command_output(client, output);
+            self.retire_command_output(client, output);
         }
         for (client, popup) in retired_popups {
             Self::retire_popup(client, popup, true);
@@ -10745,7 +10891,7 @@ impl Shared {
     }
 
     fn publish_key_tables_if_changed(&self) {
-        let (tables, tables_changed, disarmed) = {
+        let (tables, tables_changed, reset_clients) = {
             let mut inner = self.inner.lock();
             let existing = inner
                 .engine
@@ -10782,19 +10928,15 @@ impl Shared {
             for table in defaults {
                 inner.engine.keys.ensure_table(&table);
             }
-            let disarmed = reset_clients
-                .into_iter()
-                .filter(|client| inner.prefix_armed.remove(client))
-                .collect::<Vec<_>>();
             let tables = inner.engine.keys.snapshot();
             let tables_changed = tables != inner.key_tables;
             if tables_changed {
                 inner.key_tables.clone_from(&tables);
             }
-            (tables, tables_changed, disarmed)
+            (tables, tables_changed, reset_clients)
         };
-        for client in disarmed {
-            self.publish_to_client(client, EventPayload::PrefixArmed { armed: false });
+        for client in reset_clients {
+            self.sync_key_table(client, false);
         }
         if tables_changed {
             self.publish(EventPayload::KeyTablesChanged { tables });
@@ -15199,7 +15341,7 @@ impl Shared {
                 .or_default()
                 .switch_client_table(Some(table.to_owned()));
             drop(inner);
-            self.sync_prefix_armed(target_client);
+            self.sync_key_table(target_client, false);
             return Ok(Execution::default());
         }
         let sort = TmuxSort::parse(parsed.value('O'), parsed.has('r'), None)?;
@@ -15303,7 +15445,7 @@ impl Shared {
                 .entry(target_client)
                 .or_default()
                 .switch_table(None);
-            self.sync_prefix_armed(target_client);
+            self.sync_key_table(target_client, false);
         }
         let (outbound, control_target) = {
             let inner = self.inner.lock();
@@ -15758,7 +15900,7 @@ impl Shared {
                 self.resume_client_terminals(target_client);
             }
             for (owner, output) in outputs {
-                Self::retire_command_output(owner, output);
+                self.retire_command_output(owner, output);
             }
             for (owner, popup) in popups {
                 Self::retire_popup(owner, popup, true);
@@ -16711,7 +16853,7 @@ impl Shared {
             self.publish_to_client(target_client, event);
         }
         for (owner, output) in outputs {
-            Self::retire_command_output(owner, output);
+            self.retire_command_output(owner, output);
         }
         for (owner, popup) in popups {
             Self::retire_popup(owner, popup, true);
@@ -17420,7 +17562,7 @@ impl Shared {
             }
         }
         if let Some(output) = command_output {
-            Self::retire_command_output(client, output);
+            self.retire_command_output(client, output);
         }
         if choose_tree_closed {
             self.publish_to_client(client, EventPayload::ChooseTree { state: None });
@@ -17732,7 +17874,6 @@ impl Shared {
             .copy_sessions
             .remove(&client)
             .and_then(|session| inner.terminals.get(&session.pane).cloned());
-        let prefix_was_armed = inner.prefix_armed.remove(&client);
         inner.swallowed_keys.remove(&client);
         inner.suppressed_text.remove(&client);
         inner.pending_committed_text.remove(&client);
@@ -17795,7 +17936,7 @@ impl Shared {
         self.fail_gui_requests_for(client);
         let view = TerminalViewId(client.0);
         if let Some(command_output) = command_output {
-            Self::retire_command_output(client, command_output);
+            self.retire_command_output(client, command_output);
         }
         if let Some(popup) = popup {
             Self::retire_popup(client, popup, true);
@@ -17822,9 +17963,7 @@ impl Shared {
             terminal.detach_view(view);
         }
         apply_terminal_resizes(resizes);
-        if prefix_was_armed {
-            self.publish_to_client(client, EventPayload::PrefixArmed { armed: false });
-        }
+        self.sync_key_table(client, false);
         (was_attached, events)
     }
 
@@ -19415,7 +19554,7 @@ impl Shared {
             self.publish_to_client(client, EventPayload::DisplayPanes { state: None });
         }
         if !read_only && self.input_command_prompt_focus(client, kind, context, focused) {
-            self.sync_prefix_armed(client);
+            self.sync_key_table(client, false);
             return Ok(());
         }
         self.note_enabled_client_focus(client, focused);
@@ -19424,12 +19563,12 @@ impl Shared {
             let mut inner = self.inner.lock();
             let Some(session) = client_attached_session(&inner, client) else {
                 drop(inner);
-                self.sync_prefix_armed(client);
+                self.sync_key_table(client, false);
                 return Ok(());
             };
             let Some(session_state) = inner.engine.state.sessions.get(&session) else {
                 drop(inner);
-                self.sync_prefix_armed(client);
+                self.sync_key_table(client, false);
                 return Ok(());
             };
             let window = client_focused_window(&inner, client, session_state);
@@ -19441,7 +19580,7 @@ impl Shared {
                 .map(|window| window.active_pane)
             else {
                 drop(inner);
-                self.sync_prefix_armed(client);
+                self.sync_key_table(client, false);
                 return Ok(());
             };
             context.retarget(&ExecutionContext::new(
@@ -19505,7 +19644,7 @@ impl Shared {
             }
             KeyDecision::Pass | KeyDecision::Prefix | KeyDecision::Ignore => Ok(()),
         };
-        self.sync_prefix_armed(client);
+        self.sync_key_table(client, false);
         result
     }
 
@@ -19628,22 +19767,46 @@ impl Shared {
         if account_activity {
             self.note_terminal_input(client, pane);
         }
-        let command_output_active = {
+        let (command_output_active, followed) = {
             let mut inner = self.inner.lock();
-            follow_command_output_focus(&mut inner, client, pane);
-            command_output_owns_pane(&inner, client, pane)
+            let followed = follow_command_output_focus(&mut inner, client, pane);
+            (command_output_owns_pane(&inner, client, pane), followed)
         };
-        let mut sinks = None;
-        let mut pass_start = None;
-        for (offset, character) in text.char_indices() {
-            let mut encoded = [0_u8; 4];
-            let (decision, repeat_binding) =
-                self.key_decision_with_repeat(client, character.encode_utf8(&mut encoded), false);
-            match decision {
-                KeyDecision::Pass => {
-                    if command_output_active
-                        || command_output_owns_pane(&self.inner.lock(), client, pane)
-                    {
+        if followed {
+            self.sync_key_table(client, false);
+        }
+        let mut decided = false;
+        let result = (|| -> Result<(), DaemonError> {
+            let mut sinks = None;
+            let mut pass_start = None;
+            for (offset, character) in text.char_indices() {
+                let mut encoded = [0_u8; 4];
+                let (decision, repeat_binding) = self.key_decision_with_repeat(
+                    client,
+                    character.encode_utf8(&mut encoded),
+                    false,
+                );
+                match decision {
+                    KeyDecision::Pass => {
+                        if command_output_active
+                            || command_output_owns_pane(&self.inner.lock(), client, pane)
+                        {
+                            if let Some(start) = pass_start.take() {
+                                self.dispatch_input_text(
+                                    client,
+                                    pane,
+                                    &mut sinks,
+                                    &text[start..offset],
+                                )?;
+                            }
+                            continue;
+                        }
+                        if pass_start.is_none() {
+                            pass_start = Some(offset);
+                        }
+                    }
+                    KeyDecision::Prefix | KeyDecision::Ignore => {
+                        decided = true;
                         if let Some(start) = pass_start.take() {
                             self.dispatch_input_text(
                                 client,
@@ -19652,49 +19815,47 @@ impl Shared {
                                 &text[start..offset],
                             )?;
                         }
-                        continue;
                     }
-                    if pass_start.is_none() {
-                        pass_start = Some(offset);
-                    }
-                }
-                KeyDecision::Prefix | KeyDecision::Ignore => {
-                    if let Some(start) = pass_start.take() {
-                        self.dispatch_input_text(client, pane, &mut sinks, &text[start..offset])?;
-                    }
-                }
-                KeyDecision::Commands(commands) => {
-                    if let Some(start) = pass_start.take() {
-                        self.dispatch_input_text(client, pane, &mut sinks, &text[start..offset])?;
-                    }
-                    let previous = context.invoking_key().map(str::to_owned);
-                    context.set_invoking_key(Some(character.to_string()));
-                    let dispatched = self.execute_key_commands(
-                        client,
-                        kind,
-                        context,
-                        pane,
-                        &commands,
-                        repeat_binding,
-                    );
-                    context.set_invoking_key(previous);
-                    dispatched?;
-                    sinks = None;
-                    if self.inner.lock().command_prompts.contains_key(&client) {
-                        let remaining = &text[offset + character.len_utf8()..];
-                        if !remaining.is_empty() {
-                            self.input_command_prompt_text(client, kind, context, remaining);
+                    KeyDecision::Commands(commands) => {
+                        decided = true;
+                        if let Some(start) = pass_start.take() {
+                            self.dispatch_input_text(
+                                client,
+                                pane,
+                                &mut sinks,
+                                &text[start..offset],
+                            )?;
                         }
-                        break;
+                        let previous = context.invoking_key().map(str::to_owned);
+                        context.set_invoking_key(Some(character.to_string()));
+                        let dispatched = self.execute_key_commands(
+                            client,
+                            kind,
+                            context,
+                            pane,
+                            &commands,
+                            repeat_binding,
+                        );
+                        context.set_invoking_key(previous);
+                        dispatched?;
+                        sinks = None;
+                        if self.inner.lock().command_prompts.contains_key(&client) {
+                            let remaining = &text[offset + character.len_utf8()..];
+                            if !remaining.is_empty() {
+                                self.input_command_prompt_text(client, kind, context, remaining);
+                            }
+                            break;
+                        }
                     }
                 }
             }
-        }
-        if let Some(start) = pass_start {
-            self.dispatch_input_text(client, pane, &mut sinks, &text[start..])?;
-        }
-        self.sync_prefix_armed(client);
-        Ok(())
+            if let Some(start) = pass_start {
+                self.dispatch_input_text(client, pane, &mut sinks, &text[start..])?;
+            }
+            Ok(())
+        })();
+        self.sync_key_table(client, decided);
+        result
     }
 
     fn input_browser_surface_text(
@@ -19856,13 +20017,12 @@ impl Shared {
         } else {
             self.note_terminal_input(client, pane);
         }
-        follow_command_output_focus(&mut self.inner.lock(), client, pane);
+        if follow_command_output_focus(&mut self.inner.lock(), client, pane) {
+            self.sync_key_table(client, false);
+        }
         let key = input_key_name(&input);
-        let (decision, repeat_binding) = self.key_decision_with_repeat(
-            client,
-            &key,
-            input.action == zz_terminal::KeyAction::Release,
-        );
+        let release = input.action == zz_terminal::KeyAction::Release;
+        let (decision, repeat_binding) = self.key_decision_with_repeat(client, &key, release);
         if decision != KeyDecision::Pass && input.modifiers == zz_terminal::Modifiers::default() {
             self.suppress_committed_character(
                 client,
@@ -19889,7 +20049,7 @@ impl Shared {
                 if input.action != zz_terminal::KeyAction::Release
                     && self.pane_mode_key(client, context, pane, &input, text_follows)
                 {
-                    self.sync_prefix_armed(client);
+                    self.sync_key_table(client, false);
                     return Ok(());
                 }
                 self.dispatch_input_key(client, pane, input)
@@ -19911,7 +20071,7 @@ impl Shared {
                 dispatched
             }
         };
-        self.sync_prefix_armed(client);
+        self.sync_key_table(client, !release);
         result
     }
 
@@ -20246,7 +20406,7 @@ impl Shared {
         context.set_invoking_key(previous);
         context.set_invoking_mouse(previous_mouse);
         context.format_variables = previous_variables;
-        self.sync_prefix_armed(client);
+        self.sync_key_table(client, false);
         result
     }
 
@@ -22686,26 +22846,57 @@ impl Shared {
         resolve_input_sinks(&inner, source)
     }
 
-    fn sync_prefix_armed(&self, client: ClientId) {
-        let (changed, armed) = {
-            let mut inner = self.inner.lock();
-            let armed = inner
-                .key_engines
-                .get(&client)
-                .is_some_and(|engine| engine.active_table() == Some("prefix"));
-            let changed = if armed {
-                inner.prefix_armed.insert(client)
-            } else {
-                inner.prefix_armed.remove(&client)
-            };
-            (changed, armed)
+    fn sync_key_table(&self, client: ClientId, force: bool) {
+        let now = Instant::now();
+        let mut inner = self.inner.lock();
+        let session_table = client_attached_session(&inner, client)
+            .map(|session| inner.engine.key_table_for_session(session));
+        let engine = inner.key_engines.get(&client);
+        let shown = engine
+            .and_then(|engine| engine.shown_table(now))
+            .filter(|(table, _)| session_table.as_deref() != Some(*table))
+            .map(|(table, repeat)| (Some(table.to_owned()), repeat))
+            .unwrap_or_default();
+        let deadline = engine
+            .and_then(KeyEngine::next_deadline)
+            .filter(|deadline| *deadline > now);
+        let rescheduled = match deadline {
+            Some(deadline) => {
+                inner.scheduled_key_table_deadlines.insert(client, deadline) != Some(deadline)
+            }
+            None => inner
+                .scheduled_key_table_deadlines
+                .remove(&client)
+                .is_some(),
         };
-        if changed {
+        if rescheduled {
+            let _ = self
+                .key_table_deadline_tx
+                .send(KeyTableDeadlineCommand::Schedule(client, deadline));
+        }
+        let previous = if shown.0.is_some() {
+            inner.published_key_tables.insert(client, shown.clone())
+        } else {
+            inner.published_key_tables.remove(&client)
+        }
+        .unwrap_or_default();
+        let is_prefix = |table: &Option<String>| table.as_deref() == Some("prefix");
+        let armed_changed = is_prefix(&previous.0) != is_prefix(&shown.0);
+        let table_changed = previous != shown || (force && shown.0.is_some());
+        let Some(subscriber) = inner.subscribers.get(&client) else {
+            return;
+        };
+        if armed_changed {
+            let armed = is_prefix(&shown.0);
             log::info!(
                 target: "zz_daemon::diagnostics::input",
                 "prefix_armed_published client={client} armed={armed}"
             );
-            self.publish_to_client(client, EventPayload::PrefixArmed { armed });
+            Self::send_event(subscriber, EventPayload::PrefixArmed { armed });
+        }
+        if table_changed {
+            let (table, repeat) = shown;
+            Self::send_event(subscriber, EventPayload::KeyTableActive { table, repeat });
         }
     }
 
@@ -22721,7 +22912,7 @@ impl Shared {
                 inner.key_engines.entry(client).or_default().cancel_prefix();
             }
         }
-        self.sync_prefix_armed(client);
+        self.sync_key_table(client, false);
         self.publish_to_client(client, EventPayload::PrefixCancelled { request_id });
     }
 
@@ -23500,11 +23691,13 @@ impl Shared {
             let replaced = inner.command_outputs.remove(&client);
             let previous_key_table = replaced.as_ref().map_or_else(
                 || {
-                    inner
-                        .key_engines
-                        .entry(client)
-                        .or_default()
+                    let engine = inner.key_engines.entry(client).or_default();
+                    let repeat_held = engine
+                        .shown_table(Instant::now())
+                        .is_some_and(|(_, repeat)| repeat);
+                    engine
                         .active_table()
+                        .filter(|table| *table != "prefix" && !repeat_held)
                         .map(str::to_owned)
                 },
                 |output| output.previous_key_table.clone(),
@@ -23561,7 +23754,7 @@ impl Shared {
             }
         }
         if let Some(replaced) = replaced {
-            Self::retire_command_output(client, replaced);
+            self.retire_command_output(client, replaced);
         }
         Ok((pane, terminal, events))
     }
@@ -24027,7 +24220,7 @@ impl Shared {
                 .flatten()
         };
         if let Some(retired) = retired {
-            Self::retire_command_output(client, retired);
+            self.retire_command_output(client, retired);
         }
     }
 
@@ -24043,7 +24236,7 @@ impl Shared {
                 .flatten()
         };
         if let Some(retired) = retired {
-            Self::retire_command_output(client, retired);
+            self.retire_command_output(client, retired);
         }
     }
 
@@ -24073,6 +24266,7 @@ impl Shared {
                 inner.subscribers.get(&client).cloned(),
             )
         };
+        self.sync_key_table(client, false);
         if let Some(subscriber) = subscriber {
             Self::send_event(
                 &subscriber,
@@ -24085,7 +24279,8 @@ impl Shared {
         }
     }
 
-    fn retire_command_output(client: ClientId, (output, subscriber): RetiredCommandOutput) {
+    fn retire_command_output(&self, client: ClientId, (output, subscriber): RetiredCommandOutput) {
+        self.sync_key_table(client, false);
         output.terminal.view_action(
             TerminalViewId(client.0),
             zz_terminal::TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::Cancel),
@@ -30817,6 +31012,8 @@ struct ServerState {
     client_terminals: BTreeSet<ClientId>,
     native_terminal_search_clients: BTreeSet<ClientId>,
     native_chooser_clients: BTreeSet<ClientId>,
+    path_picker_clients: BTreeSet<ClientId>,
+    path_list_roots: BTreeMap<ClientId, (u64, Option<PathBuf>)>,
     /// The clients that raised tmux's `CLIENT_UTF8`. A client not in here is
     /// one `server_client_print` sanitizes its output for.
     utf8_clients: BTreeSet<ClientId>,
@@ -30875,7 +31072,8 @@ struct ServerState {
     client_terminal_input_sequences: BTreeMap<ClientId, u64>,
     key_engines: BTreeMap<ClientId, KeyEngine>,
     copy_sessions: BTreeMap<ClientId, CopySession>,
-    prefix_armed: BTreeSet<ClientId>,
+    published_key_tables: BTreeMap<ClientId, (Option<String>, bool)>,
+    scheduled_key_table_deadlines: BTreeMap<ClientId, Instant>,
     swallowed_keys: BTreeMap<ClientId, BTreeSet<String>>,
     suppressed_text: BTreeMap<ClientId, BTreeMap<char, u32>>,
     pending_committed_text: BTreeMap<ClientId, VecDeque<PendingCommittedText>>,
@@ -34526,13 +34724,21 @@ fn command_output_owns_pane(inner: &ServerState, client: ClientId, pane: PaneId)
         .is_some_and(|output| output.pane == pane)
 }
 
-fn follow_command_output_focus(inner: &mut ServerState, client: ClientId, pane: PaneId) {
+#[cfg(test)]
+fn prefix_published(inner: &ServerState, client: ClientId) -> bool {
+    inner
+        .published_key_tables
+        .get(&client)
+        .is_some_and(|(table, _)| table.as_deref() == Some("prefix"))
+}
+
+fn follow_command_output_focus(inner: &mut ServerState, client: ClientId, pane: PaneId) -> bool {
     let Some(output) = inner.command_outputs.get(&client) else {
-        return;
+        return false;
     };
     let focused = output.pane == pane;
     if focused != output.parked {
-        return;
+        return false;
     }
     let output_pane = output.pane;
     let previous = output.previous_key_table.clone();
@@ -34543,10 +34749,10 @@ fn follow_command_output_focus(inner: &mut ServerState, client: ClientId, pane: 
         .map(str::to_owned);
     if focused {
         if current != previous {
-            return;
+            return false;
         }
         let Ok(table) = inner.engine.copy_mode_table_for_pane(output_pane) else {
-            return;
+            return false;
         };
         let table = table.to_owned();
         inner
@@ -34564,6 +34770,7 @@ fn follow_command_output_focus(inner: &mut ServerState, client: ClientId, pane: 
     if let Some(output) = inner.command_outputs.get_mut(&client) {
         output.parked = !focused;
     }
+    true
 }
 
 fn copy_mode_key_owners(inner: &ServerState, client: ClientId, pane: PaneId) -> Vec<ClientId> {
@@ -43659,6 +43866,14 @@ fn handle_connection<S: TransportStream>(
         {
             inner.native_chooser_clients.insert(client);
         }
+        if hello.kind == ClientKind::Interactive
+            && hello
+                .capabilities
+                .iter()
+                .any(|capability| capability == ClientHello::CLIENT_PATH_PICKER_CAPABILITY)
+        {
+            inner.path_picker_clients.insert(client);
+        }
         if client_nested_fact(&hello.capabilities) {
             inner.nested_clients.insert(client);
         }
@@ -43792,6 +44007,8 @@ fn handle_connection<S: TransportStream>(
             (None, None, Some(context))
         };
 
+    let mut path_list: Option<(u64, Arc<AtomicBool>)> = None;
+    let path_list_turn = Arc::new(Mutex::new(()));
     let result = loop {
         let message = match read_protocol_message_into(&mut stream, &mut inbound_frame) {
             Ok(message) => message,
@@ -43869,6 +44086,33 @@ fn handle_connection<S: TransportStream>(
                     request_id,
                     homes,
                 });
+            }
+            ProtocolMessage::PathListRequest {
+                request_id,
+                pane,
+                dir,
+            } => {
+                if let Some((_, cancel)) = path_list.take() {
+                    cancel.store(true, Ordering::Release);
+                }
+                let cancel = Arc::new(AtomicBool::new(false));
+                path_list = Some((request_id, Arc::clone(&cancel)));
+                shared.start_path_list(
+                    client,
+                    hello.kind,
+                    (request_id, pane, dir),
+                    &outbound,
+                    (&cancel, &path_list_turn),
+                );
+            }
+            ProtocolMessage::PathListCancel { request_id } => {
+                if path_list
+                    .as_ref()
+                    .is_some_and(|(active, _)| *active == request_id)
+                    && let Some((_, cancel)) = path_list.take()
+                {
+                    cancel.store(true, Ordering::Release);
+                }
             }
             ProtocolMessage::EnvironmentRequest { request_id, names } => {
                 let values = shared.resolve_environment(&names);
@@ -44067,6 +44311,9 @@ fn handle_connection<S: TransportStream>(
     };
 
     command_queue_cancel.store(true, Ordering::Release);
+    if let Some((_, cancel)) = path_list.take() {
+        cancel.store(true, Ordering::Release);
+    }
     shared.detach(client);
     registration.unregister();
     drop(command_sender);
@@ -49078,8 +49325,8 @@ mod tests {
                     .and_then(KeyEngine::active_table),
                 None
             );
-            assert!(inner.prefix_armed.contains(&first));
-            assert!(!inner.prefix_armed.contains(&second));
+            assert!(prefix_published(&inner, first));
+            assert!(!prefix_published(&inner, second));
         }
 
         bind_focus_any(
@@ -49113,8 +49360,8 @@ mod tests {
                     .and_then(KeyEngine::active_table),
                 None
             );
-            assert!(!inner.prefix_armed.contains(&first));
-            assert!(!inner.prefix_armed.contains(&second));
+            assert!(!prefix_published(&inner, first));
+            assert!(!prefix_published(&inner, second));
         }
         assert!(
             take_reliable_messages(&first_mailbox)
@@ -65614,7 +65861,7 @@ set-option -g @alias-mixed-next yes
             shared.key_decision(client, "C-b", false),
             KeyDecision::Prefix
         );
-        shared.sync_prefix_armed(client);
+        shared.sync_key_table(client, false);
         assert_eq!(prefix_events(&mailbox), (vec![true], Vec::new()));
 
         shared
@@ -65629,7 +65876,7 @@ set-option -g @alias-mixed-next yes
             shared.inner.lock().key_engines[&client].active_table(),
             None
         );
-        assert!(!shared.inner.lock().prefix_armed.contains(&client));
+        assert!(!prefix_published(&shared.inner.lock(), client));
         assert_eq!(prefix_events(&mailbox), (vec![false], vec![11]));
 
         shared
@@ -65654,7 +65901,7 @@ set-option -g @alias-mixed-next yes
                 shared.key_decision(client, "C-b", false),
                 KeyDecision::Prefix
             );
-            shared.sync_prefix_armed(client);
+            shared.sync_key_table(client, false);
             assert_eq!(prefix_events(&mailbox), (vec![true], Vec::new()));
             shared
                 .inner
@@ -65677,9 +65924,354 @@ set-option -g @alias-mixed-next yes
                 shared.inner.lock().key_engines[&client].active_table(),
                 Some(table)
             );
-            assert!(!shared.inner.lock().prefix_armed.contains(&client));
+            assert!(!prefix_published(&shared.inner.lock(), client));
             assert_eq!(prefix_events(&mailbox), (vec![false], vec![13]));
         }
+    }
+
+    #[cfg(unix)]
+    fn key_table_fixture(
+        name: &str,
+    ) -> (
+        Arc<Shared>,
+        ClientId,
+        ExecutionContext,
+        PaneId,
+        Arc<OutboundMailbox>,
+    ) {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", name, "exec /bin/cat"]),
+            )
+            .expect("new session");
+        let session = context.session.expect("session");
+        let pane = context.pane.expect("pane");
+        shared.attach(client, session).expect("attach session");
+        take_reliable_messages(&mailbox);
+        (shared, client, context, pane, mailbox)
+    }
+
+    fn key_table_events(mailbox: &OutboundMailbox) -> Vec<EventPayload> {
+        take_reliable_messages(mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        payload @ (EventPayload::PrefixArmed { .. }
+                        | EventPayload::KeyTableActive { .. }),
+                    ..
+                }) => Some(payload),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn table_active(table: Option<&str>, repeat: bool) -> EventPayload {
+        EventPayload::KeyTableActive {
+            table: table.map(str::to_owned),
+            repeat,
+        }
+    }
+
+    #[cfg(unix)]
+    fn run_test_command(
+        shared: &Arc<Shared>,
+        client: ClientId,
+        context: &mut ExecutionContext,
+        command: &[&str],
+    ) {
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                context,
+                &CommandInvocation::new(command[0], command[1..].iter().copied()),
+            )
+            .unwrap_or_else(|error| panic!("{command:?}: {error:?}"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn key_table_sync_shows_user_tables_and_stays_silent_in_copy_mode() {
+        let (shared, client, mut context, pane, mailbox) = key_table_fixture("key-table-sync");
+        let prefix = test_key(
+            KeyCode::Character('b'),
+            Modifiers::new(false, true, false, false),
+            None,
+        );
+        let key = |character: char| {
+            test_key(
+                KeyCode::Character(character),
+                Modifiers::default(),
+                Some(&character.to_string()),
+            )
+        };
+
+        for table in [Some("copy-mode"), Some("copy-mode-vi"), None] {
+            shared
+                .inner
+                .lock()
+                .key_engines
+                .entry(client)
+                .or_default()
+                .switch_table(table.map(str::to_owned));
+            shared.sync_key_table(client, true);
+            assert_eq!(key_table_events(&mailbox), Vec::new(), "{table:?}");
+        }
+
+        run_test_command(
+            &shared,
+            client,
+            &mut context,
+            &[
+                "bind-key",
+                "-T",
+                "sticky",
+                "y",
+                "switch-client",
+                "-T",
+                "sticky",
+            ],
+        );
+        run_test_command(
+            &shared,
+            client,
+            &mut context,
+            &["switch-client", "-T", "sticky"],
+        );
+        assert_eq!(
+            key_table_events(&mailbox),
+            vec![table_active(Some("sticky"), false)]
+        );
+
+        input_test_key(&shared, client, &mut context, pane, key('y'));
+        assert_eq!(
+            key_table_events(&mailbox),
+            vec![table_active(Some("sticky"), false)]
+        );
+
+        input_test_key(&shared, client, &mut context, pane, key('z'));
+        assert_eq!(key_table_events(&mailbox), vec![table_active(None, false)]);
+
+        input_test_key(&shared, client, &mut context, pane, prefix.clone());
+        assert_eq!(
+            key_table_events(&mailbox),
+            vec![
+                EventPayload::PrefixArmed { armed: true },
+                table_active(Some("prefix"), false),
+            ]
+        );
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::CancelPrefix { request_id: 3 },
+            )
+            .expect("cancel prefix");
+        assert_eq!(
+            key_table_events(&mailbox),
+            vec![
+                EventPayload::PrefixArmed { armed: false },
+                table_active(None, false),
+            ]
+        );
+
+        run_test_command(
+            &shared,
+            client,
+            &mut context,
+            &["set-option", "-t", "key-table-sync", "key-table", "sticky"],
+        );
+        run_test_command(
+            &shared,
+            client,
+            &mut context,
+            &["switch-client", "-T", "sticky"],
+        );
+        assert_eq!(key_table_events(&mailbox), Vec::new());
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .published_key_tables
+                .contains_key(&client)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_reattach_republishes_the_live_key_table() {
+        let (shared, client, mut context, _, mailbox) = key_table_fixture("key-table-attach");
+        run_test_command(
+            &shared,
+            client,
+            &mut context,
+            &["switch-client", "-T", "prefix"],
+        );
+        assert_eq!(
+            key_table_events(&mailbox),
+            vec![
+                EventPayload::PrefixArmed { armed: true },
+                table_active(Some("prefix"), false),
+            ]
+        );
+        let session = context.session.expect("session");
+        let snapshot = shared.attach(client, session).expect("attach session");
+        assert!(shared.send_attached(client, &mailbox, session, snapshot));
+        assert_eq!(
+            key_table_events(&mailbox),
+            vec![
+                EventPayload::PrefixArmed { armed: true },
+                table_active(Some("prefix"), false),
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn closing_output_from_a_repeat_prefix_binding_leaves_the_prefix_disarmed() {
+        let (shared, client, mut context, pane, mailbox) = key_table_fixture("stuck-prefix");
+        run_test_command(
+            &shared,
+            client,
+            &mut context,
+            &["bind-key", "-r", "x", "list-keys"],
+        );
+        for input in [
+            test_key(
+                KeyCode::Character('b'),
+                Modifiers::new(false, true, false, false),
+                None,
+            ),
+            test_key(KeyCode::Character('x'), Modifiers::default(), Some("x")),
+        ] {
+            input_test_key(&shared, client, &mut context, pane, input);
+        }
+        take_command_output_message(&mailbox);
+        assert_eq!(
+            shared.inner.lock().command_outputs[&client].previous_key_table,
+            None
+        );
+        let output_id = current_command_output_id(&shared, client);
+        input_test_key(
+            &shared,
+            client,
+            &mut context,
+            pane,
+            test_key(KeyCode::Character('q'), Modifiers::default(), Some("q")),
+        );
+        wait_for_command_output_close(&mailbox, output_id);
+        let inner = shared.inner.lock();
+        assert!(!inner.command_outputs.contains_key(&client));
+        assert_eq!(inner.key_engines[&client].active_table(), None);
+        assert!(!prefix_published(&inner, client));
+        assert!(!inner.published_key_tables.contains_key(&client));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn key_table_deadlines_clear_the_published_state_without_another_key() {
+        let (shared, client, mut context, pane, mailbox) = key_table_fixture("key-table-timer");
+        shared
+            .start_key_table_deadline_dispatcher()
+            .expect("start key table deadlines");
+        run_test_command(
+            &shared,
+            client,
+            &mut context,
+            &["set-option", "-g", "prefix-timeout", "1000"],
+        );
+        run_test_command(
+            &shared,
+            client,
+            &mut context,
+            &["set-option", "-g", "repeat-time", "2000"],
+        );
+        take_reliable_messages(&mailbox);
+        let prefix = test_key(
+            KeyCode::Character('b'),
+            Modifiers::new(false, true, false, false),
+            None,
+        );
+        let up = test_key(KeyCode::ArrowUp, Modifiers::default(), None);
+        let wait_until = |at: Instant| {
+            if let Some(remaining) = at.checked_duration_since(Instant::now()) {
+                thread::sleep(remaining);
+            }
+        };
+        let wait_for_clear = |mailbox: &OutboundMailbox| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut events = Vec::new();
+            while events
+                != vec![
+                    EventPayload::PrefixArmed { armed: false },
+                    table_active(None, false),
+                ]
+            {
+                assert!(
+                    Instant::now() < deadline,
+                    "published key table never cleared: {events:?}"
+                );
+                thread::sleep(Duration::from_millis(10));
+                events.extend(key_table_events(mailbox));
+            }
+        };
+
+        let start = Instant::now();
+        input_test_key(&shared, client, &mut context, pane, prefix.clone());
+        assert_eq!(
+            key_table_events(&mailbox),
+            vec![
+                EventPayload::PrefixArmed { armed: true },
+                table_active(Some("prefix"), false),
+            ]
+        );
+        input_test_key(&shared, client, &mut context, pane, up.clone());
+        assert_eq!(
+            key_table_events(&mailbox),
+            vec![table_active(Some("prefix"), true)]
+        );
+        wait_until(start + Duration::from_millis(1300));
+        input_test_key(&shared, client, &mut context, pane, up);
+        assert_eq!(
+            shared.inner.lock().key_engines[&client].active_table(),
+            Some("prefix")
+        );
+        assert_eq!(
+            key_table_events(&mailbox),
+            vec![table_active(Some("prefix"), true)]
+        );
+        wait_for_clear(&mailbox);
+        assert!(start.elapsed() >= Duration::from_millis(3300));
+        assert_eq!(
+            shared.inner.lock().key_engines[&client].active_table(),
+            None
+        );
+
+        let start = Instant::now();
+        input_test_key(&shared, client, &mut context, pane, prefix);
+        assert_eq!(
+            key_table_events(&mailbox),
+            vec![
+                EventPayload::PrefixArmed { armed: true },
+                table_active(Some("prefix"), false),
+            ]
+        );
+        wait_for_clear(&mailbox);
+        assert!(start.elapsed() >= Duration::from_secs(1));
+        assert_eq!(
+            shared.inner.lock().key_engines[&client].active_table(),
+            Some("prefix")
+        );
     }
 
     #[test]
@@ -87003,7 +87595,7 @@ bind - split-window -v -c "#{pane_current_path}"
             let inner = shared.inner.lock();
             assert!(!inner.key_engines.contains_key(&client));
             assert!(!inner.swallowed_keys.contains_key(&client));
-            assert!(!inner.prefix_armed.contains(&client));
+            assert!(!prefix_published(&inner, client));
             assert_eq!(
                 inner.engine.state.windows.len(),
                 windows,
@@ -99205,7 +99797,11 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("switch-client", ["-T", "prefix"]),
             )
             .expect("select the empty prefix table");
-        assert!(shared.inner.lock().prefix_armed.contains(&client));
+        assert_eq!(
+            shared.inner.lock().key_engines[&client].active_table(),
+            Some("prefix")
+        );
+        assert!(!prefix_published(&shared.inner.lock(), client));
         shared
             .execute(
                 ClientId(99),
@@ -99217,7 +99813,7 @@ bind - split-window -v -c "#{pane_current_path}"
         {
             let inner = shared.inner.lock();
             assert_eq!(inner.key_engines[&client].active_table(), None);
-            assert!(!inner.prefix_armed.contains(&client));
+            assert!(!prefix_published(&inner, client));
             assert!(
                 inner
                     .engine
@@ -102441,6 +103037,147 @@ bind - split-window -v -c "#{pane_current_path}"
             DaemonError::Server(ServerError::InvalidCommand(message))
                 if message.contains("interactive client")
         ));
+    }
+
+    fn choose_path_error(result: Result<(), DaemonError>) -> String {
+        match result {
+            Err(DaemonError::Server(ServerError::InvalidCommand(message))) => message,
+            other => panic!("expected an invalid command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn choose_path_opens_only_for_desktop_clients_in_a_usable_terminal_pane() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "pick"]),
+            )
+            .expect("session");
+        let session = context.session.expect("session id");
+        let pane = context.pane.expect("pane id");
+        shared.attach(client, session).expect("attach session");
+        take_reliable_messages(&mailbox);
+        let choose_path = |kind: ClientKind, context: &mut ExecutionContext, args: &[&str]| {
+            shared
+                .execute(
+                    client,
+                    kind,
+                    context,
+                    &CommandInvocation::new("choose-path", args.iter().copied()),
+                )
+                .map(|_| ())
+        };
+
+        assert!(
+            choose_path_error(choose_path(ClientKind::Command, &mut context, &[]))
+                .contains("interactive client")
+        );
+        assert_eq!(
+            choose_path_error(choose_path(ClientKind::Interactive, &mut context, &[])),
+            "choose-path needs the zz desktop app"
+        );
+
+        shared.inner.lock().path_picker_clients.insert(client);
+        shared
+            .inner
+            .lock()
+            .path_list_roots
+            .insert(client, (1, Some(PathBuf::from("/stale"))));
+        choose_path(
+            ClientKind::Interactive,
+            &mut context,
+            &["-c", "/tmp/#{session_name}"],
+        )
+        .expect("open path picker");
+        let messages = take_reliable_messages(&mailbox);
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::OpenPathPicker { pane: opened, start_dir },
+                ..
+            }) if *opened == pane && start_dir.as_deref() == Some("/tmp/pick")
+        )));
+        assert!(!shared.inner.lock().path_list_roots.contains_key(&client));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-window", [] as [&str; 0]),
+            )
+            .expect("second window");
+        let result = choose_path(
+            ClientKind::Interactive,
+            &mut context,
+            &["-t", &pane.to_string()],
+        );
+        assert!(matches!(
+            result,
+            Err(DaemonError::Server(ServerError::PaneNotAttached(refused))) if refused == pane
+        ));
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("select-window", ["-t", &pane.to_string()]),
+            )
+            .expect("back to the first window");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+
+        shared.inner.lock().client_flags.insert(client);
+        assert_eq!(
+            choose_path_error(choose_path(ClientKind::Interactive, &mut context, &[])),
+            "client is read-only"
+        );
+        shared.inner.lock().client_flags.remove(client);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("copy-mode", [] as [&str; 0]),
+            )
+            .expect("enter copy mode");
+        assert!(shared.inner.lock().copy_sessions.contains_key(&client));
+        assert!(
+            choose_path_error(choose_path(ClientKind::Interactive, &mut context, &[]))
+                .contains("copy mode")
+        );
+        shared.inner.lock().copy_sessions.remove(&client);
+
+        let long_start = format!("/{}", "a".repeat(zz_protocol::MAX_PATH_LIST_TEXT_BYTES));
+        for start in [long_start.as_str(), "/tmp/a\u{1b}b"] {
+            assert_eq!(
+                choose_path_error(choose_path(
+                    ClientKind::Interactive,
+                    &mut context,
+                    &["-c", start]
+                )),
+                "choose-path start directory cannot be listed"
+            );
+        }
+
+        let terminal = shared.inner.lock().terminals.remove(&pane);
+        assert_eq!(
+            choose_path_error(choose_path(ClientKind::Interactive, &mut context, &[])),
+            "choose-path needs a terminal pane"
+        );
+        drop(terminal);
+
+        shared.unregister(client);
+        assert!(!shared.inner.lock().path_picker_clients.contains(&client));
     }
 
     #[test]
@@ -106862,7 +107599,7 @@ bind - split-window -v -c "#{pane_current_path}"
         {
             let mut inner = shared.inner.lock();
             assert_eq!(inner.key_engines[&client].active_table(), Some("prefix"));
-            assert!(inner.prefix_armed.contains(&client));
+            assert!(prefix_published(&inner, client));
             assert!(inner.swallowed_keys.contains_key(&client));
             inner
                 .suppressed_text
@@ -106913,7 +107650,7 @@ bind - split-window -v -c "#{pane_current_path}"
             );
             assert!(!inner.visible_terminals.contains_key(&client));
             assert!(!inner.key_engines.contains_key(&client));
-            assert!(!inner.prefix_armed.contains(&client));
+            assert!(!prefix_published(&inner, client));
             assert!(!inner.swallowed_keys.contains_key(&client));
             assert!(!inner.suppressed_text.contains_key(&client));
             assert!(!inner.pending_committed_text.contains_key(&client));
@@ -106986,7 +107723,7 @@ bind - split-window -v -c "#{pane_current_path}"
             );
             assert!(!inner.key_engines.contains_key(&client));
             assert!(!inner.copy_sessions.contains_key(&client));
-            assert!(!inner.prefix_armed.contains(&client));
+            assert!(!prefix_published(&inner, client));
             assert!(!inner.pending_committed_text.contains_key(&client));
             assert!(!inner.suppressed_text.contains_key(&client));
         }

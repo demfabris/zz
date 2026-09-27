@@ -836,7 +836,13 @@ def capture(path):
                 "-a",
                 "-F",
                 separator.join(
-                    ["#{key_table}", "#{key_string}", "#{key_repeat}", "#{key_command}"]
+                    [
+                        "#{key_table}",
+                        "#{key_string}",
+                        "#{key_repeat}",
+                        "#{key_command}",
+                        "#{key_note}",
+                    ]
                 ),
             ],
             env,
@@ -880,11 +886,19 @@ def capture(path):
             }
         )
     key_bindings = []
-    for table, key, repeat, command in split_records(key_output, 4, "key binding", separator):
+    for table, key, repeat, command, note in split_records(
+        key_output, 5, "key binding", separator
+    ):
         if repeat not in {"0", "1"}:
             fail(f"invalid repeat value for {table} key {key!r}: {repeat!r}")
         key_bindings.append(
-            {"table": table, "key": key, "repeat": repeat == "1", "command": command}
+            {
+                "table": table,
+                "key": key,
+                "repeat": repeat == "1",
+                "command": command,
+                "note": note,
+            }
         )
     commands.sort(key=lambda command: command["name"])
     key_bindings.sort(

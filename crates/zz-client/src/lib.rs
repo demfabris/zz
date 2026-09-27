@@ -18,8 +18,11 @@ mod layout;
 mod menu;
 pub mod navigation;
 pub mod pane_separator;
+pub mod path_insert;
+pub mod path_rank;
 mod status;
 mod status_bar;
+pub mod which_key;
 
 pub use chrome::{
     BROWSER_TABLE, CHROME_TABLES, ChromeAction, ChromeKey, ChromeKeymap, ChromeProfile,

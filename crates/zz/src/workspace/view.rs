@@ -11,10 +11,11 @@ use std::{
 };
 
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, AnyView, AnyWindowHandle, App, Bounds, Context,
-    Corners, CursorStyle, DragMoveEvent, Entity, EntityId, FocusHandle, IntoElement, KeyUpEvent,
-    Keystroke, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    Point, Render, Size, StyleRefinement, Window, div, ease_out_quint, prelude::*, px,
+    Anchor, Animation, AnimationExt as _, AnyElement, AnyView, AnyWindowHandle, App, Bounds,
+    Context, Corners, CursorStyle, DragMoveEvent, Entity, EntityId, FocusHandle, Focusable as _,
+    IntoElement, KeyUpEvent, Keystroke, MouseButton, MouseDownEvent, MouseExitEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, Size, StyleRefinement, Subscription, Task,
+    WeakEntity, Window, anchored, deferred, div, ease_out_quint, prelude::*, px,
 };
 #[cfg(test)]
 use zz_client::pane_swap_command;
@@ -27,12 +28,16 @@ use zz_mux::display_width;
 use zz_protocol::{
     AgentCommand, Axis, ClientMessageKind, CommandInvocation, DisplayPanesAction, GuiResponse,
     InputMessage, LayoutNode, MenuState, MuxSnapshot, PROTOCOL_VERSION, PaneId, PaneIndicator,
-    PaneKindSnapshot, PopupBorderLines, PopupState, SPLIT_RATIO_BASIS, SessionId, SplitId,
-    WindowId, WindowSnapshot,
+    PaneKindSnapshot, PathEntry, PathListRoot, PopupBorderLines, PopupState, SPLIT_RATIO_BASIS,
+    SessionId, SplitId, WindowId, WindowSnapshot,
 };
 use zz_terminal::KeyAction as TerminalKeyAction;
 use zz_ui::attachment::open_attachment_preview;
+use zz_ui::command::COMMAND_PALETTE_ROW_HEIGHT;
 use zz_ui::dialog::DialogButtonProps;
+use zz_ui::path_picker::{
+    PATH_PICKER_VISIBLE_ROWS, PathPickerBackend, PathPickerEvent, PathPickerView,
+};
 use zz_ui::{
     ActiveTheme as _, ElementExt as _, WindowExt as _, draws_window_controls, kbd::Kbd,
     notification::Notification,
@@ -56,6 +61,7 @@ use super::{
         ChromeMode, SidebarModeChanged, SidebarReleaseFocus, SidebarRouteChanged, WorkspaceRoute,
         WorkspaceSidebar,
     },
+    which_key::{self, WhichKeySheet},
 };
 use crate::{
     agent::AgentView,
@@ -74,8 +80,8 @@ use crate::{
     editor::EditorView,
     mux::{
         client::{
-            AttachmentPreviewRequest, ClientNotification, ClientNotificationCleared, MuxClient,
-            SshPromptRequest,
+            AttachmentPreviewRequest, ClientNotification, ClientNotificationCleared,
+            KeyTableChanged, MuxClient, PathPickerUpdate, SshPromptRequest,
         },
         hosts::HostId,
         nav::{TreeTarget, kill_target_command, picker_split_command, select_window_command},
@@ -91,6 +97,9 @@ use zz_ui::Colorize as _;
 
 const DROP_PREVIEW_MORPH: Duration = Duration::from_millis(180);
 const DROP_PREVIEW_FADE: Duration = Duration::from_millis(140);
+const PATH_PICKER_MAX_HEIGHT: f32 =
+    COMMAND_PALETTE_ROW_HEIGHT * PATH_PICKER_VISIBLE_ROWS as f32 + 84.0;
+const PATH_PICKER_WINDOW_MARGIN: f32 = 8.0;
 
 gpui::actions!(zz, [ClosePane]);
 
@@ -544,6 +553,89 @@ enum OverlayKind {
     Popup(PaneId),
     Menu,
     Confirm,
+    PathPicker,
+}
+
+struct PathPickerOverlay {
+    view: Entity<PathPickerView>,
+    pane: PaneId,
+    active_pane: Option<PaneId>,
+    anchor: Anchor,
+    position: Point<Pixels>,
+    _blur: Subscription,
+}
+
+struct MuxPathPickerBackend {
+    mux: WeakEntity<MuxClient>,
+    terminal: Option<WeakEntity<TerminalView>>,
+    pane: PaneId,
+}
+
+impl PathPickerBackend for MuxPathPickerBackend {
+    fn list(&self, dir: Option<&str>, cx: &mut App) -> Option<u64> {
+        self.mux
+            .update(cx, |mux, _| {
+                mux.request_path_list(self.pane, dir.map(str::to_owned))
+            })
+            .ok()
+            .flatten()
+    }
+
+    fn cancel(&self, request_id: u64, cx: &mut App) {
+        self.mux
+            .update(cx, |mux, _| mux.cancel_path_list(request_id))
+            .ok();
+    }
+
+    fn insert(&self, root: &PathListRoot, entry: &PathEntry, absolute: bool, cx: &mut App) {
+        let Some(text) = path_picker_insert_text(root, entry, absolute) else {
+            return;
+        };
+        if let Some(terminal) = self.terminal.as_ref().and_then(WeakEntity::upgrade) {
+            terminal.update(cx, |terminal, cx| terminal.paste_text(text, cx));
+            return;
+        }
+        self.mux
+            .update(cx, |mux, _| mux.paste_to_pane(self.pane, text))
+            .ok();
+    }
+}
+
+fn path_picker_insert_text(
+    root: &PathListRoot,
+    entry: &PathEntry,
+    absolute: bool,
+) -> Option<String> {
+    zz_client::path_insert::insert_text(
+        &root.root,
+        &entry.rel,
+        entry.kind,
+        root.cwd.as_deref(),
+        root.insert,
+        absolute,
+    )
+}
+
+fn path_picker_placement(
+    target: Bounds<Pixels>,
+    viewport_height: Pixels,
+) -> (Anchor, Point<Pixels>) {
+    let below = viewport_height - target.bottom();
+    let above = target.top();
+    if below >= px(PATH_PICKER_MAX_HEIGHT + PATH_PICKER_WINDOW_MARGIN) || below >= above {
+        (Anchor::TopLeft, target.bottom_left())
+    } else {
+        (Anchor::BottomLeft, target.origin)
+    }
+}
+
+fn pane_in_session(snapshot: &MuxSnapshot, session: Option<SessionId>, pane: PaneId) -> bool {
+    snapshot
+        .sessions
+        .iter()
+        .filter(|candidate| Some(candidate.id) == session)
+        .flat_map(|candidate| &candidate.windows)
+        .any(|window| window.panes.contains_key(&pane))
 }
 
 #[derive(PartialEq)]
@@ -576,6 +668,7 @@ pub struct AppView {
     choose_buffer: Option<Entity<ChooseBufferView>>,
     display_panes: Option<Entity<DisplayPanesView>>,
     command_palette: Option<Entity<CommandPaletteView>>,
+    path_picker: Option<PathPickerOverlay>,
     local_palette_prompt_revision: Option<u64>,
     local_palette_chooser_revision: Option<u64>,
     pending_palette_chooser_close: Option<u64>,
@@ -600,6 +693,9 @@ pub struct AppView {
     dialog_prefix_cancel_sent: bool,
     dialog_prefix_cancel_pending: Option<u64>,
     synchronized_signature: Option<SynchronizeSignature>,
+    which_key: Option<WhichKeySheet>,
+    which_key_timer: Option<Task<()>>,
+    which_key_generation: u64,
 }
 
 impl AppView {
@@ -758,6 +854,10 @@ impl AppView {
             },
         )
         .detach();
+        cx.subscribe_in(&mux, window, |view, _, _: &KeyTableChanged, window, cx| {
+            view.key_table_changed(window, cx);
+        })
+        .detach();
         cx.subscribe_in(
             &mux,
             window,
@@ -779,6 +879,14 @@ impl AppView {
             window,
             |_, mux, event: &SshPromptRequest, window, cx| {
                 super::ssh_prompt::open(mux, event, window, cx);
+            },
+        )
+        .detach();
+        cx.subscribe_in(
+            &mux,
+            window,
+            |view, _, event: &PathPickerUpdate, window, cx| {
+                view.on_path_picker_update(event, window, cx);
             },
         )
         .detach();
@@ -873,6 +981,7 @@ impl AppView {
             choose_buffer: None,
             display_panes: None,
             command_palette: None,
+            path_picker: None,
             local_palette_prompt_revision: None,
             local_palette_chooser_revision: None,
             pending_palette_chooser_close: None,
@@ -897,6 +1006,9 @@ impl AppView {
             dialog_prefix_cancel_sent: false,
             dialog_prefix_cancel_pending: None,
             synchronized_signature: None,
+            which_key: None,
+            which_key_timer: None,
+            which_key_generation: 0,
         };
         view.register_agent_panes(cx);
         view
@@ -916,17 +1028,14 @@ impl AppView {
         {
             return;
         }
+        if !(event.is_held && self.mux.read(cx).prefix_armed()) {
+            self.hide_which_key(cx);
+        }
         if self.reconcile_dialog_prefix(window, cx) {
             return;
         }
         let keystroke = &event.keystroke;
-        let overlay_open = self.popup.is_some()
-            || self.menu.is_some()
-            || self.confirm.is_some()
-            || self.command_palette.as_ref().is_some_and(|palette| {
-                palette.read(cx).is_local() || palette.read(cx).is_window_chooser()
-            })
-            || self.sidebar.read(cx).route() == WorkspaceRoute::Settings;
+        let overlay_open = self.overlay_open(cx);
         if !overlay_open
             && keystroke.key == "escape"
             && self
@@ -1087,6 +1196,76 @@ impl AppView {
         }
     }
 
+    fn overlay_open(&self, cx: &App) -> bool {
+        self.popup.is_some()
+            || self.menu.is_some()
+            || self.confirm.is_some()
+            || self.command_palette.as_ref().is_some_and(|palette| {
+                palette.read(cx).is_local() || palette.read(cx).is_window_chooser()
+            })
+            || self.path_picker.is_some()
+            || self.sidebar.read(cx).route() == WorkspaceRoute::Settings
+    }
+
+    fn which_key_blocked(&self, window: &Window, cx: &App) -> bool {
+        self.overlay_open(cx)
+            || self.visible_overlay(cx).is_some()
+            || self.pane_drag.is_some()
+            || cx.has_active_drag()
+            || window
+                .root::<zz_ui::Root>()
+                .flatten()
+                .is_some_and(|root| root.read(cx).has_active_dialog())
+    }
+
+    fn hide_which_key(&mut self, cx: &mut Context<Self>) {
+        self.which_key_timer = None;
+        self.which_key_generation = self.which_key_generation.wrapping_add(1);
+        if self.which_key.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    fn key_table_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.hide_which_key(cx);
+        let Some((table, false)) = self.mux.read(cx).key_table() else {
+            return;
+        };
+        let table = table.to_owned();
+        let Some(delay) = which_key::delay(config::resolved_config(cx).which_key_delay.value)
+        else {
+            return;
+        };
+        let generation = self.which_key_generation;
+        self.which_key_timer = Some(cx.spawn_in(window, async move |view, cx| {
+            cx.background_executor().timer(delay).await;
+            view.update_in(cx, |view, window, cx| {
+                view.show_which_key(generation, &table, window, cx);
+            })
+            .ok();
+        }));
+    }
+
+    fn show_which_key(
+        &mut self,
+        generation: u64,
+        table: &str,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        if generation != self.which_key_generation {
+            return;
+        }
+        self.which_key_timer = None;
+        if self.mux.read(cx).key_table() != Some((table, false))
+            || self.which_key_blocked(window, cx)
+        {
+            return;
+        }
+        self.which_key = WhichKeySheet::build(self.mux.read(cx), table);
+        cx.notify();
+    }
+
     fn reconcile_dialog_prefix(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let active = window
             .root::<zz_ui::Root>()
@@ -1142,6 +1321,7 @@ impl AppView {
         if self.popup.is_some() || self.menu.is_some() || self.confirm.is_some() {
             return;
         }
+        self.discard_path_picker(cx);
         let mux = self.mux.clone();
         mux.update(cx, |mux, _| mux.send_prefix_cancel());
         self.local_palette_prompt_revision = Some(mux.read(cx).command_prompt_revision());
@@ -1212,6 +1392,190 @@ impl AppView {
             cx.notify();
         })
         .detach();
+    }
+
+    fn on_path_picker_update(
+        &mut self,
+        event: &PathPickerUpdate,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            PathPickerUpdate::Open { pane, start_dir } => {
+                self.open_path_picker(*pane, start_dir.as_deref(), window, cx);
+            }
+            PathPickerUpdate::Close => self.close_path_picker(window, cx),
+            PathPickerUpdate::Begin { request_id, result } => {
+                if let Some(picker) = &self.path_picker {
+                    picker.view.update(cx, |view, cx| {
+                        view.apply_begin(*request_id, result.clone(), cx);
+                    });
+                }
+            }
+            PathPickerUpdate::Chunk {
+                request_id,
+                entries,
+                done,
+                truncated,
+            } => {
+                if let Some(picker) = &self.path_picker {
+                    picker.view.update(cx, |view, cx| {
+                        view.apply_chunk(*request_id, Arc::clone(entries), *done, *truncated, cx);
+                    });
+                }
+            }
+            PathPickerUpdate::Git { request_id, marks } => {
+                if let Some(picker) = &self.path_picker {
+                    picker.view.update(cx, |view, cx| {
+                        view.apply_git(*request_id, marks.clone(), cx);
+                    });
+                }
+            }
+        }
+    }
+
+    fn open_path_picker(
+        &mut self,
+        pane: PaneId,
+        start_dir: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.popup.is_some()
+            || self.menu.is_some()
+            || self.confirm.is_some()
+            || self.command_palette.is_some()
+            || self.sidebar.read(cx).route() != WorkspaceRoute::App
+        {
+            return;
+        }
+        let (attached, snapshot) = {
+            let mux = self.mux.read(cx);
+            (mux.attached_session(), mux.snapshot())
+        };
+        if !pane_in_session(&snapshot, attached, pane) {
+            return;
+        }
+        self.close_path_picker(window, cx);
+        self.mux.update(cx, |mux, _| mux.send_prefix_cancel());
+        let (anchor, position) = self.path_picker_anchor(pane, window, cx);
+        let backend = Rc::new(MuxPathPickerBackend {
+            mux: self.mux.downgrade(),
+            terminal: self.terminals.get(&pane).map(Entity::downgrade),
+            pane,
+        });
+        let view = cx.new(|cx| PathPickerView::new(backend, start_dir, window, cx));
+        if view.read(cx).request_id().is_none() {
+            return;
+        }
+        cx.subscribe_in(
+            &view,
+            window,
+            |this, view, _: &PathPickerEvent, window, cx| {
+                if this
+                    .path_picker
+                    .as_ref()
+                    .is_none_or(|picker| picker.view != *view)
+                {
+                    return;
+                }
+                this.path_picker = None;
+                this.focused_overlay = None;
+                this.synchronized_signature = None;
+                this.focus_active_pane(window, cx);
+                cx.notify();
+            },
+        )
+        .detach();
+        let focus = view.focus_handle(cx);
+        focus.focus(window, cx);
+        let blur = cx.on_blur(&focus, window, |this, window, cx| {
+            if window.is_window_active() {
+                this.discard_path_picker(cx);
+            }
+        });
+        self.path_picker = Some(PathPickerOverlay {
+            view,
+            pane,
+            active_pane: self.active_pane(cx),
+            anchor,
+            position,
+            _blur: blur,
+        });
+        self.focused_overlay = Some(OverlayKind::PathPicker);
+        self.focused_pane = None;
+        self.synchronized_signature = None;
+        cx.notify();
+    }
+
+    fn path_picker_anchor(
+        &self,
+        pane: PaneId,
+        window: &Window,
+        cx: &App,
+    ) -> (Anchor, Point<Pixels>) {
+        let terminal = self.terminals.get(&pane).map(|terminal| terminal.read(cx));
+        let target = terminal
+            .and_then(TerminalView::cursor_bounds)
+            .or_else(|| {
+                terminal
+                    .and_then(TerminalView::grid_bounds)
+                    .map(|grid| Bounds::new(grid.bottom_left(), Size::default()))
+            })
+            .unwrap_or_else(|| {
+                let canvas = self.pane_canvas_bounds.get();
+                Bounds::new(canvas.bottom_left(), Size::default())
+            });
+        path_picker_placement(target, window.viewport_size().height)
+    }
+
+    fn discard_path_picker(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(picker) = self.path_picker.take() else {
+            return false;
+        };
+        picker.view.update(cx, PathPickerView::close);
+        if self.focused_overlay == Some(OverlayKind::PathPicker) {
+            self.focused_overlay = None;
+        }
+        cx.notify();
+        true
+    }
+
+    fn close_path_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.discard_path_picker(cx) {
+            self.synchronized_signature = None;
+            self.focus_active_pane(window, cx);
+        }
+    }
+
+    fn path_picker_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let picker = self.path_picker.as_ref()?;
+        Some(
+            div()
+                .id("path-picker-overlay")
+                .debug_selector(|| "path-picker-overlay".to_owned())
+                .absolute()
+                .inset_0()
+                .occlude()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|view, _, window, cx| {
+                        view.close_path_picker(window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .child(
+                    deferred(
+                        anchored()
+                            .anchor(picker.anchor)
+                            .position(picker.position)
+                            .snap_to_window_with_margin(px(PATH_PICKER_WINDOW_MARGIN))
+                            .child(picker.view.clone()),
+                    )
+                    .with_priority(1),
+                )
+                .into_any_element(),
+        )
     }
 
     #[cfg_attr(target_os = "ios", allow(dead_code))]
@@ -1339,6 +1703,8 @@ impl AppView {
             ))
         } else if let Some(palette) = &self.command_palette {
             Some((OverlayKind::CommandPalette, palette.read(cx).focus(cx)))
+        } else if let Some(picker) = &self.path_picker {
+            Some((OverlayKind::PathPicker, picker.view.focus_handle(cx)))
         } else if let Some(chooser) = &self.choose_buffer {
             Some((OverlayKind::ChooseBuffer, chooser.read(cx).focus().clone()))
         } else if let Some(chooser) = &self.choose_tree {
@@ -1387,6 +1753,7 @@ impl AppView {
         let popup = mux.popup().cloned();
         let menu = mux.menu().cloned();
         let confirm = mux.confirm().cloned();
+        let daemon_overlay_up = popup.is_some() || menu.is_some() || confirm.is_some();
         let command_prompt = mux.command_prompt().cloned();
         let command_prompt_revision = mux.command_prompt_revision();
         let choose_tree = mux.choose_tree().cloned();
@@ -1890,6 +2257,13 @@ impl AppView {
             self.pickers.contains_key(&active)
                 && self.focused_pane.map(|(pane, _)| pane) != Some(active)
         });
+        if self.path_picker.as_ref().is_some_and(|picker| {
+            daemon_overlay_up
+                || picker.active_pane != active_pane
+                || !pane_in_session(&snapshot, attached, picker.pane)
+        }) {
+            self.discard_path_picker(cx);
+        }
         self.audit_pane_focus("pass", window, cx);
         let floating_input = self.popup.is_some()
             || self.menu.is_some()
@@ -3278,6 +3652,7 @@ impl Render for AppView {
                 self.choose_buffer
                     .clone()
                     .map(IntoElement::into_any_element),
+                self.path_picker_overlay(cx),
             ]
             .into_iter()
             .flatten()
@@ -3294,6 +3669,21 @@ impl Render for AppView {
         }
         if let Some(confirm) = self.confirm_overlay(canvas_origin, cx) {
             overlays.push(confirm);
+        }
+        if (self.which_key.is_some() || self.which_key_timer.is_some())
+            && self.which_key_blocked(window, cx)
+        {
+            self.which_key_timer = None;
+            self.which_key = None;
+        }
+        if let Some(sheet) = &self.which_key {
+            let canvas = self.pane_canvas_bounds.get().size;
+            let canvas = if canvas.width > px(0.) && canvas.height > px(0.) {
+                canvas
+            } else {
+                window.viewport_size()
+            };
+            overlays.push(sheet.element(canvas_top, pane_margin, canvas));
         }
         let measured_canvas_bounds = self.pane_canvas_bounds.clone();
         let content = div().relative().size_full().child(
@@ -3955,10 +4345,12 @@ mod tests {
             | CoreEvent::StatusChanged
             | CoreEvent::PrefixArmed { .. }
             | CoreEvent::PrefixCancelled { .. }
+            | CoreEvent::KeyTableChanged
             | CoreEvent::CommandOutputChanged
             | CoreEvent::PaneRemoved { .. }
             | CoreEvent::Bell { .. }
             | CoreEvent::FocusSidebar
+            | CoreEvent::OpenPathPicker { .. }
             | CoreEvent::Detached { .. }
             | CoreEvent::ServerStopping
             | CoreEvent::CommandResponse(_)
@@ -4283,6 +4675,269 @@ mod tests {
                 .any(|message| matches!(message, InputMessage::Key { .. }))
         );
         assert!(mux.read_with(cx, |mux, _| mux.prefix_armed()));
+    }
+
+    #[cfg(unix)]
+    fn publish_key_table(
+        mux: &Entity<MuxClient>,
+        table: Option<&str>,
+        repeat: bool,
+        cx: &mut gpui::VisualTestContext,
+    ) {
+        mux.update(cx, |mux, cx| {
+            mux.handle_message_for_test(
+                zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 0,
+                    payload: zz_protocol::EventPayload::KeyTableActive {
+                        table: table.map(str::to_owned),
+                        repeat,
+                    },
+                }),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+    }
+
+    #[cfg(unix)]
+    fn which_key_visible(workspace: &Entity<AppView>, cx: &mut gpui::VisualTestContext) -> bool {
+        workspace.read_with(cx, |workspace, _| workspace.which_key.is_some())
+    }
+
+    #[cfg(unix)]
+    fn wait_for_which_key(cx: &mut gpui::VisualTestContext, milliseconds: u64) {
+        cx.executor()
+            .advance_clock(Duration::from_millis(milliseconds));
+        cx.run_until_parked();
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn which_key_shows_after_the_prefix_pause_and_hides_on_the_next_key(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        let Some((client, _server)) = input_test_client() else {
+            return;
+        };
+        let (workspace, cx) = input_test_workspace(cx, client);
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+        let stroke = Keystroke::parse("ctrl-a").unwrap();
+        cx.simulate_event(gpui::KeyDownEvent {
+            keystroke: stroke.clone(),
+            is_held: false,
+            prefer_character_input: false,
+        });
+        publish_key_table(&mux, Some("prefix"), false, cx);
+        cx.simulate_event(KeyUpEvent {
+            keystroke: stroke.clone(),
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            input.borrow().as_slice(),
+            &[
+                InputMessage::Key {
+                    pane: PaneId(0),
+                    input: terminal_key_input(&stroke, TerminalKeyAction::Press),
+                    text_follows: false
+                },
+                InputMessage::Key {
+                    pane: PaneId(0),
+                    input: terminal_key_input(&stroke, TerminalKeyAction::Release),
+                    text_follows: false
+                },
+            ]
+        );
+        wait_for_which_key(cx, 399);
+        assert!(!which_key_visible(&workspace, cx));
+        wait_for_which_key(cx, 2);
+        assert!(which_key_visible(&workspace, cx));
+        workspace.read_with(cx, |workspace, _| {
+            let sheet = workspace.which_key.as_ref().unwrap();
+            assert_eq!(sheet.header().table.as_ref(), "prefix");
+            assert_eq!(sheet.header().prefix_raw.as_ref(), "C-a");
+            assert!(sheet.header().prefix.is_some());
+            let split = sheet
+                .rows()
+                .iter()
+                .find(|row| row.raw.as_ref() == "%")
+                .unwrap();
+            assert_eq!(split.group.as_deref(), Some("Panes"));
+            assert!(split.key.is_some());
+            assert!(!split.yours);
+        });
+        assert!(workspace.read_with(cx, |workspace, _| workspace.focused_overlay.is_none()));
+        let sheet = cx.debug_bounds("which-key").unwrap();
+        let viewport = cx.update(|window, _| window.viewport_size());
+        assert!(sheet.bottom() <= viewport.height);
+        assert!(sheet.bottom() > viewport.height - px(40.0));
+        assert!(sheet.top() >= px(0.));
+        assert!(sheet.left() >= px(16.0));
+        let canvas = workspace.read_with(cx, |workspace, _| workspace.pane_canvas_bounds.get());
+        assert!(sheet.top() >= canvas.top(), "{sheet:?} {canvas:?}");
+        let terminal =
+            workspace.read_with(cx, |workspace, _| workspace.terminals[&PaneId(0)].clone());
+        assert!(cx.update(|window, cx| terminal.read(cx).focus().is_focused(window)));
+        cx.simulate_keystrokes("c");
+        assert!(!which_key_visible(&workspace, cx));
+        assert!(
+            input
+                .borrow()
+                .iter()
+                .any(|message| matches!(message, InputMessage::Key { input, .. } if input.text.as_deref() == Some("c")))
+        );
+        assert!(
+            !input
+                .borrow()
+                .iter()
+                .any(|message| matches!(message, InputMessage::CancelPrefix { .. }))
+        );
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn a_held_prefix_key_keeps_the_which_key_timer(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        let Some((client, _server)) = input_test_client() else {
+            return;
+        };
+        let (workspace, cx) = input_test_workspace(cx, client);
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        mux.update(cx, |mux, cx| mux.set_prefix_armed_for_test(true, cx));
+        publish_key_table(&mux, Some("prefix"), false, cx);
+        wait_for_which_key(cx, 200);
+        cx.simulate_event(gpui::KeyDownEvent {
+            keystroke: Keystroke::parse("ctrl-a").unwrap(),
+            is_held: true,
+            prefer_character_input: false,
+        });
+        cx.run_until_parked();
+        wait_for_which_key(cx, 201);
+        assert!(which_key_visible(&workspace, cx));
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn which_key_hides_for_a_repeat_window_and_a_cleared_table(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        let Some((client, _server)) = input_test_client() else {
+            return;
+        };
+        let (workspace, cx) = input_test_workspace(cx, client);
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        publish_key_table(&mux, Some("prefix"), false, cx);
+        wait_for_which_key(cx, 401);
+        assert!(which_key_visible(&workspace, cx));
+        publish_key_table(&mux, Some("prefix"), true, cx);
+        assert!(!which_key_visible(&workspace, cx));
+        wait_for_which_key(cx, 2_000);
+        assert!(!which_key_visible(&workspace, cx));
+        publish_key_table(&mux, Some("prefix"), false, cx);
+        wait_for_which_key(cx, 200);
+        publish_key_table(&mux, None, false, cx);
+        wait_for_which_key(cx, 2_000);
+        assert!(!which_key_visible(&workspace, cx));
+        assert!(workspace.read_with(cx, |workspace, _| workspace.which_key_timer.is_none()));
+        publish_key_table(&mux, Some("prefix"), false, cx);
+        wait_for_which_key(cx, 401);
+        assert!(which_key_visible(&workspace, cx));
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.open_command_palette(None, window, cx);
+        });
+        cx.run_until_parked();
+        assert!(!which_key_visible(&workspace, cx));
+        assert!(workspace.read_with(cx, |workspace, _| {
+            workspace.focused_overlay == Some(OverlayKind::CommandPalette)
+        }));
+        publish_key_table(&mux, Some("prefix"), false, cx);
+        wait_for_which_key(cx, 401);
+        assert!(!which_key_visible(&workspace, cx));
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn which_key_lists_a_custom_table_flat_and_hides_on_its_keys(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        let Some((client, _server)) = input_test_client() else {
+            return;
+        };
+        let (workspace, cx) = input_test_workspace(cx, client);
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        let mut tables = zz_protocol::KeyTables::default();
+        for (key, direction) in [("h", "-L"), ("l", "-R")] {
+            tables.bind(
+                "resize",
+                key,
+                zz_protocol::Binding {
+                    commands: vec![CommandInvocation::new("resize-pane", [direction])],
+                    repeat: true,
+                    note: None,
+                },
+            );
+        }
+        mux.update(cx, |mux, cx| {
+            mux.handle_message_for_test(
+                zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 0,
+                    payload: zz_protocol::EventPayload::KeyTablesChanged {
+                        tables: tables.snapshot(),
+                    },
+                }),
+                cx,
+            );
+        });
+        publish_key_table(&mux, Some("resize"), false, cx);
+        let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+        wait_for_which_key(cx, 401);
+        workspace.read_with(cx, |workspace, _| {
+            let sheet = workspace.which_key.as_ref().unwrap();
+            assert_eq!(sheet.header().table.as_ref(), "resize");
+            assert!(sheet.header().prefix.is_none());
+            assert_eq!(
+                sheet
+                    .rows()
+                    .iter()
+                    .map(|row| row.raw.as_ref())
+                    .collect::<Vec<_>>(),
+                ["h", "l"]
+            );
+            assert!(
+                sheet
+                    .rows()
+                    .iter()
+                    .all(|row| row.group.is_none() && row.repeat)
+            );
+        });
+        cx.simulate_keystrokes("h");
+        assert!(!which_key_visible(&workspace, cx));
+        assert!(
+            input
+                .borrow()
+                .iter()
+                .any(|message| matches!(message, InputMessage::Key { input, .. } if input.text.as_deref() == Some("h")))
+        );
+        publish_key_table(&mux, Some("resize"), false, cx);
+        wait_for_which_key(cx, 401);
+        assert!(which_key_visible(&workspace, cx));
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn which_key_delay_zero_never_shows(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        let Some((client, _server)) = input_test_client() else {
+            return;
+        };
+        let (workspace, cx) = input_test_workspace(cx, client);
+        cx.update(|_, cx| {
+            let mut config = config::resolved_config(cx);
+            config.which_key_delay = zz_config::ConfigValue::from_default(0.0);
+            cx.set_global(config);
+        });
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        publish_key_table(&mux, Some("prefix"), false, cx);
+        assert!(workspace.read_with(cx, |workspace, _| workspace.which_key_timer.is_none()));
+        wait_for_which_key(cx, 5_000);
+        assert!(!which_key_visible(&workspace, cx));
     }
 
     #[gpui::test]
@@ -6540,5 +7195,462 @@ mod tests {
             10_000
         );
         assert_eq!(split_ratio_basis(0.456_74), 4_567);
+    }
+
+    type PathPickerFixture<'a> = (
+        Entity<AppView>,
+        Entity<MuxClient>,
+        Rc<RefCell<Vec<InputMessage>>>,
+        Rc<RefCell<Vec<zz_protocol::ProtocolMessage>>>,
+        &'a mut gpui::VisualTestContext,
+    );
+
+    fn path_picker_workspace(cx: &mut TestAppContext) -> PathPickerFixture<'_> {
+        cx.update(zz_ui::init);
+        let mux_slot = Rc::new(RefCell::new(None));
+        let captured_mux = Rc::clone(&mux_slot);
+        let (workspace, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                BrowserController::new(Err(zz_browser::BrowserError::AlreadyShutdown), cx)
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("path picker".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            captured_mux.replace(Some(mux.clone()));
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux: Entity<MuxClient> = mux_slot.borrow().clone().expect("captured mux");
+        let (input, lists) = mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), one_pane_snapshot(1), cx);
+            (
+                mux.record_input_for_test(),
+                mux.record_path_lists_for_test(),
+            )
+        });
+        cx.run_until_parked();
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.focus_active_pane(window, cx);
+        });
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        (workspace, mux, input, lists, cx)
+    }
+
+    fn publish_to_mux(
+        mux: &Entity<MuxClient>,
+        message: zz_protocol::ProtocolMessage,
+        cx: &mut gpui::VisualTestContext,
+    ) {
+        mux.update(cx, |mux, cx| mux.handle_message_for_test(message, cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+    }
+
+    fn open_path_picker_event(sequence: u64) -> zz_protocol::ProtocolMessage {
+        open_path_picker_event_for(sequence, PaneId(0))
+    }
+
+    fn open_path_picker_event_for(sequence: u64, pane: PaneId) -> zz_protocol::ProtocolMessage {
+        zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+            sequence,
+            payload: zz_protocol::EventPayload::OpenPathPicker {
+                pane,
+                start_dir: None,
+            },
+        })
+    }
+
+    fn path_list_root_for_test() -> PathListRoot {
+        PathListRoot {
+            root: "/home/me/src".to_owned(),
+            display_root: "~/src/".to_owned(),
+            cwd: Some("/home/me/src".to_owned()),
+            insert: zz_protocol::InsertStyle::Shell(zz_protocol::ShellKind::Posix),
+        }
+    }
+
+    fn picker_is_focused(workspace: &Entity<AppView>, cx: &mut gpui::VisualTestContext) -> bool {
+        cx.update(|window, cx| {
+            workspace
+                .read(cx)
+                .path_picker
+                .as_ref()
+                .is_some_and(|picker| picker.view.focus_handle(cx).is_focused(window))
+        })
+    }
+
+    fn terminal_is_focused(workspace: &Entity<AppView>, cx: &mut gpui::VisualTestContext) -> bool {
+        cx.update(|window, cx| {
+            workspace.read(cx).terminals[&PaneId(0)]
+                .read(cx)
+                .focus()
+                .is_focused(window)
+        })
+    }
+
+    fn cancelled_path_lists(lists: &RefCell<Vec<zz_protocol::ProtocolMessage>>) -> Vec<u64> {
+        lists
+            .borrow()
+            .iter()
+            .filter_map(|message| match message {
+                zz_protocol::ProtocolMessage::PathListCancel { request_id } => Some(*request_id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[gpui::test]
+    fn path_picker_pastes_into_its_pane_and_hands_focus_back(cx: &mut TestAppContext) {
+        let (workspace, mux, input, lists, cx) = path_picker_workspace(cx);
+        assert!(terminal_is_focused(&workspace, cx));
+        input.borrow_mut().clear();
+        publish_to_mux(&mux, open_path_picker_event(1), cx);
+        assert!(picker_is_focused(&workspace, cx));
+        assert!(
+            input
+                .borrow()
+                .iter()
+                .any(|message| matches!(message, InputMessage::CancelPrefix { .. }))
+        );
+        assert_eq!(
+            lists.borrow().as_slice(),
+            &[zz_protocol::ProtocolMessage::PathListRequest {
+                request_id: 1,
+                pane: PaneId(0),
+                dir: None,
+            }]
+        );
+        let mut entries = (0..30)
+            .map(|index| PathEntry {
+                rel: format!("file{index:02}.rs"),
+                kind: zz_protocol::PathKind::File,
+                symlink: false,
+            })
+            .collect::<Vec<_>>();
+        entries.push(PathEntry {
+            rel: "my notes.txt".to_owned(),
+            kind: zz_protocol::PathKind::File,
+            symlink: false,
+        });
+        publish_to_mux(
+            &mux,
+            zz_protocol::ProtocolMessage::PathListBegin {
+                request_id: 1,
+                result: Ok(path_list_root_for_test()),
+            },
+            cx,
+        );
+        publish_to_mux(
+            &mux,
+            zz_protocol::ProtocolMessage::PathListChunk {
+                request_id: 1,
+                entries,
+                done: true,
+                truncated: false,
+            },
+            cx,
+        );
+        let bounds = cx.debug_bounds("path-picker").expect("picker drawn");
+        assert!(bounds.size.height <= px(PATH_PICKER_MAX_HEIGHT));
+        assert!(bounds.size.height > px(PATH_PICKER_MAX_HEIGHT - 8.0));
+        input.borrow_mut().clear();
+        cx.simulate_keystrokes("n o t e s");
+        cx.run_until_parked();
+        assert!(input.borrow().is_empty());
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert_eq!(
+            input.borrow().as_slice(),
+            &[InputMessage::TerminalView {
+                pane: PaneId(0),
+                action: zz_terminal::TerminalViewAction::Paste("'my notes.txt' ".to_owned()),
+            }]
+        );
+        assert!(workspace.read_with(cx, |workspace, _| workspace.path_picker.is_none()));
+        assert!(terminal_is_focused(&workspace, cx));
+        assert!(cancelled_path_lists(&lists).is_empty());
+    }
+
+    #[gpui::test]
+    fn path_picker_stays_shut_while_a_menu_is_up(cx: &mut TestAppContext) {
+        let (workspace, mux, _, lists, cx) = path_picker_workspace(cx);
+        publish_to_mux(
+            &mux,
+            zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                sequence: 1,
+                payload: zz_protocol::EventPayload::Menu {
+                    state: Some(menu_state_for_test()),
+                },
+            }),
+            cx,
+        );
+        publish_to_mux(&mux, open_path_picker_event(2), cx);
+        assert!(workspace.read_with(cx, |workspace, _| workspace.path_picker.is_none()));
+        assert!(lists.borrow().is_empty());
+    }
+
+    #[gpui::test]
+    fn path_picker_closes_on_escape_outside_click_pane_change_and_reset(cx: &mut TestAppContext) {
+        let (workspace, mux, _, lists, cx) = path_picker_workspace(cx);
+        publish_to_mux(&mux, open_path_picker_event(1), cx);
+        assert!(picker_is_focused(&workspace, cx));
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(workspace.read_with(cx, |workspace, _| workspace.path_picker.is_none()));
+        assert!(terminal_is_focused(&workspace, cx));
+        assert_eq!(cancelled_path_lists(&lists), vec![1]);
+
+        publish_to_mux(&mux, open_path_picker_event(2), cx);
+        assert!(picker_is_focused(&workspace, cx));
+        let picker = cx.debug_bounds("path-picker").expect("picker drawn");
+        let layer = cx
+            .debug_bounds("path-picker-overlay")
+            .expect("close layer drawn");
+        let outside = [
+            layer.origin + point(px(2.0), px(2.0)),
+            layer.bottom_right() - point(px(2.0), px(2.0)),
+        ]
+        .into_iter()
+        .find(|point| !picker.contains(point))
+        .expect("a point beside the picker");
+        cx.simulate_click(picker.center(), Modifiers::none());
+        cx.run_until_parked();
+        assert!(workspace.read_with(cx, |workspace, _| workspace.path_picker.is_some()));
+        cx.simulate_click(outside, Modifiers::none());
+        cx.run_until_parked();
+        assert!(workspace.read_with(cx, |workspace, _| workspace.path_picker.is_none()));
+        assert!(terminal_is_focused(&workspace, cx));
+        assert_eq!(cancelled_path_lists(&lists), vec![1, 2]);
+
+        publish_to_mux(&mux, open_path_picker_event(3), cx);
+        assert!(picker_is_focused(&workspace, cx));
+        let mut moved = one_pane_snapshot(2);
+        let window = &mut moved.sessions[0].windows[0];
+        let mut pane = window.panes.remove(&PaneId(0)).expect("pane 0");
+        pane.id = PaneId(1);
+        window.panes.insert(PaneId(1), pane);
+        window.active_pane = PaneId(1);
+        window.layout = LayoutNode::Pane(PaneId(1));
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), moved, cx);
+        });
+        cx.run_until_parked();
+        assert!(workspace.read_with(cx, |workspace, _| workspace.path_picker.is_none()));
+        assert_eq!(cancelled_path_lists(&lists), vec![1, 2, 3]);
+
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), one_pane_snapshot(3), cx);
+        });
+        cx.run_until_parked();
+        publish_to_mux(&mux, open_path_picker_event(4), cx);
+        assert!(picker_is_focused(&workspace, cx));
+        mux.update(cx, MuxClient::reset_session_state_for_test);
+        cx.run_until_parked();
+        assert!(workspace.read_with(cx, |workspace, _| workspace.path_picker.is_none()));
+        assert_eq!(cancelled_path_lists(&lists), vec![1, 2, 3, 4]);
+    }
+
+    #[gpui::test]
+    fn opening_the_palette_retires_the_path_picker(cx: &mut TestAppContext) {
+        let (workspace, mux, _, lists, cx) = path_picker_workspace(cx);
+        publish_to_mux(&mux, open_path_picker_event(1), cx);
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.open_command_palette(None, window, cx);
+        });
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, _| {
+            assert!(workspace.path_picker.is_none());
+            assert!(workspace.command_palette.is_some());
+        });
+        assert_eq!(cancelled_path_lists(&lists), vec![1]);
+    }
+
+    #[gpui::test]
+    fn a_daemon_menu_retires_an_open_path_picker(cx: &mut TestAppContext) {
+        let (workspace, mux, _, lists, cx) = path_picker_workspace(cx);
+        publish_to_mux(&mux, open_path_picker_event(1), cx);
+        assert!(picker_is_focused(&workspace, cx));
+        publish_to_mux(
+            &mux,
+            zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                sequence: 2,
+                payload: zz_protocol::EventPayload::Menu {
+                    state: Some(menu_state_for_test()),
+                },
+            }),
+            cx,
+        );
+        workspace.read_with(cx, |workspace, _| {
+            assert!(workspace.path_picker.is_none());
+            assert!(workspace.menu.is_some());
+            assert_eq!(workspace.focused_overlay, Some(OverlayKind::Menu));
+        });
+        assert_eq!(cancelled_path_lists(&lists), vec![1]);
+    }
+
+    #[gpui::test]
+    fn focusing_the_sidebar_retires_the_path_picker(cx: &mut TestAppContext) {
+        let (workspace, mux, _, lists, cx) = path_picker_workspace(cx);
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        publish_to_mux(&mux, open_path_picker_event(1), cx);
+        assert!(picker_is_focused(&workspace, cx));
+        cx.deactivate_window();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(picker_is_focused(&workspace, cx));
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.sidebar.read(cx).focus_handle().focus(window, cx);
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, _| {
+            assert!(workspace.path_picker.is_none());
+            assert_ne!(workspace.focused_overlay, Some(OverlayKind::PathPicker));
+        });
+        assert_eq!(cancelled_path_lists(&lists), vec![1]);
+    }
+
+    #[gpui::test]
+    fn path_picker_serves_its_own_pane_and_closes_when_that_pane_goes(cx: &mut TestAppContext) {
+        let (workspace, mux, input, lists, cx) = path_picker_workspace(cx);
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(
+                SessionId(0),
+                two_pane_snapshot_of(PaneId(0), PaneKindSnapshot::Terminal),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        publish_to_mux(&mux, open_path_picker_event_for(1, PaneId(2)), cx);
+        assert!(picker_is_focused(&workspace, cx));
+        publish_to_mux(
+            &mux,
+            zz_protocol::ProtocolMessage::PathListBegin {
+                request_id: 1,
+                result: Ok(path_list_root_for_test()),
+            },
+            cx,
+        );
+        publish_to_mux(
+            &mux,
+            zz_protocol::ProtocolMessage::PathListChunk {
+                request_id: 1,
+                entries: vec![PathEntry {
+                    rel: "main.rs".to_owned(),
+                    kind: zz_protocol::PathKind::File,
+                    symlink: false,
+                }],
+                done: true,
+                truncated: false,
+            },
+            cx,
+        );
+        input.borrow_mut().clear();
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert_eq!(
+            input.borrow().as_slice(),
+            &[InputMessage::TerminalView {
+                pane: PaneId(2),
+                action: zz_terminal::TerminalViewAction::Paste("main.rs ".to_owned()),
+            }]
+        );
+        assert!(workspace.read_with(cx, |workspace, _| workspace.path_picker.is_none()));
+        assert!(cancelled_path_lists(&lists).is_empty());
+
+        publish_to_mux(&mux, open_path_picker_event_for(2, PaneId(2)), cx);
+        assert!(picker_is_focused(&workspace, cx));
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), one_pane_snapshot(200), cx);
+        });
+        cx.run_until_parked();
+        assert!(workspace.read_with(cx, |workspace, _| workspace.path_picker.is_none()));
+        assert_eq!(cancelled_path_lists(&lists), vec![2]);
+    }
+
+    #[test]
+    fn path_picker_sits_under_the_cursor_and_flips_when_short_of_room() {
+        let caret = Bounds::new(point(px(40.0), px(100.0)), gpui::size(px(8.0), px(18.0)));
+        assert_eq!(
+            path_picker_placement(caret, px(900.0)),
+            (Anchor::TopLeft, point(px(40.0), px(118.0)))
+        );
+        let low = Bounds::new(point(px(40.0), px(700.0)), gpui::size(px(8.0), px(18.0)));
+        assert_eq!(
+            path_picker_placement(low, px(900.0)),
+            (Anchor::BottomLeft, point(px(40.0), px(700.0)))
+        );
+        let cramped = Bounds::new(point(px(40.0), px(100.0)), gpui::size(px(8.0), px(18.0)));
+        assert_eq!(
+            path_picker_placement(cramped, px(300.0)),
+            (Anchor::TopLeft, point(px(40.0), px(118.0)))
+        );
+    }
+
+    #[test]
+    fn path_picker_insert_text_follows_the_listing_root() {
+        let root = path_list_root_for_test();
+        let entry = |rel: &str, kind| PathEntry {
+            rel: rel.to_owned(),
+            kind,
+            symlink: false,
+        };
+        assert_eq!(
+            path_picker_insert_text(
+                &root,
+                &entry("src/main.rs", zz_protocol::PathKind::File),
+                false
+            )
+            .as_deref(),
+            Some("src/main.rs ")
+        );
+        assert_eq!(
+            path_picker_insert_text(
+                &root,
+                &entry("src/main.rs", zz_protocol::PathKind::File),
+                true
+            )
+            .as_deref(),
+            Some("/home/me/src/src/main.rs ")
+        );
+        assert_eq!(
+            path_picker_insert_text(&root, &entry("docs", zz_protocol::PathKind::Dir), false)
+                .as_deref(),
+            Some("docs/ ")
+        );
+        let claude = PathListRoot {
+            insert: zz_protocol::InsertStyle::Claude,
+            ..root
+        };
+        assert_eq!(
+            path_picker_insert_text(
+                &claude,
+                &entry("src/main.rs", zz_protocol::PathKind::File),
+                false
+            )
+            .as_deref(),
+            Some("@src/main.rs ")
+        );
     }
 }

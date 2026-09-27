@@ -1160,6 +1160,10 @@ pub enum MuxEffect {
     FocusSidebar {
         pane: PaneId,
     },
+    ChoosePath {
+        pane: PaneId,
+        start_dir: Option<String>,
+    },
     ChooseBuffer {
         pane: PaneId,
         filter: Option<String>,
@@ -4676,6 +4680,7 @@ impl MuxEngine {
             "copy-mode-search-prompt" => self.copy_mode_search_prompt(context, &command.args)?,
             "command-prompt" => self.command_prompt(context, command)?,
             "focus-sidebar" => self.focus_sidebar(context, &command.args)?,
+            "choose-path" => self.choose_path(context, &command.args, hooks)?,
             "choose-tree" => self.choose_tree(context, command)?,
             "choose-client" => self.choose_client(context, command)?,
             "choose-buffer" => self.choose_buffer(context, command)?,
@@ -8609,6 +8614,37 @@ impl MuxEngine {
         }
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         Ok(Execution::effect(MuxEffect::FocusSidebar { pane }))
+    }
+
+    fn choose_path(
+        &self,
+        context: &ExecutionContext,
+        args: &[RawText],
+        hooks: &mut impl StatusHooks,
+    ) -> Result<Execution, ServerError> {
+        let (options, positional) = parse_command_options("choose-path", args)?;
+        if !positional.is_empty() {
+            return Err(ServerError::CommandParse(
+                "choose-path does not take positional arguments".to_owned(),
+            ));
+        }
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let start_dir = options.value("-c").and_then(|value| {
+            let format_context = ExecutionContext::for_pane(&self.state, pane).map_or_else(
+                FormatContext::default,
+                |origin| FormatContext {
+                    session: origin.session,
+                    window: origin.window,
+                    pane: origin.pane,
+                    active_session: origin.session,
+                    format_client: context.format_client(),
+                    format_type: FormatType::Pane,
+                },
+            );
+            let expanded = expand_format_with_hooks(value, self, format_context, hooks);
+            (!expanded.is_empty()).then(|| expanded.to_string())
+        });
+        Ok(Execution::effect(MuxEffect::ChoosePath { pane, start_dir }))
     }
 
     fn server_access(
@@ -40738,6 +40774,34 @@ mod tests {
                 .unwrap()
                 .effects,
             vec![MuxEffect::FocusSidebar { pane }]
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("choose-path", &[]))
+                .unwrap()
+                .effects,
+            vec![MuxEffect::ChoosePath {
+                pane,
+                start_dir: None,
+            }]
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("choose-path", &["-c", "/tmp/#{pane_id}"])
+                )
+                .unwrap()
+                .effects,
+            vec![MuxEffect::ChoosePath {
+                pane,
+                start_dir: Some(format!("/tmp/{pane}")),
+            }]
+        );
+        assert!(
+            engine
+                .execute(&mut context, &command("choose-path", &["extra"]))
+                .is_err()
         );
 
         assert_eq!(

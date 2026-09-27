@@ -4,7 +4,7 @@ title: Key tables (key.rs)
 description: Root/prefix/copy-mode/chooser key resolution with the default C-b prefix and optional prefix2, canonical and shifted key encoding, bind/unbind, send-prefix (-2), numeric vi counts, pending jump-key capture, and wire publication of every table.
 resource: crates/zz-protocol/src/key.rs
 tags: [tmux, keys, bindings, prefix, copy-mode, choosers]
-timestamp: 2026-08-25T00:00:00Z
+timestamp: 2026-09-27T00:00:00Z
 ---
 
 # Cycle-16 checkpoint
@@ -201,7 +201,7 @@ Prefix table (partial, the canonical zz set):
 | `[` | `copy-mode` | `?` | `list-keys -N` |
 | `=` | `choose-buffer -Z` | `s` / `w` | `choose-tree -Zs` / `-Zw` |
 | `q` | `display-panes` | `r` | `reload-config` |
-| `e` | `send-last-output` *(zz-native)* | | |
+| `e` | `send-last-output` *(zz-native)* | `F` | `choose-path` *(zz-native)* |
 | `z` | `resize-pane -Z` | `;` | `last-pane` |
 | `{` / `}` | `swap-pane -U` / `-D` | `:` | `command-prompt` |
 | `$` | `command-prompt -I #S 'rename-session -- %%'` | `,` | `command-prompt -I #W 'rename-window -- %%'` |
@@ -218,12 +218,17 @@ pin's commands for `x`, `&`, `]`, `?`, `d`, `PPage`, `f`, `.`, `(`, `)`, `L`, `m
 checked by `smoke/keys-prefix-stock`; `smoke/keys-prefix-attached` proves confirmation, paste bytes,
 and detach with real clients on both binaries.
 
-The table has 77 bindings against the pin's 92, with `e` the one zz-only key; `D` runs
+The table has 78 bindings against the pin's 92, with `e` and `F` the zz-only keys; `D` runs
 `choose-client -Z`. These 16 stock keys remain absent: `*`, `/`, `<`, `>`, `@`, `BTab`, `C`, `C-z`, `DC`, `S-Down`, `S-Left`,
 `S-Right`, `S-Up`, `Tab`, `g`, and `t`. `keys.default-prefix` enumerates the native chrome and
 viewport choices behind these omissions. It also retains the text differences for `$`, `,`,
 `0` through `9`, and the tiled-only resize bindings `C-Up`, `C-Down`, `C-Left`, `C-Right`,
 `M-Up`, and `M-Left`. The numeric commands use `:N` instead of the pin's `:=N`.
+
+Every stock prefix key zz shares with the pin carries the pin's `-N` note except `r`, whose zz
+binding reloads the configuration instead of redrawing the client; `e` and `F` have zz notes too,
+so `C-b ?` lists all 78 bindings. `shared_prefix_keys_carry_the_pinned_notes` compares the notes with
+the `note` field that `compat/tmux-oracle.py` captures through `#{key_note}`.
 
 This default-key policy does not reinterpret imported bindings: explicit `split-window`,
 `choose-tree`, and `refresh-client` commands retain their own contracts.

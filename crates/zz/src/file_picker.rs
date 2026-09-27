@@ -167,10 +167,7 @@ fn scan_directories(
                 continue;
             }
             let relative = entry.path().strip_prefix(root).unwrap_or(entry.path());
-            let name = entry.file_name().to_str().unwrap_or_default();
-            if matches!(name, "node_modules" | "target" | "__pycache__" | "venv")
-                || relative.ends_with("go/pkg/mod")
-            {
+            if !zz_daemon::path_walk_enters(relative, false) {
                 continue;
             }
             let Some(label) = relative.to_str() else {
@@ -181,20 +178,8 @@ fn scan_directories(
                 absolute: Arc::from(entry.path()),
                 prior: entry_prior(depth + 1, entry.path().join(".git").exists()),
             });
-            let media_root = depth == 0
-                && matches!(
-                    name,
-                    "Applications"
-                        | "Library"
-                        | "Movies"
-                        | "Music"
-                        | "Pictures"
-                        | "Public"
-                        | "Templates"
-                        | "Videos"
-                        | "snap"
-                );
-            if depth + 1 < DIRECTORY_SCAN_DEPTH && !media_root {
+            if depth + 1 < DIRECTORY_SCAN_DEPTH && zz_daemon::path_walk_enters(relative, depth == 0)
+            {
                 pending.push_back((entry.path().to_path_buf(), depth + 1));
             }
             if !published
@@ -275,48 +260,20 @@ impl PickerIndex {
                 .collect();
         }
         let query = query.trim().trim_end_matches(['/', '\\']);
-        let mut ranked = if query.is_empty() {
-            self.directories
-                .iter()
-                .enumerate()
-                .map(|(index, _)| (index, 0))
-                .collect::<Vec<_>>()
-        } else {
-            let candidates = self
-                .directories
-                .iter()
-                .map(|entry| entry.relative.as_ref())
-                .collect::<Vec<_>>();
-            let config = neo_frizbee::Config {
-                max_typos: Some(u16::try_from(query.chars().count() / 4).unwrap_or(6).min(6)),
-                casing: neo_frizbee::CaseMatching::Smart,
-                sort: false,
-                ..neo_frizbee::Config::default()
-            };
-            neo_frizbee::match_list(query, &candidates, &config)
-                .into_iter()
-                .map(|matched| (matched.index as usize, matched.score))
-                .collect()
-        };
-        ranked.sort_unstable_by(|(left, left_score), (right, right_score)| {
-            right_score
-                .cmp(left_score)
-                .then(
-                    self.directories[*right]
-                        .prior
-                        .cmp(&self.directories[*left].prior),
-                )
-                .then(
-                    self.directories[*left]
-                        .relative
-                        .cmp(&self.directories[*right].relative),
-                )
-        });
-        ranked
-            .into_iter()
-            .take(MAX_PICKER_ROWS)
-            .map(|(index, _)| self.directories[index].clone())
-            .collect()
+        let labels = self
+            .directories
+            .iter()
+            .map(|entry| entry.relative.as_ref())
+            .collect::<Vec<_>>();
+        zz_client::path_rank::rank(
+            query,
+            &labels,
+            |index| self.directories[index].prior,
+            MAX_PICKER_ROWS,
+        )
+        .into_iter()
+        .map(|index| self.directories[index].clone())
+        .collect()
     }
 }
 

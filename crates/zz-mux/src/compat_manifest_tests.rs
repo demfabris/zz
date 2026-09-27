@@ -108,6 +108,7 @@ struct OracleKey {
     key: String,
     repeat: bool,
     command: String,
+    note: String,
 }
 
 const STRUCTURALLY_MATCHING_SHARED_BINDINGS_BY_TABLE: &[(&str, usize)] = &[
@@ -1379,7 +1380,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         303,
         "pinned binding count changed"
     );
-    assert_eq!(zz_keys.len(), 366, "zz default binding count changed");
+    assert_eq!(zz_keys.len(), 367, "zz default binding count changed");
     assert_eq!(
         shared_keys.len(),
         275,
@@ -1392,7 +1393,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     );
     assert_eq!(
         native_keys.len(),
-        91,
+        92,
         "native default binding count changed"
     );
     assert_eq!(
@@ -1446,6 +1447,48 @@ fn stock_copy_mode_action_keys_render_the_pinned_binding() {
             "{table} {key}"
         );
     }
+}
+
+#[test]
+fn shared_prefix_keys_carry_the_pinned_notes() {
+    let (oracle, _) = inventory();
+    let key_tables = KeyTables::default();
+    let exceptions = BTreeSet::from(["r"]);
+    let pinned = oracle
+        .key_bindings
+        .iter()
+        .filter(|binding| binding.table == "prefix")
+        .map(|binding| (item_key(&binding.key), binding.note.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let mut shared = 0;
+    let mut differing = Vec::new();
+    for (table, key, binding) in key_tables.list(None) {
+        let key = item_key(key);
+        if table != "prefix" || exceptions.contains(key.as_str()) {
+            continue;
+        }
+        let Some(note) = pinned.get(&key) else {
+            continue;
+        };
+        shared += 1;
+        if binding.note.as_deref() != Some(*note) {
+            differing.push(format!("{key}: {:?} != {note:?}", binding.note));
+        }
+    }
+    assert!(
+        differing.is_empty(),
+        "prefix notes differ from the pin: {differing:?}"
+    );
+    assert_eq!(shared, 75, "shared prefix key count changed");
+    let unnoted = key_tables
+        .list(Some("prefix"))
+        .filter(|(_, _, binding)| binding.note.is_none())
+        .map(|(_, key, _)| key.to_owned())
+        .collect::<Vec<_>>();
+    assert!(
+        unnoted.is_empty(),
+        "stock prefix keys without a note: {unnoted:?}"
+    );
 }
 
 #[test]

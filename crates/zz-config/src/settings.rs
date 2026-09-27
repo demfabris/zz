@@ -42,6 +42,10 @@ fn value(parsed: &ParsedConfig, key: ConfigKey) -> (Value, ConfigProvenance) {
             let setting = &parsed.config.picker_focus_sidebar;
             (json!(setting.value), setting.provenance)
         }
+        ConfigKey::WhichKeyDelay => {
+            let setting = &parsed.config.which_key_delay;
+            (json!(setting.value), setting.provenance)
+        }
         ConfigKey::PaletteShowKeys => {
             let setting = &parsed.config.palette_show_keys;
             (json!(setting.value), setting.provenance)
@@ -250,7 +254,7 @@ fn choices(key: ConfigKey) -> Vec<Choice> {
 }
 fn section(key: ConfigKey) -> &'static str {
     match key {
-        ConfigKey::PickerFocusSidebar => "multiplexer",
+        ConfigKey::PickerFocusSidebar | ConfigKey::WhichKeyDelay => "multiplexer",
         ConfigKey::StatusShowSession
         | ConfigKey::StatusBadges
         | ConfigKey::StatusAgents
@@ -286,6 +290,7 @@ fn section(key: ConfigKey) -> &'static str {
 fn title(key: ConfigKey) -> String {
     match key {
         ConfigKey::PickerFocusSidebar => "Focus sidebar for session and window pickers".to_owned(),
+        ConfigKey::WhichKeyDelay => "Which-key delay".to_owned(),
         ConfigKey::UiFontFamily => "Interface font".to_owned(),
         ConfigKey::ChromeContrast => "Contrast".to_owned(),
         ConfigKey::PaneGlowStrength => "Selected pane glow".to_owned(),
@@ -313,6 +318,7 @@ pub fn settings(parsed: &ParsedConfig) -> Vec<Setting> {
         ConfigKey::PaletteHostPrefix,
         ConfigKey::PaletteShowKeys,
         ConfigKey::PickerFocusSidebar,
+        ConfigKey::WhichKeyDelay,
         ConfigKey::UseSystemTitlebar,
         ConfigKey::WindowCornerRadius,
         ConfigKey::WindowBackgroundBlur,
@@ -821,6 +827,76 @@ mod tests {
             !std::fs::read_to_string(path)
                 .unwrap()
                 .contains("picker-focus-sidebar")
+        );
+    }
+
+    #[test]
+    fn which_key_delay_defaults_to_400_accepts_zero_and_rejects_out_of_range() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config");
+        let mut model = SettingsModel::new("System".to_owned(), Some(path.clone()), None);
+        assert_eq!(
+            model.parsed.config.which_key_delay,
+            ConfigValue::from_default(DEFAULT_WHICH_KEY_DELAY)
+        );
+        let setting = settings(&model.parsed)
+            .into_iter()
+            .find(|setting| setting.key == "which-key-delay")
+            .unwrap();
+        assert_eq!(setting.section, "multiplexer");
+        assert_eq!(setting.control, "number");
+        assert_eq!(setting.range, Some((0.0, 2000.0)));
+        assert_eq!(setting.default_value, json!(400.0));
+        for value in [json!(0), json!("250")] {
+            model
+                .action(
+                    SettingsAction::Set {
+                        key: "which-key-delay".to_owned(),
+                        value,
+                    },
+                    &[],
+                )
+                .unwrap();
+        }
+        let loaded = load_config(&path, "System").unwrap();
+        assert_eq!(loaded.config.which_key_delay.value, 250.0);
+        assert_eq!(
+            loaded.config.which_key_delay.provenance,
+            ConfigProvenance::Override
+        );
+        for value in [json!(2001), json!(-1), json!("soon")] {
+            assert!(
+                model
+                    .action(
+                        SettingsAction::Set {
+                            key: "which-key-delay".to_owned(),
+                            value,
+                        },
+                        &[],
+                    )
+                    .is_err()
+            );
+        }
+        let parsed = parse_config("which-key-delay = 0\n", "System");
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(parsed.config.which_key_delay.value, 0.0);
+        let parsed = parse_config("which-key-delay = 5000\n", "System");
+        assert_eq!(
+            parsed.diagnostics[0].message,
+            "invalid `which-key-delay`: value must be between 0 and 2000 milliseconds"
+        );
+        assert_eq!(parsed.config.which_key_delay.value, DEFAULT_WHICH_KEY_DELAY);
+        model
+            .action(
+                SettingsAction::Reset {
+                    key: "which-key-delay".to_owned(),
+                },
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            model.parsed.config.which_key_delay,
+            ConfigValue::from_default(DEFAULT_WHICH_KEY_DELAY)
         );
     }
 

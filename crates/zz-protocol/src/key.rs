@@ -420,6 +420,38 @@ impl Default for KeyTables {
             ("'", "Prompt for window index to select"),
             ("M-n", "Select the next window with an alert"),
             ("M-p", "Select the previous window with an alert"),
+            ("c", "Create a new window"),
+            ("%", "Split window horizontally"),
+            ("\"", "Split window vertically"),
+            ("!", "Break pane to a new window"),
+            ("n", "Select the next window"),
+            ("p", "Select the previous window"),
+            ("l", "Select the previously current window"),
+            ("o", "Select the next pane"),
+            ("C-o", "Rotate through the panes"),
+            ("M-o", "Rotate through the panes in reverse"),
+            ("Space", "Select next layout"),
+            ("E", "Spread panes out evenly"),
+            ("M-1", "Set the even-horizontal layout"),
+            ("M-2", "Set the even-vertical layout"),
+            ("M-3", "Set the main-horizontal layout"),
+            ("M-4", "Set the main-vertical layout"),
+            ("M-5", "Select the tiled layout"),
+            ("M-6", "Set the main-horizontal-mirrored layout"),
+            ("M-7", "Set the main-vertical-mirrored layout"),
+            ("[", "Enter copy mode"),
+            ("=", "Choose a paste buffer from a list"),
+            ("e", "Send the last command and its output to an agent pane"),
+            ("s", "Choose a session from a list"),
+            ("w", "Choose a window from a list"),
+            ("D", "Choose and detach a client from a list"),
+            ("q", "Display pane numbers"),
+            ("r", "Reload the configuration"),
+            ("z", "Zoom the active pane"),
+            (";", "Move to the previously active pane"),
+            ("{", "Swap the active pane with the pane above"),
+            ("}", "Swap the active pane with the pane below"),
+            (":", "Prompt for a command"),
         ] {
             tables.update_binding_metadata("prefix", key, Some(note.to_owned()), false);
         }
@@ -445,6 +477,15 @@ impl Default for KeyTables {
                 },
             );
         }
+        tables.bind(
+            "prefix",
+            "F",
+            Binding {
+                commands: vec![CommandInvocation::new("choose-path", Vec::<String>::new())],
+                repeat: false,
+                note: Some("Pick a path and insert it at the cursor".to_owned()),
+            },
+        );
         for digit in 0..=9_u32 {
             tables.bind(
                 "prefix",
@@ -455,15 +496,23 @@ impl Default for KeyTables {
                         ["-t".to_owned(), format!(":{digit}")],
                     )],
                     repeat: false,
-                    note: None,
+                    note: Some(format!("Select window {digit}")),
                 },
             );
         }
         for (key, flag, note) in [
-            ("Up", "-U", "Select the pane above"),
-            ("Down", "-D", "Select the pane below"),
-            ("Left", "-L", "Select the pane to the left"),
-            ("Right", "-R", "Select the pane to the right"),
+            ("Up", "-U", "Select the pane above the active pane"),
+            ("Down", "-D", "Select the pane below the active pane"),
+            (
+                "Left",
+                "-L",
+                "Select the pane to the left of the active pane",
+            ),
+            (
+                "Right",
+                "-R",
+                "Select the pane to the right of the active pane",
+            ),
         ] {
             tables.bind(
                 "prefix",
@@ -1514,6 +1563,30 @@ impl KeyEngine {
         } else {
             self.table.as_deref()
         }
+    }
+
+    #[must_use]
+    pub fn shown_table(&self, now: Instant) -> Option<(&str, bool)> {
+        let table = self.table.as_deref()?;
+        if self.mode_table || matches!(table, "copy-mode" | "copy-mode-vi") {
+            return None;
+        }
+        if self.repeat_deadline.is_some_and(|deadline| now >= deadline) {
+            return None;
+        }
+        let repeat = self.repeat_deadline.is_some();
+        if table == "prefix"
+            && !repeat
+            && self.prefix_deadline.is_some_and(|deadline| now >= deadline)
+        {
+            return None;
+        }
+        Some((table, repeat))
+    }
+
+    #[must_use]
+    pub fn next_deadline(&self) -> Option<Instant> {
+        self.repeat_deadline.or(self.prefix_deadline)
     }
 
     /// Consume the copy-mode repeat prefix the way `window_copy_command` reads
@@ -3702,6 +3775,54 @@ mod tests {
             ),
             KeyDecision::Commands(vec![CommandInvocation::new("display-message", ["custom"],)])
         );
+    }
+
+    #[test]
+    fn shown_table_and_next_deadline_follow_prefix_timeout_and_repeat_windows() {
+        let tables = KeyTables::default();
+        let start = Instant::now();
+        let prefix_timeout = Duration::from_millis(300);
+        let repeat_time = Duration::from_millis(500);
+        let ms = |millis| start + Duration::from_millis(millis);
+        let press = |engine: &mut KeyEngine, key, at| {
+            engine.handle_with_repeat_times(
+                &tables,
+                key,
+                at,
+                repeat_time,
+                Duration::ZERO,
+                prefix_timeout,
+                "root",
+            )
+        };
+        let up = KeyDecision::Commands(vec![CommandInvocation::new("select-pane", ["-U"])]);
+
+        let mut idle = KeyEngine::default();
+        assert_eq!(press(&mut idle, "C-b", start), KeyDecision::Prefix);
+        assert_eq!(idle.shown_table(start), Some(("prefix", false)));
+        assert_eq!(idle.next_deadline(), Some(ms(300)));
+        assert_eq!(idle.shown_table(ms(299)), Some(("prefix", false)));
+        assert_eq!(idle.shown_table(ms(300)), None);
+        assert_eq!(idle.active_table(), Some("prefix"));
+
+        let mut engine = KeyEngine::default();
+        assert_eq!(press(&mut engine, "C-b", start), KeyDecision::Prefix);
+        assert_eq!(press(&mut engine, "Up", ms(100)), up);
+        assert_eq!(engine.shown_table(ms(100)), Some(("prefix", true)));
+        assert_eq!(engine.next_deadline(), Some(ms(600)));
+        assert_eq!(engine.shown_table(ms(400)), Some(("prefix", true)));
+        assert_eq!(press(&mut engine, "Up", ms(400)), up);
+        assert_eq!(engine.next_deadline(), Some(ms(900)));
+        assert_eq!(engine.shown_table(ms(899)), Some(("prefix", true)));
+        assert_eq!(engine.shown_table(ms(900)), None);
+        assert_eq!(engine.next_deadline(), Some(ms(900)));
+
+        let mut copy = KeyEngine::default();
+        copy.switch_table(Some("copy-mode".to_owned()));
+        assert_eq!(copy.shown_table(start), None);
+        assert_eq!(copy.next_deadline(), None);
+        copy.switch_client_table(Some("copy-mode".to_owned()));
+        assert_eq!(copy.shown_table(start), None);
     }
 
     #[test]

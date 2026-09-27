@@ -66,6 +66,8 @@ pub const CHROME_KEYBIND_KEY: &str = "chrome-keybind";
 pub const CHROME_UNBIND_KEY: &str = "chrome-unbind";
 pub const DEFAULT_BROWSER_SEARCH_PROVIDER: SearchProvider = SearchProvider::Google;
 pub const DEFAULT_BROWSER_EGRESS: bool = true;
+pub const DEFAULT_WHICH_KEY_DELAY: f32 = 400.0;
+pub const MAX_WHICH_KEY_DELAY: f32 = 2000.0;
 pub const DEFAULT_EDITOR_FONT_SIZE: f32 = 13.0;
 pub const MIN_EDITOR_FONT_SIZE: f32 = 8.0;
 pub const MAX_EDITOR_FONT_SIZE: f32 = 32.0;
@@ -105,6 +107,7 @@ pub enum ConfigKey {
     PaletteHostPrefix,
     PaletteShowKeys,
     PickerFocusSidebar,
+    WhichKeyDelay,
     UseSystemTitlebar,
     WindowCornerRadius,
     WindowBackgroundBlur,
@@ -153,6 +156,7 @@ impl ConfigKey {
             Self::PaletteHostPrefix => "palette-host-prefix",
             Self::PaletteShowKeys => "palette-show-keys",
             Self::PickerFocusSidebar => "picker-focus-sidebar",
+            Self::WhichKeyDelay => "which-key-delay",
             Self::UseSystemTitlebar => "use-system-titlebar",
             Self::WindowCornerRadius => "window-corner-radius",
             Self::WindowBackgroundBlur => "window-background-blur",
@@ -202,6 +206,7 @@ impl ConfigKey {
             "palette-host-prefix" => Some(Self::PaletteHostPrefix),
             "palette-show-keys" => Some(Self::PaletteShowKeys),
             "picker-focus-sidebar" => Some(Self::PickerFocusSidebar),
+            "which-key-delay" => Some(Self::WhichKeyDelay),
             "use-system-titlebar" => Some(Self::UseSystemTitlebar),
             "window-corner-radius" => Some(Self::WindowCornerRadius),
             "window-background-blur" => Some(Self::WindowBackgroundBlur),
@@ -261,6 +266,7 @@ impl ConfigKey {
             Self::ChromeContrast => Some((0.5, 2.0)),
             Self::WindowCornerRadius => Some((0.0, MAX_WINDOW_CORNER_RADIUS)),
             Self::EditorFontSize => Some((MIN_EDITOR_FONT_SIZE, MAX_EDITOR_FONT_SIZE)),
+            Self::WhichKeyDelay => Some((0.0, MAX_WHICH_KEY_DELAY)),
             Self::UseSystemTitlebar
             | Self::PaletteWindowLayout
             | Self::PaletteHostPrefix
@@ -412,6 +418,7 @@ pub struct AppConfig {
     pub palette_host_prefix: ConfigValue<PaletteHostPrefix>,
     pub palette_show_keys: ConfigValue<bool>,
     pub picker_focus_sidebar: ConfigValue<bool>,
+    pub which_key_delay: ConfigValue<f32>,
     pub use_system_titlebar: ConfigValue<bool>,
     pub window_corner_radius: ConfigValue<f32>,
     pub window_background_blur: ConfigValue<bool>,
@@ -460,6 +467,7 @@ impl Default for AppConfig {
             palette_host_prefix: ConfigValue::from_default(PaletteHostPrefix::Tilde),
             palette_show_keys: ConfigValue::from_default(true),
             picker_focus_sidebar: ConfigValue::from_default(false),
+            which_key_delay: ConfigValue::from_default(DEFAULT_WHICH_KEY_DELAY),
             use_system_titlebar: ConfigValue::from_default(DEFAULT_USE_SYSTEM_TITLEBAR),
             window_corner_radius: ConfigValue::from_default(DEFAULT_WINDOW_CORNER_RADIUS),
             window_background_blur: ConfigValue::from_default(DEFAULT_WINDOW_BACKGROUND_BLUR),
@@ -536,6 +544,7 @@ impl AppConfig {
             ConfigKey::EditorVimMode => Some(&mut self.editor_vim_mode),
             ConfigKey::BrowserEgress => Some(&mut self.browser_egress),
             ConfigKey::WindowCornerRadius
+            | ConfigKey::WhichKeyDelay
             | ConfigKey::PaletteWindowLayout
             | ConfigKey::PaletteHostPrefix
             | ConfigKey::PaneBackgroundOpacity
@@ -1071,6 +1080,7 @@ pub fn parse_config(source: &str, system_font_family: &str) -> ParsedConfig {
             ConfigKey::ChromeContrast => &mut parsed.config.chrome_contrast,
             ConfigKey::ShadowStrength => &mut parsed.config.shadow_strength,
             ConfigKey::EditorFontSize => &mut parsed.config.editor_font_size,
+            ConfigKey::WhichKeyDelay => &mut parsed.config.which_key_delay,
             ConfigKey::UseSystemTitlebar
             | ConfigKey::PaletteWindowLayout
             | ConfigKey::PaletteHostPrefix
@@ -1304,6 +1314,8 @@ pub fn parse_numeric_value(
             | ConfigKey::ChromeContrast
     ) {
         ""
+    } else if key == ConfigKey::WhichKeyDelay {
+        " milliseconds"
     } else {
         " logical pixels"
     };

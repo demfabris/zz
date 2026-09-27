@@ -114,6 +114,7 @@ pub enum CoreEvent {
     PrefixCancelled {
         request_id: u64,
     },
+    KeyTableChanged,
     CommandPromptChanged,
     CommandOutputChanged,
     ChooseTreeChanged,
@@ -129,6 +130,10 @@ pub enum CoreEvent {
         pane: PaneId,
     },
     FocusSidebar,
+    OpenPathPicker {
+        pane: PaneId,
+        start_dir: Option<String>,
+    },
     Detached {
         session: SessionId,
         by: Option<String>,
@@ -263,6 +268,7 @@ pub struct ClientCore {
     agent_states: HashMap<PaneId, AgentPaneWire>,
     full_pending: HashSet<PaneId>,
     prefix_armed: bool,
+    key_table: Option<(String, bool)>,
     command_prompt: Option<CommandPromptState>,
     command_output: Option<(u64, PaneId, TerminalViewport)>,
     command_output_watermark: u64,
@@ -301,6 +307,7 @@ impl ClientCore {
                 self.viewports.clear();
                 self.full_pending.clear();
                 let prefix_changed = self.prefix_armed;
+                let key_table_changed = self.key_table.is_some();
                 let command_prompt_changed = self.command_prompt.is_some();
                 let command_output_changed = self.command_output.is_some();
                 let choose_tree_changed = self.choose_tree.is_some();
@@ -315,6 +322,9 @@ impl ClientCore {
                 if prefix_changed {
                     self.events
                         .push_back(CoreEvent::PrefixArmed { armed: false });
+                }
+                if key_table_changed {
+                    self.events.push_back(CoreEvent::KeyTableChanged);
                 }
                 if command_prompt_changed {
                     self.events.push_back(CoreEvent::CommandPromptChanged);
@@ -466,23 +476,32 @@ impl ClientCore {
         self.prefix_armed
     }
 
+    #[must_use]
+    pub fn key_table(&self) -> Option<(&str, bool)> {
+        self.key_table
+            .as_ref()
+            .map(|(table, repeat)| (table.as_str(), *repeat))
+    }
+
     pub fn claims_prefix_input(&self, input: &zz_terminal::KeyInput) -> bool {
         if input.modifiers.platform() {
             return false;
         }
+        if self.prefix_armed || self.key_table.is_some() {
+            return true;
+        }
         let key = zz_protocol::input_key_name(input);
-        self.prefix_armed
-            || [
-                zz_protocol::MuxOptionKey::Prefix,
-                zz_protocol::MuxOptionKey::Prefix2,
-            ]
-            .into_iter()
-            .any(|option| {
-                self.mux_options.get(option).is_some_and(|option| {
-                    !option.value.eq_ignore_ascii_case("none")
-                        && zz_protocol::canonical_key(&option.value) == key.as_str()
-                })
+        [
+            zz_protocol::MuxOptionKey::Prefix,
+            zz_protocol::MuxOptionKey::Prefix2,
+        ]
+        .into_iter()
+        .any(|option| {
+            self.mux_options.get(option).is_some_and(|option| {
+                !option.value.eq_ignore_ascii_case("none")
+                    && zz_protocol::canonical_key(&option.value) == key.as_str()
             })
+        })
     }
 
     #[must_use]
@@ -579,6 +598,7 @@ impl ClientCore {
     /// cleared, so events here would double-fire against its own bookkeeping.
     pub fn reset_session(&mut self) {
         self.prefix_armed = false;
+        self.key_table = None;
         self.command_prompt = None;
         self.command_output = None;
         self.choose_tree = None;
@@ -714,6 +734,10 @@ impl ClientCore {
                 self.events
                     .push_back(CoreEvent::PrefixCancelled { request_id });
             }
+            EventPayload::KeyTableActive { table, repeat } => {
+                self.key_table = table.map(|table| (table, repeat));
+                self.events.push_back(CoreEvent::KeyTableChanged);
+            }
             EventPayload::PaneRemoved(pane) => {
                 self.viewports.remove(&pane);
                 self.agent_states.remove(&pane);
@@ -756,6 +780,10 @@ impl ClientCore {
             EventPayload::ServerStopping => self.events.push_back(CoreEvent::ServerStopping),
             EventPayload::Bell { pane } => self.events.push_back(CoreEvent::Bell { pane }),
             EventPayload::FocusSidebar => self.events.push_back(CoreEvent::FocusSidebar),
+            EventPayload::OpenPathPicker { pane, start_dir } => {
+                self.events
+                    .push_back(CoreEvent::OpenPathPicker { pane, start_dir });
+            }
             EventPayload::ClientMessage { pane, kind, text } => {
                 self.events.push_back(CoreEvent::ClientMessage {
                     pane,
@@ -1784,6 +1812,7 @@ mod tests {
         let pane = PaneId(7);
         let mut core = ClientCore::new();
         core.prefix_armed = true;
+        core.key_table = Some(("prefix".to_owned(), false));
         core.command_prompt = Some(CommandPromptState {
             prompt: ":".to_owned(),
             input: "echo".to_owned(),
@@ -1876,6 +1905,7 @@ mod tests {
         });
 
         assert!(!core.prefix_armed());
+        assert_eq!(core.key_table(), None);
         assert!(core.command_prompt().is_none());
         assert!(core.command_output().is_none());
         assert!(core.choose_tree().is_none());
@@ -1892,6 +1922,7 @@ mod tests {
                 },
                 CoreEvent::SnapshotChanged,
                 CoreEvent::PrefixArmed { armed: false },
+                CoreEvent::KeyTableChanged,
                 CoreEvent::CommandPromptChanged,
                 CoreEvent::CommandOutputChanged,
                 CoreEvent::ChooseTreeChanged,
@@ -1902,5 +1933,87 @@ mod tests {
                 CoreEvent::ConfirmChanged,
             ]
         );
+    }
+
+    #[test]
+    fn key_table_active_is_stored_and_every_publication_emits() {
+        let mut core = ClientCore::new();
+        for (table, repeat) in [
+            (Some("prefix"), false),
+            (Some("prefix"), false),
+            (Some("resize"), true),
+            (None, false),
+        ] {
+            core.handle_message(ProtocolMessage::Event(Event {
+                sequence: 0,
+                payload: EventPayload::KeyTableActive {
+                    table: table.map(str::to_owned),
+                    repeat,
+                },
+            }));
+            assert_eq!(core.key_table(), table.map(|table| (table, repeat)));
+            assert_eq!(drain(&mut core), vec![CoreEvent::KeyTableChanged]);
+        }
+    }
+
+    #[test]
+    fn an_active_key_table_claims_every_key_but_platform_chords() {
+        let mut core = ClientCore::new();
+        let key = |character: char, platform: bool| zz_terminal::KeyInput {
+            action: zz_terminal::KeyAction::Press,
+            key: zz_terminal::KeyCode::Character(character),
+            modifiers: zz_terminal::Modifiers::new(false, false, false, platform),
+            text: Some(character.to_string().into_boxed_str()),
+            unshifted_codepoint: None,
+        };
+        let publish = |core: &mut ClientCore, table: Option<&str>, repeat: bool| {
+            core.handle_message(ProtocolMessage::Event(Event {
+                sequence: 0,
+                payload: EventPayload::KeyTableActive {
+                    table: table.map(str::to_owned),
+                    repeat,
+                },
+            }));
+        };
+        assert!(!core.claims_prefix_input(&key('x', false)));
+        publish(&mut core, Some("resize"), false);
+        assert!(core.claims_prefix_input(&key('x', false)));
+        assert!(!core.claims_prefix_input(&key('x', true)));
+        publish(&mut core, Some("resize"), true);
+        assert!(core.claims_prefix_input(&key('h', false)));
+        publish(&mut core, None, false);
+        assert!(!core.claims_prefix_input(&key('x', false)));
+        publish(&mut core, Some("resize"), false);
+        core.reset_session();
+        assert!(!core.claims_prefix_input(&key('x', false)));
+    }
+
+    #[test]
+    fn prefix_claims_follow_both_live_options_and_armed_state() {
+        let mut core = ClientCore::new();
+        let set = |core: &mut ClientCore, key, value: &str| {
+            core.mux_options
+                .set(key, value, zz_protocol::MuxOptionSource::RuntimeCommand);
+        };
+        set(&mut core, zz_protocol::MuxOptionKey::Prefix, "Ctrl-a");
+        set(&mut core, zz_protocol::MuxOptionKey::Prefix2, "Alt-Space");
+        let input = |character: char, control: bool, alt: bool| zz_terminal::KeyInput {
+            action: zz_terminal::KeyAction::Press,
+            key: zz_terminal::KeyCode::Character(character),
+            modifiers: zz_terminal::Modifiers::new(false, control, alt, false),
+            text: Some(character.to_string().into_boxed_str()),
+            unshifted_codepoint: Some(character),
+        };
+        assert!(core.claims_prefix_input(&input('a', true, false)));
+        assert!(core.claims_prefix_input(&input(' ', false, true)));
+        assert!(!core.claims_prefix_input(&input('b', true, false)));
+        assert!(!core.claims_prefix_input(&input('x', false, false)));
+        core.prefix_armed = true;
+        assert!(core.claims_prefix_input(&input('x', false, false)));
+        core.prefix_armed = false;
+        set(&mut core, zz_protocol::MuxOptionKey::Prefix2, "none");
+        assert!(!core.claims_prefix_input(&input(' ', false, true)));
+        set(&mut core, zz_protocol::MuxOptionKey::Prefix, "None");
+        assert!(!core.claims_prefix_input(&input('a', true, false)));
     }
 }

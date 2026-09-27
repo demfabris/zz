@@ -4,7 +4,7 @@ title: zz-daemon crate
 description: The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions and Agent-pane ACP adapter children, and the fan-out engine that streams coalesced terminal frames and agent transcripts to attached and short-lived clients over a socket or named pipe.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [crate, daemon, ipc, fanout, transport, agent]
-timestamp: 2026-09-24T00:00:00-03:00
+timestamp: 2026-09-27T00:00:00-03:00
 ---
 
 # Overview
@@ -527,7 +527,12 @@ and unbound input passing to the pane through `resolve_input_sinks` (synchronize
 Browser fanout; Picker and Agent panes have no sink and drop passed keys . an agent pane's keys are
 composer input the client owns, and its prompts arrive as `AgentPrompt`, not as key events). The daemon publishes
 `EventPayload::PrefixArmed` transitions of that cursor to the owning client, which uses them to
-claim in-flight sequence keys from focus contexts that never reach the daemon.
+claim in-flight sequence keys from focus contexts that never reach the daemon. `sync_key_table`
+also publishes `KeyTableActive { table, repeat }` from `KeyEngine::shown_table`: the prefix or a
+`switch-client -T` table, never copy-mode and never the session's own `key-table`, re-sent after
+every key decided inside a table. A `zz-key-table` deadline thread re-runs the sync at
+`KeyEngine::next_deadline`, so both events clear when the repeat window or prefix-timeout ends
+without another key; the engine itself still expires lazily.
 
 Input accounting uses two terminal-input seams. `note_terminal_input` updates retained activity,
 advances the latest geometry owner, and clears the pane bell. `note_terminal_input_without_bell`

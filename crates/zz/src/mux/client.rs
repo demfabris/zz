@@ -23,15 +23,16 @@ use zz_protocol::StatusLine;
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferState, ChooseTreeState, ClientMessageKind,
     ClipboardProducer, CommandInvocation, CommandPromptState, CommandResponse, ConfirmState,
-    DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage, KeyBindingSnapshot,
-    LayoutNode, MenuState, MuxOptionKey, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY,
-    PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PastedImageFormat, PopupState, ProtocolError,
-    ProtocolMessage, ServerError, ServerHello, SessionId, TerminalUiCommand, WindowSnapshot,
+    DisplayPanesState, Event, EventPayload, GitMark, GuiResponse, InputMessage, KeyBindingSnapshot,
+    KeyTableSnapshot, LayoutNode, MenuState, MuxOptionKey, MuxSnapshot,
+    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PastedImageFormat,
+    PathEntry, PathListRoot, PopupState, ProtocolError, ProtocolMessage, ServerError, ServerHello,
+    SessionId, TerminalUiCommand, WindowSnapshot,
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, GRAPHEME_TABLE_BIT, IMAGE_PLACEHOLDER_SCHEME,
     PackedCell, ScrollbarState, TerminalAppearance, TerminalColorScheme, TerminalDictionary,
-    TerminalDiffScratch, TerminalViewport, TerminalViewportPatch,
+    TerminalDiffScratch, TerminalViewAction, TerminalViewport, TerminalViewportPatch,
 };
 
 use crate::{
@@ -273,6 +274,28 @@ impl PaneImageSnapshots {
             self.revision = self.revision.wrapping_add(1).max(1);
         }
     }
+}
+
+pub(crate) enum PathPickerUpdate {
+    Open {
+        pane: PaneId,
+        start_dir: Option<String>,
+    },
+    Begin {
+        request_id: u64,
+        result: Result<PathListRoot, String>,
+    },
+    Chunk {
+        request_id: u64,
+        entries: Arc<[PathEntry]>,
+        done: bool,
+        truncated: bool,
+    },
+    Git {
+        request_id: u64,
+        marks: Vec<(String, GitMark)>,
+    },
+    Close,
 }
 
 /// A pasted image a terminal pane asked to reopen.
@@ -839,6 +862,8 @@ pub(crate) struct InitialConnectionFinished;
 
 pub(crate) struct AgentStateChanged;
 
+pub(crate) struct KeyTableChanged;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct StaleDaemonInfo {
     pub(crate) daemon: Option<u16>,
@@ -1141,6 +1166,9 @@ pub struct MuxClient {
     pane_images: BTreeMap<PaneId, PaneImageSnapshots>,
     pasted_image_assemblies: BTreeMap<(PaneId, u32), PastedImageAssembly>,
     pending_pasted_image_previews: BTreeSet<(PaneId, u32)>,
+    path_list_requests: BTreeSet<u64>,
+    #[cfg(test)]
+    path_list_sink: Option<std::rc::Rc<std::cell::RefCell<Vec<ProtocolMessage>>>>,
     pending_commands_revision: u64,
     command_output: Option<CommandOutputModel>,
     command_prompt_revision: u64,
@@ -1288,6 +1316,9 @@ impl MuxClient {
             pane_images: BTreeMap::new(),
             pasted_image_assemblies: BTreeMap::new(),
             pending_pasted_image_previews: BTreeSet::new(),
+            path_list_requests: BTreeSet::new(),
+            #[cfg(test)]
+            path_list_sink: None,
             pending_commands_revision: 0,
             command_output: None,
             command_prompt_revision: 0,
@@ -1863,10 +1894,11 @@ impl MuxClient {
         let connect_thread = thread::Builder::new()
             .name("zz-host-connect".to_owned())
             .spawn(move || {
-                let result = InteractiveClient::connect_endpoint_with_prompts(
+                let result = InteractiveClient::connect_endpoint_with_prompts_and_capabilities(
                     &endpoint,
                     color_scheme,
                     prompts,
+                    &[zz_protocol::ClientHello::CLIENT_PATH_PICKER_CAPABILITY],
                 );
                 let _ = results.send_blocking(result);
             });
@@ -2399,6 +2431,20 @@ impl MuxClient {
     }
 
     #[must_use]
+    pub(crate) fn key_table(&self) -> Option<(&str, bool)> {
+        self.attached_connection().client.as_ref()?;
+        self.core.key_table()
+    }
+
+    #[must_use]
+    pub(crate) fn key_tables(&self) -> &[KeyTableSnapshot] {
+        if self.attached_connection().client.is_none() {
+            return &[];
+        }
+        self.core.key_tables()
+    }
+
+    #[must_use]
     pub(crate) const fn prefix_cancelled_request(&self) -> Option<u64> {
         self.prefix_cancelled_request
     }
@@ -2416,6 +2462,15 @@ impl MuxClient {
     #[must_use]
     pub fn is_connected(&self) -> bool {
         self.attached_connection().is_connected()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_path_lists_for_test(
+        &mut self,
+    ) -> std::rc::Rc<std::cell::RefCell<Vec<ProtocolMessage>>> {
+        let sink = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        self.path_list_sink = Some(std::rc::Rc::clone(&sink));
+        sink
     }
 
     /// Collect what the views send to panes, so a test can assert delivery.
@@ -2858,6 +2913,63 @@ impl MuxClient {
         }
     }
 
+    pub(crate) fn request_path_list(&mut self, pane: PaneId, dir: Option<String>) -> Option<u64> {
+        #[cfg(test)]
+        if let Some(sink) = &self.path_list_sink {
+            let sent = sink
+                .borrow()
+                .iter()
+                .filter(|message| matches!(message, ProtocolMessage::PathListRequest { .. }))
+                .count();
+            let request_id = u64::try_from(sent).unwrap_or(u64::MAX) + 1;
+            sink.borrow_mut().push(ProtocolMessage::PathListRequest {
+                request_id,
+                pane,
+                dir,
+            });
+            self.path_list_requests.insert(request_id);
+            return Some(request_id);
+        }
+        let client = self.attached_connection().client.as_ref()?;
+        match client.request_path_list(pane, dir) {
+            Ok(request_id) => {
+                self.path_list_requests.insert(request_id);
+                Some(request_id)
+            }
+            Err(error) => {
+                log::warn!("failed to request a path listing: {error}");
+                None
+            }
+        }
+    }
+
+    pub(crate) fn cancel_path_list(&mut self, request_id: u64) {
+        if self.path_list_requests.remove(&request_id) {
+            self.send_path_list_cancel(request_id);
+        }
+    }
+
+    fn send_path_list_cancel(&self, request_id: u64) {
+        #[cfg(test)]
+        if let Some(sink) = &self.path_list_sink {
+            sink.borrow_mut()
+                .push(ProtocolMessage::PathListCancel { request_id });
+            return;
+        }
+        if let Some(client) = &self.attached_connection().client
+            && let Err(error) = client.cancel_path_list(request_id)
+        {
+            log::warn!("failed to cancel path listing {request_id}: {error}");
+        }
+    }
+
+    pub(crate) fn paste_to_pane(&self, pane: PaneId, text: String) -> bool {
+        self.send_input(InputMessage::TerminalView {
+            pane,
+            action: TerminalViewAction::Paste(text),
+        })
+    }
+
     pub(crate) fn send_prefix_cancel(&mut self) -> Option<u64> {
         let request_id = self.next_prefix_cancel_request.saturating_add(1).max(1);
         if self.send_input(InputMessage::CancelPrefix { request_id }) {
@@ -3219,7 +3331,12 @@ impl MuxClient {
         self.confirm_revision = self.confirm_revision.wrapping_add(1).max(1);
     }
 
-    fn reset_session_state(&mut self, _cx: &mut Context<Self>) {
+    fn reset_session_state(&mut self, cx: &mut Context<Self>) {
+        let key_table_changed = self.core.key_table().is_some();
+        for request_id in std::mem::take(&mut self.path_list_requests) {
+            self.send_path_list_cancel(request_id);
+        }
+        cx.emit(PathPickerUpdate::Close);
         self.reset_client_focus_attach();
         let connection = self.attached_connection_mut();
         connection.resync_pending = false;
@@ -3246,6 +3363,9 @@ impl MuxClient {
         self.confirm_revision = self.confirm_revision.wrapping_add(1).max(1);
         self.clear_all_kitty_images();
         self.clear_all_pasted_images();
+        if key_table_changed {
+            cx.emit(KeyTableChanged);
+        }
     }
 
     fn kitty_image_cache(&mut self, pane: PaneId) -> Arc<RwLock<KittyImageCache>> {
@@ -3904,6 +4024,12 @@ impl MuxClient {
                 &message,
                 ProtocolMessage::CommandResponse(CommandResponse::Success { .. })
             );
+        let path_list = matches!(
+            &message,
+            ProtocolMessage::PathListBegin { .. }
+                | ProtocolMessage::PathListChunk { .. }
+                | ProtocolMessage::PathListGit { .. }
+        );
         log::trace!(
             target: "zz::diagnostics::mux",
             "handle_message begin message={message:#?}"
@@ -3950,7 +4076,7 @@ impl MuxClient {
             self.viewports.len(),
             self.attached_connection().resync_pending,
         );
-        if !status_only && !quiet_success {
+        if !status_only && !quiet_success && !path_list {
             cx.notify();
         }
     }
@@ -4190,6 +4316,7 @@ impl MuxClient {
                 let _ = (pane, request_id, result);
             }
             CoreEvent::Message(message) => self.handle_unreduced_message(*message, cx),
+            CoreEvent::KeyTableChanged => cx.emit(KeyTableChanged),
             // Key tables are read straight off the core; the handshake is
             // ingested rather than received; the frame path never reaches the
             // core, so its two viewport events cannot fire here.
@@ -4198,6 +4325,9 @@ impl MuxClient {
             | CoreEvent::ViewportChanged { .. }
             | CoreEvent::StatusChanged
             | CoreEvent::CommandOutputChanged => {}
+            CoreEvent::OpenPathPicker { pane, start_dir } => {
+                cx.emit(PathPickerUpdate::Open { pane, start_dir });
+            }
         }
     }
 
@@ -4416,6 +4546,31 @@ impl MuxClient {
             ProtocolMessage::PastedImageUnavailable { pane, number } => {
                 self.pasted_image_unavailable(pane, number);
             }
+            ProtocolMessage::PathListBegin { request_id, result } => {
+                if result.is_err() {
+                    self.path_list_requests.remove(&request_id);
+                }
+                cx.emit(PathPickerUpdate::Begin { request_id, result });
+            }
+            ProtocolMessage::PathListChunk {
+                request_id,
+                entries,
+                done,
+                truncated,
+            } => {
+                if done {
+                    self.path_list_requests.remove(&request_id);
+                }
+                cx.emit(PathPickerUpdate::Chunk {
+                    request_id,
+                    entries: entries.into(),
+                    done,
+                    truncated,
+                });
+            }
+            ProtocolMessage::PathListGit { request_id, marks } => {
+                cx.emit(PathPickerUpdate::Git { request_id, marks });
+            }
             _ => {}
         }
     }
@@ -4584,12 +4739,15 @@ impl MuxClient {
 
 impl EventEmitter<InitialConnectionFinished> for MuxClient {}
 impl EventEmitter<AgentStateChanged> for MuxClient {}
+impl EventEmitter<KeyTableChanged> for MuxClient {}
 impl EventEmitter<ClientNotification> for MuxClient {}
 impl EventEmitter<ClientNotificationCleared> for MuxClient {}
 
 impl EventEmitter<AttachmentPreviewRequest> for MuxClient {}
 
 impl EventEmitter<SshPromptRequest> for MuxClient {}
+
+impl EventEmitter<PathPickerUpdate> for MuxClient {}
 
 fn adjusted_terminal_font_size(current: f32, adjustment: TerminalFontSizeAdjustment) -> f32 {
     (current + adjustment.delta_points())

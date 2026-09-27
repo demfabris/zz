@@ -10,6 +10,7 @@ use zz_protocol::{
 const PATH_LIST_BUDGET: Duration = Duration::from_secs(3);
 const PATH_LIST_HIGH_WATER_BYTES: usize = 256 * 1024;
 const PATH_LIST_POLL_INTERVAL: Duration = Duration::from_millis(1);
+const PATH_LIST_TURN_POLL: Duration = Duration::from_millis(10);
 const PATH_LIST_FLUSH_INTERVAL: Duration = Duration::from_millis(30);
 const PATH_LIST_MESSAGE_OVERHEAD: usize = 32;
 const PATH_ENTRY_OVERHEAD: usize = 8;
@@ -105,14 +106,14 @@ fn wire_relative(relative: &Path) -> Option<String> {
 }
 
 #[cfg(unix)]
-fn device_of(metadata: &fs::Metadata) -> u64 {
+fn device_of(_path: &Path, metadata: &fs::Metadata) -> u64 {
     use std::os::unix::fs::MetadataExt as _;
 
     metadata.dev()
 }
 
 #[cfg(not(unix))]
-fn device_of(_metadata: &fs::Metadata) -> u64 {
+fn device_of(_path: &Path, _metadata: &fs::Metadata) -> u64 {
     0
 }
 
@@ -120,6 +121,7 @@ fn walk_paths(
     root: &Path,
     root_is_home: bool,
     limits: WalkLimits,
+    device: &dyn Fn(&Path, &fs::Metadata) -> u64,
     cancelled: &dyn Fn() -> bool,
     emit: &mut dyn FnMut(PathEntry) -> bool,
 ) -> WalkEnd {
@@ -128,9 +130,12 @@ fn walk_paths(
         .ancestors()
         .any(|directory| directory.join(".git").exists());
     let children_only = root.parent().is_none();
-    let root_device = fs::metadata(root).ok().as_ref().map(device_of);
+    let root_device = fs::metadata(root)
+        .ok()
+        .map(|metadata| device(root, &metadata));
     let mut pending = VecDeque::from([(root.to_path_buf(), 0_usize)]);
     let mut emitted = 0_usize;
+    let mut depth_capped = false;
     while let Some((directory, depth)) = pending.pop_front() {
         if cancelled() {
             return WalkEnd::Stopped;
@@ -170,12 +175,19 @@ fn walk_paths(
             if directory_entry
                 && !symlink
                 && !children_only
-                && depth + 1 < limits.depth
                 && path_walk_enters(relative, depth == 0 && root_is_home)
                 && (root_device.is_none()
-                    || entry.metadata().ok().as_ref().map(device_of) == root_device)
+                    || entry
+                        .metadata()
+                        .ok()
+                        .map(|metadata| device(entry.path(), &metadata))
+                        == root_device)
             {
-                pending.push_back((entry.path().to_path_buf(), depth + 1));
+                if depth + 1 < limits.depth {
+                    pending.push_back((entry.path().to_path_buf(), depth + 1));
+                } else {
+                    depth_capped = true;
+                }
             }
             emitted += 1;
             if !emit(PathEntry {
@@ -191,7 +203,11 @@ fn walk_paths(
             }
         }
     }
-    WalkEnd::Complete
+    if depth_capped {
+        WalkEnd::Truncated
+    } else {
+        WalkEnd::Complete
+    }
 }
 
 fn classify_git_status(x: u8, y: u8) -> Option<GitMark> {
@@ -379,6 +395,7 @@ impl PathListStream<'_> {
             root,
             root_is_home,
             limits,
+            &device_of,
             &|| self.cancelled(),
             &mut |entry| {
                 let size = entry_wire_bytes(&entry);
@@ -624,9 +641,10 @@ impl Shared {
         kind: ClientKind,
         request: (u64, PaneId, Option<String>),
         outbound: &Arc<OutboundMailbox>,
-        cancel: &Arc<AtomicBool>,
+        walk: (&Arc<AtomicBool>, &Arc<Mutex<()>>),
     ) {
         let (request_id, pane, dir) = request;
+        let (cancel, turn) = walk;
         let refusal = if kind != ClientKind::Interactive {
             Some("path listing needs an interactive client")
         } else if self.inner.lock().client_flags.contains(client) {
@@ -641,33 +659,52 @@ impl Shared {
             });
             return;
         }
-        let Some(slot) = PathWalkerSlot::acquire(&LIVE_PATH_WALKERS) else {
-            let _ = outbound.enqueue_reliable(&ProtocolMessage::PathListChunk {
-                request_id,
-                entries: Vec::new(),
-                done: true,
-                truncated: true,
-            });
-            return;
-        };
+        let expanded = self.record_requested_path_list_root(client, request_id, dir.as_deref());
         let shared = Arc::clone(self);
         let walker_outbound = Arc::clone(outbound);
         let walker_cancel = Arc::clone(cancel);
+        let walker_turn = Arc::clone(turn);
         let spawned = thread::Builder::new()
             .name(format!("zz-path-list-{}", client.0))
             .spawn(move || {
-                let _slot = slot;
                 let stream = PathListStream {
                     outbound: &walker_outbound,
                     cancel: &walker_cancel,
                     request_id,
                 };
-                let listing = match shared.resolve_path_list(client, pane, dir.as_deref()) {
+                let waited = Instant::now();
+                let _turn = loop {
+                    if stream.cancelled() {
+                        return;
+                    }
+                    if let Some(turn) = walker_turn.try_lock_for(PATH_LIST_TURN_POLL) {
+                        break turn;
+                    }
+                    if waited.elapsed() >= PATH_LIST_BUDGET {
+                        let _ = stream
+                            .begin(Err("an earlier path listing is still running".to_owned()));
+                        return;
+                    }
+                };
+                if stream.cancelled() {
+                    return;
+                }
+                let listing = match shared.resolve_path_list(pane, dir.as_deref(), expanded) {
                     Ok(listing) => listing,
                     Err(error) => {
                         let _ = stream.begin(Err(error));
                         return;
                     }
+                };
+                shared.record_resolved_path_list_root(
+                    client,
+                    request_id,
+                    &listing.root,
+                    &walker_cancel,
+                );
+                let Some(_slot) = PathWalkerSlot::acquire(&LIVE_PATH_WALKERS) else {
+                    let _ = stream.begin(Ok(listing.begin)) && stream.chunk(Vec::new(), true, true);
+                    return;
                 };
                 if !stream.begin(Ok(listing.begin)) {
                     return;
@@ -695,13 +732,51 @@ impl Shared {
         }
     }
 
-    fn resolve_path_list(
+    fn record_requested_path_list_root(
         &self,
         client: ClientId,
+        request_id: u64,
+        dir: Option<&str>,
+    ) -> Option<PathBuf> {
+        let mut inner = self.inner.lock();
+        let base = inner
+            .path_list_roots
+            .get(&client)
+            .and_then(|(_, root)| root.clone());
+        let expanded = dir.and_then(|dir| {
+            expand_directory(dir, base.as_deref(), |user| {
+                home_directory_for(&inner.engine, user)
+            })
+        });
+        inner
+            .path_list_roots
+            .insert(client, (request_id, expanded.clone()));
+        expanded
+    }
+
+    fn record_resolved_path_list_root(
+        &self,
+        client: ClientId,
+        request_id: u64,
+        root: &Path,
+        cancel: &AtomicBool,
+    ) {
+        let mut inner = self.inner.lock();
+        if let Some((current, stored)) = inner.path_list_roots.get_mut(&client)
+            && *current == request_id
+            && !cancel.load(Ordering::Acquire)
+        {
+            *stored = Some(root.to_path_buf());
+        }
+    }
+
+    fn resolve_path_list(
+        &self,
         pane: PaneId,
         dir: Option<&str>,
+        expanded: Option<PathBuf>,
     ) -> Result<ResolvedListing, String> {
-        let (terminal, start_path, reported_path, previous_root, home) = {
+        let (terminal, start_path, reported_path, home) = {
             let inner = self.inner.lock();
             let terminal = inner
                 .terminals
@@ -717,7 +792,6 @@ impl Shared {
                 facts
                     .map(|facts| facts.reported_path.clone())
                     .unwrap_or_default(),
-                inner.path_list_roots.get(&client).cloned(),
                 home_directory_for(&inner.engine, ""),
             )
         };
@@ -737,20 +811,8 @@ impl Shared {
                     .then(|| PathBuf::from(&start_path))
                     .filter(|path| path.is_dir())
             });
-        let requested = dir
-            .and_then(|dir| {
-                expand_directory(
-                    dir,
-                    previous_root.as_deref().or(fallback.as_deref()),
-                    |user| {
-                        if user.is_empty() {
-                            home.clone()
-                        } else {
-                            zz_mux::user_home(Some(user))
-                        }
-                    },
-                )
-            })
+        let requested = expanded
+            .or_else(|| dir.and_then(|dir| expand_directory(dir, fallback.as_deref(), |_| None)))
             .filter(|path| path.is_dir());
         let root = requested
             .or(fallback)
@@ -770,10 +832,6 @@ impl Shared {
             cwd: cwd.map(str::to_owned),
             insert: insert_style(pane, terminal.process_id(), foreground, &basename),
         };
-        self.inner
-            .lock()
-            .path_list_roots
-            .insert(client, root.clone());
         Ok(ResolvedListing {
             root_is_home: home.as_deref().is_some_and(|home| Path::new(home) == root),
             root,
@@ -794,10 +852,17 @@ mod tests {
 
     fn walk_all(root: &Path, root_is_home: bool, limits: WalkLimits) -> (Vec<PathEntry>, WalkEnd) {
         let mut entries = Vec::new();
-        let end = walk_paths(root, root_is_home, limits, &|| false, &mut |entry| {
-            entries.push(entry);
-            true
-        });
+        let end = walk_paths(
+            root,
+            root_is_home,
+            limits,
+            &device_of,
+            &|| false,
+            &mut |entry| {
+                entries.push(entry);
+                true
+            },
+        );
         (entries, end)
     }
 
@@ -967,36 +1032,51 @@ mod tests {
         assert!(entries.iter().all(|entry| !entry.rel.contains('/')));
     }
 
-    #[cfg(unix)]
     #[test]
     fn child_directories_on_another_device_are_listed_but_not_entered() {
-        use std::os::unix::fs::MetadataExt as _;
-
-        let Some(device) = ["/dev", "/proc", "/sys"]
-            .into_iter()
-            .map(Path::new)
-            .find(|path| {
-                fs::metadata(path).is_ok_and(|metadata| {
-                    fs::metadata("/").is_ok_and(|root| root.dev() != metadata.dev())
-                })
-            })
-        else {
-            return;
-        };
-        let (entries, _) = walk_all(
-            Path::new("/"),
+        let scratch = tempfile::tempdir().expect("temp dir");
+        touch(scratch.path(), "local/a.txt");
+        touch(scratch.path(), "mount/b.txt");
+        let mut entries = Vec::new();
+        let end = walk_paths(
+            scratch.path(),
             false,
-            WalkLimits {
-                budget: Duration::from_secs(2),
-                ..WalkLimits::default()
+            WalkLimits::default(),
+            &|path, _| u64::from(path.ends_with("mount")),
+            &|| false,
+            &mut |entry| {
+                entries.push(entry);
+                true
             },
         );
-        let name = device.file_name().and_then(OsStr::to_str).expect("name");
-        assert!(rels(&entries).contains(name));
-        assert!(
-            !entries
-                .iter()
-                .any(|entry| entry.rel.starts_with(&format!("{name}/")))
+
+        assert_eq!(end, WalkEnd::Complete);
+        assert_eq!(
+            rels(&entries),
+            BTreeSet::from([
+                "local".to_owned(),
+                "local/a.txt".to_owned(),
+                "mount".to_owned(),
+            ])
+        );
+    }
+
+    #[test]
+    fn depth_limit_marks_the_walk_truncated_only_when_a_directory_is_skipped() {
+        let scratch = tempfile::tempdir().expect("temp dir");
+        touch(scratch.path(), "a/b.txt");
+        let limits = WalkLimits {
+            depth: 2,
+            ..WalkLimits::default()
+        };
+
+        assert_eq!(walk_all(scratch.path(), false, limits).1, WalkEnd::Complete);
+        touch(scratch.path(), "node_modules/pkg/index.js");
+        assert_eq!(walk_all(scratch.path(), false, limits).1, WalkEnd::Complete);
+        fs::create_dir_all(scratch.path().join("a/deeper")).expect("deeper dir");
+        assert_eq!(
+            walk_all(scratch.path(), false, limits).1,
+            WalkEnd::Truncated
         );
     }
 
@@ -1027,7 +1107,7 @@ mod tests {
                 ..WalkLimits::default()
             },
         );
-        assert_eq!(end, WalkEnd::Complete);
+        assert_eq!(end, WalkEnd::Truncated);
         assert!(rels(&entries).contains("a/b"));
         assert!(!rels(&entries).contains("a/b/c"));
 
@@ -1045,6 +1125,7 @@ mod tests {
             scratch.path(),
             false,
             WalkLimits::default(),
+            &device_of,
             &|| true,
             &mut |_| panic!("a cancelled walk emitted"),
         );
@@ -1604,10 +1685,14 @@ mod tests {
             kind,
             request,
             &mailbox,
-            &Arc::new(AtomicBool::new(false)),
+            (&Arc::new(AtomicBool::new(false)), &Arc::new(Mutex::new(()))),
         );
+        collect_listing(&mailbox)
+    }
+
+    fn collect_listing(mailbox: &Arc<OutboundMailbox>) -> Vec<ProtocolMessage> {
         let (sender, messages) = mpsc::channel();
-        let reader_mailbox = Arc::clone(&mailbox);
+        let reader_mailbox = Arc::clone(mailbox);
         thread::spawn(move || {
             let mut collected = Vec::new();
             while let Some(frame) = reader_mailbox.recv() {
@@ -1718,5 +1803,111 @@ mod tests {
             messages.as_slice(),
             [ProtocolMessage::PathListBegin { result: Err(error), .. }] if error == "client is read-only"
         ));
+    }
+    fn path_list_client() -> (Arc<Shared>, ClientId, PaneId) {
+        let shared = Arc::new(Shared::new(1));
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "roots"]),
+            )
+            .expect("session");
+        (shared, client, context.pane.expect("pane id"))
+    }
+
+    #[test]
+    fn relative_requests_join_the_latest_requested_root_before_any_walker_runs() {
+        let (shared, client, _) = path_list_client();
+        let root = Path::new("/r/a/b");
+        assert_eq!(
+            shared.record_requested_path_list_root(client, 1, root.to_str()),
+            Some(root.to_path_buf())
+        );
+        assert_eq!(
+            shared.record_requested_path_list_root(client, 2, Some("..")),
+            Some(PathBuf::from("/r/a"))
+        );
+        assert_eq!(
+            shared.record_requested_path_list_root(client, 3, Some("..")),
+            Some(PathBuf::from("/r"))
+        );
+
+        let cancel = AtomicBool::new(false);
+        shared.record_resolved_path_list_root(client, 2, Path::new("/stale"), &cancel);
+        assert_eq!(
+            shared.inner.lock().path_list_roots.get(&client),
+            Some(&(3, Some(PathBuf::from("/r"))))
+        );
+        cancel.store(true, Ordering::Release);
+        shared.record_resolved_path_list_root(client, 3, Path::new("/cancelled"), &cancel);
+        assert_eq!(
+            shared.inner.lock().path_list_roots.get(&client),
+            Some(&(3, Some(PathBuf::from("/r"))))
+        );
+        cancel.store(false, Ordering::Release);
+        shared.record_resolved_path_list_root(client, 3, Path::new("/home/me"), &cancel);
+        assert_eq!(
+            shared.inner.lock().path_list_roots.get(&client),
+            Some(&(3, Some(PathBuf::from("/home/me"))))
+        );
+
+        shared.inner.lock().path_list_roots.remove(&client);
+        shared.record_resolved_path_list_root(client, 3, Path::new("/gone"), &cancel);
+        assert!(!shared.inner.lock().path_list_roots.contains_key(&client));
+    }
+
+    #[test]
+    fn a_superseded_request_waiting_for_its_turn_sends_nothing() {
+        let (shared, client, pane) = path_list_client();
+        let scratch = tempfile::tempdir().expect("temp dir");
+        touch(scratch.path(), "a.txt");
+        let root = scratch
+            .path()
+            .canonicalize()
+            .expect("canonical temp dir")
+            .to_str()
+            .expect("utf-8 temp dir")
+            .to_owned();
+        let mailbox = OutboundMailbox::new();
+        let turn = Arc::new(Mutex::new(()));
+        let held = turn.lock();
+        let first = Arc::new(AtomicBool::new(false));
+        shared.start_path_list(
+            client,
+            ClientKind::Interactive,
+            (1, pane, Some(root.clone())),
+            &mailbox,
+            (&first, &turn),
+        );
+        first.store(true, Ordering::Release);
+        shared.start_path_list(
+            client,
+            ClientKind::Interactive,
+            (2, pane, Some(root)),
+            &mailbox,
+            (&Arc::new(AtomicBool::new(false)), &turn),
+        );
+        thread::sleep(PATH_LIST_TURN_POLL * 3);
+        drop(held);
+
+        let messages = collect_listing(&mailbox);
+        assert!(matches!(
+            messages.first(),
+            Some(ProtocolMessage::PathListBegin {
+                request_id: 2,
+                result: Ok(_)
+            })
+        ));
+        assert!(messages.iter().all(|message| matches!(
+            message,
+            ProtocolMessage::PathListBegin { request_id: 2, .. }
+                | ProtocolMessage::PathListChunk { request_id: 2, .. }
+                | ProtocolMessage::PathListGit { request_id: 2, .. }
+        )));
     }
 }

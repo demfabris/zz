@@ -3501,6 +3501,7 @@ pub enum EventPayload {
     CommandClientExit,
     OpenPathPicker {
         pane: PaneId,
+        #[serde(deserialize_with = "deserialize_optional_path_list_text")]
         start_dir: Option<String>,
     },
 }

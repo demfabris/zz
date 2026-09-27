@@ -106,8 +106,13 @@ pub(crate) fn group_runs_codex(group: u32) -> bool {
             .and_then(|name| name.parse::<u32>().ok())
             .is_some_and(|pid| {
                 claude_peers::process_group(pid) == Some(group)
-                    && std::fs::read_link(format!("/proc/{pid}/exe"))
-                        .is_ok_and(|path| path.file_name().is_some_and(|name| name == "codex"))
+                    && std::fs::read_link(format!("/proc/{pid}/exe")).is_ok_and(|path| {
+                        path.file_name()
+                            .and_then(std::ffi::OsStr::to_str)
+                            .is_some_and(|name| {
+                                name.strip_suffix(" (deleted)").unwrap_or(name) == "codex"
+                            })
+                    })
             })
     })
 }

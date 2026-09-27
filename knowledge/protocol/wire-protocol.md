@@ -721,9 +721,12 @@ pane, dir }`, `PathListBegin { request_id, result: Result<PathListRoot, String> 
 { request_id, entries, done, truncated }`, `PathListGit { request_id, marks }` and
 `PathListCancel { request_id }`, with the types in `crates/zz-protocol/src/path_list.rs`. The
 daemon answers a request with one `Begin`, chunks of at most 64 KiB encoded, any git marks for
-entries it already sent, and a final chunk with `done`. Every path string is capped at
-`MAX_PATH_LIST_TEXT_BYTES` (4096) and a chunk or mark batch at `MAX_PATH_LIST_ENTRIES` (50,000)
-during deserialization. `path_picker_variants_append_at_the_wire_tails_and_round_trip` pins the
+entries it already sent, and a final chunk with `done`. A request that is cancelled or superseded
+before its `Begin` sends nothing. Walks run one at a time per client; a request that waits more
+than 3 s behind an earlier walk gets an error `Begin`, and one that finds all four daemon-wide walker
+slots busy gets its `Begin` followed at once by an empty `done, truncated` chunk. Every path
+string is capped at `MAX_PATH_LIST_TEXT_BYTES` (4096) and a chunk or mark batch at
+`MAX_PATH_LIST_ENTRIES` (50,000) during deserialization. `path_picker_variants_append_at_the_wire_tails_and_round_trip` pins the
 tags.
 
 # Versioning & compatibility

@@ -9000,6 +9000,15 @@ impl Shared {
                             )
                             .into());
                         }
+                        if start_dir.as_deref().is_some_and(|start_dir| {
+                            start_dir.len() > zz_protocol::MAX_PATH_LIST_TEXT_BYTES
+                                || start_dir.chars().any(char::is_control)
+                        }) {
+                            return Err(ServerError::InvalidCommand(
+                                "choose-path start directory cannot be listed".to_owned(),
+                            )
+                            .into());
+                        }
                         dismiss_overlays(
                             &mut inner,
                             client,
@@ -30881,7 +30890,7 @@ struct ServerState {
     native_terminal_search_clients: BTreeSet<ClientId>,
     native_chooser_clients: BTreeSet<ClientId>,
     path_picker_clients: BTreeSet<ClientId>,
-    path_list_roots: BTreeMap<ClientId, PathBuf>,
+    path_list_roots: BTreeMap<ClientId, (u64, Option<PathBuf>)>,
     /// The clients that raised tmux's `CLIENT_UTF8`. A client not in here is
     /// one `server_client_print` sanitizes its output for.
     utf8_clients: BTreeSet<ClientId>,
@@ -43866,6 +43875,7 @@ fn handle_connection<S: TransportStream>(
         };
 
     let mut path_list: Option<(u64, Arc<AtomicBool>)> = None;
+    let path_list_turn = Arc::new(Mutex::new(()));
     let result = loop {
         let message = match read_protocol_message_into(&mut stream, &mut inbound_frame) {
             Ok(message) => message,
@@ -43959,7 +43969,7 @@ fn handle_connection<S: TransportStream>(
                     hello.kind,
                     (request_id, pane, dir),
                     &outbound,
-                    &cancel,
+                    (&cancel, &path_list_turn),
                 );
             }
             ProtocolMessage::PathListCancel { request_id } => {
@@ -102598,7 +102608,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .inner
             .lock()
             .path_list_roots
-            .insert(client, PathBuf::from("/stale"));
+            .insert(client, (1, Some(PathBuf::from("/stale"))));
         choose_path(
             ClientKind::Interactive,
             &mut context,
@@ -102664,6 +102674,18 @@ bind - split-window -v -c "#{pane_current_path}"
                 .contains("copy mode")
         );
         shared.inner.lock().copy_sessions.remove(&client);
+
+        let long_start = format!("/{}", "a".repeat(zz_protocol::MAX_PATH_LIST_TEXT_BYTES));
+        for start in [long_start.as_str(), "/tmp/a\u{1b}b"] {
+            assert_eq!(
+                choose_path_error(choose_path(
+                    ClientKind::Interactive,
+                    &mut context,
+                    &["-c", start]
+                )),
+                "choose-path start directory cannot be listed"
+            );
+        }
 
         let terminal = shared.inner.lock().terminals.remove(&pane);
         assert_eq!(

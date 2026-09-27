@@ -24,10 +24,10 @@ use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferState, ChooseTreeState, ClientMessageKind,
     ClipboardProducer, CommandInvocation, CommandPromptState, CommandResponse, ConfirmState,
     DisplayPanesState, Event, EventPayload, GitMark, GuiResponse, InputMessage, KeyBindingSnapshot,
-    LayoutNode, MenuState, MuxOptionKey, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY,
-    PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PastedImageFormat, PathEntry, PathListRoot,
-    PopupState, ProtocolError, ProtocolMessage, ServerError, ServerHello, SessionId,
-    TerminalUiCommand, WindowSnapshot,
+    KeyTableSnapshot, LayoutNode, MenuState, MuxOptionKey, MuxSnapshot,
+    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PastedImageFormat,
+    PathEntry, PathListRoot, PopupState, ProtocolError, ProtocolMessage, ServerError, ServerHello,
+    SessionId, TerminalUiCommand, WindowSnapshot,
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, GRAPHEME_TABLE_BIT, IMAGE_PLACEHOLDER_SCHEME,
@@ -861,6 +861,8 @@ pub(crate) struct ClientNotificationCleared {
 pub(crate) struct InitialConnectionFinished;
 
 pub(crate) struct AgentStateChanged;
+
+pub(crate) struct KeyTableChanged;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct StaleDaemonInfo {
@@ -2429,6 +2431,20 @@ impl MuxClient {
     }
 
     #[must_use]
+    pub(crate) fn key_table(&self) -> Option<(&str, bool)> {
+        self.attached_connection().client.as_ref()?;
+        self.core.key_table()
+    }
+
+    #[must_use]
+    pub(crate) fn key_tables(&self) -> &[KeyTableSnapshot] {
+        if self.attached_connection().client.is_none() {
+            return &[];
+        }
+        self.core.key_tables()
+    }
+
+    #[must_use]
     pub(crate) const fn prefix_cancelled_request(&self) -> Option<u64> {
         self.prefix_cancelled_request
     }
@@ -3316,6 +3332,7 @@ impl MuxClient {
     }
 
     fn reset_session_state(&mut self, cx: &mut Context<Self>) {
+        let key_table_changed = self.core.key_table().is_some();
         for request_id in std::mem::take(&mut self.path_list_requests) {
             self.send_path_list_cancel(request_id);
         }
@@ -3346,6 +3363,9 @@ impl MuxClient {
         self.confirm_revision = self.confirm_revision.wrapping_add(1).max(1);
         self.clear_all_kitty_images();
         self.clear_all_pasted_images();
+        if key_table_changed {
+            cx.emit(KeyTableChanged);
+        }
     }
 
     fn kitty_image_cache(&mut self, pane: PaneId) -> Arc<RwLock<KittyImageCache>> {
@@ -4290,11 +4310,11 @@ impl MuxClient {
                 let _ = (pane, request_id, result);
             }
             CoreEvent::Message(message) => self.handle_unreduced_message(*message, cx),
+            CoreEvent::KeyTableChanged => cx.emit(KeyTableChanged),
             // Key tables are read straight off the core; the handshake is
             // ingested rather than received; the frame path never reaches the
             // core, so its two viewport events cannot fire here.
             CoreEvent::KeyTablesChanged
-            | CoreEvent::KeyTableChanged
             | CoreEvent::HelloReceived
             | CoreEvent::ViewportChanged { .. }
             | CoreEvent::StatusChanged
@@ -4713,6 +4733,7 @@ impl MuxClient {
 
 impl EventEmitter<InitialConnectionFinished> for MuxClient {}
 impl EventEmitter<AgentStateChanged> for MuxClient {}
+impl EventEmitter<KeyTableChanged> for MuxClient {}
 impl EventEmitter<ClientNotification> for MuxClient {}
 impl EventEmitter<ClientNotificationCleared> for MuxClient {}
 

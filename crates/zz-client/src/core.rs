@@ -487,19 +487,21 @@ impl ClientCore {
         if input.modifiers.platform() {
             return false;
         }
+        if self.prefix_armed || self.key_table.is_some() {
+            return true;
+        }
         let key = zz_protocol::input_key_name(input);
-        self.prefix_armed
-            || [
-                zz_protocol::MuxOptionKey::Prefix,
-                zz_protocol::MuxOptionKey::Prefix2,
-            ]
-            .into_iter()
-            .any(|option| {
-                self.mux_options.get(option).is_some_and(|option| {
-                    !option.value.eq_ignore_ascii_case("none")
-                        && zz_protocol::canonical_key(&option.value) == key.as_str()
-                })
+        [
+            zz_protocol::MuxOptionKey::Prefix,
+            zz_protocol::MuxOptionKey::Prefix2,
+        ]
+        .into_iter()
+        .any(|option| {
+            self.mux_options.get(option).is_some_and(|option| {
+                !option.value.eq_ignore_ascii_case("none")
+                    && zz_protocol::canonical_key(&option.value) == key.as_str()
             })
+        })
     }
 
     #[must_use]
@@ -1952,5 +1954,66 @@ mod tests {
             assert_eq!(core.key_table(), table.map(|table| (table, repeat)));
             assert_eq!(drain(&mut core), vec![CoreEvent::KeyTableChanged]);
         }
+    }
+
+    #[test]
+    fn an_active_key_table_claims_every_key_but_platform_chords() {
+        let mut core = ClientCore::new();
+        let key = |character: char, platform: bool| zz_terminal::KeyInput {
+            action: zz_terminal::KeyAction::Press,
+            key: zz_terminal::KeyCode::Character(character),
+            modifiers: zz_terminal::Modifiers::new(false, false, false, platform),
+            text: Some(character.to_string().into_boxed_str()),
+            unshifted_codepoint: None,
+        };
+        let publish = |core: &mut ClientCore, table: Option<&str>, repeat: bool| {
+            core.handle_message(ProtocolMessage::Event(Event {
+                sequence: 0,
+                payload: EventPayload::KeyTableActive {
+                    table: table.map(str::to_owned),
+                    repeat,
+                },
+            }));
+        };
+        assert!(!core.claims_prefix_input(&key('x', false)));
+        publish(&mut core, Some("resize"), false);
+        assert!(core.claims_prefix_input(&key('x', false)));
+        assert!(!core.claims_prefix_input(&key('x', true)));
+        publish(&mut core, Some("resize"), true);
+        assert!(core.claims_prefix_input(&key('h', false)));
+        publish(&mut core, None, false);
+        assert!(!core.claims_prefix_input(&key('x', false)));
+        publish(&mut core, Some("resize"), false);
+        core.reset_session();
+        assert!(!core.claims_prefix_input(&key('x', false)));
+    }
+
+    #[test]
+    fn prefix_claims_follow_both_live_options_and_armed_state() {
+        let mut core = ClientCore::new();
+        let set = |core: &mut ClientCore, key, value: &str| {
+            core.mux_options
+                .set(key, value, zz_protocol::MuxOptionSource::RuntimeCommand);
+        };
+        set(&mut core, zz_protocol::MuxOptionKey::Prefix, "Ctrl-a");
+        set(&mut core, zz_protocol::MuxOptionKey::Prefix2, "Alt-Space");
+        let input = |character: char, control: bool, alt: bool| zz_terminal::KeyInput {
+            action: zz_terminal::KeyAction::Press,
+            key: zz_terminal::KeyCode::Character(character),
+            modifiers: zz_terminal::Modifiers::new(false, control, alt, false),
+            text: Some(character.to_string().into_boxed_str()),
+            unshifted_codepoint: Some(character),
+        };
+        assert!(core.claims_prefix_input(&input('a', true, false)));
+        assert!(core.claims_prefix_input(&input(' ', false, true)));
+        assert!(!core.claims_prefix_input(&input('b', true, false)));
+        assert!(!core.claims_prefix_input(&input('x', false, false)));
+        core.prefix_armed = true;
+        assert!(core.claims_prefix_input(&input('x', false, false)));
+        core.prefix_armed = false;
+        set(&mut core, zz_protocol::MuxOptionKey::Prefix2, "none");
+        assert!(!core.claims_prefix_input(&input(' ', false, true)));
+        set(&mut core, zz_protocol::MuxOptionKey::Prefix, "None");
+        assert!(!core.claims_prefix_input(&input('a', true, false)));
     }
 }

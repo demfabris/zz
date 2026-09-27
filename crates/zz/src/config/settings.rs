@@ -120,6 +120,7 @@ pub(crate) struct SettingsView {
     pane_corner_radius: Entity<InputState>,
     pane_margin: Entity<InputState>,
     editor_font_size: Entity<InputState>,
+    which_key_delay: Entity<InputState>,
     pane_border_width: Entity<InputState>,
     widget_corner_radius: Entity<InputState>,
     chrome_contrast: Entity<InputState>,
@@ -195,6 +196,13 @@ impl SettingsView {
             window,
             cx,
         );
+        let which_key_delay = numeric_value_input(
+            ConfigKey::WhichKeyDelay,
+            observed.which_key_delay.value,
+            50.0,
+            window,
+            cx,
+        );
         let pane_border_width = numeric_value_input(
             ConfigKey::PaneBorderWidth,
             observed.pane_border_width.value,
@@ -266,6 +274,7 @@ impl SettingsView {
             ),
             numeric_input_subscription(&pane_margin, ConfigKey::PaneMargin, window, cx),
             numeric_input_subscription(&pane_border_width, ConfigKey::PaneBorderWidth, window, cx),
+            numeric_input_subscription(&which_key_delay, ConfigKey::WhichKeyDelay, window, cx),
             numeric_input_subscription(
                 &widget_corner_radius,
                 ConfigKey::WidgetCornerRadius,
@@ -299,6 +308,7 @@ impl SettingsView {
             pane_corner_radius,
             pane_margin,
             editor_font_size,
+            which_key_delay,
             pane_border_width,
             widget_corner_radius,
             chrome_contrast,
@@ -504,6 +514,12 @@ impl SettingsView {
             synchronize_f32_input(
                 &self.editor_font_size,
                 resolved.editor_font_size.value,
+                window,
+                cx,
+            );
+            synchronize_f32_input(
+                &self.which_key_delay,
+                resolved.which_key_delay.value,
                 window,
                 cx,
             );
@@ -1603,13 +1619,23 @@ impl SettingsView {
                     })
                     .when(kind == ConfigFileKind::Mux, |page| {
                         page.child(
-                            SettingsStack::titled("Navigation").child(Self::boolean_setting(
-                                ConfigKey::PickerFocusSidebar,
-                                "Focus sidebar for session and window pickers",
-                                "Prefix + s and Prefix + w focus the sidebar instead of opening the picker.",
-                                config::resolved_config(cx).picker_focus_sidebar,
-                                cx,
-                            )),
+                            SettingsStack::titled("Navigation")
+                                .child(Self::boolean_setting(
+                                    ConfigKey::PickerFocusSidebar,
+                                    "Focus sidebar for session and window pickers",
+                                    "Prefix + s and Prefix + w focus the sidebar instead of opening the picker.",
+                                    config::resolved_config(cx).picker_focus_sidebar,
+                                    cx,
+                                ))
+                                .child(Self::numeric_setting(
+                                    ConfigKey::WhichKeyDelay,
+                                    "Which-key delay",
+                                    "Milliseconds to wait after the prefix or a key table before \
+                                     showing its keys (0–2000). Set to 0 to turn it off.",
+                                    config::resolved_config(cx).which_key_delay,
+                                    &self.which_key_delay,
+                                    cx,
+                                )),
                         )
                         .child(self.mux_splits_section(cx))
                     })
@@ -2339,6 +2365,7 @@ fn refresh_settings_preview(key: ConfigKey, cx: &mut App) {
                 | ConfigKey::PaletteHostPrefix
                 | ConfigKey::PaletteShowKeys
                 | ConfigKey::PickerFocusSidebar
+                | ConfigKey::WhichKeyDelay
                 | ConfigKey::StatusShowSession
                 | ConfigKey::StatusBadges
                 | ConfigKey::StatusAgents
@@ -2448,6 +2475,7 @@ fn numeric_config_value(config: &AppConfig, key: ConfigKey) -> f32 {
         ConfigKey::ShadowStrength => config.shadow_strength.value,
         ConfigKey::WindowCornerRadius => config.window_corner_radius.value,
         ConfigKey::EditorFontSize => config.editor_font_size.value,
+        ConfigKey::WhichKeyDelay => config.which_key_delay.value,
         ConfigKey::UseSystemTitlebar
         | ConfigKey::PaletteWindowLayout
         | ConfigKey::PaletteHostPrefix

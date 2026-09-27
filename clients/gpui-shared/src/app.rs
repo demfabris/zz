@@ -589,7 +589,7 @@ impl AppShell {
             && self.connection.read(cx).connected
             && !event.keystroke.modifiers.platform
             && !event.keystroke.modifiers.function
-            && claims_daemon_prefix(core.mux_options(), core.prefix_armed(), &input)
+            && core.claims_prefix_input(&input)
         {
             if !event.is_held
                 && let Some(pane) = self.active_window(cx).map(|window| window.active_pane)
@@ -2850,22 +2850,6 @@ fn update_split_ratio(node: &mut zz_protocol::LayoutNode, split: zz_protocol::Sp
     }
 }
 
-fn claims_daemon_prefix(
-    options: &zz_protocol::MuxOptions,
-    armed: bool,
-    input: &zz_terminal::KeyInput,
-) -> bool {
-    let name = zz_protocol::input_key_name(input);
-    armed
-        || [
-            zz_protocol::MuxOptionKey::Prefix,
-            zz_protocol::MuxOptionKey::Prefix2,
-        ]
-        .into_iter()
-        .filter_map(|key| options.get(key))
-        .any(|option| zz_protocol::canonical_key(&option.value) == name.as_str())
-}
-
 fn pane_icon(kind: &PaneKindSnapshot) -> IconName {
     match kind {
         PaneKindSnapshot::Terminal => IconName::SquareTerminal,
@@ -3015,10 +2999,6 @@ fn unix_seconds() -> u64 {
 
 #[cfg(test)]
 mod prefix_tests {
-    use super::claims_daemon_prefix;
-    use zz_protocol::{MuxOptionKey, MuxOptionSource, MuxOptions};
-    use zz_terminal::{KeyAction, KeyCode, KeyInput, Modifiers};
-
     #[test]
     fn pane_drop_targets_follow_canvas_offset_and_pixel_aspect_ratio() {
         use gpui::{Bounds, point, px, size};
@@ -3102,67 +3082,5 @@ mod prefix_tests {
                 String::new()
             )
         );
-    }
-
-    fn input(character: char, control: bool, alt: bool) -> KeyInput {
-        KeyInput {
-            action: KeyAction::Press,
-            key: KeyCode::Character(character),
-            modifiers: Modifiers::new(false, control, alt, false),
-            text: Some(character.to_string().into_boxed_str()),
-            unshifted_codepoint: Some(character),
-        }
-    }
-
-    #[test]
-    fn prefix_capture_follows_both_live_options_and_armed_state() {
-        let mut options = MuxOptions::default();
-        options.set(
-            MuxOptionKey::Prefix,
-            "Ctrl-a",
-            MuxOptionSource::RuntimeCommand,
-        );
-        options.set(
-            MuxOptionKey::Prefix2,
-            "Alt-Space",
-            MuxOptionSource::RuntimeCommand,
-        );
-
-        assert!(claims_daemon_prefix(
-            &options,
-            false,
-            &input('a', true, false)
-        ));
-        assert!(claims_daemon_prefix(
-            &options,
-            false,
-            &input(' ', false, true)
-        ));
-        assert!(!claims_daemon_prefix(
-            &options,
-            false,
-            &input('b', true, false)
-        ));
-        assert!(!claims_daemon_prefix(
-            &options,
-            false,
-            &input('x', false, false)
-        ));
-        assert!(claims_daemon_prefix(
-            &options,
-            true,
-            &input('x', false, false)
-        ));
-
-        options.set(
-            MuxOptionKey::Prefix2,
-            "none",
-            MuxOptionSource::RuntimeCommand,
-        );
-        assert!(!claims_daemon_prefix(
-            &options,
-            false,
-            &input(' ', false, true)
-        ));
     }
 }

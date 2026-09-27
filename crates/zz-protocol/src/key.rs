@@ -1558,10 +1558,10 @@ impl KeyEngine {
 
     #[must_use]
     pub fn shown_table(&self, now: Instant) -> Option<(&str, bool)> {
-        if self.mode_table {
+        let table = self.table.as_deref()?;
+        if self.mode_table || matches!(table, "copy-mode" | "copy-mode-vi") {
             return None;
         }
-        let table = self.table.as_deref()?;
         if self.repeat_deadline.is_some_and(|deadline| now >= deadline) {
             return None;
         }
@@ -3813,7 +3813,7 @@ mod tests {
         assert_eq!(copy.shown_table(start), None);
         assert_eq!(copy.next_deadline(), None);
         copy.switch_client_table(Some("copy-mode".to_owned()));
-        assert_eq!(copy.shown_table(start), Some(("copy-mode", false)));
+        assert_eq!(copy.shown_table(start), None);
     }
 
     #[test]

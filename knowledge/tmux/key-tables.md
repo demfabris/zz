@@ -4,7 +4,7 @@ title: Key tables (key.rs)
 description: Root/prefix/copy-mode/chooser key resolution with the default C-b prefix and optional prefix2, canonical and shifted key encoding, bind/unbind, send-prefix (-2), numeric vi counts, pending jump-key capture, and wire publication of every table.
 resource: crates/zz-protocol/src/key.rs
 tags: [tmux, keys, bindings, prefix, copy-mode, choosers]
-timestamp: 2026-08-25T00:00:00Z
+timestamp: 2026-09-27T00:00:00Z
 ---
 
 # Cycle-16 checkpoint
@@ -224,6 +224,11 @@ The table has 77 bindings against the pin's 92, with `e` the one zz-only key; `D
 viewport choices behind these omissions. It also retains the text differences for `$`, `,`,
 `0` through `9`, and the tiled-only resize bindings `C-Up`, `C-Down`, `C-Left`, `C-Right`,
 `M-Up`, and `M-Left`. The numeric commands use `:N` instead of the pin's `:=N`.
+
+Every stock prefix key zz shares with the pin carries the pin's `-N` note except `r`, whose zz
+binding reloads the configuration instead of redrawing the client; `e` has a zz note too, so
+`C-b ?` lists all 77 bindings. `shared_prefix_keys_carry_the_pinned_notes` compares the notes with
+the `note` field that `compat/tmux-oracle.py` captures through `#{key_note}`.
 
 This default-key policy does not reinterpret imported bindings: explicit `split-window`,
 `choose-tree`, and `refresh-client` commands retain their own contracts.

@@ -653,6 +653,53 @@ pane_current_command, hooks), `compat/status-row.sh`, `compat/tui-indicators.sh`
 Expected: key tables 11-21% of every command and 59% of config replay; status/snapshots with no
 subscriber 52-53% with 10 panes printing; config 272 -> ~70 ms alone; flip CPU 24% -> 6-8%.
 
+As built (branch `perf/publish`), where it departs from the scope above:
+
+- Wire names are resolved on a binding's first snapshot and kept with the binding (`OnceLock`),
+  not at bind time, so client-side tables that never snapshot (which-key, chrome keymaps) pay
+  nothing. Config replay holds key-table publication on its thread
+  (`KeyTablePublishHold` in `replay_config_file_in_queue`), so a file with 300 `bind-key` lines
+  snapshots and publishes once, at the end of the outer command. The hello reuses the last
+  published snapshot while the generation matches.
+- The per-client check covers every Snapshot send, not only runtime-fact ones: the stamped
+  snapshot's postcard digest plus its generation, recorded by `publish_mux_snapshots`,
+  `send_attached` and `send_resync_inner`. A send whose content changed under an unchanged
+  generation bumps the tree generation first, so the GUI's `AppRevision` still sees a new one. A
+  split drag clears the dragging client's record, because the GUI drops its local layout
+  prediction only on a fresh Snapshot.
+- Pane events publish with a reason. A tree change (rename, title) runs `publish_snapshot`; a
+  runtime-fact-only change runs the stamped snapshot and status refresh only when
+  `MuxEngine::runtime_facts_reach_presentation` finds a template that reads runtime facts
+  (status, window-status, border, window-style and set-titles options; `@`, `E:`, `T:`, `O:` count
+  as reads), and refreshes open choose-trees. There is no scan cache: the scan borrows the option
+  tables and costs less than one status request. The status-interval tick re-stamps only when a
+  window label or border template follows the clock (`window_labels_follow_the_clock`: `%`,
+  `#(`, `t:`, `E:`, `T:`). A missed template degrades to tmux timing, the next tick or tree change.
+- The rename throttle covers renames driven by pane runtime facts only. Command-path renames
+  (select-pane, new-window, kill-pane, `set automatic-rename`) stay immediate, as the compat corpus
+  expects. It is an engine flag (`set_automatic_rename_throttle`) the daemon turns on, so zz-mux
+  unit tests keep immediate renames. Hook facts are built only when a rename is due.
+- The timer thread selects over the four unchanged deadline channels plus one `TimerCommand`
+  channel (Rename, PublishFlush). Silence and rename hook events run inline when no hook has
+  commands, else on a `zz-daemon-hooks` thread spawned on demand that exits when its queue is
+  empty, so FIFO order holds and an idle daemon has no extra thread.
+- The status sampler parks with no timeout when there is no subscriber, format monitor or armed
+  peer scan; `subscribe`, the end of every command and a pane's first foreground job wake it. The
+  peer scan is armed while a pane's foreground process group is not its shell, or a Claude state
+  is recorded. `RegistryCache` in claude_peers.rs re-reads a record only when its (mtime, size,
+  inode) changes and re-lists the directory only when the directory's stamp changes.
+
+Measured at `--quick` on a loaded host (load 7-26 on 16 CPUs) against the same binary before
+the lane: fixed service threads 9 -> 6 (main, async-io, signals, accept, timers, status);
+`cli.instr.display.p1` 10.8 -> 7.4 Minstr, `.p20` 29.2 -> 25.8; `chain5.p1` 20.4 -> 9.3;
+`config.instr.source_1000` 3645 -> 749 Minstr (51 ms wall); `chatty.instr_per_s.flip`
+2943 -> 1614 Minstr/s; `chatty.instr_per_s.hidden` 5281 -> 1906; `chatty.tty_kibps.hidden`
+161 -> 5-11 KiB/s; `idle.wakeups_per_s.p20` 1.2 -> 0.2. The 4-pane 300-line TUI workload stays
+under 12 Snapshots and 10 StatusChanged per 3 s
+(`a_busy_tiled_window_sends_few_snapshots_and_status_lines`). `chatty.cpu_pct.flip` is 12.6% at
+load 7-10; what is left on the flip path is the sysinfo lookup (W1-FOOTPRINT) and frames built
+with no view (W1-PANE).
+
 ## W1-FORMAT: lazy universe, option index (effort M)
 
 Scope:
@@ -1301,9 +1348,9 @@ deletes most wave-1 fallback paths anyway).
 | `ZZ_PERF_EAGER_FRAMES=1` | PANE | frames for every attached view plus the no-view fallback |
 | `ZZ_PERF_NO_COMPRESS=1` | PANE | no idle history compression |
 | `ZZ_PERF_ECHO_FASTPATH=0` | PANE | always wait `CONTENT_PUBLISH_STALENESS` |
-| `ZZ_PERF_EAGER_PUBLISH=1` | PUBLISH | runtime-fact and title changes publish synchronously; no subscriber early returns |
+| `ZZ_PERF_EAGER_PUBLISH=1` | PUBLISH | runtime-fact and title changes publish synchronously; no subscriber early returns; every Snapshot is sent even when a client already has it |
 | `ZZ_PERF_RENAME_THROTTLE=0` | PUBLISH | no 500 ms automatic-rename throttle |
-| `ZZ_PERF_PEER_SCAN=always` | PUBLISH | 1 Hz Claude peer scan as today |
+| `ZZ_PERF_PEER_SCAN=always` | PUBLISH | 1 Hz Claude peer scan as today, reading every record each tick; the status sampler ticks with no client |
 | `ZZ_PERF_EAGER_UNIVERSE=1` | FORMAT | full universe per expansion (also the differential oracle) |
 | `ZZ_PERF_ATTACH_DEDUP=0` | ATTACH | resync and Full enqueue as today |
 | `ZZ_PERF_READONLY_SKIP=0` | HOOKS | read-only commands take the before/after captures |

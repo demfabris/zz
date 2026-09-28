@@ -225,7 +225,6 @@ fn compressed_history_reads_back_whole() {
         text(&session.latest_viewport()).contains("ZZ_FILLED")
     });
     thread::sleep(super::COMPRESS_IDLE + Duration::from_millis(500));
-    let started = Instant::now();
     let capture = session
         .capture(super::CaptureOptions {
             start: super::CaptureBoundary::HistoryStart,
@@ -233,11 +232,6 @@ fn compressed_history_reads_back_whole() {
             ..super::CaptureOptions::default()
         })
         .expect("capture the whole history");
-    eprintln!(
-        "capture of {} compressed rows took {} us",
-        capture.lines().count(),
-        started.elapsed().as_micros()
-    );
     for row in [0, 1500, 2999] {
         assert!(
             capture.contains(&format!("compressed history row {row:05}")),

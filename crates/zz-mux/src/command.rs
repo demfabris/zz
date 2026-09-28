@@ -57,9 +57,9 @@ use crate::{
     terminfo::TtyTerm,
     tmux_options::{
         HOOK_NAMES, TmuxArrayValue, TmuxOption, TmuxOptionScope, TmuxStoredScalarKind,
-        exact_tmux_option, match_tmux_option, parse_tmux_option, tmux_option_format_is_flag,
-        tmux_option_is_hook, tmux_option_table_order, tmux_options, tmux_stored_array,
-        tmux_stored_scalar,
+        exact_tmux_option, match_tmux_option, parse_tmux_option, tmux_consumer_options,
+        tmux_option_format_is_flag, tmux_option_is_hook, tmux_option_table_order,
+        tmux_option_with_consumer, tmux_options, tmux_stored_array, tmux_stored_scalar,
     },
     valid_style,
 };
@@ -1879,8 +1879,8 @@ fn parse_format_option(input: &str) -> Option<(TmuxOption, FormatOptionIndex)> {
     } else {
         (input, FormatOptionIndex::Whole)
     };
-    let option = exact_tmux_option(name)?;
-    if !TMUX_OPTION_CONSUMERS.contains(&option.name) {
+    let (option, consumer) = tmux_option_with_consumer(name)?;
+    if !consumer {
         return None;
     }
     if matches!(
@@ -2644,11 +2644,7 @@ impl MuxEngine {
         scope: TmuxOptionScope,
         target: TmuxOptionTarget,
     ) {
-        for name in TMUX_OPTION_CONSUMERS {
-            let option = exact_tmux_option(name).expect("consumer option is catalogued");
-            if option.scope != scope {
-                continue;
-            }
+        for &option in tmux_consumer_options(scope) {
             if let Some(array) = self.format_option_array(target, option.name) {
                 values.insert(
                     option.name.to_owned(),

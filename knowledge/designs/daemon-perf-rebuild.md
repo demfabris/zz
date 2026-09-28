@@ -1048,7 +1048,10 @@ isolated daemon each, daemon Minstr per command: split 37.6 -> 21.2, empty split
 `echo.p99.idle` 0.68 -> 0.50 ms, `echo.p50.busy30` 3.84 -> 0.44 ms, `echo.p99.busy30` 17.7 -> 1.6
 ms. Throughput and attach measured against the pre-campaign binary in the same runs: detached
 ASCII 214-219 against 204-217 MB/s, unicode 101-102 against 98.5, attached 756-817 against
-722-755 ms (noise at load 7-8, the quick gate's single run read 188-194 at load 20);
+722-755 ms at load 7-8, and at the lane head under load 13-18 detached ASCII 210 and 174 against
+179 and 152, unicode 106 and 103 against 101 and 103, attached 910 against 960 and 962 ms (one
+more lane run read 1506 ms with a 6 s outlier while another fixture ran; the quick gate's single
+run read 179-194 at load 14-20);
 `attach.instr.p1` 120 against 122 Minstr, `.p4` 126.6 against 126.5, `attach.ttfc.p1` 18.8
 against 19.7 ms, `attach.wire_s2c.p4` 257 -> 204 KB.
 

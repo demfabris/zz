@@ -2,6 +2,7 @@ use std::{
     cell::Cell,
     collections::BTreeMap,
     fmt,
+    hash::{DefaultHasher, Hasher},
     path::{Path, PathBuf},
     str::FromStr,
 };
@@ -583,6 +584,36 @@ impl MuxSnapshot {
         self.focused_window
             .filter(|focused| session.windows.iter().any(|window| window.id == *focused))
             .unwrap_or(session.active_window)
+    }
+
+    #[must_use]
+    pub fn content_digest(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        let _ = postcard::serialize_with_flavor(
+            &(&self.sessions, &self.focused_window),
+            DigestFlavor(&mut hasher),
+        );
+        hasher.finish()
+    }
+}
+
+struct DigestFlavor<'a>(&'a mut DefaultHasher);
+
+impl postcard::ser_flavors::Flavor for DigestFlavor<'_> {
+    type Output = ();
+
+    fn try_push(&mut self, data: u8) -> postcard::Result<()> {
+        self.0.write_u8(data);
+        Ok(())
+    }
+
+    fn try_extend(&mut self, data: &[u8]) -> postcard::Result<()> {
+        self.0.write(data);
+        Ok(())
+    }
+
+    fn finalize(self) -> postcard::Result<Self::Output> {
+        Ok(())
     }
 }
 

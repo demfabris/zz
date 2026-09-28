@@ -410,6 +410,7 @@ struct PaintBuffers {
     kitty_below_bg: Vec<PositionedKittyImage>,
     backgrounds: Vec<PaintQuad>,
     overlays: Vec<PaintQuad>,
+    selection: Vec<Bounds<Pixels>>,
     box_connectors: Vec<TerminalGraphicPaint>,
     kitty_below_text: Vec<PositionedKittyImage>,
     cursor: Vec<PaintQuad>,
@@ -423,6 +424,7 @@ impl PaintBuffers {
         self.kitty_below_bg.clear();
         self.backgrounds.clear();
         self.overlays.clear();
+        self.selection.clear();
         self.box_connectors.clear();
         self.kitty_below_text.clear();
         self.cursor.clear();
@@ -442,6 +444,13 @@ pub struct PaintState {
     composition: Option<PositionedLine>,
     cell_width: Pixels,
     line_height: Pixels,
+}
+
+impl PaintState {
+    #[must_use]
+    pub fn selection_bounds(&self) -> &[Bounds<Pixels>] {
+        &self.buffers.selection
+    }
 }
 
 struct TextBatch {
@@ -1117,6 +1126,7 @@ impl RowRenderCache {
             line_height,
             scale,
             &mut buffers.overlays,
+            &mut buffers.selection,
         );
         let scrollbar =
             local_scroll_target.map_or(viewport.scrollbar, |target_offset| ScrollbarState {
@@ -1523,6 +1533,7 @@ fn collect_overlays(
     line_height: Pixels,
     scale: f32,
     output: &mut Vec<PaintQuad>,
+    selection: &mut Vec<Bounds<Pixels>>,
 ) -> Option<Bounds<Pixels>> {
     let mut link_hover_bounds = None;
     for span in viewport
@@ -1558,6 +1569,9 @@ fn collect_overlays(
             ),
             size(cell_width * end.saturating_sub(start), line_height),
         );
+        if span.kind() == OverlayKind::Selection {
+            selection.push(bounds);
+        }
         let mut quad = fill(bounds, overlay_color(span.kind(), appearance));
         if appearance.rounded_selection
             && span.kind() == OverlayKind::Selection
@@ -3436,6 +3450,7 @@ mod tests {
             px(19.0),
             1.0,
             &mut output,
+            &mut Vec::new(),
         );
 
         assert_eq!(output.len(), 3);
@@ -3478,6 +3493,7 @@ mod tests {
             px(19.0),
             1.0,
             &mut output,
+            &mut Vec::new(),
         );
 
         assert_eq!(

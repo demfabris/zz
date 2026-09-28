@@ -160,6 +160,13 @@ Each is upstream-able as a small Zed PR; if Zed merges an equivalent, drop it. I
     later changes. The first read happens while the platform is built (capped at 200 ms) so no
     frame is shaped in the fallback family first. `PlatformTextSystem::font_generation` tells
     `TextSystem` to drop resolved ids, and open windows force a redraw.
+34. Shader layers (`Window::paint_shader_layer`, `CustomShader`; `88d396491d`, `e01edb6b1a`). What the closure paints goes into
+    a nested `Scene` carried by one `ShaderLayer` primitive; the scene records start and end
+    operations, so layers nest and survive cached-view replay. Metal and wgpu draw the nested scene
+    into a window-sized texture, copy the layer's pixels into a layer-sized one, and run the
+    caller's WGSL fragment shader over the layer with premultiplied blending (Metal translates it to
+    MSL through naga). DirectX, and any backend whose compile fails, draws the content unshaded. The
+    wgpu headless renderer now uses Metal on macOS so the layer's pixel tests run there.
 
 WGPU window-frame antialiasing (`c8135f5b6b`) applies outer coverage once when a quad and the
 window mask have identical bounds, radii, and corner smoothing. Other intersections retain their

@@ -729,6 +729,9 @@ pub(crate) struct RetainedTerminalViewport {
     pub(crate) row_revisions: Box<[u64]>,
     pub(crate) row_revision_epoch: u64,
     pub(crate) revision_scratch: Vec<u16>,
+    /// Bumped each time a selection this pane served lands in the system
+    /// clipboard.
+    pub(crate) copy_generation: u64,
 }
 
 struct KittyCachedImage {
@@ -2402,6 +2405,7 @@ impl MuxClient {
     /// id zero too.
     fn write_clipboard(
         &self,
+        pane: PaneId,
         producer: ClipboardProducer,
         target: ClipboardTarget,
         text: String,
@@ -2412,6 +2416,17 @@ impl MuxClient {
         }
         let item = ClipboardItem::new_string(text);
         let empty_field = producer == ClipboardProducer::Server;
+        let lands_in_clipboard = match target {
+            ClipboardTarget::Clipboard => true,
+            ClipboardTarget::Primary => empty_field && self.set_clipboard_writes(),
+        };
+        if empty_field
+            && lands_in_clipboard
+            && let Some(retained) = self.viewports.get(&pane)
+        {
+            let mut retained = retained.write();
+            retained.copy_generation = retained.copy_generation.wrapping_add(1);
+        }
         match target {
             ClipboardTarget::Clipboard => cx.write_to_clipboard(item),
             ClipboardTarget::Primary => {
@@ -4208,11 +4223,12 @@ impl MuxClient {
                 cx.emit(ClientNotificationCleared { message_id });
             }
             CoreEvent::Clipboard {
+                pane,
                 producer,
                 target,
                 text,
                 ..
-            } => self.write_clipboard(producer, target, text, cx),
+            } => self.write_clipboard(pane, producer, target, text, cx),
             CoreEvent::OpenUri { pane, uri } => self.route_open_uri(pane, &uri, cx),
             CoreEvent::AgentCommand {
                 pane,
@@ -4867,6 +4883,7 @@ fn new_retained_viewport(
         row_revisions: row_revisions.into_boxed_slice(),
         row_revision_epoch: allocate_row_revision(next_row_revision),
         revision_scratch: Vec::new(),
+        copy_generation: 0,
     }
 }
 
@@ -10885,6 +10902,7 @@ mod tests {
             row_revisions: Box::new([10, 11, 12]),
             row_revision_epoch: 9,
             revision_scratch: Vec::new(),
+            copy_generation: 0,
         };
         let revision_address = retained.row_revisions.as_ptr();
         let mut next_revision = 20;

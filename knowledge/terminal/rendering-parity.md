@@ -4,7 +4,7 @@ title: Zed GPUI terminal rendering parity
 description: The effort to bring zz's terminal painting up to Zed's GPUI standard by mapping immutable renderer-neutral frames and dirty-row patches onto GPUI text, cursor, and overlay painting.
 resource: crates/zz-ui/src/terminal.rs
 tags: [rendering, gpui, zed, parity, cursor, ime, contrast, box-drawing, block-elements, local-scroll]
-timestamp: 2026-09-25T00:00:00Z
+timestamp: 2026-09-27T00:00:00Z
 ---
 
 # Overview
@@ -154,10 +154,36 @@ a 1px underline; the candidate window follows the composition bounds.
 Paint order: (1) terminal surface, (2) non-default cell backgrounds, (3) selection / search / link-hover /
 copy-mode highlights, (4) box/block cell geometry, (5) cached text runs + decorations, (6) normal cursor,
 (7) IME-masked base/selection glyphs then marked text, (8) hovered-link and terminal-mode presentation.
+While a copy shimmer runs, all eight go through one shader layer.
+
+# Shader layers and the copy flash
+
+`Window::paint_shader_layer` (a carried [gpui patch](/references/gpui-revision.md)) draws what a
+closure paints into a texture and composites it through a WGSL fragment shader. zz writes its
+terminal shaders in Ghostty's Shadertoy dialect: `crates/zz/src/terminal/shaders/prelude.glsl` holds
+Ghostty's uniform block (with `iChannelTime` as a `vec4`, since WGSL rejects float arrays in uniforms)
+plus zz fields `iCellSize`, `iTimeCopy`, `iCopyRectCount`, and `iCopyRects[16]`. naga translates
+GLSL to WGSL (`terminal/shader.rs`), and uniform bytes are written at the offsets naga reports for
+the translated block, so the Rust side never hand-computes std140. Coordinates are y-down, as in
+Ghostty on Metal; `iResolution` comes from the input texture's size. All 46 shaders in two community
+collections translated when this landed.
+
+The copy flash is the first user. `MuxClient` bumps `RetainedTerminalViewport::copy_generation` when
+a server-produced selection lands in the system clipboard (copy-mode yank, `Cmd-C`, and
+copy-on-select, which writes the clipboard on macOS unless `set-clipboard` is `off`; an application's
+OSC 52 never counts). The view flashes the selection it last painted if it is still visible or
+cleared under 500 ms ago, and keeps following the painted selection while the flash runs: the copy
+can arrive before the frame that shows a drag's final extent. Stacked rows with the same span merge,
+and the shader unions the rest smoothly. The effect is one pass of a shimmer: a slanted band sweeps
+the selection's bounds left to right over 0.55 s (`COPY_FLASH_SECONDS`, injected into the GLSL as
+`FLASH_SECONDS`). Under the band, pixels that match neither the selection nor the terminal
+background are pushed away from it, so glyphs brighten on a dark selection and darken on a light
+one, and the background gets a soft sheen with a faint glow past the edge. Frames are requested only
+while it runs.
 
 # Non-goals
 
-No Ghostty custom shaders or GPU renderer; no Sixel / iTerm images; no settings UI; text
+No GPU renderer of our own; no Sixel / iTerm images; no settings UI; text
 blink is preserved in the model but not painted this milestone.
 
 # Related

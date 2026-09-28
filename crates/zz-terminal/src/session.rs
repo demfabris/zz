@@ -6263,18 +6263,21 @@ fn run_terminal(
                         let _ = refresh_view_search(&terminal, view, state, &mut search_worker)?;
                         sync_viewport_anchor(&terminal, state)?;
                     }
-                    publish_active_views(
-                        &mut terminal,
-                        publisher,
-                        &mut frames,
-                        SnapshotChange::View,
-                        &mut active_views,
-                        &word_separators,
-                        SessionStatus::Running,
-                    )?;
+                    if frames.shows(view, &active_views) {
+                        publish_active_views(
+                            &mut terminal,
+                            publisher,
+                            &mut frames,
+                            SnapshotChange::View,
+                            &mut active_views,
+                            &word_separators,
+                            SessionStatus::Running,
+                        )?;
+                    }
                 }
                 Command::DetachView(view) => {
                     search_worker.cancel(view);
+                    let shown = frames.shows(view, &active_views);
                     deactivate_view(
                         &mut terminal,
                         view,
@@ -6282,20 +6285,25 @@ fn run_terminal(
                         &mut inactive_views,
                         &word_separators,
                     )?;
-                    publish_active_views(
-                        &mut terminal,
-                        publisher,
-                        &mut frames,
-                        SnapshotChange::View,
-                        &mut active_views,
-                        &word_separators,
-                        SessionStatus::Running,
-                    )?;
+                    if shown {
+                        publish_active_views(
+                            &mut terminal,
+                            publisher,
+                            &mut frames,
+                            SnapshotChange::View,
+                            &mut active_views,
+                            &word_separators,
+                            SessionStatus::Running,
+                        )?;
+                    }
                 }
                 Command::ReleaseView(view) => {
                     search_worker.forget(view);
+                    let shown = frames.shows(view, &active_views);
                     frames.forget_view(view);
-                    if release_view(&mut terminal, view, &mut active_views, &mut inactive_views)? {
+                    if release_view(&mut terminal, view, &mut active_views, &mut inactive_views)?
+                        && shown
+                    {
                         publish_active_views(
                             &mut terminal,
                             publisher,
@@ -14241,6 +14249,14 @@ impl<'alloc> Frames<'alloc> {
             state.epoch = state.epoch.wrapping_add(1);
         }
         restart
+    }
+
+    fn shows(&self, view: TerminalViewId, active: &ActiveTerminalViews) -> bool {
+        self.streaming(view)
+            || self.published.contains(&view)
+            || active
+                .get(&view)
+                .is_some_and(|state| state.copy_mode.is_some())
     }
 
     fn forget_view(&mut self, view: TerminalViewId) {

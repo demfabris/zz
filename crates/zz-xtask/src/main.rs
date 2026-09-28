@@ -28,10 +28,6 @@ const BUNDLE_VERSION_KEY: &str = "CFBundleVersion";
 #[cfg(target_os = "macos")]
 const PROFILING_PROFILE: &str = "profiling";
 #[cfg(target_os = "macos")]
-const GHOSTTY_OPTIMIZE_ENV: &str = "LIBGHOSTTY_VT_SYS_OPTIMIZE";
-#[cfg(target_os = "macos")]
-const GHOSTTY_RELEASE_FAST: &str = "ReleaseFast";
-#[cfg(target_os = "macos")]
 const MACOS_HELPER_NAME: &str = "zz_helper";
 #[cfg(target_os = "macos")]
 const MACOS_CEF_FRAMEWORK: &str = "Contents/Frameworks/Chromium Embedded Framework.framework";
@@ -151,12 +147,6 @@ impl BuildProfile {
     #[cfg(target_os = "macos")]
     fn is_named(&self, expected: &str) -> bool {
         matches!(self, Self::Named(profile) if profile == expected)
-    }
-
-    #[cfg(target_os = "macos")]
-    fn ghostty_optimize_override(&self) -> Option<&'static str> {
-        self.is_named(PROFILING_PROFILE)
-            .then_some(GHOSTTY_RELEASE_FAST)
     }
 }
 
@@ -676,10 +666,6 @@ fn build_macos_binaries(
     profile.configure_cargo(&mut command);
     if let Some(features) = merged_features(features) {
         command.arg("--features").arg(features);
-    }
-    if let Some(optimize_mode) = profile.ghostty_optimize_override() {
-        command.env(GHOSTTY_OPTIMIZE_ENV, optimize_mode);
-        println!("Building libghostty-vt with Zig {optimize_mode} for profiling parity...");
     }
     command
         .args([
@@ -1371,16 +1357,6 @@ mod option_tests {
             parse_bundle_options(&arguments(&["--profile"])),
             Err("--profile requires a name".to_owned())
         );
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn profiling_profile_keeps_release_fast_ghostty() {
-        assert_eq!(
-            BuildProfile::Named("profiling".to_owned()).ghostty_optimize_override(),
-            Some("ReleaseFast")
-        );
-        assert_eq!(BuildProfile::Release.ghostty_optimize_override(), None);
     }
 }
 

@@ -41,7 +41,7 @@ block2 = "0.6.2"
 cargo_metadata = "0.23.1"
 cbc = "=0.2.1"
 cef = { version = "=154.0.0", features = ["accelerated_osr"] }
-chrono = "0.4.45"
+chrono = { version = "0.4.45", default-features = false }
 core-foundation = "=0.10.1"
 core-video = "=0.5.2"
 crossbeam-channel = "0.5.17"

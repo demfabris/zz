@@ -694,7 +694,7 @@ Process-wide `--verbose`/`--zz-verbose-log` wiring shared by every mode above: `
 with per-target filters (terse `NORMAL_FILTER` vs. exhaustive `VERBOSE_FILTER` covering
 `zz`/`zz_browser`/`zz_daemon`/`zz_terminal`/`zz_mux`/`cef`/`gpui`/`wgpu`), a panic hook that logs a
 captured backtrace before delegating to the previous hook, a background process/process-tree
-resource sampler (`sysinfo`, every 2s), and a periodic app-state sampler that calls
+resource sampler (`zz_daemon::process_info`, every 2s), and a periodic app-state sampler that calls
 `log_diagnostic_snapshot` on both `MuxClient` and `BrowserController` (every 5s, plus on
 `"startup"`/`"shutdown"`). `process_role()` labels every log line by process kind
 (`app`/`daemon`/`command`/`cef-<type>`) so a single shared verbose log file can be filtered by

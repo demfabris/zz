@@ -92,7 +92,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=GHOSTTY_ZIG_SYSTEM_DIR");
     println!("cargo:rerun-if-env-changed=TARGET");
     println!("cargo:rerun-if-env-changed=HOST");
-    println!("cargo:rerun-if-env-changed=DEBUG");
+    println!("cargo:rerun-if-env-changed=PROFILE");
     println!("cargo:rerun-if-env-changed=OPT_LEVEL");
     println!("cargo:rerun-if-changed=build.rs");
 
@@ -378,13 +378,14 @@ fn emit_include_metadata(include_paths: &[PathBuf]) {
 /// values are the four Zig `OptimizeMode` names (`Debug`, `ReleaseSafe`, `ReleaseFast`,
 /// `ReleaseSmall`).
 ///
-/// Defaults to `ReleaseFast` for optimized builds. If `DEBUG` is `true` (as cargo sets for the
-/// `dev` profile), `ReleaseSafe` is used: it keeps Zig's runtime safety checks (the terminal
-/// integrity assertions) while avoiding an unoptimized per-byte VT state machine, which parses
-/// roughly 6x slower and blows the daemon's 2s command budgets under test load. Anyone actually
-/// debugging the VT engine can still get an unoptimized build with
-/// `LIBGHOSTTY_VT_SYS_OPTIMIZE=Debug`. Otherwise, if `OPT_LEVEL` is `s` or `z`, `ReleaseSmall`
-/// is used.
+/// Follows the cargo profile family, not whether the profile carries debug info: `PROFILE` `debug`
+/// (the `dev` and `test` profiles and anything inheriting them) builds `ReleaseSafe`, which keeps
+/// Zig's runtime safety checks (the terminal integrity assertions) while avoiding an unoptimized
+/// per-byte VT state machine that parses roughly 6x slower. Release-family profiles build
+/// `ReleaseSmall` at `OPT_LEVEL` `s` or `z` and `ReleaseFast` otherwise, so profiles that only add
+/// debug info to a release build (`profiling`, `testflight`) get the shipped VT engine. Anyone
+/// actually debugging the VT engine can still get an unoptimized build with
+/// `LIBGHOSTTY_VT_SYS_OPTIMIZE=Debug`.
 fn zig_optimize_mode() -> &'static str {
     if let Ok(override_mode) = env::var("LIBGHOSTTY_VT_SYS_OPTIMIZE") {
         return match override_mode.as_str() {
@@ -398,7 +399,7 @@ fn zig_optimize_mode() -> &'static str {
         };
     }
 
-    if env::var("DEBUG").as_deref() == Ok("true") {
+    if env::var("PROFILE").as_deref() == Ok("debug") {
         return "ReleaseSafe";
     }
 

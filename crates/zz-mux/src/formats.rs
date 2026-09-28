@@ -2,7 +2,7 @@ use std::{
     borrow::Cow, cell::OnceCell, cmp::Ordering, collections::BTreeMap, fmt::Write as _, sync::Arc,
 };
 
-use chrono::{Datelike as _, Local, TimeZone as _};
+use chrono::{DateTime, Datelike as _, FixedOffset};
 use glob::{MatchOptions, Pattern};
 use regex::{Captures, RegexBuilder};
 use unicode_width::UnicodeWidthChar as _;
@@ -1755,7 +1755,7 @@ impl CommandHooks {
 impl StatusHooks for CommandHooks {
     fn strftime(&mut self, literal: &str) -> String {
         self.now
-            .and_then(|now| Local.timestamp_opt(now, 0).single())
+            .and_then(crate::localtime::local_time)
             .map_or_else(String::new, |now| format_datetime(&now, literal))
     }
 
@@ -4966,7 +4966,7 @@ fn format_time_value(value: &str, flags: &TimeFlags<'_>, now: Option<i64>) -> St
     if flags.pretty {
         return now.map_or_else(String::new, |now| pretty_time(timestamp, now));
     }
-    let Some(time) = Local.timestamp_opt(timestamp, 0).single() else {
+    let Some(time) = crate::localtime::local_time(timestamp) else {
         return String::new();
     };
     format_datetime(&time, flags.format.unwrap_or("%a %b %e %H:%M:%S %Y"))
@@ -4975,10 +4975,10 @@ fn format_time_value(value: &str, flags: &TimeFlags<'_>, now: Option<i64>) -> St
 fn pretty_time(timestamp: i64, now: i64) -> String {
     let effective_now = now.max(timestamp);
     let age = effective_now.saturating_sub(timestamp);
-    let Some(time) = Local.timestamp_opt(timestamp, 0).single() else {
+    let Some(time) = crate::localtime::local_time(timestamp) else {
         return String::new();
     };
-    let Some(now) = Local.timestamp_opt(effective_now, 0).single() else {
+    let Some(now) = crate::localtime::local_time(effective_now) else {
         return String::new();
     };
     let format = if age < 24 * 3600 {
@@ -5030,7 +5030,7 @@ fn relative_time(timestamp: i64, now: i64) -> String {
     }
 }
 
-fn format_datetime(time: &chrono::DateTime<Local>, format: &str) -> String {
+fn format_datetime(time: &DateTime<FixedOffset>, format: &str) -> String {
     let Ok(items) = chrono::format::StrftimeItems::new(format).parse() else {
         return String::new();
     };

@@ -10,14 +10,14 @@ use std::{
 #[cfg(any(feature = "daemon", test))]
 use std::{fs::OpenOptions, io::Write};
 
-use sysinfo::{
-    Pid, Process, ProcessRefreshKind, ProcessesToUpdate, Signal, System, get_current_pid,
-};
 use thiserror::Error;
 #[cfg(any(feature = "daemon", test))]
 use zz_protocol::PROTOCOL_VERSION;
 
-use crate::transport::{LocalTransport, PeerCredentials, Transport};
+use crate::{
+    process_info::{self, ProcessRecord},
+    transport::{LocalTransport, PeerCredentials, Transport},
+};
 
 const IDENTITY_MAGIC_V1: &str = "zz-daemon-identity-v1";
 const IDENTITY_MAGIC_V2: &str = "zz-daemon-identity-v2";
@@ -38,19 +38,12 @@ struct IdentityRecord {
 impl IdentityRecord {
     #[cfg(any(feature = "daemon", test))]
     fn current() -> io::Result<Self> {
-        let pid = get_current_pid().map_err(io::Error::other)?;
-        let mut system = System::new();
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[pid]),
-            true,
-            ProcessRefreshKind::nothing(),
-        );
-        let process = system
-            .process(pid)
+        let pid = std::process::id();
+        let start_time = process_info::start_time(pid)
             .ok_or_else(|| io::Error::other(format!("could not inspect current process {pid}")))?;
         Ok(Self {
-            pid: pid.as_u32(),
-            start_time: process.start_time(),
+            pid,
+            start_time,
             protocol_version: Some(PROTOCOL_VERSION),
         })
     }
@@ -194,35 +187,28 @@ pub fn terminate_incompatible_daemon(
 
     let identity = read_identity_file(socket_path)?;
     let pid = select_target_pid(peer, identity.as_ref())?;
-    let process_pid = Pid::from_u32(pid);
-    let current_pid = get_current_pid().map_err(io::Error::other)?;
-    if process_pid == current_pid {
+    let current_pid = std::process::id();
+    if pid == current_pid {
         return Err(DaemonRecoveryError::UnsafeTarget(
             "the daemon socket resolves to the current client process".to_owned(),
         ));
     }
 
-    let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::Some(&[current_pid, process_pid]),
-        true,
-        ProcessRefreshKind::everything(),
-    );
-    let current = system.process(current_pid).ok_or_else(|| {
+    let current = process_info::record(current_pid).ok_or_else(|| {
         DaemonRecoveryError::UnsafeTarget("could not inspect the current process".to_owned())
     })?;
-    let target = system.process(process_pid).ok_or_else(|| {
+    let target = process_info::record(pid).ok_or_else(|| {
         DaemonRecoveryError::UnsafeTarget(format!("daemon pid {pid} is not running"))
     })?;
 
-    validate_target_process(current, target, peer, identity.as_ref())?;
-    let start_time = target.start_time();
-    if !request_termination(target) {
+    validate_target_process(&current, &target, peer, identity.as_ref())?;
+    let start_time = target.start_time;
+    if !process_info::terminate(pid) {
         return Err(DaemonRecoveryError::TerminationRejected(pid));
     }
     drop(stream);
 
-    wait_for_process_exit(&mut system, process_pid, start_time)
+    wait_for_process_exit(pid, start_time)
         .then_some(())
         .ok_or(DaemonRecoveryError::Timeout(pid))?;
 
@@ -263,41 +249,38 @@ fn select_target_pid(
 }
 
 fn validate_target_process(
-    current: &Process,
-    target: &Process,
+    current: &ProcessRecord,
+    target: &ProcessRecord,
     peer: PeerCredentials,
     identity: Option<&IdentityFile>,
 ) -> Result<(), DaemonRecoveryError> {
-    if !daemon_executable_and_command_match(target.exe(), target.cmd()) {
+    if !daemon_executable_and_command_match(target.executable.as_deref(), &target.arguments) {
         return Err(DaemonRecoveryError::UnsafeTarget(format!(
             "socket owner pid {} is not a zz daemon",
-            target.pid()
+            target.pid
         )));
     }
 
     #[cfg(unix)]
     {
-        let current_user = current.effective_user_id().or_else(|| current.user_id());
-        let target_user = target.effective_user_id().or_else(|| target.user_id());
-        if current_user.is_none() || current_user != target_user {
+        if current.owner.is_none() || current.owner != target.owner {
             return Err(DaemonRecoveryError::UnsafeTarget(
                 "daemon and client process owners do not match".to_owned(),
             ));
         }
-        if let Some(peer_user) = peer.effective_user_id {
-            let target_user = target_user.expect("target user checked above");
-            if **target_user != peer_user {
-                return Err(DaemonRecoveryError::UnsafeTarget(
-                    "socket peer owner does not match the daemon process owner".to_owned(),
-                ));
-            }
+        if let Some(peer_user) = peer.effective_user_id
+            && target.owner != Some(peer_user)
+        {
+            return Err(DaemonRecoveryError::UnsafeTarget(
+                "socket peer owner does not match the daemon process owner".to_owned(),
+            ));
         }
     }
 
     #[cfg(windows)]
     {
         let _ = peer;
-        if let (Some(current_user), Some(target_user)) = (current.user_id(), target.user_id())
+        if let (Some(current_user), Some(target_user)) = (&current.owner, &target.owner)
             && current_user != target_user
         {
             return Err(DaemonRecoveryError::UnsafeTarget(
@@ -306,7 +289,7 @@ fn validate_target_process(
         }
     }
 
-    validate_identity_start_time(identity, target.pid().as_u32(), target.start_time())?;
+    validate_identity_start_time(identity, target.pid, target.start_time)?;
     Ok(())
 }
 
@@ -352,25 +335,10 @@ fn daemon_executable_name_matches(name: &OsStr) -> bool {
     }
 }
 
-#[cfg(unix)]
-fn request_termination(process: &Process) -> bool {
-    process.kill_with(Signal::Term) == Some(true)
-}
-
-#[cfg(windows)]
-fn request_termination(process: &Process) -> bool {
-    // Windows has no SIGTERM equivalent in sysinfo.
-    process.kill_with(Signal::Kill) == Some(true)
-}
-
-fn wait_for_process_exit(system: &mut System, pid: Pid, start_time: u64) -> bool {
+fn wait_for_process_exit(pid: u32, start_time: u64) -> bool {
     let deadline = Instant::now() + TERMINATION_TIMEOUT;
     loop {
-        system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
-        if system
-            .process(pid)
-            .is_none_or(|process| process.start_time() != start_time)
-        {
+        if process_info::start_time(pid) != Some(start_time) {
             return true;
         }
         if Instant::now() >= deadline {
@@ -586,7 +554,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn process_exit_wait_removes_exited_process_from_cached_snapshot() {
+    fn process_exit_wait_returns_once_the_child_is_reaped() {
         use std::process::{Command, Stdio};
 
         let mut child = Command::new("sh")
@@ -596,15 +564,14 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        let pid = Pid::from_u32(child.id());
-        let mut system = System::new_all();
-        let start_time = system.process(pid).unwrap().start_time();
+        let pid = child.id();
+        let start_time = process_info::start_time(pid).unwrap();
 
         drop(child.stdin.take());
         child.wait().unwrap();
 
-        assert!(wait_for_process_exit(&mut system, pid, start_time));
-        assert!(system.process(pid).is_none());
+        assert!(wait_for_process_exit(pid, start_time));
+        assert_eq!(process_info::start_time(pid), None);
     }
 
     #[test]

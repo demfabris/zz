@@ -304,18 +304,36 @@ fn configure_application_working_directory() {
 }
 #[cfg(not(windows))]
 const MI_OPTION_PURGE_DELAY: std::ffi::c_int = 15;
+#[cfg(target_os = "macos")]
+const MI_OPTION_OS_TAG: std::ffi::c_int = 18;
+#[cfg(target_os = "macos")]
+const MI_DEFAULT_OS_TAG: std::ffi::c_long = 100;
+#[cfg(target_os = "macos")]
+const ALLOCATOR_OS_TAG: std::ffi::c_long = 241;
+#[cfg(not(windows))]
+const DAEMON_PURGE_DELAY_MS: std::ffi::c_long = 0;
 
 #[cfg(not(windows))]
 #[allow(unsafe_code)]
 unsafe extern "C" {
+    #[cfg(target_os = "macos")]
+    fn mi_option_get(option: std::ffi::c_int) -> std::ffi::c_long;
     fn mi_option_set(option: std::ffi::c_int, value: std::ffi::c_long);
+}
+
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
+pub extern "C" fn tag_allocator_memory() {
+    if unsafe { mi_option_get(MI_OPTION_OS_TAG) } == MI_DEFAULT_OS_TAG {
+        unsafe { mi_option_set(MI_OPTION_OS_TAG, ALLOCATOR_OS_TAG) };
+    }
 }
 
 #[cfg(not(windows))]
 #[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
 fn purge_freed_memory_promptly() {
     if std::env::var_os("MIMALLOC_PURGE_DELAY").is_none() {
-        unsafe { mi_option_set(MI_OPTION_PURGE_DELAY, 0) };
+        unsafe { mi_option_set(MI_OPTION_PURGE_DELAY, DAEMON_PURGE_DELAY_MS) };
     }
 }
 

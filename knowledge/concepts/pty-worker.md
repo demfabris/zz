@@ -135,10 +135,12 @@ previous.retain(|view, _| active.contains(view));     // a view that went away d
 Before diffing, the watcher calls `synchronize_pane_runtime` to update pane facts. Its
 `terminal_working_directory` lookup queries the foreground PID on each publication: a shell can
 change directory without changing PID. On macOS it calls `proc_pidinfo(PROC_PIDVNODEPATHINFO)` and
-reads the physical cwd from the returned vnode data. This avoids a system-wide process scan and
-Rayon scheduling for each terminal frame. Linux keeps the sysinfo lookup. The physical cwd remains
-separate from the path reported through OSC 7. These functions live in
-`crates/zz-daemon/src/daemon.rs`.
+reads the physical cwd from the returned vnode data; Linux reads the `/proc/<pid>/cwd` link.
+`terminal_current_command` names the same PID by its exec path basename on macOS (one
+`KERN_PROCARGS2` sysctl, skipped while the process's exec generation is unchanged) and by
+`/proc/<pid>/comm` on Linux. Neither scans the process table. The physical cwd remains
+separate from the path reported through OSC 7. The wrappers live in
+`crates/zz-daemon/src/daemon.rs`, the lookups in `crates/zz-daemon/src/process_info.rs`.
 
 Title sync and exit detection ride whichever frames exist. Each frame's title goes through
 `synchronize_pane_title`, and an `Exited` status on any of them closes the pane through

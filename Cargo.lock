@@ -11606,7 +11606,6 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
- "sysinfo 0.39.6",
  "tempfile",
  "windows 0.62.2",
  "zz-config",
@@ -11744,6 +11743,7 @@ version = "0.14.0"
 dependencies = [
  "chrono",
  "glob",
+ "libc",
  "nix 0.31.3",
  "parking_lot",
  "regex",

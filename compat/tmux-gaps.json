@@ -1,7 +1,7 @@
 {
   "schema": 3,
   "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
-  "updated_on": "2026-09-24",
+  "updated_on": "2026-09-28",
   "gaps": [
     {
       "id": "aliases.remote-client-preflight",
@@ -504,6 +504,34 @@
       ],
       "depends_on": [],
       "reason": "Unlike cursor_flag, which formats.terminal-runtime already declares an explicit zz placeholder, pane_current_command is a backed format with a real value, so nothing on the books covers this divergence. Found by the TUI-018 verifying review on 2026-09-19 and confirmed identical on the pre-fix binary, so it is pre-existing and was not introduced by the caller-stream pass. It produces no recorded entry in compat/tui-client-commands.sh, so it blocks neither TUI-018 nor TUI-011. Left open rather than accepted because whether zz matches the pin here is fabrico's call, not the gate's. Filed as a semantic item rather than a format: item: crates/zz-mux/src/compat_manifest_tests.rs asserts that every tracked format: item names a constant-backed placeholder, and pane_current_command is genuinely backed, so the divergence is in its semantics for a process-less pane and not in the variable being unbacked."
+    },
+    {
+      "id": "formats.pane-current-command-exec-path",
+      "title": "Name the foreground process by its exec path, not the kernel comm",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
+      "impact": [
+        "daily",
+        "scripts"
+      ],
+      "owner": "daemon",
+      "items": [
+        "semantic:pane-current-command-exec-path"
+      ],
+      "evidence": [
+        "resource:crates/zz-daemon/src/process_info.rs",
+        "resource:crates/zz-daemon/src/daemon/process_facts_tests.rs",
+        "resource:knowledge/designs/daemon-perf-rebuild.md"
+      ],
+      "acceptance": [
+        "#{pane_current_command} names the foreground process group leader of the pane's tty. On macOS zz answers the basename of the exec path the kernel recorded for that process (KERN_PROCARGS2), falling back to the basename of proc_pidpath when the arguments are unreadable; on Linux it answers /proc/<pgrp>/comm, the same task comm as the second field of /proc/<pgrp>/stat. The pin answers pbsi_comm from PROC_PIDT_SHORTBSDINFO on macOS (osdep-darwin.c osdep_get_name) and the first NUL-terminated field of /proc/<pgrp>/cmdline on Linux (osdep-linux.c osdep_get_name).",
+        "A binary started through a symlink keeps the name it was started by: with claude a symlink to versions/2.1.99, zz answers claude where the pin on macOS answers 2.1.99, and automatic-rename names the window claude.",
+        "The values are the ones sysinfo 0.39.6 returned before the daemon dropped it on 2026-09-28, so this records long-standing behavior rather than a new difference."
+      ],
+      "depends_on": [],
+      "reason": "The default @agent-progress-commands value is claude, and synchronize_pane_progress matches it against #{pane_current_command}. The Claude Code installer links claude to a versioned binary, so pbsi_comm reads the version string (measured: 2.1.99) and would break agent-state tracking and rename windows to the version. The exec path basename is the name the user typed. The same split shows on hosts that put Homebrew coreutils' gnubin first on PATH, where sleep links to gsleep: smoke/plugin-runtime-continuum then saves sleep on zz and gsleep on the pin, the only divergence that row shows there. Two smaller differences follow: macOS names longer than 16 bytes are not truncated in zz, and Linux names come from comm (at most 15 bytes, the exec filename) rather than argv0. Adopting the pin's argv0 on Linux was considered and not taken. The lookup reads only the one process asked about, with no scan of the process table; the regression test is daemon::process_facts_tests::a_symlinked_agent_binary_keeps_its_invoked_name."
     },
     {
       "id": "formats.pane-runtime",
@@ -1535,6 +1563,35 @@
       ],
       "depends_on": [],
       "reason": "The acceptance had asked for one atomic terminal action that trims cursor-derived history, advances the cursor, and no-ops in pane mode. Read against the pin on 2026-09-02: cmd_resize_pane_exec's -T branch returns immediately when the pane holds any mode, then takes `adjust = screen_size_y(&wp->base) - 1 - wp->base.cy` clamped to the history size, calls grid_remove_history(gd, adjust) and adds adjust to wp->base.cy. grid_remove_history frees the last adjust lines of the whole grid, the blank rows below the cursor, and then shrinks hsize by the same count, so the visible window slides up into the scrollback: the screen gains adjust rows of history at the top, loses the blank rows at the bottom, the cursor ends on the last screen row, and history_size drops by adjust. That is grid surgery, not a VT operation. libghostty's terminal API is vt_write, resize, reset, scroll_viewport and readers; scroll_viewport moves what is displayed and never moves a row between the scrollback and the active grid, and nothing else can remove history rows or pull them back in. Resizing the terminal down and up again would come close on ghostty's reflow rules, but the geometry is the mux's to own and the round trip would send the child two spurious SIGWINCHes, so it is not the same operation. zz therefore keeps refusing the flag with `unsupported command: resize-pane -T` rather than accepting it as a no-op, because the pin's -T is visible in capture-pane and a silent no-op would be the worse divergence. Reopen if libghostty grows a scrollback API that can move rows across the active-grid boundary."
+    },
+    {
+      "id": "terminal.shell-integration-prompt-title",
+      "title": "Keep a pane title set with select-pane -T across the next prompt",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "next",
+      "ease": "easy",
+      "impact": [
+        "daily",
+        "scripts"
+      ],
+      "owner": "terminal",
+      "items": [
+        "semantic:shell-integration-prompt-title"
+      ],
+      "evidence": [
+        "resource:crates/zz-terminal/assets/shell-integration/bash/zz-integration.bash",
+        "resource:crates/zz-terminal/assets/shell-integration/zsh/zz-integration.zsh",
+        "resource:crates/zz-terminal/assets/shell-integration/powershell/zz-integration.ps1",
+        "resource:compat/scenarios/smoke/plugin-runtime-resurrect-restore.txt"
+      ],
+      "acceptance": [
+        "Measured by the W1-FOOTPRINT review on 2026-09-28 with default-shell /opt/homebrew/bin/bash: `new-window -d \\; select-pane -t :1 -T mytitle`, then #{pane_title} read at once, after the first prompt and after the second. zz answers mytitle, bash, bash; pinned tmux d77c9dc6 answers mytitle three times.",
+        "The cause is zz's own shell integration, not the mux: bash __zz_title_precmd, zsh's precmd hook and PowerShell's prompt function write OSC 2 with the shell name at every prompt, and the preexec hooks write the command name. The pin carries no shell integration, so a stock shell leaves the title alone.",
+        "A fix keeps an explicitly set title until the user or the program running in the pane changes it, and smoke/plugin-runtime-resurrect-restore passes again with the restored panes running bash instead of default-shell /bin/sh."
+      ],
+      "depends_on": [],
+      "reason": "Found by the W1-FOOTPRINT review. tmux-resurrect's restore.sh sets each pane title with select-pane -T right after creating the pane, so under bash, zsh or PowerShell with zz's integration a restore loses the titles whenever the shell prints its first prompt after the title lands. The faster command client in W1-FOOTPRINT made that order the common one: smoke/plugin-runtime-resurrect-restore went red on zz in 3 of 5 runs, and it now restores under default-shell /bin/sh, which has no integration, so it keeps testing the restore itself. This entry is the record of the divergence that change stopped exercising. Left open because whether the integration should stop titling, title only when the title is still the one it wrote, or leave titles to an option is fabrico's call."
     }
   ],
   "closed": [

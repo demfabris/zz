@@ -53,7 +53,7 @@ use crate::{
         SessionOptions, WindowOption, WindowOptions,
     },
     layout::{CellLayout, PANE_MAXIMUM},
-    model::{DEFAULT_WINDOW_EXTENT, NO_MARKED_TARGET, fnmatch, is_marked_target},
+    model::{DEFAULT_WINDOW_EXTENT, GlobPattern, NO_MARKED_TARGET, is_marked_target},
     terminfo::TtyTerm,
     tmux_options::{
         HOOK_NAMES, TmuxArrayValue, TmuxOption, TmuxOptionScope, TmuxStoredScalarKind,
@@ -15805,15 +15805,35 @@ fn session_creation_environment(options: &Options) -> Vec<(String, String)> {
         .collect()
 }
 
+type CompiledPatterns = Arc<[(String, GlobPattern)]>;
+
+fn compiled_update_environment(patterns: &[String]) -> CompiledPatterns {
+    static COMPILED: std::sync::LazyLock<
+        parking_lot::Mutex<Option<(Vec<String>, CompiledPatterns)>>,
+    > = std::sync::LazyLock::new(parking_lot::Mutex::default);
+    let mut cached = COMPILED.lock();
+    if let Some((key, compiled)) = cached.as_ref()
+        && key.as_slice() == patterns
+    {
+        return Arc::clone(compiled);
+    }
+    let compiled: CompiledPatterns = patterns
+        .iter()
+        .map(|pattern| (pattern.clone(), GlobPattern::new(pattern)))
+        .collect();
+    *cached = Some((patterns.to_vec(), Arc::clone(&compiled)));
+    compiled
+}
+
 fn apply_client_environment_update(
     environment: &mut Environment,
     patterns: &[String],
     client_environment: &BTreeMap<RawText, RawText>,
 ) {
-    for pattern in patterns {
+    for (pattern, glob) in compiled_update_environment(patterns).iter() {
         let matches = client_environment
             .iter()
-            .filter(|(name, _)| fnmatch(pattern, name))
+            .filter(|(name, _)| glob.matches(name))
             .map(|(name, value)| (name.clone(), value.clone()))
             .collect::<Vec<_>>();
         if matches.is_empty() {

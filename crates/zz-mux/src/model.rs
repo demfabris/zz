@@ -4166,9 +4166,26 @@ struct GlobClassCharacter {
 }
 
 pub(crate) fn fnmatch(pattern: &str, value: &str) -> bool {
-    let Some(tokens) = glob_tokens(pattern) else {
-        return false;
-    };
+    GlobPattern::new(pattern).matches(value)
+}
+
+#[derive(Clone)]
+pub(crate) struct GlobPattern(Option<Vec<GlobToken>>);
+
+impl GlobPattern {
+    pub(crate) fn new(pattern: &str) -> Self {
+        Self(glob_tokens(pattern))
+    }
+
+    pub(crate) fn matches(&self, value: &str) -> bool {
+        let Some(tokens) = &self.0 else {
+            return false;
+        };
+        glob_matches(tokens, value)
+    }
+}
+
+fn glob_matches(tokens: &[GlobToken], value: &str) -> bool {
     let value = value.chars().collect::<Vec<_>>();
     let mut matched = vec![false; value.len() + 1];
     matched[0] = true;
@@ -4186,7 +4203,7 @@ pub(crate) fn fnmatch(pattern: &str, value: &str) -> bool {
             }
             GlobToken::Literal(expected) => {
                 for (index, character) in value.iter().copied().enumerate() {
-                    next[index + 1] = matched[index] && character == expected;
+                    next[index + 1] = matched[index] && character == *expected;
                 }
             }
             GlobToken::Class { negated, ranges } => {
@@ -4194,7 +4211,7 @@ pub(crate) fn fnmatch(pattern: &str, value: &str) -> bool {
                     let contains = ranges
                         .iter()
                         .any(|(start, end)| *start <= character && character <= *end);
-                    next[index + 1] = matched[index] && contains != negated;
+                    next[index + 1] = matched[index] && contains != *negated;
                 }
             }
         }

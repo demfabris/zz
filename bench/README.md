@@ -63,3 +63,11 @@ terminal running `inner.sh <label>` and waits on `results/<label>.done`.
 `gen-fixtures.sh --extra` also emits `+osc` and `+kitty` fixtures. No test
 drives them yet; they exist so an escape-sequence-heavy or graphics-heavy test
 can be added without touching the generator.
+
+## Daemon gate
+
+`bench/perf/` is a separate benchmark: the zz daemon against a release tmux,
+both headless and isolated, covering CLI round trips, spawn, cold start,
+config replay, chatty panes, idle cost, memory, attach, echo latency,
+throughput, control mode and status jobs. `just perf-gate [stage]` runs it;
+see `bench/perf/README.md`.

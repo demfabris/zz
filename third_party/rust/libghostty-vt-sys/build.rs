@@ -92,6 +92,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=GHOSTTY_ZIG_SYSTEM_DIR");
     println!("cargo:rerun-if-env-changed=TARGET");
     println!("cargo:rerun-if-env-changed=HOST");
+    println!("cargo:rerun-if-env-changed=PROFILE");
     println!("cargo:rerun-if-env-changed=OPT_LEVEL");
     println!("cargo:rerun-if-changed=build.rs");
 
@@ -377,14 +378,14 @@ fn emit_include_metadata(include_paths: &[PathBuf]) {
 /// values are the four Zig `OptimizeMode` names (`Debug`, `ReleaseSafe`, `ReleaseFast`,
 /// `ReleaseSmall`).
 ///
-/// Follows the optimization level cargo compiles this crate at, not whether the profile carries
-/// debug info: `OPT_LEVEL` `0` builds `ReleaseSafe`, which keeps Zig's runtime safety checks (the
-/// terminal integrity assertions) while avoiding an unoptimized per-byte VT state machine that
-/// parses roughly 6x slower; `s` or `z` builds `ReleaseSmall`; every other level builds
-/// `ReleaseFast`. Profiles that add debug info to an optimized build (`profiling`, `testflight`)
-/// and the workspace `dev` profile, which compiles dependencies at `opt-level = 2`, therefore get
-/// the same VT engine as a release build. Anyone actually debugging the VT engine can still get
-/// an unoptimized build with `LIBGHOSTTY_VT_SYS_OPTIMIZE=Debug`.
+/// Follows the cargo profile family, not whether the profile carries debug info: `PROFILE` `debug`
+/// (the `dev` and `test` profiles and anything inheriting them) builds `ReleaseSafe`, which keeps
+/// Zig's runtime safety checks (the terminal integrity assertions) while avoiding an unoptimized
+/// per-byte VT state machine that parses roughly 6x slower. Release-family profiles build
+/// `ReleaseSmall` at `OPT_LEVEL` `s` or `z` and `ReleaseFast` otherwise, so profiles that only add
+/// debug info to a release build (`profiling`, `testflight`) get the shipped VT engine. Anyone
+/// actually debugging the VT engine can still get an unoptimized build with
+/// `LIBGHOSTTY_VT_SYS_OPTIMIZE=Debug`.
 fn zig_optimize_mode() -> &'static str {
     if let Ok(override_mode) = env::var("LIBGHOSTTY_VT_SYS_OPTIMIZE") {
         return match override_mode.as_str() {
@@ -398,8 +399,11 @@ fn zig_optimize_mode() -> &'static str {
         };
     }
 
+    if env::var("PROFILE").as_deref() == Ok("debug") {
+        return "ReleaseSafe";
+    }
+
     match env::var("OPT_LEVEL").as_deref() {
-        Ok("0") => "ReleaseSafe",
         Ok("s") | Ok("z") => "ReleaseSmall",
         _ => "ReleaseFast",
     }

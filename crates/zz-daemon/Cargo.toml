@@ -36,7 +36,7 @@ agent-client-protocol = { workspace = true, optional = true }
 # channel are not part of the unix-only signal plumbing below.
 async-channel = { workspace = true, optional = true }
 base64 = { workspace = true, optional = true }
-chrono = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true, features = ["alloc", "std"] }
 futures-lite = { workspace = true, optional = true }
 getrandom.workspace = true
 glob = "0.3"
@@ -72,6 +72,7 @@ rustix = { workspace = true, features = ["fs", "net"] }
 sysinfo.workspace = true
 
 [dev-dependencies]
+chrono = { workspace = true, features = ["clock"] }
 sysinfo.workspace = true
 russh = { version = "0.63.3", default-features = false, features = ["ring", "flate2", "rsa"] }
 tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "time", "sync", "macros", "test-util"] }

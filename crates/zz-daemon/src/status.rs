@@ -14,7 +14,6 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use chrono::Local;
 use glob::{MatchOptions, Pattern};
 use regex::RegexBuilder;
 use zz_mux::{
@@ -128,6 +127,10 @@ fn shell_second() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn format_second() -> i64 {
+    i64::try_from(shell_second()).unwrap_or(i64::MAX)
 }
 
 pub(crate) const LIST_CLIENTS_CONTEXT_FORMATS: [&str; 1] = ["line"];
@@ -905,7 +908,7 @@ fn render(
     zz_executable: Option<&std::path::Path>,
     job_waker: Option<&thread::Thread>,
 ) -> StatusLine {
-    let now = Local::now();
+    let now = format_second();
     let title = request
         .title_format
         .as_ref()
@@ -1308,7 +1311,7 @@ pub(crate) struct DaemonFormatHooks<'a> {
     cache: Option<&'a mut BTreeMap<ShellCacheKey, ShellCacheEntry>>,
     touched: Option<&'a mut BTreeSet<ShellCacheKey>>,
     refresh: bool,
-    now: chrono::DateTime<Local>,
+    now: i64,
     environment: Option<&'a [(RawText, Option<RawText>)]>,
     default_terminal: Option<&'a str>,
     startup: bool,
@@ -1337,7 +1340,7 @@ impl<'a> DaemonFormatHooks<'a> {
             cache: None,
             touched: None,
             refresh: false,
-            now: Local::now(),
+            now: format_second(),
             environment: None,
             default_terminal: None,
             startup: false,
@@ -1377,7 +1380,7 @@ impl<'a> DaemonFormatHooks<'a> {
         cache: &'a mut BTreeMap<ShellCacheKey, ShellCacheEntry>,
         touched: &'a mut BTreeSet<ShellCacheKey>,
         refresh: bool,
-        now: chrono::DateTime<Local>,
+        now: i64,
         environment: &'a [(RawText, Option<RawText>)],
         default_terminal: &'a str,
         startup: bool,
@@ -1510,7 +1513,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         let Ok(format) = std::ffi::CString::new(literal) else {
             return literal.to_owned();
         };
-        let time: libc::time_t = TryInto::try_into(self.now.timestamp()).unwrap_or(0);
+        let time: libc::time_t = TryInto::try_into(self.now).unwrap_or(0);
         let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
         if unsafe { libc::localtime_r(&raw const time, &raw mut tm) }.is_null() {
             return literal.to_owned();
@@ -1532,14 +1535,11 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         let Ok(items) = chrono::format::StrftimeItems::new(literal).parse() else {
             return literal.to_owned();
         };
+        let Some(now) = zz_mux::local_time(self.now) else {
+            return literal.to_owned();
+        };
         let mut formatted = String::with_capacity(literal.len());
-        if write!(
-            &mut formatted,
-            "{}",
-            self.now.format_with_items(items.iter())
-        )
-        .is_err()
-        {
+        if write!(&mut formatted, "{}", now.format_with_items(items.iter())).is_err() {
             return literal.to_owned();
         }
         formatted

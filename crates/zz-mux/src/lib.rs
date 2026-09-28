@@ -11,6 +11,7 @@ mod honest_knobs;
 mod layout;
 #[cfg(test)]
 mod layout_pin_tests;
+mod localtime;
 mod model;
 mod parser;
 mod sort;
@@ -51,6 +52,7 @@ pub use formats::{
 };
 pub use honest_knobs::{BellAction, PresetOptions, VisualBell, WindowSize};
 pub use layout::{CellLayout, SplitSize};
+pub use localtime::local_time;
 pub use model::{
     LayoutPreset, MuxState, Pane, PaneDirection, PaneKind, Session, SplitPlacement, Window,
     joined_layout, swapped_layout,

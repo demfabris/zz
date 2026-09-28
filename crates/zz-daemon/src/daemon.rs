@@ -399,6 +399,7 @@ fn tmux_environment(socket_path: &Path, session: Option<SessionId>) -> String {
     format!("{},{},{session}", socket_path.display(), std::process::id())
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn terminal_working_directory(terminal: &TerminalSession) -> Option<PathBuf> {
     terminal
         .foreground_process_id()
@@ -406,7 +407,12 @@ fn terminal_working_directory(terminal: &TerminalSession) -> Option<PathBuf> {
         .and_then(crate::process_info::working_directory)
 }
 
-#[cfg(test)]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn terminal_working_directory(_terminal: &TerminalSession) -> Option<PathBuf> {
+    None
+}
+
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
 mod process_facts_tests;
 
 fn home_directory_for(engine: &MuxEngine, user: &str) -> Option<String> {
@@ -425,7 +431,6 @@ fn terminal_current_command(terminal: &TerminalSession) -> String {
         .foreground_process_id()
         .filter(|pid| *pid != 0)
         .and_then(crate::process_info::command_name)
-        .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default()
 }
 

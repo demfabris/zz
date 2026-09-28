@@ -18,12 +18,14 @@ pub struct ProcessRecord {
 pub struct ProcessSample {
     pub pid: u32,
     pub parent: Option<u32>,
-    pub name: OsString,
+    pub name: String,
     pub resident_bytes: u64,
     pub virtual_bytes: u64,
     pub cpu_time: Duration,
     pub threads: u32,
     pub start_time: u64,
+    pub disk_read_bytes: u64,
+    pub disk_written_bytes: u64,
 }
 
 pub fn start_time(pid: u32) -> Option<u64> {
@@ -34,7 +36,7 @@ pub fn record(pid: u32) -> Option<ProcessRecord> {
     platform::record(pid)
 }
 
-pub fn command_name(pid: u32) -> Option<OsString> {
+pub fn command_name(pid: u32) -> Option<String> {
     platform::command_name(pid)
 }
 
@@ -122,7 +124,7 @@ mod platform {
     }
 
     thread_local! {
-        static RECENT_NAMES: RefCell<VecDeque<(ImageKey, OsString)>> =
+        static RECENT_NAMES: RefCell<VecDeque<(ImageKey, String)>> =
             const { RefCell::new(VecDeque::new()) };
     }
 
@@ -168,17 +170,10 @@ mod platform {
     }
 
     #[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
-    fn with_process_arguments<T>(
-        pid: libc::pid_t,
-        read: impl FnOnce(&[u8]) -> Option<T>,
-    ) -> Option<T> {
-        static BUFFER: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+    fn fill_arguments(pid: libc::pid_t, buffer: &mut Vec<u8>) -> Option<()> {
         let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
-        let mut buffer = BUFFER.lock();
         buffer.clear();
-        if buffer.capacity() < ARGUMENTS_BUFFER_BYTES {
-            buffer.reserve(ARGUMENTS_BUFFER_BYTES);
-        }
+        buffer.reserve(ARGUMENTS_BUFFER_BYTES);
         loop {
             let capacity = buffer.capacity();
             let mut size: libc::size_t = capacity;
@@ -204,12 +199,25 @@ mod platform {
                 unsafe { buffer.set_len(size.min(capacity)) };
                 break;
             }
-            buffer.reserve(needed);
+            buffer.reserve_exact(needed + 1);
         }
-        if buffer.len() <= std::mem::size_of::<libc::c_int>() {
-            return None;
+        (buffer.len() > std::mem::size_of::<libc::c_int>()).then_some(())
+    }
+
+    fn with_process_arguments<T>(
+        pid: libc::pid_t,
+        read: impl FnOnce(&[u8]) -> Option<T>,
+    ) -> Option<T> {
+        static BUFFER: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+        let mut shared = BUFFER.try_lock();
+        let mut private = Vec::new();
+        let buffer = shared.as_deref_mut().unwrap_or(&mut private);
+        let result = fill_arguments(pid, buffer).and_then(|()| read(buffer));
+        if buffer.capacity() > ARGUMENTS_BUFFER_BYTES {
+            buffer.clear();
+            buffer.shrink_to(ARGUMENTS_BUFFER_BYTES);
         }
-        read(&buffer)
+        result
     }
 
     fn split_arguments(data: &[u8]) -> Option<(PathBuf, Vec<OsString>)> {
@@ -266,8 +274,9 @@ mod platform {
         Some(PathBuf::from(OsString::from_vec(buffer)))
     }
 
-    fn basename(path: &Path) -> Option<OsString> {
-        path.file_name().map(OsStr::to_os_string)
+    fn basename(path: &Path) -> Option<String> {
+        path.file_name()
+            .map(|name| name.to_string_lossy().into_owned())
     }
 
     pub(super) fn start_time(pid: u32) -> Option<u64> {
@@ -290,7 +299,7 @@ mod platform {
         })
     }
 
-    pub(super) fn command_name(pid: u32) -> Option<OsString> {
+    pub(super) fn command_name(pid: u32) -> Option<String> {
         let raw = raw_pid(pid)?;
         let key = image_key(pid, raw);
         if let Some(name) = key.and_then(|key| {
@@ -303,10 +312,9 @@ mod platform {
         }) {
             return Some(name);
         }
-        let name = exec_path(raw)
-            .or_else(|| image_path(raw))
-            .as_deref()
-            .and_then(basename)?;
+        let Some(name) = exec_path(raw).as_deref().and_then(basename) else {
+            return image_path(raw).as_deref().and_then(basename);
+        };
         if let Some(key) = key {
             RECENT_NAMES.with_borrow_mut(|recent| {
                 if recent.len() == RECENT_NAME_CAPACITY {
@@ -318,19 +326,16 @@ mod platform {
         Some(name)
     }
 
+    #[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
     pub(super) fn working_directory(pid: u32) -> Option<PathBuf> {
         let info: libc::proc_vnodepathinfo = pid_info(raw_pid(pid)?, libc::PROC_PIDVNODEPATHINFO)?;
         let cwd = info.pvi_cdir;
         if cwd.vip_vi.vi_stat.vst_dev == 0 {
             return None;
         }
-        let path: Vec<u8> = cwd
-            .vip_path
-            .iter()
-            .flatten()
-            .map(|byte| *byte as u8)
-            .collect();
-        let path = CStr::from_bytes_until_nul(&path).ok()?;
+        let path = cwd.vip_path.as_flattened();
+        let path = unsafe { std::slice::from_raw_parts(path.as_ptr().cast::<u8>(), path.len()) };
+        let path = CStr::from_bytes_until_nul(path).ok()?;
         Some(PathBuf::from(OsStr::from_bytes(path.to_bytes())))
     }
 
@@ -361,6 +366,19 @@ mod platform {
         })
     }
 
+    #[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
+    fn disk_bytes(pid: libc::pid_t) -> (u64, u64) {
+        let mut usage = MaybeUninit::<libc::rusage_info_v2>::zeroed();
+        if unsafe { libc::proc_pid_rusage(pid, libc::RUSAGE_INFO_V2, usage.as_mut_ptr().cast()) }
+            != 0
+        {
+            return (0, 0);
+        }
+        let usage = unsafe { usage.assume_init() };
+        (usage.ri_diskio_bytesread, usage.ri_diskio_byteswritten)
+    }
+
+    #[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
     pub(super) fn sample(pid: u32) -> Option<ProcessSample> {
         let raw = raw_pid(pid)?;
         let info = bsd_info(raw)?;
@@ -368,9 +386,13 @@ mod platform {
         let (numer, denom) = nanoseconds_per_tick();
         let ticks = task.pti_total_user.saturating_add(task.pti_total_system);
         let name = command_name(pid).unwrap_or_else(|| {
-            let comm: Vec<u8> = info.pbi_comm.iter().map(|byte| *byte as u8).collect();
-            OsString::from_vec(comm.split(|byte| *byte == 0).next().unwrap_or(&[]).to_vec())
+            let comm = unsafe {
+                std::slice::from_raw_parts(info.pbi_comm.as_ptr().cast::<u8>(), info.pbi_comm.len())
+            };
+            let comm = comm.split(|byte| *byte == 0).next().unwrap_or(&[]);
+            String::from_utf8_lossy(comm).into_owned()
         });
+        let (disk_read_bytes, disk_written_bytes) = disk_bytes(raw);
         Some(ProcessSample {
             pid,
             parent: Some(info.pbi_ppid).filter(|parent| *parent != 0),
@@ -383,6 +405,8 @@ mod platform {
             ),
             threads: u32::try_from(task.pti_threadnum).unwrap_or(0),
             start_time: info.pbi_start_tvsec,
+            disk_read_bytes,
+            disk_written_bytes,
         })
     }
 
@@ -455,34 +479,34 @@ mod platform {
     const RESIDENT_PAGES: usize = 21;
 
     struct Stat {
-        comm: OsString,
-        fields: Vec<String>,
+        data: Vec<u8>,
+        comm: std::ops::Range<usize>,
     }
 
     impl Stat {
         fn read(pid: u32) -> Option<Self> {
-            Self::parse(&fs::read(format!("/proc/{pid}/stat")).ok()?)
+            Self::parse(fs::read(format!("/proc/{pid}/stat")).ok()?)
         }
 
-        fn parse(data: &[u8]) -> Option<Self> {
-            let space = data.iter().position(|byte| *byte == b' ')?;
-            let rest = &data[space + 1..];
-            let close = rest.iter().rposition(|byte| *byte == b')')?;
-            let comm = &rest[..close];
-            let comm = comm.strip_prefix(b"(").unwrap_or(comm);
-            let fields = std::str::from_utf8(&rest[close + 1..])
-                .ok()?
-                .split_whitespace()
-                .map(str::to_owned)
-                .collect();
-            Some(Self {
-                comm: OsStr::from_bytes(comm).to_os_string(),
-                fields,
+        fn parse(data: Vec<u8>) -> Option<Self> {
+            let open = data.iter().position(|byte| *byte == b'(')?;
+            let close = data.iter().rposition(|byte| *byte == b')')?;
+            (open < close).then_some(Self {
+                comm: open + 1..close,
+                data,
             })
         }
 
+        fn comm(&self) -> String {
+            String::from_utf8_lossy(&self.data[self.comm.clone()]).into_owned()
+        }
+
         fn number(&self, index: usize) -> Option<u64> {
-            self.fields.get(index)?.parse().ok()
+            let field = self.data[self.comm.end + 1..]
+                .split(u8::is_ascii_whitespace)
+                .filter(|field| !field.is_empty())
+                .nth(index)?;
+            std::str::from_utf8(field).ok()?.parse().ok()
         }
 
         fn start_time(&self) -> Option<u64> {
@@ -514,22 +538,38 @@ mod platform {
 
     #[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
     fn boot_time() -> u64 {
-        if let Some(seconds) = fs::read_to_string("/proc/stat").ok().and_then(|stat| {
-            stat.lines()
-                .find_map(|line| line.strip_prefix("btime"))
-                .and_then(|value| value.trim().parse().ok())
-        }) {
-            return seconds;
-        }
-        let mut uptime = libc::timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
+        static BOOT: OnceLock<u64> = OnceLock::new();
+        *BOOT.get_or_init(|| {
+            if let Some(seconds) = fs::read_to_string("/proc/stat").ok().and_then(|stat| {
+                stat.lines()
+                    .find_map(|line| line.strip_prefix("btime"))
+                    .and_then(|value| value.trim().parse().ok())
+            }) {
+                return seconds;
+            }
+            let mut uptime = libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            if unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &raw mut uptime) } == 0 {
+                u64::try_from(uptime.tv_sec).unwrap_or(0)
+            } else {
+                0
+            }
+        })
+    }
+
+    fn disk_bytes(pid: u32) -> (u64, u64) {
+        let Ok(io) = fs::read_to_string(format!("/proc/{pid}/io")) else {
+            return (0, 0);
         };
-        if unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &raw mut uptime) } == 0 {
-            u64::try_from(uptime.tv_sec).unwrap_or(0)
-        } else {
-            0
-        }
+        let field = |name: &str| {
+            io.lines()
+                .find_map(|line| line.strip_prefix(name))
+                .and_then(|value| value.trim().parse().ok())
+                .unwrap_or(0)
+        };
+        (field("read_bytes:"), field("write_bytes:"))
     }
 
     fn effective_user(pid: u32) -> Option<u32> {
@@ -582,8 +622,15 @@ mod platform {
         })
     }
 
-    pub(super) fn command_name(pid: u32) -> Option<OsString> {
-        Stat::read(pid).map(|stat| stat.comm)
+    pub(super) fn command_name(pid: u32) -> Option<String> {
+        let mut name = fs::read(format!("/proc/{pid}/comm")).ok()?;
+        if name.last() == Some(&b'\n') {
+            name.pop();
+        }
+        Some(
+            String::from_utf8(name)
+                .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned()),
+        )
     }
 
     pub(super) fn working_directory(pid: u32) -> Option<PathBuf> {
@@ -599,6 +646,7 @@ mod platform {
         let ticks = stat
             .number(USER_TICKS)?
             .saturating_add(stat.number(SYSTEM_TICKS)?);
+        let (disk_read_bytes, disk_written_bytes) = disk_bytes(pid);
         Some(ProcessSample {
             pid,
             parent: stat
@@ -616,7 +664,9 @@ mod platform {
                 .and_then(|threads| u32::try_from(threads).ok())
                 .unwrap_or(0),
             start_time: stat.start_time()?,
-            name: stat.comm,
+            name: stat.comm(),
+            disk_read_bytes,
+            disk_written_bytes,
         })
     }
 
@@ -658,7 +708,7 @@ mod platform {
 
 #[cfg(windows)]
 mod platform {
-    use std::{ffi::OsString, path::PathBuf, time::Duration};
+    use std::{path::PathBuf, time::Duration};
 
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, Signal, System, UpdateKind};
 
@@ -690,11 +740,11 @@ mod platform {
         })
     }
 
-    pub(super) fn command_name(pid: u32) -> Option<OsString> {
+    pub(super) fn command_name(pid: u32) -> Option<String> {
         let key = Pid::from_u32(pid);
         refreshed(&[key], ProcessRefreshKind::nothing())
             .process(key)
-            .map(|process| process.name().to_os_string())
+            .map(|process| process.name().to_string_lossy().into_owned())
     }
 
     pub(super) fn working_directory(pid: u32) -> Option<PathBuf> {
@@ -720,13 +770,17 @@ mod platform {
         let key = Pid::from_u32(pid);
         let system = refreshed(
             &[key],
-            ProcessRefreshKind::nothing().with_memory().with_cpu(),
+            ProcessRefreshKind::nothing()
+                .with_memory()
+                .with_cpu()
+                .with_disk_usage(),
         );
         let process = system.process(key)?;
+        let disk = process.disk_usage();
         Some(ProcessSample {
             pid,
             parent: process.parent().map(Pid::as_u32),
-            name: process.name().to_os_string(),
+            name: process.name().to_string_lossy().into_owned(),
             resident_bytes: process.memory(),
             virtual_bytes: process.virtual_memory(),
             cpu_time: Duration::from_millis(process.accumulated_cpu_time()),
@@ -734,6 +788,8 @@ mod platform {
                 .tasks()
                 .map_or(0, |tasks| u32::try_from(tasks.len()).unwrap_or(u32::MAX)),
             start_time: process.start_time(),
+            disk_read_bytes: disk.total_read_bytes,
+            disk_written_bytes: disk.total_written_bytes,
         })
     }
 
@@ -779,7 +835,7 @@ mod platform {
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 mod platform {
-    use std::{ffi::OsString, path::PathBuf};
+    use std::path::PathBuf;
 
     use super::{ProcessRecord, ProcessSample};
 
@@ -791,7 +847,7 @@ mod platform {
         None
     }
 
-    pub(super) fn command_name(_pid: u32) -> Option<OsString> {
+    pub(super) fn command_name(_pid: u32) -> Option<String> {
         None
     }
 
@@ -825,7 +881,6 @@ mod platform {
 #[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
 mod tests {
     use std::{
-        ffi::OsStr,
         os::unix::fs::symlink,
         path::Path,
         process::{Child, Command, Stdio},
@@ -885,8 +940,8 @@ mod tests {
 
         let system = oracle(pid);
         let expected = system.process(Pid::from_u32(pid)).expect("oracle process");
-        assert_eq!(command_name(pid).as_deref(), Some(expected.name()));
-        assert_eq!(command_name(pid).as_deref(), Some(OsStr::new("claude")));
+        assert_eq!(command_name(pid).as_deref(), expected.name().to_str());
+        assert_eq!(command_name(pid).as_deref(), Some("claude"));
         assert_eq!(start_time(pid), Some(expected.start_time()));
         assert_eq!(working_directory(pid).as_deref(), expected.cwd());
         let actual = record(pid).expect("record");
@@ -910,7 +965,7 @@ mod tests {
         let system = oracle(pid);
         let expected = system.process(Pid::from_u32(pid)).expect("oracle process");
         assert_eq!(start_time(pid), Some(expected.start_time()));
-        assert_eq!(command_name(pid).as_deref(), Some(expected.name()));
+        assert_eq!(command_name(pid).as_deref(), expected.name().to_str());
         assert_eq!(host_name(), System::host_name());
         let sample = sample(pid).expect("sample");
         assert!(sample.resident_bytes > 0);
@@ -937,10 +992,10 @@ mod tests {
                 .expect("spawn shell"),
         );
         let pid = child.0.id();
-        assert_eq!(command_name(pid).as_deref(), Some(OsStr::new("bash")));
+        assert_eq!(command_name(pid).as_deref(), Some("bash"));
         drop(child.0.stdin.take());
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while command_name(pid).as_deref() != Some(OsStr::new("claude")) {
+        while command_name(pid).as_deref() != Some("claude") {
             assert!(
                 std::time::Instant::now() < deadline,
                 "the exec was never noticed"
@@ -950,14 +1005,49 @@ mod tests {
     }
 
     #[test]
-    fn a_large_environment_still_reads_the_exec_path() {
+    fn a_lookup_during_an_exec_does_not_pin_the_resolved_image_name() {
+        let directory = tempfile::tempdir().expect("fixture directory");
+        let versions = directory.path().join("versions");
+        std::fs::create_dir_all(&versions).expect("versions directory");
+        symlink("/bin/bash", versions.join("2.1.99")).expect("versioned binary");
+        let link = directory.path().join("claude");
+        symlink(Path::new("versions").join("2.1.99"), &link).expect("agent symlink");
+        for _ in 0..200 {
+            let child = Sleeper(
+                Command::new("/bin/bash")
+                    .args(["-c", "exec \"$0\" -c 'while :; do sleep 1; done'"])
+                    .arg(&link)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .expect("spawn shell"),
+            );
+            let pid = child.0.id();
+            std::thread::scope(|scope| {
+                for _ in 0..4 {
+                    scope.spawn(|| {
+                        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                        let mut name = command_name(pid);
+                        while name.as_deref() != Some("claude") {
+                            assert!(std::time::Instant::now() < deadline, "stuck at {name:?}");
+                            name = command_name(pid);
+                        }
+                    });
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn a_large_argument_list_still_reads_the_exec_path() {
         let directory = tempfile::tempdir().expect("fixture directory");
         let link = directory.path().join("claude");
-        symlink(sleep_binary(), &link).expect("symlink");
+        symlink("/bin/bash", &link).expect("symlink");
         let child = Sleeper(
             Command::new(&link)
-                .arg("30")
-                .env("ZZ_PROCESS_INFO_PADDING", "x".repeat(100_000))
+                .args(["-c", "while :; do sleep 1; done"])
+                .arg("x".repeat(100_000))
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -965,7 +1055,7 @@ mod tests {
                 .expect("spawn sleeper"),
         );
         let pid = child.0.id();
-        assert_eq!(command_name(pid).as_deref(), Some(OsStr::new("claude")));
+        assert_eq!(command_name(pid).as_deref(), Some("claude"));
         let system = oracle(pid);
         let expected = system.process(Pid::from_u32(pid)).expect("oracle process");
         let actual = record(pid).expect("record");

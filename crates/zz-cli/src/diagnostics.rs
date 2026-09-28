@@ -587,23 +587,27 @@ pub fn start_process_sampler() {
 
 pub fn process_sampler() {
     let pid = std::process::id();
-    let mut previous = HashMap::<u32, (Duration, Instant)>::new();
+    let mut previous = HashMap::<u32, (ProcessSample, Instant)>::new();
     loop {
         let Some(process) = process_info::sample(pid) else {
             return;
         };
         let sampled = Instant::now();
-        let mut cpu_percent = |sample: &ProcessSample| {
-            let percent = previous
-                .get(&sample.pid)
-                .filter(|(_, at)| sampled > *at)
-                .map_or(0.0, |(cpu_time, at)| {
-                    sample.cpu_time.saturating_sub(*cpu_time).as_secs_f64()
-                        / sampled.duration_since(*at).as_secs_f64()
-                        * 100.0
-                });
-            previous.insert(sample.pid, (sample.cpu_time, sampled));
-            percent
+        let mut since_last = |sample: &ProcessSample| {
+            let last = previous.get(&sample.pid).filter(|(_, at)| sampled > *at);
+            let cpu_percent = last.map_or(0.0, |(last, at)| {
+                sample.cpu_time.saturating_sub(last.cpu_time).as_secs_f64()
+                    / sampled.duration_since(*at).as_secs_f64()
+                    * 100.0
+            });
+            let read = sample
+                .disk_read_bytes
+                .saturating_sub(last.map_or(0, |(last, _)| last.disk_read_bytes));
+            let written = sample
+                .disk_written_bytes
+                .saturating_sub(last.map_or(0, |(last, _)| last.disk_written_bytes));
+            previous.insert(sample.pid, (sample.clone(), sampled));
+            (cpu_percent, read, written)
         };
         let run_seconds = |sample: &ProcessSample| {
             SystemTime::now()
@@ -617,24 +621,26 @@ pub fn process_sampler() {
             .and_then(|path| path.as_deref())
             .and_then(|path| path.metadata().ok())
             .map(|metadata| metadata.len());
-        let process_cpu_percent = cpu_percent(&process);
+        let (process_cpu_percent, read, written) = since_last(&process);
         log::info!(
             target: "zz::diagnostics::process",
-            "sample rss_bytes={} virtual_bytes={} cpu_percent={process_cpu_percent:.3} run_seconds={} parent_pid={:?} task_count={} log_file_bytes={log_file_bytes:?}",
+            "sample rss_bytes={} virtual_bytes={} cpu_percent={process_cpu_percent:.3} run_seconds={} parent_pid={:?} task_count={} disk_read_bytes={read} disk_written_bytes={written} disk_total_read_bytes={} disk_total_written_bytes={} log_file_bytes={log_file_bytes:?}",
             process.resident_bytes,
             process.virtual_bytes,
             run_seconds(&process),
             process.parent,
             process.threads,
+            process.disk_read_bytes,
+            process.disk_written_bytes,
         );
 
         let descendants = process_info::descendants(pid)
             .into_iter()
             .filter_map(|child| process_info::sample(child).map(|sample| (child, sample)))
             .collect::<Vec<_>>();
-        let child_cpu_percent = descendants
+        let child_rates = descendants
             .iter()
-            .map(|(_, child)| cpu_percent(child))
+            .map(|(_, child)| since_last(child))
             .collect::<Vec<_>>();
         previous.retain(|_, (_, at)| *at == sampled);
         let tree_rss_bytes = descendants
@@ -647,26 +653,34 @@ pub fn process_sampler() {
             .fold(process.virtual_bytes, |total, (_, child)| {
                 total.saturating_add(child.virtual_bytes)
             });
-        let tree_cpu_percent = child_cpu_percent.iter().sum::<f64>() + process_cpu_percent;
+        let tree_cpu_percent = child_rates
+            .iter()
+            .map(|(cpu_percent, _, _)| cpu_percent)
+            .sum::<f64>()
+            + process_cpu_percent;
         log::info!(
             target: "zz::diagnostics::process_tree",
             "tree_sample root_pid={pid} process_count={} descendant_count={} rss_bytes={tree_rss_bytes} virtual_bytes={tree_virtual_bytes} cpu_percent={tree_cpu_percent:.3}",
             descendants.len() + 1,
             descendants.len(),
         );
-        for ((child_pid, child), child_cpu_percent) in descendants.iter().zip(child_cpu_percent) {
+        for ((child_pid, child), (child_cpu_percent, read, written)) in
+            descendants.iter().zip(child_rates)
+        {
             let record = process_info::record(*child_pid);
             log::info!(
                 target: "zz::diagnostics::process_tree",
-                "descendant_sample pid={child_pid} parent_pid={:?} name={} exe={:?} cmd={:?} rss_bytes={} virtual_bytes={} cpu_percent={child_cpu_percent:.3} run_seconds={} task_count={}",
+                "descendant_sample pid={child_pid} parent_pid={:?} name={} exe={:?} cmd={:?} rss_bytes={} virtual_bytes={} cpu_percent={child_cpu_percent:.3} run_seconds={} task_count={} disk_read_bytes={read} disk_written_bytes={written} disk_total_read_bytes={} disk_total_written_bytes={}",
                 child.parent,
-                child.name.display(),
+                child.name,
                 record.as_ref().and_then(|record| record.executable.as_deref()),
                 record.as_ref().map(|record| record.arguments.as_slice()).unwrap_or_default(),
                 child.resident_bytes,
                 child.virtual_bytes,
                 run_seconds(child),
                 child.threads,
+                child.disk_read_bytes,
+                child.disk_written_bytes,
             );
         }
         log::logger().flush();

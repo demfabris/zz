@@ -25,7 +25,6 @@ fn wait_for(what: &str, mut current: impl FnMut() -> String, expected: &str) {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 fn a_symlinked_agent_binary_keeps_its_invoked_name() {
     let directory = tempfile::tempdir().expect("fixture directory");
@@ -38,7 +37,7 @@ fn a_symlinked_agent_binary_keeps_its_invoked_name() {
     let script = directory.path().join("agent.sh");
     fs::write(
         &script,
-        "read -r _\nprintf '\\033]9;4;3\\007'\nwhile :; do sleep 1; done\n",
+        "printf 'ready\\n'\nread -r _\nprintf '\\033]9;4;3\\007working\\n'\nwhile :; do sleep 1; done\n",
     )
     .expect("agent script");
 
@@ -54,10 +53,23 @@ fn a_symlinked_agent_binary_keeps_its_invoked_name() {
         )
         .expect("session");
     let pane = context.pane.expect("pane").to_string();
-    let terminal = Arc::clone(&shared.inner.lock().terminals[&context.pane.expect("pane")]);
+    let current_command = || {
+        run(
+            &shared,
+            &[
+                "display-message",
+                "-p",
+                "-t",
+                &pane,
+                "#{pane_current_command}",
+            ],
+        )
+        .trim()
+        .to_owned()
+    };
     wait_for(
-        "the agent never became the foreground process",
-        || terminal_current_command(&terminal),
+        "the pane never saw the agent in the foreground",
+        current_command,
         "claude",
     );
 
@@ -74,19 +86,6 @@ fn a_symlinked_agent_binary_keeps_its_invoked_name() {
         },
         "working",
     );
-    assert_eq!(
-        run(
-            &shared,
-            &[
-                "display-message",
-                "-p",
-                "-t",
-                &pane,
-                "#{pane_current_command}"
-            ]
-        )
-        .trim(),
-        "claude"
-    );
+    assert_eq!(current_command(), "claude");
     shared.request_shutdown();
 }

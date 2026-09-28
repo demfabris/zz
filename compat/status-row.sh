@@ -339,7 +339,21 @@ for entry in "${CORPUS[@]}"; do
   compare_step "$option = $value"
 done
 
-TOTAL_CHECKS=$((${#CORPUS[@]} + ${#SERVER_CORPUS[@]} + 1 + BAND_CHECKS))
+send_on_both() {
+  side_command zz send-keys -t "=$INNER_SESSION:0.0" "$@" || die "zz refused send-keys"
+  side_command tmux send-keys -t "=$INNER_SESSION:0.0" "$@" || die "tmux refused send-keys"
+}
+set_on_both status-interval 1
+set_on_both window-status-current-format '#I:#{b:pane_current_path}'
+set_on_both status-right '#{pane_current_command}:#{b:pane_current_path}'
+compare_step "runtime facts in the row"
+send_on_both 'cd /usr' Enter
+compare_step "runtime facts after cd"
+send_on_both 'exec cat' Enter
+compare_step "runtime facts after exec"
+RUNTIME_STEPS=3
+
+TOTAL_CHECKS=$((${#CORPUS[@]} + ${#SERVER_CORPUS[@]} + 1 + BAND_CHECKS + RUNTIME_STEPS))
 if [ "$FAILURES" -ne 0 ]; then
   printf '%s of %s comparisons differ\n' "$FAILURES" "$TOTAL_CHECKS"
   exit 1

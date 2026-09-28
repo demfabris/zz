@@ -1,9 +1,10 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::ffi::{OsStr, OsString};
 use std::fmt::Write as _;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::Shutdown;
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -15,7 +16,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct PeerRecord {
     pub(crate) pid: u32,
@@ -85,27 +86,118 @@ fn read_records_in(directory: &Path) -> io::Result<Vec<PeerRecord>> {
     for entry in entries {
         let entry = entry?;
         let filename = entry.file_name();
-        let Some(pid) = filename
-            .to_str()
-            .and_then(|name| name.strip_suffix(".json"))
-            .and_then(|name| name.parse::<u32>().ok())
-        else {
+        let Some(pid) = record_file_pid(&filename) else {
             continue;
         };
         if !entry.file_type()?.is_file() {
             continue;
         }
-        let Some(record) = fs::read(entry.path())
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<PeerRecord>(&bytes).ok())
-        else {
-            continue;
-        };
-        if record.pid == pid && filename.to_str() == Some(format!("{pid}.json").as_str()) {
+        if let Some(record) = read_record_file(&entry.path(), pid) {
             records.push(record);
         }
     }
     Ok(records)
+}
+
+fn record_file_pid(filename: &OsStr) -> Option<u32> {
+    let name = filename.to_str()?;
+    let pid = name.strip_suffix(".json")?.parse::<u32>().ok()?;
+    (name == format!("{pid}.json")).then_some(pid)
+}
+
+fn read_record_file(path: &Path, pid: u32) -> Option<PeerRecord> {
+    fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<PeerRecord>(&bytes).ok())
+        .filter(|record| record.pid == pid)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileStamp {
+    modified: Option<SystemTime>,
+    len: u64,
+    inode: u64,
+}
+
+impl FileStamp {
+    fn of(metadata: &fs::Metadata) -> Self {
+        Self {
+            modified: metadata.modified().ok(),
+            len: metadata.len(),
+            inode: metadata.ino(),
+        }
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct RegistryCache {
+    directory: Option<PathBuf>,
+    listing: Option<FileStamp>,
+    files: BTreeMap<OsString, (Option<FileStamp>, Option<PeerRecord>)>,
+}
+
+impl RegistryCache {
+    pub(crate) fn refresh(&mut self) -> io::Result<bool> {
+        let directory = registry_dir()?;
+        self.refresh_in(&directory)
+    }
+
+    fn refresh_in(&mut self, directory: &Path) -> io::Result<bool> {
+        let mut changed = false;
+        if self.directory.as_deref() != Some(directory) {
+            changed = !self.files.is_empty();
+            *self = Self {
+                directory: Some(directory.to_path_buf()),
+                ..Self::default()
+            };
+        }
+        let listing = match fs::metadata(directory) {
+            Ok(metadata) => FileStamp::of(&metadata),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                changed |= !self.files.is_empty();
+                self.files.clear();
+                self.listing = None;
+                return Ok(changed);
+            }
+            Err(error) => return Err(error),
+        };
+        if self.listing != Some(listing) {
+            self.listing = Some(listing);
+            let mut names = BTreeSet::new();
+            for entry in fs::read_dir(directory)? {
+                let entry = entry?;
+                let filename = entry.file_name();
+                if record_file_pid(&filename).is_some() && entry.file_type()?.is_file() {
+                    names.insert(filename);
+                }
+            }
+            let before = self.files.len();
+            self.files.retain(|name, _| names.contains(name));
+            changed |= self.files.len() != before;
+            for name in names {
+                self.files.entry(name).or_insert((None, None));
+            }
+        }
+        for (name, (stamp, record)) in &mut self.files {
+            let path = directory.join(name);
+            let current = fs::metadata(&path)
+                .ok()
+                .map(|metadata| FileStamp::of(&metadata));
+            if current == *stamp {
+                continue;
+            }
+            *stamp = current;
+            *record = record_file_pid(name).and_then(|pid| read_record_file(&path, pid));
+            changed = true;
+        }
+        Ok(changed)
+    }
+
+    pub(crate) fn records(&self) -> impl Iterator<Item = &PeerRecord> {
+        self.files
+            .values()
+            .filter_map(|(_, record)| record.as_ref())
+    }
 }
 
 fn socket_dir(records: &[PeerRecord]) -> io::Result<PathBuf> {
@@ -843,6 +935,48 @@ fn serve_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registry_cache_reads_only_changed_records() {
+        let directory = tempfile::tempdir().expect("registry");
+        let record = |status: &str| {
+            serde_json::to_vec(&json!({"pid": 4242, "status": status, "tmux": "s:@0.%1"}))
+                .expect("record JSON")
+        };
+        let path = directory.path().join("4242.json");
+        fs::write(&path, record("busy")).expect("write record");
+        fs::write(directory.path().join("notes.txt"), "ignored").expect("write stray file");
+        let mut cache = RegistryCache::default();
+        assert!(cache.refresh_in(directory.path()).expect("first scan"));
+        let statuses = |cache: &RegistryCache| {
+            cache
+                .records()
+                .map(|record| record.status.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(statuses(&cache), ["busy"]);
+        assert!(!cache.refresh_in(directory.path()).expect("quiet scan"));
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .expect("open record in place");
+        std::thread::sleep(Duration::from_millis(5));
+        file.write_all(&record("idle"))
+            .expect("rewrite record in place");
+        drop(file);
+        assert!(cache.refresh_in(directory.path()).expect("in-place scan"));
+        assert_eq!(statuses(&cache), ["idle"]);
+        fs::remove_file(&path).expect("remove record");
+        assert!(cache.refresh_in(directory.path()).expect("removal scan"));
+        assert!(statuses(&cache).is_empty());
+        assert!(!cache.refresh_in(directory.path()).expect("empty scan"));
+        fs::remove_dir_all(directory.path()).expect("remove registry");
+        assert!(
+            !cache
+                .refresh_in(directory.path())
+                .expect("missing registry")
+        );
+    }
 
     #[test]
     fn replies_strip_only_the_outer_wrapper() {

@@ -1026,14 +1026,18 @@ departs from the scope above:
 - The pane watcher now sends frames before the runtime sync, so an echo no longer waits for the
   process lookup and `synchronize_pane_runtime`. Attach, detach and release publish only when
   the view streams, holds a mode or had a frame, so an attach does not build a frame that the
-  stream then builds again.
+  stream then builds again. A pane told to terminate (kill-pane, respawn-pane -k) no longer
+  forces a full exit frame nobody reads; its exit status still reaches the fallback.
 - The foreground group is read with `libc::tcgetpgrp` and 0 means none; rustix asserted a
   positive pid there, which panicked the watchers of exited panes in debug builds.
 
 Measured with the quick wave1 gate (`--only spawn,chatty,mem,echo,throughput,attach`, load 7-25)
 and a full `--only chatty,mem` run, against `/tmp` before-JSON of 157ac6a3 (quick) and W0:
 `spawn.cpu.split_shell` 4.71 -> 2.57 ms (36.8 -> 20.2 Minstr), `spawn.wall.split_empty_P` 2023 ->
-6.3 ms (1.9 ms CPU, 45.4 -> 17.0 Minstr), `spawn.cpu.new_window` 4.94 -> 2.67 ms;
+6.3 ms (1.9 ms CPU, 45.4 -> 17.0 Minstr), `spawn.cpu.new_window` 4.94 -> 2.67 ms (in an A/B on one
+isolated daemon each, daemon Minstr per command: split 37.6 -> 21.2, empty split with `-P` 47.1
+-> 17.5, new-window 46.3 -> 22.9, kill-pane 16.4 -> 15.5, against 12.6 -> 11.7 for
+`display-message`);
 `chatty.cpu_pct.steady` 9.86 (W0) -> 3.02% (102 Minstr/s, tmux 112), `.flip` 25.6 -> 5.4% (3285
 -> 351 Minstr/s), `.hidden` 51.5 -> 11.1% (6906 -> 1117 Minstr/s, tty 219 -> 43 KiB/s),
 `.visible` 17.0 -> 16.6%; `mem.footprint.p20` 54.1 -> 41.9 MiB, `mem.threads.p20` 89 -> 49,

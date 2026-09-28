@@ -1435,9 +1435,6 @@ impl Daemon {
         }
     }
 
-    /// The write end of the spawning client's readiness pipe. The daemon writes
-    /// one byte to it once its socket is bound, so the client dials once
-    /// instead of polling.
     #[must_use]
     pub fn with_bootstrap_ready_fd(mut self, fd: i32) -> Self {
         self.bootstrap_ready_fd = Some(fd);
@@ -1487,8 +1484,8 @@ impl Daemon {
         &self,
         ready: impl FnOnce(u64) -> R,
     ) -> Result<(), DaemonError> {
-        let bootstrap_ready = BootstrapReady::adopt(self.bootstrap_ready_fd);
-        prepare_socket(&self.socket_path)?;
+        let mut bootstrap_ready = BootstrapReady::adopt(self.bootstrap_ready_fd);
+        let start_lock = prepare_socket(&self.socket_path, &mut bootstrap_ready)?;
         let listener = LocalTransport::bind(&self.socket_path).map_err(|error| {
             if error.kind() == ErrorKind::AddrInUse {
                 DaemonError::AlreadyRunning(self.socket_path.clone())
@@ -1496,6 +1493,7 @@ impl Daemon {
                 DaemonError::Io(error)
             }
         })?;
+        drop(start_lock);
         bootstrap_ready.signal();
         restrict_socket_permissions(&self.socket_path)?;
         listener.set_nonblocking(true)?;
@@ -1747,10 +1745,6 @@ struct TmuxShimGuard {
     executable: PathBuf,
 }
 
-/// The executable panes of this daemon run as `tmux`, pinned to the image the
-/// daemon itself runs so an app swap cannot hand them a newer CLI: Linux
-/// execs the daemon's own `/proc/<pid>/exe`, macOS a copy-on-write clone
-/// beside the wrapper. Without either, the installed path.
 #[cfg(unix)]
 fn pinned_executable(directory: &Path, executable: &Path) -> PathBuf {
     #[cfg(target_os = "linux")]
@@ -1881,7 +1875,7 @@ impl BootstrapReady {
         unsafe_code,
         reason = "one byte to a pipe the daemon owns, then close it"
     )]
-    fn signal(mut self) {
+    fn signal(&mut self) {
         if let Some(fd) = self.0.take() {
             unsafe {
                 let _ = libc::write(fd, [1_u8].as_ptr().cast(), 1);
@@ -1891,7 +1885,7 @@ impl BootstrapReady {
     }
 
     #[cfg(not(unix))]
-    fn signal(self) {}
+    fn signal(&mut self) {}
 }
 
 impl Drop for BootstrapReady {
@@ -4687,10 +4681,6 @@ impl Shared {
         Ok(())
     }
 
-    /// `history-file` is read on the first prompt that needs it rather than on
-    /// the startup path. Every reader and writer of the prompt history calls
-    /// this before it takes `inner`, so nothing is recorded before the file's
-    /// entries are in place.
     fn ensure_prompt_history(&self) {
         if self.prompt_history_settled.load(Ordering::Acquire) {
             return;
@@ -6003,31 +5993,28 @@ impl Shared {
         prepared: bool,
     ) -> (CommandResponse, bool) {
         let stdin_available = kind == ClientKind::Command && command.stdin_available();
-        let (command, blocked) = match self.prepare_command_request(client, command, prepared) {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                return (
-                    CommandResponse::Error {
-                        request_id,
-                        error,
-                        output: RawText::default(),
-                    },
-                    false,
-                );
-            }
-        };
-        if blocked {
-            return (
-                CommandResponse::Error {
-                    request_id,
-                    error: ServerError::InvalidCommand("client is read-only".to_owned()),
-                    output: RawText::default(),
-                },
-                false,
-            );
-        }
-        let client_name = {
+        let (command, client_name) = {
             let mut inner = self.inner.lock();
+            let refusal = match prepare_command_request(&mut inner, client, command, prepared) {
+                Ok((command, false)) => Ok(command),
+                Ok((_, true)) => Err(ServerError::InvalidCommand(
+                    "client is read-only".to_owned(),
+                )),
+                Err(error) => Err(error),
+            };
+            let command = match refusal {
+                Ok(command) => command,
+                Err(error) => {
+                    return (
+                        CommandResponse::Error {
+                            request_id,
+                            error,
+                            output: RawText::default(),
+                        },
+                        false,
+                    );
+                }
+            };
             let client_name = server_log_client_name(&inner, client);
             let command_line = command_log_line(&command);
             push_server_message(&mut inner, format!("{client_name} command: {command_line}"));
@@ -6045,7 +6032,7 @@ impl Shared {
                     },
                 );
             }
-            client_name
+            (command, client_name)
         };
         let previous_control_target = context.control_command_target();
         if kind == ClientKind::Control {
@@ -6113,16 +6100,20 @@ impl Shared {
                 }
             }
         };
-        let streams = self.inner.lock().command_streams.remove(&client);
+        let (streams, sanitizes) = {
+            let mut inner = self.inner.lock();
+            (
+                inner.command_streams.remove(&client),
+                sanitizes_output_for(&inner, client, kind, &command.name),
+            )
+        };
         let client_exit = streams.as_ref().is_some_and(|streams| streams.client_exit);
         let recorded_claim = streams.as_ref().and_then(|streams| streams.stdout_claim);
         let mut response = match streams {
             Some(streams) if !streams.is_empty() => merge_command_streams(response, &streams),
             _ => response,
         };
-        if recorded_claim != Some(StdoutClaim::Raw)
-            && self.sanitizes_output_for(client, kind, &command.name)
-        {
+        if recorded_claim != Some(StdoutClaim::Raw) && sanitizes {
             let output = match &mut response {
                 CommandResponse::Success { output, .. } | CommandResponse::Error { output, .. } => {
                     output
@@ -6164,32 +6155,9 @@ impl Shared {
         (response, client_exit)
     }
 
-    /// `server_client_print` runs `utf8_sanitize` over a message bound for a
-    /// client with no session of its own or for a control client, which is
-    /// every shape but an attached one: an attached client is shown the message
-    /// in a pane instead. The gate is tmux's `CLIENT_UTF8`, which the client
-    /// raised for itself out of `$TMUX` and the locale before it dialled.
-    ///
-    /// Three commands answer their client without passing through
-    /// `server_client_print` at all, so the pin leaves their bytes alone for
-    /// every client shape and every encoding. `capture-pane -p` writes
-    /// `control_write` for a control client and `file_print_buffer` for
-    /// everyone else. `save-buffer` always writes `file_write`, a real path and
-    /// `-` alike. `show-buffer` reaches `cmdq_print_data` only when the client
-    /// has a session of its own or is a control client, so it is sanitized for
-    /// a control client but falls through to the same raw `file_write` for a
-    /// session-less command client, which is the only shape zz's `Command`
-    /// kind has.
+    #[cfg(test)]
     fn sanitizes_output_for(&self, client: ClientId, kind: ClientKind, command: &str) -> bool {
-        if !matches!(kind, ClientKind::Command | ClientKind::Control) {
-            return false;
-        }
-        match canonical_command(command) {
-            "capture-pane" | "save-buffer" => return false,
-            "show-buffer" if kind == ClientKind::Command => return false,
-            _ => {}
-        }
-        !self.inner.lock().utf8_clients.contains(&client)
+        sanitizes_output_for(&self.inner.lock(), client, kind, command)
     }
 
     fn execute_command_request_with_prepared_into(
@@ -6343,28 +6311,6 @@ impl Shared {
             .lock()
             .get(&client)
             .is_some_and(|cancel| cancel.load(Ordering::Acquire))
-    }
-
-    fn prepare_command_request(
-        &self,
-        client: ClientId,
-        command: &CommandInvocation,
-        prepared: bool,
-    ) -> Result<(CommandInvocation, bool), ServerError> {
-        let mut inner = self.inner.lock();
-        inner.cold_bootstrap.command(client);
-        let command = if prepared {
-            command.clone()
-        } else {
-            resolve_and_prepare_command(&inner.engine, command)?.0
-        };
-        if !prepared && canonical_command(&command.name) == "load-buffer" {
-            parse_buffer_command_args("load-buffer", &command.args, &['b', 't'], &['w'])?;
-        }
-        let guarded = read_only_guard_client(&inner, client, &command);
-        let blocked = guarded.is_some_and(|guarded| inner.client_flags.contains(guarded))
-            && !command_is_read_only_safe(&command);
-        Ok((command, blocked))
     }
 
     #[cfg(test)]
@@ -36609,10 +36555,60 @@ fn set_current_window_latest_client(
     set_window_latest_client(inner, client, window, event_hooks_enabled)
 }
 
-/// Whether detaching `client` can change nothing a hook watches: it is on no
-/// session, holds no copy mode, focus, view or control sizing, and no window
-/// counts it as its latest client. A command client that never attached is
-/// always this, so its detach skips the before and after world captures.
+fn prepare_command_request(
+    inner: &mut ServerState,
+    client: ClientId,
+    command: &CommandInvocation,
+    prepared: bool,
+) -> Result<(CommandInvocation, bool), ServerError> {
+    inner.cold_bootstrap.command(client);
+    let command = if prepared {
+        command.clone()
+    } else {
+        resolve_and_prepare_command(&inner.engine, command)?.0
+    };
+    if !prepared && canonical_command(&command.name) == "load-buffer" {
+        parse_buffer_command_args("load-buffer", &command.args, &['b', 't'], &['w'])?;
+    }
+    let guarded = read_only_guard_client(inner, client, &command);
+    let blocked = guarded.is_some_and(|guarded| inner.client_flags.contains(guarded))
+        && !command_is_read_only_safe(&command);
+    Ok((command, blocked))
+}
+
+/// `server_client_print` runs `utf8_sanitize` over a message bound for a
+/// client with no session of its own or for a control client, which is
+/// every shape but an attached one: an attached client is shown the message
+/// in a pane instead. The gate is tmux's `CLIENT_UTF8`, which the client
+/// raised for itself out of `$TMUX` and the locale before it dialled.
+///
+/// Three commands answer their client without passing through
+/// `server_client_print` at all, so the pin leaves their bytes alone for
+/// every client shape and every encoding. `capture-pane -p` writes
+/// `control_write` for a control client and `file_print_buffer` for
+/// everyone else. `save-buffer` always writes `file_write`, a real path and
+/// `-` alike. `show-buffer` reaches `cmdq_print_data` only when the client
+/// has a session of its own or is a control client, so it is sanitized for
+/// a control client but falls through to the same raw `file_write` for a
+/// session-less command client, which is the only shape zz's `Command`
+/// kind has.
+fn sanitizes_output_for(
+    inner: &ServerState,
+    client: ClientId,
+    kind: ClientKind,
+    command: &str,
+) -> bool {
+    if !matches!(kind, ClientKind::Command | ClientKind::Control) {
+        return false;
+    }
+    match canonical_command(command) {
+        "capture-pane" | "save-buffer" => return false,
+        "show-buffer" if kind == ClientKind::Command => return false,
+        _ => {}
+    }
+    !inner.utf8_clients.contains(&client)
+}
+
 fn detach_is_inert(inner: &ServerState, client: ClientId) -> bool {
     client_attached_session(inner, client).is_none()
         && !inner.copy_sessions.contains_key(&client)
@@ -44869,22 +44865,40 @@ fn post_admission_callback_error(error: DaemonError) -> DaemonError {
 }
 
 #[cfg(unix)]
-fn prepare_socket(path: &Path) -> Result<(), DaemonError> {
+fn prepare_socket(path: &Path, ready: &mut BootstrapReady) -> Result<fs::File, DaemonError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
+    let mut lock_path = path.as_os_str().to_owned();
+    lock_path.push(".lock");
+    let lock = {
+        use std::os::unix::fs::OpenOptionsExt as _;
+
+        fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .mode(0o600)
+            .open(PathBuf::from(lock_path))?
+    };
+    rustix::fs::flock(&lock, rustix::fs::FlockOperation::LockExclusive)
+        .map_err(std::io::Error::from)?;
     // A stopping daemon releases its endpoint within one accept tick; wait
     // that out so a spawn racing a kill-server binds instead of dying to a
     // socket that only looks alive. The deadline is generous because loaded
     // schedulers stretch the tick.
     let deadline = Instant::now() + Duration::from_secs(3);
     while path.exists() {
-        match LocalTransport::connect(path) {
-            Ok(_) if Instant::now() >= deadline => {
+        match daemon_answers_at(path) {
+            Some(true) => {
+                ready.signal();
                 return Err(DaemonError::AlreadyRunning(path.to_owned()));
             }
-            Ok(_) => thread::sleep(Duration::from_millis(20)),
-            Err(_) => {
+            Some(false) if Instant::now() >= deadline => {
+                return Err(DaemonError::AlreadyRunning(path.to_owned()));
+            }
+            Some(false) => thread::sleep(Duration::from_millis(20)),
+            None => {
                 match fs::remove_file(path) {
                     Ok(()) => {}
                     Err(error) if error.kind() == ErrorKind::NotFound => {}
@@ -44894,11 +44908,51 @@ fn prepare_socket(path: &Path) -> Result<(), DaemonError> {
             }
         }
     }
-    Ok(())
+    Ok(lock)
+}
+
+#[cfg(unix)]
+fn daemon_answers_at(path: &Path) -> Option<bool> {
+    let mut stream = LocalTransport::connect(path).ok()?;
+    let (answered, answer) = crossbeam_channel::bounded(1);
+    let probe = thread::Builder::new()
+        .name("zz-socket-probe".to_owned())
+        .spawn(move || {
+            let request = ProtocolMessage::Exec(zz_protocol::ExecRequest {
+                protocol_version: PROTOCOL_VERSION,
+                flags: zz_protocol::ExecFlags::default(),
+                client_instance_id: ClientInstanceId::default(),
+                origin: None,
+                working_directory: None,
+                tty: None,
+                size: None,
+                features: 0,
+                startup_reentry: None,
+                spawned_server_id: None,
+                expect_server_id: None,
+                process_id: std::process::id(),
+                environment: ClientEnvironmentBlob::default(),
+                commands: Vec::new(),
+            });
+            let live = zz_protocol::write_protocol_message(&mut stream, &request).is_ok()
+                && matches!(
+                    zz_protocol::read_protocol_message(&mut stream),
+                    Ok(ProtocolMessage::ExecExit(_))
+                );
+            let _ = answered.send(live);
+        });
+    if probe.is_err() {
+        return Some(false);
+    }
+    Some(
+        answer
+            .recv_timeout(Duration::from_millis(250))
+            .unwrap_or(false),
+    )
 }
 
 #[cfg(windows)]
-fn prepare_socket(_: &Path) -> Result<(), DaemonError> {
+fn prepare_socket(_: &Path, _: &mut BootstrapReady) -> Result<(), DaemonError> {
     Ok(())
 }
 

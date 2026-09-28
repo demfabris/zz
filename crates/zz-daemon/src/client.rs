@@ -162,15 +162,11 @@ static LEGACY_COMMAND: LazyLock<bool> = LazyLock::new(|| {
 pub type ExecClassifier<'a> =
     &'a dyn Fn(&[CommandInvocation], &[PreparedCommand]) -> Option<ExecResumeKind>;
 
-/// One command chain sent as a single `Exec`. `resume` lets the daemon hand an
-/// attaching chain back instead of running it; the classifier only runs when
-/// the daemon predates `Exec` and the chain goes through the hello path.
 pub struct ExecChain<'a> {
     pub commands: Vec<CommandInvocation>,
     pub spawned_server_id: Option<u64>,
     pub expect_server_id: Option<u64>,
     pub resume: Option<ExecClassifier<'a>>,
-    /// Run the commands exactly as given: no alias lookup, no list preflight.
     pub prepared: bool,
 }
 
@@ -187,9 +183,6 @@ impl ExecChain<'_> {
     }
 }
 
-/// How an answered chain ended. A daemon that never answered is the `Err` of
-/// [`CommandClient::exec_chain`] instead, so a caller can still fall back to
-/// starting one; `Failed` is a command error or a connection lost mid-chain.
 #[derive(Debug)]
 pub enum ExecChainEnd {
     Ran { exit_code: u8 },
@@ -487,8 +480,6 @@ impl CommandClient {
         }
     }
 
-    /// The daemon's identity: from the last reply, else from a zero-command
-    /// `Exec` that runs nothing.
     pub fn server_id(&mut self) -> Result<u64, DaemonError> {
         if let Some(server_id) = self.server_id {
             return Ok(server_id);
@@ -528,8 +519,6 @@ impl CommandClient {
         stdout_or_exit(self.execute_streams(command)?)
     }
 
-    /// Run one command only on the daemon `server_id` names: a different
-    /// daemon runs nothing and this returns `Ok(None)`.
     pub fn execute_on_server(
         &mut self,
         server_id: u64,
@@ -556,8 +545,6 @@ impl CommandClient {
             })
     }
 
-    /// Run one command exactly as given, the way the pin's `-k`-style raw
-    /// verbs bypass the live alias table.
     pub fn execute_prepared_streams(
         &mut self,
         command: CommandInvocation,
@@ -590,10 +577,6 @@ impl CommandClient {
         }
     }
 
-    /// Run a whole command chain as one `Exec`: every command's streams reach
-    /// `emit` as they land, and the returned exit status folds each command's
-    /// own status with what `emit` reports, the last nonzero one winning. A
-    /// command that fails stops the chain and comes back as the `Err`.
     pub fn exec_chain(
         &mut self,
         chain: ExecChain<'_>,

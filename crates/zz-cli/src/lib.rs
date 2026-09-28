@@ -1098,9 +1098,6 @@ fn emit_chain_outcome(outcome: &CommandOutcome) -> u8 {
     status
 }
 
-/// One `Exec` for the whole chain against the local daemon. The daemon either
-/// runs it, rejects it before anything runs, or hands an attaching chain back
-/// for the TUI. `Unanswered` is a daemon that never replied at all.
 #[cfg(not(target_os = "ios"))]
 fn run_local_command_chain(
     routing: &ChainRouting<'_>,
@@ -2191,8 +2188,6 @@ mod readiness {
         time::{Duration, Instant},
     };
 
-    /// The daemon writes one byte to `child` once its socket is bound, or closes
-    /// it by exiting. Either way the waiting client dials exactly once.
     pub(super) struct Pipe {
         reader: OwnedFd,
         child: Option<OwnedFd>,
@@ -2333,9 +2328,6 @@ pub fn connect_or_spawn_daemon_with_provenance<T>(
     Ok((client, provenance))
 }
 
-/// Dial a daemon that has just signalled readiness. On unix one dial is the
-/// whole cost; the backoff only runs where there is no readiness pipe, or when
-/// a racing daemon won the socket and is still starting.
 #[cfg(not(target_os = "ios"))]
 fn connect_spawned<T>(
     path: &Path,

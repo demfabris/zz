@@ -19,10 +19,6 @@ static SPAWN_PER_CONNECTION: LazyLock<bool> = LazyLock::new(|| {
     std::env::var_os("ZZ_PERF_CONNECTION_THREADS").is_some_and(|value| value == "0")
 });
 
-/// Connection threads outlive their connection by up to a second so a
-/// script's next command reuses one instead of paying a thread start and
-/// exit. Every connection still gets a thread of its own: an idle one when
-/// there is one, a new one otherwise, so nothing ever waits for a thread.
 #[derive(Default)]
 pub(super) struct ConnectionThreads {
     idle: Mutex<Vec<crossbeam_channel::Sender<ExecJob>>>,
@@ -346,6 +342,40 @@ pub(super) fn serve_exec<S: TransportStream>(
             server: PROTOCOL_VERSION,
         }
         .into());
+    }
+    let mut request = request;
+    let mut frame = Vec::new();
+    while request.commands.is_empty() {
+        if shared.stopping.load(Ordering::Acquire)
+            || shared.shutdown_pending.load(Ordering::Acquire)
+        {
+            best_effort_server_stopping_reply(&mut stream);
+            return Ok(());
+        }
+        let outcome = if request
+            .expect_server_id
+            .is_some_and(|expected| expected != shared.server_id)
+        {
+            ExecOutcome::ServerMismatch
+        } else {
+            ExecOutcome::Ran
+        };
+        encode_protocol_message_into(
+            &ProtocolMessage::ExecExit(ExecExit {
+                server_id: shared.server_id,
+                outcome,
+            }),
+            &mut frame,
+        )?;
+        stream.write_all(&frame)?;
+        stream.flush()?;
+        request = loop {
+            match read_protocol_message_into(&mut stream, &mut frame) {
+                Ok(ProtocolMessage::Exec(next)) => break next,
+                Ok(_) => {}
+                Err(_) => return Ok(()),
+            }
+        };
     }
     let reentry = request.startup_reentry == Some(shared.server_id);
     let job_shared = Arc::clone(shared);

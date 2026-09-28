@@ -84,7 +84,7 @@ impl Kbd {
         Self::format_key(key, false)
     }
 
-    fn format_key(key: &Keystroke, lowercase: bool) -> String {
+    pub(crate) fn format_key(key: &Keystroke, lowercase: bool) -> String {
         let m = &key.modifiers;
         let mut parts: Vec<&str> = [
             m.control.then_some(MODIFIERS[0]),

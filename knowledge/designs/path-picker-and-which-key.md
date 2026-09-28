@@ -332,17 +332,28 @@ pub trait PathPickerBackend {
   `intercept_keystroke` (after its modifier-only early return; never on key-up, which would hide the
   sheet on the prefix key's own release), while an overlay or dialog is open, during a pane drag, and on
   the Settings route.
-- Rows, built in zz-client:
-  - stock prefix bindings equal to the default at the same key go into groups by a fixed key-to-group
-    map (Panes, Windows, Sessions, Copy and paste, Other), which names every stock key explicitly (`:`,
-    `?`, `i`, `~`, `r`, `e` and the send-prefix key go to Other), with a unit test that every default
-    prefix key is in the map;
+- Rows, built in zz-client (`crates/zz-client/src/which_key.rs`, reworked 2026-09-28):
+  - every binding is classified by its command, not its key: a short label, a group (Panes, Windows,
+    Sessions, Copy and paste, Other), a rank inside the group, and whether it is core. Wrappers are
+    unwrapped (`confirm-before`, `command-prompt` templates) and trailing `display-message` feedback is
+    ignored, so a rebound key lands in the same group as the stock key it replaces. A unit test keeps
+    every default prefix binding classified;
+  - a note wins over the short label only when it differs from the stock note at that key;
+  - keys whose commands differ only by direction, window index, layout, or next/previous collapse into
+    one row (`0–9`, arrows, `⌃`/`⌥` arrows, `⌥1–7`, `n p`, `{}`), then rows with the same label merge
+    their keys (`| %`, `c ⌃c`). 78 stock prefix bindings become 50 rows;
   - Yours: bindings whose `(commands, repeat)` differ from `KeyTables::default()` with the client's
-    prefix applied, or that the default lacks (notes ignored);
-  - custom tables render as one flat list; mouse and wheel keys are dropped; `-r` keys are marked;
-  - key caps come from `display_keystroke`, the call the zero-session panel already uses.
-- `WhichKeyView` (zz-ui): a passive, occluding bottom sheet over the workspace with `popover_style`,
-  `Kbd` caps, a column per group and Yours last. It is never focused and never counted in
+    prefix applied. They stay in their command's group with their keys tinted, are always core, and
+    only unclassified ones go to a trailing Yours group, labelled by their command text;
+  - custom tables render as one flat list with the same collapsing; mouse and wheel keys are dropped;
+    `-r` rows are marked with ↻.
+- Two sheets. The pause after the prefix shows only core rows (21 on stock bindings) with a
+  `? all keys` hint. The desktop catches the key bound to `list-keys -N` while the prefix is armed and
+  shows every row instead, without sending it to the daemon, so the prefix stays armed and the next key
+  runs its binding. With `which-key-delay` at 0 `?` keeps tmux's `list-keys` output.
+- `WhichKeyView` (zz-ui): a passive, occluding bottom sheet over the workspace with `popover_style`.
+  Groups that fit stack under each other in one column, so the sheet is as narrow as the tallest group
+  allows; the key column is measured from the widest cap. It is never focused and never counted in
   `overlay_open`, and it never sends `CancelPrefix`.
 
 # D. Testing and bookkeeping

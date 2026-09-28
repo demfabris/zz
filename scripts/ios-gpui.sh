@@ -67,14 +67,21 @@ if [[ "$mode" == testflight ]]; then
         auth_args=(-authenticationKeyPath "$api_key_path" -authenticationKeyID "$api_key_id" -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID")
     fi
 
-    ZZ_DEV_BUILD=0 IPHONEOS_DEPLOYMENT_TARGET=26.0 cargo build --locked --release -p zz-gpui-ios "${build_target[@]}" --target aarch64-apple-ios
+    ZZ_DEV_BUILD=0 IPHONEOS_DEPLOYMENT_TARGET=26.0 cargo build --locked --profile testflight -p zz-gpui-ios "${build_target[@]}" --target aarch64-apple-ios
+    built="$repo_root/target/aarch64-apple-ios/testflight/$binary"
     out="$repo_root/target/ios-testflight"
     archive="$out/zz-$marketing_version-$build_number.xcarchive"
     export_path="$out/export-$marketing_version-$build_number"
     [[ ! -e "$archive" ]] || { echo "archive already exists: $archive" >&2; exit 1; }
     app="$archive/Products/Applications/ZZ.app"
-    mkdir -p "$app"
-    cp "$repo_root/target/aarch64-apple-ios/release/$binary" "$app/ZZ"
+    dsym="$archive/dSYMs/ZZ.app.dSYM"
+    mkdir -p "$app" "$archive/dSYMs"
+    cp -RL "$built.dSYM" "$dsym"
+    mv "$dsym"/Contents/Resources/DWARF/* "$dsym/Contents/Resources/DWARF/ZZ"
+    cp "$built" "$app/ZZ"
+    xcrun strip "$app/ZZ"
+    [[ "$(dwarfdump --uuid "$app/ZZ" | awk '{print $2}')" == "$(dwarfdump --uuid "$dsym" | awk '{print $2}')" ]] \
+        || { echo "the dSYM does not match the app binary" >&2; exit 1; }
     cp "$repo_root/clients/ios-gpui/Info.plist" "$app/Info.plist"
     plist="$app/Info.plist"
     sdk_version="$(xcrun --sdk iphoneos --show-sdk-version)"

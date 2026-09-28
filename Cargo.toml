@@ -160,3 +160,9 @@ inherits = "release"
 debug = "full"
 strip = "none"
 split-debuginfo = "packed"
+
+[profile.testflight]
+inherits = "release"
+debug = "line-tables-only"
+strip = "none"
+split-debuginfo = "packed"

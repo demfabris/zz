@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{cell::RefCell, rc::Rc, sync::Arc, time::Instant};
 
 use gpui::{
     App, Bounds, Element, ElementId, ElementInputHandler, Entity, GlobalElementId,
@@ -15,7 +15,10 @@ pub(crate) use zz_ui::terminal::RowRenderCache;
 use crate::{
     mux::client::{HistoryRing, KittyImageCache, RetainedTerminalViewport},
     pane,
-    terminal::view::TerminalView,
+    terminal::{
+        shader,
+        view::{CopyFlash, TerminalView},
+    },
 };
 
 pub(crate) struct TerminalElement {
@@ -28,6 +31,7 @@ pub(crate) struct TerminalElement {
     text_opacity: f32,
     cursor_blink_visible: bool,
     marked_text: Option<String>,
+    copy_flash: Option<CopyFlash>,
 }
 
 impl TerminalElement {
@@ -41,6 +45,7 @@ impl TerminalElement {
         text_opacity: f32,
         cursor_blink_visible: bool,
         marked_text: Option<String>,
+        copy_flash: Option<CopyFlash>,
     ) -> Self {
         Self {
             view,
@@ -52,6 +57,7 @@ impl TerminalElement {
             text_opacity,
             cursor_blink_visible,
             marked_text,
+            copy_flash,
         }
     }
 }
@@ -144,7 +150,10 @@ impl Element for TerminalElement {
             cx,
         );
         let geometry = paint.geometry;
+        let selection = paint.selection_bounds();
+        let copy_flash = self.copy_flash.take();
         self.view.update(cx, |view, cx| {
+            self.copy_flash = copy_flash.and(view.record_selection(selection));
             view.update_geometry(
                 geometry.grid,
                 geometry.grid_bounds,
@@ -176,6 +185,38 @@ impl Element for TerminalElement {
             ElementInputHandler::new(bounds, self.view.clone()),
             cx,
         );
-        self.row_cache.borrow_mut().paint(paint, bounds, window, cx);
+        let flash = self.copy_flash.as_ref().and_then(|flash| {
+            let shader = shader::copy_flash()?;
+            let scale = window.scale_factor();
+            let mut uniforms = shader.uniforms();
+            uniforms
+                .float(
+                    "iTime",
+                    Instant::now().duration_since(flash.epoch).as_secs_f32(),
+                )
+                .float(
+                    "iTimeCopy",
+                    flash.started.duration_since(flash.epoch).as_secs_f32(),
+                )
+                .vector(
+                    "iCellSize",
+                    &[
+                        f32::from(paint.geometry.cell_width) * scale,
+                        f32::from(paint.geometry.line_height) * scale,
+                    ],
+                )
+                .appearance(&self.appearance)
+                .copy_rects(&flash.rects, bounds.origin, scale);
+            Some((shader, uniforms.finish()))
+        });
+        match flash {
+            Some((shader, uniforms)) => {
+                window.paint_shader_layer(bounds, shader.shader(), uniforms, |window| {
+                    self.row_cache.borrow_mut().paint(paint, bounds, window, cx);
+                });
+                window.request_animation_frame();
+            }
+            None => self.row_cache.borrow_mut().paint(paint, bounds, window, cx),
+        }
     }
 }

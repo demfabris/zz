@@ -1,6 +1,7 @@
 # Update Log
 
 ## 2026-09-27
+* **Update**: Terminal panes can run shaders. A carried gpui patch adds shader layers: a closure's primitives are drawn to a texture and composited through a WGSL fragment shader on Metal and wgpu, while DirectX draws them unshaded. zz writes terminal shaders in Ghostty's Shadertoy GLSL and translates them with naga; all 46 shaders in two community collections translated. The first shader is a copy shimmer: when a selection lands in the system clipboard, a slanted band of light sweeps across it once over 0.55 s, raising glyph contrast so text stays readable on light and dark selections. Loading user shader files from config is not wired yet. Client only: no protocol or daemon change.
 * **Update**: Protocol 107 adds the desktop path picker and which-key; it is unreleased, and the daemon and every client must update together, including the zz on each ssh host. `choose-path [-t pane] [-c dir]`, bound to `C-b F`, opens a picker at the terminal cursor that only the desktop app can show: the daemon walks the pane's directory, reads git marks without running repo fsmonitor or filter commands, and picks the insert form (shell quoting, `@path` for Claude, a bare path for Codex); the client ranks and pastes. A new `KeyTableActive` event drives a which-key sheet for the prefix and custom key tables after `which-key-delay` (400 ms, 0 turns it off). The stock prefix notes now match the pin except `r`, so `C-b ?` lists 78 rows instead of 35.
 
 ## 2026-09-25

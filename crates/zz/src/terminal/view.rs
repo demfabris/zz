@@ -49,7 +49,10 @@ use crate::{
         TerminalFontSizeAdjustment,
     },
     mux::hosts::HostId,
-    terminal::element::{RowRenderCache, TerminalElement},
+    terminal::{
+        element::{RowRenderCache, TerminalElement},
+        shader,
+    },
     window::corners::{WindowCorners, round_div_radii},
 };
 
@@ -84,6 +87,7 @@ static PASTE_UPLOAD_ID: AtomicU64 = AtomicU64::new(1);
 const SELECTION_AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(33);
 const LOCAL_SCROLL_DEBOUNCE: Duration = Duration::from_millis(120);
 const LOCAL_SCROLL_TIMEOUT: Duration = Duration::from_secs(2);
+const COPY_FLASH_SELECTION_GRACE: Duration = Duration::from_millis(500);
 const IMAGE_HOVER_DWELL: Duration = Duration::from_millis(250);
 const CURSOR_BLINK_TIMEOUT: Duration = Duration::from_secs(10);
 const IMAGE_POPOVER_SIDE: f32 = 300.0;
@@ -591,7 +595,19 @@ pub(crate) struct TerminalView {
     scrollbar_dragging: bool,
     primary_paste_pressed: bool,
     last_clipboard_image: Option<(u64, Arc<Image>)>,
+    shader_epoch: Instant,
+    observed_copy_generation: u64,
+    painted_selection: Vec<Bounds<Pixels>>,
+    selection_cleared_at: Option<Instant>,
+    copy_flash: Option<CopyFlash>,
     _subscriptions: Vec<Subscription>,
+}
+
+#[derive(Clone)]
+pub(crate) struct CopyFlash {
+    pub(crate) epoch: Instant,
+    pub(crate) started: Instant,
+    pub(crate) rects: Arc<[Bounds<Pixels>]>,
 }
 
 impl TerminalView {
@@ -948,6 +964,7 @@ impl TerminalView {
                 row_revisions,
                 row_revision_epoch: u64::MAX,
                 revision_scratch: Vec::new(),
+                copy_generation: 0,
             }))
         });
         let kitty_images = if command_output || popup {
@@ -973,6 +990,7 @@ impl TerminalView {
             observed_row_revision_epoch,
             observed_history_invalidations,
             initial_hovered_uri,
+            observed_copy_generation,
         ) = {
             let state = retained.read();
             (
@@ -981,6 +999,7 @@ impl TerminalView {
                 state.row_revision_epoch,
                 state.history_invalidations,
                 state.viewport.presentation.hovered_uri.clone(),
+                state.copy_generation,
             )
         };
         let focus_handle = cx.focus_handle();
@@ -1141,6 +1160,7 @@ impl TerminalView {
                     history_invalidations,
                     server_offset,
                     local_scroll_available,
+                    copy_generation,
                 ) = {
                     let state = retained.read();
                     (
@@ -1150,6 +1170,7 @@ impl TerminalView {
                         state.history_invalidations,
                         state.viewport.scrollbar.offset,
                         local_scroll_gate(&state.viewport, state.history.rows.len()),
+                        state.copy_generation,
                     )
                 };
                 if let Some(local_scroll) = view.local_scroll.as_mut() {
@@ -1189,6 +1210,10 @@ impl TerminalView {
                     changed = true;
                 }
                 view.observed_history_invalidations = history_invalidations;
+                if copy_generation != view.observed_copy_generation {
+                    view.observed_copy_generation = copy_generation;
+                    changed |= !retained_changed && view.start_copy_flash();
+                }
             }
             let mut retired_images = Vec::new();
             if let Some(kitty_images) = kitty_images {
@@ -1307,6 +1332,11 @@ impl TerminalView {
             scrollbar_dragging: false,
             primary_paste_pressed: false,
             last_clipboard_image: None,
+            shader_epoch: Instant::now(),
+            observed_copy_generation,
+            painted_selection: Vec::new(),
+            selection_cleared_at: None,
+            copy_flash: None,
             _subscriptions: subscriptions,
         };
         view.observe_image_hover(initial_hovered_uri, cx);
@@ -1315,6 +1345,47 @@ impl TerminalView {
 
     pub(crate) fn retained(&self) -> Arc<RwLock<RetainedTerminalViewport>> {
         Arc::clone(&self.retained)
+    }
+
+    pub(crate) fn record_selection(&mut self, selection: &[Bounds<Pixels>]) -> Option<CopyFlash> {
+        if selection.is_empty() {
+            if !self.painted_selection.is_empty() && self.selection_cleared_at.is_none() {
+                self.selection_cleared_at = Some(Instant::now());
+            }
+        } else {
+            self.selection_cleared_at = None;
+            if self.painted_selection != selection {
+                self.painted_selection = selection.to_vec();
+                if let Some(flash) = &mut self.copy_flash {
+                    flash.rects = shader::merge_rows(selection).into();
+                }
+            }
+        }
+        self.copy_flash.clone()
+    }
+
+    fn start_copy_flash(&mut self) -> bool {
+        let now = Instant::now();
+        let recent = self
+            .selection_cleared_at
+            .is_none_or(|cleared| now.duration_since(cleared) < COPY_FLASH_SELECTION_GRACE);
+        if self.painted_selection.is_empty() || !recent {
+            return false;
+        }
+        self.copy_flash = Some(CopyFlash {
+            epoch: self.shader_epoch,
+            started: now,
+            rects: shader::merge_rows(&self.painted_selection).into(),
+        });
+        true
+    }
+
+    fn live_copy_flash(&mut self) -> Option<CopyFlash> {
+        let flash = self.copy_flash.as_ref()?;
+        if flash.started.elapsed().as_secs_f32() > shader::COPY_FLASH_SECONDS {
+            self.copy_flash = None;
+        }
+        self.copy_flash.clone()
     }
 
     pub(crate) fn pane_background(&self, cx: &App) -> Hsla {
@@ -2772,6 +2843,7 @@ impl Render for TerminalView {
         let marked_text = self.marked_text();
         let status = (!self.popup).then(|| self.status_message()).flatten();
         let search_query = self.search_query.clone();
+        let copy_flash = self.live_copy_flash();
         let (mode, unseen_output, search_status, hovered_uri) = {
             let state = retained.read();
             (
@@ -2865,6 +2937,7 @@ impl Render for TerminalView {
                     self.text_opacity,
                     self.cursor_blink_visible,
                     search_query.is_none().then_some(marked_text).flatten(),
+                    copy_flash,
                 )),
             pane_content_radii(cx, self.window_corners),
         )

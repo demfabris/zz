@@ -92,6 +92,7 @@ thiserror = "2.0.20"
 url = "=2.5.8"
 wayland-client = "0.31.15"
 wgpu = "=30.0.1"
+naga = { version = "=30.0.1", features = ["glsl-in", "wgsl-in", "wgsl-out"] }
 windows = "=0.62.2"
 x11rb = "0.13.2"
 zeroize = "=1.9.0"
@@ -103,8 +104,8 @@ cef-dll-sys = { path = "third_party/rust/cef-dll-sys" }
 libghostty-vt-sys = { path = "third_party/rust/libghostty-vt-sys" }
 
 [patch."https://github.com/zed-industries/zed"]
-gpui = { git = "https://github.com/demfabris/zed", rev = "beca360ad31c8ad1d93c846d26a57a41fadfcb80", version = "=0.2.2" }
-gpui_platform = { git = "https://github.com/demfabris/zed", rev = "beca360ad31c8ad1d93c846d26a57a41fadfcb80" }
+gpui = { git = "https://github.com/demfabris/zed", rev = "e01edb6b1a997d18d4e1c6db62109dd495a4f0db", version = "=0.2.2" }
+gpui_platform = { git = "https://github.com/demfabris/zed", rev = "e01edb6b1a997d18d4e1c6db62109dd495a4f0db" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

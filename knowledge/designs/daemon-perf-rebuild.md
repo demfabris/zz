@@ -1016,7 +1016,9 @@ departs from the scope above:
   `TerminalSpawn`, and every setting and view change (`set_word_separators`, `set_appearance`,
   `set_allow_passthrough`, `set_wrap_search`, `set_engine_knobs`, `resize`, attach, detach,
   release, stream, preview watch) goes through `ControlSlot`, which coalesces per key and per view
-  and is applied before the command that wakes the actor, so none of them parks the caller.
+  and is applied before the command that wakes the actor, so none of them parks the caller. The
+  price is order: a setting sent while a command still waits in the channel takes effect before
+  that command runs.
   Empty panes take word separators and wrap-search through the slot at creation.
 - Items 8-12 as briefed, with these details: views are recorded on the handle side
   (`ControlSlot::known_views`), not by the actor; `is_current_terminal` reads a per-session

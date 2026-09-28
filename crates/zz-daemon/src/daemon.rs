@@ -66,8 +66,8 @@ use zz_terminal::{
     CursorStyle, EngineKnobs, LastCommandCapture, PasteBufferAction, ProgressBarState,
     RawOutputTapError, TerminalAppearance, TerminalCaptureError, TerminalColorScheme,
     TerminalDiffScratch, TerminalEvent, TerminalEvents, TerminalMode, TerminalPalette,
-    TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId, TerminalViewport, WordSeparators,
-    apply_appearance_overrides, parse_x11_color, prepare_paste_buffer,
+    TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId, TerminalViewport, ViewStream,
+    WordSeparators, apply_appearance_overrides, parse_x11_color, prepare_paste_buffer,
 };
 
 #[cfg(feature = "agent")]
@@ -1558,6 +1558,7 @@ impl Daemon {
                 log::info!("ZZ_PERF_EAGER_UNIVERSE=1: format universes are built eagerly");
             }
             log::info!("zz daemon listening at {endpoint}");
+            log_pane_perf_knobs();
             Ok::<(), DaemonError>(())
         })();
         let _ready_guard = if startup_result.is_ok() {
@@ -4677,6 +4678,7 @@ impl Shared {
             let mut terminals = std::mem::take(&mut inner.terminals)
                 .values()
                 .cloned()
+                .inspect(|terminal| terminal.retire())
                 .collect::<Vec<_>>();
             terminals.extend(
                 inner
@@ -8003,6 +8005,9 @@ impl Shared {
                                 .map(|(columns, rows)| TerminalSize::cells(columns, rows)),
                             non_login_shell: false,
                             env,
+                            word_separators: Some(word_separators.clone()),
+                            allow_passthrough: Some(terminal_options.allow_passthrough),
+                            wrap_search: Some(terminal_options.wrap_search),
                         };
                         let session = Arc::new(if empty {
                             let session = TerminalSession::spawn_empty_with_appearance(
@@ -8022,23 +8027,30 @@ impl Shared {
                                 |path| path.to_string_lossy().into_owned(),
                             )
                         };
-                        deferred_terminal_commands.push(
-                            DeferredTerminalCommand::SetWordSeparators {
-                                terminal: Arc::clone(&session),
-                                separators: word_separators,
-                            },
-                        );
-                        deferred_terminal_commands.push(
-                            DeferredTerminalCommand::SetAllowPassthrough {
-                                terminal: Arc::clone(&session),
-                                enabled: terminal_options.allow_passthrough,
-                            },
-                        );
-                        deferred_terminal_commands.push(DeferredTerminalCommand::SetWrapSearch {
-                            terminal: Arc::clone(&session),
-                            enabled: terminal_options.wrap_search,
-                        });
-                        inner.terminals_mut().insert(*pane, Arc::clone(&session));
+                        if empty {
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetWordSeparators {
+                                    terminal: Arc::clone(&session),
+                                    separators: word_separators,
+                                },
+                            );
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetAllowPassthrough {
+                                    terminal: Arc::clone(&session),
+                                    enabled: terminal_options.allow_passthrough,
+                                },
+                            );
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetWrapSearch {
+                                    terminal: Arc::clone(&session),
+                                    enabled: terminal_options.wrap_search,
+                                },
+                            );
+                        }
+                        if let Some(previous) = inner.terminals_mut().insert(*pane, Arc::clone(&session))
+                        {
+                            previous.retire();
+                        }
                         inner.terminal_spawns.insert(*pane, spawn);
                         inner.engine.set_pane_runtime_facts_with_hooks(
                             *pane,
@@ -8177,6 +8189,9 @@ impl Shared {
                                 .map(|(columns, rows)| TerminalSize::cells(columns, rows)),
                             non_login_shell: false,
                             env,
+                            word_separators: Some(word_separators.clone()),
+                            allow_passthrough: Some(terminal_options.allow_passthrough),
+                            wrap_search: Some(terminal_options.wrap_search),
                         };
                         let session = Arc::new(if *empty {
                             let session = TerminalSession::spawn_empty_with_appearance(
@@ -8196,30 +8211,41 @@ impl Shared {
                                 |path| path.to_string_lossy().into_owned(),
                             )
                         };
-                        deferred_terminal_commands.push(
-                            DeferredTerminalCommand::SetWordSeparators {
-                                terminal: Arc::clone(&session),
-                                separators: word_separators,
-                            },
-                        );
-                        deferred_terminal_commands.push(
-                            DeferredTerminalCommand::SetAllowPassthrough {
-                                terminal: Arc::clone(&session),
-                                enabled: terminal_options.allow_passthrough,
-                            },
-                        );
-                        deferred_terminal_commands.push(DeferredTerminalCommand::SetWrapSearch {
-                            terminal: Arc::clone(&session),
-                            enabled: terminal_options.wrap_search,
-                        });
+                        if *empty {
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetWordSeparators {
+                                    terminal: Arc::clone(&session),
+                                    separators: word_separators,
+                                },
+                            );
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetAllowPassthrough {
+                                    terminal: Arc::clone(&session),
+                                    enabled: terminal_options.allow_passthrough,
+                                },
+                            );
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetWrapSearch {
+                                    terminal: Arc::clone(&session),
+                                    enabled: terminal_options.wrap_search,
+                                },
+                            );
+                        }
                         Self::wake_pane_exit_wait(&mut inner, *pane, 0);
                         if let Some(entry) = inner.pane_exit_waits.get_mut(pane) {
                             let command_wait = entry.command_wait.take();
                             *entry = PaneExitWait::new();
                             entry.command_wait = command_wait;
                         }
-                        inner.terminals_mut().insert(*pane, Arc::clone(&session));
+                        if let Some(previous) = inner.terminals_mut().insert(*pane, Arc::clone(&session))
+                        {
+                            previous.retire();
+                        }
                         inner.terminal_spawns.insert(*pane, spawn);
+                        for streamed in inner.streamed_terminals.values_mut() {
+                            streamed.remove(pane);
+                        }
+                        inner.preview_watched.remove(pane);
                         inner.engine.set_pane_runtime_facts_with_hooks(
                             *pane,
                             PaneRuntimeFacts {
@@ -8371,7 +8397,9 @@ impl Shared {
                                 pipes_to_close.push(pipe);
                             }
                             Self::wake_pane_exit_wait(&mut inner, *pane, 0);
-                            inner.terminals_mut().remove(pane);
+                            if let Some(terminal) = inner.terminals_mut().remove(pane) {
+                                terminal.retire();
+                            }
                             inner.last_output.remove(pane);
                             #[cfg(all(feature = "agent", unix))]
                             inner.claude_peer_states.remove(pane);
@@ -15900,6 +15928,9 @@ impl Shared {
                 }),
                 non_login_shell: true,
                 env,
+                word_separators: None,
+                allow_passthrough: None,
+                wrap_search: None,
             };
             (
                 geometry,
@@ -15914,6 +15945,7 @@ impl Shared {
         let terminal = Arc::new(TerminalSession::spawn(history_limit, appearance, spawn));
         terminal.set_word_separators(word_separators);
         terminal.attach_view(TerminalViewId(target_client.0));
+        terminal.set_view_stream(TerminalViewId(target_client.0), ViewStream::Foreground);
         let (wake, wait) = crossbeam_channel::bounded(1);
         {
             let mut inner = self.inner.lock();
@@ -17237,6 +17269,12 @@ impl Shared {
             .copied()
             .collect::<Vec<_>>();
         affected_panes.extend(visible.iter().copied());
+        let previous_kinds = inner
+            .streamed_terminals
+            .get(&client)
+            .cloned()
+            .unwrap_or_default();
+        apply_view_streams(&inner, TerminalViewId(client.0), &previous_kinds, &streamed);
         inner.visible_terminals.insert(client, visible);
         inner.streamed_terminals.insert(client, streamed);
         mark_client_terminal_latest(&mut inner, client);
@@ -17599,6 +17637,11 @@ impl Shared {
             .remove(&client)
             .map(|streamed| streamed.into_keys().collect::<Vec<_>>())
             .unwrap_or_default();
+        for pane in &streamed {
+            if let Some(terminal) = inner.terminals.get(pane) {
+                terminal.set_view_stream(TerminalViewId(client.0), ViewStream::Off);
+            }
+        }
         inner.terminal_preview_clients.remove(&client);
         let subscriber = inner.subscribers.get(&client).cloned();
         inner.visible_agents.remove(&client);
@@ -18716,7 +18759,9 @@ impl Shared {
                 return;
             };
             let terminal = Arc::clone(&popup.terminal);
-            inner.terminals_mut().insert(pane, Arc::clone(&terminal));
+            if let Some(previous) = inner.terminals_mut().insert(pane, Arc::clone(&terminal)) {
+                previous.retire();
+            }
             let current_path = terminal_working_directory(&terminal)
                 .map(|path| path.to_string_lossy().into_owned())
                 .unwrap_or_default();
@@ -23482,6 +23527,7 @@ impl Shared {
 
         terminal.set_word_separators(word_separators);
         terminal.attach_view(view);
+        terminal.set_view_stream(view, ViewStream::Foreground);
         if choose_tree_closed {
             self.publish_to_client(client, EventPayload::ChooseTree { state: None });
         }
@@ -24060,7 +24106,7 @@ impl Shared {
         thread::Builder::new()
             .name(format!("zz-pane-{}", pane.0))
             .spawn(move || {
-                let mut previous = BTreeMap::<TerminalViewId, Arc<TerminalViewport>>::new();
+                let mut previous = BTreeMap::<TerminalViewId, (u64, Arc<TerminalViewport>)>::new();
                 let mut previous_title = None::<String>;
                 let projects_agent = shared
                     .inner
@@ -24081,13 +24127,8 @@ impl Shared {
                     }
                     match event {
                         TerminalEvent::ViewportReady { output_activity } => {
-                            let mut current =
-                                terminal.latest_viewports().into_iter().collect::<Vec<_>>();
-                            current.sort_by_key(|(view, _)| view.0);
-                            let runtime_viewport = current.first().map_or_else(
-                                || terminal.latest_viewport(),
-                                |(_, viewport)| Arc::clone(viewport),
-                            );
+                            let current = terminal.latest_view_frames();
+                            let runtime_viewport = terminal.latest_viewport();
                             if !terminal_status_should_close(&runtime_viewport.status) {
                                 let current_command = terminal_current_command(&terminal);
                                 shared.synchronize_pane_runtime(
@@ -24108,9 +24149,24 @@ impl Shared {
                                     );
                                 }
                             }
+                            if !projects_agent
+                                && previous_title
+                                    .as_deref()
+                                    .is_none_or(|previous| previous != runtime_viewport.title())
+                            {
+                                shared.synchronize_pane_title(
+                                    pane,
+                                    &terminal,
+                                    runtime_viewport.title(),
+                                );
+                                previous_title = Some(runtime_viewport.title().to_owned());
+                            }
+                            if terminal.take_preview_ready() {
+                                shared.refresh_chooser_previews();
+                            }
                             let referenced_images = current
                                 .iter()
-                                .flat_map(|(_, viewport)| {
+                                .flat_map(|(_, viewport, _)| {
                                     viewport.kitty_placements.iter().map(|placement| {
                                         (placement.image_id, placement.image_generation)
                                     })
@@ -24127,42 +24183,20 @@ impl Shared {
                             }
                             let active = current
                                 .iter()
-                                .map(|(view, _)| *view)
+                                .map(|(view, _, _)| *view)
                                 .collect::<BTreeSet<_>>();
-                            let mut finished = false;
+                            let mut finished =
+                                terminal_status_should_close(&runtime_viewport.status);
                             let mut mode_clients = BTreeSet::new();
-                            if active.is_empty() {
-                                let viewport = terminal.latest_viewport();
-                                if !projects_agent
-                                    && previous_title
-                                        .as_deref()
-                                        .is_none_or(|previous| previous != viewport.title())
-                                {
-                                    shared.synchronize_pane_title(
-                                        pane,
-                                        &terminal,
-                                        viewport.title(),
-                                    );
-                                    previous_title = Some(viewport.title().to_owned());
-                                }
-                                finished = terminal_status_should_close(&viewport.status);
-                            }
-                            for (view, viewport) in current {
-                                if !projects_agent
-                                    && previous_title
-                                        .as_deref()
-                                        .is_none_or(|previous| previous != viewport.title())
-                                {
-                                    shared.synchronize_pane_title(
-                                        pane,
-                                        &terminal,
-                                        viewport.title(),
-                                    );
-                                    previous_title = Some(viewport.title().to_owned());
-                                }
+                            for (view, viewport, epoch) in current {
                                 finished |= terminal_status_should_close(&viewport.status);
-                                let payload = previous
-                                    .get(&view)
+                                let payload = epoch
+                                    .and_then(|epoch| {
+                                        previous
+                                            .get(&view)
+                                            .filter(|(seen, _)| *seen == epoch)
+                                            .map(|(_, previous)| previous)
+                                    })
                                     .and_then(|previous| {
                                         TerminalViewport::diff_with_scratch(
                                             previous,
@@ -24189,7 +24223,14 @@ impl Shared {
                                 {
                                     mode_clients.insert(ClientId(view.0));
                                 }
-                                previous.insert(view, viewport);
+                                match epoch {
+                                    Some(epoch) => {
+                                        previous.insert(view, (epoch, viewport));
+                                    }
+                                    None => {
+                                        previous.remove(&view);
+                                    }
+                                }
                             }
                             mode_memo.retain(|view, _| active.contains(view));
                             if !mode_clients.is_empty() {
@@ -24431,11 +24472,16 @@ impl Shared {
     }
 
     fn is_current_terminal(&self, pane: PaneId, terminal: &Arc<TerminalSession>) -> bool {
-        self.inner
-            .lock()
-            .terminals
-            .get(&pane)
-            .is_some_and(|current| Arc::ptr_eq(current, terminal))
+        let current = !terminal.is_retired();
+        debug_assert!(
+            !current
+                || self.inner.try_lock().is_none_or(|inner| inner
+                    .terminals
+                    .get(&pane)
+                    .is_none_or(|mapped| Arc::ptr_eq(mapped, terminal))),
+            "a live terminal is mapped to another pane's session"
+        );
+        current
     }
 
     fn synchronize_pane_progress(
@@ -25182,6 +25228,7 @@ impl Shared {
                     .copied()
                     .collect::<Vec<_>>();
                 let view = TerminalViewId(client.0);
+                apply_view_streams(&inner, view, &previous_streamed, &next_streamed);
                 let viewport_for = |pane: &PaneId| {
                     terminal_viewport_for_pane(&inner, *pane, view)
                         .map(|(terminal, viewport)| (*pane, terminal, (*viewport).clone()))
@@ -25214,6 +25261,7 @@ impl Shared {
                 inner.visible_terminals.insert(client, next_visible);
                 inner.streamed_terminals.insert(client, next_streamed);
             }
+            refresh_preview_watches(&mut inner);
             let layout_changed = write_back_terminal_geometries(&mut inner, &affected_panes);
             let resizes = terminal_resizes_for_panes(&inner, &affected_panes);
             (changes, resizes, layout_changed)
@@ -25252,6 +25300,23 @@ impl Shared {
         apply_terminal_resizes(resizes);
         if layout_changed {
             self.publish_mux_snapshots();
+        }
+    }
+
+    /// A chooser previews panes by reading their latest viewport. Once the
+    /// first current frame of a pane a chooser started watching lands, redraw
+    /// the choosers so their first render does not keep cells from before
+    /// the watch.
+    fn refresh_chooser_previews(&self) {
+        let clients = self
+            .inner
+            .lock()
+            .choose_trees
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        for client in clients {
+            self.publish_chooser_presentation(client);
         }
     }
 
@@ -30932,6 +30997,7 @@ struct ServerState {
     key_tables_generation: u64,
     published_snapshots: BTreeMap<ClientId, (u64, u64)>,
     scheduled_window_rename: Option<Instant>,
+    preview_watched: BTreeSet<PaneId>,
 }
 
 struct WaitItem {
@@ -39006,6 +39072,101 @@ fn streamed_terminal_panes(
     streamed
 }
 
+#[cfg(test)]
+mod pane_tests;
+
+fn log_pane_perf_knobs() {
+    for (knob, active) in zz_terminal::perf_knobs() {
+        log::info!(target: "zz_daemon::perf_knobs", "{knob} {}", if active { "on" } else { "off" });
+    }
+}
+
+/// Mirrors one client's stream changes onto the pane actors. Called under the
+/// server lock, so the order the actors see matches the order the streamed
+/// sets changed in; the calls only queue and never wait for an actor.
+fn apply_view_streams(
+    inner: &ServerState,
+    view: TerminalViewId,
+    previous: &BTreeMap<PaneId, TerminalStreamKind>,
+    next: &BTreeMap<PaneId, TerminalStreamKind>,
+) {
+    for pane in previous.keys().filter(|pane| !next.contains_key(pane)) {
+        if let Some(terminal) = inner.terminals.get(pane) {
+            terminal.set_view_stream(view, ViewStream::Off);
+        }
+    }
+    for (pane, kind) in next {
+        if previous.contains_key(pane) {
+            continue;
+        }
+        if let Some(terminal) = inner.terminals.get(pane) {
+            terminal.set_view_stream(
+                view,
+                match kind {
+                    TerminalStreamKind::Foreground => ViewStream::Foreground,
+                    TerminalStreamKind::Preview => ViewStream::Preview,
+                },
+            );
+        }
+    }
+}
+
+/// The panes an open chooser can preview from its rows: every pane of a
+/// listed session or window, a listed pane, and a listed client's pane.
+fn chooser_preview_panes(inner: &ServerState) -> BTreeSet<PaneId> {
+    let state = &inner.engine.state;
+    let mut panes = BTreeSet::new();
+    let add_window = |panes: &mut BTreeSet<PaneId>, window: WindowId| {
+        if let Some(window) = state.windows.get(&window) {
+            panes.extend(window.panes.keys().copied());
+        }
+    };
+    for chooser in inner.choose_trees.values() {
+        for item in &chooser.rendered.items {
+            match item.target {
+                ChooseTreeTarget::Session(session) => {
+                    for window in state
+                        .sessions
+                        .get(&session)
+                        .into_iter()
+                        .flat_map(|session| session.windows.iter())
+                    {
+                        add_window(&mut panes, *window);
+                    }
+                }
+                ChooseTreeTarget::Window(window) => add_window(&mut panes, window),
+                ChooseTreeTarget::Pane(pane) => {
+                    panes.insert(pane);
+                }
+                ChooseTreeTarget::Client(client) => {
+                    panes.extend(
+                        chooser
+                            .clients
+                            .iter()
+                            .filter(|row| row.client == client)
+                            .filter_map(|row| row.pane),
+                    );
+                }
+            }
+        }
+    }
+    panes.retain(|pane| inner.terminals.contains_key(pane));
+    panes
+}
+
+fn refresh_preview_watches(inner: &mut ServerState) {
+    let next = chooser_preview_panes(inner);
+    if next == inner.preview_watched {
+        return;
+    }
+    for pane in inner.preview_watched.symmetric_difference(&next) {
+        if let Some(terminal) = inner.terminals.get(pane) {
+            terminal.set_preview_watch(next.contains(pane));
+        }
+    }
+    inner.preview_watched = next;
+}
+
 /// The agent panes a client can actually see, derived exactly like the
 /// terminal ones: attached session, focused window, zoom.
 #[cfg(feature = "agent")]
@@ -39804,13 +39965,7 @@ fn mouse_pane_cell(
 }
 
 fn wait_for_terminal_identity(terminal: &TerminalSession) {
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while terminal.process_id().is_none() || cfg!(unix) && terminal.tty().is_none() {
-        if terminal.completion().is_some() || Instant::now() >= deadline {
-            return;
-        }
-        thread::sleep(Duration::from_millis(1));
-    }
+    terminal.wait_for_identity(Duration::from_secs(2));
 }
 
 fn terminal_resizes_for_panes(
@@ -70747,9 +70902,21 @@ set-option -g @alias-mixed-next yes
         let deadline = Instant::now() + Duration::from_secs(30);
         for client in clients {
             loop {
-                let ready = shared.inner.lock().terminals[&pane]
-                    .latest_viewport_for(TerminalViewId(client.0))
-                    .is_some();
+                let ready = {
+                    let inner = shared.inner.lock();
+                    let streamed = inner
+                        .streamed_terminals
+                        .get(client)
+                        .is_some_and(|streamed| streamed.contains_key(&pane));
+                    let terminal = &inner.terminals[&pane];
+                    if streamed {
+                        terminal
+                            .latest_viewport_for(TerminalViewId(client.0))
+                            .is_some()
+                    } else {
+                        matches!(terminal.latest_viewport().status, SessionStatus::Running)
+                    }
+                };
                 if ready {
                     break;
                 }

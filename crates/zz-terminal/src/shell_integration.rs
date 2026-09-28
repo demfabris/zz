@@ -6,7 +6,10 @@ use std::{
     fs::{self, OpenOptions},
     io::{self, ErrorKind, Write},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        LazyLock, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 #[cfg(unix)]
@@ -22,6 +25,52 @@ const POWERSHELL_INTEGRATION: &[u8] =
 
 #[cfg(any(unix, windows))]
 static TEMPORARY_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+/// The resource directory is named after a hash of the resources this build
+/// carries, so a root prepared once holds exactly these bytes and a newer
+/// build never rewrites files a running shell still reads.
+#[cfg(unix)]
+static RESOURCE_DIRECTORY: LazyLock<String> =
+    LazyLock::new(|| resource_directory(&[BASH_INTEGRATION, ZSH_BOOTSTRAP, ZSH_INTEGRATION]));
+#[cfg(windows)]
+static RESOURCE_DIRECTORY: LazyLock<String> =
+    LazyLock::new(|| resource_directory(&[POWERSHELL_INTEGRATION]));
+
+/// Roots this process already materialized; a pane spawn after the first
+/// touches the file system for none of them.
+#[cfg(any(unix, windows))]
+static PREPARED_ROOTS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+#[cfg(any(unix, windows))]
+fn resource_directory(resources: &[&[u8]]) -> String {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for resource in resources {
+        for byte in resource.iter().chain(
+            &u64::try_from(resource.len())
+                .unwrap_or(u64::MAX)
+                .to_le_bytes(),
+        ) {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    format!("v1-{hash:016x}")
+}
+
+/// Every variable the integration may set, so a spawn that rebuilds the
+/// child's environment reads each one back even when its value is not UTF-8.
+#[cfg(unix)]
+pub(super) const ENVIRONMENT_KEYS: [&str; 9] = [
+    "ENV",
+    "HISTFILE",
+    "ZDOTDIR",
+    "ZZ_BASH_ENV",
+    "ZZ_BASH_INJECT",
+    "ZZ_BASH_UNEXPORT_HISTFILE",
+    "ZZ_SHELL_INTEGRATION_ACTIVE",
+    "ZZ_SHELL_INTEGRATION_DIR",
+    "ZZ_ZSH_ZDOTDIR",
+];
 
 #[cfg(any(unix, windows))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -160,7 +209,13 @@ fn configure_zsh(command: &mut CommandBuilder, root: &Path) {
 #[cfg(any(unix, windows))]
 fn resource_root() -> Option<PathBuf> {
     let prepared = resource_cache_root().and_then(|root| {
-        materialize_resources(&root)?;
+        let mut prepared_roots = PREPARED_ROOTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !prepared_roots.contains(&root) {
+            materialize_resources(&root)?;
+            prepared_roots.push(root.clone());
+        }
         Ok(root)
     });
     match prepared {
@@ -195,7 +250,7 @@ fn resource_cache_root() -> io::Result<PathBuf> {
                 "neither XDG_CACHE_HOME nor HOME can locate a shell integration cache",
             )
         })?;
-    Ok(base.join("zz/shell-integration/v1"))
+    Ok(base.join("zz/shell-integration").join(&*RESOURCE_DIRECTORY))
 }
 
 #[cfg(all(unix, target_os = "macos"))]
@@ -270,7 +325,6 @@ fn write_resource(path: &Path, contents: &[u8]) -> io::Result<()> {
     let result = (|| {
         file.set_permissions(fs::Permissions::from_mode(0o600))?;
         file.write_all(contents)?;
-        file.sync_all()?;
         drop(file);
         fs::rename(&temporary, path)?;
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))
@@ -384,7 +438,7 @@ fn resource_cache_root() -> io::Result<PathBuf> {
                 "neither LOCALAPPDATA nor the temporary directory can locate a shell integration cache",
             )
         })?;
-    Ok(base.join("zz/shell-integration/v1"))
+    Ok(base.join("zz/shell-integration").join(&*RESOURCE_DIRECTORY))
 }
 
 #[cfg(windows)]
@@ -432,7 +486,6 @@ fn write_resource(path: &Path, contents: &[u8]) -> io::Result<()> {
         .open(&temporary)?;
     let result = (|| {
         file.write_all(contents)?;
-        file.sync_all()?;
         // Windows opens files without FILE_SHARE_DELETE, so close before renaming.
         drop(file);
         fs::rename(&temporary, path)

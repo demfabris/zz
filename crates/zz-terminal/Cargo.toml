@@ -18,6 +18,7 @@ session = [
     "dep:filedescriptor",
     "dep:foldhash",
     "dep:image",
+    "dep:libc",
     "dep:libghostty-vt",
     "dep:log",
     "dep:parking_lot",
@@ -33,12 +34,13 @@ csscolorparser.workspace = true
 filedescriptor = { workspace = true, optional = true }
 foldhash = { workspace = true, optional = true }
 image = { version = "=0.25.10", optional = true, default-features = false, features = ["png"] }
+libc = { workspace = true, optional = true }
 libghostty-vt = { workspace = true, optional = true, features = ["kitty-graphics"] }
 log = { workspace = true, optional = true }
 parking_lot = { workspace = true, optional = true }
 portable-pty = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
-rustix = { workspace = true, optional = true }
+rustix = { workspace = true, optional = true, features = ["fs", "pty"] }
 serde.workspace = true
 smallvec.workspace = true
 thiserror.workspace = true

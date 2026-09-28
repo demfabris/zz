@@ -2130,7 +2130,7 @@ fn spawn_daemon(
     let executable = daemon_executable()?;
     let mut command = Command::new(&executable);
     command
-        .env("ZZ_TMUX_EXECUTABLE", &executable)
+        .env_remove("ZZ_TMUX_EXECUTABLE")
         .env_remove(APP_STARTUP_DIRECTORY_ENV);
     command.arg(diagnostics::SOCKET_ARGUMENT).arg(path);
     for config in mux_config_files {

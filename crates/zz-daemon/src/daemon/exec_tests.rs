@@ -214,6 +214,142 @@ fn a_client_file_read_goes_live_and_the_connection_keeps_serving() {
     );
 }
 
+#[test]
+fn an_idle_connection_thread_serves_the_next_connection_then_retires() {
+    let threads = Arc::new(exec::ConnectionThreads::default());
+    let (ran, seen) = mpsc::channel();
+    let first = ran.clone();
+    threads
+        .run(Box::new(move || {
+            let _ = first.send(thread::current().id());
+        }))
+        .expect("first job");
+    let first_thread = seen
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first ran");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while threads.idle_count() == 0 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(threads.idle_count(), 1);
+    let second = ran.clone();
+    threads
+        .run(Box::new(move || {
+            let _ = second.send(thread::current().id());
+        }))
+        .expect("second job");
+    assert_eq!(
+        seen.recv_timeout(Duration::from_secs(5))
+            .expect("second ran"),
+        first_thread
+    );
+    let (release, blocked) = mpsc::channel::<()>();
+    let third = ran.clone();
+    threads
+        .run(Box::new(move || {
+            let _ = third.send(thread::current().id());
+            let _ = blocked.recv();
+        }))
+        .expect("third job");
+    let busy = seen
+        .recv_timeout(Duration::from_secs(5))
+        .expect("third ran");
+    threads
+        .run(Box::new(move || {
+            let _ = ran.send(thread::current().id());
+        }))
+        .expect("fourth job");
+    assert_ne!(
+        seen.recv_timeout(Duration::from_secs(5))
+            .expect("fourth ran"),
+        busy,
+        "a busy connection thread never delays the next connection"
+    );
+    drop(release);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while threads.idle_count() != 0 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(threads.idle_count(), 0);
+}
+
+#[test]
+fn prompt_history_loads_on_first_use_and_keeps_an_early_entry() {
+    let directory = tempfile::tempdir().expect("history directory");
+    let history = directory.path().join("history");
+    fs::write(&history, "command:from-file\nsearch:needle\n").expect("history file");
+    let shared = Arc::new(Shared::new(3));
+    shared
+        .execute(
+            ClientId(9),
+            ClientKind::Command,
+            &mut ExecutionContext::default(),
+            &CommandInvocation::new(
+                "set-option",
+                ["-s", "history-file", history.to_str().expect("UTF-8 path")],
+            ),
+        )
+        .expect("history-file");
+    shared.initialize(false).expect("startup");
+    assert!(shared.inner.lock().command_history.is_empty());
+    shared.record_prompt_history(CommandPromptType::Command, "early");
+    assert_eq!(
+        shared.inner.lock().command_history,
+        ["from-file".to_owned(), "early".to_owned()]
+    );
+    assert_eq!(
+        fs::read_to_string(&history).expect("persisted history"),
+        "command:from-file\ncommand:early\nsearch:needle\n"
+    );
+    let shown = shared
+        .execute(
+            ClientId(9),
+            ClientKind::Command,
+            &mut ExecutionContext::default(),
+            &CommandInvocation::new("show-prompt-history", ["-T", "search"]),
+        )
+        .expect("show history")
+        .output;
+    assert_eq!(shown, "History for search:\n\n1: needle\n\n");
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn the_tmux_wrapper_runs_a_pinned_image_that_outlives_a_replaced_install() {
+    let directory = tempfile::tempdir().expect("temporary install");
+    let installed = directory.path().join("zz");
+    fs::write(&installed, b"#!/bin/sh\nprintf 'old %s' \"$1\"\n").expect("write installed zz");
+    fs::set_permissions(
+        &installed,
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .expect("make installed zz executable");
+    let shim = TmuxShimGuard::install(installed.clone(), true).expect("install pinned wrapper");
+    let clone_directory = shim.directory.clone();
+    if cfg!(target_os = "macos") {
+        assert_eq!(shim.executable, clone_directory.join("zz"));
+        fs::remove_file(&installed).expect("replace the install");
+        fs::write(&installed, b"#!/bin/sh\nprintf 'new'\n").expect("write new zz");
+        let output = std::process::Command::new(clone_directory.join("tmux"))
+            .arg("-V")
+            .env(
+                crate::TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE,
+                &shim.executable,
+            )
+            .env_remove("TMUX")
+            .output()
+            .expect("run pinned wrapper");
+        assert_eq!(output.stdout, b"old -V");
+    } else {
+        assert_eq!(
+            shim.executable,
+            PathBuf::from(format!("/proc/{}/exe", std::process::id()))
+        );
+    }
+    drop(shim);
+    assert!(!clone_directory.exists());
+}
+
 #[cfg(unix)]
 mod raw {
     use std::os::unix::net::UnixStream;

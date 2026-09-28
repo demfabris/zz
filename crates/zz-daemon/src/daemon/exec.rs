@@ -1,11 +1,112 @@
+use std::sync::LazyLock;
+
 use super::*;
-use zz_protocol::{ExecExit, ExecFlags, ExecOutcome, ExecRequest, ExecResume, ExecResumeKind};
+use zz_protocol::{
+    ClientEnvironmentBlob, ExecExit, ExecFlags, ExecOutcome, ExecRequest, ExecResume,
+    ExecResumeKind,
+};
 
 thread_local! {
     static EXEC_CLIENT: Cell<Option<ClientId>> = const { Cell::new(None) };
 }
 
 type ExecJob = Box<dyn FnOnce() + Send>;
+
+const IDLE_CONNECTION_THREADS: usize = 2;
+const CONNECTION_THREAD_IDLE: Duration = Duration::from_secs(1);
+
+static SPAWN_PER_CONNECTION: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var_os("ZZ_PERF_CONNECTION_THREADS").is_some_and(|value| value == "0")
+});
+
+/// Connection threads outlive their connection by up to a second so a
+/// script's next command reuses one instead of paying a thread start and
+/// exit. Every connection still gets a thread of its own: an idle one when
+/// there is one, a new one otherwise, so nothing ever waits for a thread.
+#[derive(Default)]
+pub(super) struct ConnectionThreads {
+    idle: Mutex<Vec<crossbeam_channel::Sender<ExecJob>>>,
+}
+
+impl ConnectionThreads {
+    pub(super) fn log_knob() {
+        if *SPAWN_PER_CONNECTION {
+            log::info!("ZZ_PERF_CONNECTION_THREADS=0: every connection starts a new thread");
+        }
+    }
+
+    pub(super) fn run(self: &Arc<Self>, job: ExecJob) -> std::io::Result<()> {
+        let mut job = job;
+        loop {
+            let Some(worker) = self.idle.lock().pop() else {
+                break;
+            };
+            match worker.send(job) {
+                Ok(()) => return Ok(()),
+                Err(returned) => job = returned.into_inner(),
+            }
+        }
+        let threads = Arc::downgrade(self);
+        thread::Builder::new()
+            .name("zz-client".to_owned())
+            .spawn(move || connection_worker(&threads, job))
+            .map(drop)
+    }
+
+    #[cfg(test)]
+    pub(super) fn idle_count(&self) -> usize {
+        self.idle.lock().len()
+    }
+
+    fn park(&self, worker: &crossbeam_channel::Sender<ExecJob>) -> bool {
+        let mut idle = self.idle.lock();
+        if *SPAWN_PER_CONNECTION || idle.len() >= IDLE_CONNECTION_THREADS {
+            return false;
+        }
+        idle.push(worker.clone());
+        true
+    }
+
+    fn retire(&self, worker: &crossbeam_channel::Sender<ExecJob>) -> bool {
+        let mut idle = self.idle.lock();
+        let Some(index) = idle.iter().position(|parked| parked.same_channel(worker)) else {
+            return false;
+        };
+        idle.swap_remove(index);
+        true
+    }
+}
+
+fn connection_worker(threads: &Weak<ConnectionThreads>, first: ExecJob) {
+    let (worker, jobs) = crossbeam_channel::bounded::<ExecJob>(1);
+    let mut job = first;
+    loop {
+        job();
+        let Some(owner) = threads.upgrade() else {
+            return;
+        };
+        if !owner.park(&worker) {
+            return;
+        }
+        drop(owner);
+        job = match jobs.recv_timeout(CONNECTION_THREAD_IDLE) {
+            Ok(next) => next,
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                let Some(owner) = threads.upgrade() else {
+                    return;
+                };
+                if owner.retire(&worker) {
+                    return;
+                }
+                match jobs.recv() {
+                    Ok(next) => next,
+                    Err(_) => return,
+                }
+            }
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
+        };
+    }
+}
 
 pub(super) struct ExecLink {
     starter: Mutex<Option<Box<dyn FnOnce() -> Option<ExecLive> + Send>>>,
@@ -44,7 +145,9 @@ impl ExecRegistration {
         if self.released.swap(true, Ordering::AcqRel) {
             return;
         }
-        self.shared.detach(self.client);
+        if !detach_is_inert(&self.shared.inner.lock(), self.client) {
+            self.shared.detach(self.client);
+        }
         self.shared.unregister(self.client);
     }
 }
@@ -147,10 +250,7 @@ impl Shared {
     pub(super) fn resume_pending_execs(&self) {
         let pending = std::mem::take(&mut *self.pending_execs.lock());
         for job in pending {
-            if let Err(error) = thread::Builder::new()
-                .name("zz-client".to_owned())
-                .spawn(job)
-            {
+            if let Err(error) = self.connection_threads.run(job) {
                 log::warn!("could not resume a parked command connection: {error}");
             }
         }
@@ -160,7 +260,11 @@ impl Shared {
         drop(std::mem::take(&mut *self.pending_execs.lock()));
     }
 
-    fn register_exec(&self, request: &ExecRequest) -> Option<(ClientId, ExecutionContext)> {
+    fn register_exec(
+        &self,
+        request: &ExecRequest,
+        environment: ClientEnvironmentBlob,
+    ) -> Option<(ClientId, ExecutionContext)> {
         let mut inner = self.inner.lock();
         if self.stopping.load(Ordering::Acquire) || self.shutdown_pending.load(Ordering::Acquire) {
             return None;
@@ -212,7 +316,7 @@ impl Shared {
         }
         inner
             .client_environments
-            .insert(client, Arc::new(request.environment.map().clone()));
+            .insert(client, Arc::new(environment));
         let context = request
             .origin
             .and_then(|pane| ExecutionContext::for_pane(&inner.engine.state, pane))
@@ -256,9 +360,14 @@ pub(super) fn serve_exec<S: TransportStream>(
     Ok(())
 }
 
-fn serve_exec_ready<S: TransportStream>(mut stream: S, shared: &Arc<Shared>, request: ExecRequest) {
+fn serve_exec_ready<S: TransportStream>(
+    mut stream: S,
+    shared: &Arc<Shared>,
+    mut request: ExecRequest,
+) {
     let started = diagnostic_timer();
-    let Some((client, context)) = shared.register_exec(&request) else {
+    let environment = std::mem::take(&mut request.environment);
+    let Some((client, context)) = shared.register_exec(&request, environment) else {
         best_effort_server_stopping_reply(&mut stream);
         return;
     };
@@ -288,7 +397,6 @@ fn serve_exec_ready<S: TransportStream>(mut stream: S, shared: &Arc<Shared>, req
         writer: Arc::new(Mutex::new(writer)),
         live: None,
     };
-    let mut request = request;
     loop {
         connection.run(request);
         match connection.next_request() {

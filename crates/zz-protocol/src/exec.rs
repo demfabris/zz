@@ -52,6 +52,21 @@ impl ClientEnvironmentBlob {
     }
 
     #[must_use]
+    pub fn from_map(map: BTreeMap<RawText, RawText>) -> Self {
+        let mut bytes = Vec::new();
+        for (name, value) in &map {
+            bytes.extend_from_slice(name.as_bytes());
+            bytes.push(b'=');
+            bytes.extend_from_slice(value.as_bytes());
+            bytes.push(0);
+        }
+        Self {
+            bytes,
+            parsed: OnceLock::from(map),
+        }
+    }
+
+    #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
     }
@@ -77,19 +92,26 @@ impl ClientEnvironmentBlob {
     }
 
     pub fn map(&self) -> &BTreeMap<RawText, RawText> {
-        self.parsed.get_or_init(|| {
-            self.entries()
-                .filter_map(|entry| {
-                    let separator = entry.iter().position(|byte| *byte == b'=')?;
-                    (separator > 0).then(|| {
-                        (
-                            RawText::from(&entry[..separator]),
-                            RawText::from(&entry[separator + 1..]),
-                        )
-                    })
+        self.parsed.get_or_init(|| self.parse())
+    }
+
+    #[must_use]
+    pub fn into_map(mut self) -> BTreeMap<RawText, RawText> {
+        self.parsed.take().unwrap_or_else(|| self.parse())
+    }
+
+    fn parse(&self) -> BTreeMap<RawText, RawText> {
+        self.entries()
+            .filter_map(|entry| {
+                let separator = entry.iter().position(|byte| *byte == b'=')?;
+                (separator > 0).then(|| {
+                    (
+                        RawText::from(&entry[..separator]),
+                        RawText::from(&entry[separator + 1..]),
+                    )
                 })
-                .collect()
-        })
+            })
+            .collect()
     }
 
     #[must_use]

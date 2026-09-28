@@ -21,8 +21,8 @@ use zz_mux::{
     StatusFormats, StatusHooks, StatusRowVariables, TtyTerm, display_width, expand_status,
 };
 use zz_protocol::{
-    ClientId, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId, RawText, SessionId,
-    StatusLine, TmuxColour, WindowId,
+    ClientEnvironmentBlob, ClientId, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId,
+    RawText, SessionId, StatusLine, TmuxColour, WindowId,
 };
 use zz_terminal::{
     CellWidth, CopyModeFacts, ProgressBar, TerminalColorScheme, TerminalSession, TerminalViewport,
@@ -716,10 +716,11 @@ pub(crate) fn client_terminal_facts(
 /// A client's own process environment as `#{Vc:}` rows. A client store has no
 /// hidden or removed entries: the client sends what it has.
 pub(crate) fn client_environment_rows(
-    environment: Option<&Arc<BTreeMap<RawText, RawText>>>,
+    environment: Option<&Arc<ClientEnvironmentBlob>>,
 ) -> Vec<FormatEnvironRow> {
     environment.map_or_else(Vec::new, |environment| {
         environment
+            .map()
             .iter()
             .map(|(name, value)| FormatEnvironRow {
                 name: name.to_string(),

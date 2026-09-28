@@ -44,23 +44,24 @@ use zz_protocol::{
     AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
     ChooseBufferSearchState, ChooseBufferState, ChooseTreeAction, ChooseTreeItem, ChooseTreeKind,
     ChooseTreePaneKind, ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget,
-    ChooserPreviewSize, ChooserRow, ClientExitAction, ClientFileOperation, ClientFileRequest,
-    ClientFileResponse, ClientHello, ClientId, ClientInstanceId, ClientKind, ClientMessageKind,
-    ClientPath, ClipboardProducer, CommandInvocation, CommandPromptAction, CommandPromptKind,
-    CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest, CommandResolution,
-    CommandResponse, ConfigOverrideEntry, ConfirmAction, ConfirmState, ControlSourceFileEvent,
-    DisplayPanesAction, DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage,
-    MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT, MAX_CHOOSE_BUFFER_QUERY_BYTES,
-    MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_ITEM_TEXT_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES,
-    MAX_ENCODED_FRAME_BYTES, MAX_KITTY_IMAGE_REMOVALS, MAX_PANE_INDICATOR_LABEL_BYTES,
-    MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES,
-    MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction, MenuItem, MenuState, MuxOptionKey,
-    MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION,
-    PaneId, PaneIndicator, PaneKindSnapshot, PaneMode, PasteUploadPurpose, PastedImageFormat,
-    PopupAction, PopupBorderLines, PopupPointer, PopupPointerButton, PopupState, PreparedCommand,
-    PreparedCommandResult, ProtocolError, ProtocolMessage, RawText, SPLIT_RATIO_BASIS, ServerError,
-    ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId,
-    canonical_key, encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
+    ChooserPreviewSize, ChooserRow, ClientEnvironmentBlob, ClientExitAction, ClientFileOperation,
+    ClientFileRequest, ClientFileResponse, ClientHello, ClientId, ClientInstanceId, ClientKind,
+    ClientMessageKind, ClientPath, ClipboardProducer, CommandInvocation, CommandPromptAction,
+    CommandPromptKind, CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest,
+    CommandResolution, CommandResponse, ConfigOverrideEntry, ConfirmAction, ConfirmState,
+    ControlSourceFileEvent, DisplayPanesAction, DisplayPanesState, Event, EventPayload,
+    GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT,
+    MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_ITEM_TEXT_BYTES,
+    MAX_CHOOSE_TREE_QUERY_BYTES, MAX_ENCODED_FRAME_BYTES, MAX_KITTY_IMAGE_REMOVALS,
+    MAX_PANE_INDICATOR_LABEL_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES,
+    MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction,
+    MenuItem, MenuState, MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot,
+    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot,
+    PaneMode, PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines, PopupPointer,
+    PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult, ProtocolError,
+    ProtocolMessage, RawText, SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId,
+    SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId, canonical_key,
+    encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
     layout_menu_row, menu_row_cells, menu_row_width, read_protocol_message_into, resolve_command,
     terminal_patch_frame_len, terminal_viewport_frame_len,
 };
@@ -1520,10 +1521,7 @@ impl Daemon {
         T::Listener: Send + 'static,
     {
         let (mut socket_guard, identity_guard) = socket_guards;
-        #[cfg(all(feature = "agent", unix))]
-        if let Err(error) = crate::agent::claude_peers::sweep_stale_records() {
-            log::warn!(target: "zz::agent", "could not sweep Claude peers: {error}");
-        }
+        exec::ConnectionThreads::log_knob();
         let color_scheme = daemon_color_scheme();
         let load = AppearanceLoad::defaults_for(color_scheme);
         log_appearance_load("startup", &load);
@@ -1580,7 +1578,12 @@ impl Daemon {
         })();
         let _ready_guard = if startup_result.is_ok() {
             shared.finish_startup();
-            Some(ready(shared.server_id))
+            let ready_guard = ready(shared.server_id);
+            #[cfg(all(feature = "agent", unix))]
+            if let Err(error) = crate::agent::claude_peers::sweep_stale_records() {
+                log::warn!(target: "zz::agent", "could not sweep Claude peers: {error}");
+            }
+            Some(ready_guard)
         } else {
             shared.request_shutdown();
             None
@@ -1672,16 +1675,12 @@ fn accept_connections<T: Transport>(
     while !shared.stopping.load(Ordering::Acquire) {
         match listener.accept() {
             Ok(stream) => {
-                let shared = Arc::clone(shared);
-                if let Err(error) =
-                    thread::Builder::new()
-                        .name("zz-client".to_owned())
-                        .spawn(move || {
-                            if let Err(error) = handle_connection(stream, &shared) {
-                                log::debug!("client disconnected: {error}");
-                            }
-                        })
-                {
+                let connection_shared = Arc::clone(shared);
+                if let Err(error) = shared.connection_threads.run(Box::new(move || {
+                    if let Err(error) = handle_connection(stream, &connection_shared) {
+                        log::debug!("client disconnected: {error}");
+                    }
+                })) {
                     log::warn!("could not start client connection thread: {error}");
                 }
             }
@@ -1748,9 +1747,66 @@ struct TmuxShimGuard {
     executable: PathBuf,
 }
 
+/// The executable panes of this daemon run as `tmux`, pinned to the image the
+/// daemon itself runs so an app swap cannot hand them a newer CLI: Linux
+/// execs the daemon's own `/proc/<pid>/exe`, macOS a copy-on-write clone
+/// beside the wrapper. Without either, the installed path.
+#[cfg(unix)]
+fn pinned_executable(directory: &Path, executable: &Path) -> PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = directory;
+        let own = PathBuf::from(format!("/proc/{}/exe", std::process::id()));
+        if own.exists() {
+            return own;
+        }
+        executable.to_path_buf()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let Some(name) = executable.file_name() else {
+            return executable.to_path_buf();
+        };
+        let clone = directory.join(name);
+        if clone_file(executable, &clone).is_ok() || fs::hard_link(executable, &clone).is_ok() {
+            return clone;
+        }
+        executable.to_path_buf()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = directory;
+        executable.to_path_buf()
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[allow(
+    unsafe_code,
+    reason = "clonefile copies one file the daemon can read into its own directory"
+)]
+fn clone_file(source: &Path, target: &Path) -> std::io::Result<()> {
+    use std::os::unix::ffi::OsStrExt as _;
+
+    unsafe extern "C" {
+        fn clonefile(
+            src: *const std::ffi::c_char,
+            dst: *const std::ffi::c_char,
+            flags: u32,
+        ) -> std::ffi::c_int;
+    }
+    let source = std::ffi::CString::new(source.as_os_str().as_bytes())?;
+    let target = std::ffi::CString::new(target.as_os_str().as_bytes())?;
+    if unsafe { clonefile(source.as_ptr(), target.as_ptr(), 0) } == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
 #[cfg(unix)]
 impl TmuxShimGuard {
-    fn install(executable: PathBuf) -> std::io::Result<Self> {
+    fn install(executable: PathBuf, pin: bool) -> std::io::Result<Self> {
         use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
 
         let directory = loop {
@@ -1778,6 +1834,11 @@ impl TmuxShimGuard {
             let _ = fs::remove_dir(&directory);
             return Err(error);
         }
+        let executable = if pin {
+            pinned_executable(&directory, &executable)
+        } else {
+            executable
+        };
         Ok(Self {
             directory,
             executable,
@@ -1788,6 +1849,9 @@ impl TmuxShimGuard {
 #[cfg(unix)]
 impl Drop for TmuxShimGuard {
     fn drop(&mut self) {
+        if self.executable.parent() == Some(self.directory.as_path()) {
+            let _ = fs::remove_file(&self.executable);
+        }
         let _ = fs::remove_file(self.directory.join("tmux"));
         let _ = fs::remove_dir(&self.directory);
     }
@@ -3427,6 +3491,9 @@ struct Shared {
     peer_registry: Mutex<crate::agent::claude_peers::RegistryCache>,
     pending_execs: Mutex<Vec<Box<dyn FnOnce() + Send>>>,
     exec_links: Mutex<BTreeMap<ClientId, Arc<exec::ExecLink>>>,
+    prompt_history_source: Mutex<Option<(PathBuf, usize)>>,
+    prompt_history_settled: AtomicBool,
+    connection_threads: Arc<exec::ConnectionThreads>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4332,10 +4399,10 @@ fn prepare_config_command(
 impl Shared {
     #[cfg(unix)]
     fn install_tmux_shim(&self) -> Result<(), DaemonError> {
-        let executable = std::env::var_os(crate::TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE)
-            .map(PathBuf::from)
-            .map_or_else(std::env::current_exe, Ok)?;
-        let shim = TmuxShimGuard::install(executable)?;
+        let shim = match std::env::var_os(crate::TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE) {
+            Some(executable) => TmuxShimGuard::install(PathBuf::from(executable), false)?,
+            None => TmuxShimGuard::install(std::env::current_exe()?, true)?,
+        };
         self.status
             .lock()
             .set_tmux_shim(shim.directory.clone(), shim.executable.clone());
@@ -4541,6 +4608,9 @@ impl Shared {
             peer_registry: Mutex::new(crate::agent::claude_peers::RegistryCache::default()),
             pending_execs: Mutex::new(Vec::new()),
             exec_links: Mutex::new(BTreeMap::new()),
+            prompt_history_source: Mutex::new(None),
+            prompt_history_settled: AtomicBool::new(true),
+            connection_threads: Arc::default(),
         }
     }
 
@@ -4610,13 +4680,29 @@ impl Shared {
             prompt_history_path(inner.engine.history_file())
                 .map(|path| (path, inner.engine.prompt_history_limit()))
         };
-        if let Some((path, limit)) = history_settings {
+        if let Some(source) = history_settings {
+            *self.prompt_history_source.lock() = Some(source);
+            self.prompt_history_settled.store(false, Ordering::Release);
+        }
+        Ok(())
+    }
+
+    /// `history-file` is read on the first prompt that needs it rather than on
+    /// the startup path. Every reader and writer of the prompt history calls
+    /// this before it takes `inner`, so nothing is recorded before the file's
+    /// entries are in place.
+    fn ensure_prompt_history(&self) {
+        if self.prompt_history_settled.load(Ordering::Acquire) {
+            return;
+        }
+        let mut source = self.prompt_history_source.lock();
+        if let Some((path, limit)) = source.take() {
             let (command, search) = load_command_prompt_history(&path, limit);
             let mut inner = self.inner.lock();
             inner.command_history = command;
             inner.search_history = search;
         }
-        Ok(())
+        self.prompt_history_settled.store(true, Ordering::Release);
     }
 
     fn freeze_response_admissions_and_wait(&self, timeout: Duration) -> bool {
@@ -7721,6 +7807,9 @@ impl Shared {
         let mut format_variables = context.format_variables.clone();
         let event_hooks_enabled = !context.no_hooks;
         let command_name = canonical_command(&command.name);
+        if command_name == "command-prompt" {
+            self.ensure_prompt_history();
+        }
         let split_caller_stream = command_name == "split-window"
             && command_stdin_sink(command_name, &command.args) == Some(CommandStdinSink::PaneInput);
         let mut terminals_to_watch = Vec::new();
@@ -10009,7 +10098,7 @@ impl Shared {
                 if let Some(environment) = inner.client_environments.get(&client).cloned() {
                     inner
                         .engine
-                        .update_session_environment_from_client(session, &environment)?;
+                        .update_session_environment_from_client(session, environment.map())?;
                 }
             }
             if invoking_client_terminal == ClientTerminal::Present {
@@ -15282,7 +15371,7 @@ impl Shared {
             if let Some(environment) = inner.client_environments.get(&target_client).cloned() {
                 inner
                     .engine
-                    .update_session_environment_from_client(target_session, &environment)?;
+                    .update_session_environment_from_client(target_session, environment.map())?;
             }
         }
         let (snapshot, mut attach_events) =
@@ -15391,6 +15480,7 @@ impl Shared {
         name: &str,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
+        self.ensure_prompt_history();
         let parsed = parse_buffer_command_args(name, args, &['T'], &[])?;
         require_no_positionals(name, &parsed)?;
         let prompt_type = parsed
@@ -17567,7 +17657,7 @@ impl Shared {
             if let Some(environment) = inner.client_environments.get(&client).cloned() {
                 inner
                     .engine
-                    .update_session_environment_from_client(session, &environment)?;
+                    .update_session_environment_from_client(session, environment.map())?;
             }
         }
         let snapshot = self.attach(client, session)?;
@@ -17701,16 +17791,7 @@ impl Shared {
             .filter_map(|(session, clients)| clients.contains(&client).then_some(*session))
             .collect::<Vec<_>>();
         let was_attached = !sessions.is_empty();
-        let event_hooks_enabled = event_hooks_enabled
-            && (was_attached
-                || inner.copy_sessions.contains_key(&client)
-                || inner.focused_windows.contains_key(&client)
-                || inner.visible_terminals.contains_key(&client)
-                || inner.client_kinds.get(&client) == Some(&ClientKind::Control)
-                || inner
-                    .window_latest_clients
-                    .values()
-                    .any(|latest| *latest == client));
+        let event_hooks_enabled = event_hooks_enabled && !detach_is_inert(&inner, client);
         let hook_state_before = event_hooks_enabled.then(|| {
             (
                 MuxHookSnapshot::capture(&inner.engine),
@@ -21826,6 +21907,7 @@ impl Shared {
         context: &mut ExecutionContext,
         text: &str,
     ) -> bool {
+        self.ensure_prompt_history();
         let result = {
             let mut inner = self.inner.lock();
             let Some(prompt) = inner.command_prompts.get(&client) else {
@@ -21882,6 +21964,7 @@ impl Shared {
         input: &zz_terminal::KeyInput,
         text_follows: bool,
     ) -> bool {
+        self.ensure_prompt_history();
         let outcome = {
             let mut inner = self.inner.lock();
             let Some(mut prompt) = inner.command_prompts.remove(&client) else {
@@ -22019,6 +22102,7 @@ impl Shared {
             )
             .into());
         }
+        self.ensure_prompt_history();
         let (read_only, read_only_pane) = {
             let inner = self.inner.lock();
             let read_only = inner.client_flags.contains(client);
@@ -22137,6 +22221,7 @@ impl Shared {
         if input.is_empty() {
             return;
         }
+        self.ensure_prompt_history();
         let changed = {
             let mut inner = self.inner.lock();
             let limit = inner.engine.prompt_history_limit();
@@ -31013,7 +31098,7 @@ struct ServerState {
     client_ttys: BTreeMap<ClientId, String>,
     client_sizes: BTreeMap<ClientId, (u16, u16)>,
     client_working_directories: BTreeMap<ClientId, PathBuf>,
-    client_environments: BTreeMap<ClientId, Arc<BTreeMap<RawText, RawText>>>,
+    client_environments: BTreeMap<ClientId, Arc<ClientEnvironmentBlob>>,
     client_origins: BTreeMap<ClientId, PaneId>,
     last_sessions: BTreeMap<ClientId, SessionId>,
     client_flags: ClientFlags,
@@ -35217,13 +35302,13 @@ fn client_working_directory_fact(working_directory: Option<&ClientPath>) -> Opti
         .filter(|working_directory| working_directory.is_absolute())
 }
 
-fn client_environment_fact(entries: &[RawText]) -> Arc<BTreeMap<RawText, RawText>> {
-    Arc::new(
+fn client_environment_fact(entries: &[RawText]) -> Arc<ClientEnvironmentBlob> {
+    Arc::new(ClientEnvironmentBlob::from_map(
         entries
             .iter()
             .filter_map(|entry| entry.split_once_byte(b'='))
             .collect(),
-    )
+    ))
 }
 
 fn effective_mux_options(inner: &ServerState, client: ClientId) -> MuxOptions {
@@ -35558,6 +35643,7 @@ fn client_environment_value<'a>(
     inner
         .client_environments
         .get(&client)?
+        .map()
         .get(name)
         .map(RawText::as_str)
 }
@@ -36521,6 +36607,22 @@ fn set_current_window_latest_client(
 ) -> Option<PendingHookEvent> {
     let window = client_focused_window_for_attachment(inner, client)?;
     set_window_latest_client(inner, client, window, event_hooks_enabled)
+}
+
+/// Whether detaching `client` can change nothing a hook watches: it is on no
+/// session, holds no copy mode, focus, view or control sizing, and no window
+/// counts it as its latest client. A command client that never attached is
+/// always this, so its detach skips the before and after world captures.
+fn detach_is_inert(inner: &ServerState, client: ClientId) -> bool {
+    client_attached_session(inner, client).is_none()
+        && !inner.copy_sessions.contains_key(&client)
+        && !inner.focused_windows.contains_key(&client)
+        && !inner.visible_terminals.contains_key(&client)
+        && inner.client_kinds.get(&client) != Some(&ClientKind::Control)
+        && !inner
+            .window_latest_clients
+            .values()
+            .any(|latest| *latest == client)
 }
 
 fn promote_window_latest_clients(
@@ -71583,10 +71685,16 @@ set-option -g @alias-mixed-next yes
             "EXACT=last".into(),
             "VALUE=contains=equals".into(),
         ]);
-        assert_eq!(environment.get("EMPTY").map(RawText::as_str), Some(""));
-        assert_eq!(environment.get("EXACT").map(RawText::as_str), Some("last"));
         assert_eq!(
-            environment.get("VALUE").map(RawText::as_str),
+            environment.map().get("EMPTY").map(RawText::as_str),
+            Some("")
+        );
+        assert_eq!(
+            environment.map().get("EXACT").map(RawText::as_str),
+            Some("last")
+        );
+        assert_eq!(
+            environment.map().get("VALUE").map(RawText::as_str),
             Some("contains=equals")
         );
     }
@@ -75746,7 +75854,7 @@ set-option -g @alias-mixed-next yes
             .lock()
             .engine
             .seed_global_environment([("PATH", "/modeled/bin:/modeled/sbin")]);
-        let shim = TmuxShimGuard::install(executable).expect("install tmux executable path");
+        let shim = TmuxShimGuard::install(executable, false).expect("install tmux executable path");
         let expected_directory = shim.directory.clone();
         let expected_path = std::env::join_paths([
             shim.directory.clone(),
@@ -75812,8 +75920,8 @@ set-option -g @alias-mixed-next yes
     #[cfg(unix)]
     #[test]
     fn tmux_shim_refuses_bare_nested_invocation_before_running_zz() {
-        let shim =
-            TmuxShimGuard::install(PathBuf::from("/bin/echo")).expect("install tmux wrapper");
+        let shim = TmuxShimGuard::install(PathBuf::from("/bin/echo"), false)
+            .expect("install tmux wrapper");
         let output = std::process::Command::new(shim.directory.join("tmux"))
             .env("TMUX", "/tmp/zzprobe-nested.sock,1,0")
             .env(
@@ -93820,7 +93928,10 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.client_terminals.insert(client);
             inner.client_environments.insert(
                 client,
-                Arc::new(BTreeMap::from([("TERM".into(), "xterm".into())])),
+                Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([(
+                    "TERM".into(),
+                    "xterm".into(),
+                )]))),
             );
             inner.client_features.insert(
                 client,
@@ -93871,7 +93982,10 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.client_terminals.insert(client);
             inner.client_environments.insert(
                 client,
-                Arc::new(BTreeMap::from([("TERM".into(), "xterm".into())])),
+                Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([(
+                    "TERM".into(),
+                    "xterm".into(),
+                )]))),
             );
         }
         let facts = || {
@@ -93929,11 +94043,11 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.client_sizes.insert(client, (132, 43));
             inner.client_environments.insert(
                 client,
-                Arc::new(BTreeMap::from([
+                Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([
                     ("COLORTERM".into(), "truecolor".into()),
                     ("LANG".into(), "en_US.UTF-8".into()),
                     ("TERM".into(), "xterm-256color".into()),
-                ])),
+                ]))),
             );
             inner.client_activity_times.insert(client, 222);
             inner.client_created_times.insert(client, 111);
@@ -94125,10 +94239,10 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.client_ttys.insert(control, "/dev/pts/43".to_owned());
             inner.client_environments.insert(
                 control,
-                Arc::new(BTreeMap::from([
+                Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([
                     ("LANG".into(), "C.UTF-8".into()),
                     ("TERM".into(), "xterm-256color".into()),
-                ])),
+                ]))),
             );
             client_format_facts(&inner, control, session)
         };

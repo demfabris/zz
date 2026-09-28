@@ -46,11 +46,19 @@ use crate::transport::{LocalTransport, Transport as _, TransportStream as _};
 
 /// `sh -l` reads `/etc/profile` and `~/.profile`; a PATH exported from `~/.bash_profile` or
 /// `~/.zshrc` never reaches it, which hides the CLI that install.sh linked into one of these.
-/// Appending leaves whatever the profile did contribute ahead of the fallbacks.
-macro_rules! remote_path_fallback {
-    () => {
-        "PATH=\"$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin\"; export PATH; "
-    };
+/// Appending leaves whatever the profile did contribute ahead of the fallbacks. A Mac app dragged
+/// out of the disk image has no CLI link at all, so `$zz_cli` falls back to the bundle's own `cli`.
+#[cfg(any(unix, windows, test))]
+fn remote_path_fallback() -> String {
+    format!(
+        "PATH=\"$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin\"; export PATH; \
+         zz_cli={name}; if ! command -v {name} >/dev/null 2>&1; then \
+         for zz_apps in /Applications \"$HOME/Applications\"; do \
+         if [ -x \"$zz_apps/{app}.app/Contents/MacOS/cli\" ]; \
+         then zz_cli=\"$zz_apps/{app}.app/Contents/MacOS/cli\"; break; fi; done; fi; ",
+        name = zz_protocol::app_identity::DIRECTORY,
+        app = zz_protocol::app_identity::DISPLAY_NAME,
+    )
 }
 
 #[cfg(any(unix, windows, test))]
@@ -69,9 +77,9 @@ pub(crate) fn remote_socket_probe() -> String {
          case \"$zz_tmp\" in /*) ;; *) zz_tmp=/tmp ;; esac; \
          zz_dir=\"${{zz_tmp%/}}/{name}-$USER\"; fi; \
          printf \"zz-probe-socket=%s\\n\" \"$zz_dir/default.sock\"; \
-         if command -v {name} >/dev/null 2>&1; then printf \"zz-probe-protocol=%s\\n\" \"$({name} protocol-version 2>/dev/null || echo unknown)\"; \
+         if command -v \"$zz_cli\" >/dev/null 2>&1; then printf \"zz-probe-protocol=%s\\n\" \"$(\"$zz_cli\" protocol-version 2>/dev/null || echo unknown)\"; \
          else printf \"zz-probe-protocol=missing\\n\"; fi",
-        fallback = remote_path_fallback!(),
+        fallback = remote_path_fallback(),
         name = zz_protocol::app_identity::DIRECTORY,
     ))
 }
@@ -144,6 +152,8 @@ pub enum EndpointError {
     HostKeyRejected { target: String },
     #[error("SSH authentication to {target} failed: {reason}")]
     AuthenticationFailed { target: String, reason: String },
+    #[error("{target} closed the connection before sign-in finished")]
+    SignInExpired { target: String },
     #[error("zz is not installed on {target}")]
     RemoteBinaryMissing { target: String },
     #[error("the zz daemon on {target} never started listening")]
@@ -191,6 +201,25 @@ pub enum EndpointError {
 }
 
 impl EndpointError {
+    /// The endpoint failure behind `error`, looking through the `io::Error` a connect wraps it in.
+    #[must_use]
+    pub fn find<'a>(error: &'a (dyn std::error::Error + 'static)) -> Option<&'a Self> {
+        let mut source = Some(error);
+        while let Some(current) = source {
+            if let Some(found) = current.downcast_ref::<Self>() {
+                return Some(found);
+            }
+            source = match current
+                .downcast_ref::<io::Error>()
+                .and_then(io::Error::get_ref)
+            {
+                Some(inner) => Some(inner),
+                None => current.source(),
+            };
+        }
+        None
+    }
+
     /// The same failure `Display` reports, said in terms of what the user can do about it.
     #[must_use]
     pub fn ssh_reason(&self) -> Option<String> {
@@ -207,8 +236,13 @@ impl EndpointError {
             Self::AuthenticationFailed { target, reason } => {
                 format!("Could not sign in to {target}: {reason}")
             }
+            Self::SignInExpired { target } => format!(
+                "{target} stopped waiting for the password.\nssh allows about two minutes to sign \
+                 in; connect again."
+            ),
             Self::RemoteBinaryMissing { target } => format!(
-                "{} is not installed on {target}.\nInstall it there, or put it on the login shell's PATH.",
+                "{} is not installed on {target}.\nInstall it there with `curl -fsSL \
+                 https://zzmux.sh/install.sh | sh`, then connect again.",
                 zz_protocol::app_identity::DIRECTORY
             ),
             Self::RemoteDaemonUnavailable { target } => format!(
@@ -521,10 +555,10 @@ fn ssh_daemon_start_command(
 pub(crate) fn remote_daemon_start_script(remote_socket: &Path) -> String {
     let socket = shell_quote(&remote_socket.to_string_lossy());
     format!(
-        "{fallback}command -v {name} >/dev/null 2>&1 || exit {REMOTE_ZZ_MISSING_STATUS}; \
+        "{fallback}command -v \"$zz_cli\" >/dev/null 2>&1 || exit {REMOTE_ZZ_MISSING_STATUS}; \
          if setsid true >/dev/null 2>&1; \
-         then setsid {name} daemon --socket {socket} >/dev/null 2>&1 </dev/null & \
-         else nohup {name} daemon --socket {socket} >/dev/null 2>&1 </dev/null & fi; \
+         then setsid \"$zz_cli\" daemon --socket {socket} >/dev/null 2>&1 </dev/null & \
+         else nohup \"$zz_cli\" daemon --socket {socket} >/dev/null 2>&1 </dev/null & fi; \
          if sleep {REMOTE_DAEMON_POLL_INTERVAL} 2>/dev/null; \
          then delay={REMOTE_DAEMON_POLL_INTERVAL}; attempts={REMOTE_DAEMON_POLL_ATTEMPTS}; \
          else delay=1; attempts={REMOTE_DAEMON_POLL_FALLBACK_ATTEMPTS}; fi; \
@@ -533,8 +567,7 @@ pub(crate) fn remote_daemon_start_script(remote_socket: &Path) -> String {
          if [ -S {socket} ]; then exit 0; fi; \
          sleep \"$delay\"; attempt=$((attempt + 1)); done; \
          exit {REMOTE_DAEMON_TIMEOUT_STATUS}",
-        fallback = remote_path_fallback!(),
-        name = zz_protocol::app_identity::DIRECTORY,
+        fallback = remote_path_fallback(),
     )
 }
 
@@ -542,10 +575,25 @@ pub(crate) fn remote_daemon_start_script(remote_socket: &Path) -> String {
 #[cfg(any(windows, target_os = "ios", test))]
 pub(crate) fn remote_proxy_script(remote_socket: &Path) -> String {
     format!(
-        "{fallback}exec {name} proxy --socket {socket}",
-        fallback = remote_path_fallback!(),
-        name = zz_protocol::app_identity::DIRECTORY,
+        "{fallback}exec \"$zz_cli\" proxy --socket {socket}",
+        fallback = remote_path_fallback(),
         socket = shell_quote(&remote_socket.to_string_lossy()),
+    )
+}
+
+/// Appends `line` to the remote `~/.ssh/authorized_keys` unless `key` is already there, creating
+/// the directory and file private as sshd's `StrictModes` wants, and never gluing onto a last line
+/// that lacks its newline.
+#[cfg(any(target_os = "ios", test))]
+pub(crate) fn authorized_key_script(key: &str, line: &str) -> String {
+    let file = "\"$HOME/.ssh/authorized_keys\"";
+    format!(
+        "umask 077; mkdir -p \"$HOME/.ssh\" && touch {file} || exit 1; \
+         grep -qF {key} {file} && exit 0; \
+         if [ -s {file} ] && [ -n \"$(tail -c 1 {file})\" ]; then echo >> {file}; fi; \
+         printf '%s\\n' {line} >> {file}",
+        key = shell_quote(key),
+        line = shell_quote(line),
     )
 }
 
@@ -567,7 +615,7 @@ pub(crate) fn shell_quote(value: &str) -> String {
 
 /// ssh collapses every failure of its own into exit 255, so stderr is all there is to go on.
 #[cfg(any(unix, windows, test))]
-fn ssh_failure_hint(stderr: &str) -> Option<&'static str> {
+pub(crate) fn ssh_failure_hint(stderr: &str) -> Option<&'static str> {
     let stderr = stderr.to_ascii_lowercase();
     let contains = |needle: &str| stderr.contains(needle);
     if contains("permission denied")
@@ -585,7 +633,10 @@ fn ssh_failure_hint(stderr: &str) -> Option<&'static str> {
     {
         Some("the host name did not resolve")
     } else if contains("connection refused") {
-        Some("the ssh port refused the connection: is sshd running?")
+        Some(
+            "nothing accepted the ssh connection: start sshd there, or on a Mac turn on Remote \
+             Login in System Settings › General › Sharing",
+        )
     } else if contains("timed out") {
         Some("the ssh connection timed out")
     } else if contains("no route to host") || contains("network is unreachable") {
@@ -1859,27 +1910,115 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn authorized_key_script_appends_once_on_its_own_line() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let file = home.path().join(".ssh/authorized_keys");
+        let run = || {
+            let script =
+                authorized_key_script("ssh-ed25519 AAAAzz", "ssh-ed25519 AAAAzz zz-iphone");
+            let status = Command::new("/bin/sh")
+                .args(["-c", &format!("sh -c {}", shell_quote(&script))])
+                .env("HOME", home.path())
+                .status()
+                .expect("run key script");
+            assert!(status.success());
+        };
+        run();
+        assert_eq!(
+            fs::metadata(home.path().join(".ssh"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            "ssh-ed25519 AAAAzz zz-iphone\n"
+        );
+        run();
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            "ssh-ed25519 AAAAzz zz-iphone\n"
+        );
+
+        fs::write(&file, "ssh-rsa AAAAother laptop").unwrap();
+        run();
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            "ssh-rsa AAAAother laptop\nssh-ed25519 AAAAzz zz-iphone\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_scripts_fall_back_to_the_mac_app_bundle_cli() {
+        let name = zz_protocol::app_identity::DIRECTORY;
+        let app = format!("{}.app", zz_protocol::app_identity::DISPLAY_NAME);
+        if ["/opt/homebrew/bin", "/usr/local/bin"]
+            .iter()
+            .any(|dir| Path::new(dir).join(name).exists())
+            || Path::new("/Applications").join(&app).exists()
+        {
+            return;
+        }
+        let home = tempfile::tempdir().expect("temporary home");
+        let macos = home
+            .path()
+            .join("Applications")
+            .join(&app)
+            .join("Contents/MacOS");
+        fs::create_dir_all(&macos).expect("app bundle");
+        let cli = macos.join("cli");
+        fs::write(&cli, "#!/bin/sh\nprintf 'bundle %s\\n' \"$1\"\n").expect("write cli");
+        fs::set_permissions(&cli, fs::Permissions::from_mode(0o755))
+            .expect("executable permissions");
+        for (script, expected) in [
+            (
+                remote_socket_probe(),
+                "zz-probe-protocol=bundle protocol-version\n",
+            ),
+            (
+                shell_quote(&remote_proxy_script(Path::new("/tmp/explicit.sock"))),
+                "bundle proxy\n",
+            ),
+        ] {
+            let output = Command::new("/bin/sh")
+                .args(["-c", &format!("sh -c {script}")])
+                .env("PATH", "/usr/bin:/bin")
+                .env("HOME", home.path())
+                .output()
+                .expect("run remote script");
+            assert!(output.status.success());
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(stdout.ends_with(expected), "{script}\n{stdout}");
+        }
+    }
+
     #[test]
     fn autostart_script_starts_the_daemon_on_the_resolved_socket() {
         let script = remote_daemon_start_script(Path::new("/run/user/1000/zz/default.sock"));
         assert!(
             script.starts_with(&format!(
-                "{}command -v {} >/dev/null 2>&1 || exit 127;",
-                remote_path_fallback!(),
-                zz_protocol::app_identity::DIRECTORY
+                "{}command -v \"$zz_cli\" >/dev/null 2>&1 || exit 127;",
+                remote_path_fallback(),
             )),
             "missing zz needs its own exit status before anything but the PATH line runs: {script}"
         );
         assert!(
-            script.contains(&format!(
-                "setsid {} daemon --socket '/run/user/1000/zz/default.sock' >/dev/null 2>&1 \
-                 </dev/null &",
-                zz_protocol::app_identity::DIRECTORY
-            )) && script.contains(&format!(
-                "nohup {} daemon --socket '/run/user/1000/zz/default.sock' >/dev/null 2>&1 \
-                 </dev/null &",
-                zz_protocol::app_identity::DIRECTORY
-            )),
+            script.contains(
+                "setsid \"$zz_cli\" daemon --socket '/run/user/1000/zz/default.sock' >/dev/null \
+                 2>&1 </dev/null &"
+            ) && script.contains(
+                "nohup \"$zz_cli\" daemon --socket '/run/user/1000/zz/default.sock' >/dev/null \
+                 2>&1 </dev/null &"
+            ),
             "the daemon must be detached and pinned to the resolved socket by either arm: \
              {script}"
         );
@@ -1908,7 +2047,7 @@ mod tests {
     fn autostart_script_starts_the_daemon_without_trusting_an_existing_socket_file() {
         let script = remote_daemon_start_script(Path::new("/run/user/1000/zz/default.sock"));
         let start = script
-            .find(&format!("{} daemon", zz_protocol::app_identity::DIRECTORY))
+            .find("\"$zz_cli\" daemon")
             .expect("the script must start the daemon");
         assert!(
             !script[..start].contains("[ -S "),
@@ -1959,7 +2098,7 @@ mod tests {
             ),
             (
                 "ssh: connect to host desk port 22: Connection refused",
-                "is sshd running?",
+                "Remote Login",
             ),
             (
                 "ssh: connect to host desk port 22: Operation timed out",

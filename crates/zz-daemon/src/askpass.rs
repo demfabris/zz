@@ -56,6 +56,8 @@ pub enum AskpassMode {
     AgentConfirm,
     /// `none`: a FIDO token touch. ssh ignores stdout and SIGTERMs the helper on the tap.
     Notification,
+    /// Never from ssh: zz offering, after a password sign-in, to add its key to the host.
+    SaveKey,
 }
 
 impl AskpassMode {
@@ -72,6 +74,7 @@ impl AskpassMode {
             Self::Answer => b'a',
             Self::AgentConfirm => b'c',
             Self::Notification => b'n',
+            Self::SaveKey => b's',
         }
     }
 
@@ -80,6 +83,7 @@ impl AskpassMode {
             b'a' => Some(Self::Answer),
             b'c' => Some(Self::AgentConfirm),
             b'n' => Some(Self::Notification),
+            b's' => Some(Self::SaveKey),
             _ => None,
         }
     }
@@ -97,6 +101,9 @@ pub enum AskpassPromptKind {
     /// ssh-agent key-use confirmation. Cancelling must exit non-zero; an empty answer reads as
     /// consent.
     AgentConfirm,
+    /// zz's offer to add its key to the host's `authorized_keys`. Any answer accepts; cancelling
+    /// declines.
+    SaveKey,
 }
 
 /// One question from ssh.
@@ -143,6 +150,7 @@ impl AskpassPrompt {
     pub fn kind(&self) -> AskpassPromptKind {
         match self.mode {
             AskpassMode::AgentConfirm => AskpassPromptKind::AgentConfirm,
+            AskpassMode::SaveKey => AskpassPromptKind::SaveKey,
             AskpassMode::Answer | AskpassMode::Notification => {
                 if is_host_key_prompt(&self.text) {
                     AskpassPromptKind::HostKey
@@ -199,12 +207,15 @@ pub(crate) fn helper_outcome(kind: AskpassPromptKind, reply: &AskpassReply) -> H
             stdout: Some(reply_line(&Zeroizing::new("no".to_owned()))),
             success: true,
         },
-        (AskpassPromptKind::Secret | AskpassPromptKind::AgentConfirm, AskpassReply::Cancel) => {
-            HelperOutcome {
-                stdout: None,
-                success: false,
-            }
-        }
+        (
+            AskpassPromptKind::Secret
+            | AskpassPromptKind::AgentConfirm
+            | AskpassPromptKind::SaveKey,
+            AskpassReply::Cancel,
+        ) => HelperOutcome {
+            stdout: None,
+            success: false,
+        },
     }
 }
 
@@ -903,7 +914,9 @@ mod tests {
             PathBuf::from("/nonexistent/zz"),
             |prompt: &AskpassPrompt| match prompt.kind() {
                 AskpassPromptKind::HostKey => AskpassReply::answer("yes"),
-                AskpassPromptKind::Secret | AskpassPromptKind::AgentConfirm => AskpassReply::Cancel,
+                AskpassPromptKind::Secret
+                | AskpassPromptKind::AgentConfirm
+                | AskpassPromptKind::SaveKey => AskpassReply::Cancel,
             },
         ))
         .expect("askpass listener");

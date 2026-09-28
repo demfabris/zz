@@ -811,6 +811,7 @@ fn classify_connect_error(error: &DaemonError) -> ZzConnectFailure {
                 EndpointError::SshSpawn { .. }
                 | EndpointError::ProbeFailure { .. }
                 | EndpointError::SshFailed { .. }
+                | EndpointError::SignInExpired { .. }
                 | EndpointError::RemoteDaemonUnavailable { .. }
                 | EndpointError::ForwardExited { .. }
                 | EndpointError::ForwardTimeout { .. }
@@ -863,6 +864,7 @@ unsafe fn password_prompts(password: *const c_char) -> Result<Option<SshPrompts>
         Path::new("").to_owned(),
         move |prompt| match prompt.kind() {
             AskpassPromptKind::HostKey => AskpassReply::answer("save"),
+            AskpassPromptKind::SaveKey => AskpassReply::Cancel,
             AskpassPromptKind::Secret | AskpassPromptKind::AgentConfirm => {
                 password.as_ref().map_or(AskpassReply::Cancel, |password| {
                     AskpassReply::answer(password.as_str())
@@ -903,6 +905,9 @@ fn interactive_prompts(
             AskpassPromptKind::HostKey => (ZzSshPromptKind::HostKey, "Verify SSH host"),
             AskpassPromptKind::AgentConfirm => {
                 (ZzSshPromptKind::Confirmation, "Confirm SSH request")
+            }
+            AskpassPromptKind::SaveKey => {
+                (ZzSshPromptKind::Confirmation, "Sign in without a password?")
             }
         };
         let value = ZzSshPrompt {

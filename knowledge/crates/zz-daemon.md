@@ -187,13 +187,15 @@ and proxy scripts. Production builds use `zz`. Desktop dev recipes link the deve
 into `~/.local/bin/zz-dev`; remote dev clients never fall back to the installed `zz` command.
 Explicit socket paths still use the build-selected executable for protocol checks and proxying.
 
-All three remote scripts open with `remote_path_fallback!`, which appends `$HOME/.local/bin`,
+All three remote scripts open with `remote_path_fallback()`, which appends `$HOME/.local/bin`,
 `/opt/homebrew/bin`, and `/usr/local/bin` to `PATH`. Those are the three directories `install.sh`
 links the CLI into, and `sh -l` cannot see them on its own: it reads `/etc/profile` and `~/.profile`
 only, never the `~/.bash_profile` or `~/.zshrc` where a bash or zsh user actually exports PATH.
 Before the fallback, a correctly installed remote answered the probe with `missing` and its host row
 read "zz is not installed". Appending rather than prepending keeps a deliberately chosen `zz` ahead
-of the guesses.
+of the guesses. When the command is still missing, the prefix points `$zz_cli` at the bundled `cli`
+in `/Applications` or `~/Applications` (`zz.app`, or `zz Dev.app` for dev builds), because a Mac app
+dragged out of the release DMG never gets a PATH link; every script runs `"$zz_cli"`.
 
 The start is unconditional rather than guarded on the socket file, because a socket outlives a
 daemon that was killed and `[ -S ]` reports those corpses as healthy . the state the auto-start

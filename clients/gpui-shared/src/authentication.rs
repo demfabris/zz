@@ -42,6 +42,20 @@ impl AppShell {
                     });
                     true
                 })
+            } else if prompt.kind == zz_daemon::AskpassPromptKind::SaveKey {
+                zz_ui::feedback::ssh_offer_prompt_dialog(
+                    dialog,
+                    "Sign in without a password?",
+                    &prompt.text,
+                    "Add key",
+                    cx,
+                )
+                .on_ok(move |_, _, cx| {
+                    confirm.update(cx, |connection, cx| {
+                        connection.answer_auth_prompt(prompt.id, Some("yes".into()), cx)
+                    });
+                    true
+                })
             } else {
                 let title = if prompt.kind == zz_daemon::AskpassPromptKind::HostKey {
                     "Trust host key?"

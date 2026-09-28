@@ -23,7 +23,9 @@ pub(crate) fn open(
 ) {
     match request.prompt.kind() {
         AskpassPromptKind::Secret => open_secret(mux, request, window, cx),
-        AskpassPromptKind::HostKey | AskpassPromptKind::AgentConfirm => {
+        AskpassPromptKind::HostKey
+        | AskpassPromptKind::AgentConfirm
+        | AskpassPromptKind::SaveKey => {
             open_confirmation(mux, request, window, cx);
         }
     }

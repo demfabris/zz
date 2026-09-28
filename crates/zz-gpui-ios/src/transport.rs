@@ -6,7 +6,10 @@ use std::{
         mpsc::{self, Receiver, Sender},
     },
 };
-use zz_daemon::{AskpassPromptKind, AskpassReply, Endpoint, InteractiveClient, SshPrompts};
+use zz_daemon::{
+    AskpassPromptKind, AskpassReply, DaemonError, Endpoint, EndpointError, InteractiveClient,
+    SshPrompts,
+};
 use zz_protocol::ProtocolMessage;
 use zz_terminal::TerminalColorScheme;
 
@@ -82,7 +85,7 @@ impl Connection {
                 };
                 let connected = Arc::new(
                     connect(&endpoint, TerminalColorScheme::Dark, Some(prompts))
-                        .map_err(|error| error.to_string())?,
+                        .map_err(|error| failure_reason(&error))?,
                 );
                 {
                     let mut slot = shared_client.lock().unwrap();
@@ -130,4 +133,10 @@ impl Drop for Connection {
             let _ = client.shutdown();
         }
     }
+}
+
+fn failure_reason(error: &DaemonError) -> String {
+    EndpointError::find(error)
+        .and_then(EndpointError::ssh_reason)
+        .unwrap_or_else(|| error.to_string())
 }

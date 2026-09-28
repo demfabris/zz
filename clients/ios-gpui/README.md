@@ -31,7 +31,8 @@ and a provisioning profile that covers `dev.zz.gpui-poc` (a team wildcard works)
 connects straight away and adds the host to the saved list; later launches from the home screen
 open the connection screen with it at the top. The Mac needs Remote Login
 enabled and `zz-dev` on its PATH (desktop dev runs link it into `~/.local/bin`). Sign in with your
-password, or copy the app's key from Settings › Hosts into `~/.ssh/authorized_keys`. Override the
+password; after a password sign-in the app offers to add its key to `~/.ssh/authorized_keys` so
+later connections skip the password. The key is also in Settings › Hosts to copy by hand. Override the
 choices with `ZZ_GPUI_DEVICE`, `ZZ_GPUI_SIGN_IDENTITY`, `ZZ_GPUI_PROFILE`, or `ZZ_GPUI_ENDPOINT`.
 
 Simulator and device builds use the zz Dev icon (`assets/zz-dev.icon`, compiled with `actool`).

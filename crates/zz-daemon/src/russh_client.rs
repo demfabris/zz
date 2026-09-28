@@ -33,8 +33,8 @@ use crate::{
     askpass::{AskpassMode, AskpassPrompt, AskpassReply, SshPrompts},
     endpoint::{
         EndpointError, PROXY_READY_MARKER, REMOTE_DAEMON_TIMEOUT_STATUS, REMOTE_ZZ_MISSING_STATUS,
-        SshEndpoint, parse_remote_probe_output, remote_daemon_start_script, remote_proxy_script,
-        remote_socket_probe, shell_quote,
+        SshEndpoint, authorized_key_script, parse_remote_probe_output, remote_daemon_start_script,
+        remote_proxy_script, remote_socket_probe, shell_quote, ssh_failure_hint,
     },
     ios_keychain::{self, KeychainError},
     russh_prompt::{AsyncSshPrompts, HandshakeDeadline},
@@ -386,7 +386,11 @@ async fn establish(
             if host_key_failure.lock().is_some() {
                 return Err(EndpointError::HostKeyRejected { target });
             }
-            return Err(ssh_failed(format!("connecting: {error}")));
+            let error = error.to_string();
+            return Err(ssh_failed(
+                ssh_failure_hint(&error)
+                    .map_or_else(|| format!("connecting: {error}"), ToOwned::to_owned),
+            ));
         }
     };
 
@@ -428,6 +432,7 @@ async fn authenticate(
 ) -> Result<(), EndpointError> {
     let key_path = directory.join("id_ed25519");
     let key = load_or_generate_key(&key_path).map_err(|error| ssh_failed(error.to_string()))?;
+    let public_key = key.public_key().to_openssh().ok();
     let attempt = session
         .authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key), None))
         .await
@@ -452,7 +457,10 @@ async fn authenticate(
             break;
         }
         match authenticate_keyboard_interactive(session, user, host, &prompts, ssh_failed).await? {
-            None => return Ok(()),
+            None => {
+                offer_key(session, &prompts, user, host, public_key.as_deref()).await;
+                return Ok(());
+            }
             Some(next) => remaining_methods = next,
         }
     }
@@ -461,14 +469,26 @@ async fn authenticate(
         for _ in 0..3 {
             let prompt =
                 AskpassPrompt::new(AskpassMode::Answer, format!("{user}@{host}'s password: "));
-            match prompts.respond(prompt).await {
+            match ask(session, &prompts, prompt, user, host).await? {
                 AskpassReply::Answer(password) => {
                     let attempt = session
                         .authenticate_password(user, password.as_str())
                         .await
-                        .map_err(|error| ssh_failed(format!("password auth: {error}")))?;
+                        .map_err(|error| {
+                            sign_in_failure(
+                                session,
+                                user,
+                                host,
+                                ssh_failed,
+                                "password auth",
+                                &error,
+                            )
+                        })?;
                     match attempt {
-                        AuthResult::Success => return Ok(()),
+                        AuthResult::Success => {
+                            offer_key(session, &prompts, user, host, public_key.as_deref()).await;
+                            return Ok(());
+                        }
                         AuthResult::Failure {
                             remaining_methods, ..
                         } if !remaining_methods.contains(&MethodKind::Password) => break,
@@ -529,7 +549,7 @@ async fn authenticate_keyboard_interactive(
                     };
                     let prompt =
                         AskpassPrompt::new(AskpassMode::Answer, context).with_echo(question.echo);
-                    match prompts.respond(prompt).await {
+                    match ask(session, prompts, prompt, user, host).await? {
                         AskpassReply::Answer(answer) => answers.push(answer.to_string()),
                         AskpassReply::Cancel => {
                             return Err(EndpointError::AuthenticationFailed {
@@ -543,10 +563,92 @@ async fn authenticate_keyboard_interactive(
                     .authenticate_keyboard_interactive_respond(answers)
                     .await
                     .map_err(|error| {
-                        ssh_failed(format!("keyboard-interactive response: {error}"))
+                        sign_in_failure(
+                            session,
+                            user,
+                            host,
+                            ssh_failed,
+                            "keyboard-interactive response",
+                            &error,
+                        )
                     })?;
             }
         }
+    }
+}
+
+async fn offer_key(
+    session: &mut SshSession,
+    prompts: &AsyncSshPrompts,
+    user: &str,
+    host: &str,
+    public_key: Option<&str>,
+) {
+    let Some(public_key) = public_key else {
+        return;
+    };
+    let prompt = AskpassPrompt::new(
+        AskpassMode::SaveKey,
+        format!(
+            "zz can add this device's key to ~/.ssh/authorized_keys for {user} on {host}, so \
+             connecting there no longer asks for a password."
+        ),
+    );
+    if !matches!(
+        ask(session, prompts, prompt, user, host).await,
+        Ok(AskpassReply::Answer(_))
+    ) {
+        return;
+    }
+    let script = authorized_key_script(public_key, &format!("{public_key} zz-iphone"));
+    match exec_capture(session, format!("sh -c {}", shell_quote(&script))).await {
+        Ok((Some(0), ..)) => {}
+        Ok((status, _, stderr)) => log::warn!(
+            target: "zz_daemon::russh",
+            "adding the zz key on {host} exited with {status:?}: {}",
+            String::from_utf8_lossy(&stderr).trim(),
+        ),
+        Err(error) => {
+            log::warn!(target: "zz_daemon::russh", "adding the zz key on {host}: {error}");
+        }
+    }
+}
+
+async fn ask(
+    session: &SshSession,
+    prompts: &AsyncSshPrompts,
+    prompt: AskpassPrompt,
+    user: &str,
+    host: &str,
+) -> Result<AskpassReply, EndpointError> {
+    tokio::select! {
+        reply = prompts.respond(prompt) => Ok(reply),
+        () = hung_up(session) => Err(EndpointError::SignInExpired {
+            target: format!("ssh://{user}@{host}"),
+        }),
+    }
+}
+
+async fn hung_up(session: &SshSession) {
+    while !session.is_closed() {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+fn sign_in_failure(
+    session: &SshSession,
+    user: &str,
+    host: &str,
+    ssh_failed: &impl Fn(String) -> EndpointError,
+    step: &str,
+    error: &russh::Error,
+) -> EndpointError {
+    if session.is_closed() {
+        EndpointError::SignInExpired {
+            target: format!("ssh://{user}@{host}"),
+        }
+    } else {
+        ssh_failed(format!("{step}: {error}"))
     }
 }
 

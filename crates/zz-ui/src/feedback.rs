@@ -135,6 +135,24 @@ pub fn ssh_confirm_prompt_dialog(
         .child(prompt_question(question, cx))
 }
 
+/// An offer the user can turn down without consequence, such as saving a key after sign-in.
+pub fn ssh_offer_prompt_dialog(
+    dialog: Dialog,
+    title: impl Into<SharedString>,
+    question: &str,
+    accept: impl Into<SharedString>,
+    cx: &App,
+) -> Dialog {
+    prompt_dialog(dialog, title)
+        .button_props(
+            DialogButtonProps::default()
+                .ok_text(accept)
+                .cancel_text("Not now")
+                .show_cancel(true),
+        )
+        .child(prompt_question(question, cx))
+}
+
 fn prompt_dialog(dialog: Dialog, title: impl Into<SharedString>) -> Dialog {
     dialog
         .title(title.into())

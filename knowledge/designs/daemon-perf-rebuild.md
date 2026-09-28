@@ -669,8 +669,11 @@ As built (branch `perf/publish`), where it departs from the scope above:
   split drag clears the dragging client's record, because the GUI drops its local layout
   prediction only on a fresh Snapshot. `publish_mux_snapshots` and `send_resync_inner` record and
   enqueue under one `snapshot_order` lock, so two publishers cannot leave a client holding an older
-  Snapshot than its record says. Format hook facts are built once per publish, not once per
-  client.
+  Snapshot than its record says. A full publish and a runtime-fact flush build one tree snapshot
+  and one set of format hook facts under one lock, shared by every client's stamped snapshot and
+  every status request; before, each client's stamp and the status refresh built their own. A
+  timer rename still builds facts once for the rename itself, because the publish that follows
+  runs after the lock is released.
 - Background publishers (a runtime-fact flush, the clock-label tick) go through
   `publish_mux_labels`, which never claims `last_published_mux_generation` for a tree change it
   did not publish. A command whose mutation lands before such a flush still runs its own
@@ -702,9 +705,10 @@ As built (branch `perf/publish`), where it departs from the scope above:
   exists, or a pane holds a Claude peer state. `status-interval` refreshes keep their own
   per-session deadlines. With none of these the sampler parks with no timeout; `subscribe`, the end
   of every command and pane output wake it when there is work.
-- The peer scan is armed from the registry side. Pane output asks for a probe (one atomic flag,
-  one unpark per probe), and the sampler runs at most one `sync_claude_peer_states` a second
-  while output flows and no state is recorded. A pane whose root process is the agent
+- The peer scan is armed from the registry side. Pane output and runtime-fact changes ask for a
+  probe (one atomic flag, one unpark per probe), and the sampler runs at most one
+  `sync_claude_peer_states` a second while they continue and no state is recorded, plus one more
+  a second after they stop, so a record the agent writes just after its last output is found. A pane whose root process is the agent
   (`split-window claude`, `exec claude`, `sh -c 'claude; ...'`) is found on its first output, the
   same as a foreground job; once a state is recorded the 1 Hz scan runs until it clears. There is
   no per-event `tcgetpgrp`. `RegistryCache` in claude_peers.rs re-reads a record only when its
@@ -719,7 +723,10 @@ threads 9 -> 6 (main, async-io, signals, accept, timers, status); `mem.threads.p
 `chatty.instr_per_s.flip` 3206 -> 1584 Minstr/s; `chatty.instr_per_s.hidden` 7295 -> 1914;
 `chatty.tty_kibps.hidden` 235 -> 8.7 KiB/s; `idle.wakeups_per_s.p20` 1.2 -> 0.2;
 `attach.instr.p1` 123 -> 92. The 4-pane 300-line TUI workload stays under 12 Snapshots and 10
-StatusChanged per 3 s (`a_busy_tiled_window_sends_few_snapshots_and_status_lines`).
+StatusChanged per 3 s (`a_busy_tiled_window_sends_few_snapshots_and_status_lines`). After the
+second review pass (one snapshot and one facts build per publish) the same gate at load 22-30
+reads `chatty.instr_per_s.flip` 1548, `.hidden` 1868, `attach.instr.p1` 87.5 and `.p4` 93.6,
+`cli.instr.display.p1` 7.33, `config.instr.source_1000` 748, with 0 regressed and 0 drifted rows.
 `chatty.cpu_pct.flip` reads 13-18% at load 7-22 and the 8% gate is not met by this lane alone.
 A symbolized flip profile after the review fixes puts this lane's path (`synchronize_pane_runtime`
 bookkeeping, `request_publish`, the peer probe) at about 3 of ~700 busy samples; the rest is

@@ -71,6 +71,12 @@ impl PublishFlush {
 }
 
 #[derive(Default)]
+pub(super) struct PeerProbe {
+    last: Option<Instant>,
+    follow_up: bool,
+}
+
+#[derive(Default)]
 pub(super) struct HookWorker {
     jobs: VecDeque<Vec<PendingHookEvent>>,
     running: bool,
@@ -414,8 +420,7 @@ impl Shared {
             (presentation, choosers)
         };
         if presentation {
-            self.publish_mux_labels();
-            self.refresh_status();
+            self.publish_mux_snapshots_as(false, true);
         }
         if choosers {
             self.refresh_choose_trees();
@@ -565,29 +570,37 @@ impl Shared {
     pub(super) fn run_peer_probe(
         self: &Arc<Self>,
         armed: bool,
-        last_probe: &mut Option<Instant>,
+        probe: &mut PeerProbe,
     ) -> Option<Instant> {
-        if armed || !self.peer_probe.load(Ordering::Acquire) {
+        if armed {
+            return None;
+        }
+        let requested = self.peer_probe.load(Ordering::Acquire);
+        if !requested && !probe.follow_up {
             return None;
         }
         let now = Instant::now();
-        if let Some(next) = last_probe
+        if let Some(next) = probe
+            .last
             .map(|last| last + PEER_PROBE_INTERVAL)
             .filter(|next| now < *next)
         {
             return Some(next);
         }
-        self.peer_probe.store(false, Ordering::Release);
-        *last_probe = Some(now);
+        if requested {
+            self.peer_probe.store(false, Ordering::Release);
+        }
+        probe.follow_up = requested;
+        probe.last = Some(now);
         self.sync_claude_peer_states();
-        None
+        probe.follow_up.then(|| now + PEER_PROBE_INTERVAL)
     }
 
     #[cfg(not(all(feature = "agent", unix)))]
     pub(super) fn run_peer_probe(
         self: &Arc<Self>,
         _armed: bool,
-        _last_probe: &mut Option<Instant>,
+        _probe: &mut PeerProbe,
     ) -> Option<Instant> {
         None
     }

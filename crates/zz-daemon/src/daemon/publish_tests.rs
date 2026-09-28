@@ -397,6 +397,15 @@ fn the_status_sampler_parks_until_its_tick_has_work() {
         }
     };
     let mut context = ExecutionContext::default();
+    shared
+        .inner
+        .lock()
+        .engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-session", ["-d", "-s", "sampler"]),
+        )
+        .expect("mux-only session");
     let mut run = |args: &[&str]| {
         shared
             .execute(
@@ -407,7 +416,6 @@ fn the_status_sampler_parks_until_its_tick_has_work() {
             )
             .expect("command");
     };
-    run(&["new-session", "-d", "-s", "sampler", "exec /bin/cat"]);
     wait_for(true);
     let mailbox = OutboundMailbox::new();
     shared.register_subscribed(ClientKind::Interactive, None, None, mailbox);
@@ -635,18 +643,20 @@ fn a_label_flush_leaves_an_unpublished_mutation_to_its_command() {
         &["new-window", "-d", "exec /bin/cat"],
     );
     events(&mailbox);
-    let (generation, hidden) = {
+    let hidden = {
         let inner = shared.inner.lock();
         let session = &inner.engine.state.sessions[&context.session.expect("session")];
-        let hidden = session
+        session
             .windows
             .iter()
             .copied()
             .find(|candidate| *candidate != session.active_window)
-            .expect("second window");
-        (inner.engine.state.generation(), hidden)
+            .expect("second window")
     };
     let hidden_pane = shared.inner.lock().engine.state.windows[&hidden].active_pane;
+    wait_for_runtime_facts(&shared, hidden_pane);
+    events(&mailbox);
+    let generation = shared.inner.lock().engine.state.generation();
     assert!(
         !shared.inner.lock().visible_terminals[&client].contains(&hidden_pane),
         "the new window starts hidden"
@@ -733,12 +743,6 @@ fn a_pane_whose_root_process_is_the_agent_gets_its_peer_state() {
         "messagingSocketPath": directory.join("peer.sock"),
         "status": "busy", "updatedAt": now, "statusUpdatedAt": now
     });
-    fs::create_dir_all(directory.join("sessions")).expect("registry");
-    fs::write(
-        directory.join("sessions").join(format!("{pid}.json")),
-        serde_json::to_vec(&record).expect("record JSON"),
-    )
-    .expect("peer record");
     let state = || {
         shared
             .execute(
@@ -761,6 +765,13 @@ fn a_pane_whose_root_process_is_the_agent_gets_its_peer_state() {
             &CommandInvocation::new("send-keys", ["-t", &pane.to_string(), "zzpub", "Enter"]),
         )
         .expect("send-keys");
+    thread::sleep(Duration::from_millis(300));
+    fs::create_dir_all(directory.join("sessions")).expect("registry");
+    fs::write(
+        directory.join("sessions").join(format!("{pid}.json")),
+        serde_json::to_vec(&record).expect("record JSON"),
+    )
+    .expect("peer record");
     let deadline = Instant::now() + Duration::from_secs(10);
     while state().trim() != "working" {
         assert!(Instant::now() < deadline, "agent state never arrived");

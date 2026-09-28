@@ -4885,46 +4885,30 @@ impl Shared {
         let startup_ready = *self.startup_ready.lock();
         let requests = {
             let mut inner = self.inner.lock();
-            let targets = inner
-                .subscribers
-                .keys()
-                .copied()
-                .filter(|client| {
-                    clients.is_none_or(|clients| clients.contains(client))
-                        && sessions.is_none_or(|sessions| {
-                            client_attached_session(&inner, *client)
-                                .is_some_and(|session| sessions.contains(&session))
-                        })
-                })
-                .collect::<Vec<_>>();
+            let targets = status_targets(&inner, sessions, clients);
             if targets.is_empty() && !*timers::EAGER_PUBLISH {
                 return;
             }
             inner.engine.set_format_now(unix_timestamp());
             let snapshot = inner.engine.state.snapshot();
             let facts = format_hook_facts(&inner);
-            let option_snapshot = Arc::new(inner.engine.format_option_snapshot());
-            let mut line_needs = BTreeMap::new();
-            targets
-                .into_iter()
-                .map(|client| {
-                    status_request_with(
-                        &inner,
-                        client,
-                        &snapshot,
-                        option_snapshot.clone(),
-                        facts.clone(),
-                        startup_ready,
-                        self.status_job_needs(client),
-                        &mut line_needs,
-                    )
-                })
-                .collect::<Vec<_>>()
+            status_requests(
+                &inner,
+                targets,
+                &snapshot,
+                &facts,
+                startup_ready,
+                &self.status_job_needs,
+            )
         };
+        self.publish_status_requests(&requests);
+    }
+
+    fn publish_status_requests(&self, requests: &[StatusRequest]) {
         if requests.is_empty() {
             return;
         }
-        let changed = self.status.lock().render_changed(&requests);
+        let changed = self.status.lock().render_changed(requests);
         if !changed.is_empty() {
             let mut inner = self.inner.lock();
             for (client, status) in &changed {
@@ -5159,7 +5143,7 @@ impl Shared {
             .spawn(move || {
                 let mut due: BTreeMap<SessionId, (Instant, Duration)> = BTreeMap::new();
                 let mut next_tick = Some(Instant::now() + CONTROL_SUBSCRIPTION_INTERVAL);
-                let mut last_probe = None;
+                let mut probe = timers::PeerProbe::default();
                 let mut probe_at = None;
                 loop {
                     let next_wake = due
@@ -5222,7 +5206,7 @@ impl Shared {
                             shared.sync_claude_peer_states();
                         }
                     }
-                    probe_at = shared.run_peer_probe(peer_scan, &mut last_probe);
+                    probe_at = shared.run_peer_probe(peer_scan, &mut probe);
                     due.retain(|session, _| intervals.contains_key(session));
                     let now = Instant::now();
                     let sessions = intervals
@@ -24757,7 +24741,7 @@ impl Shared {
                 )
             }
         };
-        if output_activity {
+        if output_activity || changed.is_some() {
             self.request_peer_probe();
         }
         if let Some(deadline) = silence_schedule {
@@ -24861,8 +24845,7 @@ impl Shared {
 
     fn publish_snapshot_state(&self) {
         self.note_published();
-        self.publish_mux_snapshots();
-        self.refresh_status();
+        self.publish_mux_snapshots_as(true, true);
         self.refresh_terminal_visibility();
         #[cfg(feature = "agent")]
         self.refresh_agent_visibility();
@@ -24872,16 +24855,17 @@ impl Shared {
     }
 
     fn publish_mux_snapshots(&self) {
-        self.publish_mux_snapshots_as(true);
+        self.publish_mux_snapshots_as(true, false);
     }
 
     fn publish_mux_labels(&self) {
-        self.publish_mux_snapshots_as(false);
+        self.publish_mux_snapshots_as(false, false);
     }
 
-    fn publish_mux_snapshots_as(&self, owns_generation: bool) {
+    fn publish_mux_snapshots_as(&self, owns_generation: bool, with_status: bool) {
+        let startup_ready = with_status.then(|| *self.startup_ready.lock());
         let order = self.snapshot_order.lock();
-        let (snapshots, appearance_updates) = {
+        let (snapshots, appearance_updates, requests) = {
             let mut inner = self.inner.lock();
             let ServerState {
                 engine,
@@ -24900,12 +24884,28 @@ impl Shared {
             } else {
                 Vec::new()
             };
-            let snapshots = if inner.subscribers.is_empty() && !*timers::EAGER_PUBLISH {
-                Vec::new()
+            let targets = startup_ready
+                .map(|_| status_targets(&inner, None, None))
+                .unwrap_or_default();
+            if inner.subscribers.is_empty() && !*timers::EAGER_PUBLISH {
+                (Vec::new(), appearance_updates, Vec::new())
             } else {
-                stamped_snapshot_sends(&mut inner, tracked)
-            };
-            (snapshots, appearance_updates)
+                if !targets.is_empty() {
+                    inner.engine.set_format_now(unix_timestamp());
+                }
+                let snapshot = inner.engine.state.snapshot();
+                let facts = format_hook_facts(&inner);
+                let snapshots = stamped_snapshot_sends(&mut inner, tracked, &snapshot, &facts);
+                let requests = status_requests(
+                    &inner,
+                    targets,
+                    &snapshot,
+                    &facts,
+                    startup_ready.unwrap_or_default(),
+                    &self.status_job_needs,
+                );
+                (snapshots, appearance_updates, requests)
+            }
         };
         for (terminal, appearance) in appearance_updates {
             terminal.set_appearance(appearance);
@@ -24914,6 +24914,7 @@ impl Shared {
             Self::send_event(&subscriber, EventPayload::Snapshot(snapshot));
         }
         drop(order);
+        self.publish_status_requests(&requests);
     }
 
     fn refresh_choose_trees(&self) {
@@ -36390,6 +36391,56 @@ fn client_input_pane(
 #[cfg(test)]
 mod format_universe_tests;
 
+fn status_targets(
+    inner: &ServerState,
+    sessions: Option<&BTreeSet<SessionId>>,
+    clients: Option<&BTreeSet<ClientId>>,
+) -> Vec<ClientId> {
+    inner
+        .subscribers
+        .keys()
+        .copied()
+        .filter(|client| {
+            clients.is_none_or(|clients| clients.contains(client))
+                && sessions.is_none_or(|sessions| {
+                    client_attached_session(inner, *client)
+                        .is_some_and(|session| sessions.contains(&session))
+                })
+        })
+        .collect()
+}
+
+fn status_requests(
+    inner: &ServerState,
+    targets: Vec<ClientId>,
+    snapshot: &MuxSnapshot,
+    facts: &FormatHookFacts,
+    startup_ready: bool,
+    job_needs: &crate::status::StatusJobNeeds,
+) -> Vec<StatusRequest> {
+    if targets.is_empty() {
+        return Vec::new();
+    }
+    let option_snapshot = Arc::new(inner.engine.format_option_snapshot());
+    let job_needs = job_needs.lock();
+    let mut line_needs = BTreeMap::new();
+    targets
+        .into_iter()
+        .map(|client| {
+            status_request_with(
+                inner,
+                client,
+                snapshot,
+                option_snapshot.clone(),
+                facts.clone(),
+                startup_ready,
+                job_needs.get(&client).copied().unwrap_or_default(),
+                &mut line_needs,
+            )
+        })
+        .collect()
+}
+
 fn status_request(
     inner: &ServerState,
     client: ClientId,
@@ -37001,16 +37052,16 @@ fn note_snapshot_sent(inner: &mut ServerState, client: ClientId, snapshot: &MuxS
 fn stamped_snapshot_sends(
     inner: &mut ServerState,
     tracked: bool,
+    snapshot: &MuxSnapshot,
+    facts: &FormatHookFacts,
 ) -> Vec<(Arc<OutboundMailbox>, MuxSnapshot)> {
-    let snapshot = inner.engine.state.snapshot();
     let presence = snapshot_presence(inner);
-    let facts = format_hook_facts(inner);
     let mut sends = Vec::with_capacity(inner.subscribers.len());
     let mut unchanged = Vec::new();
     let mut restamp = false;
     for (client, subscriber) in &inner.subscribers {
         let mut client_snapshot = snapshot.clone();
-        stamp_snapshot_for_client_with(inner, *client, &mut client_snapshot, &presence, &facts);
+        stamp_snapshot_for_client_with(inner, *client, &mut client_snapshot, &presence, facts);
         let digest = client_snapshot.content_digest();
         let sent = inner.published_snapshots.get(client).copied();
         if !*timers::EAGER_PUBLISH && sent == Some((digest, snapshot.generation)) {

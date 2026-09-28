@@ -1083,6 +1083,18 @@ Missed or handed on:
   only passes when its `sleep 30` pane exits just before the 30 s deadline, and it fails under a
   loaded full-crate run.
 
+Checks on macOS: the zz-terminal and zz-daemon suites pass (the daemon suite once under
+`--test-threads 8`), clippy is clean for zz-terminal, zz-daemon, zz-cli, zz-tui and zz, and for
+zz-terminal on `x86_64-unknown-linux-gnu`. `compat/run.sh` over the whole corpus,
+`attached-client.sh` in all three modes, `tui-copy-mode.sh` (147 cases) and
+`tui-pane-geometry.sh` agree with the pin except for scenarios that diverge the same way on
+157ac6a3 on this host (`census-hooks` reads the missing `/etc/hostname`, `prompt-history`,
+`if-shell-background-order` under load, and smoke `plugin-runtime-vim-tmux-navigator`,
+`resurrect-save`, `source-file-byte-name`, `status-background-jobs`). `tui-choosers.sh` and
+`tui-screen-diff.sh` stop at the same checkpoint on 157ac6a3 (the pin's session tree never
+settles; the zz wide-glyph line never settles), and `tui-output-backpressure.sh` reads
+`/proc` and runs only on Linux.
+
 Left on this path after the change, as busy samples in a 5 s `sample` of the flip workload: 154
 in all, 60 on the pane actors (`publish_views` 21, of which 10 signal the watcher; PTY parsing
 7; the control slot 4) and 93 on the watchers (`publish_snapshot_state` 50 and the runtime-fact

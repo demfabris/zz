@@ -1106,7 +1106,7 @@ fn terminal_appearance_updates(
     inner: &ServerState,
 ) -> Vec<(Arc<TerminalSession>, Arc<TerminalAppearance>)> {
     let mut updates = Vec::with_capacity(inner.terminals.len() + inner.command_outputs.len());
-    for (pane, terminal) in &inner.terminals {
+    for (pane, terminal) in inner.terminals.iter() {
         let appearance =
             terminal_worker_options(&inner.engine, &inner.appearance, &inner.config_files, *pane)
                 .map_or_else(
@@ -4949,7 +4949,8 @@ impl Shared {
         ) = {
             let mut inner = self.inner.lock();
             let mut terminals = std::mem::take(&mut inner.terminals)
-                .into_values()
+                .values()
+                .cloned()
                 .collect::<Vec<_>>();
             terminals.extend(
                 inner
@@ -8282,7 +8283,7 @@ impl Shared {
                             terminal: Arc::clone(&session),
                             enabled: terminal_options.wrap_search,
                         });
-                        inner.terminals.insert(*pane, Arc::clone(&session));
+                        inner.terminals_mut().insert(*pane, Arc::clone(&session));
                         inner.terminal_spawns.insert(*pane, spawn);
                         inner.engine.set_pane_runtime_facts_with_hooks(
                             *pane,
@@ -8462,7 +8463,7 @@ impl Shared {
                             *entry = PaneExitWait::new();
                             entry.command_wait = command_wait;
                         }
-                        inner.terminals.insert(*pane, Arc::clone(&session));
+                        inner.terminals_mut().insert(*pane, Arc::clone(&session));
                         inner.terminal_spawns.insert(*pane, spawn);
                         inner.engine.set_pane_runtime_facts_with_hooks(
                             *pane,
@@ -8563,7 +8564,7 @@ impl Shared {
                             if let Some((columns, rows)) = inner.engine.pane_geometry(*pane) {
                                 session.resize(columns, rows, 0, 0);
                             }
-                            inner.terminals.insert(*pane, Arc::clone(&session));
+                            inner.terminals_mut().insert(*pane, Arc::clone(&session));
                             terminals_to_watch.push((*pane, session));
                         }
                         agent_panes_opened.push(*pane);
@@ -8615,7 +8616,7 @@ impl Shared {
                                 pipes_to_close.push(pipe);
                             }
                             Self::wake_pane_exit_wait(&mut inner, *pane, 0);
-                            inner.terminals.remove(pane);
+                            inner.terminals_mut().remove(pane);
                             inner.last_output.remove(pane);
                             #[cfg(all(feature = "agent", unix))]
                             inner.claude_peer_states.remove(pane);
@@ -9504,7 +9505,7 @@ impl Shared {
                         inner.automatic_paste_buffer_limit = AutomaticPasteBufferLimit(*limit);
                     }
                     MuxEffect::WordSeparatorsChanged { session } => {
-                        for (pane, terminal) in &inner.terminals {
+                        for (pane, terminal) in inner.terminals.iter() {
                             let Some(window) = inner.engine.state.window_for_pane(*pane) else {
                                 continue;
                             };
@@ -9541,7 +9542,7 @@ impl Shared {
                         }
                     }
                     MuxEffect::TerminalKnobsChanged { window, pane } => {
-                        for (candidate, terminal) in &inner.terminals {
+                        for (candidate, terminal) in inner.terminals.iter() {
                             if pane.is_some_and(|pane| pane != *candidate)
                                 || window.is_some_and(|window| {
                                     inner.engine.state.window_for_pane(*candidate) != Some(window)
@@ -18943,7 +18944,7 @@ impl Shared {
                 return;
             };
             let terminal = Arc::clone(&popup.terminal);
-            inner.terminals.insert(pane, Arc::clone(&terminal));
+            inner.terminals_mut().insert(pane, Arc::clone(&terminal));
             let current_path = terminal_working_directory(&terminal)
                 .map(|path| path.to_string_lossy().into_owned())
                 .unwrap_or_default();
@@ -31010,7 +31011,7 @@ struct ServerState {
     activity_sequence: u64,
     deferred_event_hooks: Vec<PendingHookEvent>,
     deferred_control_refresh: bool,
-    terminals: BTreeMap<PaneId, Arc<TerminalSession>>,
+    terminals: Arc<BTreeMap<PaneId, Arc<TerminalSession>>>,
     last_output: BTreeMap<PaneId, Instant>,
     #[cfg(all(feature = "agent", unix))]
     claude_peer_states: BTreeMap<PaneId, String>,
@@ -31271,6 +31272,12 @@ impl DiagnosticSample {
 struct PendingGuiRequest {
     client: ClientId,
     reply: crossbeam_channel::Sender<Result<String, String>>,
+}
+
+impl ServerState {
+    fn terminals_mut(&mut self) -> &mut BTreeMap<PaneId, Arc<TerminalSession>> {
+        Arc::make_mut(&mut self.terminals)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -40037,7 +40044,7 @@ fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
         copy_modes: Arc::new(copy_mode_format_facts(inner)),
         pane_modes: Arc::new(pane_mode_format_facts(inner)),
         unseen_changes: Arc::new(unseen_change_panes(inner)),
-        terminals: Arc::new(inner.terminals.clone()),
+        terminals: Arc::clone(&inner.terminals),
         pane_pipes: Arc::new(
             inner
                 .pane_pipes
@@ -50147,7 +50154,7 @@ mod tests {
                 "client-focus sibling fixture".to_owned(),
                 "sibling".to_owned(),
             ));
-            inner.terminals.insert(sibling, Arc::clone(&terminal));
+            inner.terminals_mut().insert(sibling, Arc::clone(&terminal));
             (window, sibling, terminal)
         };
         shared
@@ -52619,7 +52626,7 @@ mod tests {
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(pane, Arc::clone(&terminal));
         shared
             .watch_terminal(pane, &terminal)
@@ -52636,7 +52643,7 @@ mod tests {
             "only the test and terminal map should own the session"
         );
 
-        shared.inner.lock().terminals.remove(&pane);
+        shared.inner.lock().terminals_mut().remove(&pane);
         drop(terminal);
         let deadline = Instant::now() + Duration::from_secs(2);
         while terminal_weak.upgrade().is_some() {
@@ -52666,7 +52673,7 @@ mod tests {
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(pane, Arc::clone(&terminal));
         shared
             .watch_terminal(pane, &terminal)
@@ -52704,7 +52711,7 @@ mod tests {
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(pane, Arc::clone(&replacement));
         shared.synchronize_pane_title(pane, &terminal, "stale watcher title");
         assert_eq!(
@@ -52713,7 +52720,7 @@ mod tests {
             "a retired watcher must not rename its replacement"
         );
 
-        shared.inner.lock().terminals.remove(&pane);
+        shared.inner.lock().terminals_mut().remove(&pane);
     }
 
     #[test]
@@ -70503,7 +70510,7 @@ set-option -g @alias-mixed-next yes
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(pane, Arc::clone(&terminal));
         shared
             .attach(client, session)
@@ -78208,7 +78215,7 @@ set-option -g @alias-mixed-next yes
                 .state
                 .create_session("exit-status")
                 .expect("session");
-            inner.terminals.insert(ids.2, Arc::clone(&terminal));
+            inner.terminals_mut().insert(ids.2, Arc::clone(&terminal));
             ids
         };
         let context = ExecutionContext::new(Some(session), Some(window), Some(pane));
@@ -82753,7 +82760,7 @@ bind - split-window -v -c "#{pane_current_path}"
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(second, Arc::clone(&second_terminal));
         shared
             .watch_terminal(second, &second_terminal)
@@ -89189,7 +89196,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 "second window".to_owned(),
                 String::new(),
             ));
-            inner.terminals.insert(second_pane, terminal);
+            inner.terminals_mut().insert(second_pane, terminal);
             (first_window, second_window, second_pane)
         };
         shared
@@ -100946,7 +100953,7 @@ bind - split-window -v -c "#{pane_current_path}"
                     false,
                 )
                 .expect("second window");
-            inner.terminals.insert(
+            inner.terminals_mut().insert(
                 second_pane,
                 Arc::new(TerminalSession::spawn_output_view(
                     "second fixture".to_owned(),
@@ -101282,7 +101289,7 @@ bind - split-window -v -c "#{pane_current_path}"
                     false,
                 )
                 .expect("second window");
-            inner.terminals.insert(
+            inner.terminals_mut().insert(
                 pane,
                 Arc::new(TerminalSession::spawn_output_view(
                     "second fixture".to_owned(),
@@ -101577,7 +101584,7 @@ bind - split-window -v -c "#{pane_current_path}"
                     false,
                 )
                 .expect("second window");
-            inner.terminals.insert(
+            inner.terminals_mut().insert(
                 second_pane,
                 Arc::new(TerminalSession::spawn_output_view(
                     "second fixture".to_owned(),
@@ -103172,7 +103179,7 @@ bind - split-window -v -c "#{pane_current_path}"
             );
         }
 
-        let terminal = shared.inner.lock().terminals.remove(&pane);
+        let terminal = shared.inner.lock().terminals_mut().remove(&pane);
         assert_eq!(
             choose_path_error(choose_path(ClientKind::Interactive, &mut context, &[])),
             "choose-path needs a terminal pane"
@@ -107797,7 +107804,7 @@ bind - split-window -v -c "#{pane_current_path}"
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(pane, Arc::clone(&terminal));
         shared
             .watch_terminal(pane, &terminal)

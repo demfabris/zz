@@ -1775,6 +1775,8 @@ enum ShowOptionArgument {
 
 type UserOptions = BTreeMap<String, String>;
 
+type SharedUserOptions = Arc<UserOptions>;
+
 /// What format expansion reads without holding the engine: `#{pane_kind}` and
 /// `#{@name}` readback, keyed by the ids a `StatusContext` already carries.
 #[derive(Clone, Debug, Default)]
@@ -1782,12 +1784,12 @@ pub struct FormatFacts {
     pane_kinds: BTreeMap<String, &'static str>,
     browser_urls: BTreeMap<String, String>,
     pane_windows: BTreeMap<String, String>,
-    server: UserOptions,
-    global_session: UserOptions,
-    sessions: BTreeMap<String, UserOptions>,
-    global_window: UserOptions,
-    windows: BTreeMap<String, UserOptions>,
-    panes: BTreeMap<String, UserOptions>,
+    server: SharedUserOptions,
+    global_session: SharedUserOptions,
+    sessions: BTreeMap<String, SharedUserOptions>,
+    global_window: SharedUserOptions,
+    windows: BTreeMap<String, SharedUserOptions>,
+    panes: BTreeMap<String, SharedUserOptions>,
 }
 
 impl FormatFacts {
@@ -2099,12 +2101,12 @@ pub struct MuxEngine {
     session_initial_repeat_time_ms: BTreeMap<SessionId, u32>,
     global_repeat_time_ms: u32,
     session_repeat_time_ms: BTreeMap<SessionId, u32>,
-    server_user_options: UserOptions,
-    global_session_user_options: UserOptions,
-    session_user_options: BTreeMap<SessionId, UserOptions>,
-    global_window_user_options: UserOptions,
-    window_user_options: BTreeMap<WindowId, UserOptions>,
-    pane_user_options: BTreeMap<PaneId, UserOptions>,
+    server_user_options: SharedUserOptions,
+    global_session_user_options: SharedUserOptions,
+    session_user_options: BTreeMap<SessionId, SharedUserOptions>,
+    global_window_user_options: SharedUserOptions,
+    window_user_options: BTreeMap<WindowId, SharedUserOptions>,
+    pane_user_options: BTreeMap<PaneId, SharedUserOptions>,
     stored_arrays: StoredArrays,
     stored_scalars: StoredScalars,
     global_hooks: HookTable,
@@ -2376,10 +2378,10 @@ impl Default for MuxEngine {
             session_initial_repeat_time_ms: BTreeMap::new(),
             global_repeat_time_ms: DEFAULT_REPEAT_TIME_MS,
             session_repeat_time_ms: BTreeMap::new(),
-            server_user_options: UserOptions::new(),
-            global_session_user_options: UserOptions::new(),
+            server_user_options: SharedUserOptions::default(),
+            global_session_user_options: SharedUserOptions::default(),
             session_user_options: BTreeMap::new(),
-            global_window_user_options: UserOptions::new(),
+            global_window_user_options: SharedUserOptions::default(),
             window_user_options: BTreeMap::new(),
             pane_user_options: BTreeMap::new(),
             stored_arrays: StoredArrays::default(),
@@ -10776,7 +10778,7 @@ impl MuxEngine {
                     .unwrap_or_default();
                 for pane in panes {
                     if let Some(values) = self.pane_user_options.get_mut(&pane) {
-                        values.remove(option);
+                        Arc::make_mut(values).remove(option);
                     }
                 }
             }
@@ -11234,10 +11236,11 @@ impl MuxEngine {
             TmuxOptionTarget::Window(window) => self.window_user_options.get(&window),
             TmuxOptionTarget::Pane(pane) => self.pane_user_options.get(&pane),
         }
+        .map(Arc::as_ref)
     }
 
     fn user_options_at_target_mut(&mut self, target: TmuxOptionTarget) -> &mut UserOptions {
-        match target {
+        Arc::make_mut(match target {
             TmuxOptionTarget::Server => &mut self.server_user_options,
             TmuxOptionTarget::GlobalSession => &mut self.global_session_user_options,
             TmuxOptionTarget::Session(session) => {
@@ -11246,7 +11249,7 @@ impl MuxEngine {
             TmuxOptionTarget::GlobalWindow => &mut self.global_window_user_options,
             TmuxOptionTarget::Window(window) => self.window_user_options.entry(window).or_default(),
             TmuxOptionTarget::Pane(pane) => self.pane_user_options.entry(pane).or_default(),
-        }
+        })
     }
 
     fn user_option_readback<'a>(
@@ -16212,22 +16215,22 @@ impl MuxEngine {
             }
         }
         fn keyed<K: std::fmt::Display>(
-            options: &BTreeMap<K, UserOptions>,
-        ) -> BTreeMap<String, UserOptions> {
+            options: &BTreeMap<K, SharedUserOptions>,
+        ) -> BTreeMap<String, SharedUserOptions> {
             options
                 .iter()
                 .filter(|(_, values)| !values.is_empty())
-                .map(|(id, values)| (id.to_string(), values.clone()))
+                .map(|(id, values)| (id.to_string(), Arc::clone(values)))
                 .collect()
         }
         FormatFacts {
             pane_kinds,
             browser_urls,
             pane_windows,
-            server: self.server_user_options.clone(),
-            global_session: self.global_session_user_options.clone(),
+            server: Arc::clone(&self.server_user_options),
+            global_session: Arc::clone(&self.global_session_user_options),
             sessions: keyed(&self.session_user_options),
-            global_window: self.global_window_user_options.clone(),
+            global_window: Arc::clone(&self.global_window_user_options),
             windows: keyed(&self.window_user_options),
             panes: keyed(&self.pane_user_options),
         }

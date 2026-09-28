@@ -434,7 +434,7 @@ pub(crate) struct ClientFormatFacts {
     /// The `struct tty_term` tmux would build for this client, which is what
     /// `#{I/c:}` and `#{I/f:}` interrogate. Absent for a client with no tty,
     /// which is `format_replace`'s null-term early exit.
-    pub(crate) terminal: Option<TtyTerm>,
+    pub(crate) terminal: Option<Arc<TtyTerm>>,
     pub(crate) viewport: Option<ClientViewportFacts>,
 }
 
@@ -648,22 +648,46 @@ pub(crate) fn warm_terminfo_entries(environment: &[RawText]) {
 }
 
 /// The `struct tty_term` the pin would build for a client on `term`.
+type TtyTermKey = (String, Option<String>, String, Vec<String>, Vec<String>);
+
+const TTY_TERM_CACHE_ENTRIES: usize = 64;
+
 pub(crate) fn client_terminal_facts(
     term: &str,
     colour_term: Option<&str>,
     negotiated: &str,
     terminal_features: &[String],
     terminal_overrides: &[String],
-) -> Option<TtyTerm> {
-    let entries = terminfo_entries(term)?;
-    Some(TtyTerm::create(
-        term,
-        &entries,
-        colour_term,
-        negotiated,
-        terminal_features,
-        terminal_overrides,
-    ))
+) -> Option<Arc<TtyTerm>> {
+    static TERMS: OnceLock<parking_lot::Mutex<BTreeMap<TtyTermKey, Option<Arc<TtyTerm>>>>> =
+        OnceLock::new();
+    let key = (
+        term.to_owned(),
+        colour_term.map(str::to_owned),
+        negotiated.to_owned(),
+        terminal_features.to_vec(),
+        terminal_overrides.to_vec(),
+    );
+    let cache = TERMS.get_or_init(parking_lot::Mutex::default);
+    if let Some(cached) = cache.lock().get(&key) {
+        return cached.clone();
+    }
+    let built = terminfo_entries(term).map(|entries| {
+        Arc::new(TtyTerm::create(
+            term,
+            &entries,
+            colour_term,
+            negotiated,
+            terminal_features,
+            terminal_overrides,
+        ))
+    });
+    let mut cache = cache.lock();
+    if cache.len() >= TTY_TERM_CACHE_ENTRIES {
+        cache.clear();
+    }
+    cache.insert(key, built.clone());
+    built
 }
 
 /// A client's own process environment as `#{Vc:}` rows. A client store has no
@@ -1666,7 +1690,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
     }
 
     fn client_tty_term(&mut self) -> Option<TtyTerm> {
-        self.facts.client.as_ref()?.terminal.clone()
+        self.facts.client.as_ref()?.terminal.as_deref().cloned()
     }
 
     fn client_terminal_environment(&mut self) -> Vec<FormatEnvironRow> {

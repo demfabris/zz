@@ -12,7 +12,7 @@ pub(crate) fn display_keystroke(canonical: &str) -> Option<Keystroke> {
     Keystroke::parse(&crate::keymap::gpui_source(&key)?).ok()
 }
 
-pub(crate) fn is_sidebar_picker_input(bindings: &[KeyBindingSnapshot], input: &KeyInput) -> bool {
+fn prefix_binding(bindings: &[KeyBindingSnapshot], input: &KeyInput) -> Option<Binding> {
     let mut tables = KeyTables::empty();
     for binding in bindings {
         tables.bind(
@@ -25,7 +25,16 @@ pub(crate) fn is_sidebar_picker_input(bindings: &[KeyBindingSnapshot], input: &K
             },
         );
     }
-    let Some(binding) = tables.resolve_input("prefix", input) else {
+    tables.resolve_input("prefix", input).cloned()
+}
+
+pub(crate) fn is_all_keys_input(bindings: &[KeyBindingSnapshot], input: &KeyInput) -> bool {
+    prefix_binding(bindings, input)
+        .is_some_and(|binding| zz_client::which_key::opens_all_keys(&binding.commands))
+}
+
+pub(crate) fn is_sidebar_picker_input(bindings: &[KeyBindingSnapshot], input: &KeyInput) -> bool {
+    let Some(binding) = prefix_binding(bindings, input) else {
         return false;
     };
     let [command] = binding.commands.as_slice() else {

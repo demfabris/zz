@@ -4,7 +4,7 @@ use gpui::{
     AnyElement, IntoElement, ParentElement as _, Pixels, SharedString, Size, Styled as _, div, px,
     size,
 };
-use zz_ui::which_key::{WhichKeyHeader, WhichKeyRow, WhichKeyView};
+use zz_ui::which_key::{WhichKeyCap, WhichKeyHeader, WhichKeyRow, WhichKeyView};
 
 use crate::mux::{client::MuxClient, prefix::display_keystroke};
 
@@ -17,14 +17,35 @@ pub(super) struct WhichKeySheet {
     rows: Arc<[WhichKeyRow]>,
 }
 
+fn cap(keys: &[String], yours: bool) -> WhichKeyCap {
+    let parsed: Option<Vec<_>> = keys.iter().map(|key| display_keystroke(key)).collect();
+    WhichKeyCap {
+        keys: parsed.unwrap_or_default(),
+        raw: keys.join(" ").into(),
+        yours,
+    }
+}
+
 impl WhichKeySheet {
-    pub(super) fn build(mux: &MuxClient, table: &str) -> Option<Self> {
+    pub(super) fn build(mux: &MuxClient, table: &str, all: bool) -> Option<Self> {
         let prefix = mux.canonical_prefix();
-        let rows =
-            zz_client::which_key::rows(mux.key_tables(), table, prefix.as_deref().unwrap_or("C-b"));
+        let short = table == "prefix" && !all;
+        let rows: Vec<_> =
+            zz_client::which_key::rows(mux.key_tables(), table, prefix.as_deref().unwrap_or("C-b"))
+                .into_iter()
+                .filter(|row| row.core || !short)
+                .collect();
         if rows.is_empty() {
             return None;
         }
+        let more = short
+            .then(|| {
+                mux.prefix_bindings()
+                    .iter()
+                    .find(|binding| zz_client::which_key::opens_all_keys(&binding.commands))
+            })
+            .flatten()
+            .map(|binding| cap(std::slice::from_ref(&binding.key), false));
         let prefix = if table == "prefix" {
             prefix.unwrap_or_default()
         } else {
@@ -35,18 +56,22 @@ impl WhichKeySheet {
                 table: table.to_owned().into(),
                 prefix: display_keystroke(&prefix),
                 prefix_raw: prefix.into(),
+                more,
             },
             rows: rows
                 .into_iter()
                 .map(|row| WhichKeyRow {
-                    key: display_keystroke(&row.key),
-                    raw: row.key.into(),
+                    id: row.first_key().to_owned().into(),
+                    caps: row
+                        .keys
+                        .iter()
+                        .map(|set| cap(&set.keys, set.yours))
+                        .collect(),
                     label: row.label.into(),
                     group: row
                         .group
                         .map(|group| SharedString::new_static(group.title())),
                     repeat: row.repeat,
-                    yours: row.yours,
                 })
                 .collect(),
         })
@@ -98,11 +123,13 @@ mod tests {
         let tables = zz_protocol::KeyTables::default().snapshot();
         let rows = zz_client::which_key::rows(&tables, "prefix", "C-b");
         assert!(!rows.is_empty());
-        for row in rows {
+        for key in rows
+            .iter()
+            .flat_map(|row| row.keys.iter().flat_map(|set| &set.keys))
+        {
             assert!(
-                crate::mux::prefix::display_keystroke(&row.key).is_some(),
-                "{:?} has no key cap",
-                row.key
+                crate::mux::prefix::display_keystroke(key).is_some(),
+                "{key:?} has no key cap"
             );
         }
     }

@@ -85,7 +85,7 @@ use crate::{
         },
         hosts::HostId,
         nav::{TreeTarget, kill_target_command, picker_split_command, select_window_command},
-        prefix::{is_sidebar_picker_input, terminal_key_input},
+        prefix::{is_all_keys_input, is_sidebar_picker_input, terminal_key_input},
     },
     pane::display::DisplayPanesView,
     pane::layout::{SeparatorSide, pane_separator},
@@ -1158,6 +1158,18 @@ impl AppView {
                 }
                 Effect::ForwardKey { pane, input } => {
                     if armed
+                        && which_key::delay(config::resolved_config(cx).which_key_delay.value)
+                            .is_some()
+                        && is_all_keys_input(self.mux.read(cx).prefix_bindings(), &input)
+                    {
+                        self.input_router.suppress_release(
+                            input
+                                .unshifted_codepoint
+                                .map_or(input.key, zz_terminal::KeyCode::Character),
+                        );
+                        self.which_key = WhichKeySheet::build(self.mux.read(cx), "prefix", true);
+                        cx.notify();
+                    } else if armed
                         && cx
                             .try_global::<config::AppConfig>()
                             .is_some_and(|config| config.picker_focus_sidebar.value)
@@ -1262,7 +1274,7 @@ impl AppView {
         {
             return;
         }
-        self.which_key = WhichKeySheet::build(self.mux.read(cx), table);
+        self.which_key = WhichKeySheet::build(self.mux.read(cx), table, false);
         cx.notify();
     }
 
@@ -4759,11 +4771,16 @@ mod tests {
             let split = sheet
                 .rows()
                 .iter()
-                .find(|row| row.raw.as_ref() == "%")
+                .find(|row| row.id.as_ref() == "%")
                 .unwrap();
             assert_eq!(split.group.as_deref(), Some("Panes"));
-            assert!(split.key.is_some());
-            assert!(!split.yours);
+            assert!(!split.caps[0].keys.is_empty());
+            assert!(!split.caps[0].yours);
+            assert!(sheet.rows().iter().all(|row| row.id.as_ref() != "M-1"));
+            assert_eq!(
+                sheet.header().more.as_ref().map(|more| more.raw.as_ref()),
+                Some("?")
+            );
         });
         assert!(workspace.read_with(cx, |workspace, _| workspace.focused_overlay.is_none()));
         let sheet = cx.debug_bounds("which-key").unwrap();
@@ -4896,10 +4913,11 @@ mod tests {
                 sheet
                     .rows()
                     .iter()
-                    .map(|row| row.raw.as_ref())
+                    .map(|row| row.caps[0].raw.as_ref())
                     .collect::<Vec<_>>(),
-                ["h", "l"]
+                ["h l"]
             );
+            assert!(sheet.header().more.is_none());
             assert!(
                 sheet
                     .rows()
@@ -4918,6 +4936,35 @@ mod tests {
         publish_key_table(&mux, Some("resize"), false, cx);
         wait_for_which_key(cx, 401);
         assert!(which_key_visible(&workspace, cx));
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn question_mark_opens_every_key_and_leaves_the_prefix_armed(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        let Some((client, _server)) = input_test_client() else {
+            return;
+        };
+        let (workspace, cx) = input_test_workspace(cx, client);
+        let mux = workspace.read_with(cx, |workspace, _| workspace.mux.clone());
+        mux.update(cx, |mux, cx| mux.set_prefix_armed_for_test(true, cx));
+        publish_key_table(&mux, Some("prefix"), false, cx);
+        let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+        cx.simulate_keystrokes("?");
+        workspace.read_with(cx, |workspace, _| {
+            let sheet = workspace.which_key.as_ref().unwrap();
+            assert!(sheet.header().more.is_none());
+            assert!(sheet.rows().iter().any(|row| row.id.as_ref() == "M-1"));
+        });
+        assert!(input.borrow().is_empty(), "{:?}", input.borrow());
+        cx.simulate_keystrokes("c");
+        assert!(!which_key_visible(&workspace, cx));
+        assert!(
+            input
+                .borrow()
+                .iter()
+                .any(|message| matches!(message, InputMessage::Key { input, .. } if input.text.as_deref() == Some("c")))
+        );
     }
 
     #[cfg(unix)]

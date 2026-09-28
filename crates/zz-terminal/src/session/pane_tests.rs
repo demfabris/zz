@@ -266,3 +266,18 @@ fn the_exit_watch_reaps_a_child_that_exited_before_it_was_registered() {
         "one owner reaps once"
     );
 }
+
+#[test]
+fn an_interrupt_typed_on_the_pty_reaches_the_foreground_job() {
+    let session = shell_session(
+        "if (exec 3</dev/tty) 2>/dev/null; then echo ZZ_CTTY; fi; printf 'ZZ_READY\\n'; sleep 30",
+    );
+    wait_until("the controlling terminal", || {
+        text(&session.latest_viewport()).contains("ZZ_READY")
+    });
+    assert!(text(&session.latest_viewport()).contains("ZZ_CTTY"));
+    let started = Instant::now();
+    assert!(session.send_raw_input(Arc::from(b"\x03".as_slice())));
+    wait_until("the interrupted job", || session.completion().is_some());
+    assert!(started.elapsed() < Duration::from_secs(10));
+}

@@ -8032,24 +8032,8 @@ impl Shared {
                             )
                         };
                         if empty {
-                            deferred_terminal_commands.push(
-                                DeferredTerminalCommand::SetWordSeparators {
-                                    terminal: Arc::clone(&session),
-                                    separators: word_separators,
-                                },
-                            );
-                            deferred_terminal_commands.push(
-                                DeferredTerminalCommand::SetAllowPassthrough {
-                                    terminal: Arc::clone(&session),
-                                    enabled: terminal_options.allow_passthrough,
-                                },
-                            );
-                            deferred_terminal_commands.push(
-                                DeferredTerminalCommand::SetWrapSearch {
-                                    terminal: Arc::clone(&session),
-                                    enabled: terminal_options.wrap_search,
-                                },
-                            );
+                            session.set_word_separators(word_separators);
+                            session.set_wrap_search(terminal_options.wrap_search);
                         }
                         if let Some(previous) = inner.terminals_mut().insert(*pane, Arc::clone(&session))
                         {
@@ -8216,24 +8200,8 @@ impl Shared {
                             )
                         };
                         if *empty {
-                            deferred_terminal_commands.push(
-                                DeferredTerminalCommand::SetWordSeparators {
-                                    terminal: Arc::clone(&session),
-                                    separators: word_separators,
-                                },
-                            );
-                            deferred_terminal_commands.push(
-                                DeferredTerminalCommand::SetAllowPassthrough {
-                                    terminal: Arc::clone(&session),
-                                    enabled: terminal_options.allow_passthrough,
-                                },
-                            );
-                            deferred_terminal_commands.push(
-                                DeferredTerminalCommand::SetWrapSearch {
-                                    terminal: Arc::clone(&session),
-                                    enabled: terminal_options.wrap_search,
-                                },
-                            );
+                            session.set_word_separators(word_separators);
+                            session.set_wrap_search(terminal_options.wrap_search);
                         }
                         Self::wake_pane_exit_wait(&mut inner, *pane, 0);
                         if let Some(entry) = inner.pane_exit_waits.get_mut(pane) {

@@ -5,6 +5,8 @@ mod agent_pane;
 mod authentication;
 #[path = "floating.rs"]
 mod floating;
+#[path = "hosts.rs"]
+mod hosts;
 #[path = "picker.rs"]
 mod picker;
 #[path = "settings.rs"]
@@ -136,6 +138,8 @@ pub(crate) struct AppShell {
     idle_guard: Option<gpui::Task<()>>,
     #[cfg(target_os = "ios")]
     auth_prompt_id: Option<u64>,
+    #[cfg(target_os = "ios")]
+    hosts: hosts::Hosts,
     terminals: HashMap<PaneId, Entity<TerminalPane>>,
     waiting_panes: BTreeSet<PaneId>,
     agents: HashMap<PaneId, Entity<AgentPane>>,
@@ -229,6 +233,10 @@ impl AppShell {
                         }
                     }
                     zz_client::CoreEvent::HelloReceived | zz_client::CoreEvent::Attached { .. } => {
+                        #[cfg(target_os = "ios")]
+                        if matches!(event, zz_client::CoreEvent::HelloReceived) {
+                            this.remember_host(cx);
+                        }
                         if matches!(event, zz_client::CoreEvent::Attached { .. }) {
                             connection.update(cx, Connection::set_color_scheme);
                         }
@@ -332,6 +340,8 @@ impl AppShell {
             });
         });
         let settings_controls = settings::Controls::new(&preferences, window, cx);
+        #[cfg(target_os = "ios")]
+        let hosts = hosts::Hosts::new(window, cx);
         let this = Self {
             connection,
             connection_status: String::new(),
@@ -339,6 +349,8 @@ impl AppShell {
             idle_guard: None,
             #[cfg(target_os = "ios")]
             auth_prompt_id: None,
+            #[cfg(target_os = "ios")]
+            hosts,
             terminals: HashMap::new(),
             waiting_panes: BTreeSet::new(),
             agents: HashMap::new(),
@@ -1299,7 +1311,14 @@ impl AppShell {
                 cx.stop_active_drag(window);
             }
             self.pane_layout_override = None;
-            let connected = self.connection.read(cx).connected;
+            if !self.connection.read(cx).connected {
+                return self.hosts_page(
+                    "web-connect-page",
+                    "Connect to zz",
+                    Self::narrow(window),
+                    cx,
+                );
+            }
             let has_sessions = !self.connection.read(cx).core.snapshot().sessions.is_empty();
             return div()
                 .flex()
@@ -1309,18 +1328,14 @@ impl AppShell {
                 .justify_center()
                 .gap(px(12.0))
                 .child(Icon::new(IconName::SquareTerminal).size(px(32.0)))
-                .child(div().text_size(px(16.0)).child(if connected {
-                    "Your workspace"
-                } else {
-                    "Connect to zz"
-                }))
+                .child(div().text_size(px(16.0)).child("Your workspace"))
                 .child(
                     div()
                         .text_size(px(12.0))
                         .text_color(cx.theme().foreground.muted())
                         .child(self.connection.read(cx).status.clone()),
                 )
-                .child(if connected {
+                .child(
                     Button::new("web-create-session")
                         .small()
                         .label(if has_sessions {
@@ -1343,15 +1358,8 @@ impl AppShell {
                             } else {
                                 this.command("new-session", Vec::new(), cx);
                             }
-                        }))
-                } else {
-                    Button::new("web-reconnect")
-                        .small()
-                        .label("Reconnect")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.connection.update(cx, Connection::reconnect);
-                        }))
-                })
+                        })),
+                )
                 .into_any_element();
         };
         self.reconcile_pane_drag(&active_window, window, cx);
@@ -2664,6 +2672,7 @@ impl Render for AppShell {
                     this.connection.update(cx, |connection, cx| {
                         connection.open_session(action.name.clone(), cx);
                     });
+                    this.connect_recent_host(cx);
                 }));
             shell
         })

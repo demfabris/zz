@@ -741,69 +741,7 @@ impl AppShell {
             SettingsSection::About => return about_page(cx),
             _ => {}
         }
-        let rows = match section {
-            SettingsSection::Hosts => vec![
-                with_control(
-                    SettingEntry::new(
-                        "Connection",
-                        if cfg!(target_os = "ios") {
-                            "Connect to the daemon using the endpoint configured for this app."
-                        } else {
-                            "Connect to the daemon through the zz web gateway."
-                        },
-                    ),
-                    self.connection.read(cx).status.clone(),
-                    narrow,
-                ),
-                #[cfg(target_os = "ios")]
-                with_control(
-                    SettingEntry::new(
-                        "SSH key",
-                        "Add this key to ~/.ssh/authorized_keys on the host to sign in without a password.",
-                    ),
-                    Button::new("settings-copy-ssh-key")
-                        .small()
-                        .label("Copy")
-                        .on_click(|_, window, cx| match zz_daemon::ios_ssh_public_key() {
-                            Ok(key) => cx.write_to_clipboard(gpui::ClipboardItem::new_string(key)),
-                            Err(error) => {
-                                use zz_ui::WindowExt as _;
-                                window.push_notification(
-                                    zz_ui::notification::Notification::error(error.to_string()),
-                                    cx,
-                                );
-                            }
-                        }),
-                    narrow,
-                ),
-                with_control(
-                    SettingEntry::new(
-                        "Reconnect",
-                        "Establish a new connection to the configured daemon.",
-                    ),
-                    Button::new("settings-reconnect")
-                        .small()
-                        .label("Reconnect")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.connection.update(cx, Connection::reconnect);
-                        })),
-                    narrow,
-                ),
-            ],
-            _ => Vec::new(),
-        };
-        settings_scroll_column("settings-page")
-            .child(settings_heading(
-                section.title(),
-                if section == SettingsSection::Hosts {
-                    "Connect this client to your zz daemon."
-                } else {
-                    section.description()
-                },
-                cx,
-            ))
-            .child(SettingsStack::new().children(rows))
-            .into_any_element()
+        self.hosts_page("settings-page", section.title(), narrow, cx)
     }
 
     fn appearance_item(
@@ -1341,7 +1279,11 @@ fn about_page(cx: &mut Context<AppShell>) -> AnyElement {
         .into_any_element()
 }
 
-fn with_control(entry: SettingEntry, control: impl IntoElement, narrow: bool) -> SettingEntry {
+pub(super) fn with_control(
+    entry: SettingEntry,
+    control: impl IntoElement,
+    narrow: bool,
+) -> SettingEntry {
     if narrow {
         entry.child(control)
     } else {
@@ -1380,7 +1322,11 @@ fn number_control(input: &Entity<InputState>, cx: &App) -> gpui::Div {
     )
 }
 
-fn settings_heading(title: &'static str, description: &'static str, cx: &App) -> gpui::Div {
+pub(super) fn settings_heading(
+    title: &'static str,
+    description: &'static str,
+    cx: &App,
+) -> gpui::Div {
     div()
         .flex()
         .flex_col()

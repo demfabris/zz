@@ -27,8 +27,9 @@ just ios-gpui iPad device
 
 Device mode builds a release arm64 binary, signs it with your first Apple Development identity
 and a provisioning profile that covers `dev.zz.gpui-poc` (a team wildcard works), installs it with
-`devicectl`, and launches it with `ZZ_GPUI_ENDPOINT=ssh://$USER@<this Mac>.local`. The app saves
-that endpoint, so later launches from the home screen reconnect. The Mac needs Remote Login
+`devicectl`, and launches it with `ZZ_GPUI_ENDPOINT=ssh://$USER@<this Mac>.local`. That launch
+connects straight away and adds the host to the saved list; later launches from the home screen
+open the connection screen with it at the top. The Mac needs Remote Login
 enabled and `zz-dev` on its PATH (desktop dev runs link it into `~/.local/bin`). Sign in with your
 password, or copy the app's key from Settings › Hosts into `~/.ssh/authorized_keys`. Override the
 choices with `ZZ_GPUI_DEVICE`, `ZZ_GPUI_SIGN_IDENTITY`, `ZZ_GPUI_PROFILE`, or `ZZ_GPUI_ENDPOINT`.
@@ -68,9 +69,13 @@ row or window pill to open its rename and close menu. Swipe to scroll. The top s
 it. The gear opens Settings; Command-comma also toggles Settings. The search button
 opens the command palette without a hardware keyboard.
 
-Without a daemon, the workspace shows connection status and a reconnect button.
-SSH endpoints show host-key confirmation and authentication dialogs. Endpoint selection
-currently uses `ZZ_GPUI_ENDPOINT`; a saved host manager remains a later step. The terminal example shares
+The app does not connect on launch. Until it connects, the workspace shows the connection screen:
+saved hosts (most recent first) with Connect and Remove, a destination field (`user@host` or
+`user@host:port`), and the app's SSH key. Settings › Hosts shows the same list, plus Disconnect for
+the current host. Hosts are saved in `Library/Application Support/zz-gpui/hosts.json`; a
+successful connection moves its host to the top. `ZZ_GPUI_ENDPOINT` (or `ZZ_SOCKET`) connects
+for that launch only, and opening a `zz://attach/<session>` link connects to the most recent host.
+SSH endpoints show host-key confirmation and authentication dialogs. The terminal example shares
 the native transport, key translation, and UIKit backend.
 
 ## Panes

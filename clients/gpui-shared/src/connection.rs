@@ -11,22 +11,9 @@ use zz_protocol::{
 };
 
 #[cfg(target_os = "ios")]
-fn native_endpoint() -> Option<String> {
-    let path = std::path::PathBuf::from(std::env::var_os("HOME")?)
-        .join("Library/Application Support/zz-gpui/endpoint");
-    let launched = std::env::var("ZZ_GPUI_ENDPOINT")
+fn launch_endpoint() -> Option<String> {
+    std::env::var("ZZ_GPUI_ENDPOINT")
         .or_else(|_| std::env::var("ZZ_SOCKET"))
-        .ok()
-        .map(|endpoint| endpoint.trim().to_owned())
-        .filter(|endpoint| !endpoint.is_empty());
-    if let Some(endpoint) = &launched {
-        if let Some(directory) = path.parent() {
-            let _ = std::fs::create_dir_all(directory);
-        }
-        let _ = std::fs::write(&path, endpoint);
-        return launched;
-    }
-    std::fs::read_to_string(&path)
         .ok()
         .map(|endpoint| endpoint.trim().to_owned())
         .filter(|endpoint| !endpoint.is_empty())
@@ -196,6 +183,8 @@ pub struct AuthenticationPrompt {
 
 pub struct Connection {
     #[cfg(target_os = "ios")]
+    endpoint: Option<String>,
+    #[cfg(target_os = "ios")]
     native: Option<crate::transport::Connection>,
     #[cfg(target_os = "ios")]
     client: Option<Arc<zz_daemon::InteractiveClient>>,
@@ -242,6 +231,8 @@ impl EventEmitter<CoreEvent> for Connection {}
 impl Connection {
     pub fn new(_: &mut Context<Self>) -> Self {
         Self {
+            #[cfg(target_os = "ios")]
+            endpoint: None,
             #[cfg(target_os = "ios")]
             native: None,
             #[cfg(target_os = "ios")]
@@ -430,6 +421,38 @@ impl Connection {
     }
 
     pub fn start(&mut self, cx: &mut Context<Self>) {
+        #[cfg(target_os = "ios")]
+        {
+            self.endpoint = launch_endpoint();
+        }
+        self.reconnect(cx);
+    }
+
+    #[cfg(target_os = "ios")]
+    pub fn endpoint(&self) -> Option<&str> {
+        self.endpoint.as_deref()
+    }
+
+    #[cfg(target_os = "ios")]
+    pub fn busy(&self) -> bool {
+        !self.connected && (self.native.is_some() || self.retry.is_some())
+    }
+
+    #[cfg(target_os = "ios")]
+    pub fn connect_to(&mut self, endpoint: String, cx: &mut Context<Self>) {
+        if self.endpoint.as_deref() != Some(endpoint.as_str()) {
+            self.remembered_session = None;
+        }
+        self.endpoint = Some(endpoint);
+        self.resume = false;
+        self.reconnect(cx);
+    }
+
+    #[cfg(target_os = "ios")]
+    pub fn disconnect(&mut self, cx: &mut Context<Self>) {
+        self.endpoint = None;
+        self.resume = false;
+        self.pending_session = None;
         self.reconnect(cx);
     }
 
@@ -501,7 +524,7 @@ impl Connection {
             self.client = None;
             self.auth_prompt = None;
             self.core = ClientCore::new();
-            if let Some(endpoint) = native_endpoint() {
+            if let Some(endpoint) = self.endpoint.clone() {
                 self.native = Some(crate::transport::Connection::connect(endpoint, None, true));
                 self.reader = Some(cx.spawn(async move |this, cx| {
                     loop {
@@ -514,7 +537,7 @@ impl Connection {
                     }
                 }));
             } else {
-                self.status = "No host connected".into();
+                self.status = "Not connected".into();
             }
         }
         #[cfg(not(any(target_family = "wasm", target_os = "ios")))]

@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **45**. Classified items: **356**.
+Tracked gap groups: **46**. Classified items: **357**.
 
-- Status: open: 3, accepted: 42.
-- Decision: adopt: 3, native: 33, never: 9.
-- Priority: now: 1, next: 2, none: 42.
+- Status: open: 4, accepted: 42.
+- Decision: adopt: 4, native: 33, never: 9.
+- Priority: now: 1, next: 3, none: 42.
 - Closed history entries: 210.
-- Surface: command: 3, flag: 23, extension-flag: 10, native-command: 26, option: 31, format: 43, key: 28, binding: 37, native-key: 92, semantic: 54, presentation: 8, protocol: 1.
+- Surface: command: 3, flag: 23, extension-flag: 10, native-command: 26, option: 31, format: 43, key: 28, binding: 37, native-key: 92, semantic: 55, presentation: 8, protocol: 1.
 
 ## Measured surface
 
@@ -58,6 +58,7 @@ structure as proof.
 | ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `formats.pane-current-command-empty` | Answer pane_current_command on a process-less pane | adopt | open | easy | mux | scripts, daily | none |
+| `terminal.shell-integration-prompt-title` | Keep a pane title set with select-pane -T across the next prompt | adopt | open | easy | terminal | daily, scripts | none |
 | `clients.command-round-trip-latency` | Answer a command client as fast as the pin does | adopt | open | medium | daemon | daily, scripts | none |
 
 ## None
@@ -454,7 +455,7 @@ The default @agent-progress-commands value is claude, and synchronize_pane_progr
   - `resource:crates/zz-daemon/src/daemon/process_facts_tests.rs`
   - `resource:knowledge/designs/daemon-perf-rebuild.md`
 - Acceptance:
-  - `#{pane_current_command} names the foreground process group leader of the pane's tty. On macOS zz answers the basename of the exec path the kernel recorded for that process (KERN_PROCARGS2), falling back to the basename of proc_pidpath when the arguments are unreadable; on Linux it answers the comm field of /proc/<pgrp>/stat. The pin answers pbsi_comm from PROC_PIDT_SHORTBSDINFO on macOS (osdep-darwin.c osdep_get_name) and the first NUL-terminated field of /proc/<pgrp>/cmdline on Linux (osdep-linux.c osdep_get_name).`
+  - `#{pane_current_command} names the foreground process group leader of the pane's tty. On macOS zz answers the basename of the exec path the kernel recorded for that process (KERN_PROCARGS2), falling back to the basename of proc_pidpath when the arguments are unreadable; on Linux it answers /proc/<pgrp>/comm, the same task comm as the second field of /proc/<pgrp>/stat. The pin answers pbsi_comm from PROC_PIDT_SHORTBSDINFO on macOS (osdep-darwin.c osdep_get_name) and the first NUL-terminated field of /proc/<pgrp>/cmdline on Linux (osdep-linux.c osdep_get_name).`
   - `A binary started through a symlink keeps the name it was started by: with claude a symlink to versions/2.1.99, zz answers claude where the pin on macOS answers 2.1.99, and automatic-rename names the window claude.`
   - `The values are the ones sysinfo 0.39.6 returned before the daemon dropped it on 2026-09-28, so this records long-standing behavior rather than a new difference.`
 
@@ -1004,6 +1005,27 @@ The acceptance had asked for one atomic terminal action that trims cursor-derive
   - `resource:third_party/rust/libghostty-vt-sys/src/bindings.rs`
 - Acceptance:
   - `resize-pane -T stays refused rather than silently doing nothing, because libghostty cannot pull scrollback rows back into the active grid and a no-op would be a screen-visible divergence.`
+
+### `terminal.shell-integration-prompt-title`: Keep a pane title set with select-pane -T across the next prompt
+
+Found by the W1-FOOTPRINT review. tmux-resurrect's restore.sh sets each pane title with select-pane -T right after creating the pane, so under bash, zsh or PowerShell with zz's integration a restore loses the titles whenever the shell prints its first prompt after the title lands. The faster command client in W1-FOOTPRINT made that order the common one: smoke/plugin-runtime-resurrect-restore went red on zz in 3 of 5 runs, and it now restores under default-shell /bin/sh, which has no integration, so it keeps testing the restore itself. This entry is the record of the divergence that change stopped exercising. Left open because whether the integration should stop titling, title only when the title is still the one it wrote, or leave titles to an option is fabrico's call.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `next` / `easy`
+- Owner: `terminal`
+- User impact: daily, scripts
+- Items: `semantic:shell-integration-prompt-title`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-terminal/assets/shell-integration/bash/zz-integration.bash`
+  - `resource:crates/zz-terminal/assets/shell-integration/zsh/zz-integration.zsh`
+  - `resource:crates/zz-terminal/assets/shell-integration/powershell/zz-integration.ps1`
+  - `resource:compat/scenarios/smoke/plugin-runtime-resurrect-restore.txt`
+- Acceptance:
+  - `Measured by the W1-FOOTPRINT review on 2026-09-28 with default-shell /opt/homebrew/bin/bash: `new-window -d \; select-pane -t :1 -T mytitle`, then #{pane_title} read at once, after the first prompt and after the second. zz answers mytitle, bash, bash; pinned tmux d77c9dc6 answers mytitle three times.`
+  - `The cause is zz's own shell integration, not the mux: bash __zz_title_precmd, zsh's precmd hook and PowerShell's prompt function write OSC 2 with the shell name at every prompt, and the preexec hooks write the command name. The pin carries no shell integration, so a stock shell leaves the title alone.`
+  - `A fix keeps an explicitly set title until the user or the program running in the pane changes it, and smoke/plugin-runtime-resurrect-restore passes again with the restored panes running bash instead of default-shell /bin/sh.`
 
 ## Known differential scenarios
 

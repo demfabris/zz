@@ -502,7 +502,8 @@ and incompatible-daemon tests, agent peer tests, strftime tests, `cargo check` f
 Expected: process lookup 37.5 us -> microseconds per burst and no longer grows with system
 process count; madvise 5-7% of per-command CPU and 6.6% of config replay.
 
-Built on `perf/footprint` (2026-09-28). Where the build departs from the scope above:
+Built on `perf/footprint` (2026-09-28, revised after review). Where the build departs from the
+scope above:
 
 - Items 1-3 live in one module, `zz-daemon` `process_info.rs` (public, so zz-cli's verbose
   sampler uses it too). The macOS name lookup keeps the last four names per thread keyed on
@@ -510,48 +511,84 @@ Built on `perf/footprint` (2026-09-28). Where the build departs from the scope a
   moves on every exec, even an exec of the same image through another symlink, where
   `pbi_comm`, start time and executable UUID all stay put. A miss is one `KERN_PROCARGS2`
   sysctl into a shared 16 KiB buffer (a too-small buffer returns `size == capacity` with the exec
-  path cut off, so only then does it ask for the size and grow). Windows keeps sysinfo as a
-  Windows-only dependency behind the same functions; sysinfo stays a zz-daemon dev-dependency
-  as the parity oracle in the `process_info` tests.
+  path cut off, so only then does it ask for the size and grow to size + 1). A read that needed
+  more shrinks the buffer back to 16 KiB, and a thread that finds the buffer busy reads into its
+  own. Only a name read from `KERN_PROCARGS2` is cached. That sysctl fails with EIO for a moment
+  at the start of an image, after `p_idversion` has already moved: a C probe that exec'd
+  `bash -> claude` 200 times saw it on the `claude` image in 33 rounds. The first version cached
+  the `proc_pidpath` fallback, which names the symlink target (`bash`, `2.1.99`), and kept that
+  name for the life of the image on that thread. That was the cause of the flaky
+  `process_facts_tests` run under a loaded crate test, and would have renamed windows to the
+  version and broken `@agent_state` in real use. The fallback is now answered but not cached,
+  which is what sysinfo did on every call. Windows keeps sysinfo as a Windows-only dependency
+  behind the same functions, and `terminal_working_directory` stays `None` there as before (a
+  PowerShell `Set-Location` does not move the process cwd); sysinfo stays a zz-daemon
+  dev-dependency as the parity oracle in the `process_info` tests. Linux reads the name from
+  `/proc/<pid>/comm` (the same `task->comm` as the stat field), reads `btime` from `/proc/stat`
+  once per process, and parses only the stat fields it is asked for.
+- Item 4: an unparseable `TZ` now formats in UTC, as the pin does; chrono `Local` used the
+  system zone. glibc's `localtime_r` never re-reads the zone after its first call, while the
+  pin's `localtime` re-checks `/etc/localtime` on every call, so on Linux `local_time` calls
+  `tzset()` at most once per wall-clock second per thread and follows a zone change within a
+  second. macOS `localtime_r` already follows zone changes. The year-long test compares
+  against `localtime_r` field by field, so it holds under any `TZ`.
 - Item 5 went ahead, but not through xtask: `crates/zz-cli/build.rs` links `zz_cli` with
   `-Wl,-dead_strip_dylibs`, and chrono lost its default features in the workspace (zz-mux and
-  zz-daemon take `alloc` + `std`; `clock` only on non-unix and in tests; crates/zz asks for
-  `default`). A release `-p zz -p zz-cli` build, the xtask shape, and a lone `-p zz-cli` build
-  both link only libSystem. dyld images 703 -> 83 (tmux 86); `zz_cli -V` 3.7 -> 2.3 ms against
-  tmux 3.5 ms in the same hyperfine run. A dev build still links CoreFoundation (no LTO, the
-  dead code keeps its references).
+  zz-daemon take `alloc` + `std`; `clock` only on non-unix and in zz-daemon's tests; crates/zz
+  asks for `default`). A release `-p zz -p zz-cli` build, the xtask shape, and a lone
+  `-p zz-cli` build both link only libSystem. dyld images 703 -> 83 (tmux 86); `zz_cli -V`
+  3.7 -> 2.3 ms against tmux 3.5 ms in the same hyperfine run. A dev build still links
+  CoreFoundation (no LTO, the dead code keeps its references).
 - Item 6: the memory gate kept the purge delay at 0. Any delay (1, 3, 10, 100 ms) leaves freed
   pages of idle threads unpurged: `mem.footprint.p1` 6.53 -> 7.05 MiB at 80x24, which is past
-  the wave1 6.5 MiB rule, for 1-3% less CPU per command and ~5% on `source-file`. mimalloc
-  (v3.3 in this build, purge delay default 1000 ms) reserves its 1 GiB arena before `main`, so
-  `os_tag` 241 is set from a `__mod_init_func` initializer in zz-cli `main.rs` that runs before
-  mimalloc's own; set inside `purge_freed_memory_promptly` it tagged nothing. It moves the
-  daemon's heap from "IOAccelerator" to "App-Specific Tag 2" in `footprint`/`vmmap`; the
-  footprint number does not change. `zig_optimize_mode` now reads `OPT_LEVEL` only, which also
-  moves the workspace dev profile (dependencies at `opt-level = 2`) from ReleaseSafe to
-  ReleaseFast; the xtask `profiling` override it replaced is deleted.
+  the wave1 6.5 MiB rule, for 1-3% less CPU per command and ~5% on `source-file`.
+  `MIMALLOC_PURGE_DECOMMITS=0` was worse in a 2x A/B (`mem.footprint.p1` 7.42 -> 8.30 MiB, no
+  CPU gain). So the expected madvise saving is not realized: madvise is still 7.7% of busy
+  daemon samples in a `display-message` loop and 6.7% in a split/kill loop. 35 of 82 madvise
+  samples come from `_pthread_tsd_cleanup` (a per-connection thread exits and its heap is purged
+  at once) and most of the rest re-commit pages that delay 0 just decommitted. The structural
+  fix is to stop creating a thread per connection (W1-EXEC). mimalloc (v3.3 in this build,
+  purge delay default 1000 ms) reserves its 1 GiB arena before `main`, so `os_tag` 241 is set
+  from a `__mod_init_func` initializer in zz-cli `main.rs` that runs before mimalloc's own; set
+  inside `purge_freed_memory_promptly` it tagged nothing. It moves the daemon's heap from
+  "IOAccelerator" to "App-Specific Tag 2" in `footprint`/`vmmap`; the footprint number does not
+  change. `zig_optimize_mode` picks `ReleaseSafe` when cargo's `PROFILE` is `debug` (dev and
+  test builds keep Zig's safety checks) and `ReleaseFast` for release-family profiles
+  (`ReleaseSmall` at `s`/`z`), so `profiling` and `testflight`, which carry debug info, build
+  the release engine; the xtask `profiling` override it replaced is deleted.
 - The divergence is `formats.pane-current-command-exec-path` in `compat/tmux-gaps.json`.
   `compat/scenarios/smoke/plugin-runtime-resurrect-restore.txt` now restores under
   `default-shell /bin/sh`: with a faster CLI, restore.sh's `select-pane -T` lands before the
-  restored bash prints its first prompt, and zz's bash integration retitles the pane at every
+  restored bash prints its first prompt, and zz's shell integration retitles the pane at every
   prompt. The race was there before; the old CLI was slow enough to lose it most of the time.
+  That tmux divergence (bash, zsh and PowerShell integrations) is recorded as the open gap
+  `terminal.shell-integration-prompt-title`.
+- The verbose sampler logs disk read and write bytes again (`proc_pid_rusage` on macOS,
+  `/proc/<pid>/io` on Linux, sysinfo on Windows); the process `status` field is gone.
 
-Measured with `just perf-gate wave1 --quick --only cli,chatty,mem,cold,spawn` before and after
-(load 8-18, so wall numbers are soft): `cli.wall.version.p1` 4.6 -> 1.8 ms (tmux 2.8),
-`cli.wall.display.p1` 6.4 -> 3.2 ms (tmux 3.4), `chatty.cpu_pct.flip` 35.8% -> 18.4% (W0 23.9%, so
-23% under W0), `chatty.cpu_pct.hidden` 58.9% -> 43.0%, `mem.footprint.p1` 7.92 -> 7.45 MiB,
-`mem.footprint.p20` 54.5 -> 52.0 MiB, `spawn.cpu.kill_pane` 2.02 -> 1.56 ms, `cold.wall.new_session`
-44 -> 35 ms. The gate flags `spawn.instr.split_empty_P` 10% over W0 (41.2 -> 44.5 Minstr); the old
-binary measures 46.7 in the same run, so that is drift in the 2 s identity wait, not this lane.
-Same-run A/B against the old binary on the chatty group: flip 26.7-29.5% -> 20.1-23.4% and hidden
-52.9-60.3% -> 47.9-48.4%, with fewer instructions in both.
+Measured with the quick wave1 gate (`--only cli,chatty,mem,cold,spawn`) on a loaded host (load
+7-24), against the committed W0 JSONs (full / quick): `cli.wall.version.p1` 3.61 / 3.89 -> 1.8-2.2
+ms (tmux 2.8-3.3), `mem.footprint.p1` 7.92 / 7.98 -> 7.42-7.47 MiB, `mem.footprint.p20` 54.3 /
+53.9 -> 51.8-52.1 MiB, `mem.rss.p1` 18.9 -> 15.6 MiB. Per-command CPU is flat against W0 within
+load noise (`cli.cpu.display.p1` 1.08 -> 1.04-1.26 ms, `spawn.cpu.kill_pane` 1.62 -> 1.56-1.61
+ms); the per-command gain is in instructions: `cli.instr.display.p1` 10.79 -> 10.29-10.30 Minstr
+(-4.6%), spawn -1 to -4%. `chatty.cpu_pct.flip` read 18.4, 19.7, 19.7, 20.4, 20.5, 20.6 and
+21.8% across seven runs by three people, which is 9-23% under the full W0 value of 23.9%, so the
+>= 15% rule is met in some runs and missed in others on this host; the same-run A/B against the
+W0 binary is 27.2-28.6% -> 19.7-21.8% (-20 to -25%), with flip instructions 3276-3301 -> 3121-3162
+Minstr/s (-4%). The `--strict` merge run on a quiet host decides the flip rule. The gate flags
+`spawn.instr.split_empty_P` 11% over W0 (40.4 -> 44.8 Minstr); the W0 binary measures 46.7-46.9
+in the same runs and the same new binary has read 39.9, so that is noise from the 1 ms poll in
+the 2 s `wait_for_terminal_identity`, not this lane.
 
-Left on this path after the change, in a `sample` of the flip workload (8 s, 854 busy samples): the
-name lookup is 29 samples, mostly the `KERN_PROCARGS2` read for each new `sleep` (a new process
-has no cached name), and `TerminalSession::foreground_process_id` is 39: `tcgetpgrp` is two ioctls
-under the tty lock, and the watcher calls it twice per `ViewportReady` (current command, then
-cwd). Both counts scale with how often the watcher asks, which W1-PUBLISH and W4-DELIVER own; one
-foreground lookup per event and a bare `TIOCGPGRP` in zz-terminal would halve the ioctls.
+Left on this path after the change, as a share of busy daemon samples in a `sample` of the flip
+workload: process lookups are about 5% (the `KERN_PROCARGS2` read for each new `sleep` 1.8%,
+`TerminalSession::foreground_process_id` 2.0%, the cwd read 0.4%) and mimalloc 1.9%; the other
+~90% is format, option and snapshot work owned by other lanes. `tcgetpgrp` is two ioctls under
+the tty lock, and the watcher calls it twice per `ViewportReady` (current command, then cwd).
+Both counts scale with how often the watcher asks, which W1-PUBLISH and W4-DELIVER own; one
+foreground lookup per event passed to both lookups, and a bare `TIOCGPGRP` in zz-terminal
+(W1-PANE), would halve the ioctls.
 
 ## W1-PUBLISH: change-driven publication (effort M)
 

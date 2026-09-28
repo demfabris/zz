@@ -6,7 +6,8 @@ corpus: required
 # The panes carry titles because a titleless pane's saved record differs between
 # the binaries (semantic:plugin-runtime-resurrect-record-shape). Restore runs with
 # default-shell /bin/sh: restore.sh sets each title right after creating the pane,
-# and a shell whose prompt writes a title would race it.
+# and zz's shell integration retitles at every prompt, which would race it
+# (semantic:shell-integration-prompt-title under terminal.shell-integration-prompt-title).
 stage: fixtures/resurrect-restore.py ~/resurrect-restore.py
 run-shell 'python3 ~/resurrect-restore.py'
 out: show-environment -g ZZ_RESURRECT_RESTORE

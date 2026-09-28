@@ -3,6 +3,7 @@
 pub mod agent_stream;
 pub mod app_identity;
 mod catalog;
+mod exec;
 mod framing;
 mod id;
 mod key;
@@ -21,6 +22,10 @@ pub use catalog::{
     TmuxOption, TmuxOptionParse, canonical_command, catalog_command_spec, command_spec,
     command_specs, parse_tmux_command_options, parse_tmux_options, resolve_command,
     unimplemented_tmux_command_spec,
+};
+pub use exec::{
+    ClientEnvironmentBlob, ExecExit, ExecFlags, ExecOutcome, ExecRequest, ExecResume,
+    ExecResumeKind, MAX_EXEC_TTY_BYTES,
 };
 pub use framing::{MAX_ENCODED_FRAME_BYTES, MAX_FRAME_BYTES, ProtocolError};
 pub use id::{ClientId, ClientInstanceId, PaneId, SessionId, SplitId, WindowId};

@@ -21,6 +21,10 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 
 mod chooser_presentation;
+mod exec;
+#[cfg(test)]
+mod exec_tests;
+pub use exec::exec_resume_kind;
 pub(crate) mod path_listing;
 use zz_mux::{
     CUSTOMIZE_MENU_ITEMS, CUSTOMIZE_OUTSIDE_MENU_ITEMS, CellLayout, CommandAliasResolution,
@@ -1413,6 +1417,7 @@ pub struct Daemon {
     zz_mux_config_path: Option<PathBuf>,
     server_id: Option<u64>,
     initial_client_working_directory: Option<PathBuf>,
+    bootstrap_ready_fd: Option<i32>,
 }
 
 impl Daemon {
@@ -1425,7 +1430,17 @@ impl Daemon {
             zz_mux_config_path: None,
             server_id: None,
             initial_client_working_directory: None,
+            bootstrap_ready_fd: None,
         }
+    }
+
+    /// The write end of the spawning client's readiness pipe. The daemon writes
+    /// one byte to it once its socket is bound, so the client dials once
+    /// instead of polling.
+    #[must_use]
+    pub fn with_bootstrap_ready_fd(mut self, fd: i32) -> Self {
+        self.bootstrap_ready_fd = Some(fd);
+        self
     }
 
     #[must_use]
@@ -1471,6 +1486,7 @@ impl Daemon {
         &self,
         ready: impl FnOnce(u64) -> R,
     ) -> Result<(), DaemonError> {
+        let bootstrap_ready = BootstrapReady::adopt(self.bootstrap_ready_fd);
         prepare_socket(&self.socket_path)?;
         let listener = LocalTransport::bind(&self.socket_path).map_err(|error| {
             if error.kind() == ErrorKind::AddrInUse {
@@ -1479,6 +1495,7 @@ impl Daemon {
                 DaemonError::Io(error)
             }
         })?;
+        bootstrap_ready.signal();
         restrict_socket_permissions(&self.socket_path)?;
         listener.set_nonblocking(true)?;
         let socket_guard = SocketGuard::new(self.socket_path.clone());
@@ -1774,6 +1791,58 @@ impl Drop for TmuxShimGuard {
         let _ = fs::remove_file(self.directory.join("tmux"));
         let _ = fs::remove_dir(&self.directory);
     }
+}
+
+struct BootstrapReady(Option<i32>);
+
+impl BootstrapReady {
+    #[cfg(unix)]
+    #[allow(
+        unsafe_code,
+        reason = "the spawning client handed this descriptor to the daemon alone"
+    )]
+    fn adopt(fd: Option<i32>) -> Self {
+        let fd = fd.filter(|fd| unsafe { libc::fcntl(*fd, libc::F_SETFD, libc::FD_CLOEXEC) } == 0);
+        Self(fd)
+    }
+
+    #[cfg(not(unix))]
+    fn adopt(fd: Option<i32>) -> Self {
+        let _ = fd;
+        Self(None)
+    }
+
+    #[cfg(unix)]
+    #[allow(
+        unsafe_code,
+        reason = "one byte to a pipe the daemon owns, then close it"
+    )]
+    fn signal(mut self) {
+        if let Some(fd) = self.0.take() {
+            unsafe {
+                let _ = libc::write(fd, [1_u8].as_ptr().cast(), 1);
+                libc::close(fd);
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn signal(self) {}
+}
+
+impl Drop for BootstrapReady {
+    #[cfg(unix)]
+    #[allow(unsafe_code, reason = "close a descriptor the daemon owns")]
+    fn drop(&mut self) {
+        if let Some(fd) = self.0.take() {
+            unsafe {
+                libc::close(fd);
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn drop(&mut self) {}
 }
 
 fn paste_upload_directory(socket_path: &Path) -> PathBuf {
@@ -2826,6 +2895,15 @@ impl OutboundMailbox {
         self.ready.notify_all();
     }
 
+    fn drain_reliable_into(&self, output: &mut Vec<u8>) {
+        let mut state = self.state.lock();
+        while let Some(frame) = state.reliable.pop_front() {
+            state.queued_bytes = state.queued_bytes.saturating_sub(frame.len());
+            output.extend_from_slice(&frame);
+            recycle_outbound_frame(&mut state, frame);
+        }
+    }
+
     fn mark_writer_finished(&self) {
         let mut state = self.state.lock();
         state.writer_finished = true;
@@ -3347,6 +3425,8 @@ struct Shared {
     peer_probe: AtomicBool,
     #[cfg(all(feature = "agent", unix))]
     peer_registry: Mutex<crate::agent::claude_peers::RegistryCache>,
+    pending_execs: Mutex<Vec<Box<dyn FnOnce() + Send>>>,
+    exec_links: Mutex<BTreeMap<ClientId, Arc<exec::ExecLink>>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4459,6 +4539,8 @@ impl Shared {
             peer_probe: AtomicBool::new(false),
             #[cfg(all(feature = "agent", unix))]
             peer_registry: Mutex::new(crate::agent::claude_peers::RegistryCache::default()),
+            pending_execs: Mutex::new(Vec::new()),
+            exec_links: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -4469,6 +4551,7 @@ impl Shared {
     fn finish_startup(&self) {
         *self.startup_ready.lock() = true;
         self.startup_changed.notify_all();
+        self.resume_pending_execs();
     }
 
     fn wait_for_startup(&self) -> bool {
@@ -4601,6 +4684,7 @@ impl Shared {
         self.stopping.store(true, Ordering::Release);
         self.accept_wake.wake();
         self.startup_changed.notify_all();
+        self.drop_pending_execs();
         let events = self.stop_shutdown_resources(true, run_hooks);
         if run_hooks && !self.shutdown_drops_event_hooks.load(Ordering::Acquire) {
             self.run_shutdown_event_hooks(events);
@@ -5669,7 +5753,7 @@ impl Shared {
             inner.client_color_schemes.remove(&client);
             inner.client_names.remove(&client);
             inner.client_instances.remove(&client);
-            inner.client_kinds.remove(&client);
+            let control = inner.client_kinds.remove(&client) == Some(ClientKind::Control);
             inner.client_terminals.remove(&client);
             inner.native_terminal_search_clients.remove(&client);
             inner.native_chooser_clients.remove(&client);
@@ -5763,9 +5847,10 @@ impl Shared {
                 popup_waiters,
                 menu_waiters,
                 confirm_waiters,
-                shutdown,
+                (shutdown, control),
             )
         };
+        let (shutdown, control) = shutdown;
         let view = TerminalViewId(client.0);
         if let Some(command_output) = command_output {
             command_output.terminal.view_action(
@@ -5785,7 +5870,9 @@ impl Shared {
         for waiter in confirm_waiters {
             let _ = waiter.try_send(false);
         }
-        self.refresh_control_output_taps();
+        if detached && control {
+            self.refresh_control_output_taps();
+        }
         if shutdown {
             self.request_shutdown_without_hooks();
         }
@@ -5814,23 +5901,44 @@ impl Shared {
         command: &CommandInvocation,
         prepared: bool,
     ) -> CommandResponse {
+        self.execute_command_request_with_streams(
+            client, kind, context, request_id, command, prepared,
+        )
+        .0
+    }
+
+    fn execute_command_request_with_streams(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        request_id: u64,
+        command: &CommandInvocation,
+        prepared: bool,
+    ) -> (CommandResponse, bool) {
         let stdin_available = kind == ClientKind::Command && command.stdin_available();
         let (command, blocked) = match self.prepare_command_request(client, command, prepared) {
             Ok(prepared) => prepared,
             Err(error) => {
-                return CommandResponse::Error {
-                    request_id,
-                    error,
-                    output: RawText::default(),
-                };
+                return (
+                    CommandResponse::Error {
+                        request_id,
+                        error,
+                        output: RawText::default(),
+                    },
+                    false,
+                );
             }
         };
         if blocked {
-            return CommandResponse::Error {
-                request_id,
-                error: ServerError::InvalidCommand("client is read-only".to_owned()),
-                output: RawText::default(),
-            };
+            return (
+                CommandResponse::Error {
+                    request_id,
+                    error: ServerError::InvalidCommand("client is read-only".to_owned()),
+                    output: RawText::default(),
+                },
+                false,
+            );
         }
         let client_name = {
             let mut inner = self.inner.lock();
@@ -5920,6 +6028,7 @@ impl Shared {
             }
         };
         let streams = self.inner.lock().command_streams.remove(&client);
+        let client_exit = streams.as_ref().is_some_and(|streams| streams.client_exit);
         let recorded_claim = streams.as_ref().and_then(|streams| streams.stdout_claim);
         let mut response = match streams {
             Some(streams) if !streams.is_empty() => merge_command_streams(response, &streams),
@@ -5966,7 +6075,7 @@ impl Shared {
                 },
             );
         }
-        response
+        (response, client_exit)
     }
 
     /// `server_client_print` runs `utf8_sanitize` over a message bound for a
@@ -6036,6 +6145,7 @@ impl Shared {
     /// to block on something that answers later, so tell the client once that
     /// nothing else it queued runs until this request resumes.
     fn report_command_queue_park(&self) {
+        self.go_live_current_exec();
         let Some((client, request_id)) = take_unreported_command_queue_park() else {
             return;
         };
@@ -16015,6 +16125,7 @@ impl Shared {
         if self.inner.lock().client_kinds.get(&client) != Some(&ClientKind::Command) {
             return None;
         }
+        self.go_live_exec(client);
         let writer = self.client_writers.lock().get(&client).cloned()?;
         let (request_id, wait) = {
             let mut inner = self.inner.lock();
@@ -17473,7 +17584,9 @@ impl Shared {
             self.publish_snapshot();
         }
         self.enforce_destroy_unattached();
-        self.refresh_control_output_taps();
+        if detached && self.inner.lock().client_kinds.get(&client) == Some(&ClientKind::Control) {
+            self.refresh_control_output_taps();
+        }
         self.run_event_hooks(events);
     }
 
@@ -17588,6 +17701,16 @@ impl Shared {
             .filter_map(|(session, clients)| clients.contains(&client).then_some(*session))
             .collect::<Vec<_>>();
         let was_attached = !sessions.is_empty();
+        let event_hooks_enabled = event_hooks_enabled
+            && (was_attached
+                || inner.copy_sessions.contains_key(&client)
+                || inner.focused_windows.contains_key(&client)
+                || inner.visible_terminals.contains_key(&client)
+                || inner.client_kinds.get(&client) == Some(&ClientKind::Control)
+                || inner
+                    .window_latest_clients
+                    .values()
+                    .any(|latest| *latest == client));
         let hook_state_before = event_hooks_enabled.then(|| {
             (
                 MuxHookSnapshot::capture(&inner.engine),
@@ -43969,11 +44092,15 @@ fn handle_connection<S: TransportStream>(
         }
         Err(error) => return Err(error.into()),
     };
-    let ProtocolMessage::ClientHello(hello) = first_message else {
-        return Err(ServerError::InvalidCommand(
-            "first protocol message must be ClientHello".to_owned(),
-        )
-        .into());
+    let hello = match first_message {
+        ProtocolMessage::ClientHello(hello) => hello,
+        ProtocolMessage::Exec(request) => return exec::serve_exec(stream, shared, request),
+        _ => {
+            return Err(ServerError::InvalidCommand(
+                "first protocol message must be ClientHello".to_owned(),
+            )
+            .into());
+        }
     };
     if let Err(error) = validate_hello(&hello) {
         best_effort_protocol_mismatch_reply(&mut stream, hello.protocol_version);
@@ -107035,8 +107162,8 @@ bind - split-window -v -c "#{pane_current_path}"
         let server_id = started
             .recv_timeout(Duration::from_secs(10))
             .expect("ready callback");
-        let passive = connect_command_retry(&socket);
-        assert_eq!(passive.server_hello().server_id, server_id);
+        let mut passive = connect_command_retry(&socket);
+        assert_eq!(passive.server_id().expect("probe"), server_id);
         let mut commands = connect_command_retry(&socket);
         commands
             .execute(CommandInvocation::new("new-session", ["-d"]))
@@ -107912,7 +108039,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("connection handler failed");
     }
 
-    fn connect_command_retry(path: &Path) -> CommandClient {
+    pub(super) fn connect_command_retry(path: &Path) -> CommandClient {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             match CommandClient::connect(path) {
@@ -107923,7 +108050,7 @@ bind - split-window -v -c "#{pane_current_path}"
         }
     }
 
-    fn daemon_test_endpoint(name: &str) -> PathBuf {
+    pub(super) fn daemon_test_endpoint(name: &str) -> PathBuf {
         #[cfg(windows)]
         {
             PathBuf::from(format!(

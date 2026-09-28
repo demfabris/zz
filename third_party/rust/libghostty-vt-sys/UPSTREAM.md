@@ -40,9 +40,12 @@ Move back to upstream at the first libghostty-rs release that contains this stac
 
 - `GHOSTTY_REPO` and `GHOSTTY_COMMIT` point at the fork commit above.
 - `cargo:rerun-if-changed` names this snapshot's own `build.rs`.
-- Cargo's dev profile builds Zig `ReleaseSafe` instead of upstream's `Debug`: the
-  unoptimized VT parser is about 6x slower and blows the daemon's 2 s command budgets
-  under test load. `LIBGHOSTTY_VT_SYS_OPTIMIZE=Debug` still selects `Debug`.
+- The Zig mode follows `OPT_LEVEL`, not `DEBUG`: `0` builds `ReleaseSafe` instead of
+  upstream's `Debug` (the unoptimized VT parser is about 6x slower and blows the
+  daemon's 2 s command budgets under test load), `s`/`z` build `ReleaseSmall`, and
+  every other level builds `ReleaseFast`, so profiles that only add debug info
+  (`profiling`, `testflight`) and zz's dev profile (dependencies at `opt-level = 2`)
+  build the release engine. `LIBGHOSTTY_VT_SYS_OPTIMIZE=Debug` still selects `Debug`.
 - The upstream Windows DLL CRT source patch and its build-time `git apply` are dropped.
   zz links the static archive on every platform, where that patch does nothing, and this
   snapshot does not rewrite fetched sources.
@@ -86,8 +89,8 @@ ReleaseSafe and Debug builds keep for panics.
 
 Upstream's TinyIo change (`82df79ec8`, #13715) removed the buffer from
 `ReleaseFast` and `ReleaseSmall` builds, so shipped release bundles no longer
-need the patch. `ReleaseSafe`, which zz uses for every dev-profile build
-(`just run`, `just watch`, tests), still references
+need the patch. `ReleaseSafe`, which zz builds only when this crate is compiled
+at `opt-level = 0` (zz's dev profile compiles it at 2 since 2026-09-28), still references
 `std.Thread.maybeAttachSignalStack` and still carries it. Measured on
 `libghostty-vt-static_zcu.o` built with zz's flags: plain `6301810a`
 ReleaseSafe has a 262,160-byte `__thread_bss`, the fork commit 16 bytes. Both

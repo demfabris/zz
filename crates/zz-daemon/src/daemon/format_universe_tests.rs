@@ -142,6 +142,126 @@ fn status_requests_render_the_same_line_on_a_detached_universe() {
     });
 }
 
+const PARTIAL_ROWS: &[&str] = &[
+    "#{S:[#{session_name}:#{P:#{pane_index}}]}",
+    "#{S:<#{Ow:#{option_name}=#{option_value}}>}",
+    "#{S:<#{Op:#{option_name}=#{option_value}}>}",
+    "#{W:<#{Op:#{option_name}=#{option_value}}>}",
+    "#{S:#{session_name}}",
+    "#{FOO}#{Vg:#{environ_name};}",
+    "#{Og:#{option_name};}",
+];
+
+fn run_in_engine(fixture: &Fixture, args: &[&str]) {
+    let mut context = ExecutionContext::default();
+    fixture
+        .shared
+        .inner
+        .lock()
+        .engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new(args[0], args[1..].iter().copied()),
+        )
+        .unwrap_or_else(|error| panic!("{args:?}: {error:?}"));
+}
+
+fn one_status_row(fixture: &Fixture, row: &str) {
+    for args in [
+        &["set-option", "-g", "status-left", ""][..],
+        &["set-option", "-g", "status-right", ""],
+        &["set-option", "-g", "status-format[0]", "#{session_name}"],
+        &["set-option", "-g", "status-format[1]", row],
+        &["set-option", "-g", "status-format[2]", "x"],
+        &["set-option", "-g", "set-titles", "off"],
+        &["set-option", "-w", "-t", "beta:0", "@ww", "bw"],
+        &["set-option", "-p", "-t", "beta:0.0", "@pp", "b0"],
+        &["set-option", "-p", "-t", "beta:0.1", "@pp", "b1"],
+        &["set-option", "-p", "-t", "alpha:1.0", "@pp", "l0"],
+    ] {
+        run_in_engine(fixture, args);
+    }
+}
+
+fn status_request_for(fixture: &Fixture, job_needs: FormatNeeds) -> StatusRequest {
+    let inner = fixture.shared.inner.lock();
+    status_request(
+        &inner,
+        fixture.control,
+        &inner.engine.state.snapshot(),
+        Arc::new(inner.engine.format_option_snapshot()),
+        format_hook_facts(&inner),
+        true,
+        job_needs,
+    )
+}
+
+#[test]
+fn status_requests_with_partial_needs_render_what_the_eager_universe_renders() {
+    for row in PARTIAL_ROWS {
+        let fixture = fixture();
+        one_status_row(&fixture, row);
+        let request = status_request_for(&fixture, FormatNeeds::NONE);
+        assert!(
+            !request.context.format_universe_covers(FormatNeeds::ALL),
+            "{row} detached everything"
+        );
+        lazy_and_eager(|fixture| {
+            one_status_row(fixture, row);
+            let line = StatusRenderer::default()
+                .render_forced(&status_request_for(fixture, FormatNeeds::NONE));
+            line.rows
+        });
+    }
+    let fixture = fixture();
+    one_status_row(&fixture, PARTIAL_ROWS[0]);
+    let line =
+        StatusRenderer::default().render_forced(&status_request_for(&fixture, FormatNeeds::NONE));
+    assert!(line.rows[1].contains("[beta:01]"), "{:?}", line.rows);
+    one_status_row(&fixture, PARTIAL_ROWS[2]);
+    let line =
+        StatusRenderer::default().render_forced(&status_request_for(&fixture, FormatNeeds::NONE));
+    assert!(line.rows[1].contains("@pp=b"), "{:?}", line.rows);
+}
+
+#[test]
+fn status_job_output_reads_parts_the_templates_do_not() {
+    let fixture = fixture();
+    one_status_row(&fixture, "#(echo '##{S:##{session_name}.}')");
+    let mut renderer = StatusRenderer::default();
+    assert_eq!(
+        renderer
+            .render_changed(&[status_request_for(&fixture, FormatNeeds::NONE)])
+            .len(),
+        1
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !renderer.poll_jobs().contains(&fixture.control) {
+        assert!(Instant::now() < deadline, "the status job never finished");
+        thread::sleep(Duration::from_millis(10));
+    }
+    let needs = renderer
+        .job_needs()
+        .lock()
+        .get(&fixture.control)
+        .copied()
+        .unwrap_or_default();
+    assert!(needs.contains(FormatNeeds::SESSIONS));
+    assert!(
+        renderer
+            .render_changed(&[status_request_for(&fixture, FormatNeeds::NONE)])
+            .is_empty()
+    );
+    assert!(renderer.poll_jobs().contains(&fixture.control));
+    let changed = renderer.render_changed(&[status_request_for(&fixture, needs)]);
+    assert_eq!(changed.len(), 1);
+    assert!(
+        changed[0].1.rows[1] == "alpha.beta.",
+        "{:?}",
+        changed[0].1.rows
+    );
+}
+
 #[test]
 fn mode_requests_render_the_same_presentation_on_a_detached_universe() {
     lazy_and_eager(|fixture| {

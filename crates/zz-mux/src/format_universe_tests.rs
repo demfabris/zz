@@ -34,6 +34,12 @@ const FORMATS: &[&str] = &[
     "#{window_layout}#{window_manual_width}#{pane_current_command}#{pane_current_path}",
     "#{S:#{E:@fmt}}#{W:#{T:window-status-format}}",
     "#{m/r:^w.*,#{session_name}}#{s/o/0/:session_name}#{R:#{W:x},2}",
+    "#{S:[#{session_name}:#{P:#{pane_index}}]}",
+    "#{S:<#{Ow:#{option_name}=#{option_value}}>}",
+    "#{S:<#{Op:#{option_name}=#{option_value}}>}",
+    "#{W:<#{Op:#{option_name}=#{option_value}}>}",
+    "#{S:<#{Os:#{option_name}}#{V:#{environ_name}}>}",
+    "#{S:#{P:#{Op:#{option_name}}}}#{W:#{P:#{Ow:#{option_value}}}}",
 ];
 
 struct OptionHooks<'a>(&'a MuxEngine);
@@ -125,8 +131,8 @@ fn several_sessions() -> MuxEngine {
         .state
         .split_pane(logs_pane, Axis::Vertical, PaneKind::Terminal)
         .unwrap();
-    let (beta, _, beta_pane) = engine.state.create_session("beta").unwrap();
-    engine
+    let (beta, beta_window, beta_pane) = engine.state.create_session("beta").unwrap();
+    let beta_split = engine
         .state
         .split_pane(beta_pane, Axis::Vertical, PaneKind::Terminal)
         .unwrap();
@@ -138,7 +144,36 @@ fn several_sessions() -> MuxEngine {
     let gamma_target = format!("{gamma_window}");
     let beta_target = format!("{beta}");
     let split_target = format!("{split}");
+    let beta_window_target = format!("{beta_window}");
+    let beta_pane_target = format!("{beta_pane}");
+    let beta_split_target = format!("{beta_split}");
+    let logs_pane_target = format!("{logs_pane}");
+    let gamma_pane_target = format!("{gamma_pane}");
     for (command, args) in [
+        (
+            "set-option",
+            vec!["-w", "-t", beta_window_target.as_str(), "@ww", "bw"],
+        ),
+        (
+            "set-option",
+            vec!["-p", "-t", beta_pane_target.as_str(), "@pp", "b0"],
+        ),
+        (
+            "set-option",
+            vec!["-p", "-t", beta_split_target.as_str(), "@pp", "b1"],
+        ),
+        (
+            "set-option",
+            vec!["-p", "-t", logs_pane_target.as_str(), "@pp", "l0"],
+        ),
+        (
+            "set-option",
+            vec!["-p", "-t", gamma_pane_target.as_str(), "@pp", "g0"],
+        ),
+        (
+            "set-option",
+            vec!["-p", "-t", split_target.as_str(), "@pp", "a1"],
+        ),
         ("select-pane", vec!["-m", "-t", split_target.as_str()]),
         ("resize-pane", vec!["-Z", "-t", split_target.as_str()]),
         (

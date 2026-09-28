@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     cell::Cell,
     cmp::Ordering,
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fmt::Write as _,
     sync::{
         Arc, LazyLock, OnceLock,
@@ -253,7 +253,7 @@ pub struct StatusValues {
     pub session_sort_activity: u64,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub struct StatusContext<'e> {
     values: StatusValues,
     #[doc(hidden)]
@@ -366,11 +366,11 @@ pub struct FormatUniverse {
     format_client: FormatClient,
     built: AtomicU8,
     sessions: OnceLock<LoopItems>,
-    windows: Mutex<BTreeMap<SessionId, LoopItems>>,
-    panes: Mutex<BTreeMap<WindowId, LoopItems>>,
-    options: Mutex<BTreeMap<OptionRowsKey, Arc<[FormatOptionRow]>>>,
-    environments: Mutex<BTreeMap<Option<SessionId>, Arc<[FormatEnvironRow]>>>,
-    window_user_options: Mutex<BTreeMap<WindowId, Arc<[(String, String)]>>>,
+    windows: Mutex<BTreeMap<SessionId, Option<LoopItems>>>,
+    panes: Mutex<BTreeMap<WindowId, Option<LoopItems>>>,
+    options: Mutex<BTreeMap<OptionRowsKey, Option<Arc<[FormatOptionRow]>>>>,
+    environments: Mutex<BTreeMap<Option<SessionId>, Option<Arc<[FormatEnvironRow]>>>>,
+    window_user_options: Mutex<BTreeMap<WindowId, Option<Arc<[(String, String)]>>>>,
 }
 
 impl Default for FormatUniverse {
@@ -404,15 +404,26 @@ impl FormatUniverse {
     #[cfg(test)]
     pub(crate) fn with_global_environment(rows: Vec<FormatEnvironRow>) -> Self {
         let universe = Self::default();
-        universe.environments.lock().insert(None, rows.into());
+        universe.environments.lock().insert(None, Some(rows.into()));
         universe
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct FormatUniverseRef<'e> {
     parts: Arc<FormatUniverse>,
     engine: Option<&'e MuxEngine>,
+}
+
+static NO_UNIVERSE: LazyLock<Arc<FormatUniverse>> = LazyLock::new(Arc::default);
+
+impl Default for FormatUniverseRef<'_> {
+    fn default() -> Self {
+        Self {
+            parts: Arc::clone(&NO_UNIVERSE),
+            engine: None,
+        }
+    }
 }
 
 impl std::fmt::Debug for FormatUniverseRef<'_> {
@@ -424,14 +435,6 @@ impl std::fmt::Debug for FormatUniverseRef<'_> {
             .finish_non_exhaustive()
     }
 }
-
-impl PartialEq for FormatUniverseRef<'_> {
-    fn eq(&self, _other: &Self) -> bool {
-        true
-    }
-}
-
-impl Eq for FormatUniverseRef<'_> {}
 
 /// One attached client as the `L` modifier sees it: the client formats that
 /// replace the outer client context, the environment `#{Vc:}` reads inside the
@@ -468,7 +471,7 @@ pub(crate) struct FormatOptionRow {
     pub(crate) is_user: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 struct FormatLoopItem {
     context: StatusContext<'static>,
     active: bool,
@@ -1216,6 +1219,11 @@ impl StatusContext<'_> {
             format_universe,
         }
     }
+
+    #[must_use]
+    pub fn format_universe_covers(&self, needs: FormatNeeds) -> bool {
+        self.format_universe.engine.is_some() || self.format_universe.parts.built().contains(needs)
+    }
 }
 
 impl<'e> FormatUniverseRef<'e> {
@@ -1225,7 +1233,7 @@ impl<'e> FormatUniverseRef<'e> {
             engine: Some(engine),
         };
         if eager_universe() {
-            universe.fill(engine, FormatNeeds::ALL, "", "", "");
+            universe.fill(FormatNeeds::ALL, "", "", "");
         }
         universe
     }
@@ -1237,13 +1245,13 @@ impl<'e> FormatUniverseRef<'e> {
         window: &str,
         pane: &str,
     ) -> FormatUniverseRef<'static> {
-        if let Some(engine) = self.engine {
+        if self.engine.is_some() {
             let needs = if eager_universe() {
                 FormatNeeds::ALL
             } else {
                 needs
             };
-            self.fill(engine, needs, session, window, pane);
+            self.fill(needs, session, window, pane);
         }
         FormatUniverseRef {
             parts: Arc::clone(&self.parts),
@@ -1251,10 +1259,10 @@ impl<'e> FormatUniverseRef<'e> {
         }
     }
 
-    fn unbuilt(&self, kind: FormatNeeds) {
+    fn missed(&self, kind: FormatNeeds) {
         debug_assert!(
-            self.parts.built().contains(kind),
-            "a detached format universe read {kind:?}, which its template scan did not ask for"
+            self.parts.built() == FormatNeeds::ALL,
+            "a detached format universe missed a {kind:?} part that its fill did not reach"
         );
     }
 
@@ -1263,7 +1271,7 @@ impl<'e> FormatUniverseRef<'e> {
             return Arc::clone(items);
         }
         let Some(engine) = self.engine else {
-            self.unbuilt(FormatNeeds::SESSIONS);
+            self.missed(FormatNeeds::SESSIONS);
             return LoopItems::default();
         };
         Arc::clone(
@@ -1276,75 +1284,77 @@ impl<'e> FormatUniverseRef<'e> {
     fn windows(&self, session: &str) -> Option<LoopItems> {
         let session = parse_session(session)?;
         if let Some(items) = self.parts.windows.lock().get(&session) {
-            return Some(Arc::clone(items));
+            return items.clone();
         }
         let Some(engine) = self.engine else {
-            self.unbuilt(FormatNeeds::WINDOWS);
+            self.missed(FormatNeeds::WINDOWS);
             return None;
         };
-        let items: LoopItems = engine
-            .format_window_items(session, self.parts.format_client)?
-            .into();
-        Some(Arc::clone(
-            self.parts.windows.lock().entry(session).or_insert(items),
-        ))
+        let items = engine
+            .format_window_items(session, self.parts.format_client)
+            .map(LoopItems::from);
+        self.parts
+            .windows
+            .lock()
+            .entry(session)
+            .or_insert(items)
+            .clone()
     }
 
     fn panes(&self, window: &str) -> Option<LoopItems> {
         let window = parse_window(window)?;
         if let Some(items) = self.parts.panes.lock().get(&window) {
-            return Some(Arc::clone(items));
+            return items.clone();
         }
         let Some(engine) = self.engine else {
-            self.unbuilt(FormatNeeds::PANES);
+            self.missed(FormatNeeds::PANES);
             return None;
         };
-        let items: LoopItems = engine
-            .format_pane_items(window, self.parts.format_client)?
-            .into();
-        Some(Arc::clone(
-            self.parts.panes.lock().entry(window).or_insert(items),
-        ))
+        let items = engine
+            .format_pane_items(window, self.parts.format_client)
+            .map(LoopItems::from);
+        self.parts
+            .panes
+            .lock()
+            .entry(window)
+            .or_insert(items)
+            .clone()
     }
 
     fn option_rows(&self, key: OptionRowsKey) -> Option<Arc<[FormatOptionRow]>> {
         if let Some(rows) = self.parts.options.lock().get(&key) {
-            return Some(Arc::clone(rows));
+            return rows.clone();
         }
         let Some(engine) = self.engine else {
-            self.unbuilt(FormatNeeds::OPTIONS);
+            self.missed(FormatNeeds::OPTIONS);
             return None;
         };
-        let rows: Arc<[FormatOptionRow]> = engine.format_option_rows_for(key)?.into();
-        Some(Arc::clone(
-            self.parts.options.lock().entry(key).or_insert(rows),
-        ))
+        let rows = engine.format_option_rows_for(key).map(Arc::from);
+        self.parts.options.lock().entry(key).or_insert(rows).clone()
     }
 
     fn environment(&self, session: Option<SessionId>) -> Option<Arc<[FormatEnvironRow]>> {
         if let Some(rows) = self.parts.environments.lock().get(&session) {
-            return Some(Arc::clone(rows));
+            return rows.clone();
         }
         let Some(engine) = self.engine else {
-            self.unbuilt(FormatNeeds::ENVIRONMENT);
+            self.missed(FormatNeeds::ENVIRONMENT);
             return None;
         };
-        let rows: Arc<[FormatEnvironRow]> = match session {
-            None => engine.format_global_environment_rows().into(),
-            Some(session) => {
-                if !engine.state.sessions.contains_key(&session) {
-                    return None;
-                }
-                engine.format_session_environment_rows(session).into()
-            }
+        let rows: Option<Arc<[FormatEnvironRow]>> = match session {
+            None => Some(engine.format_global_environment_rows().into()),
+            Some(session) => engine
+                .state
+                .sessions
+                .contains_key(&session)
+                .then(|| engine.format_session_environment_rows(session).into()),
         };
-        Some(Arc::clone(
-            self.parts
-                .environments
-                .lock()
-                .entry(session)
-                .or_insert(rows),
-        ))
+        self.parts
+            .environments
+            .lock()
+            .entry(session)
+            .or_insert(rows)
+            .clone()
     }
 
     fn global_environment(&self) -> Arc<[FormatEnvironRow]> {
@@ -1358,55 +1368,50 @@ impl<'e> FormatUniverseRef<'e> {
     fn window_user_options(&self, window: &str) -> Option<Arc<[(String, String)]>> {
         let window = parse_window(window)?;
         if let Some(options) = self.parts.window_user_options.lock().get(&window) {
-            return Some(Arc::clone(options));
+            return options.clone();
         }
         let Some(engine) = self.engine else {
-            self.unbuilt(FormatNeeds::WINDOWS);
+            self.missed(FormatNeeds::WINDOWS);
             return None;
         };
-        if !engine.format_window_listed(window) {
-            return None;
-        }
-        let options: Arc<[(String, String)]> = engine.format_window_user_options(window).into();
-        Some(Arc::clone(
-            self.parts
-                .window_user_options
-                .lock()
-                .entry(window)
-                .or_insert(options),
-        ))
+        let options = engine
+            .format_window_listed(window)
+            .then(|| engine.format_window_user_options(window).into());
+        self.parts
+            .window_user_options
+            .lock()
+            .entry(window)
+            .or_insert(options)
+            .clone()
     }
 
-    fn fill(
-        &self,
-        engine: &MuxEngine,
-        needs: FormatNeeds,
-        session: &str,
-        window: &str,
-        pane: &str,
-    ) {
+    fn fill(&self, needs: FormatNeeds, session: &str, window: &str, pane: &str) {
         let all = needs.contains(FormatNeeds::ALL);
-        let sessions = if all || needs.contains(FormatNeeds::SESSIONS) {
-            self.sessions();
-            engine.state.sessions.keys().copied().collect()
-        } else {
-            parse_session(session).into_iter().collect::<Vec<_>>()
-        };
-        let windows = if all || needs.contains(FormatNeeds::WINDOWS) {
-            let mut windows = Vec::new();
+        let needs = if all { FormatNeeds::ALL } else { needs };
+        let mut sessions = BTreeSet::new();
+        let mut windows = BTreeSet::new();
+        let mut panes = BTreeSet::new();
+        sessions.extend(parse_session(session));
+        windows.extend(parse_window(window));
+        panes.extend(parse_pane(pane));
+        if needs.contains(FormatNeeds::SESSIONS) {
+            for item in self.sessions().iter() {
+                sessions.extend(parse_session(&item.context.session_id));
+                windows.extend(parse_window(&item.context.window_id));
+                panes.extend(parse_pane(&item.context.pane_id));
+            }
+        }
+        if needs.contains(FormatNeeds::WINDOWS) {
             for session in &sessions {
                 let items = self.windows(&session.to_string()).unwrap_or_default();
                 for item in items.iter() {
                     self.window_user_options(&item.context.window_id);
                     windows.extend(parse_window(&item.context.window_id));
+                    panes.extend(parse_pane(&item.context.pane_id));
                 }
             }
-            windows
-        } else {
-            parse_window(window).into_iter().collect()
-        };
-        let panes = if all || needs.contains(FormatNeeds::PANES) {
-            let mut panes = Vec::new();
+        }
+        if needs.contains(FormatNeeds::PANES) {
             for window in &windows {
                 let items = self.panes(&window.to_string()).unwrap_or_default();
                 panes.extend(
@@ -1415,11 +1420,8 @@ impl<'e> FormatUniverseRef<'e> {
                         .filter_map(|item| parse_pane(&item.context.pane_id)),
                 );
             }
-            panes
-        } else {
-            parse_pane(pane).into_iter().collect()
-        };
-        if all || needs.contains(FormatNeeds::OPTIONS) {
+        }
+        if needs.contains(FormatNeeds::OPTIONS) {
             for key in [
                 OptionRowsKey::Server,
                 OptionRowsKey::GlobalSession,
@@ -1433,14 +1435,13 @@ impl<'e> FormatUniverseRef<'e> {
                 self.option_rows(key);
             }
         }
-        if all || needs.contains(FormatNeeds::ENVIRONMENT) {
+        if needs.contains(FormatNeeds::ENVIRONMENT) {
             self.environment(None);
             for session in &sessions {
                 self.environment(Some(*session));
             }
         }
-        self.parts
-            .mark_built(if all { FormatNeeds::ALL } else { needs });
+        self.parts.mark_built(needs);
     }
 }
 
@@ -1459,7 +1460,7 @@ fn parse_pane(value: &str) -> Option<PaneId> {
 struct NeedsScan<'a> {
     engine: Option<&'a MuxEngine>,
     needs: FormatNeeds,
-    followed: std::collections::BTreeSet<String>,
+    followed: BTreeSet<String>,
 }
 
 impl NeedsScan<'_> {
@@ -1587,19 +1588,16 @@ impl NeedsScan<'_> {
     }
 
     fn follow(&mut self, name: &str) {
-        if !self.followed.insert(name.to_owned()) {
+        if self.followed.contains(name) {
             return;
         }
-        let mut texts = Vec::new();
-        let complete = self.engine.is_some_and(|engine| {
-            engine.format_option_texts(name, &mut |text| texts.push(text.to_owned()))
-        });
-        if !complete {
+        self.followed.insert(name.to_owned());
+        let Some(engine) = self.engine else {
             self.needs = FormatNeeds::ALL;
             return;
-        }
-        for text in texts {
-            self.template(&text);
+        };
+        if !engine.format_option_texts(name, &mut |text| self.template(text)) {
+            self.needs = FormatNeeds::ALL;
         }
     }
 }
@@ -1625,7 +1623,7 @@ fn scan_format_needs<'t>(
     let mut scan = NeedsScan {
         engine,
         needs: FormatNeeds::NONE,
-        followed: std::collections::BTreeSet::new(),
+        followed: BTreeSet::new(),
     };
     for template in templates {
         if scan.done() {
@@ -2356,7 +2354,7 @@ pub trait StatusHooks {
     /// The `struct tty_term` the format tree's own client would carry, which
     /// `#{I/c:}` and `#{I/f:}` interrogate. `None` is `format_replace`'s early
     /// exit on a null client, a null tty term, or `CLIENT_UNATTACHEDFLAGS`.
-    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+    fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
         None
     }
 
@@ -2792,7 +2790,7 @@ impl<H: StatusHooks> StatusHooks for OptionFormatHooks<'_, H> {
         self.inner.client_environment_rows()
     }
 
-    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+    fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
         self.inner.client_tty_term()
     }
 
@@ -5972,7 +5970,7 @@ mod tests {
                     *session, *window, *pane, *session, client,
                 );
                 let actual = contexts.status_context(*session, *window, *pane);
-                assert_eq!(actual, expected);
+                assert_eq!(*actual, *expected);
                 assert!(Arc::ptr_eq(
                     &first.format_universe.parts,
                     &actual.format_universe.parts

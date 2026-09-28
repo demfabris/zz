@@ -11742,6 +11742,7 @@ name = "zz-mux"
 version = "0.14.0"
 dependencies = [
  "chrono",
+ "foldhash",
  "glob",
  "libc",
  "nix 0.31.3",

@@ -608,7 +608,7 @@ impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
         self.inner.client_environment_rows()
     }
 
-    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+    fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
         self.inner.client_tty_term()
     }
 
@@ -1452,7 +1452,7 @@ impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
         self.inner.client_environment_rows()
     }
 
-    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+    fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
         self.inner.client_tty_term()
     }
 
@@ -1519,7 +1519,7 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
         self.inner.client_environment_rows()
     }
 
-    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+    fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
         self.inner.client_tty_term()
     }
 
@@ -1576,7 +1576,7 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
         self.inner.client_environment_rows()
     }
 
-    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+    fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
         self.inner.client_tty_term()
     }
 
@@ -2755,41 +2755,52 @@ impl MuxEngine {
         let Some((option, _)) = parse_format_option(name) else {
             return false;
         };
-        let (global, objects) = match option.scope {
-            TmuxOptionScope::Server => (TmuxOptionTarget::Server, Vec::new()),
-            TmuxOptionScope::Session => (
-                TmuxOptionTarget::GlobalSession,
-                self.state
-                    .sessions
-                    .keys()
-                    .copied()
-                    .map(TmuxOptionTarget::Session)
-                    .collect(),
-            ),
-            TmuxOptionScope::Window => (
-                TmuxOptionTarget::GlobalWindow,
-                self.state
-                    .windows
-                    .keys()
-                    .copied()
-                    .map(TmuxOptionTarget::Window)
-                    .collect(),
-            ),
-            TmuxOptionScope::WindowPane => (
-                TmuxOptionTarget::GlobalWindow,
-                self.state
-                    .windows
-                    .values()
-                    .flat_map(|window| {
-                        std::iter::once(TmuxOptionTarget::Window(window.id))
-                            .chain(window.panes.keys().copied().map(TmuxOptionTarget::Pane))
-                    })
-                    .collect(),
-            ),
+        let global = match option.scope {
+            TmuxOptionScope::Server => TmuxOptionTarget::Server,
+            TmuxOptionScope::Session => TmuxOptionTarget::GlobalSession,
+            TmuxOptionScope::Window | TmuxOptionScope::WindowPane => TmuxOptionTarget::GlobalWindow,
         };
         let complete = self.visit_format_option_at(global, option, true, visit);
-        for target in objects {
-            self.visit_format_option_at(target, option, false, visit);
+        match option.scope {
+            TmuxOptionScope::Server => {}
+            TmuxOptionScope::Session => {
+                for session in self.state.sessions.keys() {
+                    self.visit_format_option_at(
+                        TmuxOptionTarget::Session(*session),
+                        option,
+                        false,
+                        visit,
+                    );
+                }
+            }
+            TmuxOptionScope::Window => {
+                for window in self.state.windows.keys() {
+                    self.visit_format_option_at(
+                        TmuxOptionTarget::Window(*window),
+                        option,
+                        false,
+                        visit,
+                    );
+                }
+            }
+            TmuxOptionScope::WindowPane => {
+                for window in self.state.windows.values() {
+                    self.visit_format_option_at(
+                        TmuxOptionTarget::Window(window.id),
+                        option,
+                        false,
+                        visit,
+                    );
+                    for pane in window.panes.keys() {
+                        self.visit_format_option_at(
+                            TmuxOptionTarget::Pane(*pane),
+                            option,
+                            false,
+                            visit,
+                        );
+                    }
+                }
+            }
         }
         complete
     }

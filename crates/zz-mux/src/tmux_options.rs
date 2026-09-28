@@ -963,7 +963,9 @@ struct IndexedOption {
     consumer: bool,
 }
 
-static OPTION_INDEX: LazyLock<HashMap<&'static str, IndexedOption>> = LazyLock::new(|| {
+type OptionIndex = HashMap<&'static str, IndexedOption, foldhash::fast::FixedState>;
+
+static OPTION_INDEX: LazyLock<OptionIndex> = LazyLock::new(|| {
     let mut index = tmux_option_names()
         .map(|(scope, name)| {
             (
@@ -974,7 +976,7 @@ static OPTION_INDEX: LazyLock<HashMap<&'static str, IndexedOption>> = LazyLock::
                 },
             )
         })
-        .collect::<HashMap<_, _>>();
+        .collect::<OptionIndex>();
     for (alias, name) in ALIASES {
         let entry = index[name];
         index.insert(alias, entry);

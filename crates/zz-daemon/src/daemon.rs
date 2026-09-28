@@ -5160,10 +5160,7 @@ impl Shared {
         let requests = {
             let mut inner = self.inner.lock();
             inner.engine.set_format_now(unix_timestamp());
-            let snapshot = inner.engine.state.snapshot();
-            let facts = format_hook_facts(&inner);
-            let option_snapshot = Arc::new(inner.engine.format_option_snapshot());
-            inner
+            let targets = inner
                 .subscribers
                 .keys()
                 .copied()
@@ -5174,8 +5171,18 @@ impl Shared {
                                 .is_some_and(|session| sessions.contains(&session))
                         })
                 })
+                .collect::<Vec<_>>();
+            if targets.is_empty() {
+                return;
+            }
+            let snapshot = inner.engine.state.snapshot();
+            let facts = format_hook_facts(&inner);
+            let option_snapshot = Arc::new(inner.engine.format_option_snapshot());
+            let mut line_needs = BTreeMap::new();
+            targets
+                .into_iter()
                 .map(|client| {
-                    status_request(
+                    status_request_with(
                         &inner,
                         client,
                         &snapshot,
@@ -5183,6 +5190,7 @@ impl Shared {
                         facts.clone(),
                         startup_ready,
                         self.status_job_needs(client),
+                        &mut line_needs,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -36572,6 +36580,28 @@ fn status_request(
     startup_ready: bool,
     job_needs: FormatNeeds,
 ) -> StatusRequest {
+    status_request_with(
+        inner,
+        client,
+        snapshot,
+        option_snapshot,
+        facts,
+        startup_ready,
+        job_needs,
+        &mut BTreeMap::new(),
+    )
+}
+
+fn status_request_with(
+    inner: &ServerState,
+    client: ClientId,
+    snapshot: &MuxSnapshot,
+    option_snapshot: Arc<zz_mux::StatusRowVariables>,
+    facts: FormatHookFacts,
+    startup_ready: bool,
+    job_needs: FormatNeeds,
+    line_needs: &mut BTreeMap<Option<SessionId>, FormatNeeds>,
+) -> StatusRequest {
     let attached = client_attached_session(inner, client);
     let mut facts = facts;
     facts.client_environment = Arc::new(client_environment_rows(
@@ -36595,13 +36625,15 @@ fn status_request(
     let title_format = (attached.is_some() && inner.engine.set_titles_for_session(attached))
         .then(|| inner.engine.set_titles_string_for_session(attached));
     let message_styles = inner.engine.message_styles_for_session(attached);
-    let needs = crate::status::status_line_needs(
-        &inner.engine,
-        &formats,
-        &row_formats,
-        title_format.as_deref(),
-        &message_styles,
-    ) | job_needs;
+    let needs = *line_needs.entry(attached).or_insert_with(|| {
+        crate::status::status_line_needs(
+            &inner.engine,
+            &formats,
+            &row_formats,
+            title_format.as_deref(),
+            &message_styles,
+        )
+    }) | job_needs;
     StatusRequest {
         client,
         formats,

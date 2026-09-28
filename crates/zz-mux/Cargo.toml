@@ -25,7 +25,6 @@ nix = { version = "0.31.3", features = ["user"] }
 chrono = { workspace = true, features = ["clock"] }
 
 [dev-dependencies]
-chrono = { workspace = true, features = ["clock"] }
 serde.workspace = true
 serde_json.workspace = true
 

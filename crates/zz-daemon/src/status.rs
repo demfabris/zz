@@ -17,8 +17,8 @@ use std::{
 use glob::{MatchOptions, Pattern};
 use regex::RegexBuilder;
 use zz_mux::{
-    FormatClientRow, FormatEnvironRow, FormatJobTag, MuxEngine, StatusContext, StatusFormats,
-    StatusHooks, StatusRowVariables, TtyTerm, display_width, expand_status,
+    FormatClientRow, FormatEnvironRow, FormatJobTag, FormatNeeds, MuxEngine, StatusContext,
+    StatusFormats, StatusHooks, StatusRowVariables, TtyTerm, display_width, expand_status,
 };
 use zz_protocol::{
     ClientId, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId, RawText, SessionId,
@@ -159,6 +159,8 @@ pub(crate) const COPY_MODE_CONTEXT_FORMATS: [&str; 17] = [
 pub(crate) const SHOW_MESSAGES_CONTEXT_FORMATS: [&str; 3] =
     ["message_number", "message_text", "message_time"];
 
+pub(crate) type StatusJobNeeds = Arc<parking_lot::Mutex<BTreeMap<ClientId, FormatNeeds>>>;
+
 #[derive(Default)]
 pub(crate) struct StatusRenderer {
     shell_cache: BTreeMap<ShellCacheKey, ShellCacheEntry>,
@@ -167,6 +169,7 @@ pub(crate) struct StatusRenderer {
     zz_executable: Option<PathBuf>,
     job_waker: Option<thread::Thread>,
     pending_modes: BTreeSet<ClientId>,
+    job_needs: StatusJobNeeds,
 }
 
 pub(crate) struct StatusRequest {
@@ -180,7 +183,7 @@ pub(crate) struct StatusRequest {
     pub(crate) environment: Vec<(RawText, Option<RawText>)>,
     pub(crate) default_terminal: String,
     pub(crate) startup: bool,
-    pub(crate) context: StatusContext,
+    pub(crate) context: StatusContext<'static>,
     pub(crate) facts: FormatHookFacts,
     /// What this client's terminal reported, for the `theme detect` arm. The
     /// pin keeps `c->theme` `THEME_UNKNOWN` until the terminal answers its theme
@@ -196,7 +199,7 @@ pub(crate) struct StatusRequest {
 pub(crate) struct ModeRequest {
     pub(crate) pane: PaneId,
     pub(crate) view: bool,
-    pub(crate) context: StatusContext,
+    pub(crate) context: StatusContext<'static>,
     pub(crate) position: u32,
     pub(crate) limit: u32,
     pub(crate) vi_keys: bool,
@@ -235,27 +238,34 @@ pub(crate) fn expand_modes(
         .collect()
 }
 
+pub(crate) const MODE_FORMATS: [&str; 5] = [
+    "#{E:copy-mode-position-format}",
+    "#{E:copy-mode-position-style}",
+    "#{E:copy-mode-selection-style}",
+    "#{E:copy-mode-match-style}",
+    "#{E:copy-mode-current-match-style}",
+];
+
 fn mode_presentation(
     mode: &ModeRequest,
     hooks: &mut DaemonFormatHooks<'_>,
 ) -> zz_protocol::ModePresentation {
+    let [
+        position,
+        position_style,
+        selection_style,
+        match_style,
+        current_match_style,
+    ] = MODE_FORMATS;
     zz_protocol::ModePresentation {
         pane: mode.pane,
         view: mode.view,
-        position: clamp_status_text(expand_status(
-            "#{E:copy-mode-position-format}",
-            &mode.context,
-            hooks,
-        )),
-        position_style: expand_style("#{E:copy-mode-position-style}", &mode.context, hooks),
-        selection_style: expand_style("#{E:copy-mode-selection-style}", &mode.context, hooks),
+        position: clamp_status_text(expand_status(position, &mode.context, hooks)),
+        position_style: expand_style(position_style, &mode.context, hooks),
+        selection_style: expand_style(selection_style, &mode.context, hooks),
         vi_keys: mode.vi_keys,
-        match_style: expand_style("#{E:copy-mode-match-style}", &mode.context, hooks),
-        current_match_style: expand_style(
-            "#{E:copy-mode-current-match-style}",
-            &mode.context,
-            hooks,
-        ),
+        match_style: expand_style(match_style, &mode.context, hooks),
+        current_match_style: expand_style(current_match_style, &mode.context, hooks),
     }
 }
 
@@ -287,6 +297,37 @@ const THEME_SLOTS: [(&str, u8); zz_protocol::COLOUR_THEME_COUNT] = [
 /// unexpanded value would parse as nothing. A value that does not parse, or one
 /// that names a theme colour and would resolve to itself, leaves the slot at
 /// colour 8, which is what the pin leaves it at.
+fn theme_formats() -> impl Iterator<Item = String> {
+    std::iter::once("#{theme}".to_owned()).chain(["light", "dark"].into_iter().flat_map(|half| {
+        THEME_SLOTS
+            .iter()
+            .map(move |(suffix, _)| format!("#{{E:{half}-theme-{suffix}}}"))
+    }))
+}
+
+pub(crate) fn status_line_needs(
+    engine: &MuxEngine,
+    formats: &StatusFormats,
+    row_formats: &BTreeMap<u32, String>,
+    title_format: Option<&str>,
+    message_styles: &(String, String),
+) -> FormatNeeds {
+    let theme = theme_formats().collect::<Vec<_>>();
+    engine.format_needs(
+        [
+            formats.left.as_str(),
+            formats.right.as_str(),
+            formats.style.as_str(),
+            message_styles.0.as_str(),
+            message_styles.1.as_str(),
+        ]
+        .into_iter()
+        .chain(row_formats.values().map(String::as_str))
+        .chain(title_format)
+        .chain(theme.iter().map(String::as_str)),
+    )
+}
+
 fn resolve_theme_colours(
     request: &StatusRequest,
     hooks: &mut DaemonFormatHooks<'_>,
@@ -742,6 +783,10 @@ impl StatusRenderer {
             .collect()
     }
 
+    pub(crate) fn job_needs(&self) -> StatusJobNeeds {
+        Arc::clone(&self.job_needs)
+    }
+
     pub(crate) fn poll_jobs(&mut self) -> BTreeSet<ClientId> {
         let now = shell_second();
         self.shell_cache
@@ -750,6 +795,20 @@ impl StatusRenderer {
         for ((client, _, _), entry) in &mut self.shell_cache {
             if entry.poll() {
                 changed.insert(*client);
+            }
+        }
+        for client in &changed {
+            let needs = zz_mux::format_needs_without_engine(
+                self.shell_cache
+                    .iter()
+                    .filter(|((cached, _, _), _)| cached == client)
+                    .filter_map(|(_, entry)| entry.output.as_deref()),
+            );
+            let mut job_needs = self.job_needs.lock();
+            if needs.is_empty() {
+                job_needs.remove(client);
+            } else {
+                job_needs.insert(*client, needs);
             }
         }
         changed
@@ -814,6 +873,7 @@ impl StatusRenderer {
         self.published.remove(&client);
         self.shell_cache
             .retain(|(cached, _, _), _| *cached != client);
+        self.job_needs.lock().remove(&client);
     }
 
     pub(crate) fn set_tmux_shim(&mut self, directory: PathBuf, executable: PathBuf) {
@@ -822,12 +882,12 @@ impl StatusRenderer {
     }
 }
 
-pub(crate) fn status_context(
+pub(crate) fn status_context<'e>(
     snapshot: &MuxSnapshot,
-    engine: &MuxEngine,
+    engine: &'e MuxEngine,
     attached: Option<SessionId>,
     focused_window: Option<WindowId>,
-) -> StatusContext {
+) -> StatusContext<'e> {
     let mut context = attached.map_or_else(
         || engine.format_status_context(None, focused_window, None),
         |client_session| {
@@ -1304,7 +1364,7 @@ pub(crate) struct DaemonFormatHooks<'a> {
     status_client: Option<ClientId>,
     facts: &'a FormatHookFacts,
     option_engine: Option<&'a MuxEngine>,
-    status_context: Option<&'a StatusContext>,
+    status_context: Option<&'a StatusContext<'a>>,
     variables: Option<&'a BTreeMap<String, String>>,
     command_item: Option<&'a str>,
     option_snapshot: Option<&'a StatusRowVariables>,
@@ -1375,7 +1435,7 @@ impl<'a> DaemonFormatHooks<'a> {
     fn status(
         client: ClientId,
         facts: &'a FormatHookFacts,
-        context: &'a StatusContext,
+        context: &'a StatusContext<'a>,
         option_snapshot: Option<&'a StatusRowVariables>,
         cache: &'a mut BTreeMap<ShellCacheKey, ShellCacheEntry>,
         touched: &'a mut BTreeSet<ShellCacheKey>,
@@ -2253,7 +2313,7 @@ fn terminate_shell(child: &mut Child) {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
-    use zz_mux::{PaneKind, SplitSize, expand_format_values};
+    use zz_mux::{PaneKind, SplitSize, StatusValues, expand_format_values};
     use zz_protocol::Axis;
     use zz_terminal::{SessionStatus, TerminalViewId};
 
@@ -2293,10 +2353,10 @@ mod tests {
             environment: Vec::new(),
             default_terminal: "tmux-256color".to_owned(),
             startup: false,
-            context: StatusContext {
+            context: StatusContext::from(StatusValues {
                 session_name: "work".to_owned(),
-                ..StatusContext::default()
-            },
+                ..StatusValues::default()
+            }),
             facts: FormatHookFacts {
                 client: Some(ClientFormatFacts::default()),
                 ..FormatHookFacts::default()
@@ -2314,25 +2374,36 @@ mod tests {
         session: Option<SessionId>,
     ) -> StatusRequest {
         let snapshot = engine.state.snapshot();
+        let formats = engine.status_formats_for_session(session);
+        let row_formats = engine.status_format_array_for_session(session);
+        let title_format = (session.is_some() && engine.set_titles_for_session(session))
+            .then(|| engine.set_titles_string_for_session(session));
+        let message_styles = engine.message_styles_for_session(session);
+        let needs = status_line_needs(
+            engine,
+            &formats,
+            &row_formats,
+            title_format.as_deref(),
+            &message_styles,
+        );
         StatusRequest {
             client: ClientId(client),
-            formats: engine.status_formats_for_session(session),
-            row_formats: engine.status_format_array_for_session(session),
+            formats,
+            row_formats,
             option_snapshot: Arc::new(engine.format_option_snapshot()),
             message_line: engine.message_line_for_session(session),
             customized: engine.status_customized_for_session(session),
-            title_format: (session.is_some() && engine.set_titles_for_session(session))
-                .then(|| engine.set_titles_string_for_session(session)),
+            title_format,
             environment: engine.job_environment(None),
             default_terminal: engine.default_terminal_for_spawn().to_owned(),
             startup: false,
-            context: status_context(&snapshot, engine, session, None),
+            context: status_context(&snapshot, engine, session, None).detach(needs),
             facts: FormatHookFacts {
                 client: session.map(|_| ClientFormatFacts::default()),
                 ..FormatHookFacts::default()
             },
             client_scheme: None,
-            message_styles: engine.message_styles_for_session(session),
+            message_styles,
             modes: Vec::new(),
             pane_borders: Vec::new(),
         }
@@ -2426,10 +2497,10 @@ mod tests {
                     ..FormatHookFacts::default()
                 };
                 let mut hooks = DaemonFormatHooks::command(&facts);
-                let context = StatusContext {
+                let context = StatusContext::from(StatusValues {
                     pane_id: pane.to_string(),
-                    ..StatusContext::default()
-                };
+                    ..StatusValues::default()
+                });
                 assert_eq!(
                     zz_mux::expand_format_values(
                         "#{agent_state}:#{agent_pending_permission}",
@@ -2438,10 +2509,10 @@ mod tests {
                     ),
                     format!("{expected}:{}", u8::from(pending))
                 );
-                let context = StatusContext {
+                let context = StatusContext::from(StatusValues {
                     pane_id: terminal.to_string(),
-                    ..StatusContext::default()
-                };
+                    ..StatusValues::default()
+                });
                 assert_eq!(
                     zz_mux::expand_format_values(
                         "#{agent_state}:#{agent_pending_permission}",
@@ -2466,10 +2537,10 @@ mod tests {
             ..FormatHookFacts::default()
         };
         let mut hooks = DaemonFormatHooks::command(&facts);
-        let context = StatusContext {
+        let context = StatusContext::from(StatusValues {
             pane_id: pane.to_string(),
-            ..StatusContext::default()
-        };
+            ..StatusValues::default()
+        });
         for (bytes, expected) in [
             (b"".as_slice(), ""),
             (b"\x1b]133;D;7\x07".as_slice(), "7"),
@@ -2491,10 +2562,10 @@ mod tests {
             );
         }
         for pane_id in ["%99", ""] {
-            let context = StatusContext {
+            let context = StatusContext::from(StatusValues {
                 pane_id: pane_id.to_owned(),
-                ..StatusContext::default()
-            };
+                ..StatusValues::default()
+            });
             assert_eq!(
                 hooks.variable("pane_last_command_status", &context),
                 Some(String::new())
@@ -2542,12 +2613,12 @@ mod tests {
             )])),
             ..FormatHookFacts::default()
         };
-        let context = StatusContext {
+        let context = StatusContext::from(StatusValues {
             session_id: session.to_string(),
             window_id: "@1".to_owned(),
             pane_id: pane.to_string(),
-            ..StatusContext::default()
-        };
+            ..StatusValues::default()
+        });
         let mut hooks = DaemonFormatHooks::command(&facts);
         for name in delegated {
             assert!(
@@ -2560,10 +2631,10 @@ mod tests {
     #[test]
     fn copy_mode_toggle_and_selection_formats_answer_from_the_copy_view() {
         let pane = PaneId(1);
-        let context = StatusContext {
+        let context = StatusContext::from(StatusValues {
             pane_id: pane.to_string(),
-            ..StatusContext::default()
-        };
+            ..StatusValues::default()
+        });
         let answer = |facts: &FormatHookFacts| {
             zz_mux::expand_format_values(
                 "#{selection_active}:#{rectangle_toggle}",
@@ -3312,10 +3383,10 @@ mod tests {
             buffer: None,
             ..FormatHookFacts::default()
         };
-        let context = StatusContext {
+        let context = StatusContext::from(StatusValues {
             pane_id: pane.to_string(),
-            ..StatusContext::default()
-        };
+            ..StatusValues::default()
+        });
         let mut hooks = DaemonFormatHooks::command(&facts);
         assert_eq!(
             expand_format_values(
@@ -3338,10 +3409,10 @@ mod tests {
     #[test]
     fn window_cell_metrics_default_to_the_pin_size_and_follow_a_reporting_client() {
         let format = "#{window_cell_width}|#{window_cell_height}";
-        let window = StatusContext {
+        let window = StatusContext::from(StatusValues {
             window_id: "@1".to_owned(),
-            ..StatusContext::default()
-        };
+            ..StatusValues::default()
+        });
 
         let bare = FormatHookFacts::default();
         let mut hooks = DaemonFormatHooks::command(&bare);

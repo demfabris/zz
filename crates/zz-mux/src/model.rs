@@ -2172,6 +2172,14 @@ impl MuxState {
         let window_id = self
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        self.pane_synchronize_panes_in(window_id, pane)
+    }
+
+    pub(crate) fn pane_synchronize_panes_in(
+        &self,
+        window_id: WindowId,
+        pane: PaneId,
+    ) -> Result<bool, ServerError> {
         let window = &self.windows[&window_id];
         let pane = &window.panes[&pane];
         Ok(pane

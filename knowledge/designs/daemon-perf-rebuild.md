@@ -663,11 +663,13 @@ Scope:
 2. **Universe as `Built(Arc<FormatUniverse>) | Deferred(&'e MuxEngine)`**, deferred only inside a
    lock scope. Parts (loop items, option rows per scope, environment + window user options) fill
    on first read. `StatusContext.format_universe` changes type from the owned Arc. `detach()`
-   builds the parts a template scan needs at **every escape point**: status request, border
-   presentations, mode request, chooser rows, control subscriptions, format monitors, hook
-   contexts. Any part not built and read off-lock renders empty with no error, which is the bug
-   this rule prevents. No existing lazy path to reuse: `FormatContextSnapshot` builds on the first
-   `status_context()` call.
+   builds the parts a template scan needs at **every escape point**. Any part not built and read
+   off-lock renders empty with no error, which is the bug this rule prevents. No existing lazy
+   path to reuse: `FormatContextSnapshot` builds on the first `status_context()` call.
+   As built, the engine borrow is the `'e` of `StatusContext<'e>`, so the compiler finds every
+   escape: only the status request and the mode requests leave the lock. Border presentations,
+   chooser rows, control subscriptions, format monitors and hook bodies expand inside it on one
+   deferred universe per client per call.
 3. `expand_format_inner`, `expand_format_with_hooks`: return input unchanged when it has no `#`
    (and no `%` when time expansion is on); lazy `option_fallback`.
 4. `list_keys`, `list_commands` resolve once; `list_sessions`, `list_windows`, `list_panes`
@@ -714,6 +716,40 @@ terminal-overrides refresh; `compat_manifest_tests.rs`, `format_modifier_client_
 Expected: universe 95% of list-keys CPU; list-keys 17 -> ~1.6 ms (1 pane), 78 -> ~4 ms (20);
 list-* linear, not quadratic; option lookups 470 of 569 `format_option_snapshot` samples; regex
 52 of 344 in the 20-pane status render.
+
+As built (branch `perf/format`):
+
+- `StatusContext<'e>` is `StatusValues` (the table values, reached through `Deref`) plus a
+  `FormatUniverseRef<'e>`: an `Arc` part cache and the engine that may fill it. A detached handle
+  has no engine and a `built` set; reading a part it was not built with is a `debug_assert`.
+  Loop items store their values once and loops walk them by reference.
+- The template scan is `MuxEngine::format_needs`: loops, `N:`, `O:`, `V:`, and any name that
+  is neither a table name nor an option with a global value (environment fallthrough). `E:` and
+  `T:` on an option follow its value at every scope; on anything else, or on an option some
+  context lacks, the scan asks for everything. A status job's output is only known to the
+  renderer, so `poll_jobs` scans it without an engine and records the result per client in a
+  leaf-locked map (`StatusJobNeeds`) that `status_request` unions in.
+- `pane_format_geometry` is an engine method sharing `format_target` with context resolution.
+- Found by profile and removed as well: `FormatFacts` user options are shared copy-on-write
+  maps, so a fact snapshot per command takes refcounts instead of copying every `@option`
+  (3.7% of the 1000-line config replay); built `TtyTerm`s are cached by their five inputs, where
+  every client format tree built four; `update-environment` patterns compile once per array
+  (`GlobPattern`).
+- `ZZ_PERF_EAGER_UNIVERSE=1` fills every part on creation and detach; `with_eager_universe`
+  flips it per thread and is the oracle of the differential tests in
+  `crates/zz-mux/src/format_universe_tests.rs` and
+  `crates/zz-daemon/src/daemon/format_universe_tests.rs`.
+- Measured with `--quick` on the lane base (157ac6a3) and on the lane head, same loaded host
+  (load ~20 on 16 CPUs, so wall and CPU time are noisy; instructions are not): `list-keys`
+  249 -> 25.5 Minstr at p1 and 1128 -> 29.0 at p20 (CPU 67 -> 3.2 ms, wall 1.03x tmux);
+  `list-panes -a`, `list-windows -a`, `list-sessions` at s20 ~123 -> ~14 Minstr each (tmux
+  4.5, 2.9, 30.6); `display-message` 10.8 -> 7.4 (p1) and 29.2 -> 11.0 (p20); 1000-line
+  `source-file` 3647 -> 2614 Minstr; `chatty.cpu_pct` flip 34 -> 18%, hidden 69 -> 23%. The
+  rest of each per-command cost is key-table snapshots (PUBLISH), unregister wakes (PANE,
+  EXEC), hook captures (HOOKS) and `chrono::Local` (FOOTPRINT); format work no longer shows in
+  the `display-message`, `list-windows -a` or hidden-chatty profiles. In the config replay, past
+  the key tables, what is left of this lane's path is the unrequested `format_option_snapshot`
+  (PUBLISH drops the call) and the per-command fact snapshot, which W2-FMT borrows instead.
 
 ## W1-PANE: frames for watchers, compression, threads, spawn (effort L)
 

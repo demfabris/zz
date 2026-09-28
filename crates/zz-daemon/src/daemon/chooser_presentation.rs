@@ -252,17 +252,20 @@ pub(super) fn client_chooser_rows(
     clients.sort_by_key(|(client, _)| client.0);
     let base = format_hook_facts(inner);
     let mut rows = Vec::with_capacity(clients.len());
+    let mut universes = BTreeMap::new();
     for (line, (client, session_id)) in clients.into_iter().enumerate() {
         let Some(session) = inner.engine.state.sessions.get(&session_id) else {
             continue;
         };
         let focused = client_focused_window(inner, client, session);
-        let mut context = inner.engine.format_status_context_for_client(
-            Some(session_id),
-            Some(focused),
-            None,
-            session_id,
-        );
+        let mut context = universes
+            .entry(session_id)
+            .or_insert_with(|| {
+                inner
+                    .engine
+                    .format_context_snapshot(FormatClient::Attached(session_id))
+            })
+            .status_context(Some(session_id), Some(focused), None);
         context.config_files.clone_from(&inner.config_files);
         let mut client_facts = client_format_facts(inner, client, session_id);
         client_facts.line = line;

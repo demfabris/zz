@@ -1,3 +1,5 @@
+use std::{collections::HashMap, sync::LazyLock};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TmuxOptionScope {
     Server,
@@ -72,7 +74,7 @@ const UPDATE_ENVIRONMENT_DEFAULTS: &[&str] = &[
     "XDG_SESSION_DESKTOP",
     "XDG_SESSION_TYPE",
 ];
-const STATUS_FORMAT_DEFAULTS: &[&str] = &[
+pub(crate) const STATUS_FORMAT_DEFAULTS: &[&str] = &[
     concat!(
         "#[align=left range=left #{E:status-left-style}]",
         "#[push-default]",
@@ -955,8 +957,63 @@ pub(crate) fn tmux_option_table_order(name: &str) -> usize {
         .map_or(usize::MAX, |index| OPTION_TABLE_ORDER.len() + index)
 }
 
+#[derive(Clone, Copy)]
+struct IndexedOption {
+    option: TmuxOption,
+    consumer: bool,
+}
+
+type OptionIndex = HashMap<&'static str, IndexedOption, foldhash::fast::FixedState>;
+
+static OPTION_INDEX: LazyLock<OptionIndex> = LazyLock::new(|| {
+    let mut index = tmux_option_names()
+        .map(|(scope, name)| {
+            (
+                name,
+                IndexedOption {
+                    option: build_tmux_option(scope, name),
+                    consumer: crate::command::TMUX_OPTION_CONSUMERS.contains(&name),
+                },
+            )
+        })
+        .collect::<OptionIndex>();
+    for (alias, name) in ALIASES {
+        let entry = index[name];
+        index.insert(alias, entry);
+    }
+    index
+});
+
+static CONSUMERS_BY_SCOPE: LazyLock<[Vec<TmuxOption>; 4]> = LazyLock::new(|| {
+    let mut scopes: [Vec<TmuxOption>; 4] = Default::default();
+    for name in crate::command::TMUX_OPTION_CONSUMERS {
+        let option = OPTION_INDEX[name].option;
+        scopes[scope_slot(option.scope)].push(option);
+    }
+    scopes
+});
+
+const fn scope_slot(scope: TmuxOptionScope) -> usize {
+    match scope {
+        TmuxOptionScope::Server => 0,
+        TmuxOptionScope::Session => 1,
+        TmuxOptionScope::Window => 2,
+        TmuxOptionScope::WindowPane => 3,
+    }
+}
+
 pub(crate) fn tmux_options() -> impl Iterator<Item = TmuxOption> {
-    tmux_option_names().map(|(scope, name)| build_tmux_option(scope, name))
+    tmux_option_names().map(|(_, name)| OPTION_INDEX[name].option)
+}
+
+pub(crate) fn tmux_consumer_options(scope: TmuxOptionScope) -> &'static [TmuxOption] {
+    &CONSUMERS_BY_SCOPE[scope_slot(scope)]
+}
+
+pub(crate) fn tmux_option_with_consumer(input: &str) -> Option<(TmuxOption, bool)> {
+    OPTION_INDEX
+        .get(input)
+        .map(|entry| (entry.option, entry.consumer))
 }
 
 fn tmux_option_names() -> impl Iterator<Item = (TmuxOptionScope, &'static str)> {
@@ -1126,32 +1183,21 @@ pub(crate) fn parse_tmux_option(input: &str) -> Result<ParsedTmuxOption<'_>, ()>
 }
 
 pub(crate) fn match_tmux_option(input: &str) -> Result<Option<TmuxOption>, ()> {
-    let input = exact_tmux_option_name(input);
-    if let Some((scope, name)) = tmux_option_names().find(|(_, name)| *name == input) {
-        return Ok(Some(build_tmux_option(scope, name)));
+    if let Some(option) = exact_tmux_option(input) {
+        return Ok(Some(option));
     }
     let mut matches = tmux_option_names().filter(|(_, name)| name.starts_with(input));
-    let Some((scope, name)) = matches.next() else {
+    let Some((_, name)) = matches.next() else {
         return Ok(None);
     };
     if matches.next().is_some() {
         return Err(());
     }
-    Ok(Some(build_tmux_option(scope, name)))
+    Ok(Some(OPTION_INDEX[name].option))
 }
 
 pub(crate) fn exact_tmux_option(input: &str) -> Option<TmuxOption> {
-    let name = exact_tmux_option_name(input);
-    tmux_option_names()
-        .find(|(_, candidate)| *candidate == name)
-        .map(|(scope, name)| build_tmux_option(scope, name))
-}
-
-fn exact_tmux_option_name(input: &str) -> &str {
-    ALIASES
-        .iter()
-        .find_map(|(alias, name)| (*alias == input).then_some(*name))
-        .unwrap_or(input)
+    OPTION_INDEX.get(input).map(|entry| entry.option)
 }
 
 pub(crate) fn tmux_option_format_is_flag(name: &str) -> bool {
@@ -1194,6 +1240,50 @@ mod tests {
                 .len(),
             options.len()
         );
+    }
+
+    #[test]
+    fn the_index_answers_what_a_catalog_scan_builds_for_every_name_and_alias() {
+        let consumers = crate::command::TMUX_OPTION_CONSUMERS;
+        for (scope, name) in tmux_option_names() {
+            let scanned = build_tmux_option(scope, name);
+            assert_eq!(exact_tmux_option(name), Some(scanned), "{name}");
+            assert_eq!(
+                tmux_option_with_consumer(name),
+                Some((scanned, consumers.contains(&name))),
+                "{name}"
+            );
+        }
+        for (alias, name) in ALIASES {
+            let (scope, _) = tmux_option_names()
+                .find(|(_, candidate)| candidate == name)
+                .expect("alias target is catalogued");
+            let scanned = build_tmux_option(scope, name);
+            assert_eq!(exact_tmux_option(alias), Some(scanned), "{alias}");
+            assert_eq!(
+                tmux_option_with_consumer(alias),
+                Some((scanned, consumers.contains(name))),
+                "{alias}"
+            );
+        }
+        assert_eq!(exact_tmux_option("not-an-option"), None);
+        assert_eq!(tmux_option_with_consumer("status-l"), None);
+        for scope in [
+            TmuxOptionScope::Server,
+            TmuxOptionScope::Session,
+            TmuxOptionScope::Window,
+            TmuxOptionScope::WindowPane,
+        ] {
+            let scanned = consumers
+                .iter()
+                .filter_map(|name| {
+                    let (option_scope, name) =
+                        tmux_option_names().find(|(_, candidate)| candidate == name)?;
+                    (option_scope == scope).then(|| build_tmux_option(option_scope, name))
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(tmux_consumer_options(scope), scanned.as_slice());
+        }
     }
 
     #[test]

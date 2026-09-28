@@ -27,13 +27,14 @@ use zz_mux::{
     CommandPromptStep, CommandPromptTemplate, ConfigDiagnostic, CopyModeStyleValues, CustomizeMenu,
     CustomizeMenuItem, CustomizeMode, CustomizeResult, DEFAULT_BUFFER_LIMIT, DetachScope,
     Execution, ExecutionContext, FormatClient, FormatMonitorScope, FormatMonitorTarget,
-    KeyDecision, KeyEngine, KeyTables, MouseEventTarget, MuxEffect, MuxEngine, PaneKind,
-    PaneModeRequest, PaneRuntimeFacts, ParsedConfig, ParsedConfigBytes, RetainedJobEnvironment,
-    SourceStream, StatusHooks, SwitchAction, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize,
-    canonical_command, command_block_body, copy_mode_action_is_read_only_safe, customize_menu_feed,
-    expand_format_bytes, expand_format_values, expand_status, format_command, format_true,
-    hook_format_variables, if_shell_truthy, parse_tmux_colour, sanitize_client_output,
-    send_keys_is_read_only_safe, send_keys_target_client, validate_static_command_chain,
+    FormatNeeds, KeyDecision, KeyEngine, KeyTables, MouseEventTarget, MuxEffect, MuxEngine,
+    PaneKind, PaneModeRequest, PaneRuntimeFacts, ParsedConfig, ParsedConfigBytes,
+    RetainedJobEnvironment, SourceStream, StatusHooks, SwitchAction, TmuxColour, TmuxSort,
+    TmuxSortOrder, WindowSize, canonical_command, command_block_body,
+    copy_mode_action_is_read_only_safe, customize_menu_feed, expand_format_bytes,
+    expand_format_values, expand_status, format_command, format_true, hook_format_variables,
+    if_shell_truthy, parse_tmux_colour, sanitize_client_output, send_keys_is_read_only_safe,
+    send_keys_target_client, validate_static_command_chain,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
@@ -935,13 +936,13 @@ impl StatusHooks for InertFormatHooks<'_> {
     }
 }
 
-fn server_format_context(
-    engine: &MuxEngine,
+fn server_format_context<'e>(
+    engine: &'e MuxEngine,
     config_files: &str,
     session: Option<SessionId>,
     window: Option<WindowId>,
     pane: Option<PaneId>,
-) -> zz_mux::StatusContext {
+) -> zz_mux::StatusContext<'e> {
     server_format_context_with_format_client(
         engine,
         config_files,
@@ -953,15 +954,15 @@ fn server_format_context(
     )
 }
 
-fn server_format_context_with_format_client(
-    engine: &MuxEngine,
+fn server_format_context_with_format_client<'e>(
+    engine: &'e MuxEngine,
     config_files: &str,
     session: Option<SessionId>,
     window: Option<WindowId>,
     pane: Option<PaneId>,
     active_session: Option<SessionId>,
     format_client: FormatClient,
-) -> zz_mux::StatusContext {
+) -> zz_mux::StatusContext<'e> {
     let mut context = engine.format_status_context_with_format_client(
         session,
         window,
@@ -1105,7 +1106,7 @@ fn terminal_appearance_updates(
     inner: &ServerState,
 ) -> Vec<(Arc<TerminalSession>, Arc<TerminalAppearance>)> {
     let mut updates = Vec::with_capacity(inner.terminals.len() + inner.command_outputs.len());
-    for (pane, terminal) in &inner.terminals {
+    for (pane, terminal) in inner.terminals.iter() {
         let appearance =
             terminal_worker_options(&inner.engine, &inner.appearance, &inner.config_files, *pane)
                 .map_or_else(
@@ -1553,6 +1554,9 @@ impl Daemon {
             shared.start_diagnostic_sampler()?;
             shared.start_status_sampler()?;
             shared.log_diagnostic_snapshot("startup");
+            if zz_mux::eager_universe_knob() {
+                log::info!("ZZ_PERF_EAGER_UNIVERSE=1: format universes are built eagerly");
+            }
             log::info!("zz daemon listening at {endpoint}");
             Ok::<(), DaemonError>(())
         })();
@@ -3330,6 +3334,7 @@ struct Shared {
     destroy_unattached_hook: Mutex<Option<ResponseAdmissionHook>>,
     #[cfg(unix)]
     tmux_shim: Mutex<Option<TmuxShimGuard>>,
+    status_job_needs: crate::status::StatusJobNeeds,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4358,6 +4363,8 @@ impl Shared {
         let (silence_deadline_tx, silence_deadline_rx) = crossbeam_channel::unbounded();
         let (client_message_deadline_tx, client_message_deadline_rx) =
             crossbeam_channel::unbounded();
+        let status = StatusRenderer::default();
+        let status_job_needs = status.job_needs();
         Self {
             accept_wake: AcceptWake::new(),
             inner: Mutex::new(state),
@@ -4388,7 +4395,7 @@ impl Shared {
             peer_waits: Arc::new(Mutex::new(crate::agent::claude_peers::PeerWaits::default())),
             kitty_image_frames: Mutex::new(BTreeMap::new()),
             pasted_images: Mutex::new(BTreeMap::new()),
-            status: Mutex::new(StatusRenderer::default()),
+            status: Mutex::new(status),
             display_panes_deadline_tx,
             display_panes_deadline_rx: Mutex::new(Some(display_panes_deadline_rx)),
             key_table_deadline_tx,
@@ -4424,6 +4431,7 @@ impl Shared {
             destroy_unattached_hook: Mutex::new(None),
             #[cfg(unix)]
             tmux_shim: Mutex::new(None),
+            status_job_needs,
         }
     }
 
@@ -4941,7 +4949,8 @@ impl Shared {
         ) = {
             let mut inner = self.inner.lock();
             let mut terminals = std::mem::take(&mut inner.terminals)
-                .into_values()
+                .values()
+                .cloned()
                 .collect::<Vec<_>>();
             terminals.extend(
                 inner
@@ -5130,6 +5139,14 @@ impl Shared {
         self.refresh_status_for_sessions(None);
     }
 
+    fn status_job_needs(&self, client: ClientId) -> FormatNeeds {
+        self.status_job_needs
+            .lock()
+            .get(&client)
+            .copied()
+            .unwrap_or_default()
+    }
+
     fn refresh_status_for_sessions(&self, sessions: Option<&BTreeSet<SessionId>>) {
         self.refresh_status_filtered(sessions, None);
     }
@@ -5143,10 +5160,7 @@ impl Shared {
         let requests = {
             let mut inner = self.inner.lock();
             inner.engine.set_format_now(unix_timestamp());
-            let snapshot = inner.engine.state.snapshot();
-            let facts = format_hook_facts(&inner);
-            let option_snapshot = Arc::new(inner.engine.format_option_snapshot());
-            inner
+            let targets = inner
                 .subscribers
                 .keys()
                 .copied()
@@ -5157,14 +5171,26 @@ impl Shared {
                                 .is_some_and(|session| sessions.contains(&session))
                         })
                 })
+                .collect::<Vec<_>>();
+            if targets.is_empty() {
+                return;
+            }
+            let snapshot = inner.engine.state.snapshot();
+            let facts = format_hook_facts(&inner);
+            let option_snapshot = Arc::new(inner.engine.format_option_snapshot());
+            let mut line_needs = BTreeMap::new();
+            targets
+                .into_iter()
                 .map(|client| {
-                    status_request(
+                    status_request_with(
                         &inner,
                         client,
                         &snapshot,
                         option_snapshot.clone(),
                         facts.clone(),
                         startup_ready,
+                        self.status_job_needs(client),
+                        &mut line_needs,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -5199,7 +5225,7 @@ impl Shared {
                         client: Some(client_format_facts(&inner, *client, session)),
                         ..FormatHookFacts::default()
                     };
-                    let requests = mode_requests(&inner, *client, session);
+                    let requests = mode_requests(&inner, *client, session, FormatNeeds::NONE);
                     Some((
                         *client,
                         crate::status::expand_modes(&requests, &facts, &inner.engine),
@@ -5233,27 +5259,28 @@ impl Shared {
             let base_facts = format_hook_facts(&inner);
             let mut events = Vec::new();
             for (client, session) in clients {
-                let client_facts = client_format_facts(&inner, client, session);
+                let facts = FormatHookFacts {
+                    client: Some(client_format_facts(&inner, client, session)),
+                    ..base_facts.clone()
+                };
                 let mut subscriptions = inner
                     .control_outputs
                     .get_mut(&client)
                     .map(|output| std::mem::take(&mut output.subscriptions))
                     .unwrap_or_default();
+                let contexts = inner
+                    .engine
+                    .format_context_snapshot(FormatClient::Attached(session));
                 for (name, subscription) in &mut subscriptions {
                     let mut current = BTreeMap::new();
                     for target in control_subscription_targets(&inner, session, subscription.scope)
                     {
-                        let mut context = inner.engine.format_status_context_for_client(
+                        let mut context = contexts.status_context(
                             Some(target.session),
                             target.window,
                             target.pane,
-                            session,
                         );
                         context.config_files.clone_from(&inner.config_files);
-                        let facts = FormatHookFacts {
-                            client: Some(client_facts.clone()),
-                            ..base_facts.clone()
-                        };
                         let mut hooks =
                             DaemonFormatHooks::command(&facts).with_option_engine(&inner.engine);
                         let value =
@@ -5300,6 +5327,8 @@ impl Shared {
             inner.engine.set_format_now(unix_timestamp());
             let base_facts = format_hook_facts(&inner);
             let mut fires = Vec::new();
+            let mut samples_by_monitor = Vec::new();
+            let contexts = inner.engine.format_context_snapshot(FormatClient::NoClient);
             for monitor in monitors {
                 let Some(session) = monitor
                     .session
@@ -5318,11 +5347,8 @@ impl Shared {
                 let mut seen = BTreeSet::new();
                 let mut samples = Vec::new();
                 for target in control_subscription_targets(&inner, session, scope) {
-                    let mut context = inner.engine.format_status_context(
-                        Some(target.session),
-                        target.window,
-                        target.pane,
-                    );
+                    let mut context =
+                        contexts.status_context(Some(target.session), target.window, target.pane);
                     context.config_files.clone_from(&inner.config_files);
                     let mut hooks =
                         DaemonFormatHooks::command(&base_facts).with_option_engine(&inner.engine);
@@ -5335,6 +5361,9 @@ impl Shared {
                     seen.insert(key);
                     samples.push((key, value));
                 }
+                samples_by_monitor.push((monitor, seen, samples));
+            }
+            for (monitor, seen, samples) in samples_by_monitor {
                 for (key, value) in samples {
                     if let Some(last) = inner
                         .engine
@@ -5685,6 +5714,7 @@ impl Shared {
             option_snapshot,
             format_hook_facts(&inner),
             startup_ready,
+            self.status_job_needs(client),
         );
         drop(inner);
         let mut hello = hello;
@@ -8261,7 +8291,7 @@ impl Shared {
                             terminal: Arc::clone(&session),
                             enabled: terminal_options.wrap_search,
                         });
-                        inner.terminals.insert(*pane, Arc::clone(&session));
+                        inner.terminals_mut().insert(*pane, Arc::clone(&session));
                         inner.terminal_spawns.insert(*pane, spawn);
                         inner.engine.set_pane_runtime_facts_with_hooks(
                             *pane,
@@ -8441,7 +8471,7 @@ impl Shared {
                             *entry = PaneExitWait::new();
                             entry.command_wait = command_wait;
                         }
-                        inner.terminals.insert(*pane, Arc::clone(&session));
+                        inner.terminals_mut().insert(*pane, Arc::clone(&session));
                         inner.terminal_spawns.insert(*pane, spawn);
                         inner.engine.set_pane_runtime_facts_with_hooks(
                             *pane,
@@ -8542,7 +8572,7 @@ impl Shared {
                             if let Some((columns, rows)) = inner.engine.pane_geometry(*pane) {
                                 session.resize(columns, rows, 0, 0);
                             }
-                            inner.terminals.insert(*pane, Arc::clone(&session));
+                            inner.terminals_mut().insert(*pane, Arc::clone(&session));
                             terminals_to_watch.push((*pane, session));
                         }
                         agent_panes_opened.push(*pane);
@@ -8594,7 +8624,7 @@ impl Shared {
                                 pipes_to_close.push(pipe);
                             }
                             Self::wake_pane_exit_wait(&mut inner, *pane, 0);
-                            inner.terminals.remove(pane);
+                            inner.terminals_mut().remove(pane);
                             inner.last_output.remove(pane);
                             #[cfg(all(feature = "agent", unix))]
                             inner.claude_peer_states.remove(pane);
@@ -9483,7 +9513,7 @@ impl Shared {
                         inner.automatic_paste_buffer_limit = AutomaticPasteBufferLimit(*limit);
                     }
                     MuxEffect::WordSeparatorsChanged { session } => {
-                        for (pane, terminal) in &inner.terminals {
+                        for (pane, terminal) in inner.terminals.iter() {
                             let Some(window) = inner.engine.state.window_for_pane(*pane) else {
                                 continue;
                             };
@@ -9520,7 +9550,7 @@ impl Shared {
                         }
                     }
                     MuxEffect::TerminalKnobsChanged { window, pane } => {
-                        for (candidate, terminal) in &inner.terminals {
+                        for (candidate, terminal) in inner.terminals.iter() {
                             if pane.is_some_and(|pane| pane != *candidate)
                                 || window.is_some_and(|window| {
                                     inner.engine.state.window_for_pane(*candidate) != Some(window)
@@ -15782,6 +15812,7 @@ impl Shared {
                 Arc::new(inner.engine.format_option_snapshot()),
                 format_hook_facts(&inner),
                 startup_ready,
+                self.status_job_needs(target),
             )
         };
         let status = {
@@ -18921,7 +18952,7 @@ impl Shared {
                 return;
             };
             let terminal = Arc::clone(&popup.terminal);
-            inner.terminals.insert(pane, Arc::clone(&terminal));
+            inner.terminals_mut().insert(pane, Arc::clone(&terminal));
             let current_path = terminal_working_directory(&terminal)
                 .map(|path| path.to_string_lossy().into_owned())
                 .unwrap_or_default();
@@ -30988,7 +31019,7 @@ struct ServerState {
     activity_sequence: u64,
     deferred_event_hooks: Vec<PendingHookEvent>,
     deferred_control_refresh: bool,
-    terminals: BTreeMap<PaneId, Arc<TerminalSession>>,
+    terminals: Arc<BTreeMap<PaneId, Arc<TerminalSession>>>,
     last_output: BTreeMap<PaneId, Instant>,
     #[cfg(all(feature = "agent", unix))]
     claude_peer_states: BTreeMap<PaneId, String>,
@@ -31249,6 +31280,12 @@ impl DiagnosticSample {
 struct PendingGuiRequest {
     client: ClientId,
     reply: crossbeam_channel::Sender<Result<String, String>>,
+}
+
+impl ServerState {
+    fn terminals_mut(&mut self) -> &mut BTreeMap<PaneId, Arc<TerminalSession>> {
+        Arc::make_mut(&mut self.terminals)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -35949,10 +35986,9 @@ fn mouse_format_variables(
     let Some(window) = inner.engine.state.window_for_pane(pane) else {
         return (variables, None);
     };
-    let session = inner.engine.state.windows[&window].session;
     let geometry = inner
         .engine
-        .format_status_context(Some(session), Some(window), Some(pane));
+        .pane_format_geometry(None, Some(window), Some(pane));
     let mut probe = None;
     if let (Some(left), Some(top)) = (geometry.pane_left, geometry.pane_top)
         && let (Some(x), Some(y)) = (mouse.column.checked_sub(left), mouse.row.checked_sub(top))
@@ -36019,7 +36055,7 @@ fn client_viewport_facts(
     let pane = inner.engine.state.windows.get(&window)?.active_pane;
     let geometry = inner
         .engine
-        .format_status_context(Some(session), Some(window), Some(pane));
+        .pane_format_geometry(Some(session), Some(window), Some(pane));
     let cursor = inner.terminals.get(&pane).and_then(|terminal| {
         let cursor = terminal
             .latest_viewport()
@@ -36532,6 +36568,9 @@ fn client_input_pane(
         })
 }
 
+#[cfg(test)]
+mod format_universe_tests;
+
 fn status_request(
     inner: &ServerState,
     client: ClientId,
@@ -36539,6 +36578,29 @@ fn status_request(
     option_snapshot: Arc<zz_mux::StatusRowVariables>,
     facts: FormatHookFacts,
     startup_ready: bool,
+    job_needs: FormatNeeds,
+) -> StatusRequest {
+    status_request_with(
+        inner,
+        client,
+        snapshot,
+        option_snapshot,
+        facts,
+        startup_ready,
+        job_needs,
+        &mut BTreeMap::new(),
+    )
+}
+
+fn status_request_with(
+    inner: &ServerState,
+    client: ClientId,
+    snapshot: &MuxSnapshot,
+    option_snapshot: Arc<zz_mux::StatusRowVariables>,
+    facts: FormatHookFacts,
+    startup_ready: bool,
+    job_needs: FormatNeeds,
+    line_needs: &mut BTreeMap<Option<SessionId>, FormatNeeds>,
 ) -> StatusRequest {
     let attached = client_attached_session(inner, client);
     let mut facts = facts;
@@ -36558,23 +36620,38 @@ fn status_request(
     let pane_borders = attached.map_or_else(Vec::new, |session| {
         border_presentations(inner, client, session, &facts)
     });
+    let formats = inner.engine.status_formats_for_session(attached);
+    let row_formats = inner.engine.status_format_array_for_session(attached);
+    let title_format = (attached.is_some() && inner.engine.set_titles_for_session(attached))
+        .then(|| inner.engine.set_titles_string_for_session(attached));
+    let message_styles = inner.engine.message_styles_for_session(attached);
+    let needs = *line_needs.entry(attached).or_insert_with(|| {
+        crate::status::status_line_needs(
+            &inner.engine,
+            &formats,
+            &row_formats,
+            title_format.as_deref(),
+            &message_styles,
+        )
+    }) | job_needs;
     StatusRequest {
         client,
-        formats: inner.engine.status_formats_for_session(attached),
-        row_formats: inner.engine.status_format_array_for_session(attached),
+        formats,
+        row_formats,
         option_snapshot,
         message_line: inner.engine.message_line_for_session(attached),
         customized: inner.engine.status_customized_for_session(attached),
-        title_format: (attached.is_some() && inner.engine.set_titles_for_session(attached))
-            .then(|| inner.engine.set_titles_string_for_session(attached)),
+        title_format,
         environment: inner.engine.job_environment(None),
         default_terminal: inner.engine.default_terminal_for_spawn().to_owned(),
         startup: !startup_ready,
-        context,
+        context: context.detach(needs),
         facts,
         client_scheme: inner.client_color_schemes.get(&client).copied(),
-        message_styles: inner.engine.message_styles_for_session(attached),
-        modes: attached.map_or_else(Vec::new, |session| mode_requests(inner, client, session)),
+        message_styles,
+        modes: attached.map_or_else(Vec::new, |session| {
+            mode_requests(inner, client, session, job_needs)
+        }),
         pane_borders,
     }
 }
@@ -36593,17 +36670,15 @@ fn border_presentations(
         return Vec::new();
     };
     let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(&inner.engine);
+    let contexts = inner
+        .engine
+        .format_context_snapshot(FormatClient::Attached(session));
     window_state
         .panes
         .keys()
         .take(zz_protocol::MAX_PANE_BORDER_PRESENTATIONS)
         .map(|pane| {
-            let context = inner.engine.format_status_context_for_client(
-                Some(session),
-                Some(window),
-                Some(*pane),
-                session,
-            );
+            let context = contexts.status_context(Some(session), Some(window), Some(*pane));
             let format = if *pane == window_state.active_pane {
                 "#{E:pane-active-border-style}"
             } else {
@@ -36621,19 +36696,61 @@ fn mode_requests(
     inner: &ServerState,
     client: ClientId,
     session: SessionId,
+    job_needs: FormatNeeds,
 ) -> Vec<crate::status::ModeRequest> {
     let copy = inner
         .copy_sessions
         .get(&client)
         .filter(|copy| !copy.exiting)
-        .and_then(|copy| {
-            let terminal = inner.terminals.get(&copy.pane)?;
-            mode_request(inner, client, session, copy.pane, terminal, false)
-        });
-    let view = inner.command_outputs.get(&client).and_then(|output| {
-        mode_request(inner, client, session, output.pane, &output.terminal, true)
-    });
-    copy.into_iter().chain(view).collect()
+        .and_then(|copy| Some((copy.pane, inner.terminals.get(&copy.pane)?, false)));
+    let view = inner
+        .command_outputs
+        .get(&client)
+        .map(|output| (output.pane, &output.terminal, true));
+    let mut shown = copy
+        .into_iter()
+        .chain(view)
+        .filter_map(|(pane, terminal, view)| {
+            mode_request_position(client, terminal, view).map(|position| (pane, view, position))
+        })
+        .peekable();
+    if shown.peek().is_none() {
+        return Vec::new();
+    }
+    let needs = inner.engine.format_needs(crate::status::MODE_FORMATS) | job_needs;
+    let contexts = inner
+        .engine
+        .format_context_snapshot(FormatClient::Attached(session));
+    shown
+        .filter_map(|(pane, view, position)| {
+            mode_request(inner, &contexts, needs, session, pane, view, position)
+        })
+        .collect()
+}
+
+fn mode_request(
+    inner: &ServerState,
+    contexts: &zz_mux::FormatContextSnapshot<'_>,
+    needs: FormatNeeds,
+    session: SessionId,
+    pane: PaneId,
+    view: bool,
+    (position, limit): (u32, u32),
+) -> Option<crate::status::ModeRequest> {
+    let window = inner.engine.state.window_for_pane(pane)?;
+    Some(crate::status::ModeRequest {
+        pane,
+        view,
+        context: contexts
+            .status_context(Some(session), Some(window), Some(pane))
+            .detach(needs),
+        position,
+        limit,
+        vi_keys: inner
+            .engine
+            .copy_mode_table_for_pane(pane)
+            .is_ok_and(|table| table == "copy-mode-vi"),
+    })
 }
 
 const fn mode_kind(mode: TerminalMode) -> u8 {
@@ -36651,14 +36768,11 @@ const fn mode_kind(mode: TerminalMode) -> u8 {
     }
 }
 
-fn mode_request(
-    inner: &ServerState,
+fn mode_request_position(
     client: ClientId,
-    session: SessionId,
-    pane: PaneId,
     terminal: &TerminalSession,
     view: bool,
-) -> Option<crate::status::ModeRequest> {
+) -> Option<(u32, u32)> {
     let viewport = terminal.latest_viewport_for(TerminalViewId(client.0))?;
     let shown = match viewport.mode {
         TerminalMode::Copy { hide_position, .. } => !view && !hide_position,
@@ -36672,24 +36786,7 @@ fn mode_request(
         .scrollbar
         .total
         .saturating_sub(viewport.scrollbar.len);
-    let window = inner.engine.state.window_for_pane(pane)?;
-    let context = inner.engine.format_status_context_for_client(
-        Some(session),
-        Some(window),
-        Some(pane),
-        session,
-    );
-    Some(crate::status::ModeRequest {
-        pane,
-        view,
-        context,
-        position: limit.saturating_sub(viewport.scrollbar.offset),
-        limit,
-        vi_keys: inner
-            .engine
-            .copy_mode_table_for_pane(pane)
-            .is_ok_and(|table| table == "copy-mode-vi"),
-    })
+    Some((limit.saturating_sub(viewport.scrollbar.offset), limit))
 }
 
 fn resolve_popup_client(
@@ -36852,7 +36949,7 @@ fn popup_position_variables(
     width: u16,
     height: u16,
 ) -> BTreeMap<String, String> {
-    let status = engine.format_status_context(target.session, target.window, target.pane);
+    let status = engine.pane_format_geometry(target.session, target.window, target.pane);
     let status_row = engine.status_formats_for_session(target.session);
     let status_lines = if status_row.enabled {
         u16::from(status_row.lines)
@@ -39725,11 +39822,7 @@ fn mouse_pane_cell(
     pane: PaneId,
     mouse: &MouseEventTarget,
 ) -> Option<(usize, usize)> {
-    let window = inner.engine.state.window_for_pane(pane)?;
-    let session = inner.engine.state.windows[&window].session;
-    let geometry = inner
-        .engine
-        .format_status_context(Some(session), Some(window), Some(pane));
+    let geometry = inner.engine.pane_format_geometry(None, None, Some(pane));
     let (left, top) = (geometry.pane_left?, geometry.pane_top?);
     let (x, y) = (mouse.column.checked_sub(left)?, mouse.row.checked_sub(top)?);
     if geometry.pane_right.is_none_or(|right| mouse.column > right)
@@ -39983,7 +40076,7 @@ fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
         copy_modes: Arc::new(copy_mode_format_facts(inner)),
         pane_modes: Arc::new(pane_mode_format_facts(inner)),
         unseen_changes: Arc::new(unseen_change_panes(inner)),
-        terminals: Arc::new(inner.terminals.clone()),
+        terminals: Arc::clone(&inner.terminals),
         pane_pipes: Arc::new(
             inner
                 .pane_pipes
@@ -46217,6 +46310,7 @@ mod tests {
                 option_snapshot,
                 FormatHookFacts::default(),
                 true,
+                FormatNeeds::NONE,
             );
             assert_eq!(request.context.config_files, expected);
         }
@@ -50092,7 +50186,7 @@ mod tests {
                 "client-focus sibling fixture".to_owned(),
                 "sibling".to_owned(),
             ));
-            inner.terminals.insert(sibling, Arc::clone(&terminal));
+            inner.terminals_mut().insert(sibling, Arc::clone(&terminal));
             (window, sibling, terminal)
         };
         shared
@@ -52564,7 +52658,7 @@ mod tests {
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(pane, Arc::clone(&terminal));
         shared
             .watch_terminal(pane, &terminal)
@@ -52581,7 +52675,7 @@ mod tests {
             "only the test and terminal map should own the session"
         );
 
-        shared.inner.lock().terminals.remove(&pane);
+        shared.inner.lock().terminals_mut().remove(&pane);
         drop(terminal);
         let deadline = Instant::now() + Duration::from_secs(2);
         while terminal_weak.upgrade().is_some() {
@@ -52611,7 +52705,7 @@ mod tests {
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(pane, Arc::clone(&terminal));
         shared
             .watch_terminal(pane, &terminal)
@@ -52649,7 +52743,7 @@ mod tests {
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(pane, Arc::clone(&replacement));
         shared.synchronize_pane_title(pane, &terminal, "stale watcher title");
         assert_eq!(
@@ -52658,7 +52752,7 @@ mod tests {
             "a retired watcher must not rename its replacement"
         );
 
-        shared.inner.lock().terminals.remove(&pane);
+        shared.inner.lock().terminals_mut().remove(&pane);
     }
 
     #[test]
@@ -56235,7 +56329,8 @@ mod tests {
                 .inner
                 .lock()
                 .engine
-                .format_status_context(None, None, None);
+                .format_status_context(None, None, None)
+                .detach(FormatNeeds::NONE);
             let now = u64::try_from(context.format_now.unwrap()).unwrap();
             assert!((before..=after).contains(&now));
         }
@@ -70447,7 +70542,7 @@ set-option -g @alias-mixed-next yes
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(pane, Arc::clone(&terminal));
         shared
             .attach(client, session)
@@ -78152,7 +78247,7 @@ set-option -g @alias-mixed-next yes
                 .state
                 .create_session("exit-status")
                 .expect("session");
-            inner.terminals.insert(ids.2, Arc::clone(&terminal));
+            inner.terminals_mut().insert(ids.2, Arc::clone(&terminal));
             ids
         };
         let context = ExecutionContext::new(Some(session), Some(window), Some(pane));
@@ -82697,7 +82792,7 @@ bind - split-window -v -c "#{pane_current_path}"
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(second, Arc::clone(&second_terminal));
         shared
             .watch_terminal(second, &second_terminal)
@@ -89133,7 +89228,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 "second window".to_owned(),
                 String::new(),
             ));
-            inner.terminals.insert(second_pane, terminal);
+            inner.terminals_mut().insert(second_pane, terminal);
             (first_window, second_window, second_pane)
         };
         shared
@@ -93636,12 +93731,12 @@ bind - split-window -v -c "#{pane_current_path}"
                 "/dev/pts/42",
             ]
         );
-        let expected_identity =
-            shared
-                .inner
-                .lock()
-                .engine
-                .format_status_context(Some(session), Some(window), None);
+        let expected_identity = shared
+            .inner
+            .lock()
+            .engine
+            .format_status_context(Some(session), Some(window), None)
+            .detach(FormatNeeds::NONE);
         assert_eq!(fields[21], expected_identity.uid);
         assert_eq!(fields[22], expected_identity.user);
         assert_eq!(&fields[23..27], ["1", "132", "1234", "333"]);
@@ -93714,6 +93809,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 option_snapshot,
                 format_hook_facts(&inner),
                 true,
+                FormatNeeds::NONE,
             )
         };
         status_request.formats.enabled = true;
@@ -100889,7 +100985,7 @@ bind - split-window -v -c "#{pane_current_path}"
                     false,
                 )
                 .expect("second window");
-            inner.terminals.insert(
+            inner.terminals_mut().insert(
                 second_pane,
                 Arc::new(TerminalSession::spawn_output_view(
                     "second fixture".to_owned(),
@@ -101225,7 +101321,7 @@ bind - split-window -v -c "#{pane_current_path}"
                     false,
                 )
                 .expect("second window");
-            inner.terminals.insert(
+            inner.terminals_mut().insert(
                 pane,
                 Arc::new(TerminalSession::spawn_output_view(
                     "second fixture".to_owned(),
@@ -101520,7 +101616,7 @@ bind - split-window -v -c "#{pane_current_path}"
                     false,
                 )
                 .expect("second window");
-            inner.terminals.insert(
+            inner.terminals_mut().insert(
                 second_pane,
                 Arc::new(TerminalSession::spawn_output_view(
                     "second fixture".to_owned(),
@@ -103115,7 +103211,7 @@ bind - split-window -v -c "#{pane_current_path}"
             );
         }
 
-        let terminal = shared.inner.lock().terminals.remove(&pane);
+        let terminal = shared.inner.lock().terminals_mut().remove(&pane);
         assert_eq!(
             choose_path_error(choose_path(ClientKind::Interactive, &mut context, &[])),
             "choose-path needs a terminal pane"
@@ -107740,7 +107836,7 @@ bind - split-window -v -c "#{pane_current_path}"
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(pane, Arc::clone(&terminal));
         shared
             .watch_terminal(pane, &terminal)
@@ -108072,7 +108168,7 @@ bind - split-window -v -c "#{pane_current_path}"
         }
     }
 
-    fn take_reliable_messages(mailbox: &OutboundMailbox) -> Vec<ProtocolMessage> {
+    pub(super) fn take_reliable_messages(mailbox: &OutboundMailbox) -> Vec<ProtocolMessage> {
         let frames = {
             let mut state = mailbox.state.lock();
             let frames = state.reliable.drain(..).collect::<Vec<_>>();

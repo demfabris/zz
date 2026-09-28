@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 chrono = { workspace = true, features = ["alloc", "std"] }
+foldhash.workspace = true
 glob = "0.3"
 parking_lot.workspace = true
 regex.workspace = true

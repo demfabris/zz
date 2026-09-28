@@ -44,22 +44,22 @@ use crate::{
     copy_actions::pinned_copy_action,
     formats::{
         CommandHooks, FormatClient, FormatClientRow, FormatContext, FormatEnvironRow, FormatJobTag,
-        FormatOptionRow, FormatType, StatusHooks, expand_format_time_traced,
-        expand_format_time_with_hooks, expand_format_with_hooks, format_listing, format_true,
-        parse_tmux_colour,
+        FormatOptionRow, FormatType, LayoutDumps, PreparedFormat, StatusHooks,
+        expand_format_time_traced, expand_format_time_with_hooks, expand_format_with_hooks,
+        format_listing, format_true, parse_tmux_colour,
     },
     honest_knobs::{
         AllowPassthrough, PaneOption, PaneOptions, ServerOption, ServerOptions, SessionOption,
         SessionOptions, WindowOption, WindowOptions,
     },
     layout::{CellLayout, PANE_MAXIMUM},
-    model::{DEFAULT_WINDOW_EXTENT, NO_MARKED_TARGET, fnmatch, is_marked_target},
+    model::{DEFAULT_WINDOW_EXTENT, GlobPattern, NO_MARKED_TARGET, is_marked_target},
     terminfo::TtyTerm,
     tmux_options::{
         HOOK_NAMES, TmuxArrayValue, TmuxOption, TmuxOptionScope, TmuxStoredScalarKind,
-        exact_tmux_option, match_tmux_option, parse_tmux_option, tmux_option_format_is_flag,
-        tmux_option_is_hook, tmux_option_table_order, tmux_options, tmux_stored_array,
-        tmux_stored_scalar,
+        exact_tmux_option, match_tmux_option, parse_tmux_option, tmux_consumer_options,
+        tmux_option_format_is_flag, tmux_option_is_hook, tmux_option_table_order,
+        tmux_option_with_consumer, tmux_options, tmux_stored_array, tmux_stored_scalar,
     },
     valid_style,
 };
@@ -608,7 +608,7 @@ impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
         self.inner.client_environment_rows()
     }
 
-    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+    fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
         self.inner.client_tty_term()
     }
 
@@ -1452,7 +1452,7 @@ impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
         self.inner.client_environment_rows()
     }
 
-    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+    fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
         self.inner.client_tty_term()
     }
 
@@ -1519,7 +1519,7 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
         self.inner.client_environment_rows()
     }
 
-    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+    fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
         self.inner.client_tty_term()
     }
 
@@ -1576,7 +1576,7 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
         self.inner.client_environment_rows()
     }
 
-    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+    fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
         self.inner.client_tty_term()
     }
 
@@ -1775,6 +1775,8 @@ enum ShowOptionArgument {
 
 type UserOptions = BTreeMap<String, String>;
 
+type SharedUserOptions = Arc<UserOptions>;
+
 /// What format expansion reads without holding the engine: `#{pane_kind}` and
 /// `#{@name}` readback, keyed by the ids a `StatusContext` already carries.
 #[derive(Clone, Debug, Default)]
@@ -1782,12 +1784,12 @@ pub struct FormatFacts {
     pane_kinds: BTreeMap<String, &'static str>,
     browser_urls: BTreeMap<String, String>,
     pane_windows: BTreeMap<String, String>,
-    server: UserOptions,
-    global_session: UserOptions,
-    sessions: BTreeMap<String, UserOptions>,
-    global_window: UserOptions,
-    windows: BTreeMap<String, UserOptions>,
-    panes: BTreeMap<String, UserOptions>,
+    server: SharedUserOptions,
+    global_session: SharedUserOptions,
+    sessions: BTreeMap<String, SharedUserOptions>,
+    global_window: SharedUserOptions,
+    windows: BTreeMap<String, SharedUserOptions>,
+    panes: BTreeMap<String, SharedUserOptions>,
 }
 
 impl FormatFacts {
@@ -1879,8 +1881,8 @@ fn parse_format_option(input: &str) -> Option<(TmuxOption, FormatOptionIndex)> {
     } else {
         (input, FormatOptionIndex::Whole)
     };
-    let option = exact_tmux_option(name)?;
-    if !TMUX_OPTION_CONSUMERS.contains(&option.name) {
+    let (option, consumer) = tmux_option_with_consumer(name)?;
+    if !consumer {
         return None;
     }
     if matches!(
@@ -2099,12 +2101,12 @@ pub struct MuxEngine {
     session_initial_repeat_time_ms: BTreeMap<SessionId, u32>,
     global_repeat_time_ms: u32,
     session_repeat_time_ms: BTreeMap<SessionId, u32>,
-    server_user_options: UserOptions,
-    global_session_user_options: UserOptions,
-    session_user_options: BTreeMap<SessionId, UserOptions>,
-    global_window_user_options: UserOptions,
-    window_user_options: BTreeMap<WindowId, UserOptions>,
-    pane_user_options: BTreeMap<PaneId, UserOptions>,
+    server_user_options: SharedUserOptions,
+    global_session_user_options: SharedUserOptions,
+    session_user_options: BTreeMap<SessionId, SharedUserOptions>,
+    global_window_user_options: SharedUserOptions,
+    window_user_options: BTreeMap<WindowId, SharedUserOptions>,
+    pane_user_options: BTreeMap<PaneId, SharedUserOptions>,
     stored_arrays: StoredArrays,
     stored_scalars: StoredScalars,
     global_hooks: HookTable,
@@ -2376,10 +2378,10 @@ impl Default for MuxEngine {
             session_initial_repeat_time_ms: BTreeMap::new(),
             global_repeat_time_ms: DEFAULT_REPEAT_TIME_MS,
             session_repeat_time_ms: BTreeMap::new(),
-            server_user_options: UserOptions::new(),
-            global_session_user_options: UserOptions::new(),
+            server_user_options: SharedUserOptions::default(),
+            global_session_user_options: SharedUserOptions::default(),
             session_user_options: BTreeMap::new(),
-            global_window_user_options: UserOptions::new(),
+            global_window_user_options: SharedUserOptions::default(),
             window_user_options: BTreeMap::new(),
             pane_user_options: BTreeMap::new(),
             stored_arrays: StoredArrays::default(),
@@ -2644,11 +2646,7 @@ impl MuxEngine {
         scope: TmuxOptionScope,
         target: TmuxOptionTarget,
     ) {
-        for name in TMUX_OPTION_CONSUMERS {
-            let option = exact_tmux_option(name).expect("consumer option is catalogued");
-            if option.scope != scope {
-                continue;
-            }
+        for &option in tmux_consumer_options(scope) {
             if let Some(array) = self.format_option_array(target, option.name) {
                 values.insert(
                     option.name.to_owned(),
@@ -2713,6 +2711,124 @@ impl MuxEngine {
             };
         }
         self.format_scalar_option(target, option)
+    }
+
+    pub(crate) fn format_option_always_answers(&self, name: &str) -> bool {
+        let Some((option, index)) = parse_format_option(name) else {
+            return false;
+        };
+        let global = match option.scope {
+            TmuxOptionScope::Server => TmuxOptionTarget::Server,
+            TmuxOptionScope::Session => TmuxOptionTarget::GlobalSession,
+            TmuxOptionScope::Window | TmuxOptionScope::WindowPane => TmuxOptionTarget::GlobalWindow,
+        };
+        matches!(index, FormatOptionIndex::Invalid)
+            || self.format_option_array(global, option.name).is_some()
+            || self.format_scalar_option(global, option).is_some()
+    }
+
+    pub(crate) fn format_option_texts(&self, name: &str, visit: &mut dyn FnMut(&str)) -> bool {
+        if name.starts_with('@') {
+            let mut global = false;
+            for options in [
+                &self.server_user_options,
+                &self.global_session_user_options,
+                &self.global_window_user_options,
+            ] {
+                if let Some(value) = options.get(name) {
+                    visit(value);
+                    global = true;
+                }
+            }
+            for options in self
+                .session_user_options
+                .values()
+                .chain(self.window_user_options.values())
+                .chain(self.pane_user_options.values())
+            {
+                if let Some(value) = options.get(name) {
+                    visit(value);
+                }
+            }
+            return global;
+        }
+        let Some((option, _)) = parse_format_option(name) else {
+            return false;
+        };
+        let global = match option.scope {
+            TmuxOptionScope::Server => TmuxOptionTarget::Server,
+            TmuxOptionScope::Session => TmuxOptionTarget::GlobalSession,
+            TmuxOptionScope::Window | TmuxOptionScope::WindowPane => TmuxOptionTarget::GlobalWindow,
+        };
+        let complete = self.visit_format_option_at(global, option, true, visit);
+        match option.scope {
+            TmuxOptionScope::Server => {}
+            TmuxOptionScope::Session => {
+                for session in self.state.sessions.keys() {
+                    self.visit_format_option_at(
+                        TmuxOptionTarget::Session(*session),
+                        option,
+                        false,
+                        visit,
+                    );
+                }
+            }
+            TmuxOptionScope::Window => {
+                for window in self.state.windows.keys() {
+                    self.visit_format_option_at(
+                        TmuxOptionTarget::Window(*window),
+                        option,
+                        false,
+                        visit,
+                    );
+                }
+            }
+            TmuxOptionScope::WindowPane => {
+                for window in self.state.windows.values() {
+                    self.visit_format_option_at(
+                        TmuxOptionTarget::Window(window.id),
+                        option,
+                        false,
+                        visit,
+                    );
+                    for pane in window.panes.keys() {
+                        self.visit_format_option_at(
+                            TmuxOptionTarget::Pane(*pane),
+                            option,
+                            false,
+                            visit,
+                        );
+                    }
+                }
+            }
+        }
+        complete
+    }
+
+    fn visit_format_option_at(
+        &self,
+        target: TmuxOptionTarget,
+        option: TmuxOption,
+        inherited: bool,
+        visit: &mut dyn FnMut(&str),
+    ) -> bool {
+        if let Some((array, _)) = matches!(
+            option.name,
+            "command-alias" | "pane-colours" | "status-format" | "update-environment"
+        )
+        .then(|| self.array_option_readback(target, option.name, inherited))
+        .flatten()
+        {
+            for value in array.values() {
+                visit(value);
+            }
+            return true;
+        }
+        let Ok(Some((value, _))) = self.tmux_option_readback(option, target, inherited) else {
+            return false;
+        };
+        visit(&value);
+        true
     }
 
     fn format_option_target(
@@ -3203,7 +3319,20 @@ impl MuxEngine {
 
     #[must_use]
     pub fn window_size(&self, window: WindowId) -> WindowSize {
-        self.window_knobs(window).window_size
+        self.window_options
+            .get(&window)
+            .and_then(|overrides| overrides.get(&WindowOption::WindowSize))
+            .and_then(|value| {
+                [
+                    WindowSize::Largest,
+                    WindowSize::Smallest,
+                    WindowSize::Manual,
+                    WindowSize::Latest,
+                ]
+                .into_iter()
+                .find(|size| size.as_str() == value)
+            })
+            .unwrap_or(self.global_window_options.window_size)
     }
 
     /// `window_get_pane_status`: the window's `pane-border-status`, with
@@ -5110,6 +5239,8 @@ impl MuxEngine {
             ordering.then_with(|| left.name.cmp(&right.name))
         });
         let mut output = Vec::new();
+        let universe = self.format_universe(FormatClient::NoClient);
+        let mut dumps = LayoutDumps::default();
         for (line, session) in sessions.into_iter().enumerate() {
             let format_context = FormatContext {
                 session: Some(session),
@@ -5119,30 +5250,24 @@ impl MuxEngine {
                 format_client: FormatClient::NoClient,
                 format_type: FormatType::Session,
             };
+            let prepared =
+                PreparedFormat::with_universe(self, format_context, universe.clone(), &mut dumps);
             if let Some(filter) = options.value("-f") {
                 let mut row_hooks = RowFormatHooks { inner: hooks, line };
-                let expanded =
-                    expand_format_with_hooks(filter, self, format_context, &mut row_hooks);
-                if !format_true(&expanded) {
+                if !format_true(&prepared.expand(filter, &mut row_hooks)) {
                     continue;
                 }
             }
             let mut row_hooks = RowFormatHooks { inner: hooks, line };
             output.push(if options.has("--json") {
-                let values = self.format_status_context_with_format_client(
-                    format_context.session,
-                    format_context.window,
-                    format_context.pane,
-                    format_context.active_session,
-                    format_context.format_client,
-                );
                 RawText::from(
-                    values
+                    prepared
+                        .values()
                         .scoped_format_values("session", &mut row_hooks)
                         .to_string(),
                 )
             } else {
-                expand_format_with_hooks(format, self, format_context, &mut row_hooks)
+                prepared.expand(format, &mut row_hooks)
             });
         }
         Ok(Execution::output(RawText::join(&output, b"\n")))
@@ -5604,6 +5729,8 @@ impl MuxEngine {
         });
         let line = windows.len();
         let mut output = Vec::new();
+        let universe = self.format_universe(FormatClient::NoClient);
+        let mut dumps = LayoutDumps::default();
         for (session, window) in windows {
             let format_context = FormatContext {
                 session: Some(session),
@@ -5613,30 +5740,24 @@ impl MuxEngine {
                 format_client: FormatClient::NoClient,
                 format_type: FormatType::Window,
             };
+            let prepared =
+                PreparedFormat::with_universe(self, format_context, universe.clone(), &mut dumps);
             if let Some(filter) = options.value("-f") {
                 let mut row_hooks = RowFormatHooks { inner: hooks, line };
-                let expanded =
-                    expand_format_with_hooks(filter, self, format_context, &mut row_hooks);
-                if !format_true(&expanded) {
+                if !format_true(&prepared.expand(filter, &mut row_hooks)) {
                     continue;
                 }
             }
             let mut row_hooks = RowFormatHooks { inner: hooks, line };
             output.push(if options.has("--json") {
-                let values = self.format_status_context_with_format_client(
-                    format_context.session,
-                    format_context.window,
-                    format_context.pane,
-                    format_context.active_session,
-                    format_context.format_client,
-                );
                 RawText::from(
-                    values
+                    prepared
+                        .values()
                         .scoped_format_values("window", &mut row_hooks)
                         .to_string(),
                 )
             } else {
-                expand_format_with_hooks(format, self, format_context, &mut row_hooks)
+                prepared.expand(format, &mut row_hooks)
             });
         }
         Ok(Execution::output(RawText::join(&output, b"\n")))
@@ -7182,6 +7303,8 @@ impl MuxEngine {
             DEFAULT_LIST_PANES_FORMAT
         });
         let mut output = Vec::new();
+        let universe = self.format_universe(FormatClient::NoClient);
+        let mut dumps = LayoutDumps::default();
         for window_id in window_ids {
             let window = self
                 .state
@@ -7237,30 +7360,28 @@ impl MuxEngine {
                     format_client: FormatClient::NoClient,
                     format_type: FormatType::Pane,
                 };
+                let prepared = PreparedFormat::with_universe(
+                    self,
+                    format_context,
+                    universe.clone(),
+                    &mut dumps,
+                );
                 if let Some(filter) = options.value("-f") {
                     let mut row_hooks = RowFormatHooks { inner: hooks, line };
-                    let expanded =
-                        expand_format_with_hooks(filter, self, format_context, &mut row_hooks);
-                    if !format_true(&expanded) {
+                    if !format_true(&prepared.expand(filter, &mut row_hooks)) {
                         continue;
                     }
                 }
                 let mut row_hooks = RowFormatHooks { inner: hooks, line };
                 output.push(if options.has("--json") {
-                    let values = self.format_status_context_with_format_client(
-                        format_context.session,
-                        format_context.window,
-                        format_context.pane,
-                        format_context.active_session,
-                        format_context.format_client,
-                    );
                     RawText::from(
-                        values
+                        prepared
+                            .values()
                             .scoped_format_values("pane", &mut row_hooks)
                             .to_string(),
                     )
                 } else {
-                    expand_format_with_hooks(format, self, format_context, &mut row_hooks)
+                    prepared.expand(format, &mut row_hooks)
                 });
             }
         }
@@ -9175,6 +9296,17 @@ impl MuxEngine {
         );
         let had_binding = !bindings.is_empty();
         let mut output = Vec::new();
+        let prepared = PreparedFormat::new(
+            self,
+            FormatContext {
+                session: context.session,
+                window: context.window,
+                pane: context.pane,
+                active_session: context.session,
+                format_client: context.target_format_client(),
+                format_type: FormatType::None,
+            },
+        );
         for listed in bindings {
             let mut item_hooks = ListKeyHooks {
                 inner: &mut *hooks,
@@ -9187,19 +9319,7 @@ impl MuxEngine {
                 key_width,
                 table_width,
             };
-            let line = expand_format_with_hooks(
-                format,
-                self,
-                FormatContext {
-                    session: context.session,
-                    window: context.window,
-                    pane: context.pane,
-                    active_session: context.session,
-                    format_client: context.target_format_client(),
-                    format_type: FormatType::None,
-                },
-                &mut item_hooks,
-            );
+            let line = prepared.expand(format, &mut item_hooks);
             if !line.is_empty() {
                 output.push(line);
             }
@@ -9262,24 +9382,23 @@ impl MuxEngine {
         specs.sort_by_key(|spec| spec.name);
         let format = options.value("-F").unwrap_or(DEFAULT_LIST_COMMANDS_FORMAT);
         let mut output = Vec::with_capacity(specs.len());
+        let prepared = PreparedFormat::new(
+            self,
+            FormatContext {
+                session: context.session,
+                window: context.window,
+                pane: context.pane,
+                active_session: context.session,
+                format_client: FormatClient::NoClient,
+                format_type: FormatType::None,
+            },
+        );
         for spec in specs {
             let mut item_hooks = ListCommandHooks {
                 inner: &mut *hooks,
                 spec,
             };
-            output.push(expand_format_with_hooks(
-                format,
-                self,
-                FormatContext {
-                    session: context.session,
-                    window: context.window,
-                    pane: context.pane,
-                    active_session: context.session,
-                    format_client: FormatClient::NoClient,
-                    format_type: FormatType::None,
-                },
-                &mut item_hooks,
-            ));
+            output.push(prepared.expand(format, &mut item_hooks));
         }
         Ok(Execution::output(RawText::join(&output, b"\n")))
     }
@@ -10670,7 +10789,7 @@ impl MuxEngine {
                     .unwrap_or_default();
                 for pane in panes {
                     if let Some(values) = self.pane_user_options.get_mut(&pane) {
-                        values.remove(option);
+                        Arc::make_mut(values).remove(option);
                     }
                 }
             }
@@ -11128,10 +11247,11 @@ impl MuxEngine {
             TmuxOptionTarget::Window(window) => self.window_user_options.get(&window),
             TmuxOptionTarget::Pane(pane) => self.pane_user_options.get(&pane),
         }
+        .map(Arc::as_ref)
     }
 
     fn user_options_at_target_mut(&mut self, target: TmuxOptionTarget) -> &mut UserOptions {
-        match target {
+        Arc::make_mut(match target {
             TmuxOptionTarget::Server => &mut self.server_user_options,
             TmuxOptionTarget::GlobalSession => &mut self.global_session_user_options,
             TmuxOptionTarget::Session(session) => {
@@ -11140,7 +11260,7 @@ impl MuxEngine {
             TmuxOptionTarget::GlobalWindow => &mut self.global_window_user_options,
             TmuxOptionTarget::Window(window) => self.window_user_options.entry(window).or_default(),
             TmuxOptionTarget::Pane(pane) => self.pane_user_options.entry(pane).or_default(),
-        }
+        })
     }
 
     fn user_option_readback<'a>(
@@ -15696,15 +15816,35 @@ fn session_creation_environment(options: &Options) -> Vec<(String, String)> {
         .collect()
 }
 
+type CompiledPatterns = Arc<[(String, GlobPattern)]>;
+
+fn compiled_update_environment(patterns: &[String]) -> CompiledPatterns {
+    static COMPILED: std::sync::LazyLock<
+        parking_lot::Mutex<Option<(Vec<String>, CompiledPatterns)>>,
+    > = std::sync::LazyLock::new(parking_lot::Mutex::default);
+    let mut cached = COMPILED.lock();
+    if let Some((key, compiled)) = cached.as_ref()
+        && key.as_slice() == patterns
+    {
+        return Arc::clone(compiled);
+    }
+    let compiled: CompiledPatterns = patterns
+        .iter()
+        .map(|pattern| (pattern.clone(), GlobPattern::new(pattern)))
+        .collect();
+    *cached = Some((patterns.to_vec(), Arc::clone(&compiled)));
+    compiled
+}
+
 fn apply_client_environment_update(
     environment: &mut Environment,
     patterns: &[String],
     client_environment: &BTreeMap<RawText, RawText>,
 ) {
-    for pattern in patterns {
+    for (pattern, glob) in compiled_update_environment(patterns).iter() {
         let matches = client_environment
             .iter()
-            .filter(|(name, _)| fnmatch(pattern, name))
+            .filter(|(name, _)| glob.matches(name))
             .map(|(name, value)| (name.clone(), value.clone()))
             .collect::<Vec<_>>();
         if matches.is_empty() {
@@ -16106,22 +16246,22 @@ impl MuxEngine {
             }
         }
         fn keyed<K: std::fmt::Display>(
-            options: &BTreeMap<K, UserOptions>,
-        ) -> BTreeMap<String, UserOptions> {
+            options: &BTreeMap<K, SharedUserOptions>,
+        ) -> BTreeMap<String, SharedUserOptions> {
             options
                 .iter()
                 .filter(|(_, values)| !values.is_empty())
-                .map(|(id, values)| (id.to_string(), values.clone()))
+                .map(|(id, values)| (id.to_string(), Arc::clone(values)))
                 .collect()
         }
         FormatFacts {
             pane_kinds,
             browser_urls,
             pane_windows,
-            server: self.server_user_options.clone(),
-            global_session: self.global_session_user_options.clone(),
+            server: Arc::clone(&self.server_user_options),
+            global_session: Arc::clone(&self.global_session_user_options),
             sessions: keyed(&self.session_user_options),
-            global_window: self.global_window_user_options.clone(),
+            global_window: Arc::clone(&self.global_window_user_options),
             windows: keyed(&self.window_user_options),
             panes: keyed(&self.pane_user_options),
         }

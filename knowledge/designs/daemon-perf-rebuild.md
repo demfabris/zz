@@ -663,11 +663,13 @@ Scope:
 2. **Universe as `Built(Arc<FormatUniverse>) | Deferred(&'e MuxEngine)`**, deferred only inside a
    lock scope. Parts (loop items, option rows per scope, environment + window user options) fill
    on first read. `StatusContext.format_universe` changes type from the owned Arc. `detach()`
-   builds the parts a template scan needs at **every escape point**: status request, border
-   presentations, mode request, chooser rows, control subscriptions, format monitors, hook
-   contexts. Any part not built and read off-lock renders empty with no error, which is the bug
-   this rule prevents. No existing lazy path to reuse: `FormatContextSnapshot` builds on the first
-   `status_context()` call.
+   builds the parts a template scan needs at **every escape point**. Any part not built and read
+   off-lock renders empty with no error, which is the bug this rule prevents. No existing lazy
+   path to reuse: `FormatContextSnapshot` builds on the first `status_context()` call.
+   As built, the engine borrow is the `'e` of `StatusContext<'e>`, so the compiler finds every
+   escape: only the status request and the mode requests leave the lock. Border presentations,
+   chooser rows, control subscriptions, format monitors and hook bodies expand inside it on one
+   deferred universe per client per call.
 3. `expand_format_inner`, `expand_format_with_hooks`: return input unchanged when it has no `#`
    (and no `%` when time expansion is on); lazy `option_fallback`.
 4. `list_keys`, `list_commands` resolve once; `list_sessions`, `list_windows`, `list_panes`
@@ -714,6 +716,80 @@ terminal-overrides refresh; `compat_manifest_tests.rs`, `format_modifier_client_
 Expected: universe 95% of list-keys CPU; list-keys 17 -> ~1.6 ms (1 pane), 78 -> ~4 ms (20);
 list-* linear, not quadratic; option lookups 470 of 569 `format_option_snapshot` samples; regex
 52 of 344 in the 20-pane status render.
+
+As built (branch `perf/format`):
+
+- `StatusContext<'e>` is `StatusValues` (the table values, reached through `Deref`) plus a
+  `FormatUniverseRef<'e>`: an `Arc` part cache and the engine that may fill it. Loop items store
+  their values once, share one empty universe handle, and loops walk them by reference.
+  `StatusContext` has no `PartialEq`; tests compare values and expanded output.
+- `detach(needs)` fills the parts the scan asked for over everything a loop item can reach: an
+  `S` item carries its session's active window and pane, and a `W` item its window's active
+  pane, so those windows' pane lists and option rows are built too. Lookups of entities that do
+  not exist are cached as absent. A detached handle that misses a part it was not filled with
+  trips a `debug_assert` (per part, not per kind) unless it was filled with everything.
+- The template scan is `MuxEngine::format_needs`: loops, `N:`, `O:`, `V:`, and any name that
+  is neither a table name nor an option with a global value (environment fallthrough). `E:` and
+  `T:` on an option follow its value at every scope; on anything else, or on an option some
+  context lacks, the scan asks for everything. A status refresh scans once per session, not per
+  client.
+- A status job's output is only known to the renderer. Each output is scanned once when it
+  arrives, and `poll_jobs` records the union per client in a leaf-locked map
+  (`StatusJobNeeds`) that `status_request` reads. An output that arrives between a request and
+  its render is not expanded on a universe that lacks its parts: the render is not published,
+  the client is marked, and the sampler's next `poll_jobs` refreshes it with the new needs.
+- `pane_format_geometry` is an engine method sharing `format_target` with context resolution.
+- Found by profile and removed as well: `FormatFacts` user options are shared copy-on-write
+  maps, so a fact snapshot per command takes refcounts instead of copying every `@option`;
+  built `TtyTerm`s are cached by their five inputs, looked up by borrowed values, and handed out
+  as `Arc`s; `update-environment` patterns compile once per array (`GlobPattern`); the option
+  index hashes with foldhash; a status refresh with no matching subscriber returns before it
+  builds the snapshot, the facts and `format_option_snapshot`.
+- `ZZ_PERF_EAGER_UNIVERSE=1` fills every part on creation and detach; `with_eager_universe`
+  flips it per thread and is the oracle of the differential tests in
+  `crates/zz-mux/src/format_universe_tests.rs` and
+  `crates/zz-daemon/src/daemon/format_universe_tests.rs` (loop compositions inside `S`/`W`,
+  status requests with partial needs, and a status job whose output needs a part the templates
+  do not).
+- Measured with `--quick` on the lane base (157ac6a3) and on the lane head (instructions are
+  stable to 1% across hosts and loads; wall and CPU are not): `list-keys` 249 -> 25.1 Minstr at
+  p1 and 1128 -> 28.6 at p20; `list-panes -a`, `list-windows -a`, `list-sessions` at s20
+  ~123 -> ~14 Minstr each (tmux 4.5, 2.9, 30.6); `display-message` 10.8 -> 7.4 (p1) and
+  29.2 -> 11.0 (p20); 1000-line `source-file` 3647 -> 2530 Minstr; `chatty.cpu_pct` flip
+  34 -> 16%, hidden 69 -> 22.5%; `control.instr_per_cmd` 7.66 -> 2.23;
+  `statusjob.instr_per_s` 59.6 -> 15.4; `attach.instr.p1` 123 -> 42.
+
+Still failing at the lane head, on a quiet host (load 7 on 16 CPUs): `cli.wall.list_keys` 1.04x
+(p1) and 1.06-1.08x (p20) tmux against 1.0; `cli.wall.list_panes_a.s20` 1.46-1.49x;
+`cli.cpu.list_windows_a.s20` 7.5-8.9x and `cli.cpu.list_panes_a.s20` 6.6x against 1.2x;
+`cli.cpu.list_sessions.s20` 1.14-1.26x (borderline); `config.wall.source_1000` 170 ms against
+25 ms. `list-keys` CPU passes (2.15 ms at p1, 3.33 ms at p20). Format work is not gone from the profiles (shares of busy daemon samples):
+
+- `display-message` p20: about 15%, all for the hello status of a one-shot command client
+  (`register` -> `status_request` -> `render_initial`). EXEC's `Exec` path has no hello, which
+  removes it.
+- `list-windows -a` s20: `list_windows` 15.5% (`PreparedFormat::expand` 8.2%,
+  `resolve_batched` 5.7%), about 2.2 Minstr, roughly tmux's whole 2.9 Minstr command. Key
+  tables are 66-70% of the samples (PUBLISH); without them about 0.67 ms CPU remains against a
+  0.36 ms budget, so the `list_*_a` rows also need W2-FMT's compiled templates and borrowed
+  handles, and EXEC's one-frame command.
+- `list-keys` p20: per-row template parsing is 25-30% (`expand_replacement`, `split_once_top`,
+  `pad_value`, `from_modifiers`); zz is already 0.54x tmux on instructions. W2-FMT's op-list
+  cache removes it.
+- hidden chatty: `refresh_status_filtered` 20.5% (`status_request` 6.7%, render 6.2%,
+  `format_option_snapshot` 5.3%, `format_hook_facts` 3.6%, the scan 3.1%). The refresh rate is
+  PUBLISH's; the scan and the snapshot per refresh need an options generation to cache across
+  refreshes, which W2-FMT introduces for its template cache.
+- 1000-line config replay: key-table snapshots are 90% of what is left (PUBLISH, about 16 ms
+  once it lands). A `set @x` clones that scope's user option map once, because the command's
+  own fact snapshot holds a refcount while the command runs (1.4% at 400 `@options`); before
+  this lane every command copied every map. W2-FMT's borrowed facts remove the snapshot.
+
+`attach.tty_total.p1` goes over its 1.05 tolerance in 2 of 3 quick runs (170-179 KB against
+W0's 162 KB). The status content is the same; the faster hello changes the order in which the
+TUI paints its "waiting for frame" placeholder (11 paints instead of 9, then a full redraw).
+W1-ATTACH item 5 (never paint an empty pane before its first frame) removes the placeholder
+paints; until it lands, the merge run should expect this row to be order-dependent.
 
 ## W1-PANE: frames for watchers, compression, threads, spawn (effort L)
 
@@ -1161,8 +1237,8 @@ lookup goes options first, then a static sorted callback table (one function per
 binary search or `phf`), then the per-command tree, then the environment, as `format_find` does.
 Loops (`#{S:}`, `#{W:}`, `#{P:}`) push a child tree per item. Templates are parsed once into an
 op list cached by (template string, options generation), so status, borders and list commands
-stop re-parsing. Daemon facts are borrowed, never cloned into the context. The seven escape
-points keep `detach()`, now producing only the values a compiled template references.
+stop re-parsing. Daemon facts are borrowed, never cloned into the context. The two escape
+points W1-FORMAT found (status and mode requests) keep `detach()`, now producing only the values a compiled template references.
 
 Write zone: formats.rs (all but the time helpers), the `StatusContext` users in status.rs and
 command.rs `StatusRowVariables`, daemon.rs `format_hook_facts*`.
@@ -1172,6 +1248,13 @@ Gate `--stage wave2`: format code under 3% of samples in `cli.list_keys.p20`, st
 `chatty.cpu_pct.visible` improves on the W2-HOOKS merge. Tests: the format differential rows in
 `compat/run.sh` (formats, formats-values, status rows, choosers) with exact output, plus a
 property test that the compiled path and the W1 lazy path agree on every pinned format name.
+
+Handed over from W1-FORMAT (see its As-built block): per-row template parsing is 25-30% of
+`list-keys` p20; `list_windows` costs about 2.2 Minstr at s20 against tmux's 2.9 for the whole
+command; the status template scan and `format_option_snapshot` run on every refresh because
+nothing tells them options changed, so the options generation this lane adds for its template
+cache should key them too; the per-command `FormatHookFacts` snapshot makes every `set @x` clone
+that scope's user option map.
 
 ## W4-ROWS: bulk row extraction from libghostty (effort M)
 

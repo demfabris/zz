@@ -11606,7 +11606,6 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
- "sysinfo 0.39.6",
  "tempfile",
  "windows 0.62.2",
  "zz-config",

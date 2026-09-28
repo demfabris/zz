@@ -18,7 +18,6 @@ log.workspace = true
 mimalloc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sysinfo.workspace = true
 zz-config = { path = "../zz-config" }
 zz-daemon = { path = "../zz-daemon" }
 zz-mux = { path = "../zz-mux" }

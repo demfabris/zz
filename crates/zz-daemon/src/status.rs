@@ -882,7 +882,7 @@ pub(crate) fn status_context(
 pub(crate) fn host_names() -> &'static (String, String) {
     static HOST: OnceLock<(String, String)> = OnceLock::new();
     HOST.get_or_init(|| {
-        let host = sysinfo::System::host_name()
+        let host = crate::process_info::host_name()
             .map(|host| host.trim().to_owned())
             .filter(|host| !host.is_empty())
             .unwrap_or_else(|| "localhost".to_owned());

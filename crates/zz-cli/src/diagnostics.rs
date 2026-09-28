@@ -4,6 +4,7 @@ use std::process::Command;
 #[cfg(target_os = "macos")]
 use std::sync::{Mutex, PoisonError};
 use std::{
+    collections::HashMap,
     ffi::{OsStr, OsString},
     fs::{self, File, OpenOptions},
     io::{self, IsTerminal, Write},
@@ -14,7 +15,7 @@ use std::{
 };
 
 use env_logger::{Builder, Env, Target, WriteStyle};
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind, get_current_pid};
+use zz_daemon::process_info::{self, ProcessSample};
 use zz_protocol::RawText;
 
 pub const INTERNAL_LOG_ARGUMENT: &str = "--zz-verbose-log";
@@ -585,125 +586,92 @@ pub fn start_process_sampler() {
 }
 
 pub fn process_sampler() {
-    let Ok(pid) = get_current_pid() else {
-        log::error!(
-            target: "zz::diagnostics::process",
-            "could not resolve current process id"
-        );
-        return;
-    };
-    let mut system = System::new();
-    let refresh = ProcessRefreshKind::nothing()
-        .with_memory()
-        .with_cpu()
-        .with_disk_usage()
-        .with_cmd(UpdateKind::OnlyIfNotSet)
-        .with_exe(UpdateKind::OnlyIfNotSet);
+    let pid = std::process::id();
+    let mut previous = HashMap::<u32, (Duration, Instant)>::new();
     loop {
-        system.refresh_processes_specifics(ProcessesToUpdate::All, true, refresh);
-        let Some(process) = system.process(pid) else {
+        let Some(process) = process_info::sample(pid) else {
             return;
         };
-        let disk = process.disk_usage();
+        let sampled = Instant::now();
+        let mut cpu_percent = |sample: &ProcessSample| {
+            let percent = previous
+                .get(&sample.pid)
+                .filter(|(_, at)| sampled > *at)
+                .map_or(0.0, |(cpu_time, at)| {
+                    sample.cpu_time.saturating_sub(*cpu_time).as_secs_f64()
+                        / sampled.duration_since(*at).as_secs_f64()
+                        * 100.0
+                });
+            previous.insert(sample.pid, (sample.cpu_time, sampled));
+            percent
+        };
+        let run_seconds = |sample: &ProcessSample| {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+                .saturating_sub(sample.start_time)
+        };
         let log_file_bytes = VERBOSE_LOG
             .get()
             .and_then(|path| path.as_deref())
             .and_then(|path| path.metadata().ok())
             .map(|metadata| metadata.len());
+        let process_cpu_percent = cpu_percent(&process);
         log::info!(
             target: "zz::diagnostics::process",
-            "sample rss_bytes={} virtual_bytes={} cpu_percent={:.3} run_seconds={} status={:?} parent_pid={:?} task_count={:?} disk_read_bytes={} disk_written_bytes={} disk_total_read_bytes={} disk_total_written_bytes={} log_file_bytes={log_file_bytes:?}",
-            process.memory(),
-            process.virtual_memory(),
-            process.cpu_usage(),
-            process.run_time(),
-            process.status(),
-            process.parent(),
-            process.tasks().map(std::collections::HashSet::len),
-            disk.read_bytes,
-            disk.written_bytes,
-            disk.total_read_bytes,
-            disk.total_written_bytes,
+            "sample rss_bytes={} virtual_bytes={} cpu_percent={process_cpu_percent:.3} run_seconds={} parent_pid={:?} task_count={} log_file_bytes={log_file_bytes:?}",
+            process.resident_bytes,
+            process.virtual_bytes,
+            run_seconds(&process),
+            process.parent,
+            process.threads,
         );
 
-        let mut descendants = system
-            .processes()
-            .iter()
-            .filter(|(candidate, process)| {
-                process.thread_kind().is_none() && is_descendant(&system, **candidate, pid)
-            })
+        let descendants = process_info::descendants(pid)
+            .into_iter()
+            .filter_map(|child| process_info::sample(child).map(|sample| (child, sample)))
             .collect::<Vec<_>>();
-        descendants.sort_unstable_by_key(|(child_pid, _)| child_pid.as_u32());
-
+        let child_cpu_percent = descendants
+            .iter()
+            .map(|(_, child)| cpu_percent(child))
+            .collect::<Vec<_>>();
+        previous.retain(|_, (_, at)| *at == sampled);
         let tree_rss_bytes = descendants
             .iter()
-            .fold(process.memory(), |total, (_, child)| {
-                total.saturating_add(child.memory())
+            .fold(process.resident_bytes, |total, (_, child)| {
+                total.saturating_add(child.resident_bytes)
             });
         let tree_virtual_bytes = descendants
             .iter()
-            .fold(process.virtual_memory(), |total, (_, child)| {
-                total.saturating_add(child.virtual_memory())
+            .fold(process.virtual_bytes, |total, (_, child)| {
+                total.saturating_add(child.virtual_bytes)
             });
-        let tree_cpu_percent = descendants
-            .iter()
-            .fold(process.cpu_usage(), |total, (_, child)| {
-                total + child.cpu_usage()
-            });
+        let tree_cpu_percent = child_cpu_percent.iter().sum::<f64>() + process_cpu_percent;
         log::info!(
             target: "zz::diagnostics::process_tree",
             "tree_sample root_pid={pid} process_count={} descendant_count={} rss_bytes={tree_rss_bytes} virtual_bytes={tree_virtual_bytes} cpu_percent={tree_cpu_percent:.3}",
             descendants.len() + 1,
             descendants.len(),
         );
-        for (child_pid, child) in descendants {
-            let disk = child.disk_usage();
+        for ((child_pid, child), child_cpu_percent) in descendants.iter().zip(child_cpu_percent) {
+            let record = process_info::record(*child_pid);
             log::info!(
                 target: "zz::diagnostics::process_tree",
-                "descendant_sample pid={child_pid} parent_pid={:?} name={} exe={:?} cmd={:?} rss_bytes={} virtual_bytes={} cpu_percent={:.3} run_seconds={} status={:?} task_count={:?} disk_read_bytes={} disk_written_bytes={} disk_total_read_bytes={} disk_total_written_bytes={}",
-                child.parent(),
-                child.name().display(),
-                child.exe(),
-                child.cmd(),
-                child.memory(),
-                child.virtual_memory(),
-                child.cpu_usage(),
-                child.run_time(),
-                child.status(),
-                child.tasks().map(std::collections::HashSet::len),
-                disk.read_bytes,
-                disk.written_bytes,
-                disk.total_read_bytes,
-                disk.total_written_bytes,
+                "descendant_sample pid={child_pid} parent_pid={:?} name={} exe={:?} cmd={:?} rss_bytes={} virtual_bytes={} cpu_percent={child_cpu_percent:.3} run_seconds={} task_count={}",
+                child.parent,
+                child.name.display(),
+                record.as_ref().and_then(|record| record.executable.as_deref()),
+                record.as_ref().map(|record| record.arguments.as_slice()).unwrap_or_default(),
+                child.resident_bytes,
+                child.virtual_bytes,
+                run_seconds(child),
+                child.threads,
             );
         }
         log::logger().flush();
         thread::sleep(PROCESS_SAMPLE_INTERVAL);
     }
-}
-
-#[must_use]
-pub fn is_descendant(system: &System, candidate: Pid, root: Pid) -> bool {
-    if candidate == root {
-        return false;
-    }
-    let mut cursor = candidate;
-    for _ in 0..64 {
-        let Some(process) = system.process(cursor) else {
-            return false;
-        };
-        let Some(parent) = process.parent() else {
-            return false;
-        };
-        if parent == root {
-            return true;
-        }
-        if parent == cursor {
-            return false;
-        }
-        cursor = parent;
-    }
-    false
 }
 
 #[cfg(test)]

@@ -56,6 +56,7 @@ mod keys;
 mod lifecycle;
 #[cfg_attr(target_os = "ios", allow(dead_code))]
 mod paths;
+pub mod process_info;
 #[cfg(target_os = "ios")]
 mod russh_client;
 #[cfg(any(target_os = "ios", test))]

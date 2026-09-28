@@ -1814,7 +1814,7 @@ fn connect_stream_with_startup_owner<S: TransportStream>(
 }
 
 pub fn short_device_name() -> Option<String> {
-    let host = sysinfo::System::host_name()?;
+    let host = crate::process_info::host_name()?;
     host.trim()
         .split('.')
         .next()

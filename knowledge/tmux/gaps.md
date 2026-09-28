@@ -4,7 +4,7 @@ title: tmux compatibility gap report
 description: "Live TODO and status report for tmux compatibility gaps, decisions, evidence, and acceptance gates."
 resource: compat/tmux-gaps.json
 tags: [tmux, compatibility, gaps, tracker]
-timestamp: 2026-09-24T00:00:00-03:00
+timestamp: 2026-09-28T00:00:00-03:00
 ---
 
 # Overview
@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **44**. Classified items: **355**.
+Tracked gap groups: **45**. Classified items: **356**.
 
-- Status: open: 3, accepted: 41.
-- Decision: adopt: 3, native: 32, never: 9.
-- Priority: now: 1, next: 2, none: 41.
+- Status: open: 3, accepted: 42.
+- Decision: adopt: 3, native: 33, never: 9.
+- Priority: now: 1, next: 2, none: 42.
 - Closed history entries: 210.
-- Surface: command: 3, flag: 23, extension-flag: 10, native-command: 26, option: 31, format: 43, key: 28, binding: 37, native-key: 92, semantic: 53, presentation: 8, protocol: 1.
+- Surface: command: 3, flag: 23, extension-flag: 10, native-command: 26, option: 31, format: 43, key: 28, binding: 37, native-key: 92, semantic: 54, presentation: 8, protocol: 1.
 
 ## Measured surface
 
@@ -77,6 +77,7 @@ structure as proof.
 | `formats.mouse-context` | Expose mouse event formats | native | accepted | none | protocol | scripts, gui | none |
 | `formats.native-modes` | Keep native mode row formats | native | accepted | none | client | daily, gui | none |
 | `formats.native-typed-context-producers` | Keep typed native context producers explicit | native | accepted | none | client | gui | none |
+| `formats.pane-current-command-exec-path` | Name the foreground process by its exec path, not the kernel comm | native | accepted | none | daemon | daily, scripts | none |
 | `formats.pane-runtime` | Expose pane mode formats | native | accepted | none | client | scripts, daily | none |
 | `formats.session-activity-wake-lifecycle` | Keep native wake lifecycle outside session activity | native | accepted | none | daemon | remote | none |
 | `formats.terminal-cells` | Expose terminal cell formats | native | accepted | none | terminal | scripts | none |
@@ -436,6 +437,26 @@ Unlike cursor_flag, which formats.terminal-runtime already declares an explicit 
   - `Measured on pinned tmux d77c9dc6 against zz at b1596c72 by the TUI-018 verifying review: on a pane with no foreground process, the pin answers #{pane_current_command} with the basename of the pane's start command and keeps that answer sticky, while zz answers the empty string. Reproduced by a plain `split-window -d -P` as well as by `split-window -I`, so no command stream is involved.`
   - `zz-daemon terminal_current_command returns String::new() whenever the pane has no foreground pid, and zz-mux copies that straight into the format context, so the empty answer is the fallback rather than a measured value.`
   - `Deciding this means choosing whether zz adopts the pin's sticky start-command fallback or keeps the empty answer as a declared divergence. #{pane_current_command} also feeds automatic-rename-format and window naming, so either choice has to be measured against the window-name surface and not only the format read.`
+
+### `formats.pane-current-command-exec-path`: Name the foreground process by its exec path, not the kernel comm
+
+The default @agent-progress-commands value is claude, and synchronize_pane_progress matches it against #{pane_current_command}. The Claude Code installer links claude to a versioned binary, so pbsi_comm reads the version string (measured: 2.1.99) and would break agent-state tracking and rename windows to the version. The exec path basename is the name the user typed. The same split shows on hosts that put Homebrew coreutils' gnubin first on PATH, where sleep links to gsleep: smoke/plugin-runtime-continuum then saves sleep on zz and gsleep on the pin, the only divergence that row shows there. Two smaller differences follow: macOS names longer than 16 bytes are not truncated in zz, and Linux names come from comm (at most 15 bytes, the exec filename) rather than argv0. Adopting the pin's argv0 on Linux was considered and not taken. The lookup reads only the one process asked about, with no scan of the process table; the regression test is daemon::process_facts_tests::a_symlinked_agent_binary_keeps_its_invoked_name.
+
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
+- Owner: `daemon`
+- User impact: daily, scripts
+- Items: `semantic:pane-current-command-exec-path`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-daemon/src/process_info.rs`
+  - `resource:crates/zz-daemon/src/daemon/process_facts_tests.rs`
+  - `resource:knowledge/designs/daemon-perf-rebuild.md`
+- Acceptance:
+  - `#{pane_current_command} names the foreground process group leader of the pane's tty. On macOS zz answers the basename of the exec path the kernel recorded for that process (KERN_PROCARGS2), falling back to the basename of proc_pidpath when the arguments are unreadable; on Linux it answers the comm field of /proc/<pgrp>/stat. The pin answers pbsi_comm from PROC_PIDT_SHORTBSDINFO on macOS (osdep-darwin.c osdep_get_name) and the first NUL-terminated field of /proc/<pgrp>/cmdline on Linux (osdep-linux.c osdep_get_name).`
+  - `A binary started through a symlink keeps the name it was started by: with claude a symlink to versions/2.1.99, zz answers claude where the pin on macOS answers 2.1.99, and automatic-rename names the window claude.`
+  - `The values are the ones sysinfo 0.39.6 returned before the daemon dropped it on 2026-09-28, so this records long-standing behavior rather than a new difference.`
 
 ### `formats.pane-runtime`: Expose pane mode formats
 

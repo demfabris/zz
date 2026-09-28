@@ -1,7 +1,7 @@
 {
   "schema": 3,
   "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
-  "updated_on": "2026-09-24",
+  "updated_on": "2026-09-28",
   "gaps": [
     {
       "id": "aliases.remote-client-preflight",
@@ -504,6 +504,34 @@
       ],
       "depends_on": [],
       "reason": "Unlike cursor_flag, which formats.terminal-runtime already declares an explicit zz placeholder, pane_current_command is a backed format with a real value, so nothing on the books covers this divergence. Found by the TUI-018 verifying review on 2026-09-19 and confirmed identical on the pre-fix binary, so it is pre-existing and was not introduced by the caller-stream pass. It produces no recorded entry in compat/tui-client-commands.sh, so it blocks neither TUI-018 nor TUI-011. Left open rather than accepted because whether zz matches the pin here is fabrico's call, not the gate's. Filed as a semantic item rather than a format: item: crates/zz-mux/src/compat_manifest_tests.rs asserts that every tracked format: item names a constant-backed placeholder, and pane_current_command is genuinely backed, so the divergence is in its semantics for a process-less pane and not in the variable being unbacked."
+    },
+    {
+      "id": "formats.pane-current-command-exec-path",
+      "title": "Name the foreground process by its exec path, not the kernel comm",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
+      "impact": [
+        "daily",
+        "scripts"
+      ],
+      "owner": "daemon",
+      "items": [
+        "semantic:pane-current-command-exec-path"
+      ],
+      "evidence": [
+        "resource:crates/zz-daemon/src/process_info.rs",
+        "resource:crates/zz-daemon/src/daemon/process_facts_tests.rs",
+        "resource:knowledge/designs/daemon-perf-rebuild.md"
+      ],
+      "acceptance": [
+        "#{pane_current_command} names the foreground process group leader of the pane's tty. On macOS zz answers the basename of the exec path the kernel recorded for that process (KERN_PROCARGS2), falling back to the basename of proc_pidpath when the arguments are unreadable; on Linux it answers the comm field of /proc/<pgrp>/stat. The pin answers pbsi_comm from PROC_PIDT_SHORTBSDINFO on macOS (osdep-darwin.c osdep_get_name) and the first NUL-terminated field of /proc/<pgrp>/cmdline on Linux (osdep-linux.c osdep_get_name).",
+        "A binary started through a symlink keeps the name it was started by: with claude a symlink to versions/2.1.99, zz answers claude where the pin on macOS answers 2.1.99, and automatic-rename names the window claude.",
+        "The values are the ones sysinfo 0.39.6 returned before the daemon dropped it on 2026-09-28, so this records long-standing behavior rather than a new difference."
+      ],
+      "depends_on": [],
+      "reason": "The default @agent-progress-commands value is claude, and synchronize_pane_progress matches it against #{pane_current_command}. The Claude Code installer links claude to a versioned binary, so pbsi_comm reads the version string (measured: 2.1.99) and would break agent-state tracking and rename windows to the version. The exec path basename is the name the user typed. The same split shows on hosts that put Homebrew coreutils' gnubin first on PATH, where sleep links to gsleep: smoke/plugin-runtime-continuum then saves sleep on zz and gsleep on the pin, the only divergence that row shows there. Two smaller differences follow: macOS names longer than 16 bytes are not truncated in zz, and Linux names come from comm (at most 15 bytes, the exec filename) rather than argv0. Adopting the pin's argv0 on Linux was considered and not taken. The lookup reads only the one process asked about, with no scan of the process table; the regression test is daemon::process_facts_tests::a_symlinked_agent_binary_keeps_its_invoked_name."
     },
     {
       "id": "formats.pane-runtime",

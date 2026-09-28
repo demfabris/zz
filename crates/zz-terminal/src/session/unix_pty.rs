@@ -26,11 +26,13 @@ impl UnixMaster {
         .map_err(io::Error::from)
     }
 
+    #[allow(
+        unsafe_code,
+        reason = "tcgetpgrp only reads the foreground group of a descriptor this value owns"
+    )]
     pub(super) fn process_group_leader(&self) -> Option<i32> {
-        rustix::termios::tcgetpgrp(&self.0)
-            .ok()
-            .map(rustix::process::Pid::as_raw_nonzero)
-            .map(std::num::NonZeroI32::get)
+        let group = unsafe { libc::tcgetpgrp(self.0.as_raw_fd()) };
+        (group > 0).then_some(group)
     }
 
     pub(super) fn as_raw_fd(&self) -> RawFd {
@@ -458,7 +460,10 @@ fn search_path(exe: &OsStr, cwd: &Path, path: Option<&OsStr>) -> io::Result<Path
                     ));
                 }
             }
-            errors.push(format!("No viable candidates found in PATH {path:?}"));
+            errors.push(format!(
+                "No viable candidates found in PATH {}",
+                path.display()
+            ));
         } else {
             errors.push("Unable to resolve the PATH".to_owned());
         }

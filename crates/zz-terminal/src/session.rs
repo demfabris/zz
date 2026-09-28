@@ -2625,14 +2625,16 @@ impl ControlSlot {
             | Command::SetViewStream(view, _) => *view,
             _ => unreachable!("only view commands coalesce per view"),
         };
-        let replaces = |queued: &Command| match (&command, queued) {
-            (Command::ReleaseView(_), _) => true,
-            (
-                Command::AttachView(_) | Command::DetachView(_),
-                Command::AttachView(_) | Command::DetachView(_),
+        let replaces = |queued: &Command| {
+            matches!(
+                (&command, queued),
+                (Command::ReleaseView(_), _)
+                    | (
+                        Command::AttachView(_) | Command::DetachView(_),
+                        Command::AttachView(_) | Command::DetachView(_),
+                    )
+                    | (Command::SetViewStream(..), Command::SetViewStream(..))
             )
-            | (Command::SetViewStream(..), Command::SetViewStream(..)) => true,
-            _ => false,
         };
         self.views.retain(|queued| {
             let same = match queued {
@@ -4289,7 +4291,7 @@ impl Publisher {
         terminal: &Terminal<'_, '_>,
         dictionary: &mut ViewportDictionary,
         status: &SessionStatus,
-    ) -> Result<Option<TerminalViewport>, WorkerError> {
+    ) -> Result<Option<(TerminalViewport, bool)>, WorkerError> {
         let previous = Arc::clone(&self.latest.read().fallback);
         let scrollbar = terminal.scrollbar()?;
         let scrollbar = ScrollbarState {
@@ -4324,11 +4326,21 @@ impl Publisher {
             .kitty_keyboard_flags()
             .is_ok_and(|flags| !flags.is_empty());
         viewport.unseen_output = 0;
-        Ok(Some(viewport))
+        let changed = viewport.presentation.title != previous.presentation.title
+            || viewport.presentation.working_directory != previous.presentation.working_directory
+            || viewport.status != previous.status
+            || viewport.mouse_tracking != previous.mouse_tracking
+            || viewport.kitty_keyboard != previous.kitty_keyboard;
+        Ok(Some((viewport, changed)))
     }
 
     fn latest_fallback(&self) -> Arc<TerminalViewport> {
         Arc::clone(&self.latest.read().fallback)
+    }
+
+    fn notify_latest(&self) {
+        let fallback = self.latest_fallback();
+        self.notify_viewports(&fallback, 0);
     }
 
     fn publish_copy_facts(&self, facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>) {
@@ -4799,7 +4811,7 @@ fn run_output_view(
     let mut active_views = ActiveTerminalViews::new();
     let mut inactive_views = InactiveTerminalViews::new();
     let bound_pasted_images = HashSet::new();
-    let (mut search_worker, search_results) = SearchWorker::spawn(ActorWake::none())?;
+    let (mut search_worker, search_results) = SearchWorker::spawn(ActorWake::none());
     let mut compression = IdleCompression::default();
     if frozen {
         frames.force_fallback = true;
@@ -5723,7 +5735,7 @@ fn run_terminal(
     let no_output = crossbeam_channel::never();
     #[cfg(all(unix, not(target_os = "linux")))]
     let mut read_buffer = vec![0_u8; PTY_READ_BUFFER_BYTES];
-    let (mut search_worker, search_results) = SearchWorker::spawn(wake.clone())?;
+    let (mut search_worker, search_results) = SearchWorker::spawn(wake.clone());
     let mut search_refresh_due = None::<Instant>;
     let mut last_content_publish = Instant::now();
     let mut output_pending = false;
@@ -6070,7 +6082,7 @@ fn run_terminal(
                         }
                     }
                 }
-                Command::Output(_) => {}
+                Command::Output(_) | Command::Wake => {}
                 Command::RawInput(bytes) => {
                     if exit_status.is_none() {
                         writer.write_all(&bytes)?;
@@ -6584,7 +6596,6 @@ fn run_terminal(
                     frames.force_fallback = false;
                     let _ = reply.send(publisher.latest_fallback());
                 }
-                Command::Wake => {}
             }
         }
         match wakeup {
@@ -11892,12 +11903,12 @@ struct SearchThread {
 }
 
 impl SearchWorker {
-    fn spawn(wake: ActorWake) -> Result<(Self, Receiver<SearchResults>), WorkerError> {
+    fn spawn(wake: ActorWake) -> (Self, Receiver<SearchResults>) {
         let (jobs, job_rx) = crossbeam_channel::bounded::<SearchJobs>(1);
         let discard_jobs = job_rx.clone();
         let (result_tx, results) = crossbeam_channel::bounded::<SearchResults>(1);
         let discard_results = results.clone();
-        Ok((
+        (
             Self {
                 jobs,
                 discard_jobs,
@@ -11912,7 +11923,7 @@ impl SearchWorker {
                 }),
             },
             results,
-        ))
+        )
     }
 
     fn start(&mut self) {
@@ -14148,6 +14159,7 @@ impl IdleCompression {
 
 const UNWATCHED_SETTLE_QUIET: Duration = Duration::from_millis(100);
 const UNWATCHED_SETTLE_MAX: Duration = Duration::from_secs(1);
+const UNWATCHED_NOTIFY_INTERVAL: Duration = Duration::from_millis(100);
 
 struct RenderResources<'alloc> {
     state: RenderState<'alloc>,
@@ -14184,6 +14196,8 @@ struct Frames<'alloc> {
     published: HashSet<TerminalViewId>,
     unbuilt_since: Option<Instant>,
     last_unbuilt: Option<Instant>,
+    last_notify: Option<Instant>,
+    notify_owed: bool,
 }
 
 impl<'alloc> Frames<'alloc> {
@@ -14202,6 +14216,8 @@ impl<'alloc> Frames<'alloc> {
             published: HashSet::new(),
             unbuilt_since: None,
             last_unbuilt: None,
+            last_notify: None,
+            notify_owed: false,
         })
     }
 
@@ -14303,10 +14319,42 @@ impl<'alloc> Frames<'alloc> {
         self.dictionary.release_pools();
     }
 
-    fn settle_due(&self) -> Option<Instant> {
+    fn rebuild_due(&self) -> Option<Instant> {
         let first = self.unbuilt_since?;
         let last = self.last_unbuilt.unwrap_or(first);
         Some((last + UNWATCHED_SETTLE_QUIET).min(first + UNWATCHED_SETTLE_MAX))
+    }
+
+    fn notify_due(&self) -> Option<Instant> {
+        self.notify_owed
+            .then(|| {
+                self.last_notify
+                    .map(|last| last + UNWATCHED_NOTIFY_INTERVAL)
+            })
+            .flatten()
+    }
+
+    fn settle_due(&self) -> Option<Instant> {
+        match (self.rebuild_due(), self.notify_due()) {
+            (Some(rebuild), Some(notify)) => Some(rebuild.min(notify)),
+            (rebuild, notify) => rebuild.or(notify),
+        }
+    }
+
+    fn admit_notify(&mut self, metadata_changed: bool) -> bool {
+        let now = Instant::now();
+        if metadata_changed
+            || self
+                .last_notify
+                .is_none_or(|last| now >= last + UNWATCHED_NOTIFY_INTERVAL)
+        {
+            self.last_notify = Some(now);
+            self.notify_owed = false;
+            true
+        } else {
+            self.notify_owed = true;
+            false
+        }
     }
 }
 
@@ -14381,11 +14429,25 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
         streamed_any |= streaming;
         viewports.push((view_id, viewport, streaming.then(|| frames.epoch(view_id))));
     }
+    let refreshed = if streamed_any || force_fallback || *EAGER_FRAMES || frames.preview {
+        None
+    } else {
+        publisher.refresh_fallback(terminal, &mut frames.dictionary, &status)?
+    };
+    let mut notify = notify;
     let fallback = if streamed_any {
         frames.unbuilt_since = None;
         frames.last_unbuilt = None;
         FallbackFrame::FirstStreamed
-    } else if force_fallback || *EAGER_FRAMES || frames.preview {
+    } else if let Some((viewport, metadata_changed)) = refreshed {
+        if matches!(change, SnapshotChange::Content) {
+            let now = Instant::now();
+            frames.unbuilt_since.get_or_insert(now);
+            frames.last_unbuilt = Some(now);
+        }
+        notify = notify && frames.admit_notify(metadata_changed);
+        FallbackFrame::Metadata(viewport)
+    } else {
         if !active.is_empty() {
             terminal.set_selection(None)?;
             terminal.scroll_viewport(ScrollViewport::Bottom);
@@ -14393,22 +14455,6 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
         frames.unbuilt_since = None;
         frames.last_unbuilt = None;
         FallbackFrame::Built(frames.snapshot(terminal, change, None, status)?)
-    } else {
-        match publisher.refresh_fallback(terminal, &mut frames.dictionary, &status)? {
-            Some(viewport) => {
-                if matches!(change, SnapshotChange::Content) {
-                    let now = Instant::now();
-                    frames.unbuilt_since.get_or_insert(now);
-                    frames.last_unbuilt = Some(now);
-                }
-                FallbackFrame::Metadata(viewport)
-            }
-            None => {
-                frames.unbuilt_since = None;
-                frames.last_unbuilt = None;
-                FallbackFrame::Built(frames.snapshot(terminal, change, None, status)?)
-            }
-        }
     };
     frames.published.clear();
     frames
@@ -14428,7 +14474,13 @@ fn settle_unwatched<'alloc: 'callbacks, 'callbacks>(
     word_separators: &WordSeparators,
     status: SessionStatus,
 ) -> Result<(), WorkerError> {
-    if frames.settle_due().is_none_or(|due| Instant::now() < due) {
+    let now = Instant::now();
+    if frames.notify_due().is_some_and(|due| now >= due) {
+        frames.notify_owed = false;
+        frames.last_notify = Some(now);
+        publisher.notify_latest();
+    }
+    if frames.rebuild_due().is_none_or(|due| now < due) {
         return Ok(());
     }
     frames.force_fallback = true;

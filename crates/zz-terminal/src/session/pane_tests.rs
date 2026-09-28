@@ -248,6 +248,10 @@ fn compressed_history_reads_back_whole() {
 
 #[cfg(all(unix, not(target_os = "linux")))]
 #[test]
+#[allow(
+    clippy::zombie_processes,
+    reason = "the exit watch under test is the child's reaper"
+)]
 fn the_exit_watch_reaps_a_child_that_exited_before_it_was_registered() {
     let child = std::process::Command::new("/usr/bin/true")
         .spawn()
@@ -280,4 +284,41 @@ fn an_interrupt_typed_on_the_pty_reaches_the_foreground_job() {
     assert!(session.send_raw_input(Arc::from(b"\x03".as_slice())));
     wait_until("the interrupted job", || session.completion().is_some());
     assert!(started.elapsed() < Duration::from_secs(10));
+}
+
+#[test]
+fn an_unwatched_pane_wakes_its_watcher_a_few_times_a_second_under_steady_output() {
+    let session = shell_session(
+        "read _; i=0; while [ $i -lt 300 ]; do printf 'row %d\\n' $i; i=$((i+1)); sleep 0.005; done; printf 'ZZ_DONE\\n'; read _",
+    );
+    let events = session.events();
+    wait_until("the shell to start", || {
+        matches!(session.latest_viewport().status, SessionStatus::Running)
+    });
+    while events.try_recv().is_ok() {}
+    session.send_text("go\n");
+    let started = Instant::now();
+    let mut ready = 0_u32;
+    loop {
+        match events.try_recv() {
+            Ok(super::TerminalEvent::ViewportReady { .. }) => ready += 1,
+            Ok(_) => {}
+            Err(_) => {
+                if text(&session.latest_viewport()).contains("ZZ_DONE") {
+                    break;
+                }
+                assert!(
+                    started.elapsed() < Duration::from_secs(30),
+                    "the output never finished"
+                );
+                thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+    let elapsed = started.elapsed().as_secs_f64();
+    let per_second = f64::from(ready) / elapsed;
+    assert!(
+        per_second <= 20.0,
+        "{ready} watcher wakes in {elapsed:.2} s for a pane nobody streams"
+    );
 }

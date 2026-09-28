@@ -217,10 +217,8 @@ fn an_unchanged_snapshot_is_not_sent_again() {
 fn runtime_facts_keep_the_tree_generation_and_skip_unreferenced_labels() {
     let (shared, _, _, pane, mailbox) = attached_fixture("runtime-quiet");
     let generation = shared.inner.lock().engine.state.generation();
-    let runtime = shared.inner.lock().engine.runtime_facts_generation();
     assert!(set_current_command(&shared, pane, "zzpub-quiet"));
     assert_eq!(shared.inner.lock().engine.state.generation(), generation);
-    assert!(shared.inner.lock().engine.runtime_facts_generation() > runtime);
     shared.publish_mux_snapshots();
     assert!(snapshots(events(&mailbox)).is_empty());
 }
@@ -385,7 +383,7 @@ fn a_blocking_silence_hook_does_not_stall_other_timers() {
 }
 
 #[test]
-fn the_status_sampler_parks_without_clients_and_wakes_for_one() {
+fn the_status_sampler_parks_until_its_tick_has_work() {
     let shared = Arc::new(Shared::new(1));
     shared.start_status_sampler().expect("start sampler");
     let wait_for = |idle: bool| {
@@ -398,10 +396,32 @@ fn the_status_sampler_parks_without_clients_and_wakes_for_one() {
             thread::sleep(Duration::from_millis(5));
         }
     };
+    let mut context = ExecutionContext::default();
+    let mut run = |args: &[&str]| {
+        shared
+            .execute(
+                ClientId(1),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(args[0], args[1..].iter().copied()),
+            )
+            .expect("command");
+    };
+    run(&["new-session", "-d", "-s", "sampler", "exec /bin/cat"]);
     wait_for(true);
     let mailbox = OutboundMailbox::new();
     shared.register_subscribed(ClientKind::Interactive, None, None, mailbox);
+    thread::sleep(Duration::from_millis(50));
+    assert!(shared.status_sampler_idle.load(Ordering::SeqCst));
+    run(&[
+        "set-hook",
+        "-B",
+        "@zzpub:@*:#{window_name}",
+        "set -g @fired yes",
+    ]);
     wait_for(false);
+    run(&["set-hook", "-u", "-B", "@zzpub"]);
+    wait_for(true);
     shared.request_shutdown();
 }
 
@@ -591,4 +611,160 @@ fn a_runtime_fact_flush_is_silent_unless_a_template_reads_runtime_facts() {
     flush(&shared);
     let (_, status_lines) = counts(&events(&mailbox));
     assert_eq!(status_lines, 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_label_flush_leaves_an_unpublished_mutation_to_its_command() {
+    let (shared, client, mut context, pane, mailbox) = attached_fixture("label-flush-race");
+    run_test_command(
+        &shared,
+        client,
+        &mut context,
+        &[
+            "set-option",
+            "-g",
+            "window-status-current-format",
+            "#{pane_current_command}",
+        ],
+    );
+    run_test_command(
+        &shared,
+        client,
+        &mut context,
+        &["new-window", "-d", "exec /bin/cat"],
+    );
+    events(&mailbox);
+    let (generation, hidden) = {
+        let inner = shared.inner.lock();
+        let session = &inner.engine.state.sessions[&context.session.expect("session")];
+        let hidden = session
+            .windows
+            .iter()
+            .copied()
+            .find(|candidate| *candidate != session.active_window)
+            .expect("second window");
+        (inner.engine.state.generation(), hidden)
+    };
+    let hidden_pane = shared.inner.lock().engine.state.windows[&hidden].active_pane;
+    assert!(
+        !shared.inner.lock().visible_terminals[&client].contains(&hidden_pane),
+        "the new window starts hidden"
+    );
+    {
+        let mut inner = shared.inner.lock();
+        let mut select = context.clone();
+        inner
+            .engine
+            .execute(
+                &mut select,
+                &CommandInvocation::new("select-window", ["-t", &hidden.to_string()]),
+            )
+            .expect("select-window");
+    }
+    assert!(set_current_command(&shared, pane, "zzpub-race"));
+    shared.publish_runtime_facts();
+    assert_eq!(
+        snapshots(events(&mailbox)).len(),
+        1,
+        "the flush still sends"
+    );
+    let command_publishes = {
+        let inner = shared.inner.lock();
+        let current = inner.engine.state.generation();
+        current != generation && inner.last_published_mux_generation != current
+    };
+    assert!(
+        command_publishes,
+        "the label flush claimed the command's publish"
+    );
+    shared.publish_snapshot();
+    assert!(shared.inner.lock().visible_terminals[&client].contains(&hidden_pane));
+    assert!(
+        snapshots(events(&mailbox)).is_empty(),
+        "the command's publish does not resend what the flush sent"
+    );
+}
+
+#[cfg(all(feature = "agent", unix))]
+#[test]
+fn a_pane_whose_root_process_is_the_agent_gets_its_peer_state() {
+    const CHILD: &str = "ZZ_TEST_PUBLISH_ROOT_PEER";
+    if std::env::var_os(CHILD).is_none() {
+        let directory = tempfile::tempdir().expect("peer registry directory");
+        let status = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args([
+                "--exact",
+                "daemon::publish_tests::a_pane_whose_root_process_is_the_agent_gets_its_peer_state",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CHILD, "1")
+            .env("CLAUDE_CONFIG_DIR", directory.path())
+            .status()
+            .expect("isolated root peer regression");
+        assert!(status.success());
+        return;
+    }
+    let directory = PathBuf::from(std::env::var_os("CLAUDE_CONFIG_DIR").expect("peer config"));
+    let shared = Arc::new(Shared::new(1));
+    shared.start_status_sampler().expect("start sampler");
+    let mut context = ExecutionContext::default();
+    shared
+        .execute(
+            ClientId(1),
+            ClientKind::Command,
+            &mut context,
+            &CommandInvocation::new("new-session", ["-d", "-s", "root-peer", "exec /bin/cat"]),
+        )
+        .expect("agent session");
+    let pane = context.pane.expect("pane");
+    wait_for_runtime_facts(&shared, pane);
+    let pid = shared.inner.lock().terminals[&pane]
+        .process_id()
+        .expect("root pid");
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_millis() as u64;
+    let record = serde_json::json!({
+        "pid": pid, "sessionId": "root-peer", "cwd": directory,
+        "tmux": format!("root-peer:@0.{pane}"),
+        "messagingSocketPath": directory.join("peer.sock"),
+        "status": "busy", "updatedAt": now, "statusUpdatedAt": now
+    });
+    fs::create_dir_all(directory.join("sessions")).expect("registry");
+    fs::write(
+        directory.join("sessions").join(format!("{pid}.json")),
+        serde_json::to_vec(&record).expect("record JSON"),
+    )
+    .expect("peer record");
+    let state = || {
+        shared
+            .execute(
+                ClientId(1),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "show-options",
+                    ["-p", "-qv", "-t", &pane.to_string(), "@agent_state"],
+                ),
+            )
+            .expect("read agent state")
+            .output
+    };
+    shared
+        .execute(
+            ClientId(1),
+            ClientKind::Command,
+            &mut ExecutionContext::default(),
+            &CommandInvocation::new("send-keys", ["-t", &pane.to_string(), "zzpub", "Enter"]),
+        )
+        .expect("send-keys");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while state().trim() != "working" {
+        assert!(Instant::now() < deadline, "agent state never arrived");
+        thread::sleep(Duration::from_millis(20));
+    }
+    shared.request_shutdown();
 }

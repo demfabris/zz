@@ -664,9 +664,18 @@ As built (branch `perf/publish`), where it departs from the scope above:
 - The per-client check covers every Snapshot send, not only runtime-fact ones: the stamped
   snapshot's postcard digest plus its generation, recorded by `publish_mux_snapshots`,
   `send_attached` and `send_resync_inner`. A send whose content changed under an unchanged
-  generation bumps the tree generation first, so the GUI's `AppRevision` still sees a new one. A
+  generation bumps the tree generation first, so the GUI's `AppRevision` still sees a new one,
+  and moves the records of clients whose content did not change to that generation too. A
   split drag clears the dragging client's record, because the GUI drops its local layout
-  prediction only on a fresh Snapshot.
+  prediction only on a fresh Snapshot. `publish_mux_snapshots` and `send_resync_inner` record and
+  enqueue under one `snapshot_order` lock, so two publishers cannot leave a client holding an older
+  Snapshot than its record says. Format hook facts are built once per publish, not once per
+  client.
+- Background publishers (a runtime-fact flush, the clock-label tick) go through
+  `publish_mux_labels`, which never claims `last_published_mux_generation` for a tree change it
+  did not publish. A command whose mutation lands before such a flush still runs its own
+  `publish_snapshot` at the end, with the visibility, session-cleanup and chooser refreshes that
+  only the full publish does; the Snapshot itself is not sent twice.
 - Pane events publish with a reason. A tree change (rename, title) runs `publish_snapshot`; a
   runtime-fact-only change runs the stamped snapshot and status refresh only when
   `MuxEngine::runtime_facts_reach_presentation` finds a template that reads runtime facts
@@ -678,27 +687,45 @@ As built (branch `perf/publish`), where it departs from the scope above:
 - The rename throttle covers renames driven by pane runtime facts only. Command-path renames
   (select-pane, new-window, kill-pane, `set automatic-rename`) stay immediate, as the compat corpus
   expects. It is an engine flag (`set_automatic_rename_throttle`) the daemon turns on, so zz-mux
-  unit tests keep immediate renames. Hook facts are built only when a rename is due.
+  unit tests keep immediate renames. Hook facts are built only when a rename is due; the daemon's
+  "due" check and the engine's rename read the same instant (`set_pane_runtime_facts_at`), so a
+  rename on the 500 ms boundary cannot run with empty hook facts. No separate runtime-facts counter
+  exists: nothing read it. `compat/rename-timing.sh` compares the window-renamed hook rate and the
+  settled name against the pin.
 - The timer thread selects over the four unchanged deadline channels plus one `TimerCommand`
   channel (Rename, PublishFlush). Silence and rename hook events run inline when no hook has
   commands, else on a `zz-daemon-hooks` thread spawned on demand that exits when its queue is
-  empty, so FIFO order holds and an idle daemon has no extra thread.
-- The status sampler parks with no timeout when there is no subscriber, format monitor or armed
-  peer scan; `subscribe`, the end of every command and a pane's first foreground job wake it. The
-  peer scan is armed while a pane's foreground process group is not its shell, or a Claude state
-  is recorded. `RegistryCache` in claude_peers.rs re-reads a record only when its (mtime, size,
-  inode) changes and re-lists the directory only when the directory's stamp changes.
+  empty, so FIFO order holds and an idle daemon has no extra thread. Each expiry runs under
+  `catch_unwind`, and a full publish clears a pending flush, so one bad handler cannot stop the
+  other timers or leave publishing stuck behind a flush that never runs.
+- The 1 s status tick runs only while a control client has subscriptions, a `set-hook -B` monitor
+  exists, or a pane holds a Claude peer state. `status-interval` refreshes keep their own
+  per-session deadlines. With none of these the sampler parks with no timeout; `subscribe`, the end
+  of every command and pane output wake it when there is work.
+- The peer scan is armed from the registry side. Pane output asks for a probe (one atomic flag,
+  one unpark per probe), and the sampler runs at most one `sync_claude_peer_states` a second
+  while output flows and no state is recorded. A pane whose root process is the agent
+  (`split-window claude`, `exec claude`, `sh -c 'claude; ...'`) is found on its first output, the
+  same as a foreground job; once a state is recorded the 1 Hz scan runs until it clears. There is
+  no per-event `tcgetpgrp`. `RegistryCache` in claude_peers.rs re-reads a record only when its
+  (mtime, size, inode) changes, or when it was read within 2 s of its mtime (a coarse clock can
+  hide a same-length rewrite, as git's racy-clean check), and re-lists the directory the same way.
 
-Measured at `--quick` on a loaded host (load 7-26 on 16 CPUs) against the same binary before
-the lane: fixed service threads 9 -> 6 (main, async-io, signals, accept, timers, status);
-`cli.instr.display.p1` 10.8 -> 7.4 Minstr, `.p20` 29.2 -> 25.8; `chain5.p1` 20.4 -> 9.3;
-`config.instr.source_1000` 3645 -> 749 Minstr (51 ms wall); `chatty.instr_per_s.flip`
-2943 -> 1614 Minstr/s; `chatty.instr_per_s.hidden` 5281 -> 1906; `chatty.tty_kibps.hidden`
-161 -> 5-11 KiB/s; `idle.wakeups_per_s.p20` 1.2 -> 0.2. The 4-pane 300-line TUI workload stays
-under 12 Snapshots and 10 StatusChanged per 3 s
-(`a_busy_tiled_window_sends_few_snapshots_and_status_lines`). `chatty.cpu_pct.flip` is 12.6% at
-load 7-10; what is left on the flip path is the sysinfo lookup (W1-FOOTPRINT) and frames built
-with no view (W1-PANE).
+Measured at `--quick` on a loaded host (load 7-22 on 16 CPUs). Before is the W0 quick JSON
+(`baseline-quick-macbook-17e17115.json`), which a fresh 157ac6a3 build reproduces: fixed service
+threads 9 -> 6 (main, async-io, signals, accept, timers, status); `mem.threads.p1` 13 -> 10;
+`cli.instr.display.p1` 10.8 -> 7.4 Minstr, `.p20` 29.1 -> 25.8; `chain5.p1` 20.4 -> 9.3, `.p20`
+43.8 -> 32.8; `config.instr.source_1000` 3640 -> 749 Minstr (48 ms CPU, was 228);
+`chatty.instr_per_s.flip` 3206 -> 1584 Minstr/s; `chatty.instr_per_s.hidden` 7295 -> 1914;
+`chatty.tty_kibps.hidden` 235 -> 8.7 KiB/s; `idle.wakeups_per_s.p20` 1.2 -> 0.2;
+`attach.instr.p1` 123 -> 92. The 4-pane 300-line TUI workload stays under 12 Snapshots and 10
+StatusChanged per 3 s (`a_busy_tiled_window_sends_few_snapshots_and_status_lines`).
+`chatty.cpu_pct.flip` reads 13-18% at load 7-22 and the 8% gate is not met by this lane alone.
+A symbolized flip profile after the review fixes puts this lane's path (`synchronize_pane_runtime`
+bookkeeping, `request_publish`, the peer probe) at about 3 of ~700 busy samples; the rest is
+`terminal_current_command` / `terminal_working_directory` through sysinfo and `proc_pidinfo`
+(W1-FOOTPRINT, ~290) and `publish_active_views` building frames with no view (W1-PANE, ~380).
+The gate is met when those two lanes land, and has to be re-measured then.
 
 ## W1-FORMAT: lazy universe, option index (effort M)
 

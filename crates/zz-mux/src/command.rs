@@ -2146,7 +2146,6 @@ pub struct MuxEngine {
     agent: AgentOptions,
     format_monitors: Vec<FormatMonitorEntry>,
     next_format_monitor_id: u64,
-    runtime_facts_generation: u64,
     automatic_rename_throttle: bool,
     window_name_times: BTreeMap<WindowId, Instant>,
     pending_window_renames: BTreeSet<WindowId>,
@@ -2455,7 +2454,6 @@ impl Default for MuxEngine {
             agent: AgentOptions::default(),
             format_monitors: Vec::new(),
             next_format_monitor_id: 0,
-            runtime_facts_generation: 0,
             automatic_rename_throttle: false,
             window_name_times: BTreeMap::new(),
             pending_window_renames: BTreeSet::new(),
@@ -4014,8 +4012,18 @@ impl MuxEngine {
     pub fn set_pane_runtime_facts_with_hooks(
         &mut self,
         pane: PaneId,
+        facts: PaneRuntimeFacts,
+        hooks: &mut impl StatusHooks,
+    ) -> bool {
+        self.set_pane_runtime_facts_at(pane, facts, hooks, Instant::now())
+    }
+
+    pub fn set_pane_runtime_facts_at(
+        &mut self,
+        pane: PaneId,
         mut facts: PaneRuntimeFacts,
         hooks: &mut impl StatusHooks,
+        now: Instant,
     ) -> bool {
         if self.state.pane(pane).is_none() {
             return false;
@@ -4031,16 +4039,10 @@ impl MuxEngine {
             return false;
         }
         self.pane_runtime_facts.insert(pane, facts);
-        self.runtime_facts_generation += 1;
         if command_changed {
-            self.refresh_automatic_window_name_throttled(pane, hooks);
+            self.refresh_automatic_window_name_throttled(pane, hooks, now);
         }
         true
-    }
-
-    #[must_use]
-    pub fn runtime_facts_generation(&self) -> u64 {
-        self.runtime_facts_generation
     }
 
     pub fn set_automatic_rename_throttle(&mut self, enabled: bool) {
@@ -4054,6 +4056,7 @@ impl MuxEngine {
         &mut self,
         pane: PaneId,
         hooks: &mut impl StatusHooks,
+        now: Instant,
     ) -> bool {
         if !self.automatic_rename_throttle {
             return self.refresh_automatic_window_name_for_pane(pane, hooks);
@@ -4061,7 +4064,6 @@ impl MuxEngine {
         let Some(window) = self.automatic_rename_window(pane) else {
             return false;
         };
-        let now = Instant::now();
         if self.window_name_waits(window, now) {
             self.pending_window_renames.insert(window);
             return false;
@@ -4088,9 +4090,9 @@ impl MuxEngine {
     }
 
     #[must_use]
-    pub fn automatic_rename_due(&self, pane: PaneId) -> bool {
+    pub fn automatic_rename_due(&self, pane: PaneId, now: Instant) -> bool {
         self.automatic_rename_window(pane).is_some_and(|window| {
-            !self.automatic_rename_throttle || !self.window_name_waits(window, Instant::now())
+            !self.automatic_rename_throttle || !self.window_name_waits(window, now)
         })
     }
 

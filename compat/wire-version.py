@@ -26,7 +26,7 @@ WIRE_DIR = "crates/zz-protocol/src"
 # watch message.rs alone, which is how cycle 11 pushed a PaneSnapshot.mode append in
 # snapshot.rs onto a released 103 and got a green check. New files are watched by
 # default, because a guard that has to be told about each one fails open.
-NOT_WIRE = {"catalog.rs", "key.rs", "lib.rs"}
+NOT_WIRE = {"catalog.rs", "lib.rs"}
 VERSION = re.compile(r"pub const PROTOCOL_VERSION: u16 = (\d+);")
 
 

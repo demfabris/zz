@@ -4,6 +4,8 @@ use super::*;
 
 pub(super) const PUBLISH_FLUSH_INTERVAL: Duration = Duration::from_millis(16);
 
+pub(super) const PEER_PROBE_INTERVAL: Duration = Duration::from_secs(1);
+
 pub(super) static EAGER_PUBLISH: LazyLock<bool> =
     LazyLock::new(|| std::env::var_os("ZZ_PERF_EAGER_PUBLISH").is_some_and(|value| value == "1"));
 
@@ -190,7 +192,13 @@ impl Shared {
                         let Some(shared) = shared.upgrade() else {
                             return;
                         };
-                        shared.expire_timer(expiry, now);
+                        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            shared.expire_timer(expiry, now);
+                        }))
+                        .is_err()
+                        {
+                            log::error!(target: "zz_daemon::timers", "a timer expiry panicked");
+                        }
                     }
                     let operation = match deadlines.next() {
                         Some(deadline) => match select.select_deadline(deadline) {
@@ -374,6 +382,7 @@ impl Shared {
     pub(super) fn note_published(&self) {
         let mut flush = self.publish_flush.lock();
         flush.take();
+        flush.scheduled = false;
         flush.last = Some(Instant::now());
     }
 
@@ -394,16 +403,18 @@ impl Shared {
         }
     }
 
-    fn publish_runtime_facts(&self) {
+    pub(super) fn publish_runtime_facts(&self) {
         let (presentation, choosers) = {
             let inner = self.inner.lock();
-            (
-                inner.engine.runtime_facts_reach_presentation(),
-                !inner.choose_trees.is_empty(),
-            )
+            let choosers = !inner.choose_trees.is_empty();
+            let presentation = (!inner.subscribers.is_empty()
+                || inner.engine.has_window_style_settings()
+                || *EAGER_PUBLISH)
+                && inner.engine.runtime_facts_reach_presentation();
+            (presentation, choosers)
         };
         if presentation {
-            self.publish_mux_snapshots();
+            self.publish_mux_labels();
             self.refresh_status();
         }
         if choosers {
@@ -503,36 +514,89 @@ impl Shared {
         })
     }
 
-    pub(super) fn status_tick_needed(&self, inner: &mut ServerState) -> bool {
-        !inner.subscribers.is_empty()
+    pub(super) fn status_tick_needed(inner: &ServerState) -> bool {
+        inner
+            .control_outputs
+            .values()
+            .any(|output| !output.subscriptions.is_empty())
             || inner.engine.has_format_monitors()
             || Self::peer_scan_armed(inner)
     }
 
+    pub(super) fn status_sampler_has_work(inner: &ServerState) -> bool {
+        Self::status_tick_needed(inner)
+            || inner
+                .subscribers
+                .keys()
+                .filter_map(|client| client_attached_session(inner, *client))
+                .any(|session| {
+                    !inner
+                        .engine
+                        .status_formats_for_session(Some(session))
+                        .interval
+                        .is_zero()
+                })
+    }
+
     #[cfg(all(feature = "agent", unix))]
-    pub(super) fn peer_scan_armed(inner: &mut ServerState) -> bool {
-        if *PEER_SCAN_ALWAYS || !inner.claude_peer_states.is_empty() {
-            return true;
-        }
-        let ServerState {
-            engine,
-            foreground_job_panes,
-            ..
-        } = inner;
-        foreground_job_panes.retain(|pane| engine.state.pane(*pane).is_some());
-        !foreground_job_panes.is_empty()
+    pub(super) fn peer_scan_armed(inner: &ServerState) -> bool {
+        *PEER_SCAN_ALWAYS || !inner.claude_peer_states.is_empty()
     }
 
     #[cfg(not(all(feature = "agent", unix)))]
-    pub(super) fn peer_scan_armed(_inner: &mut ServerState) -> bool {
+    pub(super) fn peer_scan_armed(_inner: &ServerState) -> bool {
         false
+    }
+
+    #[cfg(all(feature = "agent", unix))]
+    pub(super) fn request_peer_probe(&self) {
+        if self.peer_probe.load(Ordering::Relaxed) || self.peer_probe.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        if let Some(sampler) = self.status_sampler.lock().as_ref() {
+            sampler.unpark();
+        }
+    }
+
+    #[cfg(not(all(feature = "agent", unix)))]
+    pub(super) fn request_peer_probe(&self) {}
+
+    #[cfg(all(feature = "agent", unix))]
+    pub(super) fn run_peer_probe(
+        self: &Arc<Self>,
+        armed: bool,
+        last_probe: &mut Option<Instant>,
+    ) -> Option<Instant> {
+        if armed || !self.peer_probe.load(Ordering::Acquire) {
+            return None;
+        }
+        let now = Instant::now();
+        if let Some(next) = last_probe
+            .map(|last| last + PEER_PROBE_INTERVAL)
+            .filter(|next| now < *next)
+        {
+            return Some(next);
+        }
+        self.peer_probe.store(false, Ordering::Release);
+        *last_probe = Some(now);
+        self.sync_claude_peer_states();
+        None
+    }
+
+    #[cfg(not(all(feature = "agent", unix)))]
+    pub(super) fn run_peer_probe(
+        self: &Arc<Self>,
+        _armed: bool,
+        _last_probe: &mut Option<Instant>,
+    ) -> Option<Instant> {
+        None
     }
 
     pub(super) fn nudge_status_sampler(&self) {
         if !self.status_sampler_idle.load(Ordering::SeqCst) {
             return;
         }
-        if !self.status_tick_needed(&mut self.inner.lock()) {
+        if !Self::status_sampler_has_work(&self.inner.lock()) {
             return;
         }
         if let Some(sampler) = self.status_sampler.lock().as_ref() {

@@ -3341,6 +3341,9 @@ struct Shared {
     hook_worker: Mutex<timers::HookWorker>,
     status_sampler: Mutex<Option<thread::Thread>>,
     status_sampler_idle: AtomicBool,
+    snapshot_order: Mutex<()>,
+    #[cfg(all(feature = "agent", unix))]
+    peer_probe: AtomicBool,
     #[cfg(all(feature = "agent", unix))]
     peer_registry: Mutex<crate::agent::claude_peers::RegistryCache>,
 }
@@ -4450,6 +4453,9 @@ impl Shared {
             hook_worker: Mutex::new(timers::HookWorker::default()),
             status_sampler: Mutex::new(None),
             status_sampler_idle: AtomicBool::new(false),
+            snapshot_order: Mutex::new(()),
+            #[cfg(all(feature = "agent", unix))]
+            peer_probe: AtomicBool::new(false),
             #[cfg(all(feature = "agent", unix))]
             peer_registry: Mutex::new(crate::agent::claude_peers::RegistryCache::default()),
         }
@@ -5153,17 +5159,20 @@ impl Shared {
             .spawn(move || {
                 let mut due: BTreeMap<SessionId, (Instant, Duration)> = BTreeMap::new();
                 let mut next_tick = Some(Instant::now() + CONTROL_SUBSCRIPTION_INTERVAL);
+                let mut last_probe = None;
+                let mut probe_at = None;
                 loop {
                     let next_wake = due
                         .values()
                         .map(|(deadline, _)| *deadline)
                         .chain(next_tick)
+                        .chain(probe_at)
                         .min();
                     if let Some(next_wake) = next_wake {
                         thread::park_timeout(next_wake.saturating_duration_since(Instant::now()));
                     } else if shared.upgrade().is_some_and(|shared| {
                         shared.status_sampler_idle.store(true, Ordering::SeqCst);
-                        !shared.status_tick_needed(&mut shared.inner.lock())
+                        !Self::status_sampler_has_work(&shared.inner.lock())
                     }) {
                         thread::park();
                     }
@@ -5183,9 +5192,9 @@ impl Shared {
                         shared.refresh_status_filtered(None, Some(&jobs_changed));
                     }
                     let (tick_needed, peer_scan, intervals) = {
-                        let mut inner = shared.inner.lock();
-                        let tick_needed = shared.status_tick_needed(&mut inner);
-                        let peer_scan = Self::peer_scan_armed(&mut inner);
+                        let inner = shared.inner.lock();
+                        let tick_needed = Self::status_tick_needed(&inner);
+                        let peer_scan = Self::peer_scan_armed(&inner);
                         let intervals = inner
                             .subscribers
                             .keys()
@@ -5213,8 +5222,7 @@ impl Shared {
                             shared.sync_claude_peer_states();
                         }
                     }
-                    #[cfg(not(all(feature = "agent", unix)))]
-                    let _ = peer_scan;
+                    probe_at = shared.run_peer_probe(peer_scan, &mut last_probe);
                     due.retain(|session, _| intervals.contains_key(session));
                     let now = Instant::now();
                     let sessions = intervals
@@ -5240,7 +5248,7 @@ impl Shared {
                     if !sessions.is_empty() {
                         shared.refresh_status_for_sessions(Some(&sessions));
                         if shared.inner.lock().engine.window_labels_follow_the_clock() {
-                            shared.publish_mux_snapshots();
+                            shared.publish_mux_labels();
                         }
                     }
                 }
@@ -22976,6 +22984,7 @@ impl Shared {
         outbound: &OutboundMailbox,
         skip_command_output: Option<u64>,
     ) {
+        let order = self.snapshot_order.lock();
         let (
             snapshot,
             viewports,
@@ -23061,6 +23070,7 @@ impl Shared {
             )
         };
         Self::send_event(outbound, EventPayload::Snapshot(snapshot));
+        drop(order);
         Self::send_event(
             outbound,
             EventPayload::CommandPrompt {
@@ -24656,12 +24666,6 @@ impl Shared {
             .tty()
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_default();
-        #[cfg(all(feature = "agent", unix))]
-        let foreground_job = terminal
-            .foreground_process_id()
-            .is_some_and(|foreground| foreground != 0 && Some(foreground) != pid);
-        #[cfg(all(feature = "agent", unix))]
-        let mut peer_scan_armed = false;
         let (changed, events, refresh_activity_choosers, alert_window, silence_schedule) = {
             let mut inner = self.inner.lock();
             if !inner
@@ -24670,14 +24674,6 @@ impl Shared {
                 .is_some_and(|current| Arc::ptr_eq(current, terminal))
             {
                 return;
-            }
-            let generation = inner.engine.state.generation();
-            #[cfg(all(feature = "agent", unix))]
-            if foreground_job {
-                peer_scan_armed = inner.foreground_job_panes.is_empty()
-                    && inner.foreground_job_panes.insert(pane);
-            } else {
-                inner.foreground_job_panes.remove(&pane);
             }
             let mut alert_window = None;
             let mut silence_schedule = None;
@@ -24726,8 +24722,9 @@ impl Shared {
                     silence_schedule,
                 )
             } else {
+                let now = Instant::now();
                 let rename_due = previous.current_command != runtime.current_command
-                    && inner.engine.automatic_rename_due(pane);
+                    && inner.engine.automatic_rename_due(pane, now);
                 let facts = if rename_due {
                     format_hook_facts(&inner)
                 } else {
@@ -24735,9 +24732,10 @@ impl Shared {
                 };
                 let mut hooks = DaemonFormatHooks::command(&facts);
                 let before = rename_due.then(|| MuxHookSnapshot::capture(&inner.engine));
+                let generation = inner.engine.state.generation();
                 let changed = inner
                     .engine
-                    .set_pane_runtime_facts_with_hooks(pane, runtime, &mut hooks);
+                    .set_pane_runtime_facts_at(pane, runtime, &mut hooks, now);
                 let renamed = inner.engine.state.generation() != generation;
                 let events = match before {
                     Some(before) if renamed => {
@@ -24759,9 +24757,8 @@ impl Shared {
                 )
             }
         };
-        #[cfg(all(feature = "agent", unix))]
-        if peer_scan_armed {
-            self.nudge_status_sampler();
+        if output_activity {
+            self.request_peer_probe();
         }
         if let Some(deadline) = silence_schedule {
             let _ = self
@@ -24875,6 +24872,15 @@ impl Shared {
     }
 
     fn publish_mux_snapshots(&self) {
+        self.publish_mux_snapshots_as(true);
+    }
+
+    fn publish_mux_labels(&self) {
+        self.publish_mux_snapshots_as(false);
+    }
+
+    fn publish_mux_snapshots_as(&self, owns_generation: bool) {
+        let order = self.snapshot_order.lock();
         let (snapshots, appearance_updates) = {
             let mut inner = self.inner.lock();
             let ServerState {
@@ -24884,7 +24890,11 @@ impl Shared {
             } = &mut *inner;
             window_latest_clients.retain(|window, _| engine.state.windows.contains_key(window));
             release_chooser_zooms(&mut inner);
-            inner.last_published_mux_generation = inner.engine.state.generation();
+            let generation = inner.engine.state.generation();
+            let tracked = owns_generation || inner.last_published_mux_generation == generation;
+            if tracked {
+                inner.last_published_mux_generation = generation;
+            }
             let appearance_updates = if inner.engine.has_window_style_settings() {
                 terminal_appearance_updates(&inner)
             } else {
@@ -24893,7 +24903,7 @@ impl Shared {
             let snapshots = if inner.subscribers.is_empty() && !*timers::EAGER_PUBLISH {
                 Vec::new()
             } else {
-                stamped_snapshot_sends(&mut inner)
+                stamped_snapshot_sends(&mut inner, tracked)
             };
             (snapshots, appearance_updates)
         };
@@ -24903,6 +24913,7 @@ impl Shared {
         for (subscriber, snapshot) in snapshots {
             Self::send_event(&subscriber, EventPayload::Snapshot(snapshot));
         }
+        drop(order);
     }
 
     fn refresh_choose_trees(&self) {
@@ -30909,8 +30920,6 @@ struct ServerState {
     key_tables_generation: u64,
     published_snapshots: BTreeMap<ClientId, (u64, u64)>,
     scheduled_window_rename: Option<Instant>,
-    #[cfg(all(feature = "agent", unix))]
-    foreground_job_panes: BTreeSet<PaneId>,
 }
 
 struct WaitItem {
@@ -36989,17 +36998,23 @@ fn note_snapshot_sent(inner: &mut ServerState, client: ClientId, snapshot: &MuxS
         .insert(client, (snapshot.content_digest(), snapshot.generation));
 }
 
-fn stamped_snapshot_sends(inner: &mut ServerState) -> Vec<(Arc<OutboundMailbox>, MuxSnapshot)> {
+fn stamped_snapshot_sends(
+    inner: &mut ServerState,
+    tracked: bool,
+) -> Vec<(Arc<OutboundMailbox>, MuxSnapshot)> {
     let snapshot = inner.engine.state.snapshot();
     let presence = snapshot_presence(inner);
+    let facts = format_hook_facts(inner);
     let mut sends = Vec::with_capacity(inner.subscribers.len());
+    let mut unchanged = Vec::new();
     let mut restamp = false;
     for (client, subscriber) in &inner.subscribers {
         let mut client_snapshot = snapshot.clone();
-        stamp_snapshot_for_client(inner, *client, &mut client_snapshot, &presence);
+        stamp_snapshot_for_client_with(inner, *client, &mut client_snapshot, &presence, &facts);
         let digest = client_snapshot.content_digest();
         let sent = inner.published_snapshots.get(client).copied();
         if !*timers::EAGER_PUBLISH && sent == Some((digest, snapshot.generation)) {
+            unchanged.push(*client);
             continue;
         }
         restamp |= sent.is_some_and(|(sent_digest, sent_generation)| {
@@ -37010,7 +37025,14 @@ fn stamped_snapshot_sends(inner: &mut ServerState) -> Vec<(Arc<OutboundMailbox>,
     let generation = if restamp {
         inner.engine.state.bump_generation();
         let generation = inner.engine.state.generation();
-        inner.last_published_mux_generation = generation;
+        if tracked {
+            inner.last_published_mux_generation = generation;
+        }
+        for client in unchanged {
+            if let Some((_, sent_generation)) = inner.published_snapshots.get_mut(&client) {
+                *sent_generation = generation;
+            }
+        }
         generation
     } else {
         snapshot.generation
@@ -37033,6 +37055,17 @@ fn stamp_snapshot_for_client(
     snapshot: &mut MuxSnapshot,
     presence: &SnapshotPresence,
 ) {
+    let facts = format_hook_facts(inner);
+    stamp_snapshot_for_client_with(inner, client, snapshot, presence, &facts);
+}
+
+fn stamp_snapshot_for_client_with(
+    inner: &ServerState,
+    client: ClientId,
+    snapshot: &mut MuxSnapshot,
+    presence: &SnapshotPresence,
+    facts: &FormatHookFacts,
+) {
     snapshot.focused_window = client_focused_window_for_attachment(inner, client);
     for session in &mut snapshot.sessions {
         session.viewers = presence
@@ -37045,33 +37078,32 @@ fn stamp_snapshot_for_client(
             })
             .collect();
     }
-    let facts = format_hook_facts(inner);
     let format_client = client_attached_session(inner, client)
         .map_or(FormatClient::Unattached, FormatClient::Attached);
     let contexts = inner.engine.format_context_snapshot(format_client);
     expand_window_status_labels(
         &inner.engine,
         &inner.config_files,
-        &facts,
+        facts,
         &contexts,
         snapshot,
     );
     stamp_pane_border_colours(
         &inner.engine,
         &inner.config_files,
-        &facts,
+        facts,
         &contexts,
         snapshot,
     );
     stamp_pane_border_chrome(
         &inner.engine,
         &inner.config_files,
-        &facts,
+        facts,
         &contexts,
         snapshot,
     );
     drop(contexts);
-    stamp_pane_modes(inner, &facts, snapshot);
+    stamp_pane_modes(inner, facts, snapshot);
 }
 
 fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut MuxSnapshot) {
@@ -70724,10 +70756,8 @@ set-option -g @alias-mixed-next yes
             assert_eq!(inner.engine.pane_runtime_facts(pane), Some(&facts));
         }
 
-        let runtime_generation = shared.inner.lock().engine.runtime_facts_generation();
         shared.synchronize_pane_runtime(pane, &terminal, &viewport, "zz-changed", false);
         let inner = shared.inner.lock();
-        assert!(inner.engine.runtime_facts_generation() > runtime_generation);
         assert_ne!(inner.engine.pane_runtime_facts(pane), Some(&facts));
     }
 

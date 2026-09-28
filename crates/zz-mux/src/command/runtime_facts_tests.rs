@@ -35,7 +35,7 @@ fn run(engine: &mut MuxEngine, pane: PaneId, command: &str) -> bool {
 }
 
 #[test]
-fn runtime_facts_move_their_own_counter_not_the_tree() {
+fn runtime_facts_do_not_move_the_tree_generation() {
     let (mut engine, _, active, _) = engine_with_panes();
     engine
         .execute(
@@ -44,12 +44,16 @@ fn runtime_facts_move_their_own_counter_not_the_tree() {
         )
         .expect("disable rename");
     let tree = engine.state.generation();
-    let runtime = engine.runtime_facts_generation();
     assert!(run(&mut engine, active, "vim"));
     assert_eq!(engine.state.generation(), tree);
-    assert_eq!(engine.runtime_facts_generation(), runtime + 1);
+    assert_eq!(
+        engine
+            .pane_runtime_facts(active)
+            .map(|facts| facts.current_command.as_str()),
+        Some("vim")
+    );
     assert!(!run(&mut engine, active, "vim"));
-    assert_eq!(engine.runtime_facts_generation(), runtime + 1);
+    assert_eq!(engine.state.generation(), tree);
 }
 
 #[test]
@@ -183,4 +187,34 @@ fn only_clock_driven_window_labels_need_the_status_tick() {
     set(&["-g", "window-status-current-format", "#(date)"], true);
     set(&["-gu", "window-status-current-format"], false);
     set(&["-g", "pane-border-format", "#{t:pane_start_time}"], true);
+}
+
+#[test]
+fn the_rename_decision_and_the_rename_read_one_clock() {
+    let (mut engine, window, active, _) = engine_with_panes();
+    engine.set_automatic_rename_throttle(true);
+    let mut hooks = CommandHooks::new(engine.format_now());
+    let mut set_at = |engine: &mut MuxEngine, command: &str, now: Instant| {
+        let facts = PaneRuntimeFacts {
+            current_command: command.to_owned(),
+            ..engine
+                .pane_runtime_facts(active)
+                .cloned()
+                .unwrap_or_default()
+        };
+        engine.set_pane_runtime_facts_at(active, facts, &mut hooks, now)
+    };
+    let start = Instant::now();
+    assert!(engine.automatic_rename_due(active, start));
+    assert!(set_at(&mut engine, "vim", start));
+    assert_eq!(engine.state.windows[&window].name, "vim");
+    let early = start + Duration::from_millis(499);
+    assert!(!engine.automatic_rename_due(active, early));
+    assert!(set_at(&mut engine, "less", early));
+    assert_eq!(engine.state.windows[&window].name, "vim");
+    let boundary = start + NAME_INTERVAL;
+    assert!(engine.automatic_rename_due(active, boundary));
+    assert!(set_at(&mut engine, "top", boundary));
+    assert_eq!(engine.state.windows[&window].name, "top");
+    assert_eq!(engine.next_window_rename_deadline(), None);
 }

@@ -16,7 +16,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct PeerRecord {
     pub(crate) pid: u32,
@@ -112,6 +112,8 @@ fn read_record_file(path: &Path, pid: u32) -> Option<PeerRecord> {
         .filter(|record| record.pid == pid)
 }
 
+const RACY_WINDOW: Duration = Duration::from_secs(2);
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct FileStamp {
     modified: Option<SystemTime>,
@@ -127,13 +129,40 @@ impl FileStamp {
             inode: metadata.ino(),
         }
     }
+
+    fn racy(self, read_at: SystemTime) -> bool {
+        self.modified.is_none_or(|modified| {
+            read_at
+                .duration_since(modified)
+                .map_or(true, |age| age < RACY_WINDOW)
+        })
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Seen {
+    stamp: FileStamp,
+    racy: bool,
+}
+
+impl Seen {
+    fn fresh(previous: Option<Self>, stamp: Option<FileStamp>) -> bool {
+        previous.is_some_and(|seen| !seen.racy && Some(seen.stamp) == stamp)
+    }
+
+    fn at(stamp: Option<FileStamp>, read_at: SystemTime) -> Option<Self> {
+        stamp.map(|stamp| Self {
+            stamp,
+            racy: stamp.racy(read_at),
+        })
+    }
 }
 
 #[derive(Default)]
 pub(crate) struct RegistryCache {
     directory: Option<PathBuf>,
-    listing: Option<FileStamp>,
-    files: BTreeMap<OsString, (Option<FileStamp>, Option<PeerRecord>)>,
+    listing: Option<Seen>,
+    files: BTreeMap<OsString, (Option<Seen>, Option<PeerRecord>)>,
 }
 
 impl RegistryCache {
@@ -161,8 +190,8 @@ impl RegistryCache {
             }
             Err(error) => return Err(error),
         };
-        if self.listing != Some(listing) {
-            self.listing = Some(listing);
+        if !Seen::fresh(self.listing, Some(listing)) {
+            let read_at = SystemTime::now();
             let mut names = BTreeSet::new();
             for entry in fs::read_dir(directory)? {
                 let entry = entry?;
@@ -171,6 +200,7 @@ impl RegistryCache {
                     names.insert(filename);
                 }
             }
+            self.listing = Seen::at(Some(listing), read_at);
             let before = self.files.len();
             self.files.retain(|name, _| names.contains(name));
             changed |= self.files.len() != before;
@@ -178,17 +208,21 @@ impl RegistryCache {
                 self.files.entry(name).or_insert((None, None));
             }
         }
-        for (name, (stamp, record)) in &mut self.files {
+        for (name, (seen, record)) in &mut self.files {
             let path = directory.join(name);
+            let read_at = SystemTime::now();
             let current = fs::metadata(&path)
                 .ok()
                 .map(|metadata| FileStamp::of(&metadata));
-            if current == *stamp {
+            if Seen::fresh(*seen, current) {
                 continue;
             }
-            *stamp = current;
-            *record = record_file_pid(name).and_then(|pid| read_record_file(&path, pid));
-            changed = true;
+            *seen = Seen::at(current, read_at);
+            let next = record_file_pid(name).and_then(|pid| read_record_file(&path, pid));
+            if next != *record {
+                *record = next;
+                changed = true;
+            }
         }
         Ok(changed)
     }
@@ -944,7 +978,19 @@ mod tests {
                 .expect("record JSON")
         };
         let path = directory.path().join("4242.json");
-        fs::write(&path, record("busy")).expect("write record");
+        let settled = SystemTime::now() - Duration::from_hours(1);
+        let rewrite = |status: &str, modified: SystemTime| {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(&path)
+                .expect("open record in place");
+            file.write_all(&record(status))
+                .expect("rewrite record in place");
+            file.set_modified(modified).expect("pin mtime");
+        };
+        rewrite("busy", settled);
         fs::write(directory.path().join("notes.txt"), "ignored").expect("write stray file");
         let mut cache = RegistryCache::default();
         assert!(cache.refresh_in(directory.path()).expect("first scan"));
@@ -956,16 +1002,17 @@ mod tests {
         };
         assert_eq!(statuses(&cache), ["busy"]);
         assert!(!cache.refresh_in(directory.path()).expect("quiet scan"));
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .open(&path)
-            .expect("open record in place");
-        std::thread::sleep(Duration::from_millis(5));
-        file.write_all(&record("idle"))
-            .expect("rewrite record in place");
-        drop(file);
+        rewrite("idle", settled);
+        assert!(!cache.refresh_in(directory.path()).expect("settled stamp"));
+        assert_eq!(statuses(&cache), ["busy"]);
+        let recent = SystemTime::now();
+        rewrite("idle", recent);
         assert!(cache.refresh_in(directory.path()).expect("in-place scan"));
         assert_eq!(statuses(&cache), ["idle"]);
+        rewrite("busy", recent);
+        assert!(cache.refresh_in(directory.path()).expect("same-stamp scan"));
+        assert_eq!(statuses(&cache), ["busy"]);
+        assert!(!cache.refresh_in(directory.path()).expect("racy quiet scan"));
         fs::remove_file(&path).expect("remove record");
         assert!(cache.refresh_in(directory.path()).expect("removal scan"));
         assert!(statuses(&cache).is_empty());

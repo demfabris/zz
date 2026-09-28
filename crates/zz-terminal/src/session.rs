@@ -4838,7 +4838,7 @@ fn run_output_view(
             .map_or_else(crossbeam_channel::never, |deadline| {
                 crossbeam_channel::after(deadline.saturating_duration_since(Instant::now()))
             });
-        compression.observe(&terminal);
+        compression.observe(&terminal, Instant::now());
         let compress_timeout = compression
             .due()
             .map_or_else(crossbeam_channel::never, |deadline| {
@@ -5886,7 +5886,7 @@ fn run_terminal(
                 SessionStatus::Running,
             )?;
         }
-        compression.observe(&terminal);
+        compression.observe(&terminal, now);
         if !output_pending && raw_output_parse_backlog.is_empty() {
             compression.run(&mut terminal);
         }
@@ -14101,7 +14101,7 @@ impl IdleCompression {
         !self.unsupported && !*NO_COMPRESS
     }
 
-    fn observe(&mut self, terminal: &Terminal<'_, '_>) {
+    fn observe(&mut self, terminal: &Terminal<'_, '_>, now: Instant) {
         if !self.enabled() {
             return;
         }
@@ -14110,7 +14110,7 @@ impl IdleCompression {
         };
         if self.activity != Some(activity) {
             self.activity = Some(activity);
-            self.due = Some(Instant::now() + COMPRESS_IDLE);
+            self.due = Some(now + COMPRESS_IDLE);
         }
     }
 

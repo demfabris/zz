@@ -947,6 +947,138 @@ Expected: snapshot builds 71% of detached-pane CPU; RenderState 0.72 MB per 180x
 `ttyname_r` 0.86 ms per spawn; 2.6 ms command-thread block per split; 2 s identity poll; threads 4
 -> 2 per pane; pages 288 MB -> 13-24 MB for 20x12k lines.
 
+Built on `perf/pane` (2026-09-28, on 157ac6a3, before the W1-FOOTPRINT merge). Where the build
+departs from the scope above:
+
+- Item 1: `publish_views` (behind `publish_active_views`) builds cells only for views whose
+  stream is on, for views holding copy or view mode (their copy-mode facts keep updating, plus
+  one frame when they leave it), and for the fallback when a caller forces it (exit, dead notice,
+  frozen output views, `fresh_viewport`) or a preview watch is on. Otherwise
+  `Publisher::refresh_fallback` copies the stored fallback with the title, OSC 7 directory,
+  status, scrollbar, mouse tracking and kitty keyboard flags read again; a new size, a mode, an
+  overlay, a search or a scrolled viewport makes it build instead. Cursor and progress are not
+  on this path: `#{cursor_x}` and friends come from `TerminalFacts` and the progress bar from its
+  own slot, both refreshed on every loop turn. The fallback of an unwatched pane is rebuilt once
+  its output has been quiet for 100 ms and at least once a second under continuous output
+  (`settle_unwatched`), which bounds how old the cells `#{C:}` reads can be.
+- Not in the brief: an unwatched pane now wakes its watcher on the leading edge of output and
+  then at most every 100 ms (`Frames::admit_notify`, `UNWATCHED_NOTIFY_INTERVAL`); a title,
+  directory, status or mode change still wakes it at once. Before this the actor signalled the
+  watcher on every 16 ms publish (50 of the actor's 80 busy samples in the flip workload), and
+  each wake ran the whole runtime sync. `pane_current_command`, activity and silence times of an
+  unwatched pane are at most 100 ms older as a result; bells and exits are separate events and
+  are not delayed.
+- Item 2: the streamed set the daemon already kept (`streamed_terminal_panes`: the visible
+  window's panes as Foreground, a GUI sidebar's session panes as Preview) now drives
+  `set_view_stream` through `apply_view_streams` inside `refresh_terminal_visibility`, and
+  `detach_client_state` turns a leaving client's streams off. Turning a stream on for a view that
+  has no published frame starts a new stream epoch, and the watcher sends the first frame of an
+  epoch whole (`latest_view_frames` carries the epoch). Choosers do not attach views: the actor
+  keeps its fallback cells current while `set_preview_watch` is on, and
+  `refresh_preview_watches` turns it on for the panes the selected choose-tree row previews (a
+  session's window active panes, a window's panes, a pane, a client's pane), re-evaluated on
+  every chooser presentation and snapshot publish; once the first current frame of a newly
+  watched pane lands the watcher redraws the choosers (`take_preview_ready`). Popups stream their
+  own view. display-panes reads no cells. `#{C:}` is not in the streamed set: status.rs belongs to
+  W1-FORMAT and a template scan would miss `#{E:}` indirection, so `pane_search` reads the settled
+  fallback (at most 100 ms after output stops, 1 s under a flood; tmux reads the grid live).
+- Item 3: `forbid_actor_round_trips` is set in `execute_with_mux_source_routed_for_terminal_in_queue`
+  and around the status render in `refresh_status_filtered`. `fresh_viewport` has no production
+  caller; first frames come from the stream epoch.
+- Item 4: `Frames` owns the render state and its iterators and drops them, with the dictionary
+  pools, whenever no view streams and no preview watch is on; the settle rebuild creates them
+  again for one build.
+- Item 5: as briefed, in both actors, re-armed after capture, copy-source capture, history
+  chunks, semantic capture, view actions and search refreshes. Measured restore: after idle
+  compression, `capture-pane -S - -E -` of a 180x50 pane holding 9.9k lines of `seq` costs 74.8
+  Minstr (5.3 ms daemon CPU) the first time and 64.6 Minstr after, against 64.2 Minstr with
+  `ZZ_PERF_NO_COMPRESS=1`, so restoring about 46 pages is 10 Minstr (about 30 us a page).
+- Item 6: the macOS child exit is a kqueue with `EVFILT_PROC NOTE_EXIT` in `wait_for_wake`'s poll
+  set (`ChildExitWatch`). `NOTE_EXIT` can fire before the child is reapable, so after the event
+  the actor waits for it with a blocking `waitpid` on that pid; `ESRCH` at registration goes
+  straight to `waitpid`. A child that outlives its actor (a shell that ignores `SIGHUP`, a kill
+  wait that ran out) is reaped by a short-lived `zz-child-reap` thread from `Drop`, where the old
+  per-pane `zz-child-wait` thread reaped it. Linux watches a pidfd in `zz-pty-gather`'s poll set
+  and keeps a `zz-child-wait` thread only when `pidfd_open` is missing. portable-pty's `Child` is
+  gone on unix; Windows keeps it.
+- Item 7: `session/unix_pty.rs` opens the pty with `posix_openpt`, `grantpt`, `unlockpt` and
+  `ptsname` (rustix, `TIOCPTYGNAME` on macOS). It resolves the program and builds argv and the
+  environment the way portable-pty's `spawn_command` did (same `PATH` search and errors, login
+  `argv[0]`, `SHELL`), all before the child exists. On macOS the child is started with
+  `posix_spawn`, `POSIX_SPAWN_SETSID`, the slave on fds 0-2, `POSIX_SPAWN_CLOEXEC_DEFAULT`, every
+  signal reset to default, an empty mask and `posix_spawn_file_actions_addchdir_np`, and
+  `ENOEXEC` is retried under `/bin/sh`. That reverses the Rejected row: a C probe showed the
+  child gets the slave as its controlling terminal (`/dev/tty` opens, `tpgid` is the child), a
+  test checks that ^C typed on the pty stops the foreground job, and `fork` of the daemon was 0.48
+  ms of the actor's 1.2 ms per spawn, half of it in libmalloc's fork handlers. Elsewhere the
+  child is forked with nothing left to allocate and closes inherited fds with `close_range` (a
+  loop when it is missing). The pid is known as soon as the spawn returns. Pane settings travel in
+  `TerminalSpawn`, and every setting and view change (`set_word_separators`, `set_appearance`,
+  `set_allow_passthrough`, `set_wrap_search`, `set_engine_knobs`, `resize`, attach, detach,
+  release, stream, preview watch) goes through `ControlSlot`, which coalesces per key and per view
+  and is applied before the command that wakes the actor, so none of them parks the caller.
+  Empty panes take word separators and wrap-search through the slot at creation.
+- Items 8-12 as briefed, with these details: views are recorded on the handle side
+  (`ControlSlot::known_views`), not by the actor; `is_current_terminal` reads a per-session
+  `retired` flag the daemon sets whenever it drops or replaces a pane's terminal; the resource
+  directory is `v1-<FNV-1a of the scripts>` and a cache root is materialized once per process;
+  the echo window is 50 ms and allows four immediate publishes per input.
+- The pane watcher now sends frames before the runtime sync, so an echo no longer waits for the
+  process lookup and `synchronize_pane_runtime`. Attach, detach and release publish only when
+  the view streams, holds a mode or had a frame, so an attach does not build a frame that the
+  stream then builds again.
+- The foreground group is read with `libc::tcgetpgrp` and 0 means none; rustix asserted a
+  positive pid there, which panicked the watchers of exited panes in debug builds.
+
+Measured with the quick wave1 gate (`--only spawn,chatty,mem,echo,throughput,attach`, load 7-25)
+and a full `--only chatty,mem` run, against `/tmp` before-JSON of 157ac6a3 (quick) and W0:
+`spawn.cpu.split_shell` 4.71 -> 2.57 ms (36.8 -> 20.2 Minstr), `spawn.wall.split_empty_P` 2023 ->
+6.3 ms (1.9 ms CPU, 45.4 -> 17.0 Minstr), `spawn.cpu.new_window` 4.94 -> 2.67 ms;
+`chatty.cpu_pct.steady` 9.86 (W0) -> 3.02% (102 Minstr/s, tmux 112), `.flip` 25.6 -> 5.4% (3285
+-> 351 Minstr/s), `.hidden` 51.5 -> 11.1% (6906 -> 1117 Minstr/s, tty 219 -> 43 KiB/s),
+`.visible` 17.0 -> 16.6%; `mem.footprint.p20` 54.1 -> 41.9 MiB, `mem.threads.p20` 89 -> 49,
+`mem.footprint.tui20` 56.7 -> 44.6 MiB, `mem.footprint.scroll180` 343.8 -> 55.9 MiB (tmux 61.5,
+0.91x), `.scroll80` 170.6 -> 49.0 MiB (tmux 35.6, 1.38x); `echo.p50.idle` 0.45 -> 0.25 ms,
+`echo.p99.idle` 0.68 -> 0.50 ms, `echo.p50.busy30` 3.84 -> 0.44 ms, `echo.p99.busy30` 17.7 -> 1.6
+ms. Throughput and attach measured against the pre-campaign binary in the same runs: detached
+ASCII 214-219 against 204-217 MB/s, unicode 101-102 against 98.5, attached 756-817 against
+722-755 ms (noise at load 7-8, the quick gate's single run read 188-194 at load 20);
+`attach.instr.p1` 120 against 122 Minstr, `.p4` 126.6 against 126.5, `attach.ttfc.p1` 18.8
+against 19.7 ms, `attach.wire_s2c.p4` 257 -> 204 KB.
+
+Missed or handed on:
+
+- `mem.footprint.scroll80` (1.38x, rule 1.15x): the scrolled history now costs 7 MiB over 20 idle
+  panes at 80 columns (tmux holds 33 MiB of it); the rest is the idle panes. A quiet 80x24 pane
+  costs about 1.5 MiB, 0.9 MiB more than an empty one, and almost all of it is mimalloc pages:
+  each pane runs two threads with their own heaps, and pages abandoned by exited connection
+  threads keep the pane state they allocated (creating the same 20 panes from one chained
+  command instead of 20 commands saves 5 MiB). The 64 KiB read buffer is not a factor (a 4 KiB
+  buffer measured the same). Handed to W1-EXEC (connection threads) and W3-SHARDS (threads per
+  pane).
+- `echo.p99.busy30` (1.6 ms against 1.5x tmux, about 0.3 ms) and `echo.p50.*`: the path still
+  crosses the client reader, the actor, the watcher and the mailbox writer, and
+  `publish_terminal_for_pane` takes `inner`; W3-SHARDS and W4-DELIVER own those hops.
+- `spawn.wall.*` and `spawn.cpu.*`: `display-message` alone costs as much wall time as a split
+  here; the remaining daemon work per split beyond it is the command and publication path
+  (W1-EXEC, W1-PUBLISH, W1-FORMAT) plus about 0.5 ms on the actor (`posix_openpt`, the slave
+  open, `Terminal::new`, the spawn).
+- W1-FOOTPRINT's hand-off: the foreground lookup is one `tcgetpgrp` on the master without
+  portable-pty's mutex, and unwatched panes wake their watcher at most ten times a second; the
+  second lookup per event in `terminal_current_command` and `terminal_working_directory` stays
+  with whoever owns those functions after the merge.
+- On Linux, glibc's `posix_spawn` would skip the page table copy too, but `addclosefrom_np`
+  needs glibc 2.34, newer than the headless binary's floor.
+- `daemon::tests::mode_keys_scope_visible_command_output_separately_from_underlying_copy_mode`
+  takes 30 s on 157ac6a3 as well: Escape on the copy pane parks the command output, so the test
+  only passes when its `sleep 30` pane exits just before the 30 s deadline, and it fails under a
+  loaded full-crate run.
+
+Left on this path after the change, as busy samples in a 5 s `sample` of the flip workload: 154
+in all, 60 on the pane actors (`publish_views` 21, of which 10 signal the watcher; PTY parsing
+7; the control slot 4) and 93 on the watchers (`publish_snapshot_state` 50 and the runtime-fact
+hooks 14, W1-PUBLISH and W1-FORMAT; `terminal_current_command` 27, W1-FOOTPRINT).
+
 ## W1-EXEC: one-frame commands, fast cold start (effort L)
 
 Scope:
@@ -1469,7 +1601,7 @@ revert. `ZZ_PTY_SHARDS=N` is a tuning knob, not a rollback.
 | socketpair / listener-fd handoff on cold start | a readiness pipe gives the same latency with less code |
 | Separate config batch-replay mode | the per-line costs are removed at their source; a second mode duplicates hook semantics |
 | Caching the option snapshot behind a generation | removing the calls plus the option index works without invalidation risk |
-| `posix_spawn` for panes | controlling tty on XNU unverified; fork cost already near tmux |
+| `posix_spawn` for panes on Linux | glibc's `addclosefrom_np` is newer than the headless binary's floor; macOS uses it since W1-PANE (controlling tty verified, fork of the daemon was 0.48 ms) |
 | Daemon-owned layout | GUI pixel gaps unresolved; sizing before the first frame removes the TUI round trip |
 | Version preamble and slimmer envelope | ~3 B per frame does not justify changing zz-web framing |
 | Shrinking the GUI HistoryRing | outside the daemon; revisit after W2-TERM |

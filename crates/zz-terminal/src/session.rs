@@ -13506,21 +13506,19 @@ fn watch_child_linux(
     exit: Sender<std::io::Result<ExitStatus>>,
 ) -> Result<Option<LinuxChildWatch>, WorkerError> {
     let pid = child_pid(process_id)?;
-    match rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty()) {
-        Ok(pidfd) => Ok(Some(LinuxChildWatch { pid, pidfd, exit })),
-        Err(_) => {
-            thread::Builder::new()
-                .name("zz-child-wait".into())
-                .spawn(move || {
-                    let status = reap_child(pid, true).unwrap_or_else(|| {
-                        Err(std::io::Error::other("the pane child was reaped elsewhere"))
-                    });
-                    let _ = exit.send(status);
-                })
-                .map_err(WorkerError::Io)?;
-            Ok(None)
-        }
+    if let Ok(pidfd) = rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty()) {
+        return Ok(Some(LinuxChildWatch { pid, pidfd, exit }));
     }
+    thread::Builder::new()
+        .name("zz-child-wait".into())
+        .spawn(move || {
+            let status = reap_child(pid, true).unwrap_or_else(|| {
+                Err(std::io::Error::other("the pane child was reaped elsewhere"))
+            });
+            let _ = exit.send(status);
+        })
+        .map_err(WorkerError::Io)?;
+    Ok(None)
 }
 
 #[cfg(all(unix, not(target_os = "linux")))]

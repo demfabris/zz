@@ -6883,7 +6883,7 @@ fn run_terminal(
             if had_output || output_pending {
                 publisher.mark_output_activity();
             }
-            frames.force_fallback = true;
+            frames.force_fallback = !terminating;
             publish_active_views(
                 &mut terminal,
                 publisher,

@@ -4910,7 +4910,10 @@ impl Shared {
         if requests.is_empty() {
             return;
         }
-        let changed = self.status.lock().render_changed(requests);
+        let changed = {
+            let _round_trips = zz_terminal::forbid_actor_round_trips();
+            self.status.lock().render_changed(requests)
+        };
         if !changed.is_empty() {
             let mut inner = self.inner.lock();
             for (client, status) in &changed {
@@ -6428,6 +6431,7 @@ impl Shared {
         client_terminal: ClientTerminal,
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
+        let _round_trips = zz_terminal::forbid_actor_round_trips();
         let split_input = canonical_command(&command.name) == "split-window"
             && command_stdin_sink("split-window", &command.args)
                 == Some(CommandStdinSink::PaneInput);
@@ -24129,41 +24133,6 @@ impl Shared {
                         TerminalEvent::ViewportReady { output_activity } => {
                             let current = terminal.latest_view_frames();
                             let runtime_viewport = terminal.latest_viewport();
-                            if !terminal_status_should_close(&runtime_viewport.status) {
-                                let current_command = terminal_current_command(&terminal);
-                                shared.synchronize_pane_runtime(
-                                    pane,
-                                    &terminal,
-                                    &runtime_viewport,
-                                    &current_command,
-                                    output_activity,
-                                );
-                                let bar_state = terminal.progress_bar().state;
-                                if !projects_agent && previous_bar_state != bar_state {
-                                    previous_bar_state = bar_state;
-                                    shared.synchronize_pane_progress(
-                                        pane,
-                                        &terminal,
-                                        &current_command,
-                                        bar_state,
-                                    );
-                                }
-                            }
-                            if !projects_agent
-                                && previous_title
-                                    .as_deref()
-                                    .is_none_or(|previous| previous != runtime_viewport.title())
-                            {
-                                shared.synchronize_pane_title(
-                                    pane,
-                                    &terminal,
-                                    runtime_viewport.title(),
-                                );
-                                previous_title = Some(runtime_viewport.title().to_owned());
-                            }
-                            if terminal.take_preview_ready() {
-                                shared.refresh_chooser_previews();
-                            }
                             let referenced_images = current
                                 .iter()
                                 .flat_map(|(_, viewport, _)| {
@@ -24233,10 +24202,45 @@ impl Shared {
                                 }
                             }
                             mode_memo.retain(|view, _| active.contains(view));
+                            previous.retain(|view, _| active.contains(view));
+                            if !terminal_status_should_close(&runtime_viewport.status) {
+                                let current_command = terminal_current_command(&terminal);
+                                shared.synchronize_pane_runtime(
+                                    pane,
+                                    &terminal,
+                                    &runtime_viewport,
+                                    &current_command,
+                                    output_activity,
+                                );
+                                let bar_state = terminal.progress_bar().state;
+                                if !projects_agent && previous_bar_state != bar_state {
+                                    previous_bar_state = bar_state;
+                                    shared.synchronize_pane_progress(
+                                        pane,
+                                        &terminal,
+                                        &current_command,
+                                        bar_state,
+                                    );
+                                }
+                            }
+                            if !projects_agent
+                                && previous_title
+                                    .as_deref()
+                                    .is_none_or(|previous| previous != runtime_viewport.title())
+                            {
+                                shared.synchronize_pane_title(
+                                    pane,
+                                    &terminal,
+                                    runtime_viewport.title(),
+                                );
+                                previous_title = Some(runtime_viewport.title().to_owned());
+                            }
+                            if terminal.take_preview_ready() {
+                                shared.refresh_chooser_previews();
+                            }
                             if !mode_clients.is_empty() {
                                 shared.status.lock().request_mode_refresh(mode_clients);
                             }
-                            previous.retain(|view, _| active.contains(view));
                             if finished {
                                 shared.close_exited_terminal(pane, &terminal);
                                 return;
@@ -25303,10 +25307,6 @@ impl Shared {
         }
     }
 
-    /// A chooser previews panes by reading their latest viewport. Once the
-    /// first current frame of a pane a chooser started watching lands, redraw
-    /// the choosers so their first render does not keep cells from before
-    /// the watch.
     fn refresh_chooser_previews(&self) {
         let clients = self
             .inner
@@ -25371,7 +25371,8 @@ impl Shared {
 
     fn publish_chooser_presentation(&self, client: ClientId) {
         let presentation = {
-            let inner = self.inner.lock();
+            let mut inner = self.inner.lock();
+            refresh_preview_watches(&mut inner);
             chooser_presentation::chooser_presentation(&inner, client).map(Box::new)
         };
         self.publish_to_client(client, EventPayload::ChooserPresentation { presentation });
@@ -39081,9 +39082,6 @@ fn log_pane_perf_knobs() {
     }
 }
 
-/// Mirrors one client's stream changes onto the pane actors. Called under the
-/// server lock, so the order the actors see matches the order the streamed
-/// sets changed in; the calls only queue and never wait for an actor.
 fn apply_view_streams(
     inner: &ServerState,
     view: TerminalViewId,
@@ -39111,43 +39109,45 @@ fn apply_view_streams(
     }
 }
 
-/// The panes an open chooser can preview from its rows: every pane of a
-/// listed session or window, a listed pane, and a listed client's pane.
 fn chooser_preview_panes(inner: &ServerState) -> BTreeSet<PaneId> {
     let state = &inner.engine.state;
     let mut panes = BTreeSet::new();
-    let add_window = |panes: &mut BTreeSet<PaneId>, window: WindowId| {
-        if let Some(window) = state.windows.get(&window) {
-            panes.extend(window.panes.keys().copied());
-        }
-    };
     for chooser in inner.choose_trees.values() {
-        for item in &chooser.rendered.items {
-            match item.target {
-                ChooseTreeTarget::Session(session) => {
-                    for window in state
-                        .sessions
-                        .get(&session)
-                        .into_iter()
-                        .flat_map(|session| session.windows.iter())
-                    {
-                        add_window(&mut panes, *window);
-                    }
-                }
-                ChooseTreeTarget::Window(window) => add_window(&mut panes, window),
-                ChooseTreeTarget::Pane(pane) => {
-                    panes.insert(pane);
-                }
-                ChooseTreeTarget::Client(client) => {
-                    panes.extend(
-                        chooser
-                            .clients
-                            .iter()
-                            .filter(|row| row.client == client)
-                            .filter_map(|row| row.pane),
-                    );
-                }
+        let Some(item) = usize::try_from(chooser.rendered.selected)
+            .ok()
+            .and_then(|selected| chooser.rendered.items.get(selected))
+        else {
+            continue;
+        };
+        match item.target {
+            ChooseTreeTarget::Session(session) => panes.extend(
+                state
+                    .sessions
+                    .get(&session)
+                    .into_iter()
+                    .flat_map(|session| session.windows.iter())
+                    .filter_map(|window| state.windows.get(window))
+                    .map(|window| window.active_pane),
+            ),
+            ChooseTreeTarget::Window(window) => panes.extend(
+                state
+                    .windows
+                    .get(&window)
+                    .into_iter()
+                    .flat_map(|window| window.panes.keys().copied()),
+            ),
+            ChooseTreeTarget::Pane(pane) => {
+                panes.insert(pane);
             }
+            ChooseTreeTarget::Client(client) if !chooser.info_preview => panes.extend(
+                chooser
+                    .clients
+                    .iter()
+                    .filter(|row| row.client == client)
+                    .filter_map(|row| row.pane)
+                    .filter(|pane| !(chooser.hide_source && *pane == chooser.source_pane)),
+            ),
+            ChooseTreeTarget::Client(_) => {}
         }
     }
     panes.retain(|pane| inner.terminals.contains_key(pane));

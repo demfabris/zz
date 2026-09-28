@@ -51,9 +51,6 @@ fn viewport_text(viewport: &TerminalViewport) -> String {
     text
 }
 
-/// A session whose first window idles and whose second window prints a
-/// counter forever, with one interactive client attached and looking at the
-/// first window.
 fn printing_session(
     shared: &Arc<Shared>,
     name: &str,
@@ -174,6 +171,30 @@ fn a_chooser_keeps_the_panes_it_previews_current() {
         )
         .expect("open the chooser");
     shared.publish_snapshot();
+    assert!(
+        !shared.inner.lock().preview_watched.contains(&printing),
+        "only the selected row's preview is watched"
+    );
+    {
+        let mut inner = shared.inner.lock();
+        let window = inner
+            .engine
+            .state
+            .window_for_pane(printing)
+            .expect("printing window");
+        let chooser = inner.choose_trees.get_mut(&client).expect("chooser");
+        let row = chooser
+            .rendered
+            .items
+            .iter()
+            .position(|item| {
+                item.target == ChooseTreeTarget::Window(window)
+                    || item.target == ChooseTreeTarget::Pane(printing)
+            })
+            .expect("the printing window's row");
+        chooser.rendered.selected = u32::try_from(row).expect("row index");
+    }
+    shared.publish_chooser_presentation(client);
     assert!(shared.inner.lock().preview_watched.contains(&printing));
     wait_until("the watched preview", || {
         printer.latest_viewport_is_current()
@@ -216,7 +237,7 @@ fn a_chooser_keeps_the_panes_it_previews_current() {
 }
 
 #[test]
-fn a_client_that_never_attached_leaves_no_view_behind() {
+fn a_command_client_that_ran_copy_mode_and_capture_leaves_no_view_behind() {
     let shared = Arc::new(Shared::new(1));
     let mut context = ExecutionContext::default();
     run(
@@ -250,6 +271,35 @@ fn a_client_that_never_attached_leaves_no_view_behind() {
     );
     let session = context.session.expect("session");
     shared.attach(interactive, session).expect("attach");
+    assert_eq!(pane_terminal.known_view_count(), 1);
+    let (copying_client, _) =
+        shared.register_subscribed(ClientKind::Command, None, None, Arc::clone(&mailbox));
+    for (name, args) in [
+        ("copy-mode", vec!["-t".to_owned(), pane.to_string()]),
+        (
+            "capture-pane",
+            vec!["-p".to_owned(), "-t".to_owned(), pane.to_string()],
+        ),
+        (
+            "send-keys",
+            vec![
+                "-X".to_owned(),
+                "-t".to_owned(),
+                pane.to_string(),
+                "cancel".to_owned(),
+            ],
+        ),
+    ] {
+        shared
+            .execute(
+                copying_client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(name, args.iter().map(String::as_str)),
+            )
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+    }
+    shared.unregister(copying_client);
     assert_eq!(pane_terminal.known_view_count(), 1);
     shared.unregister(interactive);
     assert_eq!(pane_terminal.known_view_count(), 0);
@@ -376,5 +426,49 @@ fn split_window_with_an_empty_command_prints_its_pane_without_waiting() {
         started.elapsed() < Duration::from_millis(1500),
         "an empty pane has no child identity to wait for: {:?}",
         started.elapsed()
+    );
+}
+
+#[test]
+fn styled_wide_lines_fill_the_history_limit_like_plain_ones() {
+    let shared = Arc::new(Shared::new(1));
+    let mut context = ExecutionContext::default();
+    run(
+        &shared,
+        &mut context,
+        "set-option",
+        &["-g", "history-limit", "2000"],
+    );
+    let history = |name: &str, style: &str| {
+        let script = format!(
+            "awk 'BEGIN {{ for (l = 0; l < 3000; l++) {{ s = \"\"; for (c = 0; c < 180; c++) s = s sprintf(\"{style}%c\", (l + c) % 216 + 16, 97 + c % 26); print s \"\\033[m\" }} print \"ZZ_FILLED\" }}'; read _"
+        );
+        let mut context = ExecutionContext::default();
+        run(
+            &shared,
+            &mut context,
+            "new-session",
+            &["-d", "-s", name, "-x", "180", "-y", "50", &script],
+        );
+        let pane = context.pane.expect("pane").to_string();
+        wait_until("the fill", || {
+            run(&shared, &mut context, "capture-pane", &["-p", "-t", &pane]).contains("ZZ_FILLED")
+        });
+        run(
+            &shared,
+            &mut context,
+            "display-message",
+            &["-p", "-t", &pane, "#{history_size}"],
+        )
+        .trim()
+        .parse::<usize>()
+        .expect("history size")
+    };
+    let plain = history("plain-history", "%.0s");
+    let styled = history("styled-history", "\\033[1;38;5;%d;48;5;17m");
+    assert!((1_800..=2_000).contains(&plain), "plain kept {plain}");
+    assert_eq!(
+        styled, plain,
+        "styled lines keep as much history as plain ones"
     );
 }

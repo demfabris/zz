@@ -26,9 +26,6 @@ const POWERSHELL_INTEGRATION: &[u8] =
 #[cfg(any(unix, windows))]
 static TEMPORARY_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
-/// The resource directory is named after a hash of the resources this build
-/// carries, so a root prepared once holds exactly these bytes and a newer
-/// build never rewrites files a running shell still reads.
 #[cfg(unix)]
 static RESOURCE_DIRECTORY: LazyLock<String> =
     LazyLock::new(|| resource_directory(&[BASH_INTEGRATION, ZSH_BOOTSTRAP, ZSH_INTEGRATION]));
@@ -36,8 +33,6 @@ static RESOURCE_DIRECTORY: LazyLock<String> =
 static RESOURCE_DIRECTORY: LazyLock<String> =
     LazyLock::new(|| resource_directory(&[POWERSHELL_INTEGRATION]));
 
-/// Roots this process already materialized; a pane spawn after the first
-/// touches the file system for none of them.
 #[cfg(any(unix, windows))]
 static PREPARED_ROOTS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
@@ -57,8 +52,6 @@ fn resource_directory(resources: &[&[u8]]) -> String {
     format!("v1-{hash:016x}")
 }
 
-/// Every variable the integration may set, so a spawn that rebuilds the
-/// child's environment reads each one back even when its value is not UTF-8.
 #[cfg(unix)]
 pub(super) const ENVIRONMENT_KEYS: [&str; 9] = [
     "ENV",

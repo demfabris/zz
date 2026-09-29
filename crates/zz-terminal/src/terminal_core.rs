@@ -41,6 +41,8 @@ pub use model::{
     UnderlineStyle,
 };
 pub use paste::{PastePreparationError, prepare_paste_buffer};
+#[cfg(all(feature = "session", target_os = "linux"))]
+pub use session::disable_transparent_huge_pages;
 #[cfg(feature = "session")]
 pub use session::{
     CaptureBoundary, CaptureOptions, CopyModeFacts, CopyModeSelectionFacts, EngineKnobs,

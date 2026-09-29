@@ -253,7 +253,7 @@ impl Renderer {
         Self::with_sink(crate::writer::stdout_sink())
     }
 
-    fn with_sink(sink: Sink) -> Self {
+    pub(crate) fn with_sink(sink: Sink) -> Self {
         Self {
             output: Vec::with_capacity(64 * 1024),
             queued_control: Vec::new(),
@@ -316,7 +316,11 @@ impl Renderer {
     }
 
     pub fn note_frame(&mut self, pane: PaneId, damage: FrameDamage) {
-        self.damage.insert(pane, damage);
+        if let Some(pending) = self.damage.get_mut(&pane) {
+            merge_damage(pending, damage);
+        } else {
+            self.damage.insert(pane, damage);
+        }
     }
 
     pub fn queue_control(&mut self, output: Vec<u8>) {

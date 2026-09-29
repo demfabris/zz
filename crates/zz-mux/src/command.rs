@@ -3096,6 +3096,11 @@ impl MuxEngine {
     }
 
     #[must_use]
+    pub const fn extended_keys(&self) -> &str {
+        self.server_options.extended_keys.as_str()
+    }
+
+    #[must_use]
     pub const fn history_file(&self) -> &str {
         self.server_options.history_file.as_str()
     }
@@ -16086,7 +16091,12 @@ fn session_creation_environment(options: &Options) -> Vec<(String, String)> {
         .collect()
 }
 
-type CompiledPatterns = Arc<[(String, GlobPattern)]>;
+enum EnvironmentPattern {
+    Name(String),
+    Glob(GlobPattern),
+}
+
+type CompiledPatterns = Arc<[(String, EnvironmentPattern)]>;
 
 fn compiled_update_environment(patterns: &[String]) -> CompiledPatterns {
     static COMPILED: std::sync::LazyLock<
@@ -16100,7 +16110,13 @@ fn compiled_update_environment(patterns: &[String]) -> CompiledPatterns {
     }
     let compiled: CompiledPatterns = patterns
         .iter()
-        .map(|pattern| (pattern.clone(), GlobPattern::new(pattern)))
+        .map(|pattern| {
+            let glob = GlobPattern::new(pattern);
+            let compiled = glob
+                .literal()
+                .map_or(EnvironmentPattern::Glob(glob), EnvironmentPattern::Name);
+            (pattern.clone(), compiled)
+        })
         .collect();
     *cached = Some((patterns.to_vec(), Arc::clone(&compiled)));
     compiled
@@ -16111,12 +16127,21 @@ fn apply_client_environment_update(
     patterns: &[String],
     client_environment: &BTreeMap<RawText, RawText>,
 ) {
-    for (pattern, glob) in compiled_update_environment(patterns).iter() {
-        let matches = client_environment
-            .iter()
-            .filter(|(name, _)| glob.matches(name))
-            .map(|(name, value)| (name.clone(), value.clone()))
-            .collect::<Vec<_>>();
+    for (pattern, compiled) in compiled_update_environment(patterns).iter() {
+        let matches = match compiled {
+            EnvironmentPattern::Name(name) => client_environment
+                .range::<str, _>((
+                    std::ops::Bound::Included(name.as_str()),
+                    std::ops::Bound::Included(name.as_str()),
+                ))
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect::<Vec<_>>(),
+            EnvironmentPattern::Glob(glob) => client_environment
+                .iter()
+                .filter(|(name, _)| glob.matches(name))
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect::<Vec<_>>(),
+        };
         if matches.is_empty() {
             environment
                 .entry(pattern.clone().into())
@@ -40045,6 +40070,53 @@ mod tests {
                 .global_tmux_option_value("update-environment")
                 .as_deref(),
             Some("PHASE_C7 ABSENT_C7")
+        );
+    }
+
+    #[test]
+    fn update_environment_names_take_only_their_own_entry_and_globs_every_match() {
+        let client = BTreeMap::from([
+            (RawText::from("DISPLAY"), RawText::from(":0")),
+            (RawText::from("DISPLAY_EXTRA"), RawText::from("extra")),
+            (RawText::from("SSH_AGENT_PID"), RawText::from("7")),
+            (RawText::from("SSH_AUTH_SOCK"), RawText::from("/sock")),
+            (RawText::from("STAR*"), RawText::from("star")),
+            (
+                RawText::from_bytes(b"BYTE\xff".to_vec()),
+                RawText::from("raw"),
+            ),
+        ]);
+        let mut environment = Environment::default();
+        apply_client_environment_update(
+            &mut environment,
+            &[
+                "DISPLAY".to_owned(),
+                "SSH_*".to_owned(),
+                "STAR\\*".to_owned(),
+                "BYTE\u{fffd}".to_owned(),
+                "ABSENT".to_owned(),
+            ],
+            &client,
+        );
+        let values = environment
+            .iter()
+            .map(|(name, entry)| {
+                (
+                    name.as_bytes().to_vec(),
+                    entry.value.as_ref().map(ToString::to_string),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            values,
+            [
+                (b"ABSENT".to_vec(), None),
+                (b"BYTE\xff".to_vec(), Some("raw".to_owned())),
+                (b"DISPLAY".to_vec(), Some(":0".to_owned())),
+                (b"SSH_AGENT_PID".to_vec(), Some("7".to_owned())),
+                (b"SSH_AUTH_SOCK".to_vec(), Some("/sock".to_owned())),
+                (b"STAR*".to_vec(), Some("star".to_owned())),
+            ]
         );
     }
 

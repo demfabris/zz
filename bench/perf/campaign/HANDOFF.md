@@ -142,7 +142,7 @@ Lanes in flight:
 
 | Lane | Where | State |
 |---|---|---|
-| W1-ATTACH fix pass | `~/dev/zz-attach`, `perf/attach` | agent running from `~/.cache/zz-perf/prompts/attach-fix.md`; report to `~/.cache/zz-perf/attach/report.md` |
+| W1-ATTACH fix pass | `~/dev/zz-attach`, `perf/attach` | done 2026-09-29, ready for merge 6; report in `~/.cache/zz-perf/attach/report.md`, statuses in `attach-review.json` |
 | W1-LINUX-PAGES | `~/dev/ghostty-zz` branch `zz/pagelist-reuse` (local clone of the fork) + `~/dev/zz-pages` `perf/linux-pages` | agent running from `~/.cache/zz-perf/prompts/pagelist.md`. Needs an owner push of the fork branch and a `GHOSTTY_COMMIT` bump before it can merge |
 
 ## Owner decisions (binding)
@@ -263,18 +263,18 @@ judged from the fix-pass diffs (`46510b07`, `6e475f57`, `08186223`, `73eafb94`);
 
 | # | Review | Sev | Finding | Status |
 |---|---|---|---|---|
-| 1 | parity | major | queued patch stands in for a Full after a viewport wipe; pane blank or stale | likely fixed `46510b07` (+4 tests) |
-| 2 | parity | minor | same-size SIGWINCH no longer repaints | likely fixed `6e475f57` |
-| 3 | parity | minor | as-built notes: only zz-client core wipes viewports on Attached; "no epoch needed" is wrong | open (doc text unchanged) |
-| 4 | perf | major | themed clear + ECH on every blank row is half the p1 attach bytes | likely fixed `6e475f57` |
-| 5 | perf | major | placeholder status row and borders painted, then repainted 0.2 ms later | likely fixed `08186223` + `73eafb94` (`ZZ_PERF_ATTACH_BATCH`), unmeasured |
-| 6 | perf | minor | 8 KiB macOS AF_UNIX send buffer caps writev batches | partly: daemon `SO_SNDBUF` set; client `SO_RCVBUF` not; writes not re-counted |
-| 7 | perf | minor | 7 pane wakes per attach+detach, redundant same-geometry resize | likely fixed `08186223` (`requested_geometry`, `wake_queued`) |
-| 8 | perf | minor | writer thread spawned per TUI connection | likely fixed `08186223` (`attach::spawn_writer` on pooled threads) |
-| 9 | perf | minor | update-environment glob match on every attach | partly: literal-prefix reject only |
-| 10 | perf | minor | status render for the detaching TUI and other-lane work in the attach cycle | open |
-| 11 | perf | minor | kitty graphics probe + query burst, 282 B per attach | open |
-| 12 | perf | minor | headline numbers misattributed (wire_s2c came from PANE/EXEC, 0.375 KiB/s did not reproduce) | open (doc) |
+| 1 | parity | major | queued patch stands in for a Full after a viewport wipe; pane blank or stale | fixed `46510b07`, verified on Linux (+4 tests) |
+| 2 | parity | minor | same-size SIGWINCH no longer repaints | fixed `6e475f57`; a cell-size reply no longer fires `client-resized` |
+| 3 | parity | minor | as-built notes: only zz-client core wipes viewports on Attached; "no epoch needed" is wrong | fixed (doc) |
+| 4 | perf | major | themed clear + ECH on every blank row is half the p1 attach bytes | fixed: p1 504 B, p4 1449 B on Linux |
+| 5 | perf | major | placeholder status row and borders painted, then repainted 0.2 ms later | fixed, tty captures show no byte painted twice; the hello no longer carries a pre-attach status |
+| 6 | perf | minor | 8 KiB macOS AF_UNIX send buffer caps writev batches | fixed on Linux (6-7 writev per attach, buffered reads both ends; `SO_RCVBUF` does nothing here); macOS unmeasured |
+| 7 | perf | minor | 7 pane wakes per attach+detach, redundant same-geometry resize | fixed `08186223`, cannot go stale (read) |
+| 8 | perf | minor | writer thread spawned per TUI connection | fixed: 41 -> 23 distinct daemon threads over a 6 s attach loop |
+| 9 | perf | minor | update-environment glob match on every attach | fixed: literal names read by lookup |
+| 10 | perf | minor | status render for the detaching TUI and other-lane work in the attach cycle | fixed for the lane; the rest is in the plan's hand-on list |
+| 11 | perf | minor | kitty graphics probe + query burst, 282 B per attach | fixed: probe only for known kitty terminals or on first need |
+| 12 | perf | minor | headline numbers misattributed (wire_s2c came from PANE/EXEC, 0.375 KiB/s did not reproduce) | fixed (doc, Linux numbers) |
 
 Also: `ZZ_PERF_ATTACH_BATCH` is missing from the Rollback switches table; the lane adds ~73 new
 comment lines in `.rs` files (house rule: no comments); web build never run (`just web-build`);

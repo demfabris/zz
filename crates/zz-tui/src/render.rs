@@ -1,7 +1,8 @@
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fmt::Write as _,
     io::{self, Write as _},
+    rc::Rc,
 };
 
 use unicode_width::UnicodeWidthChar as _;
@@ -204,6 +205,10 @@ struct PaintedSidebarRow {
     status: bool,
 }
 
+const PAINT_BEGIN: &[u8] = b"\x1b[?2026h\x1b[?25l";
+const PAINT_END: &[u8] = b"\x1b[?2026l";
+const PAINT_TAIL_BYTES: usize = 64;
+
 pub(crate) struct Renderer {
     output: Vec<u8>,
     queued_control: Vec<u8>,
@@ -216,6 +221,7 @@ pub(crate) struct Renderer {
     painted: HashMap<PaneId, PaintedPane>,
     headers: HashMap<PaneId, String>,
     picker_cards: HashMap<PaneId, (Rect, usize)>,
+    cards: HashMap<PaneId, (Rect, &'static str, String, String)>,
     sidebar_rows: Vec<PaintedSidebarRow>,
     status_rows: Vec<StyledLine>,
     status_geometry: Option<(u16, u16, u16)>,
@@ -235,8 +241,11 @@ pub(crate) struct Renderer {
     kitty: KittyBridge,
     writer: TerminalWriter,
     control_replay: Vec<u8>,
+    paint_tail: Vec<u8>,
     terminal_colours: Option<u32>,
     terminal_defaults: TmuxStyle,
+    blank_is_default: bool,
+    default_blank: HashMap<PaneId, Rect>,
 }
 
 impl Renderer {
@@ -257,6 +266,7 @@ impl Renderer {
             painted: HashMap::new(),
             headers: HashMap::new(),
             picker_cards: HashMap::new(),
+            cards: HashMap::new(),
             sidebar_rows: Vec::new(),
             status_rows: Vec::new(),
             status_geometry: None,
@@ -270,8 +280,11 @@ impl Renderer {
             kitty: KittyBridge::default(),
             writer: TerminalWriter::spawn(sink),
             control_replay: Vec::new(),
+            paint_tail: Vec::new(),
             terminal_colours: crate::tty::terminal_colours(),
             terminal_defaults: TmuxStyle::default(),
+            blank_is_default: false,
+            default_blank: HashMap::new(),
         }
     }
 
@@ -287,9 +300,12 @@ impl Renderer {
     }
 
     pub fn invalidate(&mut self) {
+        self.paint_tail.clear();
         self.painted.clear();
+        self.default_blank.clear();
         self.headers.clear();
         self.picker_cards.clear();
+        self.cards.clear();
         self.sidebar_rows.clear();
         self.status_rows.clear();
         self.status_geometry = None;
@@ -359,8 +375,10 @@ impl Renderer {
 
     pub fn forget_pane(&mut self, pane: PaneId) {
         self.painted.remove(&pane);
+        self.default_blank.remove(&pane);
         self.headers.remove(&pane);
         self.picker_cards.remove(&pane);
+        self.cards.remove(&pane);
         self.damage.remove(&pane);
         self.browser_placements.remove(&pane);
         self.browser_painted.remove(&pane);
@@ -374,7 +392,11 @@ impl Renderer {
     }
 
     pub fn paint(&mut self, model: &Model, force: bool) -> io::Result<()> {
+        if force {
+            self.paint_tail.clear();
+        }
         self.note_terminal_colours();
+        self.forget_default_blank_under_overlays(model);
         self.output.clear();
         self.output.extend_from_slice(b"\x1b[?2026h\x1b[?25l");
         let popup_visible = model.popup.is_some();
@@ -405,6 +427,7 @@ impl Renderer {
                     self.restore_mode_tree_cursor_now();
                 }
                 chooser::ModeTreePaint::Unavailable => {
+                    self.default_blank.clear();
                     self.paint_chooser(model);
                     self.emit_queued_control();
                     self.kitty.suspend(&mut self.output);
@@ -412,10 +435,17 @@ impl Renderer {
                 }
             }
         } else {
+            let cleared_to_default = force && *crate::COALESCE;
             if force {
+                self.default_blank.clear();
+            }
+            if cleared_to_default {
+                self.output.extend_from_slice(b"\x1b[0m\x1b[2J");
+                fill_unpainted_cells(&mut self.output, model);
+            } else if force {
                 clear_screen(&mut self.output, model.appearance.background);
             }
-            self.paint_workspace(model, force);
+            self.paint_workspace(model, force, cleared_to_default);
             if model.sidebar_visible() {
                 self.paint_sidebar(model, force);
             }
@@ -455,6 +485,7 @@ impl Renderer {
 
     pub fn paint_frames(&mut self, model: &Model) -> io::Result<()> {
         self.note_terminal_colours();
+        self.forget_default_blank_under_overlays(model);
         if let Some(popup) = model.popup.as_ref()
             && model.menu.is_none()
             && model.confirm.is_none()
@@ -480,7 +511,7 @@ impl Renderer {
             && model.menu.is_none()
             && model.confirm.is_none()
         {
-            self.paint_workspace(model, false);
+            self.paint_workspace(model, false, false);
             self.paint_status_area(model);
             self.paint_pane_prompt(model);
             self.emit_queued_control();
@@ -516,6 +547,24 @@ impl Renderer {
     /// blocked `tty_puts` loses the same bytes and it is a bug there too.
     fn flush_output(&mut self) -> io::Result<()> {
         let control = std::mem::take(&mut self.control_replay);
+        let body = self
+            .output
+            .strip_prefix(PAINT_BEGIN)
+            .and_then(|body| body.strip_suffix(PAINT_END));
+        if *crate::COALESCE
+            && control.is_empty()
+            && let Some(body) = body
+            && cursor_only(body)
+            && self.paint_tail.ends_with(body)
+        {
+            self.output.clear();
+            return Ok(());
+        }
+        self.paint_tail.clear();
+        if let Some(body) = body {
+            let tail = body.len().saturating_sub(PAINT_TAIL_BYTES);
+            self.paint_tail.extend_from_slice(&body[tail..]);
+        }
         match self.writer.submit(std::mem::take(&mut self.output))? {
             Submission::Queued => Ok(()),
             Submission::Dropped => {
@@ -565,7 +614,18 @@ impl Renderer {
         self.writer.abandon();
     }
 
-    fn paint_workspace(&mut self, model: &Model, force: bool) {
+    fn forget_default_blank_under_overlays(&mut self, model: &Model) {
+        if model.popup.is_some()
+            || model.menu.is_some()
+            || model.confirm.is_some()
+            || model.display_panes.is_some()
+            || pane_prompt_target(model).is_some()
+        {
+            self.default_blank.clear();
+        }
+    }
+
+    fn paint_workspace(&mut self, model: &Model, force: bool, cleared_to_default: bool) {
         let lines = model.pane_border_lines();
         let indicators = model.pane_border_indicators();
         let chrome = (
@@ -579,6 +639,7 @@ impl Renderer {
         self.border_chrome = Some(chrome);
         if force {
             let cells = divider_cells(&model.layout.dividers);
+            let mut border = BTreeMap::new();
             for divider in &model.layout.dividers {
                 let highlighted = divider.highlighted;
                 let fallback = if highlighted {
@@ -595,6 +656,13 @@ impl Renderer {
                 let style = divider
                     .style_pane
                     .and_then(|pane| model.pane_border_style(pane));
+                let mut sgr = Vec::new();
+                if let Some(style) = &style {
+                    write_border_sgr(&mut sgr, style, &model.appearance);
+                } else {
+                    write_colored_sgr(&mut sgr, color, model.appearance.background);
+                }
+                let sgr = Rc::new(sgr);
                 let index = divider.style_pane.and_then(|pane| model.pane_index(pane));
                 for row in divider.rect.y..divider.rect.y.saturating_add(divider.rect.height) {
                     for column in divider.rect.x..divider.rect.x.saturating_add(divider.rect.width)
@@ -613,28 +681,11 @@ impl Renderer {
                         let cell_type = cell_type_of(mask);
                         let glyph = border_arrow(model, indicators, column, row)
                             .map_or_else(|| border_glyph(lines, cell_type, index), str::to_owned);
-                        if let Some(style) = &style {
-                            write_border_text(
-                                &mut self.output,
-                                column,
-                                row,
-                                &glyph,
-                                style,
-                                &model.appearance,
-                            );
-                        } else {
-                            write_colored_text(
-                                &mut self.output,
-                                column,
-                                row,
-                                &glyph,
-                                color,
-                                model.appearance.background,
-                            );
-                        }
+                        border.insert((row, column), (Rc::clone(&sgr), glyph));
                     }
                 }
             }
+            write_border_runs(&mut self.output, &border, model.size.columns);
         }
 
         let active = model.active_pane();
@@ -663,6 +714,7 @@ impl Renderer {
                 self.headers.remove(&entry.pane).is_some()
             };
             let content = entry.content();
+            let known_blank = self.default_blank.remove(&entry.pane) == Some(content);
             let browser_live = matches!(pane.kind, PaneKindSnapshot::Browser(_))
                 && self.browser_frame_live(entry.pane);
             let browser_state_changed = if matches!(pane.kind, PaneKindSnapshot::Browser(_)) {
@@ -702,14 +754,19 @@ impl Renderer {
                                 crate::mode_view::resolved_style(style, &model.status.theme)
                             })
                         });
+                        self.blank_is_default = cleared_to_default || known_blank;
                         self.paint_terminal(entry.pane, viewport, content, force, damage.as_ref());
+                        self.blank_is_default = false;
                         if let Some(mode) = mode {
                             self.paint_mode_position(mode, viewport, content, model);
                         }
                         self.selection_style = None;
                         self.selection_trim = None;
                         self.match_styles = [None, None];
-                    } else if force {
+                    } else if cleared_to_default || known_blank {
+                        self.painted.remove(&entry.pane);
+                        self.default_blank.insert(entry.pane, content);
+                    } else if force && !*crate::COALESCE {
                         self.paint_card(
                             content,
                             "Terminal",
@@ -732,12 +789,19 @@ impl Renderer {
                         self.picker_cards.insert(entry.pane, card_state);
                     }
                 }
-                kind if force || header_changed || browser_state_changed => {
+                kind => {
                     self.picker_cards.remove(&entry.pane);
                     let (label, detail) = placeholder_text(kind);
-                    self.paint_card(content, label, &pane.title, &detail, model);
+                    let card = (content, label, pane.title.clone(), detail);
+                    if force
+                        || header_changed
+                        || browser_state_changed
+                        || self.cards.get(&entry.pane) != Some(&card)
+                    {
+                        self.paint_card(content, card.1, &card.2, &card.3, model);
+                        self.cards.insert(entry.pane, card);
+                    }
                 }
-                _ => {}
             }
         }
         let popup = model.popup.as_ref().map(|popup| popup.pane);
@@ -748,6 +812,8 @@ impl Renderer {
             popup == Some(*pane) || model.layout.panes.iter().any(|entry| entry.pane == *pane)
         });
         self.picker_cards
+            .retain(|pane, _| model.layout.panes.iter().any(|entry| entry.pane == *pane));
+        self.cards
             .retain(|pane, _| model.layout.panes.iter().any(|entry| entry.pane == *pane));
         self.browser_painted
             .retain(|pane, _| model.layout.panes.iter().any(|entry| entry.pane == *pane));
@@ -952,6 +1018,16 @@ impl Renderer {
                 &self.selection_mask,
             )
         };
+        let ground = match default_style.background_class() {
+            ColourClass::Default => None,
+            ColourClass::Resolved if default_style.background() == viewport.background => None,
+            class => Some(class),
+        };
+        let erase_from = clear_from.filter(|_| !self.blank_is_default || ground.is_some());
+        if clear_from == Some(0) && erase_from.is_none() {
+            self.selection_style = selection_style;
+            return;
+        }
         write_cursor_position(&mut self.output, rect.x, rect.y.saturating_add(row));
         let mut current_style = None;
         let mut terminal_column = 0_u16;
@@ -1025,7 +1101,8 @@ impl Renderer {
             write_glyph(&mut self.output, viewport.glyph(cell), advance);
             terminal_column = column.saturating_add(advance);
         }
-        if let Some(start) = clear_from {
+        let mut reset = current_style.is_some();
+        if let Some(start) = erase_from {
             if terminal_column != start {
                 write_cursor_position(
                     &mut self.output,
@@ -1034,21 +1111,22 @@ impl Renderer {
                 );
             }
             self.output.extend_from_slice(b"\x1b[0m");
-            match default_style.background_class() {
-                ColourClass::Default => {}
-                ColourClass::Resolved if default_style.background() == viewport.background => {}
-                class => write_cell_ground(
+            reset = ground.is_some();
+            if let Some(class) = ground {
+                write_cell_ground(
                     &mut self.output,
                     class,
                     default_style.background(),
                     viewport.background,
                     Ground::Background,
-                ),
+                );
             }
             write!(self.output, "\x1b[{}X", rect.width - start)
                 .expect("writing to Vec cannot fail");
         }
-        self.output.extend_from_slice(b"\x1b[0m");
+        if reset {
+            self.output.extend_from_slice(b"\x1b[0m");
+        }
         self.selection_style = selection_style;
     }
 
@@ -1705,17 +1783,20 @@ impl Renderer {
         let geometry = (x, origin, width);
         let force = force || self.status_geometry != Some(geometry);
         for (index, line) in lines.iter().enumerate() {
-            if force || self.status_rows.get(index) != Some(line) {
-                write_styled_text(
-                    &mut self.output,
-                    x,
-                    origin.saturating_add(u16::try_from(index).unwrap_or(u16::MAX)),
-                    line,
-                    model.appearance.foreground,
-                    model.appearance.background,
-                    &model.appearance,
-                );
+            let row = origin.saturating_add(u16::try_from(index).unwrap_or(u16::MAX));
+            let previous = self.status_rows.get(index).filter(|_| !force);
+            if previous == Some(line) {
+                continue;
             }
+            write_styled_text(
+                &mut self.output,
+                x,
+                row,
+                line,
+                model.appearance.foreground,
+                model.appearance.background,
+                &model.appearance,
+            );
         }
         self.status_rows = lines;
         self.status_geometry = Some(geometry);
@@ -1925,6 +2006,7 @@ impl Renderer {
         self.painted.clear();
         self.headers.clear();
         self.picker_cards.clear();
+        self.cards.clear();
         self.sidebar_rows.clear();
         self.status_rows.clear();
         self.status_geometry = None;
@@ -2871,6 +2953,104 @@ fn fill_cells(fill: char, width: usize) -> String {
     )
 }
 
+fn cursor_only(bytes: &[u8]) -> bool {
+    let mut rest = bytes;
+    while !rest.is_empty() {
+        if let Some(after) = rest
+            .strip_prefix(b"\x1b[?25h")
+            .or_else(|| rest.strip_prefix(b"\x1b[?25l"))
+        {
+            rest = after;
+            continue;
+        }
+        let Some(after) = rest.strip_prefix(b"\x1b[") else {
+            return false;
+        };
+        let digits = after
+            .iter()
+            .take_while(|byte| byte.is_ascii_digit() || **byte == b';')
+            .count();
+        if after.get(digits) != Some(&b'H') {
+            return false;
+        }
+        rest = &after[digits + 1..];
+    }
+    true
+}
+
+fn fill_unpainted_cells(output: &mut Vec<u8>, model: &Model) {
+    let columns = usize::from(model.size.columns);
+    let rows = usize::from(model.size.rows);
+    if columns == 0 || rows == 0 {
+        return;
+    }
+    let mut painted = vec![false; columns * rows];
+    let mut mark = |rect: Rect| {
+        let right = usize::from(rect.x.saturating_add(rect.width)).min(columns);
+        let bottom = usize::from(rect.y.saturating_add(rect.height)).min(rows);
+        for row in usize::from(rect.y)..bottom {
+            for column in usize::from(rect.x)..right {
+                painted[row * columns + column] = true;
+            }
+        }
+    };
+    for divider in &model.layout.dividers {
+        mark(divider.rect);
+    }
+    for entry in &model.layout.panes {
+        let Some(pane) = model.pane_snapshot(entry.pane) else {
+            continue;
+        };
+        if entry.border_status.is_on() {
+            mark(entry.status_row());
+        }
+        if !matches!(pane.kind, PaneKindSnapshot::Terminal) || pane.mode.is_none() {
+            mark(entry.content());
+        }
+    }
+    let (status_x, status_width) = model.status_area();
+    mark(Rect {
+        x: status_x,
+        y: model.status_origin_y(),
+        width: status_width,
+        height: model.status_block_rows(),
+    });
+    let mut themed = false;
+    for row in 0..rows {
+        let cells = &painted[row * columns..(row + 1) * columns];
+        let mut column = 0;
+        while column < columns {
+            if cells[column] {
+                column += 1;
+                continue;
+            }
+            let start = column;
+            while column < columns && !cells[column] {
+                column += 1;
+            }
+            if !themed {
+                let background = model.appearance.background;
+                write!(
+                    output,
+                    "\x1b[48;2;{};{};{}m",
+                    background.r, background.g, background.b
+                )
+                .expect("writing to Vec cannot fail");
+                themed = true;
+            }
+            write_cursor_position(
+                output,
+                u16::try_from(start).unwrap_or(u16::MAX),
+                u16::try_from(row).unwrap_or(u16::MAX),
+            );
+            write!(output, "\x1b[{}X", column - start).expect("writing to Vec cannot fail");
+        }
+    }
+    if themed {
+        output.extend_from_slice(b"\x1b[0m");
+    }
+}
+
 fn clear_screen(output: &mut Vec<u8>, background: Color) {
     write!(
         output,
@@ -2935,15 +3115,7 @@ fn grounded(style: &TmuxStyle, base: Option<&TmuxStyle>) -> TmuxStyle {
     grounded
 }
 
-fn write_border_text(
-    output: &mut Vec<u8>,
-    column: u16,
-    row: u16,
-    text: &str,
-    style: &TmuxStyle,
-    appearance: &TerminalAppearance,
-) {
-    write_cursor_position(output, column, row);
+fn write_border_sgr(output: &mut Vec<u8>, style: &TmuxStyle, appearance: &TerminalAppearance) {
     write_tmux_sgr(
         output,
         &grounded(style, None),
@@ -2951,7 +3123,45 @@ fn write_border_text(
         appearance.background,
         appearance,
     );
-    output.extend_from_slice(text.as_bytes());
+}
+
+fn write_colored_sgr(output: &mut Vec<u8>, foreground: Color, background: Color) {
+    write!(
+        output,
+        "\x1b[0;38;2;{};{};{};48;2;{};{};{}m",
+        foreground.r, foreground.g, foreground.b, background.r, background.g, background.b
+    )
+    .expect("writing to Vec cannot fail");
+}
+
+fn write_border_runs(
+    output: &mut Vec<u8>,
+    cells: &BTreeMap<(u16, u16), (Rc<Vec<u8>>, String)>,
+    columns: u16,
+) {
+    if cells.is_empty() {
+        return;
+    }
+    let mut last = None;
+    let mut rendition: Option<&Rc<Vec<u8>>> = None;
+    for (&(row, column), (sgr, glyph)) in cells {
+        match last {
+            Some((last_row, last_column)) if last_row == row && last_column + 1 == column => {}
+            Some((last_row, last_column))
+                if *crate::COALESCE && last_row + 1 == row && last_column == column =>
+            {
+                output.extend_from_slice(b"\x08\n");
+            }
+            _ => write_cursor_position(output, column, row),
+        }
+        if rendition.is_none_or(|current| !Rc::ptr_eq(current, sgr) && current != sgr) {
+            output.extend_from_slice(sgr);
+            rendition = Some(sgr);
+        }
+        output.extend_from_slice(glyph.as_bytes());
+        last = (text_display_width(glyph) == 1 && column.saturating_add(1) < columns)
+            .then_some((row, column));
+    }
     output.extend_from_slice(b"\x1b[0m");
 }
 
@@ -3693,6 +3903,211 @@ mod tests {
         assert!(renderer.output.is_empty());
     }
 
+    fn waiting_pane_model() -> Model {
+        let mut model = block_model(40, 10);
+        let session = zz_protocol::SessionId(1);
+        let window = zz_protocol::WindowId(1);
+        let pane = PaneId(3);
+        model.attached_session = Some(session);
+        model.update_snapshot(Arc::new(zz_protocol::MuxSnapshot {
+            generation: 1,
+            sessions: vec![zz_protocol::SessionSnapshot {
+                id: session,
+                name: "s".to_owned(),
+                active_window: window,
+                windows: vec![zz_protocol::WindowSnapshot {
+                    id: window,
+                    index: 0,
+                    name: "w".to_owned(),
+                    automatic_rename: true,
+                    active_pane: pane,
+                    zoomed_pane: None,
+                    layout: zz_protocol::LayoutNode::Pane(pane),
+                    panes: std::collections::BTreeMap::from([(
+                        pane,
+                        zz_protocol::PaneSnapshot {
+                            id: pane,
+                            title: "shell".to_owned(),
+                            kind: PaneKindSnapshot::Terminal,
+                            synchronized_input: false,
+                            bell: false,
+                            dead: false,
+                            dead_status: None,
+                            border_colour: None,
+                            active_border_colour: None,
+                            border_status_text: String::new(),
+                            mode: None,
+                        },
+                    )]),
+                    layout_dump: String::new(),
+                    visible_layout_dump: String::new(),
+                    status_label: String::new(),
+                    activity: false,
+                    pane_border_status: PaneBorderStatus::Off,
+                    pane_border_lines: PaneBorderLines::Single,
+                    pane_border_indicators: PaneBorderIndicators::Colour,
+                    pane_order: vec![pane],
+                    pane_z_order: Vec::new(),
+                }],
+                viewers: Vec::new(),
+            }],
+            focused_window: Some(window),
+        }));
+        model
+    }
+
+    #[test]
+    fn a_terminal_pane_waiting_for_its_first_frame_paints_nothing() {
+        let model = waiting_pane_model();
+        let mut renderer = Renderer::new();
+        renderer.paint_workspace(&model, true, false);
+        let output = String::from_utf8(renderer.output).unwrap();
+        assert!(!output.contains("waiting for frame"), "{output:?}");
+        assert!(!output.contains('┌'), "{output:?}");
+    }
+
+    fn erases(output: &str) -> usize {
+        output
+            .split("\x1b[")
+            .skip(1)
+            .filter(|sequence| {
+                let digits = sequence.bytes().take_while(u8::is_ascii_digit).count();
+                digits > 0 && sequence.as_bytes().get(digits) == Some(&b'X')
+            })
+            .count()
+    }
+
+    #[test]
+    fn blank_pane_rows_are_never_written_over_a_default_clear() {
+        let mut model = waiting_pane_model();
+        let pane = PaneId(3);
+        let (send, receive) = std::sync::mpsc::channel();
+        let mut renderer = Renderer::with_sink(Box::new(move |bytes| {
+            send.send(bytes.to_vec()).unwrap();
+            Ok(())
+        }));
+        let wait = std::time::Duration::from_secs(5);
+        let read = || String::from_utf8(receive.recv_timeout(wait).unwrap()).unwrap();
+        renderer.paint(&model, true).unwrap();
+        let clear = read();
+        assert!(clear.contains("\x1b[0m\x1b[2J"), "{clear:?}");
+        assert_eq!(erases(&clear), 0, "{clear:?}");
+
+        let content = model.layout.panes[0].content();
+        let mut viewport =
+            TerminalViewport::blank(content.width, content.height, SessionStatus::Running);
+        let mut cells = viewport.cells.to_vec();
+        cells[0] = PackedCell::new('x' as u32, 0, CellWidth::Narrow);
+        viewport.cells = Arc::from(cells);
+        model.viewports.insert(pane, viewport);
+        renderer.note_frame(pane, FrameDamage::All);
+        renderer.paint_frames(&model).unwrap();
+        let first_frame = read();
+        assert!(first_frame.contains('x'), "{first_frame:?}");
+        assert_eq!(erases(&first_frame), 0, "{first_frame:?}");
+        assert!(!first_frame.contains("\x1b[0m\x1b[0m"), "{first_frame:?}");
+
+        renderer.invalidate();
+        renderer.note_frame(pane, FrameDamage::All);
+        renderer.paint_frames(&model).unwrap();
+        let unknown = read();
+        assert_eq!(
+            erases(&unknown),
+            usize::from(content.height),
+            "rows over a screen the renderer no longer knows are erased: {unknown:?}"
+        );
+        assert!(!unknown.contains("\x1b[0m\x1b[0m"), "{unknown:?}");
+    }
+
+    #[test]
+    fn cells_no_painter_covers_keep_the_theme_background() {
+        let mut model = waiting_pane_model();
+        let mut snapshot = (*model.snapshot).clone();
+        let window = snapshot.sessions[0].windows.first_mut().unwrap();
+        window.panes.get_mut(&PaneId(3)).unwrap().mode = Some(zz_protocol::PaneMode::Clock {
+            time: "12:00".to_owned(),
+            colour: "blue".to_owned(),
+        });
+        model.update_snapshot(Arc::new(snapshot));
+        let mut output = Vec::new();
+        fill_unpainted_cells(&mut output, &model);
+        let output = String::from_utf8(output).unwrap();
+        let content = model.layout.panes[0].content();
+        assert_eq!(erases(&output), usize::from(content.height), "{output:?}");
+        let background = model.appearance.background;
+        assert!(output.starts_with(&format!(
+            "\x1b[48;2;{};{};{}m",
+            background.r, background.g, background.b
+        )));
+    }
+
+    #[test]
+    fn a_paint_that_only_puts_the_cursor_back_writes_nothing() {
+        let model = waiting_pane_model();
+        let (send, receive) = std::sync::mpsc::channel();
+        let mut renderer = Renderer::with_sink(Box::new(move |bytes| {
+            send.send(bytes.to_vec()).unwrap();
+            Ok(())
+        }));
+        let wait = std::time::Duration::from_secs(5);
+        renderer.paint(&model, true).unwrap();
+        let first = receive.recv_timeout(wait).unwrap();
+        renderer.paint(&model, false).unwrap();
+        assert!(
+            receive
+                .recv_timeout(std::time::Duration::from_millis(100))
+                .is_err(),
+            "the cursor is already where {first:?} left it"
+        );
+        renderer.paint(&model, true).unwrap();
+        assert!(
+            receive.recv_timeout(wait).is_ok(),
+            "a forced paint is always written"
+        );
+        renderer.invalidate();
+        renderer.paint(&model, false).unwrap();
+        assert!(
+            receive.recv_timeout(wait).is_ok(),
+            "an invalidated screen repaints"
+        );
+    }
+
+    #[test]
+    fn only_cursor_placement_counts_as_cursor_only() {
+        assert!(cursor_only(b"\x1b[1;31H\x1b[?25h"));
+        assert!(cursor_only(b"\x1b[?25l"));
+        assert!(cursor_only(b""));
+        assert!(!cursor_only(b"\x1b[1;31Hx"));
+        assert!(!cursor_only(b"\x1b[0m\x1b[1;1H"));
+        assert!(!cursor_only(b"\x1b[2J"));
+    }
+
+    #[test]
+    fn border_runs_place_the_cursor_once_per_run_and_the_rendition_once_per_change() {
+        let red = Rc::new(b"\x1b[0;31m".to_vec());
+        let green = Rc::new(b"\x1b[0;32m".to_vec());
+        let cells = BTreeMap::from([
+            ((0, 0), (Rc::clone(&red), "─".to_owned())),
+            ((0, 1), (Rc::clone(&red), "─".to_owned())),
+            ((0, 2), (Rc::clone(&red), "┬".to_owned())),
+            ((1, 2), (Rc::new(b"\x1b[0;31m".to_vec()), "│".to_owned())),
+            ((2, 2), (green, "│".to_owned())),
+        ]);
+        let mut output = Vec::new();
+        write_border_runs(&mut output, &cells, 80);
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "\x1b[1;1H\x1b[0;31m──┬\x08\n│\x08\n\x1b[0;32m│\x1b[0m"
+        );
+        let mut output = Vec::new();
+        write_border_runs(&mut output, &cells, 3);
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "\x1b[1;1H\x1b[0;31m──┬\x1b[2;3H│\x1b[3;3H\x1b[0;32m│\x1b[0m",
+            "a cell in the last column leaves the cursor waiting to wrap"
+        );
+    }
+
     fn block_model(columns: u16, rows: u16) -> Model {
         let core = zz_client::ClientCore::new();
         let endpoint =
@@ -3860,7 +4275,7 @@ mod tests {
         renderer.paint_popup(&model, true);
         renderer.output.clear();
         renderer.note_frame(pane, FrameDamage::Rows(vec![1]));
-        renderer.paint_workspace(&model, false);
+        renderer.paint_workspace(&model, false, false);
         assert_eq!(
             renderer.damage.get(&pane),
             Some(&FrameDamage::Rows(vec![1]))

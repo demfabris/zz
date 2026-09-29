@@ -89,6 +89,11 @@ pub(crate) trait TransportStream: Read + Write + Send + Sized + 'static {
     fn shutdown(&self) -> io::Result<()> {
         Ok(())
     }
+
+    #[cfg(feature = "daemon")]
+    fn set_send_buffer_size(&self, _bytes: usize) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 #[must_use]
@@ -248,6 +253,16 @@ impl TransportStream for LocalStream {
     fn shutdown(&self) -> io::Result<()> {
         LocalStream::shutdown(self)
     }
+
+    #[cfg(all(feature = "daemon", unix))]
+    fn set_send_buffer_size(&self, bytes: usize) -> io::Result<()> {
+        match &self.0 {
+            LocalSocketStream::UdSocket(stream) => {
+                rustix::net::sockopt::set_socket_send_buffer_size(stream.inner(), bytes)
+                    .map_err(io::Error::from)
+            }
+        }
+    }
 }
 
 impl Read for LocalStream {
@@ -259,6 +274,10 @@ impl Read for LocalStream {
 impl Write for LocalStream {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
         self.0.write(buffer)
+    }
+
+    fn write_vectored(&mut self, buffers: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        self.0.write_vectored(buffers)
     }
 
     fn flush(&mut self) -> io::Result<()> {

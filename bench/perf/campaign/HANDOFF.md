@@ -16,7 +16,7 @@ Paths under `/Users/...` and `/private/tmp/...` in any report are on the Mac and
 |---|---|---|---|
 | `main` (origin) | `1f474295` | has `17e17115` (W0 code point) | the gate and plan (`157ac6a3`) are not on origin yet |
 | `perf/wave1` | `9eb5888b` + handoff commits (`fd6f36a8`, ...) | W0 gate + plan, W1-FOOTPRINT, W1-FORMAT, W1-PUBLISH, W1-PANE, W1-EXEC, 3 side branches | all checks green on the Mac (see below); 83 commits ahead of `origin/main` at `fd6f36a8` |
-| `perf/attach` | `00831246` | W1-ATTACH (16 commits) + `perf/wave1` merged in up to `9eb5888b` (not the handoff commits) | fix pass cut off mid-verification; `73eafb94` is a WIP commit |
+| `perf/attach` | `9a72b53b` (was `00831246` at handoff) | W1-ATTACH | fix pass finished on Linux, merged into `perf/wave1` as `ce1b34cd` (w1-6); branch and worktree removed |
 
 Wave 1 merge log on `perf/wave1` (gate JSON per merge in `bench/perf/results/`):
 
@@ -32,6 +32,7 @@ Wave 1 merge log on `perf/wave1` (gate JSON per merge in `bench/perf/results/`):
 | fold | `fix/pty-bridge-adaptive-spin` | `c7c93042` | quick throughput only: 261.0 MB/s vs tmux 47.4 (5.51x), W0 quick 233.9; not committed (`results/local/`) |
 | fold | `perf/footprint` (title fix) | `cd1ce6eb` | none; `select-pane -T` titles survive shell-integration prompt retitles |
 | extra | registry | `9eb5888b` | closes `terminal.shell-integration-prompt-title` in `compat/tmux-gaps.json`; owner may drop it |
+| 6 | ATTACH | `ce1b34cd` | `w1-6-attach-alienware-ce1b34cd.json` (Linux, `--strict`, full, quiet: 59 pass, 11 fail, 0 regressed, 0 drifted) |
 
 FORMAT merged before PUBLISH, against the plan's order: a usage-limit cut left PUBLISH's fix pass
 unfinished while FORMAT was ready, and the resume run (`scripts/wave1-resume.js`) merged it first.
@@ -142,7 +143,7 @@ Lanes in flight:
 
 | Lane | Where | State |
 |---|---|---|
-| W1-ATTACH fix pass | `~/dev/zz-attach`, `perf/attach` | done 2026-09-29, ready for merge 6; report in `~/.cache/zz-perf/attach/report.md`, statuses in `attach-review.json` |
+| W1-ATTACH | was `~/dev/zz-attach`, `perf/attach` | merged 2026-09-29 as `ce1b34cd` (w1-6), worktree and branch removed; reports in `~/.cache/zz-perf/attach/` (`report.md`, `merge-report.md`), statuses in `attach-review.json` |
 | W1-LINUX-PAGES | `~/dev/ghostty-zz` branch `zz/pagelist-reuse` (local clone of the fork) + `~/dev/zz-pages` `perf/linux-pages` | agent running from `~/.cache/zz-perf/prompts/pagelist.md`. Needs an owner push of the fork branch and a `GHOSTTY_COMMIT` bump before it can merge |
 
 ## Owner decisions (binding)
@@ -294,13 +295,38 @@ on the Mac too, so compare each against the pre-merge binary before blaming the 
 `resurrect-save`, `status-background-jobs`.
 `scripts/wave-lanes.js` is preset for exactly this (fix from the reports, then merge).
 
-### 6. Merge attach as w1-6
+### 6. Merge attach as w1-6 (done, `ce1b34cd`)
 
 Merge `perf/wave1` into `perf/attach` again if it moved since step 5, then merge `perf/attach`
 `--no-ff` into `perf/wave1`, full checks (fmt, clippy, workspace tests under `timeout`,
 `just compat-check`, full `compat/run.sh`, `compat/attached-client.sh`), gate JSON
 `just perf-gate wave1 --strict --baseline <w1-5-fold JSON> --json
 bench/perf/results/w1-6-attach-<host>-<sha8>.json` on a quiet host. Remove `~/dev/zz-attach` and the branch right after.
+
+Done 2026-09-29 on alienware. The merge was clean (`perf/attach` already held `a41b1fbf`) and its
+tree equals the lane's. fmt, clippy, `just compat-check`, `just web-build` and
+`compat/attached-client.sh` pass. Workspace tests: only the known base failures plus load victims
+that pass alone (`process_info` exec-name tests, a `russh_socks` port test,
+`mode_keys_scope_visible_command_output_separately_from_underlying_copy_mode`, see Known open
+bugs). Full `compat/run.sh`: three rows red twice, all identical on the pre-merge binary
+(`lane2-store` and `show-options-hooks`: zz's `lock-command` default is `lock -np`, the oracle
+tmux built here has `vlock`; `smoke/plugin-runtime-resurrect-restore` fails for tmux too, bash
+prompt retitles).
+
+Gate `w1-6-attach-alienware-ce1b34cd.json` against `w1-5-fold`: every attach rule passes
+(`tty_total` 175762 -> 504 B at p1, 344894 -> 1435 B at p4; `instr` 15.8 -> 10.7 and 16.3 -> 11.1
+Minstr; `ttfc` 8.3 / 9.2 ms vs tmux 7.9 / 9.6; `conns` 4 -> 2), `chatty.tty_kibps.hidden` 1.00 ->
+0.54 KiB/s. Rows that moved for reasons outside the lane: every `mem.footprint.*` row passes now
+because of the THP fix (`ad4ee99c`, after the fold JSON): the pre-merge `a41b1fbf` binary reads
+3.18 / 17.9 MiB against the merge's 3.14 / 18.1. The `spawn`, `cold`, `config` and `cli` CPU and
+wall rows dropped 2-3x with tmux dropping the same (tmux `spawn.cpu.split_shell` 2.18 -> 0.79 ms,
+`config.wall.source_1000` 25.6 -> 14.5 ms) and their instruction counts unchanged: the host ran in
+a faster state than during the fold run, so `spawn.cpu.kill_pane` and `config.*.source_1000`
+passing is not a lane result, and both can fail again in the slow state. Still failing, none owned
+by ATTACH: `spawn.cpu.split_shell`, `split_empty_P`, `new_window` (Linux kernel time per pane,
+W3), `chatty.cpu_pct.visible` (W2-TERM, W4), `mem.threads.p20` 66 (W3-SHARDS), the four echo rows
+(no wave-1 owner, same on the pre-merge binary in an A/B), `throughput.detached.ascii` (Linux
+ceiling, W1-LINUX-PAGES) and `throughput.attached.ascii_ms` 0.53x (rule 0.25x).
 
 ### 7. Wave-1 exit
 
@@ -383,3 +409,5 @@ Rule: every wave exit gets one `--strict` gate run on the Mac, committed as
 |---|---|---|
 | Title race: the pane watcher can see a program's new title before `program_title_writes` moves, so a `select-pane -T` title then hides it until the next viewport publish | zz-terminal `run_terminal` publishes facts at the top of each pass, after the viewport; daemon `watch_terminal` | set facts right before `publish_active_views` |
 | `verify_claims_test.py` "unattributed: unbound variable" under bash 3.2 | `compat/tui/` | Mac-only; empty array under `set -u` |
+| `mode_keys_scope_visible_command_output_separately_from_underlying_copy_mode` takes 30.05 s alone and fails under load: the Escape never closes the output view, it closes when the window's `sleep 30` exits, just inside the test's 30 s wait (with `sleep 50` it fails at 30 s). Same on `a41b1fbf` | daemon.rs test and the command-output Escape path | find why the emacs-table Escape does not cancel the output view; then the test stops depending on the sleep |
+| `lock-command` defaults to `lock -np` on every platform; tmux's configure picks `vlock` on Linux when `vlock` is installed at build time (it is on alienware), so `lane2-store` and `show-options-hooks` are red in `compat/run.sh` here | zz-mux `tmux_options.rs`, `command.rs` | decide whether zz follows tmux's build-time probe; the pinned oracle's answer depends on the build host |

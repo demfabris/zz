@@ -2,7 +2,7 @@
 type: Design Plan
 title: Daemon performance rebuild
 description: "The campaign to bring the zz daemon to tmux cost per command, per pane and per attach while keeping the 5x output throughput lead - a permanent zz-vs-tmux gate first, then waves that remove unrequested work (one-frame Exec commands, change-driven publication, lazy formats, frames only for watchers, a compact wire under one unreleased protocol version), then one mux loop and PTY shards; the lane brief source with targets, merge order, write zones, gates and rollback switches."
-status: Approved 2026-09-28; wave 0 (gate and this plan) built; release freeze until W4 exits; wave 1 in progress on perf/wave1 (FOOTPRINT, FORMAT, PUBLISH, PANE and EXEC merged; W1-ATTACH finishing on perf/attach); continued on Linux from bench/perf/campaign/HANDOFF.md
+status: Approved 2026-09-28; wave 0 (gate and this plan) built; release freeze until W4 exits; wave 1 in progress on perf/wave1 (FOOTPRINT, FORMAT, PUBLISH, PANE, EXEC and ATTACH merged; wave-1 exit next); continued on Linux from bench/perf/campaign/HANDOFF.md
 resource: crates/zz-daemon/src/daemon.rs
 tags:
 - performance
@@ -12,14 +12,14 @@ tags:
 - benchmark
 - campaign
 - design-plan
-timestamp: 2026-09-29T12:00:00Z
+timestamp: 2026-09-29T15:30:00Z
 ---
 
 # Campaign status
 
-2026-09-29: `perf/wave1` (`9eb5888b`) holds W0 and five wave-1 lanes (FOOTPRINT, FORMAT, PUBLISH,
-PANE, EXEC) plus three folded side branches; W1-ATTACH is on `perf/attach` with its fix pass
-verified on Linux (see its as-built notes), waiting for merge 6. Neither branch is on main. The campaign continues on a Linux host:
+2026-09-29: `perf/wave1` holds W0 and all six wave-1 lanes (FOOTPRINT, FORMAT, PUBLISH, PANE,
+EXEC, and ATTACH as merge 6, `ce1b34cd`, on Linux) plus three folded side branches; the wave-1
+exit is next. It is not on main. The campaign continues on a Linux host:
 `bench/perf/campaign/HANDOFF.md` has the state, the numbers against tmux at the last gate, the
 next steps in order, the macOS-only checks and the traps; `bench/perf/campaign/attach-review.json`
 has the attach lane's reports; `bench/perf/campaign/scripts/` has the lane workflow template.
@@ -1836,6 +1836,17 @@ Handed on:
 - macOS-only, not measured here: the 8 KiB `net.local.stream.sendspace` effect on the writev
   batches (the reason for the daemon's `SO_SNDBUF`), `just ios-gpui iPad build` for the two hello
   capability constants.
+
+Merged onto the five lanes above and the Linux THP fix (`perf/wave1`, merge `ce1b34cd`, a clean
+merge). Merge gate (`w1-6-attach-alienware-ce1b34cd.json`, full, `--strict`, load under 1 on 16
+CPUs), fold -> merge, tmux in the same run: `attach.tty_total` 175762 -> 504 B at p1 (tmux 977)
+and 344894 -> 1435 B at p4 (tmux 3655); `attach.instr` 15.8 -> 10.7 and 16.3 -> 11.1 Minstr (tmux
+9.09, 12.1); `attach.cpu` 6.20 -> 3.46 and 10.5 -> 4.99 ms (tmux 2.03, 4.07); `attach.ttfc` 11.6
+-> 8.3 and 16.8 -> 9.2 ms (tmux 7.9, 9.6); `attach.conns` 4 -> 2; `chatty.tty_kibps.hidden` 1.00
+-> 0.54 KiB/s (tmux 0.38). 59 pass, 11 fail, 0 regressed, 0 drifted; no failing row is owned by
+this lane. The footprint rows moved with the THP fix, not this lane (the pre-merge binary reads
+the same). An A/B against the pre-merge binary shows no change in `spawn.instr.*`,
+`chatty.instr_per_s.*` or the echo rows (p50 idle 1.94-1.96 vs 1.97-1.99 ms, tmux 0.83-0.91).
 
 ## W2-TERM: PaneFrame terminal lane (effort L)
 

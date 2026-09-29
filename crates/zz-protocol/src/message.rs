@@ -3511,10 +3511,6 @@ pub enum EventPayload {
         #[serde(deserialize_with = "deserialize_optional_path_list_text")]
         start_dir: Option<String>,
     },
-    /// The key tables that changed since the previous publication, each
-    /// replacing the client's table of the same name, and the names of the
-    /// tables that no longer exist. [`EventPayload::KeyTablesChanged`] carries
-    /// every table instead.
     KeyTablesPatched {
         tables: Vec<KeyTableSnapshot>,
         removed: Vec<String>,

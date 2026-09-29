@@ -85,3 +85,26 @@ fn a_dropped_window_stops_the_recording() {
     assert_eq!(changes.sessions[&session].expect("existed").name, "alpha");
     assert_eq!(changes.windows[&window].expect("existed").name, "unwatched");
 }
+
+#[test]
+fn removals_count_every_session_window_and_pane_that_leaves() {
+    let mut state = MuxState::default();
+    let (session, window, pane) = state.create_session("alpha").expect("session");
+    let split = state
+        .split_pane(pane, Axis::Horizontal, PaneKind::Terminal)
+        .expect("split");
+    let (other, _) = state
+        .create_window(session, None, PaneKind::Terminal)
+        .expect("window");
+    let (doomed, _, _) = state.create_session("beta").expect("session");
+    let start = state.removals();
+    state.rename_window(window, "renamed").expect("rename");
+    state.rename_session(session, "gamma").expect("rename");
+    assert_eq!(state.removals(), start);
+    state.kill_pane(split).expect("kill pane");
+    assert_eq!(state.removals(), start + 1);
+    state.kill_window(other).expect("kill window");
+    assert_eq!(state.removals(), start + 2);
+    state.kill_session(doomed).expect("kill session");
+    assert!(state.removals() > start + 2);
+}

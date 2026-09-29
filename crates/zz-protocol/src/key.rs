@@ -1337,8 +1337,6 @@ impl KeyTables {
         self.generation
     }
 
-    /// Each table's generation: it moves whenever that table's bindings do,
-    /// so a publisher can send only the tables that changed.
     pub fn table_generations(&self) -> impl Iterator<Item = (&str, u64)> {
         self.table_generations
             .iter()
@@ -1637,7 +1635,6 @@ impl KeyTables {
             .collect()
     }
 
-    /// One table flattened for the wire, as [`Self::snapshot`] flattens it.
     #[must_use]
     pub fn snapshot_table(&self, table: &str) -> Option<KeyTableSnapshot> {
         self.tables

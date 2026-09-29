@@ -1255,6 +1255,7 @@ impl MuxState {
             .expect("window exists");
         window.panes.remove(&pane);
         repair_window_after_pane_removal(window, pane);
+        self.journal.note_removal();
         self.bump_generation();
         Ok(vec![pane])
     }

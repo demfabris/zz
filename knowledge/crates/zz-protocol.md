@@ -85,7 +85,8 @@ A caller that cannot report a process uses zero.
 `ServerHello` answers with the assigned `ClientId`, the daemon's own capabilities, resolved
 appearance plus provenance, the effective `MuxOptions`, the rendered status line for terminal
 clients, and
-`key_tables` (every live table, refreshed later by `KeyTablesChanged`). Both capability
+`key_tables` (every live table, refreshed later by `KeyTablesPatched`, or `KeyTablesChanged` with
+the rollback knob). Both capability
 vectors deserialize through one bounded visitor: at most 64 entries of at most 256 bytes, rejected
 before the strings materialize. The top-level capability-name constant is
 `NEW_SESSION_ATTACH_CAPABILITY` (`new-session-attach-v1`). `ClientHello` exposes the terminal-fact

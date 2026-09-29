@@ -2049,7 +2049,7 @@ impl CommandAliasResolution {
 #[derive(Debug)]
 pub struct MuxEngine {
     pub state: MuxState,
-    swept_generation: u64,
+    swept_removals: u64,
     pub keys: KeyTables,
     global_mode_keys: ModeKeys,
     window_mode_keys: BTreeMap<WindowId, ModeKeys>,
@@ -2358,7 +2358,7 @@ impl Default for MuxEngine {
     fn default() -> Self {
         Self {
             state: MuxState::default(),
-            swept_generation: 0,
+            swept_removals: 0,
             keys: KeyTables::default(),
             global_mode_keys: ModeKeys::default(),
             window_mode_keys: BTreeMap::new(),
@@ -5189,13 +5189,13 @@ impl MuxEngine {
         if self.state.generation() != generation {
             execution.effects.push(MuxEffect::SnapshotChanged);
         }
-        if self.state.generation() != self.swept_generation {
-            self.swept_generation = self.state.generation();
+        if self.state.removals() != self.swept_removals {
+            self.swept_removals = self.state.removals();
             self.retain_live_entries();
         } else if cfg!(debug_assertions) {
             assert!(
                 !self.retain_live_entries(),
-                "{name} left an entry for a removed session, window or pane without moving the generation"
+                "{name} left an entry for a session, window or pane removed without a count"
             );
         }
         self.repair_context(context);

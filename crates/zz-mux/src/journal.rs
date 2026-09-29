@@ -56,6 +56,7 @@ pub struct ChangeJournal {
     entries: Vec<Change>,
     positions: Positions,
     open: Vec<(u64, Weak<()>)>,
+    removals: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -71,6 +72,10 @@ pub struct JournalChanges<'a> {
 }
 
 impl ChangeJournal {
+    pub(crate) fn note_removal(&mut self) {
+        self.removals = self.removals.wrapping_add(1);
+    }
+
     fn prune(&mut self) {
         self.open.retain(|(_, alive)| alive.strong_count() > 0);
         if self.open.is_empty() && !self.entries.is_empty() {
@@ -257,6 +262,7 @@ macro_rules! tracked_methods {
             ) -> Option<$value> {
                 if self.map.contains_key(key) {
                     self.record(journal, *key);
+                    journal.note_removal();
                 }
                 self.map.remove(key)
             }
@@ -280,6 +286,11 @@ impl MuxState {
     #[must_use]
     pub fn journal_len(&self) -> usize {
         self.journal.entries.len()
+    }
+
+    #[must_use]
+    pub fn removals(&self) -> u64 {
+        self.journal.removals
     }
 
     pub fn session_mut(&mut self, session: SessionId) -> Option<&mut Session> {

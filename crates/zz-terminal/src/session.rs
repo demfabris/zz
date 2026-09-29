@@ -4701,16 +4701,15 @@ fn new_terminal<'alloc: 'cb, 'cb>(
     Ok(terminal)
 }
 
-const SCROLLBACK_BYTES_PER_CELL_ESTIMATE: usize = 10;
-const SCROLLBACK_BACKSTOP_FACTOR: usize = 4;
-const SCROLLBACK_BACKSTOP_CAP: usize = 256 * 1024 * 1024;
+const SCROLLBACK_BACKSTOP_BYTES_PER_CELL: usize = 128;
+const SCROLLBACK_BACKSTOP_FLOOR: usize = 64 * 1024 * 1024;
+const SCROLLBACK_BACKSTOP_CAP: usize = 1024 * 1024 * 1024;
 
 fn scrollback_backstop_bytes(history_limit: usize, columns: u16) -> usize {
     history_limit
         .saturating_mul(usize::from(columns.max(1)))
-        .saturating_mul(SCROLLBACK_BYTES_PER_CELL_ESTIMATE)
-        .saturating_mul(SCROLLBACK_BACKSTOP_FACTOR)
-        .min(SCROLLBACK_BACKSTOP_CAP)
+        .saturating_mul(SCROLLBACK_BACKSTOP_BYTES_PER_CELL)
+        .clamp(SCROLLBACK_BACKSTOP_FLOOR, SCROLLBACK_BACKSTOP_CAP)
 }
 
 fn clipboard_write_request<'a>(

@@ -4,8 +4,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::{
-    SCROLLBACK_BACKSTOP_CAP, TerminalSession, TerminalSpawn, TerminalViewId, ViewStream,
-    new_terminal, scrollback_backstop_bytes,
+    SCROLLBACK_BACKSTOP_CAP, SCROLLBACK_BACKSTOP_FLOOR, TerminalSession, TerminalSpawn,
+    TerminalViewId, ViewStream, new_terminal, scrollback_backstop_bytes,
 };
 use crate::{SessionStatus, TerminalAppearance, TerminalSize, TerminalViewport};
 
@@ -193,12 +193,36 @@ fn styled_wide_lines_fill_the_history_limit_like_plain_ones() {
 }
 
 #[test]
-fn the_scrollback_byte_backstop_scales_with_width_and_is_capped() {
-    assert_eq!(scrollback_backstop_bytes(10_000, 80), 10_000 * 80 * 40);
-    assert_eq!(scrollback_backstop_bytes(10_000, 180), 10_000 * 180 * 40);
+fn the_scrollback_byte_backstop_scales_with_width_between_a_floor_and_a_cap() {
+    assert_eq!(
+        scrollback_backstop_bytes(100, 80),
+        SCROLLBACK_BACKSTOP_FLOOR
+    );
+    assert_eq!(scrollback_backstop_bytes(10_000, 180), 10_000 * 180 * 128);
     assert_eq!(
         scrollback_backstop_bytes(1_000_000, 500),
         SCROLLBACK_BACKSTOP_CAP
+    );
+}
+
+#[test]
+fn combining_marks_fill_the_history_limit_like_plain_text() {
+    let retained = |columns: u16, limit: usize, lines: usize| {
+        let mut terminal = new_terminal(columns, 50, limit).expect("terminal");
+        let mut line = "a\u{301}\u{302}\u{303}\u{304}".repeat(usize::from(columns));
+        line.push_str("\r\n");
+        let chunk = line.repeat(500);
+        for _ in 0..lines / 500 {
+            terminal.vt_write(chunk.as_bytes());
+        }
+        terminal.scrollback_rows().expect("history")
+    };
+    let wide = retained(180, 2_000, 3_000);
+    assert!(wide >= 1_800, "a 180-column pane kept {wide} of 2000 lines");
+    let narrow = retained(8, 50_000, 60_000);
+    assert!(
+        narrow >= 45_000,
+        "an 8-column pane kept {narrow} of 50000 lines"
     );
 }
 

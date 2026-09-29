@@ -74,6 +74,22 @@ pub fn forbid_actor_round_trips() -> RoundTripGuard {
     RoundTripGuard(ROUND_TRIPS_FORBIDDEN.with(|forbidden| forbidden.replace(true)))
 }
 
+/// Run as the pane launcher when the process was started as one: claim the
+/// terminal on stdin as the controlling terminal and exec the pane program.
+/// Returns `None` in every other process, which marks it as able to launch
+/// panes through itself.
+#[must_use]
+pub fn run_pty_exec_mode() -> Option<std::process::ExitCode> {
+    #[cfg(unix)]
+    {
+        unix_pty::run_pty_exec_mode()
+    }
+    #[cfg(not(unix))]
+    {
+        None
+    }
+}
+
 #[must_use]
 pub fn allow_actor_round_trips() -> RoundTripGuard {
     RoundTripGuard(ROUND_TRIPS_FORBIDDEN.with(|forbidden| forbidden.replace(false)))
@@ -112,6 +128,8 @@ const CAPTURE_TIMEOUT: Duration = Duration::from_secs(2);
 const SEARCH_REFRESH_DEBOUNCE: Duration = Duration::from_millis(80);
 const TERMINATION_GRACE: Duration = Duration::from_millis(500);
 const TERMINATION_KILL_WAIT: Duration = Duration::from_millis(500);
+#[cfg(unix)]
+const PANE_EXEC_WAIT: Duration = Duration::from_millis(500);
 const MAX_SEARCH_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_WHEEL_REPEAT: u32 = 32;
 const PTY_READ_BUFFER_BYTES: usize = 64 * 1024;
@@ -5664,7 +5682,7 @@ fn run_terminal(
     #[cfg(not(unix))]
     let mut killer = child.clone_killer();
     #[cfg(unix)]
-    let shell_process_id = {
+    let (shell_process_id, spawned) = {
         let environment = unix_pty::command_environment(
             &command,
             spawn
@@ -5678,9 +5696,9 @@ fn run_terminal(
                         .map(std::ffi::OsStr::new),
                 ),
         );
-        let process_id = unix_pty::spawn(&command, environment, &pty.slave)
+        let spawned = unix_pty::spawn(&command, environment, &pty.slave)
             .map_err(|error| WorkerError::Spawn(error.to_string()))?;
-        Some(process_id)
+        (Some(spawned.pid), spawned)
     };
     #[cfg(unix)]
     drop(pty.slave);
@@ -5853,6 +5871,8 @@ fn run_terminal(
     #[cfg(unix)]
     let mut active_input_permit = None::<InputPermit>;
 
+    #[cfg(unix)]
+    spawned.wait_for_exec(PANE_EXEC_WAIT);
     publish_active_views(
         &mut terminal,
         publisher,

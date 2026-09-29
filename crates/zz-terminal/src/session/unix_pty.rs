@@ -4,7 +4,10 @@ use std::io::{self, ErrorKind};
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Component, Path, PathBuf};
+use std::process::ExitCode;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use portable_pty::{CommandBuilder, PtySize};
 use rustix::fs::{Access, Mode, OFlags};
@@ -75,7 +78,7 @@ pub(super) fn command_environment<'a>(
         .iter_full_env_as_str()
         .map(|(key, value)| (OsString::from(key), OsString::from(value)))
         .collect::<BTreeMap<_, _>>();
-    for key in opaque_base_keys()
+    for key in base_environment_keys()
         .iter()
         .map(OsString::as_os_str)
         .chain(named)
@@ -90,27 +93,133 @@ pub(super) fn command_environment<'a>(
     environment.into_iter().collect()
 }
 
-fn opaque_base_keys() -> &'static [OsString] {
+fn base_environment_keys() -> &'static [OsString] {
     static KEYS: OnceLock<Vec<OsString>> = OnceLock::new();
-    KEYS.get_or_init(|| {
-        std::env::vars_os()
-            .filter(|(key, value)| key.to_str().is_none() || value.to_str().is_none())
-            .map(|(key, _)| key)
-            .collect()
-    })
+    KEYS.get_or_init(|| std::env::vars_os().map(|(key, _)| key).collect())
+}
+
+const PTY_EXEC_ARGUMENT: &str = "--zz-pty-exec";
+const PTY_EXEC_FENCE: RawFd = 3;
+static PTY_EXEC_HOST: AtomicBool = AtomicBool::new(false);
+
+pub(super) fn run_pty_exec_mode() -> Option<ExitCode> {
+    let mut arguments = std::env::args_os().skip(1);
+    if arguments.next().as_deref() != Some(OsStr::new(PTY_EXEC_ARGUMENT)) {
+        PTY_EXEC_HOST.store(true, Ordering::Release);
+        return None;
+    }
+    let Ok(arguments) = arguments
+        .map(|argument| CString::new(argument.into_vec()))
+        .collect::<Result<Vec<_>, _>>()
+    else {
+        return Some(ExitCode::from(127));
+    };
+    Some(exec_pty_program(&arguments))
+}
+
+#[allow(
+    unsafe_code,
+    reason = "resets signals, claims the controlling terminal and execs, all on memory this function owns"
+)]
+fn exec_pty_program(arguments: &[CString]) -> ExitCode {
+    let Some((program, argv)) = arguments.split_first() else {
+        return ExitCode::from(127);
+    };
+    if argv.is_empty() {
+        return ExitCode::from(127);
+    }
+    let argv_pointers = pointers(argv);
+    let mut fallback = vec![CString::from(c"sh"), program.clone()];
+    fallback.extend(argv.iter().skip(1).cloned());
+    let fallback_pointers = pointers(&fallback);
+    unsafe {
+        for signal in 1..SIGNAL_LIMIT {
+            if signal != libc::SIGKILL && signal != libc::SIGSTOP {
+                libc::signal(signal, libc::SIG_DFL);
+            }
+        }
+        let empty: libc::sigset_t = std::mem::zeroed();
+        libc::sigprocmask(libc::SIG_SETMASK, &raw const empty, std::ptr::null_mut());
+        let _ = rustix::process::ioctl_tiocsctty(std::os::fd::BorrowedFd::borrow_raw(0));
+        libc::fcntl(PTY_EXEC_FENCE, libc::F_SETFD, libc::FD_CLOEXEC);
+        libc::execv(program.as_ptr(), argv_pointers.as_ptr());
+        if io::Error::last_os_error().raw_os_error() == Some(libc::ENOEXEC) {
+            libc::execv(c"/bin/sh".as_ptr(), fallback_pointers.as_ptr());
+        }
+    }
+    let error = io::Error::last_os_error();
+    eprintln!("zz: cannot run {}: {error}", program.to_string_lossy());
+    ExitCode::from(127)
+}
+
+#[cfg(target_os = "macos")]
+fn pty_exec_helper() -> Option<&'static CString> {
+    static HELPER: OnceLock<Option<CString>> = OnceLock::new();
+    if !PTY_EXEC_HOST.load(Ordering::Acquire) {
+        return None;
+    }
+    HELPER
+        .get_or_init(|| {
+            std::env::current_exe()
+                .ok()
+                .and_then(|path| CString::new(path.into_os_string().into_vec()).ok())
+        })
+        .as_ref()
+}
+
+pub(super) struct Spawned {
+    pub(super) pid: u32,
+    pub(super) exec_fence: OwnedFd,
+}
+
+impl Spawned {
+    pub(super) fn wait_for_exec(self, limit: Duration) {
+        let mut fds = [rustix::event::PollFd::new(
+            &self.exec_fence,
+            rustix::event::PollFlags::IN | rustix::event::PollFlags::HUP,
+        )];
+        let deadline = std::time::Instant::now() + limit;
+        while let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) {
+            let timeout = rustix::event::Timespec::try_from(remaining)
+                .expect("a bounded wait fits in a timespec");
+            match rustix::event::poll(&mut fds, Some(&timeout)) {
+                Err(rustix::io::Errno::INTR) => {}
+                Ok(_) | Err(_) => break,
+            }
+        }
+    }
+}
+
+fn exec_fence() -> io::Result<(OwnedFd, OwnedFd)> {
+    let (read, write) = rustix::pipe::pipe()?;
+    rustix::io::fcntl_setfd(&read, FdFlags::CLOEXEC)?;
+    rustix::io::fcntl_setfd(&write, FdFlags::CLOEXEC)?;
+    Ok((read, write))
 }
 
 pub(super) fn spawn(
     builder: &CommandBuilder,
     environment: Vec<(OsString, OsString)>,
     slave: &OwnedFd,
-) -> io::Result<u32> {
+) -> io::Result<Spawned> {
     let plan = ExecPlan::new(builder, environment)?;
+    let (exec_fence, fence_write) = exec_fence()?;
     let pointers = ExecPointers {
         argv: pointers(&plan.argv),
         envp: pointers(&plan.envp),
         fallback: pointers(&plan.fallback),
     };
+    #[cfg(target_os = "macos")]
+    if let Some(helper) = pty_exec_helper() {
+        match spawn_through_helper(helper, &plan, slave.as_raw_fd(), fence_write.as_raw_fd()) {
+            Ok(pid) => return Ok(Spawned { pid, exec_fence }),
+            Err(error) => log::warn!(
+                target: "zz_terminal::spawn",
+                "pane helper {} failed, forking instead: {error}",
+                helper.to_string_lossy()
+            ),
+        }
+    }
     let mut descriptors = DescriptorScratch::new();
     #[allow(
         unsafe_code,
@@ -124,16 +233,143 @@ pub(super) fn spawn(
         libc::pthread_sigmask(libc::SIG_SETMASK, &raw const blocked, &raw mut previous);
         let pid = libc::fork();
         if pid == 0 {
-            exec_child(&plan, &pointers, slave.as_raw_fd(), &mut descriptors);
+            exec_child(
+                &plan,
+                &pointers,
+                slave.as_raw_fd(),
+                fence_write.as_raw_fd(),
+                &mut descriptors,
+            );
         }
         let error = io::Error::last_os_error();
         libc::pthread_sigmask(libc::SIG_SETMASK, &raw const previous, std::ptr::null_mut());
         if pid == -1 {
             Err(error)
         } else {
-            Ok(pid.cast_unsigned())
+            Ok(Spawned {
+                pid: pid.cast_unsigned(),
+                exec_fence,
+            })
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+const POSIX_SPAWN_SETSID: libc::c_int = 0x0400;
+
+#[cfg(target_os = "macos")]
+#[allow(
+    unsafe_code,
+    reason = "posix_spawn_file_actions_addchdir_np has no binding in the libc crate"
+)]
+unsafe extern "C" {
+    fn posix_spawn_file_actions_addchdir_np(
+        actions: *mut libc::posix_spawn_file_actions_t,
+        path: *const libc::c_char,
+    ) -> libc::c_int;
+}
+
+#[cfg(target_os = "macos")]
+struct SpawnAttributes(libc::posix_spawnattr_t);
+
+#[cfg(target_os = "macos")]
+impl Drop for SpawnAttributes {
+    #[allow(unsafe_code, reason = "destroys attributes this value initialized")]
+    fn drop(&mut self) {
+        unsafe {
+            libc::posix_spawnattr_destroy(&raw mut self.0);
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+struct SpawnActions(libc::posix_spawn_file_actions_t);
+
+#[cfg(target_os = "macos")]
+impl Drop for SpawnActions {
+    #[allow(unsafe_code, reason = "destroys file actions this value initialized")]
+    fn drop(&mut self) {
+        unsafe {
+            libc::posix_spawn_file_actions_destroy(&raw mut self.0);
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn spawn_result(code: libc::c_int) -> io::Result<()> {
+    if code == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::from_raw_os_error(code))
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[allow(
+    unsafe_code,
+    reason = "posix_spawn reads argv, envp and the actions from memory that outlives the call"
+)]
+fn spawn_through_helper(
+    helper: &CString,
+    plan: &ExecPlan,
+    slave: RawFd,
+    fence: RawFd,
+) -> io::Result<u32> {
+    let marker = CString::new(PTY_EXEC_ARGUMENT).expect("the marker has no NUL byte");
+    let argv = [helper.as_ptr(), marker.as_ptr(), plan.program.as_ptr()]
+        .into_iter()
+        .chain(plan.argv.iter().map(|argument| argument.as_ptr()))
+        .chain(std::iter::once(std::ptr::null()))
+        .collect::<Vec<_>>();
+    let envp = pointers(&plan.envp);
+    let mut attributes = SpawnAttributes(std::ptr::null_mut());
+    spawn_result(unsafe { libc::posix_spawnattr_init(&raw mut attributes.0) })?;
+    let flags = libc::POSIX_SPAWN_SETSIGDEF
+        | libc::POSIX_SPAWN_SETSIGMASK
+        | libc::POSIX_SPAWN_CLOEXEC_DEFAULT
+        | POSIX_SPAWN_SETSID;
+    spawn_result(unsafe {
+        libc::posix_spawnattr_setflags(
+            &raw mut attributes.0,
+            libc::c_short::try_from(flags).expect("spawn flags fit a short"),
+        )
+    })?;
+    let mut defaults: libc::sigset_t = 0;
+    let empty: libc::sigset_t = 0;
+    unsafe {
+        libc::sigfillset(&raw mut defaults);
+    }
+    spawn_result(unsafe {
+        libc::posix_spawnattr_setsigdefault(&raw mut attributes.0, &raw const defaults)
+    })?;
+    spawn_result(unsafe {
+        libc::posix_spawnattr_setsigmask(&raw mut attributes.0, &raw const empty)
+    })?;
+    let mut actions = SpawnActions(std::ptr::null_mut());
+    spawn_result(unsafe { libc::posix_spawn_file_actions_init(&raw mut actions.0) })?;
+    for target in 0..=2 {
+        spawn_result(unsafe {
+            libc::posix_spawn_file_actions_adddup2(&raw mut actions.0, slave, target)
+        })?;
+    }
+    spawn_result(unsafe {
+        libc::posix_spawn_file_actions_adddup2(&raw mut actions.0, fence, PTY_EXEC_FENCE)
+    })?;
+    spawn_result(unsafe {
+        posix_spawn_file_actions_addchdir_np(&raw mut actions.0, plan.directory.as_ptr())
+    })?;
+    let mut pid: libc::pid_t = 0;
+    spawn_result(unsafe {
+        libc::posix_spawn(
+            &raw mut pid,
+            helper.as_ptr(),
+            &raw const actions.0,
+            &raw const attributes.0,
+            argv.as_ptr().cast(),
+            envp.as_ptr().cast(),
+        )
+    })?;
+    Ok(pid.cast_unsigned())
 }
 
 struct ExecPointers {
@@ -236,7 +472,7 @@ impl DescriptorScratch {
         unsafe_code,
         reason = "proc_pidinfo writes into capacity reserved before the fork"
     )]
-    unsafe fn close_inherited(&mut self) {
+    unsafe fn close_inherited(&mut self, keep: RawFd) {
         let capacity = self.0.capacity();
         let bytes =
             i32::try_from(capacity * std::mem::size_of::<libc::proc_fdinfo>()).unwrap_or(i32::MAX);
@@ -255,7 +491,7 @@ impl DescriptorScratch {
         let count = (written / std::mem::size_of::<libc::proc_fdinfo>()).min(capacity);
         for index in 0..count {
             let descriptor = unsafe { (*self.0.as_ptr().add(index)).proc_fd };
-            if descriptor > 2 {
+            if descriptor > 2 && descriptor != keep {
                 unsafe {
                     libc::close(descriptor);
                 }
@@ -281,14 +517,21 @@ impl DescriptorScratch {
         unsafe_code,
         reason = "close_range and close are async-signal-safe syscalls"
     )]
-    unsafe fn close_inherited(&mut self) {
+    unsafe fn close_inherited(&mut self, keep: RawFd) {
         #[cfg(any(target_os = "linux", target_os = "android"))]
-        if unsafe { libc::syscall(libc::SYS_close_range, 3_u32, u32::MAX, 0_u32) } == 0 {
+        if let Ok(keep) = u32::try_from(keep)
+            && keep >= 3
+            && (keep == 3
+                || unsafe { libc::syscall(libc::SYS_close_range, 3_u32, keep - 1, 0_u32) } == 0)
+            && unsafe { libc::syscall(libc::SYS_close_range, keep + 1, u32::MAX, 0_u32) } == 0
+        {
             return;
         }
         for descriptor in 3..self.0 {
-            unsafe {
-                libc::close(descriptor);
+            if descriptor != keep {
+                unsafe {
+                    libc::close(descriptor);
+                }
             }
         }
     }
@@ -307,6 +550,7 @@ unsafe fn exec_child(
     plan: &ExecPlan,
     pointers: &ExecPointers,
     slave: RawFd,
+    fence: RawFd,
     descriptors: &mut DescriptorScratch,
 ) -> ! {
     unsafe {
@@ -330,7 +574,7 @@ unsafe fn exec_child(
         if libc::chdir(plan.directory.as_ptr()) == -1 {
             libc::_exit(1);
         }
-        descriptors.close_inherited();
+        descriptors.close_inherited(fence);
         libc::execve(
             plan.program.as_ptr(),
             pointers.argv.as_ptr(),

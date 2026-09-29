@@ -2626,8 +2626,14 @@ pub fn launch_application(socket_path: &Path) -> ExitCode {
 }
 
 pub fn daemon_executable() -> io::Result<PathBuf> {
-    let executable = std::env::current_exe()?.canonicalize()?;
-    Ok(daemon_executable_from(&executable))
+    let executable = std::env::current_exe()?;
+    match executable.canonicalize() {
+        Ok(executable) => Ok(daemon_executable_from(&executable)),
+        #[cfg(target_os = "linux")]
+        Err(_) => Ok(PathBuf::from("/proc/self/exe")),
+        #[cfg(not(target_os = "linux"))]
+        Err(error) => Err(error),
+    }
 }
 
 #[must_use]

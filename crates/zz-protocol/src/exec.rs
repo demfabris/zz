@@ -11,6 +11,7 @@ use crate::{
 };
 
 pub const MAX_EXEC_TTY_BYTES: usize = 1024;
+pub const EXEC_CAPABILITY: &str = "exec-v1";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecFlags(u8);

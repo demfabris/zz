@@ -22,7 +22,8 @@ use zz_protocol::{
     read_protocol_message_into,
 };
 use zz_protocol::{
-    ClientEnvironmentBlob, ExecFlags, ExecOutcome, ExecRequest, ExecResume, ExecResumeKind,
+    ClientEnvironmentBlob, EXEC_CAPABILITY, ExecFlags, ExecOutcome, ExecRequest, ExecResume,
+    ExecResumeKind,
 };
 
 /// `EIO`, the error the pin's client reports for anything that fails after the
@@ -257,15 +258,12 @@ fn stdout_or_exit(outcome: CommandOutcome) -> Result<String, DaemonError> {
     }
 }
 
-fn exec_unsupported(error: &DaemonError) -> bool {
+fn exec_maybe_unsupported(error: &DaemonError) -> bool {
     match error {
         DaemonError::Protocol(ProtocolError::Decode(_)) => true,
-        DaemonError::Protocol(ProtocolError::Io(error)) | DaemonError::Io(error) => matches!(
-            error.kind(),
-            io::ErrorKind::UnexpectedEof
-                | io::ErrorKind::ConnectionReset
-                | io::ErrorKind::BrokenPipe
-        ),
+        DaemonError::Protocol(ProtocolError::Io(error)) | DaemonError::Io(error) => {
+            error.kind() == io::ErrorKind::UnexpectedEof
+        }
         _ => false,
     }
 }
@@ -383,7 +381,7 @@ impl CommandRoute {
         }
     }
 
-    fn connect_legacy(&self) -> Result<CommandLink, DaemonError> {
+    fn connect_legacy(&self) -> Result<(CommandLink, bool), DaemonError> {
         let stream = LocalTransport::connect(&self.socket)?;
         let (reader, writer, hello) = connect_stream(
             stream,
@@ -395,16 +393,23 @@ impl CommandRoute {
             self.send_origin,
             self.facts,
         )?;
-        Ok(CommandLink::Legacy {
-            reader,
-            writer,
-            server_id: hello.server_id,
-        })
+        let speaks_exec = hello
+            .capabilities
+            .iter()
+            .any(|capability| capability == EXEC_CAPABILITY);
+        Ok((
+            CommandLink::Legacy {
+                reader,
+                writer,
+                server_id: hello.server_id,
+            },
+            speaks_exec,
+        ))
     }
 
     fn connect(&self) -> Result<CommandLink, DaemonError> {
         if *LEGACY_COMMAND {
-            return self.connect_legacy();
+            return self.connect_legacy().map(|(link, _)| link);
         }
         let stream = LocalTransport::connect(&self.socket)?;
         Ok(CommandLink::Exec {
@@ -612,7 +617,13 @@ impl CommandClient {
             Err(error) => Err(error),
         };
         let first = match first {
-            Err(error) if !*answered && exec_unsupported(&error) => {
+            Err(error) if !*answered && exec_maybe_unsupported(&error) => {
+                let Ok((link, speaks_exec)) = self.route.connect_legacy() else {
+                    return Ok(ExecChainEnd::Failed(error));
+                };
+                if speaks_exec {
+                    return Ok(ExecChainEnd::Failed(error));
+                }
                 log::debug!(
                     target: "zz_daemon::diagnostics::client",
                     "daemon did not take Exec ({error}); retrying over the hello path",
@@ -620,7 +631,7 @@ impl CommandClient {
                 let ProtocolMessage::Exec(request) = request else {
                     unreachable!("request is an Exec");
                 };
-                self.link = self.route.connect_legacy()?;
+                self.link = link;
                 if let CommandLink::Legacy { server_id, .. } = &self.link {
                     self.server_id = Some(*server_id);
                 }

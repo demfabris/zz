@@ -146,6 +146,158 @@ fn a_chain_stops_at_the_first_failure_and_keeps_earlier_output() {
 }
 
 #[test]
+fn a_chain_longer_than_the_mailbox_runs_to_the_end_and_returns_every_line() {
+    let daemon = RunningDaemon::start("exec-long");
+    let mut client = daemon.client();
+    let wide = "w".repeat(4000);
+    let mut commands = (1..=300)
+        .map(|index| {
+            CommandInvocation::new(
+                "set-option",
+                ["-g".to_owned(), format!("@x{index}"), "y".to_owned()],
+            )
+        })
+        .collect::<Vec<_>>();
+    commands.extend((1..=300).map(|index| {
+        CommandInvocation::new(
+            "display-message",
+            ["-p".to_owned(), format!("line {index}")],
+        )
+    }));
+    commands
+        .extend((0..40).map(|_| CommandInvocation::new("display-message", ["-p", wide.as_str()])));
+    let mut outputs = Vec::new();
+    let end = client
+        .exec_chain(ExecChain::new(commands), |outcome| {
+            outputs.push(outcome.stdout.to_string());
+            0
+        })
+        .expect("daemon answered");
+    assert!(matches!(end, ExecChainEnd::Ran { exit_code: 0 }), "{end:?}");
+    assert_eq!(outputs.len(), 640);
+    assert_eq!(outputs[300], "line 1");
+    assert_eq!(outputs[599], "line 300");
+    assert!(outputs[600..].iter().all(|output| *output == wide));
+    assert_eq!(run(&mut client, &["show-options", "-gqv", "@x300"]), "y");
+}
+
+#[cfg(unix)]
+mod dropped_exec {
+    use std::os::unix::net::{UnixListener, UnixStream};
+
+    use super::*;
+    use zz_protocol::{EXEC_CAPABILITY, read_protocol_message, write_protocol_message};
+
+    #[derive(Clone, Copy)]
+    enum First {
+        RunThenDrop,
+        DropUnread,
+    }
+
+    fn relay_hello(client: UnixStream, daemon: &Path, hide_exec: bool) {
+        let Ok(mut upstream) = UnixStream::connect(daemon) else {
+            return;
+        };
+        let (Ok(mut inbound), Ok(mut outbound)) = (client.try_clone(), upstream.try_clone()) else {
+            return;
+        };
+        let forward = thread::spawn(move || {
+            let _ = std::io::copy(&mut inbound, &mut outbound);
+            let _ = outbound.shutdown(std::net::Shutdown::Write);
+        });
+        let mut client = client;
+        while let Ok(mut message) = read_protocol_message(&mut upstream) {
+            if hide_exec && let ProtocolMessage::ServerHello(hello) = &mut message {
+                hello
+                    .capabilities
+                    .retain(|capability| capability != EXEC_CAPABILITY);
+            }
+            if write_protocol_message(&mut client, &message).is_err() {
+                break;
+            }
+        }
+        let _ = client.shutdown(std::net::Shutdown::Both);
+        let _ = forward.join();
+    }
+
+    fn proxy(daemon: &Path, name: &str, first: First, hide_exec: bool) -> PathBuf {
+        let path = daemon_test_endpoint(name);
+        let listener = UnixListener::bind(&path).expect("bind proxy");
+        let daemon = daemon.to_path_buf();
+        thread::spawn(move || {
+            let Ok((mut client, _)) = listener.accept() else {
+                return;
+            };
+            let exec = read_protocol_message(&mut client).expect("exec frame");
+            if let First::RunThenDrop = first {
+                let mut upstream = UnixStream::connect(&daemon).expect("daemon");
+                write_protocol_message(&mut upstream, &exec).expect("forward exec");
+                while !matches!(
+                    read_protocol_message(&mut upstream),
+                    Ok(ProtocolMessage::ExecExit(_)) | Err(_)
+                ) {}
+            }
+            drop(client);
+            while let Ok((client, _)) = listener.accept() {
+                let daemon = daemon.clone();
+                thread::spawn(move || relay_hello(client, &daemon, hide_exec));
+            }
+        });
+        path
+    }
+
+    fn windows_named(daemon: &RunningDaemon, name: &str) -> usize {
+        run(
+            &mut daemon.client(),
+            &["list-windows", "-a", "-F", "#{window_name}"],
+        )
+        .lines()
+        .filter(|line| *line == name)
+        .count()
+    }
+
+    fn exec_through(path: &Path, name: &str) -> ExecChainEnd {
+        let mut client = CommandClient::connect(path).expect("connect proxy");
+        client
+            .exec_chain(
+                ExecChain::new(vec![CommandInvocation::new(
+                    "new-window",
+                    ["-d", "-n", name],
+                )]),
+                |_| 0,
+            )
+            .expect("chain ends")
+    }
+
+    #[test]
+    fn an_exec_daemon_that_drops_the_reply_does_not_run_the_chain_twice() {
+        let daemon = RunningDaemon::start("exec-dropped");
+        run(&mut daemon.client(), &["new-session", "-d", "-s", "work"]);
+        let path = proxy(
+            &daemon.socket,
+            "exec-dropped-proxy",
+            First::RunThenDrop,
+            false,
+        );
+        let end = exec_through(&path, "once");
+        assert!(matches!(end, ExecChainEnd::Failed(_)), "{end:?}");
+        assert_eq!(windows_named(&daemon, "once"), 1);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_daemon_without_exec_gets_the_chain_once_over_the_hello_path() {
+        let daemon = RunningDaemon::start("exec-legacy");
+        run(&mut daemon.client(), &["new-session", "-d", "-s", "work"]);
+        let path = proxy(&daemon.socket, "exec-legacy-proxy", First::DropUnread, true);
+        let end = exec_through(&path, "legacy");
+        assert!(matches!(end, ExecChainEnd::Ran { exit_code: 0 }), "{end:?}");
+        assert_eq!(windows_named(&daemon, "legacy"), 1);
+        let _ = fs::remove_file(path);
+    }
+}
+
+#[test]
 fn a_preparation_error_rejects_the_whole_chain_before_it_runs() {
     let daemon = RunningDaemon::start("exec-reject");
     let mut client = daemon.client();

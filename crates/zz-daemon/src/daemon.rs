@@ -102,9 +102,8 @@ use crate::{
     shell_process,
     status::{
         BufferFormatFacts, ClientFormatFacts, ClientViewportFacts, DaemonFormatHooks,
-        FormatHookFacts, MessageFormatFacts, StatusRenderer, StatusRequest,
-        client_environment_rows, client_terminal_facts, host_names, status_context,
-        warm_terminfo_entries,
+        FormatHookFacts, MessageFormatFacts, StatusRenderer, StatusRequest, client_terminal_facts,
+        host_names, status_context, warm_terminfo_entries,
     },
     terminal_features::{terminal_colour_count, terminal_feature_mask, terminal_features_list},
     transport::{AcceptWake, LocalTransport, Transport, TransportListener, TransportStream},
@@ -2000,6 +1999,7 @@ struct OutboundState {
     discarded_bytes: u64,
     closed: bool,
     writer_finished: bool,
+    buffered: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2270,7 +2270,7 @@ impl OutboundMailbox {
         if !reserve_outbound_bytes(&mut state, encoded.len(), 0) {
             shed_preview_terminals(&mut state);
         }
-        if state.reliable.len() >= MAX_RELIABLE_MESSAGES
+        if (!state.buffered && state.reliable.len() >= MAX_RELIABLE_MESSAGES)
             || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
         {
             close_outbound_too_far_behind(&mut state);
@@ -2293,7 +2293,7 @@ impl OutboundMailbox {
         if !reserve_outbound_bytes(&mut state, encoded.len(), 0) {
             shed_preview_terminals(&mut state);
         }
-        if state.reliable.len() >= MAX_RELIABLE_MESSAGES
+        if (!state.buffered && state.reliable.len() >= MAX_RELIABLE_MESSAGES)
             || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
         {
             close_outbound_too_far_behind(&mut state);
@@ -2951,6 +2951,20 @@ impl OutboundMailbox {
         state.closed = true;
         drop(state);
         self.ready.notify_all();
+    }
+
+    fn buffered() -> Arc<Self> {
+        Arc::new(Self {
+            state: Mutex::new(OutboundState {
+                buffered: true,
+                ..OutboundState::default()
+            }),
+            ready: Condvar::new(),
+        })
+    }
+
+    fn stop_buffering(&self) {
+        self.state.lock().buffered = false;
     }
 
     fn drain_reliable_into(&self, output: &mut Vec<u8>) {
@@ -5588,6 +5602,7 @@ impl Shared {
             "browser-panes".to_owned(),
             "tmux-config-subset".to_owned(),
             NEW_SESSION_ATTACH_CAPABILITY.to_owned(),
+            zz_protocol::EXEC_CAPABILITY.to_owned(),
         ];
         let hello_mux_options = inner.mux_options.clone();
         inner
@@ -11349,6 +11364,14 @@ impl Shared {
         let serial = self.pipe_effects.lock();
         let (stale, desired) = {
             let mut inner = self.inner.lock();
+            if inner.control_output_taps.is_empty()
+                && !inner
+                    .client_kinds
+                    .values()
+                    .any(|kind| *kind == ClientKind::Control)
+            {
+                return;
+            }
             let desired = inner
                 .terminals
                 .iter()
@@ -35887,7 +35910,9 @@ fn client_format_facts(
     client: ClientId,
     session: SessionId,
 ) -> ClientFormatFacts {
-    let session_state = &inner.engine.state.sessions[&session];
+    let Some(session_state) = inner.engine.state.sessions.get(&session) else {
+        return ClientFormatFacts::default();
+    };
     let window = client_focused_window(inner, client, session_state);
     let kind = inner.client_kinds.get(&client).copied();
     let has_terminal =
@@ -35979,7 +36004,7 @@ fn client_format_facts(
         width: width.to_string(),
         written: written.to_string(),
         line: 0,
-        environment: client_environment_rows(inner.client_environments.get(&client)),
+        environment: inner.client_environments.get(&client).cloned(),
         terminal: has_terminal
             .then(|| {
                 client_terminal_facts(
@@ -36768,9 +36793,7 @@ fn status_request_with(
 ) -> StatusRequest {
     let attached = client_attached_session(inner, client);
     let mut facts = facts;
-    facts.client_environment = Arc::new(client_environment_rows(
-        inner.client_environments.get(&client),
-    ));
+    facts.client_environment = inner.client_environments.get(&client).cloned();
     if let Some(session) = attached {
         facts.client = Some(client_format_facts(inner, client, session));
     }
@@ -40505,9 +40528,7 @@ fn format_hook_facts_for_client(
     // reads that client's environment even when the format's own client is the
     // command's target.
     if let Some(invoking) = format_provenance_client(context, client) {
-        facts.client_environment = Arc::new(client_environment_rows(
-            inner.client_environments.get(&invoking),
-        ));
+        facts.client_environment = inner.client_environments.get(&invoking).cloned();
     }
     let format_client = if context.has_no_client() {
         hook_body_format_client(inner)

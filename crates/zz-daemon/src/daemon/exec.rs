@@ -13,6 +13,8 @@ thread_local! {
 type ExecJob = Box<dyn FnOnce() + Send>;
 
 const IDLE_CONNECTION_THREADS: usize = 2;
+const EXEC_FLUSH_FRAMES: usize = 64;
+const EXEC_FLUSH_BYTES: usize = 64 * 1024;
 const CONNECTION_THREAD_IDLE: Duration = Duration::from_secs(1);
 
 static SPAWN_PER_CONNECTION: LazyLock<bool> = LazyLock::new(|| {
@@ -105,7 +107,7 @@ fn connection_worker(threads: &Weak<ConnectionThreads>, first: ExecJob) {
 }
 
 pub(super) struct ExecLink {
-    starter: Mutex<Option<Box<dyn FnOnce() -> Option<ExecLive> + Send>>>,
+    starter: Mutex<Option<ExecStarter>>,
     live: Mutex<Option<ExecLive>>,
 }
 
@@ -115,9 +117,12 @@ struct ExecLive {
     requests: crossbeam_channel::Receiver<ExecRequest>,
 }
 
+type ExecStarter = Box<dyn FnOnce() -> Option<ExecLive> + Send>;
+
 impl ExecLink {
     fn go_live(&self) {
-        let Some(start) = self.starter.lock().take() else {
+        let mut starter = self.starter.lock();
+        let Some(start) = starter.take() else {
             return;
         };
         if let Some(live) = start() {
@@ -127,6 +132,11 @@ impl ExecLink {
 
     fn is_live(&self) -> bool {
         self.live.lock().is_some()
+    }
+
+    fn direct_writes(&self) -> Option<parking_lot::MutexGuard<'_, Option<ExecStarter>>> {
+        let starter = self.starter.lock();
+        (!self.is_live()).then_some(starter)
     }
 }
 
@@ -459,7 +469,7 @@ impl<S: TransportStream> ExecConnection<S> {
         let (mailbox, link) = if let Some((mailbox, link)) = &self.live {
             (Arc::clone(mailbox), Arc::clone(link))
         } else {
-            let mailbox = OutboundMailbox::new();
+            let mailbox = OutboundMailbox::buffered();
             let link = Arc::new(ExecLink {
                 starter: Mutex::new(Some(self.starter(&mailbox))),
                 live: Mutex::new(None),
@@ -476,7 +486,7 @@ impl<S: TransportStream> ExecConnection<S> {
         };
         let admission = ResponseAdmissionGuard::new(&self.shared);
         let outcome = if admission.is_some() {
-            self.execute(&mailbox, request)
+            self.execute(&mailbox, &link, request)
         } else {
             let _ = mailbox.enqueue_reliable(&server_stopping_response(1));
             ExecOutcome::Ran
@@ -485,14 +495,14 @@ impl<S: TransportStream> ExecConnection<S> {
             server_id: self.shared.server_id,
             outcome,
         });
-        if link.is_live() {
+        let Some(direct) = link.direct_writes() else {
             let _ = mailbox.enqueue_reliable(&exit);
             drop(admission);
             if self.live.is_none() {
                 self.live = Some((mailbox, link));
             }
             return;
-        }
+        };
         drop(admission);
         let mut output = Vec::new();
         mailbox.drain_reliable_into(&mut output);
@@ -504,6 +514,7 @@ impl<S: TransportStream> ExecConnection<S> {
             .stream
             .write_all(&output)
             .and_then(|()| self.stream.flush());
+        drop(direct);
         mailbox.mark_writer_finished();
         self.shared.exec_links.lock().remove(&self.client);
         let mut writers = self.shared.client_writers.lock();
@@ -515,7 +526,12 @@ impl<S: TransportStream> ExecConnection<S> {
         }
     }
 
-    fn execute(&mut self, mailbox: &Arc<OutboundMailbox>, request: ExecRequest) -> ExecOutcome {
+    fn execute(
+        &mut self,
+        mailbox: &Arc<OutboundMailbox>,
+        link: &ExecLink,
+        request: ExecRequest,
+    ) -> ExecOutcome {
         let shared = Arc::clone(&self.shared);
         if request
             .expect_server_id
@@ -528,7 +544,7 @@ impl<S: TransportStream> ExecConnection<S> {
         }
         let stdin_available = request.flags.contains(ExecFlags::STDIN_AVAILABLE);
         if request.flags.contains(ExecFlags::PREPARED) {
-            self.run_commands(mailbox, request.commands, stdin_available);
+            self.run_commands(mailbox, link, request.commands, stdin_available);
             return ExecOutcome::Ran;
         }
         let resume = request.flags.contains(ExecFlags::RESUME);
@@ -567,6 +583,7 @@ impl<S: TransportStream> ExecConnection<S> {
         }
         self.run_commands(
             mailbox,
+            link,
             prepared.into_iter().map(|command| command.invocation),
             stdin_available,
         );
@@ -576,6 +593,7 @@ impl<S: TransportStream> ExecConnection<S> {
     fn run_commands(
         &mut self,
         mailbox: &Arc<OutboundMailbox>,
+        link: &ExecLink,
         commands: impl IntoIterator<Item = CommandInvocation>,
         stdin_available: bool,
     ) {
@@ -604,13 +622,33 @@ impl<S: TransportStream> ExecConnection<S> {
             if failed || client_exit || !admitted {
                 break;
             }
+            self.flush_buffered(mailbox, link);
         }
     }
 
-    fn starter(
-        &self,
-        mailbox: &Arc<OutboundMailbox>,
-    ) -> Box<dyn FnOnce() -> Option<ExecLive> + Send> {
+    fn flush_buffered(&mut self, mailbox: &OutboundMailbox, link: &ExecLink) {
+        if mailbox
+            .queued_reliable()
+            .is_none_or(|(bytes, frames)| bytes < EXEC_FLUSH_BYTES && frames < EXEC_FLUSH_FRAMES)
+        {
+            return;
+        }
+        let Some(direct) = link.direct_writes() else {
+            return;
+        };
+        let mut output = Vec::new();
+        mailbox.drain_reliable_into(&mut output);
+        let written = self
+            .stream
+            .write_all(&output)
+            .and_then(|()| self.stream.flush());
+        drop(direct);
+        if written.is_err() {
+            mailbox.close();
+        }
+    }
+
+    fn starter(&self, mailbox: &Arc<OutboundMailbox>) -> ExecStarter {
         let writer = Arc::clone(&self.writer);
         let mailbox = Arc::clone(mailbox);
         let shared = Arc::downgrade(&self.shared);
@@ -620,6 +658,17 @@ impl<S: TransportStream> ExecConnection<S> {
         Box::new(move || {
             let mut stream = writer.lock().take()?;
             let mut reader = stream.try_clone().ok()?;
+            let mut buffered = Vec::new();
+            mailbox.drain_reliable_into(&mut buffered);
+            if !buffered.is_empty()
+                && stream
+                    .write_all(&buffered)
+                    .and_then(|()| stream.flush())
+                    .is_err()
+            {
+                mailbox.close();
+            }
+            mailbox.stop_buffering();
             let (requests_tx, requests) = crossbeam_channel::unbounded();
             let writer_mailbox = Arc::clone(&mailbox);
             let writer_shared = shared.clone();

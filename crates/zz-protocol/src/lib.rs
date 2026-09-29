@@ -24,8 +24,8 @@ pub use catalog::{
     unimplemented_tmux_command_spec,
 };
 pub use exec::{
-    ClientEnvironmentBlob, ExecExit, ExecFlags, ExecOutcome, ExecRequest, ExecResume,
-    ExecResumeKind, MAX_EXEC_TTY_BYTES,
+    ClientEnvironmentBlob, EXEC_CAPABILITY, ExecExit, ExecFlags, ExecOutcome, ExecRequest,
+    ExecResume, ExecResumeKind, MAX_EXEC_TTY_BYTES,
 };
 pub use framing::{MAX_ENCODED_FRAME_BYTES, MAX_FRAME_BYTES, ProtocolError};
 pub use id::{ClientId, ClientInstanceId, PaneId, SessionId, SplitId, WindowId};

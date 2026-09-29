@@ -6817,7 +6817,7 @@ impl MuxEngine {
                 hooks,
             );
             if let Some(title) = tmux_clean_title(&title) {
-                self.state.update_pane_title(pane, title)?;
+                self.state.pin_pane_title(pane, title)?;
             }
         }
         let session = self.state.windows[&window].session;
@@ -7021,7 +7021,7 @@ impl MuxEngine {
                 hooks,
             );
             if let Some(title) = tmux_clean_title(&title) {
-                self.state.update_pane_title(pane, title)?;
+                self.state.pin_pane_title(pane, title)?;
             }
             return Ok(execution);
         }

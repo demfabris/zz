@@ -51,7 +51,7 @@ __zz_write_title() {
   __zz_value=${__zz_value//$'\r'/ }
   __zz_value=${__zz_value//[[:cntrl:]]/}
   __zz_value=${__zz_value:0:512}
-  builtin printf '\e]2;%s\a' "$__zz_value"
+  builtin printf '\e]2626\a\e]2;%s\a' "$__zz_value"
 }
 
 __zz_write_working_directory() {

@@ -12,7 +12,7 @@ _zz_write_title() {
   value=${value//$'\r'/ }
   value=${value//[[:cntrl:]]/}
   value=${value[1,512]}
-  print -rn -- $'\e]2;'$value$'\a'
+  print -rn -- $'\e]2626\a\e]2;'$value$'\a'
 }
 
 _zz_write_working_directory() {

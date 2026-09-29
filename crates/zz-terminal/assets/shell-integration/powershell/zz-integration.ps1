@@ -7,7 +7,7 @@
 #
 # Every sequence emitted here matches the bash/zsh integration byte for byte, so
 # the terminal needs no PowerShell-specific parsing:
-#   OSC 2    "\e]2;<title>\a"             window title (shell name, then command)
+#   OSC 2    "\e]2626\a\e]2;<title>\a"     window title (shell name, then command)
 #   OSC 7    "\e]7;file://<host><cwd>\a"  working directory
 #   DECSCUSR "\e[0 q"                     restore the configured cursor style
 
@@ -30,7 +30,7 @@ function global:__zz_write_title {
     $Value = $Value -replace "[`r`n]", ' '
     $Value = $Value -replace '\p{Cc}', ''
     if ($Value.Length -gt 512) { $Value = $Value.Substring(0, 512) }
-    [Console]::Write("$($global:__ZZ_ESC)]2;$Value$($global:__ZZ_BEL)")
+    [Console]::Write("$($global:__ZZ_ESC)]2626$($global:__ZZ_BEL)$($global:__ZZ_ESC)]2;$Value$($global:__ZZ_BEL)")
 }
 
 function global:__zz_write_working_directory {

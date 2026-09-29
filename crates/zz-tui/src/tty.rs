@@ -14,7 +14,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use rustix::termios::{OptionalActions, Termios};
 
 use zz_daemon::{CommandClient, Endpoint, terminal_default_features, terminal_feature_mask};
-use zz_protocol::CommandInvocation;
+use zz_protocol::{CommandInvocation, SERVER_OPTION_CAPABILITY_PREFIX, ServerHello};
 
 use crate::kitty::{FILE_PROBE_IMAGE_ID, PROBE_IMAGE_ID, cleanup_frame_slot_files};
 
@@ -30,8 +30,16 @@ impl TerminalSize {
     #[cfg(unix)]
     pub fn detect() -> io::Result<Self> {
         let size = rustix::termios::tcgetwinsize(io::stdout())?;
-        let cell_width_px = pixel_cell_extent(size.ws_xpixel, size.ws_col, 8);
-        let cell_height_px = pixel_cell_extent(size.ws_ypixel, size.ws_row, 16);
+        let cell_width_px = zz_daemon::cell_pixel_extent(
+            size.ws_xpixel,
+            size.ws_col,
+            zz_daemon::DEFAULT_CELL_WIDTH_PX,
+        );
+        let cell_height_px = zz_daemon::cell_pixel_extent(
+            size.ws_ypixel,
+            size.ws_row,
+            zz_daemon::DEFAULT_CELL_HEIGHT_PX,
+        );
         Ok(Self {
             columns: size.ws_col,
             rows: size.ws_row,
@@ -52,14 +60,6 @@ impl TerminalSize {
             io::ErrorKind::Unsupported,
             "zz-tui currently requires a Unix terminal",
         ))
-    }
-}
-
-fn pixel_cell_extent(pixels: u16, cells: u16, fallback: u32) -> u32 {
-    if pixels == 0 || cells == 0 {
-        fallback
-    } else {
-        (u32::from(pixels) / u32::from(cells)).max(1)
     }
 }
 
@@ -200,6 +200,35 @@ const THEME_UNSUBSCRIBE: &[u8] = b"\x1b[?2031l";
 const FOCUS_EVENTS_ENABLE: &[u8] = b"\x1b[?1004h";
 const EXTENDED_KEYS_ENABLE: &[u8] = b"\x1b[>4;2m";
 const EXTENDED_KEYS_DISABLE: &[u8] = b"\x1b[>4m";
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct TerminalOptions {
+    pub extended_keys: bool,
+    pub focus_events: bool,
+}
+
+impl TerminalOptions {
+    /// The two server options the daemon put in a raw-terminal client's
+    /// hello, or `None` from a daemon that did not.
+    pub fn from_hello(hello: &ServerHello) -> Option<Self> {
+        let mut extended_keys = None;
+        let mut focus_events = None;
+        for capability in &hello.capabilities {
+            match capability
+                .strip_prefix(SERVER_OPTION_CAPABILITY_PREFIX)
+                .and_then(|option| option.split_once('='))
+            {
+                Some(("extended-keys", value)) => extended_keys = Some(extended_keys_armed(value)),
+                Some(("focus-events", value)) => focus_events = Some(value.trim() == "on"),
+                _ => {}
+            }
+        }
+        Some(Self {
+            extended_keys: extended_keys?,
+            focus_events: focus_events?,
+        })
+    }
+}
 
 pub(crate) fn extended_keys_option(endpoint: &Endpoint) -> bool {
     let Endpoint::Local(path) = endpoint else {
@@ -428,10 +457,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_hello_arms_the_terminal_only_when_it_names_both_options() {
+        let hello = |capabilities: &[&str]| ServerHello {
+            protocol_version: zz_protocol::PROTOCOL_VERSION,
+            server_id: 1,
+            client_id: zz_protocol::ClientId(1),
+            client_instance_id: zz_protocol::ClientInstanceId::default(),
+            capabilities: capabilities.iter().map(|&value| value.to_owned()).collect(),
+            appearance: zz_terminal::TerminalAppearance::default(),
+            appearance_provenance: zz_terminal::AppearanceProvenance::default(),
+            mux_options: zz_protocol::MuxOptions::default(),
+            status: zz_protocol::StatusLine::default(),
+            key_tables: Vec::new(),
+        };
+        assert_eq!(
+            TerminalOptions::from_hello(&hello(&[
+                "mux-v1",
+                "server-option-v1:extended-keys=always",
+                "server-option-v1:focus-events=on",
+            ])),
+            Some(TerminalOptions {
+                extended_keys: true,
+                focus_events: true,
+            })
+        );
+        assert_eq!(
+            TerminalOptions::from_hello(&hello(&[
+                "server-option-v1:extended-keys=off",
+                "server-option-v1:focus-events=off",
+            ])),
+            Some(TerminalOptions::default())
+        );
+        assert_eq!(
+            TerminalOptions::from_hello(&hello(&["server-option-v1:focus-events=on"])),
+            None
+        );
+    }
+
+    #[test]
     fn pixel_geometry_uses_ioctl_values_or_documented_fallbacks() {
-        assert_eq!(pixel_cell_extent(1600, 200, 8), 8);
-        assert_eq!(pixel_cell_extent(0, 200, 8), 8);
-        assert_eq!(pixel_cell_extent(40, 80, 8), 1);
+        assert_eq!(zz_daemon::cell_pixel_extent(1600, 200, 8), 8);
+        assert_eq!(zz_daemon::cell_pixel_extent(0, 200, 8), 8);
+        assert_eq!(zz_daemon::cell_pixel_extent(40, 80, 8), 1);
     }
 
     #[test]

@@ -30,7 +30,7 @@ use crate::{
     render::{FrameDamage, Renderer, merge_damage},
     state::{ClientMessage, HostSwitch, Model},
     terminal_event::{Event as TerminalEvent, EventParser},
-    tty::{MouseArming, TerminalGuard, TerminalSize},
+    tty::{MouseArming, TerminalGuard, TerminalOptions, TerminalSize},
 };
 
 enum MainEvent {
@@ -403,6 +403,18 @@ enum ProtocolOutcome {
     Exit(TuiExit),
 }
 
+/// The one paint a drained run of protocol events owes the terminal.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum PendingPaint {
+    None,
+    Frames,
+    Repaint,
+    RepaintAll,
+}
+
+/// How many queued protocol events one paint may cover.
+const MAX_COALESCED_EVENTS: usize = 256;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum TuiExit {
     Detached(String),
@@ -460,6 +472,7 @@ pub(crate) fn run(
     mut endpoint: Endpoint,
     local_endpoint: Endpoint,
     initial_attach: InitialAttach,
+    terminal_options: Option<TerminalOptions>,
     host_label: String,
     local_host_label: String,
     fleet_hosts: Vec<HostEntry>,
@@ -498,8 +511,13 @@ pub(crate) fn run(
         };
     let size = TerminalSize::detect().map_err(|error| error.to_string())?;
     let mut core = seeded_core(initial.server_hello().clone());
-    let extended_keys = crate::tty::extended_keys_option(&endpoint);
-    let focus_events = crate::tty::focus_events_option(&endpoint);
+    let TerminalOptions {
+        extended_keys,
+        focus_events,
+    } = terminal_options.unwrap_or_else(|| TerminalOptions {
+        extended_keys: crate::tty::extended_keys_option(&endpoint),
+        focus_events: crate::tty::focus_events_option(&endpoint),
+    });
     let mut client = Arc::new(initial);
     if let Some(detach_others) = attach_request {
         client
@@ -572,9 +590,12 @@ pub(crate) fn run(
     let mut creating_default = false;
     let mut remembered_session = None;
     let mut reconnect_available = true;
-    renderer
-        .paint(&model, true)
-        .map_err(|error| error.to_string())?;
+    let mut deferred = None;
+    if !*crate::COALESCE {
+        renderer
+            .paint(&model, true)
+            .map_err(|error| error.to_string())?;
+    }
 
     let outcome = loop {
         let now = Instant::now();
@@ -584,7 +605,9 @@ pub(crate) fn run(
                 .map_err(|error| error.to_string())?;
         }
         let now = Instant::now();
-        let event = if browser.should_pump(now) {
+        let event = if let Some(event) = deferred.take() {
+            Some(event)
+        } else if browser.should_pump(now) {
             None
         } else {
             receive_main_event(
@@ -611,25 +634,113 @@ pub(crate) fn run(
             continue;
         };
         match event {
-            MainEvent::Frames(event_connection) => {
-                if event_connection != connection_id {
-                    continue;
-                }
-                for (pane, frame) in frames.take() {
-                    if !model.accepts_viewport(pane) {
-                        model.viewports.remove(&pane);
-                        renderer.forget_pane(pane);
-                        continue;
+            event @ (MainEvent::Frames(_) | MainEvent::Core { .. }) => {
+                let mut paint = PendingPaint::None;
+                let mut core_seen = false;
+                let mut exit = None;
+                let mut handled = 0_usize;
+                let mut next = Some(event);
+                while let Some(event) = next.take() {
+                    match event {
+                        MainEvent::Frames(event_connection) => {
+                            if event_connection == connection_id {
+                                take_frames(&frames, &mut model, &mut renderer);
+                                paint = paint.max(PendingPaint::Frames);
+                            }
+                        }
+                        MainEvent::Core { connection, event } => {
+                            if connection == connection_id {
+                                core_seen = true;
+                                if let CoreEvent::Attached { .. } = &*event {
+                                    {
+                                        let core = lock_core(&core);
+                                        read_only = core.attached_read_only();
+                                        client_flags = (!core.attached_client_flags().is_empty())
+                                            .then(|| core.attached_client_flags().to_owned());
+                                    }
+                                    browser.reset_connection();
+                                    renderer.reset_kitty_images();
+                                    reconnect_available = true;
+                                }
+                                if matches!(
+                                    &*event,
+                                    CoreEvent::MuxOptionsChanged
+                                        | CoreEvent::HelloReceived
+                                        | CoreEvent::Attached { .. }
+                                        | CoreEvent::KeyTablesChanged
+                                ) {
+                                    refresh_terminal_options(&mut model, &core, &escape_time);
+                                }
+                                let popup_lifecycle_changed = matches!(
+                                    &*event,
+                                    CoreEvent::PopupChanged | CoreEvent::Attached { .. }
+                                );
+                                let previous_popup = popup_lifecycle_changed
+                                    .then(|| model.popup.as_ref().map(|popup| popup.pane))
+                                    .flatten();
+                                if let CoreEvent::PaneRemoved { pane } = &*event {
+                                    frames.remove(*pane);
+                                    renderer.forget_pane(*pane);
+                                }
+                                let outcome = handle_core_event(
+                                    &mut model,
+                                    &core,
+                                    &client,
+                                    *event,
+                                    &mut attempt,
+                                    &mut creating_default,
+                                    &mut browser,
+                                )?;
+                                if popup_lifecycle_changed
+                                    && previous_popup
+                                        != model.popup.as_ref().map(|popup| popup.pane)
+                                    && let Some(pane) = previous_popup
+                                {
+                                    frames.remove(pane);
+                                    renderer.forget_pane(pane);
+                                }
+                                match outcome {
+                                    ProtocolOutcome::None => {}
+                                    ProtocolOutcome::Repaint => {
+                                        paint = paint.max(PendingPaint::Repaint);
+                                    }
+                                    ProtocolOutcome::RepaintAll => {
+                                        paint = paint.max(PendingPaint::RepaintAll);
+                                    }
+                                    ProtocolOutcome::QueueControl(output) => {
+                                        renderer.queue_control(output);
+                                        paint = paint.max(PendingPaint::Repaint);
+                                    }
+                                    ProtocolOutcome::Exit(reason) => {
+                                        exit = Some(reason);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        other => {
+                            deferred = Some(other);
+                            break;
+                        }
                     }
-                    model.viewports.insert(pane, frame.viewport);
-                    renderer.note_frame(pane, frame.damage);
+                    handled += 1;
+                    if !*crate::COALESCE || handled >= MAX_COALESCED_EVENTS {
+                        break;
+                    }
+                    next = incoming.try_recv().ok();
+                }
+                if let Some(reason) = exit {
+                    break Ok(reason);
                 }
                 if let Some(sequence) = sync_mouse_modes(&mut model, pixel_mouse) {
                     renderer.queue_control(sequence);
+                    paint = paint.max(if core_seen {
+                        PendingPaint::Repaint
+                    } else {
+                        PendingPaint::Frames
+                    });
                 }
-                renderer
-                    .paint_frames(&model)
-                    .map_err(|error| error.to_string())?;
+                paint_pending(paint, &mut model, &client, &mut browser, &mut renderer)?;
             }
             MainEvent::KittyImages(event_connection) => {
                 if event_connection != connection_id {
@@ -726,6 +837,7 @@ pub(crate) fn run(
                             .map_err(|error| error.to_string())?;
                     }
                     InputOutcome::Resize(size) => {
+                        let unchanged = *crate::COALESCE && size == model.size;
                         model.set_size(size);
                         if size.columns > 0 && size.rows > 0 {
                             client
@@ -734,6 +846,9 @@ pub(crate) fn run(
                                     rows: size.rows,
                                 })
                                 .map_err(|error| error.to_string())?;
+                        }
+                        if unchanged {
+                            continue;
                         }
                         send_resizes_and_sync_browser(
                             &mut model,
@@ -818,89 +933,6 @@ pub(crate) fn run(
                 }
             }
             MainEvent::Terminal(Err(error)) => break Err(error),
-            MainEvent::Core { connection, event } => {
-                if connection != connection_id {
-                    continue;
-                }
-                if let CoreEvent::Attached { .. } = &*event {
-                    {
-                        let core = lock_core(&core);
-                        read_only = core.attached_read_only();
-                        client_flags = (!core.attached_client_flags().is_empty())
-                            .then(|| core.attached_client_flags().to_owned());
-                    }
-                    browser.reset_connection();
-                    renderer.reset_kitty_images();
-                    reconnect_available = true;
-                }
-                if matches!(
-                    &*event,
-                    CoreEvent::MuxOptionsChanged
-                        | CoreEvent::HelloReceived
-                        | CoreEvent::Attached { .. }
-                        | CoreEvent::KeyTablesChanged
-                ) {
-                    refresh_terminal_options(&mut model, &core, &escape_time);
-                }
-                let popup_lifecycle_changed = matches!(
-                    &*event,
-                    CoreEvent::PopupChanged | CoreEvent::Attached { .. }
-                );
-                let previous_popup = popup_lifecycle_changed
-                    .then(|| model.popup.as_ref().map(|popup| popup.pane))
-                    .flatten();
-                if let CoreEvent::PaneRemoved { pane } = &*event {
-                    frames.remove(*pane);
-                    renderer.forget_pane(*pane);
-                }
-                let outcome = handle_core_event(
-                    &mut model,
-                    &core,
-                    &client,
-                    *event,
-                    &mut attempt,
-                    &mut creating_default,
-                    &mut browser,
-                )?;
-                if popup_lifecycle_changed
-                    && previous_popup != model.popup.as_ref().map(|popup| popup.pane)
-                    && let Some(pane) = previous_popup
-                {
-                    frames.remove(pane);
-                    renderer.forget_pane(pane);
-                }
-                match outcome {
-                    ProtocolOutcome::None => {}
-                    ProtocolOutcome::Repaint => renderer
-                        .paint(&model, false)
-                        .map_err(|error| error.to_string())?,
-                    ProtocolOutcome::RepaintAll => {
-                        send_resizes_and_sync_browser(
-                            &mut model,
-                            &client,
-                            &mut browser,
-                            &mut renderer,
-                        )?;
-                        renderer.invalidate();
-                        renderer
-                            .paint(&model, true)
-                            .map_err(|error| error.to_string())?;
-                    }
-                    ProtocolOutcome::QueueControl(output) => {
-                        renderer.queue_control(output);
-                        renderer
-                            .paint(&model, false)
-                            .map_err(|error| error.to_string())?;
-                    }
-                    ProtocolOutcome::Exit(reason) => break Ok(reason),
-                }
-                if let Some(sequence) = sync_mouse_modes(&mut model, pixel_mouse) {
-                    renderer.queue_control(sequence);
-                    renderer
-                        .paint(&model, false)
-                        .map_err(|error| error.to_string())?;
-                }
-            }
             MainEvent::Disconnected { connection, error } => {
                 if connection != connection_id {
                     continue;
@@ -966,6 +998,9 @@ pub(crate) fn run(
                                 rows: size.rows,
                             })
                             .map_err(|error| error.to_string())?;
+                    }
+                    if *crate::COALESCE && size == previous {
+                        continue;
                     }
                     send_resizes_and_sync_browser(
                         &mut model,
@@ -1063,6 +1098,43 @@ fn hangup_parent() {
 
 #[cfg(not(unix))]
 const fn hangup_parent() {}
+
+fn take_frames(frames: &FrameInbox, model: &mut Model, renderer: &mut Renderer) {
+    for (pane, frame) in frames.take() {
+        if !model.accepts_viewport(pane) {
+            model.viewports.remove(&pane);
+            renderer.forget_pane(pane);
+            continue;
+        }
+        model.viewports.insert(pane, frame.viewport);
+        renderer.note_frame(pane, frame.damage);
+    }
+}
+
+fn paint_pending(
+    paint: PendingPaint,
+    model: &mut Model,
+    client: &InteractiveClient,
+    browser: &mut BrowserState,
+    renderer: &mut Renderer,
+) -> Result<(), String> {
+    match paint {
+        PendingPaint::None => Ok(()),
+        PendingPaint::Frames => renderer
+            .paint_frames(model)
+            .map_err(|error| error.to_string()),
+        PendingPaint::Repaint => renderer
+            .paint(model, false)
+            .map_err(|error| error.to_string()),
+        PendingPaint::RepaintAll => {
+            send_resizes_and_sync_browser(model, client, browser, renderer)?;
+            renderer.invalidate();
+            renderer
+                .paint(model, true)
+                .map_err(|error| error.to_string())
+        }
+    }
+}
 
 /// Replace this process with `shell -c command`, matching `client_exec`.
 #[cfg(unix)]
@@ -1588,9 +1660,8 @@ fn handle_core_event(
     browser: &mut BrowserState,
 ) -> Result<ProtocolOutcome, String> {
     match event {
-        // `SnapshotChanged` is queued right behind this and does the repaint;
-        // adopting the snapshot here keeps the new session and the painted
-        // layout from ever disagreeing.
+        // Adopting the snapshot here keeps the new session and the painted
+        // layout from ever disagreeing; the attach repaints everything once.
         CoreEvent::Attached { session } => {
             *attempt = AttachAttempt::Idle;
             model.attached_session = Some(session);
@@ -1621,11 +1692,22 @@ fn handle_core_event(
                     .map_err(|error| error.to_string())?;
             }
             *creating_default = false;
-            Ok(ProtocolOutcome::None)
+            Ok(if *crate::COALESCE {
+                ProtocolOutcome::RepaintAll
+            } else {
+                ProtocolOutcome::None
+            })
         }
         CoreEvent::SnapshotChanged => {
+            let before = model.paint_structure();
             model.update_snapshot(Arc::clone(lock_core(core).snapshot()));
-            Ok(ProtocolOutcome::RepaintAll)
+            Ok(
+                if !*crate::COALESCE || model.paint_structure() != before {
+                    ProtocolOutcome::RepaintAll
+                } else {
+                    ProtocolOutcome::Repaint
+                },
+            )
         }
         CoreEvent::AppearanceChanged => {
             model.appearance = lock_core(core).appearance().cloned().unwrap_or_default();
@@ -2242,6 +2324,47 @@ mod tests {
             focused_window: Some(window),
         }));
         (model, pane)
+    }
+
+    #[test]
+    fn only_a_snapshot_that_moves_the_frame_asks_for_a_full_repaint() {
+        let (mut model, pane) = paned_model();
+        let before = model.paint_structure();
+        let mut renamed = (*model.snapshot).clone();
+        renamed.generation = 2;
+        renamed.sessions[0].windows[0].name = "renamed".to_owned();
+        renamed.sessions[0].windows[0].status_label = "0:renamed*".to_owned();
+        model.update_snapshot(Arc::new(renamed.clone()));
+        assert_eq!(model.paint_structure(), before);
+
+        let mut split = renamed;
+        split.generation = 3;
+        split.sessions[0].windows[0].layout = zz_protocol::LayoutNode::Split {
+            id: zz_protocol::SplitId(1),
+            axis: zz_protocol::Axis::Horizontal,
+            ratio: 0.5,
+            first: Box::new(zz_protocol::LayoutNode::Pane(pane)),
+            second: Box::new(zz_protocol::LayoutNode::Pane(zz_protocol::PaneId(8))),
+        };
+        model.update_snapshot(Arc::new(split));
+        assert_ne!(model.paint_structure(), before);
+    }
+
+    #[test]
+    fn a_drained_run_of_events_owes_the_strongest_paint_once() {
+        let paints = [
+            PendingPaint::Frames,
+            PendingPaint::None,
+            PendingPaint::RepaintAll,
+            PendingPaint::Repaint,
+        ];
+        assert_eq!(
+            paints
+                .into_iter()
+                .fold(PendingPaint::None, PendingPaint::max),
+            PendingPaint::RepaintAll
+        );
+        assert!(PendingPaint::Frames < PendingPaint::Repaint);
     }
 
     #[test]

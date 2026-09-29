@@ -1,7 +1,8 @@
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fmt::Write as _,
     io::{self, Write as _},
+    rc::Rc,
 };
 
 use unicode_width::UnicodeWidthChar as _;
@@ -204,6 +205,12 @@ struct PaintedSidebarRow {
     status: bool,
 }
 
+const PAINT_BEGIN: &[u8] = b"\x1b[?2026h\x1b[?25l";
+const PAINT_END: &[u8] = b"\x1b[?2026l";
+/// How much of the last paint is kept to recognize a paint that only puts the
+/// cursor back where that paint left it.
+const PAINT_TAIL_BYTES: usize = 64;
+
 pub(crate) struct Renderer {
     output: Vec<u8>,
     queued_control: Vec<u8>,
@@ -235,6 +242,7 @@ pub(crate) struct Renderer {
     kitty: KittyBridge,
     writer: TerminalWriter,
     control_replay: Vec<u8>,
+    paint_tail: Vec<u8>,
     terminal_colours: Option<u32>,
     terminal_defaults: TmuxStyle,
 }
@@ -270,6 +278,7 @@ impl Renderer {
             kitty: KittyBridge::default(),
             writer: TerminalWriter::spawn(sink),
             control_replay: Vec::new(),
+            paint_tail: Vec::new(),
             terminal_colours: crate::tty::terminal_colours(),
             terminal_defaults: TmuxStyle::default(),
         }
@@ -287,6 +296,7 @@ impl Renderer {
     }
 
     pub fn invalidate(&mut self) {
+        self.paint_tail.clear();
         self.painted.clear();
         self.headers.clear();
         self.picker_cards.clear();
@@ -374,6 +384,9 @@ impl Renderer {
     }
 
     pub fn paint(&mut self, model: &Model, force: bool) -> io::Result<()> {
+        if force {
+            self.paint_tail.clear();
+        }
         self.note_terminal_colours();
         self.output.clear();
         self.output.extend_from_slice(b"\x1b[?2026h\x1b[?25l");
@@ -516,6 +529,24 @@ impl Renderer {
     /// blocked `tty_puts` loses the same bytes and it is a bug there too.
     fn flush_output(&mut self) -> io::Result<()> {
         let control = std::mem::take(&mut self.control_replay);
+        let body = self
+            .output
+            .strip_prefix(PAINT_BEGIN)
+            .and_then(|body| body.strip_suffix(PAINT_END));
+        if *crate::COALESCE
+            && control.is_empty()
+            && let Some(body) = body
+            && cursor_only(body)
+            && self.paint_tail.ends_with(body)
+        {
+            self.output.clear();
+            return Ok(());
+        }
+        self.paint_tail.clear();
+        if let Some(body) = body {
+            let tail = body.len().saturating_sub(PAINT_TAIL_BYTES);
+            self.paint_tail.extend_from_slice(&body[tail..]);
+        }
         match self.writer.submit(std::mem::take(&mut self.output))? {
             Submission::Queued => Ok(()),
             Submission::Dropped => {
@@ -579,6 +610,7 @@ impl Renderer {
         self.border_chrome = Some(chrome);
         if force {
             let cells = divider_cells(&model.layout.dividers);
+            let mut border = BTreeMap::new();
             for divider in &model.layout.dividers {
                 let highlighted = divider.highlighted;
                 let fallback = if highlighted {
@@ -595,6 +627,13 @@ impl Renderer {
                 let style = divider
                     .style_pane
                     .and_then(|pane| model.pane_border_style(pane));
+                let mut sgr = Vec::new();
+                if let Some(style) = &style {
+                    write_border_sgr(&mut sgr, style, &model.appearance);
+                } else {
+                    write_colored_sgr(&mut sgr, color, model.appearance.background);
+                }
+                let sgr = Rc::new(sgr);
                 let index = divider.style_pane.and_then(|pane| model.pane_index(pane));
                 for row in divider.rect.y..divider.rect.y.saturating_add(divider.rect.height) {
                     for column in divider.rect.x..divider.rect.x.saturating_add(divider.rect.width)
@@ -613,28 +652,11 @@ impl Renderer {
                         let cell_type = cell_type_of(mask);
                         let glyph = border_arrow(model, indicators, column, row)
                             .map_or_else(|| border_glyph(lines, cell_type, index), str::to_owned);
-                        if let Some(style) = &style {
-                            write_border_text(
-                                &mut self.output,
-                                column,
-                                row,
-                                &glyph,
-                                style,
-                                &model.appearance,
-                            );
-                        } else {
-                            write_colored_text(
-                                &mut self.output,
-                                column,
-                                row,
-                                &glyph,
-                                color,
-                                model.appearance.background,
-                            );
-                        }
+                        border.insert((row, column), (Rc::clone(&sgr), glyph));
                     }
                 }
             }
+            write_border_runs(&mut self.output, &border);
         }
 
         let active = model.active_pane();
@@ -709,7 +731,7 @@ impl Renderer {
                         self.selection_style = None;
                         self.selection_trim = None;
                         self.match_styles = [None, None];
-                    } else if force {
+                    } else if force && !*crate::COALESCE {
                         self.paint_card(
                             content,
                             "Terminal",
@@ -1705,17 +1727,27 @@ impl Renderer {
         let geometry = (x, origin, width);
         let force = force || self.status_geometry != Some(geometry);
         for (index, line) in lines.iter().enumerate() {
-            if force || self.status_rows.get(index) != Some(line) {
-                write_styled_text(
-                    &mut self.output,
-                    x,
-                    origin.saturating_add(u16::try_from(index).unwrap_or(u16::MAX)),
-                    line,
-                    model.appearance.foreground,
-                    model.appearance.background,
-                    &model.appearance,
-                );
+            let row = origin.saturating_add(u16::try_from(index).unwrap_or(u16::MAX));
+            let previous = self.status_rows.get(index).filter(|_| !force);
+            if previous == Some(line) {
+                continue;
             }
+            let (column, span) = match previous.filter(|_| *crate::COALESCE) {
+                Some(previous) => match changed_span(previous, line) {
+                    Some(changed) => changed,
+                    None => continue,
+                },
+                None => (0, line.clone()),
+            };
+            write_styled_text(
+                &mut self.output,
+                x.saturating_add(column),
+                row,
+                &span,
+                model.appearance.foreground,
+                model.appearance.background,
+                &model.appearance,
+            );
         }
         self.status_rows = lines;
         self.status_geometry = Some(geometry);
@@ -2871,6 +2903,110 @@ fn fill_cells(fill: char, width: usize) -> String {
     )
 }
 
+/// One column of a styled line as the terminal holds it: a cluster starting
+/// there, or the right half of the wide cluster before it.
+#[derive(PartialEq)]
+enum StatusColumn<'a> {
+    Lead(String, &'a TmuxStyle),
+    Tail,
+}
+
+fn status_columns(line: &StyledLine) -> Vec<StatusColumn<'_>> {
+    let mut columns = Vec::new();
+    for segment in &line.segments {
+        for character in segment.text.chars() {
+            match character.width().unwrap_or(0) {
+                0 => {
+                    if let Some(StatusColumn::Lead(text, _)) = columns
+                        .iter_mut()
+                        .rev()
+                        .find(|column| matches!(column, StatusColumn::Lead(..)))
+                    {
+                        text.push(character);
+                    }
+                }
+                1 => columns.push(StatusColumn::Lead(character.to_string(), &segment.style)),
+                _ => {
+                    columns.push(StatusColumn::Lead(character.to_string(), &segment.style));
+                    columns.push(StatusColumn::Tail);
+                }
+            }
+        }
+    }
+    columns
+}
+
+/// The columns of `next` that differ from `previous`, widened to whole
+/// clusters on both sides, as the column they start at and the text to write
+/// there. `None` when the two lines draw the same cells.
+fn changed_span(previous: &StyledLine, next: &StyledLine) -> Option<(u16, StyledLine)> {
+    let (before, after) = (status_columns(previous), status_columns(next));
+    if before.len() != after.len() {
+        return Some((0, next.clone()));
+    }
+    let mut start = before
+        .iter()
+        .zip(&after)
+        .position(|(old, new)| old != new)?;
+    let mut end = before.len()
+        - 1
+        - before
+            .iter()
+            .rev()
+            .zip(after.iter().rev())
+            .position(|(old, new)| old != new)?;
+    let tail = |columns: &[StatusColumn<'_>], index: usize| {
+        matches!(columns.get(index), Some(StatusColumn::Tail))
+    };
+    loop {
+        let widen_start = start > 0 && (tail(&before, start) || tail(&after, start));
+        let widen_end = tail(&before, end + 1) || tail(&after, end + 1);
+        if widen_start {
+            start -= 1;
+        }
+        if widen_end {
+            end += 1;
+        }
+        if !widen_start && !widen_end {
+            break;
+        }
+    }
+    let mut span = StyledLine::default();
+    for column in &after[start..=end] {
+        if let StatusColumn::Lead(text, style) = column {
+            span.push_segment(text, (*style).clone());
+        }
+    }
+    Some((u16::try_from(start).unwrap_or(u16::MAX), span))
+}
+
+/// Nothing but cursor placement and visibility, which a terminal already
+/// showing the same placement is not changed by.
+fn cursor_only(bytes: &[u8]) -> bool {
+    let mut rest = bytes;
+    while !rest.is_empty() {
+        if let Some(after) = rest
+            .strip_prefix(b"\x1b[?25h")
+            .or_else(|| rest.strip_prefix(b"\x1b[?25l"))
+        {
+            rest = after;
+            continue;
+        }
+        let Some(after) = rest.strip_prefix(b"\x1b[") else {
+            return false;
+        };
+        let digits = after
+            .iter()
+            .take_while(|byte| byte.is_ascii_digit() || **byte == b';')
+            .count();
+        if after.get(digits) != Some(&b'H') {
+            return false;
+        }
+        rest = &after[digits + 1..];
+    }
+    true
+}
+
 fn clear_screen(output: &mut Vec<u8>, background: Color) {
     write!(
         output,
@@ -2935,15 +3071,7 @@ fn grounded(style: &TmuxStyle, base: Option<&TmuxStyle>) -> TmuxStyle {
     grounded
 }
 
-fn write_border_text(
-    output: &mut Vec<u8>,
-    column: u16,
-    row: u16,
-    text: &str,
-    style: &TmuxStyle,
-    appearance: &TerminalAppearance,
-) {
-    write_cursor_position(output, column, row);
+fn write_border_sgr(output: &mut Vec<u8>, style: &TmuxStyle, appearance: &TerminalAppearance) {
     write_tmux_sgr(
         output,
         &grounded(style, None),
@@ -2951,7 +3079,38 @@ fn write_border_text(
         appearance.background,
         appearance,
     );
-    output.extend_from_slice(text.as_bytes());
+}
+
+fn write_colored_sgr(output: &mut Vec<u8>, foreground: Color, background: Color) {
+    write!(
+        output,
+        "\x1b[0;38;2;{};{};{};48;2;{};{};{}m",
+        foreground.r, foreground.g, foreground.b, background.r, background.g, background.b
+    )
+    .expect("writing to Vec cannot fail");
+}
+
+/// Border cells in screen order, as runs: the cursor is placed only where the
+/// next cell does not follow the last one, and the rendition is written only
+/// where it changes. Every rendition starts from a reset, so a run needs no
+/// reset between its cells.
+fn write_border_runs(output: &mut Vec<u8>, cells: &BTreeMap<(u16, u16), (Rc<Vec<u8>>, String)>) {
+    if cells.is_empty() {
+        return;
+    }
+    let mut cursor = None;
+    let mut rendition: Option<&Rc<Vec<u8>>> = None;
+    for (&(row, column), (sgr, glyph)) in cells {
+        if cursor != Some((row, column)) {
+            write_cursor_position(output, column, row);
+        }
+        if rendition.is_none_or(|current| !Rc::ptr_eq(current, sgr) && current != sgr) {
+            output.extend_from_slice(sgr);
+            rendition = Some(sgr);
+        }
+        output.extend_from_slice(glyph.as_bytes());
+        cursor = (text_display_width(glyph) == 1).then(|| (row, column.saturating_add(1)));
+    }
     output.extend_from_slice(b"\x1b[0m");
 }
 
@@ -3691,6 +3850,163 @@ mod tests {
         renderer.paint_terminal(PaneId(1), &viewport, rect, false, None);
 
         assert!(renderer.output.is_empty());
+    }
+
+    fn waiting_pane_model() -> Model {
+        let mut model = block_model(40, 10);
+        let session = zz_protocol::SessionId(1);
+        let window = zz_protocol::WindowId(1);
+        let pane = PaneId(3);
+        model.attached_session = Some(session);
+        model.update_snapshot(Arc::new(zz_protocol::MuxSnapshot {
+            generation: 1,
+            sessions: vec![zz_protocol::SessionSnapshot {
+                id: session,
+                name: "s".to_owned(),
+                active_window: window,
+                windows: vec![zz_protocol::WindowSnapshot {
+                    id: window,
+                    index: 0,
+                    name: "w".to_owned(),
+                    automatic_rename: true,
+                    active_pane: pane,
+                    zoomed_pane: None,
+                    layout: zz_protocol::LayoutNode::Pane(pane),
+                    panes: std::collections::BTreeMap::from([(
+                        pane,
+                        zz_protocol::PaneSnapshot {
+                            id: pane,
+                            title: "shell".to_owned(),
+                            kind: PaneKindSnapshot::Terminal,
+                            synchronized_input: false,
+                            bell: false,
+                            dead: false,
+                            dead_status: None,
+                            border_colour: None,
+                            active_border_colour: None,
+                            border_status_text: String::new(),
+                            mode: None,
+                        },
+                    )]),
+                    layout_dump: String::new(),
+                    visible_layout_dump: String::new(),
+                    status_label: String::new(),
+                    activity: false,
+                    pane_border_status: PaneBorderStatus::Off,
+                    pane_border_lines: PaneBorderLines::Single,
+                    pane_border_indicators: PaneBorderIndicators::Colour,
+                    pane_order: vec![pane],
+                    pane_z_order: Vec::new(),
+                }],
+                viewers: Vec::new(),
+            }],
+            focused_window: Some(window),
+        }));
+        model
+    }
+
+    #[test]
+    fn a_terminal_pane_waiting_for_its_first_frame_paints_nothing() {
+        let model = waiting_pane_model();
+        let mut renderer = Renderer::new();
+        renderer.paint_workspace(&model, true);
+        let output = String::from_utf8(renderer.output).unwrap();
+        assert!(!output.contains("waiting for frame"), "{output:?}");
+        assert!(!output.contains('┌'), "{output:?}");
+    }
+
+    #[test]
+    fn a_paint_that_only_puts_the_cursor_back_writes_nothing() {
+        let model = waiting_pane_model();
+        let (send, receive) = std::sync::mpsc::channel();
+        let mut renderer = Renderer::with_sink(Box::new(move |bytes| {
+            send.send(bytes.to_vec()).unwrap();
+            Ok(())
+        }));
+        let wait = std::time::Duration::from_secs(5);
+        renderer.paint(&model, true).unwrap();
+        let first = receive.recv_timeout(wait).unwrap();
+        renderer.paint(&model, false).unwrap();
+        assert!(
+            receive
+                .recv_timeout(std::time::Duration::from_millis(100))
+                .is_err(),
+            "the cursor is already where {first:?} left it"
+        );
+        renderer.paint(&model, true).unwrap();
+        assert!(
+            receive.recv_timeout(wait).is_ok(),
+            "a forced paint is always written"
+        );
+        renderer.invalidate();
+        renderer.paint(&model, false).unwrap();
+        assert!(
+            receive.recv_timeout(wait).is_ok(),
+            "an invalidated screen repaints"
+        );
+    }
+
+    #[test]
+    fn a_status_row_repaints_only_the_columns_that_changed() {
+        let red = TmuxStyle {
+            fg: Some(TmuxColour::Basic(1)),
+            ..TmuxStyle::default()
+        };
+        let line = |segments: &[(&str, &TmuxStyle)]| {
+            let mut line = StyledLine::default();
+            for (text, style) in segments {
+                line.push_segment(text, (*style).clone());
+            }
+            line
+        };
+        let plain = TmuxStyle::default();
+        let before = line(&[("[po] 0:bash* 1:sleep ", &plain), ("12:00", &red)]);
+        let after = line(&[("[po] 0:bash* 1:bash  ", &plain), ("12:00", &red)]);
+        let (column, span) = changed_span(&before, &after).expect("names differ");
+        assert_eq!(column, 15);
+        assert_eq!(span.plain_text(), "bash ");
+        assert!(changed_span(&before, &before).is_none());
+
+        let clock = line(&[("[po] 0:bash* 1:sleep ", &plain), ("12:01", &red)]);
+        let (column, span) = changed_span(&before, &clock).expect("clock moved");
+        assert_eq!((column, span.plain_text()), (25, "1".to_owned()));
+        assert_eq!(span.segments[0].style, red);
+
+        let wide = line(&[("ab中d", &plain)]);
+        let narrow = line(&[("abxyd", &plain)]);
+        let (column, span) = changed_span(&wide, &narrow).expect("wide cell replaced");
+        assert_eq!((column, span.plain_text()), (2, "xy".to_owned()));
+        let (column, span) = changed_span(&narrow, &wide).expect("wide cell drawn");
+        assert_eq!((column, span.plain_text()), (2, "中".to_owned()));
+    }
+
+    #[test]
+    fn only_cursor_placement_counts_as_cursor_only() {
+        assert!(cursor_only(b"\x1b[1;31H\x1b[?25h"));
+        assert!(cursor_only(b"\x1b[?25l"));
+        assert!(cursor_only(b""));
+        assert!(!cursor_only(b"\x1b[1;31Hx"));
+        assert!(!cursor_only(b"\x1b[0m\x1b[1;1H"));
+        assert!(!cursor_only(b"\x1b[2J"));
+    }
+
+    #[test]
+    fn border_runs_place_the_cursor_once_per_run_and_the_rendition_once_per_change() {
+        let red = Rc::new(b"\x1b[0;31m".to_vec());
+        let green = Rc::new(b"\x1b[0;32m".to_vec());
+        let cells = BTreeMap::from([
+            ((0, 0), (Rc::clone(&red), "─".to_owned())),
+            ((0, 1), (Rc::clone(&red), "─".to_owned())),
+            ((0, 2), (Rc::clone(&red), "┬".to_owned())),
+            ((1, 2), (Rc::new(b"\x1b[0;31m".to_vec()), "│".to_owned())),
+            ((2, 2), (green, "│".to_owned())),
+        ]);
+        let mut output = Vec::new();
+        write_border_runs(&mut output, &cells);
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "\x1b[1;1H\x1b[0;31m──┬\x1b[2;3H│\x1b[3;3H\x1b[0;32m│\x1b[0m"
+        );
     }
 
     fn block_model(columns: u16, rows: u16) -> Model {

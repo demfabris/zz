@@ -26,6 +26,25 @@ use crate::{
     tty::TerminalSize,
 };
 
+/// What a snapshot can change that only a full repaint redraws: pane
+/// geometry, dividers and their highlight, pane kinds and border colours, and
+/// the frame around the panes. A snapshot that leaves it alone is painted by
+/// the diffing repaint.
+#[derive(Debug, PartialEq)]
+pub(crate) struct PaintStructure {
+    layout: ResolvedLayout,
+    panes: Vec<(
+        PaneId,
+        std::mem::Discriminant<PaneKindSnapshot>,
+        Option<TmuxColour>,
+        Option<TmuxColour>,
+    )>,
+    pane_order: Vec<PaneId>,
+    window: Option<zz_protocol::WindowId>,
+    sidebar: bool,
+    status: (u16, bool),
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct HostSwitch {
     pub label: String,
@@ -372,6 +391,33 @@ impl Model {
         }
         self.client_focus.sent = Some(focused);
         Some(InputMessage::ClientFocus { focused })
+    }
+
+    pub fn paint_structure(&self) -> PaintStructure {
+        let window = self.window();
+        PaintStructure {
+            layout: self.layout.clone(),
+            panes: self
+                .layout
+                .panes
+                .iter()
+                .filter_map(|entry| {
+                    let pane = window?.panes.get(&entry.pane)?;
+                    Some((
+                        entry.pane,
+                        std::mem::discriminant(&pane.kind),
+                        pane.border_colour,
+                        pane.active_border_colour,
+                    ))
+                })
+                .collect(),
+            pane_order: window
+                .map(|window| window.pane_order.clone())
+                .unwrap_or_default(),
+            window: window.map(|window| window.id),
+            sidebar: self.sidebar_visible(),
+            status: (self.status_block_rows(), self.status_top()),
+        }
     }
 
     pub fn update_snapshot(&mut self, snapshot: Arc<MuxSnapshot>) {

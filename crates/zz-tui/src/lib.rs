@@ -21,6 +21,7 @@ use std::{
     fmt,
     io::{self, IsTerminal as _, Write as _},
     path::{Path, PathBuf},
+    sync::LazyLock,
 };
 
 use zz_daemon::{
@@ -35,6 +36,12 @@ use zz_protocol::{
 use crate::browser::BrowserFrameProvider;
 
 const MANUAL_RESTART_HINT: &str = "run 'zz kill-server' to restart it (sessions will be lost)";
+
+/// `ZZ_PERF_TUI_COALESCE=0` paints after every event, repaints everything on
+/// every snapshot, draws a card in a pane that has no frame yet, and reads the
+/// terminal options over two connections of their own.
+pub(crate) static COALESCE: LazyLock<bool> =
+    LazyLock::new(|| std::env::var_os("ZZ_PERF_TUI_COALESCE").is_none_or(|value| value != "0"));
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunOptions {
@@ -141,6 +148,9 @@ pub fn run<'a>(request: impl Into<RunRequest<'a>>) -> Result<(), Error> {
         request.local_reconnect,
     )?;
     resolve_attach_target(&initial, options.session.as_deref())?;
+    let terminal_options = COALESCE
+        .then(|| tty::TerminalOptions::from_hello(initial.server_hello()))
+        .flatten();
     if !interactive {
         if options.client_flags.is_some() {
             return request_headless_attach(&initial, options);
@@ -158,6 +168,7 @@ pub fn run<'a>(request: impl Into<RunRequest<'a>>) -> Result<(), Error> {
             read_only: options.read_only,
             client_flags: options.client_flags.clone(),
         },
+        terminal_options,
         resolved.host_label,
         resolved.local_host_label,
         resolved.fleet_hosts,
@@ -198,6 +209,10 @@ fn run_new_session_commands<'a>(
         options.restart_daemon,
         request.local_reconnect,
     )?;
+    let commands = commands.into_iter().collect::<Vec<_>>();
+    let terminal_options = (*COALESCE && commands.len() == 1)
+        .then(|| tty::TerminalOptions::from_hello(initial.server_hello()))
+        .flatten();
     match execute_new_session(&initial, commands)? {
         NewSessionOutcome::Detached => Ok(()),
         NewSessionOutcome::Attached { session, messages } => {
@@ -207,6 +222,7 @@ fn run_new_session_commands<'a>(
                 resolved.endpoint,
                 resolved.local_endpoint,
                 app::InitialAttach::AlreadyAttached { session, messages },
+                terminal_options,
                 resolved.host_label,
                 resolved.local_host_label,
                 resolved.fleet_hosts,

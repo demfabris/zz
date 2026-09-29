@@ -3967,7 +3967,7 @@ impl MuxState {
         point
     }
 
-    pub(crate) fn bump_generation(&mut self) {
+    pub fn bump_generation(&mut self) {
         self.generation = self.generation.saturating_add(1);
     }
 }

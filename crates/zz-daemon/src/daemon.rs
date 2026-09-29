@@ -3335,6 +3335,17 @@ struct Shared {
     #[cfg(unix)]
     tmux_shim: Mutex<Option<TmuxShimGuard>>,
     status_job_needs: crate::status::StatusJobNeeds,
+    timer_tx: crossbeam_channel::Sender<timers::TimerCommand>,
+    timer_rx: Mutex<Option<crossbeam_channel::Receiver<timers::TimerCommand>>>,
+    publish_flush: Mutex<timers::PublishFlush>,
+    hook_worker: Mutex<timers::HookWorker>,
+    status_sampler: Mutex<Option<thread::Thread>>,
+    status_sampler_idle: AtomicBool,
+    snapshot_order: Mutex<()>,
+    #[cfg(all(feature = "agent", unix))]
+    peer_probe: AtomicBool,
+    #[cfg(all(feature = "agent", unix))]
+    peer_registry: Mutex<crate::agent::claude_peers::RegistryCache>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4336,6 +4347,9 @@ impl Shared {
                 .set_default_status_keys(keys)
                 .expect("daemon status-keys default is valid");
         }
+        state
+            .engine
+            .set_automatic_rename_throttle(*timers::RENAME_THROTTLE);
         state.engine.initialize_default_editor(default_editor);
         state.engine.initialize_default_shell(default_shell);
         state.engine.seed_global_environment(environment);
@@ -4365,6 +4379,7 @@ impl Shared {
             crossbeam_channel::unbounded();
         let status = StatusRenderer::default();
         let status_job_needs = status.job_needs();
+        let (timer_tx, timer_rx) = crossbeam_channel::unbounded();
         Self {
             accept_wake: AcceptWake::new(),
             inner: Mutex::new(state),
@@ -4432,6 +4447,17 @@ impl Shared {
             #[cfg(unix)]
             tmux_shim: Mutex::new(None),
             status_job_needs,
+            timer_tx,
+            timer_rx: Mutex::new(Some(timer_rx)),
+            publish_flush: Mutex::new(timers::PublishFlush::default()),
+            hook_worker: Mutex::new(timers::HookWorker::default()),
+            status_sampler: Mutex::new(None),
+            status_sampler_idle: AtomicBool::new(false),
+            snapshot_order: Mutex::new(()),
+            #[cfg(all(feature = "agent", unix))]
+            peer_probe: AtomicBool::new(false),
+            #[cfg(all(feature = "agent", unix))]
+            peer_registry: Mutex::new(crate::agent::claude_peers::RegistryCache::default()),
         }
     }
 
@@ -4468,10 +4494,14 @@ impl Shared {
         mux_config_files: Option<&[PathBuf]>,
         initial_client_working_directory: Option<&Path>,
     ) -> Result<(), DaemonError> {
-        self.start_display_panes_deadline_dispatcher()?;
-        self.start_key_table_deadline_dispatcher()?;
-        self.start_silence_deadline_dispatcher()?;
-        self.start_client_message_deadline_dispatcher()?;
+        log::info!(
+            target: "zz_daemon::perf",
+            "publication knobs: ZZ_PERF_EAGER_PUBLISH={} ZZ_PERF_RENAME_THROTTLE={} ZZ_PERF_PEER_SCAN={}",
+            u8::from(*timers::EAGER_PUBLISH),
+            u8::from(*timers::RENAME_THROTTLE),
+            if *timers::PEER_SCAN_ALWAYS { "always" } else { "changes" },
+        );
+        self.start_timers()?;
         let mut context = ExecutionContext::default();
         *self.mux_config_selection.lock() =
             (load_user_config, mux_config_files.map(<[PathBuf]>::to_vec));
@@ -4503,310 +4533,6 @@ impl Shared {
             inner.search_history = search;
         }
         Ok(())
-    }
-
-    fn start_display_panes_deadline_dispatcher(self: &Arc<Self>) -> Result<(), DaemonError> {
-        let Some(receiver) = self.display_panes_deadline_rx.lock().take() else {
-            return Ok(());
-        };
-        let shared = Arc::downgrade(self);
-        let (ready_tx, ready_rx) = crossbeam_channel::bounded(1);
-        thread::Builder::new()
-            .name("zz-display-panes".to_owned())
-            .spawn(move || {
-                if ready_tx.send(()).is_err() {
-                    return;
-                }
-                let mut deadlines = BTreeMap::<ClientId, DisplayPanesDeadline>::new();
-                loop {
-                    let next = deadlines
-                        .values()
-                        .min_by_key(|deadline| deadline.deadline)
-                        .copied();
-                    let command = if let Some(next) = next {
-                        let now = Instant::now();
-                        if next.deadline <= now {
-                            deadlines.remove(&next.client);
-                            let Some(shared) = shared.upgrade() else {
-                                return;
-                            };
-                            shared.expire_display_panes(next, now);
-                            continue;
-                        }
-                        match receiver.recv_deadline(next.deadline) {
-                            Ok(command) => command,
-                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                                deadlines.remove(&next.client);
-                                let Some(shared) = shared.upgrade() else {
-                                    return;
-                                };
-                                shared.expire_display_panes(next, Instant::now());
-                                continue;
-                            }
-                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
-                        }
-                    } else {
-                        let Ok(command) = receiver.recv() else {
-                            return;
-                        };
-                        command
-                    };
-                    match command {
-                        DisplayPanesDeadlineCommand::Schedule(deadline) => {
-                            let Some(shared) = shared.upgrade() else {
-                                return;
-                            };
-                            if shared
-                                .inner
-                                .lock()
-                                .display_panes
-                                .get(&deadline.client)
-                                .is_some_and(|overlay| {
-                                    overlay.token == deadline.token
-                                        && overlay.deadline == Some(deadline.deadline)
-                                })
-                            {
-                                deadlines.insert(deadline.client, deadline);
-                            }
-                        }
-                        DisplayPanesDeadlineCommand::Cancel { client, token } => {
-                            if deadlines
-                                .get(&client)
-                                .is_some_and(|deadline| deadline.token == token)
-                            {
-                                deadlines.remove(&client);
-                            }
-                        }
-                    }
-                }
-            })
-            .map_err(|error| DaemonError::Thread(error.to_string()))?;
-        ready_rx
-            .recv()
-            .map_err(|error| DaemonError::Thread(error.to_string()))
-    }
-
-    fn start_key_table_deadline_dispatcher(self: &Arc<Self>) -> Result<(), DaemonError> {
-        let Some(receiver) = self.key_table_deadline_rx.lock().take() else {
-            return Ok(());
-        };
-        let shared = Arc::downgrade(self);
-        let (ready_tx, ready_rx) = crossbeam_channel::bounded(1);
-        thread::Builder::new()
-            .name("zz-key-table".to_owned())
-            .spawn(move || {
-                if ready_tx.send(()).is_err() {
-                    return;
-                }
-                let mut deadlines = BTreeMap::<ClientId, Instant>::new();
-                loop {
-                    let next = deadlines
-                        .iter()
-                        .min_by_key(|(_, deadline)| **deadline)
-                        .map(|(client, deadline)| (*client, *deadline));
-                    let command = if let Some((client, deadline)) = next {
-                        if deadline <= Instant::now() {
-                            deadlines.remove(&client);
-                            let Some(shared) = shared.upgrade() else {
-                                return;
-                            };
-                            shared.sync_key_table(client, false);
-                            continue;
-                        }
-                        match receiver.recv_deadline(deadline) {
-                            Ok(command) => command,
-                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                                deadlines.remove(&client);
-                                let Some(shared) = shared.upgrade() else {
-                                    return;
-                                };
-                                shared.sync_key_table(client, false);
-                                continue;
-                            }
-                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
-                        }
-                    } else {
-                        let Ok(command) = receiver.recv() else {
-                            return;
-                        };
-                        command
-                    };
-                    match command {
-                        KeyTableDeadlineCommand::Schedule(client, Some(deadline)) => {
-                            deadlines.insert(client, deadline);
-                        }
-                        KeyTableDeadlineCommand::Schedule(client, None) => {
-                            deadlines.remove(&client);
-                        }
-                    }
-                }
-            })
-            .map_err(|error| DaemonError::Thread(error.to_string()))?;
-        ready_rx
-            .recv()
-            .map_err(|error| DaemonError::Thread(error.to_string()))
-    }
-
-    fn start_silence_deadline_dispatcher(self: &Arc<Self>) -> Result<(), DaemonError> {
-        let Some(receiver) = self.silence_deadline_rx.lock().take() else {
-            return Ok(());
-        };
-        let shared = Arc::downgrade(self);
-        let (ready_tx, ready_rx) = crossbeam_channel::bounded(1);
-        thread::Builder::new()
-            .name("zz-monitor-silence".to_owned())
-            .spawn(move || {
-                if ready_tx.send(()).is_err() {
-                    return;
-                }
-                let mut deadlines = BTreeMap::<WindowId, SilenceDeadline>::new();
-                loop {
-                    let next = deadlines
-                        .values()
-                        .min_by_key(|deadline| deadline.deadline)
-                        .copied();
-                    let command = if let Some(next) = next {
-                        let now = Instant::now();
-                        if next.deadline <= now {
-                            deadlines.remove(&next.window);
-                            let Some(shared) = shared.upgrade() else {
-                                return;
-                            };
-                            shared.expire_window_silence(next, now);
-                            continue;
-                        }
-                        match receiver.recv_deadline(next.deadline) {
-                            Ok(command) => command,
-                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                                deadlines.remove(&next.window);
-                                let Some(shared) = shared.upgrade() else {
-                                    return;
-                                };
-                                shared.expire_window_silence(next, Instant::now());
-                                continue;
-                            }
-                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
-                        }
-                    } else {
-                        let Ok(command) = receiver.recv() else {
-                            return;
-                        };
-                        command
-                    };
-                    match command {
-                        SilenceDeadlineCommand::Schedule(deadline) => {
-                            let Some(shared) = shared.upgrade() else {
-                                return;
-                            };
-                            if shared
-                                .inner
-                                .lock()
-                                .silence_deadlines
-                                .get(&deadline.window)
-                                .is_some_and(|current| *current == deadline)
-                            {
-                                deadlines.insert(deadline.window, deadline);
-                            }
-                        }
-                        SilenceDeadlineCommand::Cancel { window, token } => {
-                            if deadlines
-                                .get(&window)
-                                .is_some_and(|deadline| deadline.token == token)
-                            {
-                                deadlines.remove(&window);
-                            }
-                        }
-                    }
-                }
-            })
-            .map_err(|error| DaemonError::Thread(error.to_string()))?;
-        ready_rx
-            .recv()
-            .map_err(|error| DaemonError::Thread(error.to_string()))
-    }
-
-    /// Owns the pin's per-client `message_timer`. Keyed per client and
-    /// token-validated on both schedule and expiry so a retired message's
-    /// deadline can never retire the message that replaced it.
-    fn start_client_message_deadline_dispatcher(self: &Arc<Self>) -> Result<(), DaemonError> {
-        let Some(receiver) = self.client_message_deadline_rx.lock().take() else {
-            return Ok(());
-        };
-        let shared = Arc::downgrade(self);
-        let (ready_tx, ready_rx) = crossbeam_channel::bounded(1);
-        thread::Builder::new()
-            .name("zz-client-message".to_owned())
-            .spawn(move || {
-                if ready_tx.send(()).is_err() {
-                    return;
-                }
-                let mut deadlines = BTreeMap::<ClientId, ClientMessageDeadline>::new();
-                loop {
-                    let next = deadlines
-                        .values()
-                        .min_by_key(|deadline| deadline.deadline)
-                        .copied();
-                    let command = if let Some(next) = next {
-                        let now = Instant::now();
-                        if next.deadline <= now {
-                            deadlines.remove(&next.client);
-                            let Some(shared) = shared.upgrade() else {
-                                return;
-                            };
-                            shared.expire_client_message(next, now);
-                            continue;
-                        }
-                        match receiver.recv_deadline(next.deadline) {
-                            Ok(command) => command,
-                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                                deadlines.remove(&next.client);
-                                let Some(shared) = shared.upgrade() else {
-                                    return;
-                                };
-                                shared.expire_client_message(next, Instant::now());
-                                continue;
-                            }
-                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
-                        }
-                    } else {
-                        let Ok(command) = receiver.recv() else {
-                            return;
-                        };
-                        command
-                    };
-                    match command {
-                        ClientMessageDeadlineCommand::Schedule(deadline) => {
-                            let Some(shared) = shared.upgrade() else {
-                                return;
-                            };
-                            if shared
-                                .inner
-                                .lock()
-                                .client_messages
-                                .get(&deadline.client)
-                                .is_some_and(|current| {
-                                    current.token == deadline.token
-                                        && current.deadline == Some(deadline.deadline)
-                                })
-                            {
-                                deadlines.insert(deadline.client, deadline);
-                            }
-                        }
-                        ClientMessageDeadlineCommand::Cancel { client, token } => {
-                            if deadlines
-                                .get(&client)
-                                .is_some_and(|deadline| deadline.token == token)
-                            {
-                                deadlines.remove(&client);
-                            }
-                        }
-                    }
-                }
-            })
-            .map_err(|error| DaemonError::Thread(error.to_string()))?;
-        ready_rx
-            .recv()
-            .map_err(|error| DaemonError::Thread(error.to_string()))
     }
 
     fn freeze_response_admissions_and_wait(&self, timeout: Duration) -> bool {
@@ -5159,46 +4885,30 @@ impl Shared {
         let startup_ready = *self.startup_ready.lock();
         let requests = {
             let mut inner = self.inner.lock();
-            inner.engine.set_format_now(unix_timestamp());
-            let targets = inner
-                .subscribers
-                .keys()
-                .copied()
-                .filter(|client| {
-                    clients.is_none_or(|clients| clients.contains(client))
-                        && sessions.is_none_or(|sessions| {
-                            client_attached_session(&inner, *client)
-                                .is_some_and(|session| sessions.contains(&session))
-                        })
-                })
-                .collect::<Vec<_>>();
-            if targets.is_empty() {
+            let targets = status_targets(&inner, sessions, clients);
+            if targets.is_empty() && !*timers::EAGER_PUBLISH {
                 return;
             }
+            inner.engine.set_format_now(unix_timestamp());
             let snapshot = inner.engine.state.snapshot();
             let facts = format_hook_facts(&inner);
-            let option_snapshot = Arc::new(inner.engine.format_option_snapshot());
-            let mut line_needs = BTreeMap::new();
-            targets
-                .into_iter()
-                .map(|client| {
-                    status_request_with(
-                        &inner,
-                        client,
-                        &snapshot,
-                        option_snapshot.clone(),
-                        facts.clone(),
-                        startup_ready,
-                        self.status_job_needs(client),
-                        &mut line_needs,
-                    )
-                })
-                .collect::<Vec<_>>()
+            status_requests(
+                &inner,
+                targets,
+                &snapshot,
+                &facts,
+                startup_ready,
+                &self.status_job_needs,
+            )
         };
+        self.publish_status_requests(&requests);
+    }
+
+    fn publish_status_requests(&self, requests: &[StatusRequest]) {
         if requests.is_empty() {
             return;
         }
-        let changed = self.status.lock().render_changed(&requests);
+        let changed = self.status.lock().render_changed(requests);
         if !changed.is_empty() {
             let mut inner = self.inner.lock();
             for (client, status) in &changed {
@@ -5432,16 +5142,28 @@ impl Shared {
             .name("zz-daemon-status".to_owned())
             .spawn(move || {
                 let mut due: BTreeMap<SessionId, (Instant, Duration)> = BTreeMap::new();
-                let mut next_tick = Instant::now() + CONTROL_SUBSCRIPTION_INTERVAL;
+                let mut next_tick = Some(Instant::now() + CONTROL_SUBSCRIPTION_INTERVAL);
+                let mut probe = timers::PeerProbe::default();
+                let mut probe_at = None;
                 loop {
                     let next_wake = due
                         .values()
                         .map(|(deadline, _)| *deadline)
-                        .fold(next_tick, Instant::min);
-                    thread::park_timeout(next_wake.saturating_duration_since(Instant::now()));
+                        .chain(next_tick)
+                        .chain(probe_at)
+                        .min();
+                    if let Some(next_wake) = next_wake {
+                        thread::park_timeout(next_wake.saturating_duration_since(Instant::now()));
+                    } else if shared.upgrade().is_some_and(|shared| {
+                        shared.status_sampler_idle.store(true, Ordering::SeqCst);
+                        !Self::status_sampler_has_work(&shared.inner.lock())
+                    }) {
+                        thread::park();
+                    }
                     let Some(shared) = shared.upgrade() else {
                         break;
                     };
+                    shared.status_sampler_idle.store(false, Ordering::SeqCst);
                     if shared.stopping.load(Ordering::Acquire) {
                         break;
                     }
@@ -5453,16 +5175,11 @@ impl Shared {
                     if !jobs_changed.is_empty() {
                         shared.refresh_status_filtered(None, Some(&jobs_changed));
                     }
-                    if Instant::now() >= next_tick {
-                        next_tick = Instant::now() + CONTROL_SUBSCRIPTION_INTERVAL;
-                        shared.refresh_control_subscriptions();
-                        shared.run_format_monitors();
-                        #[cfg(all(feature = "agent", unix))]
-                        shared.sync_claude_peer_states();
-                    }
-                    let intervals = {
+                    let (tick_needed, peer_scan, intervals) = {
                         let inner = shared.inner.lock();
-                        inner
+                        let tick_needed = Self::status_tick_needed(&inner);
+                        let peer_scan = Self::peer_scan_armed(&inner);
+                        let intervals = inner
                             .subscribers
                             .keys()
                             .filter_map(|client| client_attached_session(&inner, *client))
@@ -5475,8 +5192,21 @@ impl Shared {
                                         .interval,
                                 )
                             })
-                            .collect::<BTreeMap<_, _>>()
+                            .collect::<BTreeMap<_, _>>();
+                        (tick_needed, peer_scan, intervals)
                     };
+                    if !tick_needed {
+                        next_tick = None;
+                    } else if next_tick.is_none_or(|tick| Instant::now() >= tick) {
+                        next_tick = Some(Instant::now() + CONTROL_SUBSCRIPTION_INTERVAL);
+                        shared.refresh_control_subscriptions();
+                        shared.run_format_monitors();
+                        #[cfg(all(feature = "agent", unix))]
+                        if peer_scan {
+                            shared.sync_claude_peer_states();
+                        }
+                    }
+                    probe_at = shared.run_peer_probe(peer_scan, &mut probe);
                     due.retain(|session, _| intervals.contains_key(session));
                     let now = Instant::now();
                     let sessions = intervals
@@ -5501,11 +5231,15 @@ impl Shared {
                         .collect::<BTreeSet<_>>();
                     if !sessions.is_empty() {
                         shared.refresh_status_for_sessions(Some(&sessions));
+                        if shared.inner.lock().engine.window_labels_follow_the_clock() {
+                            shared.publish_mux_labels();
+                        }
                     }
                 }
             })
             .map_err(|error| DaemonError::Thread(error.to_string()))?;
         self.status.lock().set_job_waker(sampler.thread().clone());
+        *self.status_sampler.lock() = Some(sampler.thread().clone());
         Ok(())
     }
 
@@ -5704,7 +5438,11 @@ impl Shared {
             appearance_provenance: inner.appearance_provenance.clone(),
             mux_options: hello_mux_options,
             status: StatusLine::default(),
-            key_tables: inner.engine.keys.snapshot(),
+            key_tables: if inner.key_tables_generation == inner.engine.keys.generation() {
+                inner.key_tables.clone()
+            } else {
+                inner.engine.keys.snapshot()
+            },
         };
         let option_snapshot = Arc::new(inner.engine.format_option_snapshot());
         let request = status_request(
@@ -5727,11 +5465,14 @@ impl Shared {
     }
 
     fn subscribe(&self, client: ClientId, outbound: Arc<OutboundMailbox>) {
-        let mut inner = self.inner.lock();
-        inner.subscribers.insert(client, outbound);
-        if inner.client_kinds.get(&client) == Some(&ClientKind::Control) {
-            inner.control_outputs.entry(client).or_default();
+        {
+            let mut inner = self.inner.lock();
+            inner.subscribers.insert(client, outbound);
+            if inner.client_kinds.get(&client) == Some(&ClientKind::Control) {
+                inner.control_outputs.entry(client).or_default();
+            }
         }
+        self.nudge_status_sampler();
     }
 
     fn try_deliver_startup_config_causes(
@@ -5832,6 +5573,7 @@ impl Shared {
         }
         outbound.reset_kitty_images();
         outbound.reset_pasted_images();
+        let sent = (snapshot.content_digest(), snapshot.generation);
         if !outbound.enqueue_reliable(&ProtocolMessage::Attached {
             session,
             snapshot,
@@ -5840,7 +5582,11 @@ impl Shared {
         }) {
             return false;
         }
-        self.inner.lock().published_key_tables.remove(&client);
+        {
+            let mut inner = self.inner.lock();
+            inner.published_key_tables.remove(&client);
+            inner.published_snapshots.insert(client, sent);
+        }
         self.sync_key_table(client, false);
         let startup_delivery = match (target, pending.as_ref().and_then(|causes| causes.as_ref())) {
             (Some((kind, pane)), Some(causes)) => {
@@ -5947,6 +5693,7 @@ impl Shared {
             inner.key_engines.remove(&client);
             inner.copy_sessions.remove(&client);
             inner.published_key_tables.remove(&client);
+            inner.published_snapshots.remove(&client);
             inner.scheduled_key_table_deadlines.remove(&client);
             inner.swallowed_keys.remove(&client);
             inner.suppressed_text.remove(&client);
@@ -10812,6 +10559,7 @@ impl Shared {
             source_file_error = Some(error);
         }
         self.publish_key_tables_if_changed();
+        self.nudge_status_sampler();
         pending_hook_events.extend(std::mem::take(&mut self.inner.lock().deferred_event_hooks));
         if std::mem::take(&mut self.inner.lock().deferred_control_refresh) {
             self.refresh_control_output_taps();
@@ -10867,31 +10615,25 @@ impl Shared {
     }
 
     fn publish_key_tables_if_changed(&self) {
-        let (tables, tables_changed, reset_clients) = {
+        let (tables, reset_clients) = {
             let mut inner = self.inner.lock();
-            let existing = inner
-                .engine
-                .keys
-                .table_names()
-                .map(str::to_owned)
-                .collect::<BTreeSet<_>>();
-            let reset_clients = inner
-                .key_engines
-                .iter()
-                .filter_map(|(client, engine)| {
-                    engine
+            let ServerState {
+                engine,
+                key_engines,
+                ..
+            } = &mut *inner;
+            let reset_clients = key_engines
+                .iter_mut()
+                .filter_map(|(client, key_engine)| {
+                    key_engine
                         .active_table()
-                        .is_some_and(|table| !existing.contains(table))
-                        .then_some(*client)
+                        .is_some_and(|table| !engine.keys.has_table(table))
+                        .then(|| {
+                            key_engine.switch_table(None);
+                            *client
+                        })
                 })
                 .collect::<Vec<_>>();
-            for client in &reset_clients {
-                inner
-                    .key_engines
-                    .get_mut(client)
-                    .expect("reset client has a key engine")
-                    .switch_table(None);
-            }
             let mut defaults = inner
                 .attached
                 .iter()
@@ -10904,17 +10646,25 @@ impl Shared {
             for table in defaults {
                 inner.engine.keys.ensure_table(&table);
             }
-            let tables = inner.engine.keys.snapshot();
-            let tables_changed = tables != inner.key_tables;
-            if tables_changed {
-                inner.key_tables.clone_from(&tables);
-            }
-            (tables, tables_changed, reset_clients)
+            let generation = inner.engine.keys.generation();
+            let tables = if generation == inner.key_tables_generation
+                || timers::KeyTablePublishHold::active()
+            {
+                None
+            } else {
+                inner.key_tables_generation = generation;
+                let tables = inner.engine.keys.snapshot();
+                (tables != inner.key_tables).then(|| {
+                    inner.key_tables.clone_from(&tables);
+                    tables
+                })
+            };
+            (tables, reset_clients)
         };
         for client in reset_clients {
             self.sync_key_table(client, false);
         }
-        if tables_changed {
+        if let Some(tables) = tables {
             self.publish(EventPayload::KeyTablesChanged { tables });
         }
     }
@@ -18456,8 +18206,11 @@ impl Shared {
             Ok(())
         })();
         let publish_snapshot = {
-            let inner = self.inner.lock();
+            let mut inner = self.inner.lock();
             let current = inner.engine.state.generation();
+            if resize_split && result.is_ok() {
+                inner.published_snapshots.remove(&client);
+            }
             resize_split && result.is_ok()
                 || current != generation && inner.last_published_mux_generation != current
         };
@@ -23215,6 +22968,7 @@ impl Shared {
         outbound: &OutboundMailbox,
         skip_command_output: Option<u64>,
     ) {
+        let order = self.snapshot_order.lock();
         let (
             snapshot,
             viewports,
@@ -23228,10 +22982,11 @@ impl Shared {
             menu,
             confirm,
         ) = {
-            let inner = self.inner.lock();
+            let mut inner = self.inner.lock();
             let mut snapshot = inner.engine.state.snapshot();
             let presence = snapshot_presence(&inner);
             stamp_snapshot_for_client(&inner, client, &mut snapshot, &presence);
+            note_snapshot_sent(&mut inner, client, &snapshot);
             let command_prompt = command_prompt_state(&inner, client);
             let choose_tree = inner
                 .choose_trees
@@ -23299,6 +23054,7 @@ impl Shared {
             )
         };
         Self::send_event(outbound, EventPayload::Snapshot(snapshot));
+        drop(order);
         Self::send_event(
             outbound,
             EventPayload::CommandPrompt {
@@ -24793,7 +24549,7 @@ impl Shared {
             })
         };
         if let Some(event) = event {
-            self.publish_snapshot();
+            self.request_publish(timers::PublishReason::Tree);
             self.run_event_hooks(vec![event]);
         }
     }
@@ -24871,7 +24627,7 @@ impl Shared {
             .borrow_mut()
             .drain(..)
             .collect::<Vec<_>>();
-        self.publish_snapshot();
+        self.request_publish(timers::PublishReason::Tree);
         self.run_event_hooks(events);
         for launch in jobs {
             launch(self);
@@ -24943,29 +24699,51 @@ impl Shared {
             };
             if inner.engine.pane_runtime_facts(pane) == Some(&runtime) {
                 (
-                    false,
+                    None,
                     Vec::new(),
                     refresh_activity_choosers,
                     alert_window,
                     silence_schedule,
                 )
             } else {
-                let facts = format_hook_facts(&inner);
+                let now = Instant::now();
+                let rename_due = previous.current_command != runtime.current_command
+                    && inner.engine.automatic_rename_due(pane, now);
+                let facts = if rename_due {
+                    format_hook_facts(&inner)
+                } else {
+                    FormatHookFacts::default()
+                };
                 let mut hooks = DaemonFormatHooks::command(&facts);
-                let before = MuxHookSnapshot::capture(&inner.engine);
+                let before = rename_due.then(|| MuxHookSnapshot::capture(&inner.engine));
+                let generation = inner.engine.state.generation();
                 let changed = inner
                     .engine
-                    .set_pane_runtime_facts_with_hooks(pane, runtime, &mut hooks);
-                let after = MuxHookSnapshot::capture(&inner.engine);
+                    .set_pane_runtime_facts_at(pane, runtime, &mut hooks, now);
+                let renamed = inner.engine.state.generation() != generation;
+                let events = match before {
+                    Some(before) if renamed => {
+                        mux_hook_events(&before, &MuxHookSnapshot::capture(&inner.engine), "")
+                    }
+                    _ => Vec::new(),
+                };
+                self.schedule_window_renames(&mut inner);
                 (
-                    changed,
-                    mux_hook_events(&before, &after, ""),
+                    changed.then_some(if renamed {
+                        timers::PublishReason::Tree
+                    } else {
+                        timers::PublishReason::RuntimeFacts
+                    }),
+                    events,
                     refresh_activity_choosers,
                     alert_window,
                     silence_schedule,
                 )
             }
         };
+        if output_activity || changed.is_some() {
+            self.request_peer_probe();
+        }
         if let Some(deadline) = silence_schedule {
             let _ = self
                 .silence_deadline_tx
@@ -24974,8 +24752,8 @@ impl Shared {
         if let Some(window) = alert_window {
             self.raise_window_activity(window, pane);
         }
-        if changed {
-            self.publish_snapshot();
+        if let Some(reason) = changed {
+            self.request_publish(reason);
         } else if refresh_activity_choosers {
             self.refresh_choose_trees();
         }
@@ -25066,8 +24844,8 @@ impl Shared {
     }
 
     fn publish_snapshot_state(&self) {
-        self.publish_mux_snapshots();
-        self.refresh_status();
+        self.note_published();
+        self.publish_mux_snapshots_as(true, true);
         self.refresh_terminal_visibility();
         #[cfg(feature = "agent")]
         self.refresh_agent_visibility();
@@ -25077,7 +24855,17 @@ impl Shared {
     }
 
     fn publish_mux_snapshots(&self) {
-        let (snapshots, appearance_updates) = {
+        self.publish_mux_snapshots_as(true, false);
+    }
+
+    fn publish_mux_labels(&self) {
+        self.publish_mux_snapshots_as(false, false);
+    }
+
+    fn publish_mux_snapshots_as(&self, owns_generation: bool, with_status: bool) {
+        let startup_ready = with_status.then(|| *self.startup_ready.lock());
+        let order = self.snapshot_order.lock();
+        let (snapshots, appearance_updates, requests) = {
             let mut inner = self.inner.lock();
             let ServerState {
                 engine,
@@ -25086,31 +24874,47 @@ impl Shared {
             } = &mut *inner;
             window_latest_clients.retain(|window, _| engine.state.windows.contains_key(window));
             release_chooser_zooms(&mut inner);
-            let snapshot = inner.engine.state.snapshot();
-            inner.last_published_mux_generation = snapshot.generation;
-            let presence = snapshot_presence(&inner);
-            let snapshots = inner
-                .subscribers
-                .iter()
-                .map(|(client, subscriber)| {
-                    let mut client_snapshot = snapshot.clone();
-                    stamp_snapshot_for_client(&inner, *client, &mut client_snapshot, &presence);
-                    (*client, Arc::clone(subscriber), client_snapshot)
-                })
-                .collect::<Vec<_>>();
+            let generation = inner.engine.state.generation();
+            let tracked = owns_generation || inner.last_published_mux_generation == generation;
+            if tracked {
+                inner.last_published_mux_generation = generation;
+            }
             let appearance_updates = if inner.engine.has_window_style_settings() {
                 terminal_appearance_updates(&inner)
             } else {
                 Vec::new()
             };
-            (snapshots, appearance_updates)
+            let targets = startup_ready
+                .map(|_| status_targets(&inner, None, None))
+                .unwrap_or_default();
+            if inner.subscribers.is_empty() && !*timers::EAGER_PUBLISH {
+                (Vec::new(), appearance_updates, Vec::new())
+            } else {
+                if !targets.is_empty() {
+                    inner.engine.set_format_now(unix_timestamp());
+                }
+                let snapshot = inner.engine.state.snapshot();
+                let facts = format_hook_facts(&inner);
+                let snapshots = stamped_snapshot_sends(&mut inner, tracked, &snapshot, &facts);
+                let requests = status_requests(
+                    &inner,
+                    targets,
+                    &snapshot,
+                    &facts,
+                    startup_ready.unwrap_or_default(),
+                    &self.status_job_needs,
+                );
+                (snapshots, appearance_updates, requests)
+            }
         };
         for (terminal, appearance) in appearance_updates {
             terminal.set_appearance(appearance);
         }
-        for (_, subscriber, snapshot) in snapshots {
+        for (subscriber, snapshot) in snapshots {
             Self::send_event(&subscriber, EventPayload::Snapshot(snapshot));
         }
+        drop(order);
+        self.publish_status_requests(&requests);
     }
 
     fn refresh_choose_trees(&self) {
@@ -26968,7 +26772,7 @@ impl Shared {
         }
         self.publish_window_alert_notifications(notifications);
         if let Some(hook) = hook {
-            self.run_event_hooks(vec![hook]);
+            self.run_event_hooks_on_worker(vec![hook]);
         }
     }
 
@@ -28037,6 +27841,7 @@ impl Shared {
         deferred_control_config_warnings: &mut Vec<DeferredControlConfigWarning>,
         queue_execution: &CommandQueueExecution,
     ) -> Result<(), DaemonError> {
+        let _key_table_hold = timers::KeyTablePublishHold::enter();
         // cfg.c adds `current_file` to the state every command parsed out of this
         // file inherits. A nested source replays through its own cloned context,
         // so a child overrides its parent for its own commands only.
@@ -28975,7 +28780,19 @@ impl Shared {
         if self.agent_stopped.load(Ordering::Acquire) {
             return;
         }
-        let mut records = match claude_peers::read_records() {
+        let records = if *timers::PEER_SCAN_ALWAYS {
+            claude_peers::read_records()
+        } else {
+            let mut registry = self.peer_registry.lock();
+            registry.refresh().map(|_| {
+                registry
+                    .records()
+                    .filter(|record| record.zz.is_none())
+                    .cloned()
+                    .collect()
+            })
+        };
+        let mut records = match records {
             Ok(records) => records,
             Err(error) => {
                 log::warn!(target: "zz::agent", "could not read Claude peers: {error}");
@@ -31101,6 +30918,9 @@ struct ServerState {
     control_output_taps: BTreeMap<PaneId, ControlOutputTap>,
     control_outputs: BTreeMap<ClientId, ControlClientOutput>,
     next_pipe_token: u64,
+    key_tables_generation: u64,
+    published_snapshots: BTreeMap<ClientId, (u64, u64)>,
+    scheduled_window_rename: Option<Instant>,
 }
 
 struct WaitItem {
@@ -36571,6 +36391,56 @@ fn client_input_pane(
 #[cfg(test)]
 mod format_universe_tests;
 
+fn status_targets(
+    inner: &ServerState,
+    sessions: Option<&BTreeSet<SessionId>>,
+    clients: Option<&BTreeSet<ClientId>>,
+) -> Vec<ClientId> {
+    inner
+        .subscribers
+        .keys()
+        .copied()
+        .filter(|client| {
+            clients.is_none_or(|clients| clients.contains(client))
+                && sessions.is_none_or(|sessions| {
+                    client_attached_session(inner, *client)
+                        .is_some_and(|session| sessions.contains(&session))
+                })
+        })
+        .collect()
+}
+
+fn status_requests(
+    inner: &ServerState,
+    targets: Vec<ClientId>,
+    snapshot: &MuxSnapshot,
+    facts: &FormatHookFacts,
+    startup_ready: bool,
+    job_needs: &crate::status::StatusJobNeeds,
+) -> Vec<StatusRequest> {
+    if targets.is_empty() {
+        return Vec::new();
+    }
+    let option_snapshot = Arc::new(inner.engine.format_option_snapshot());
+    let job_needs = job_needs.lock();
+    let mut line_needs = BTreeMap::new();
+    targets
+        .into_iter()
+        .map(|client| {
+            status_request_with(
+                inner,
+                client,
+                snapshot,
+                option_snapshot.clone(),
+                facts.clone(),
+                startup_ready,
+                job_needs.get(&client).copied().unwrap_or_default(),
+                &mut line_needs,
+            )
+        })
+        .collect()
+}
+
 fn status_request(
     inner: &ServerState,
     client: ClientId,
@@ -37168,11 +37038,84 @@ fn snapshot_presence(inner: &ServerState) -> SnapshotPresence {
         .collect()
 }
 
+mod timers;
+
+#[cfg(test)]
+mod publish_tests;
+
+fn note_snapshot_sent(inner: &mut ServerState, client: ClientId, snapshot: &MuxSnapshot) {
+    inner
+        .published_snapshots
+        .insert(client, (snapshot.content_digest(), snapshot.generation));
+}
+
+fn stamped_snapshot_sends(
+    inner: &mut ServerState,
+    tracked: bool,
+    snapshot: &MuxSnapshot,
+    facts: &FormatHookFacts,
+) -> Vec<(Arc<OutboundMailbox>, MuxSnapshot)> {
+    let presence = snapshot_presence(inner);
+    let mut sends = Vec::with_capacity(inner.subscribers.len());
+    let mut unchanged = Vec::new();
+    let mut restamp = false;
+    for (client, subscriber) in &inner.subscribers {
+        let mut client_snapshot = snapshot.clone();
+        stamp_snapshot_for_client_with(inner, *client, &mut client_snapshot, &presence, facts);
+        let digest = client_snapshot.content_digest();
+        let sent = inner.published_snapshots.get(client).copied();
+        if !*timers::EAGER_PUBLISH && sent == Some((digest, snapshot.generation)) {
+            unchanged.push(*client);
+            continue;
+        }
+        restamp |= sent.is_some_and(|(sent_digest, sent_generation)| {
+            sent_digest != digest && sent_generation == snapshot.generation
+        });
+        sends.push((*client, Arc::clone(subscriber), client_snapshot, digest));
+    }
+    let generation = if restamp {
+        inner.engine.state.bump_generation();
+        let generation = inner.engine.state.generation();
+        if tracked {
+            inner.last_published_mux_generation = generation;
+        }
+        for client in unchanged {
+            if let Some((_, sent_generation)) = inner.published_snapshots.get_mut(&client) {
+                *sent_generation = generation;
+            }
+        }
+        generation
+    } else {
+        snapshot.generation
+    };
+    sends
+        .into_iter()
+        .map(|(client, subscriber, mut client_snapshot, digest)| {
+            client_snapshot.generation = generation;
+            inner
+                .published_snapshots
+                .insert(client, (digest, generation));
+            (subscriber, client_snapshot)
+        })
+        .collect()
+}
+
 fn stamp_snapshot_for_client(
     inner: &ServerState,
     client: ClientId,
     snapshot: &mut MuxSnapshot,
     presence: &SnapshotPresence,
+) {
+    let facts = format_hook_facts(inner);
+    stamp_snapshot_for_client_with(inner, client, snapshot, presence, &facts);
+}
+
+fn stamp_snapshot_for_client_with(
+    inner: &ServerState,
+    client: ClientId,
+    snapshot: &mut MuxSnapshot,
+    presence: &SnapshotPresence,
+    facts: &FormatHookFacts,
 ) {
     snapshot.focused_window = client_focused_window_for_attachment(inner, client);
     for session in &mut snapshot.sessions {
@@ -37186,33 +37129,32 @@ fn stamp_snapshot_for_client(
             })
             .collect();
     }
-    let facts = format_hook_facts(inner);
     let format_client = client_attached_session(inner, client)
         .map_or(FormatClient::Unattached, FormatClient::Attached);
     let contexts = inner.engine.format_context_snapshot(format_client);
     expand_window_status_labels(
         &inner.engine,
         &inner.config_files,
-        &facts,
+        facts,
         &contexts,
         snapshot,
     );
     stamp_pane_border_colours(
         &inner.engine,
         &inner.config_files,
-        &facts,
+        facts,
         &contexts,
         snapshot,
     );
     stamp_pane_border_chrome(
         &inner.engine,
         &inner.config_files,
-        &facts,
+        facts,
         &contexts,
         snapshot,
     );
     drop(contexts);
-    stamp_pane_modes(inner, &facts, snapshot);
+    stamp_pane_modes(inner, facts, snapshot);
 }
 
 fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut MuxSnapshot) {
@@ -65971,7 +65913,7 @@ set-option -g @alias-mixed-next yes
     }
 
     #[cfg(unix)]
-    fn key_table_fixture(
+    pub(super) fn key_table_fixture(
         name: &str,
     ) -> (
         Arc<Shared>,
@@ -66000,7 +65942,7 @@ set-option -g @alias-mixed-next yes
         (shared, client, context, pane, mailbox)
     }
 
-    fn key_table_events(mailbox: &OutboundMailbox) -> Vec<EventPayload> {
+    pub(super) fn key_table_events(mailbox: &OutboundMailbox) -> Vec<EventPayload> {
         take_reliable_messages(mailbox)
             .into_iter()
             .filter_map(|message| match message {
@@ -66015,7 +65957,7 @@ set-option -g @alias-mixed-next yes
             .collect()
     }
 
-    fn table_active(table: Option<&str>, repeat: bool) -> EventPayload {
+    pub(super) fn table_active(table: Option<&str>, repeat: bool) -> EventPayload {
         EventPayload::KeyTableActive {
             table: table.map(str::to_owned),
             repeat,
@@ -66023,7 +65965,7 @@ set-option -g @alias-mixed-next yes
     }
 
     #[cfg(unix)]
-    fn run_test_command(
+    pub(super) fn run_test_command(
         shared: &Arc<Shared>,
         client: ClientId,
         context: &mut ExecutionContext,
@@ -66222,9 +66164,7 @@ set-option -g @alias-mixed-next yes
     #[test]
     fn key_table_deadlines_clear_the_published_state_without_another_key() {
         let (shared, client, mut context, pane, mailbox) = key_table_fixture("key-table-timer");
-        shared
-            .start_key_table_deadline_dispatcher()
-            .expect("start key table deadlines");
+        shared.start_timers().expect("start key table deadlines");
         run_test_command(
             &shared,
             client,
@@ -70869,7 +70809,6 @@ set-option -g @alias-mixed-next yes
 
         shared.synchronize_pane_runtime(pane, &terminal, &viewport, "zz-changed", false);
         let inner = shared.inner.lock();
-        assert!(inner.engine.state.generation() > generation);
         assert_ne!(inner.engine.pane_runtime_facts(pane), Some(&facts));
     }
 
@@ -83305,7 +83244,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("set test mode-keys");
     }
 
-    fn input_test_key(
+    pub(super) fn input_test_key(
         shared: &Arc<Shared>,
         client: ClientId,
         context: &mut ExecutionContext,
@@ -108359,7 +108298,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .collect()
     }
 
-    fn test_key(key: KeyCode, modifiers: Modifiers, text: Option<&str>) -> KeyInput {
+    pub(super) fn test_key(key: KeyCode, modifiers: Modifiers, text: Option<&str>) -> KeyInput {
         KeyInput {
             action: KeyAction::Press,
             key,

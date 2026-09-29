@@ -254,7 +254,7 @@ becomes `%output`; `PaneOutputState { pane, paused }` and `PaneOutputAged { pane
 `refresh-client -f` flags; and `SubscriptionChanged { name, session, window, window_index, pane, value }`
 (v68) reports a `refresh-client -B` format subscription's value change. v71 appends
 `TimedClientMessageCleared { message_id }` at tag 46 — the daemon's explicit clear for one
-timed message, produced since Wave D3 by the `zz-client-message` deadline dispatcher when a
+timed message, produced by the client-message deadline on the `zz-daemon-timers` thread when a
 `display-message` timer expires and by the input path when a key dismisses the message.
 Surfaces must match the identity before dropping anything, so a retired message's clear can
 never take down the message that replaced it.

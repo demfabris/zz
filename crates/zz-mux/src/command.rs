@@ -15,6 +15,7 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr as _,
     sync::{Arc, LazyLock},
+    time::{Duration, Instant},
 };
 
 use parking_lot::Mutex;
@@ -2145,7 +2146,38 @@ pub struct MuxEngine {
     agent: AgentOptions,
     format_monitors: Vec<FormatMonitorEntry>,
     next_format_monitor_id: u64,
+    automatic_rename_throttle: bool,
+    window_name_times: BTreeMap<WindowId, Instant>,
+    pending_window_renames: BTreeSet<WindowId>,
 }
+
+const NAME_INTERVAL: Duration = Duration::from_millis(500);
+
+const RUNTIME_FACT_MARKERS: [&str; 11] = [
+    "pane_current_command",
+    "pane_current_path",
+    "pane_path",
+    "pane_pid",
+    "pane_tty",
+    "pane_start_path",
+    "pane_dead_signal",
+    "@",
+    "E:",
+    "T:",
+    "O:",
+];
+
+const CLOCK_MARKERS: [&str; 5] = ["#(", "t:", "t/", "E:", "T:"];
+
+fn template_reads_runtime_facts(template: &str) -> bool {
+    template.contains('#')
+        && RUNTIME_FACT_MARKERS
+            .iter()
+            .any(|marker| template.contains(marker))
+}
+
+#[cfg(test)]
+mod runtime_facts_tests;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PaneRuntimeFacts {
@@ -2422,6 +2454,9 @@ impl Default for MuxEngine {
             agent: AgentOptions::default(),
             format_monitors: Vec::new(),
             next_format_monitor_id: 0,
+            automatic_rename_throttle: false,
+            window_name_times: BTreeMap::new(),
+            pending_window_renames: BTreeSet::new(),
         }
     }
 }
@@ -3977,8 +4012,18 @@ impl MuxEngine {
     pub fn set_pane_runtime_facts_with_hooks(
         &mut self,
         pane: PaneId,
+        facts: PaneRuntimeFacts,
+        hooks: &mut impl StatusHooks,
+    ) -> bool {
+        self.set_pane_runtime_facts_at(pane, facts, hooks, Instant::now())
+    }
+
+    pub fn set_pane_runtime_facts_at(
+        &mut self,
+        pane: PaneId,
         mut facts: PaneRuntimeFacts,
         hooks: &mut impl StatusHooks,
+        now: Instant,
     ) -> bool {
         if self.state.pane(pane).is_none() {
             return false;
@@ -3994,11 +4039,206 @@ impl MuxEngine {
             return false;
         }
         self.pane_runtime_facts.insert(pane, facts);
-        self.state.bump_generation();
         if command_changed {
-            self.refresh_automatic_window_name_for_pane(pane, hooks);
+            self.refresh_automatic_window_name_throttled(pane, hooks, now);
         }
         true
+    }
+
+    pub fn set_automatic_rename_throttle(&mut self, enabled: bool) {
+        self.automatic_rename_throttle = enabled;
+        if !enabled {
+            self.pending_window_renames.clear();
+        }
+    }
+
+    fn refresh_automatic_window_name_throttled(
+        &mut self,
+        pane: PaneId,
+        hooks: &mut impl StatusHooks,
+        now: Instant,
+    ) -> bool {
+        if !self.automatic_rename_throttle {
+            return self.refresh_automatic_window_name_for_pane(pane, hooks);
+        }
+        let Some(window) = self.automatic_rename_window(pane) else {
+            return false;
+        };
+        if self.window_name_waits(window, now) {
+            self.pending_window_renames.insert(window);
+            return false;
+        }
+        self.window_name_times.insert(window, now);
+        self.pending_window_renames.remove(&window);
+        self.refresh_automatic_window_name_for_pane(pane, hooks)
+    }
+
+    fn automatic_rename_window(&self, pane: PaneId) -> Option<WindowId> {
+        let window = self.state.window_for_pane(pane)?;
+        (self.state.windows[&window].active_pane == pane
+            && self
+                .state
+                .window_automatic_rename(window)
+                .unwrap_or_default())
+        .then_some(window)
+    }
+
+    fn window_name_waits(&self, window: WindowId, now: Instant) -> bool {
+        self.window_name_times
+            .get(&window)
+            .is_some_and(|last| now.saturating_duration_since(*last) < NAME_INTERVAL)
+    }
+
+    #[must_use]
+    pub fn automatic_rename_due(&self, pane: PaneId, now: Instant) -> bool {
+        self.automatic_rename_window(pane).is_some_and(|window| {
+            !self.automatic_rename_throttle || !self.window_name_waits(window, now)
+        })
+    }
+
+    #[must_use]
+    pub fn next_window_rename_deadline(&self) -> Option<Instant> {
+        self.pending_window_renames
+            .iter()
+            .filter_map(|window| self.window_name_times.get(window))
+            .map(|last| *last + NAME_INTERVAL)
+            .min()
+    }
+
+    pub fn apply_due_window_renames(&mut self, now: Instant, hooks: &mut impl StatusHooks) -> bool {
+        self.window_name_times
+            .retain(|window, _| self.state.windows.contains_key(window));
+        let due = self
+            .pending_window_renames
+            .iter()
+            .copied()
+            .filter(|window| {
+                self.window_name_times
+                    .get(window)
+                    .is_none_or(|last| now.saturating_duration_since(*last) >= NAME_INTERVAL)
+            })
+            .collect::<Vec<_>>();
+        let mut renamed = false;
+        for window in due {
+            self.pending_window_renames.remove(&window);
+            let Some(pane) = self
+                .state
+                .windows
+                .get(&window)
+                .map(|state| state.active_pane)
+            else {
+                continue;
+            };
+            self.window_name_times.insert(window, now);
+            renamed |= self.refresh_automatic_window_name_for_pane(pane, hooks);
+        }
+        renamed
+    }
+
+    #[must_use]
+    pub fn has_format_monitors(&self) -> bool {
+        !self.format_monitors.is_empty()
+    }
+
+    #[must_use]
+    pub fn runtime_facts_reach_presentation(&self) -> bool {
+        self.presentation_templates(true)
+            .into_iter()
+            .any(template_reads_runtime_facts)
+    }
+
+    #[must_use]
+    pub fn window_labels_follow_the_clock(&self) -> bool {
+        self.presentation_templates(false)
+            .into_iter()
+            .any(|template| {
+                template.contains('#')
+                    && CLOCK_MARKERS.iter().any(|marker| template.contains(marker))
+                    || template.contains('%')
+            })
+    }
+
+    fn presentation_templates(&self, status: bool) -> Vec<&str> {
+        const LABEL_SCALARS: [&str; 5] = [
+            "pane-border-format",
+            "pane-border-style",
+            "pane-active-border-style",
+            "window-pane-status-format",
+            "window-pane-current-status-format",
+        ];
+        const STATUS_SCALARS: [&str; 3] =
+            ["window-style", "window-active-style", "set-titles-string"];
+        let names = || {
+            LABEL_SCALARS
+                .iter()
+                .chain(status.then_some(&STATUS_SCALARS).into_iter().flatten())
+        };
+        let window_status = &self.window_status;
+        let mut templates = vec![
+            window_status.format.as_str(),
+            window_status.current_format.as_str(),
+            window_status.separator.as_str(),
+            window_status.style.as_str(),
+            window_status.current_style.as_str(),
+            window_status.last_style.as_str(),
+            window_status.bell_style.as_str(),
+            window_status.activity_style.as_str(),
+        ];
+        templates.extend(
+            self.window_status_options
+                .values()
+                .flat_map(BTreeMap::values)
+                .map(String::as_str),
+        );
+        templates.extend(
+            names().filter_map(|name| tmux_stored_scalar(name).map(|metadata| metadata.default)),
+        );
+        let scalar_tables = std::iter::once(&self.stored_scalars.global_session)
+            .chain(self.stored_scalars.sessions.values())
+            .chain(std::iter::once(&self.stored_scalars.global_window))
+            .chain(self.stored_scalars.windows.values())
+            .chain(self.stored_scalars.panes.values());
+        for table in scalar_tables {
+            templates.extend(
+                names()
+                    .filter_map(|name| table.get(name))
+                    .map(String::as_str),
+            );
+        }
+        if !status {
+            return templates;
+        }
+        let formats = &self.status;
+        templates.extend([
+            formats.left.as_str(),
+            formats.right.as_str(),
+            formats.style.as_str(),
+            formats.background.as_str(),
+            formats.foreground.as_str(),
+            formats.left_style.as_str(),
+            formats.right_style.as_str(),
+        ]);
+        templates.extend(
+            self.session_status_options
+                .values()
+                .flat_map(BTreeMap::values)
+                .map(String::as_str),
+        );
+        if !self.explicit_status_options.is_empty()
+            || !self.session_explicit_status_options.is_empty()
+        {
+            let default = default_array("status-format");
+            for table in std::iter::once(&self.stored_arrays.global_session)
+                .chain(self.stored_arrays.sessions.values())
+            {
+                if let Some(array) = table.get("status-format")
+                    && *array != default
+                {
+                    templates.extend(array.values().map(String::as_str));
+                }
+            }
+        }
+        templates
     }
 
     pub fn mark_pane_dead(

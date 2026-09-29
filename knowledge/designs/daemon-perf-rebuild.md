@@ -653,6 +653,87 @@ pane_current_command, hooks), `compat/status-row.sh`, `compat/tui-indicators.sh`
 Expected: key tables 11-21% of every command and 59% of config replay; status/snapshots with no
 subscriber 52-53% with 10 panes printing; config 272 -> ~70 ms alone; flip CPU 24% -> 6-8%.
 
+As built (branch `perf/publish`), where it departs from the scope above:
+
+- Wire names are resolved on a binding's first snapshot and kept with the binding (`OnceLock`),
+  not at bind time, so client-side tables that never snapshot (which-key, chrome keymaps) pay
+  nothing. Config replay holds key-table publication on its thread
+  (`KeyTablePublishHold` in `replay_config_file_in_queue`), so a file with 300 `bind-key` lines
+  snapshots and publishes once, at the end of the outer command. The hello reuses the last
+  published snapshot while the generation matches.
+- The per-client check covers every Snapshot send, not only runtime-fact ones: the stamped
+  snapshot's postcard digest plus its generation, recorded by `publish_mux_snapshots`,
+  `send_attached` and `send_resync_inner`. A send whose content changed under an unchanged
+  generation bumps the tree generation first, so the GUI's `AppRevision` still sees a new one,
+  and moves the records of clients whose content did not change to that generation too. A
+  split drag clears the dragging client's record, because the GUI drops its local layout
+  prediction only on a fresh Snapshot. `publish_mux_snapshots` and `send_resync_inner` record and
+  enqueue under one `snapshot_order` lock, so two publishers cannot leave a client holding an older
+  Snapshot than its record says. A full publish and a runtime-fact flush build one tree snapshot
+  and one set of format hook facts under one lock, shared by every client's stamped snapshot and
+  every status request; before, each client's stamp and the status refresh built their own. A
+  timer rename still builds facts once for the rename itself, because the publish that follows
+  runs after the lock is released.
+- Background publishers (a runtime-fact flush, the clock-label tick) go through
+  `publish_mux_labels`, which never claims `last_published_mux_generation` for a tree change it
+  did not publish. A command whose mutation lands before such a flush still runs its own
+  `publish_snapshot` at the end, with the visibility, session-cleanup and chooser refreshes that
+  only the full publish does; the Snapshot itself is not sent twice.
+- Pane events publish with a reason. A tree change (rename, title) runs `publish_snapshot`; a
+  runtime-fact-only change runs the stamped snapshot and status refresh only when
+  `MuxEngine::runtime_facts_reach_presentation` finds a template that reads runtime facts
+  (status, window-status, border, window-style and set-titles options; `@`, `E:`, `T:`, `O:` count
+  as reads), and refreshes open choose-trees. There is no scan cache: the scan borrows the option
+  tables and costs less than one status request. The status-interval tick re-stamps only when a
+  window label or border template follows the clock (`window_labels_follow_the_clock`: `%`,
+  `#(`, `t:`, `E:`, `T:`). A missed template degrades to tmux timing, the next tick or tree change.
+- The rename throttle covers renames driven by pane runtime facts only. Command-path renames
+  (select-pane, new-window, kill-pane, `set automatic-rename`) stay immediate, as the compat corpus
+  expects. It is an engine flag (`set_automatic_rename_throttle`) the daemon turns on, so zz-mux
+  unit tests keep immediate renames. Hook facts are built only when a rename is due; the daemon's
+  "due" check and the engine's rename read the same instant (`set_pane_runtime_facts_at`), so a
+  rename on the 500 ms boundary cannot run with empty hook facts. No separate runtime-facts counter
+  exists: nothing read it. `compat/rename-timing.sh` compares the window-renamed hook rate and the
+  settled name against the pin.
+- The timer thread selects over the four unchanged deadline channels plus one `TimerCommand`
+  channel (Rename, PublishFlush). Silence and rename hook events run inline when no hook has
+  commands, else on a `zz-daemon-hooks` thread spawned on demand that exits when its queue is
+  empty, so FIFO order holds and an idle daemon has no extra thread. Each expiry runs under
+  `catch_unwind`, and a full publish clears a pending flush, so one bad handler cannot stop the
+  other timers or leave publishing stuck behind a flush that never runs.
+- The 1 s status tick runs only while a control client has subscriptions, a `set-hook -B` monitor
+  exists, or a pane holds a Claude peer state. `status-interval` refreshes keep their own
+  per-session deadlines. With none of these the sampler parks with no timeout; `subscribe`, the end
+  of every command and pane output wake it when there is work.
+- The peer scan is armed from the registry side. Pane output and runtime-fact changes ask for a
+  probe (one atomic flag, one unpark per probe), and the sampler runs at most one
+  `sync_claude_peer_states` a second while they continue and no state is recorded, plus one more
+  a second after they stop, so a record the agent writes just after its last output is found. A pane whose root process is the agent
+  (`split-window claude`, `exec claude`, `sh -c 'claude; ...'`) is found on its first output, the
+  same as a foreground job; once a state is recorded the 1 Hz scan runs until it clears. There is
+  no per-event `tcgetpgrp`. `RegistryCache` in claude_peers.rs re-reads a record only when its
+  (mtime, size, inode) changes, or when it was read within 2 s of its mtime (a coarse clock can
+  hide a same-length rewrite, as git's racy-clean check), and re-lists the directory the same way.
+
+Measured at `--quick` on a loaded host (load 7-22 on 16 CPUs). Before is the W0 quick JSON
+(`baseline-quick-macbook-17e17115.json`), which a fresh 157ac6a3 build reproduces: fixed service
+threads 9 -> 6 (main, async-io, signals, accept, timers, status); `mem.threads.p1` 13 -> 10;
+`cli.instr.display.p1` 10.8 -> 7.4 Minstr, `.p20` 29.1 -> 25.8; `chain5.p1` 20.4 -> 9.3, `.p20`
+43.8 -> 32.8; `config.instr.source_1000` 3640 -> 749 Minstr (48 ms CPU, was 228);
+`chatty.instr_per_s.flip` 3206 -> 1584 Minstr/s; `chatty.instr_per_s.hidden` 7295 -> 1914;
+`chatty.tty_kibps.hidden` 235 -> 8.7 KiB/s; `idle.wakeups_per_s.p20` 1.2 -> 0.2;
+`attach.instr.p1` 123 -> 92. The 4-pane 300-line TUI workload stays under 12 Snapshots and 10
+StatusChanged per 3 s (`a_busy_tiled_window_sends_few_snapshots_and_status_lines`). After the
+second review pass (one snapshot and one facts build per publish) the same gate at load 22-30
+reads `chatty.instr_per_s.flip` 1548, `.hidden` 1868, `attach.instr.p1` 87.5 and `.p4` 93.6,
+`cli.instr.display.p1` 7.33, `config.instr.source_1000` 748, with 0 regressed and 0 drifted rows.
+`chatty.cpu_pct.flip` reads 13-18% at load 7-22 and the 8% gate is not met by this lane alone.
+A symbolized flip profile after the review fixes puts this lane's path (`synchronize_pane_runtime`
+bookkeeping, `request_publish`, the peer probe) at about 3 of ~700 busy samples; the rest is
+`terminal_current_command` / `terminal_working_directory` through sysinfo and `proc_pidinfo`
+(W1-FOOTPRINT, ~290) and `publish_active_views` building frames with no view (W1-PANE, ~380).
+The gate is met when those two lanes land, and has to be re-measured then.
+
 ## W1-FORMAT: lazy universe, option index (effort M)
 
 Scope:
@@ -1301,9 +1382,9 @@ deletes most wave-1 fallback paths anyway).
 | `ZZ_PERF_EAGER_FRAMES=1` | PANE | frames for every attached view plus the no-view fallback |
 | `ZZ_PERF_NO_COMPRESS=1` | PANE | no idle history compression |
 | `ZZ_PERF_ECHO_FASTPATH=0` | PANE | always wait `CONTENT_PUBLISH_STALENESS` |
-| `ZZ_PERF_EAGER_PUBLISH=1` | PUBLISH | runtime-fact and title changes publish synchronously; no subscriber early returns |
+| `ZZ_PERF_EAGER_PUBLISH=1` | PUBLISH | runtime-fact and title changes publish synchronously; no subscriber early returns; every Snapshot is sent even when a client already has it |
 | `ZZ_PERF_RENAME_THROTTLE=0` | PUBLISH | no 500 ms automatic-rename throttle |
-| `ZZ_PERF_PEER_SCAN=always` | PUBLISH | 1 Hz Claude peer scan as today |
+| `ZZ_PERF_PEER_SCAN=always` | PUBLISH | 1 Hz Claude peer scan as today, reading every record each tick; the status sampler ticks with no client |
 | `ZZ_PERF_EAGER_UNIVERSE=1` | FORMAT | full universe per expansion (also the differential oracle) |
 | `ZZ_PERF_ATTACH_DEDUP=0` | ATTACH | resync and Full enqueue as today |
 | `ZZ_PERF_READONLY_SKIP=0` | HOOKS | read-only commands take the before/after captures |

@@ -2,6 +2,10 @@ use std::{
     collections::BTreeMap,
     fmt::{self, Write as _},
     ops::Deref,
+    sync::{
+        OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -36,20 +40,79 @@ impl Binding {
     }
 }
 
+static NEXT_KEY_TABLES_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+fn next_key_tables_generation() -> u64 {
+    NEXT_KEY_TABLES_GENERATION.fetch_add(1, Ordering::Relaxed)
+}
+
+#[derive(Clone, Debug)]
+struct StoredBinding {
+    binding: Binding,
+    wire_names: OnceLock<Box<[Option<&'static str>]>>,
+}
+
+impl StoredBinding {
+    fn new(binding: Binding) -> Self {
+        Self {
+            binding,
+            wire_names: OnceLock::new(),
+        }
+    }
+
+    fn wire_names(&self) -> &[Option<&'static str>] {
+        self.wire_names.get_or_init(|| {
+            self.binding
+                .commands
+                .iter()
+                .map(
+                    |command| match crate::catalog::resolve_command(&command.name) {
+                        crate::catalog::CommandResolution::Canonical(name)
+                        | crate::catalog::CommandResolution::Unimplemented(name) => {
+                            (name != command.name).then_some(name)
+                        }
+                        crate::catalog::CommandResolution::Ambiguous(_)
+                        | crate::catalog::CommandResolution::Unknown => None,
+                    },
+                )
+                .collect()
+        })
+    }
+
+    fn snapshot(&self, key: &str) -> KeyBindingSnapshot {
+        KeyBindingSnapshot {
+            key: key.to_owned(),
+            commands: self
+                .binding
+                .commands
+                .iter()
+                .zip(self.wire_names())
+                .map(|(command, name)| {
+                    let mut command = command.clone();
+                    if let Some(name) = name {
+                        (*name).clone_into(&mut command.name);
+                    }
+                    command.source = None;
+                    command
+                })
+                .collect(),
+            repeat: self.binding.repeat,
+            note: self.binding.note.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct KeyTables {
     prefix: String,
     prefix2: Option<String>,
-    tables: BTreeMap<String, BTreeMap<String, Binding>>,
+    tables: BTreeMap<String, BTreeMap<String, StoredBinding>>,
+    generation: u64,
 }
 
 impl Default for KeyTables {
     fn default() -> Self {
-        let mut tables = Self {
-            prefix: "C-b".to_owned(),
-            prefix2: None,
-            tables: BTreeMap::new(),
-        };
+        let mut tables = Self::empty();
         for (key, command) in [
             ("c", "new-window"),
             ("d", "detach-client"),
@@ -1251,6 +1314,9 @@ fn pane_menu_command() -> CommandInvocation {
 /// neither tracks the mouse itself nor holds a mode of its own.
 const PANE_MENU_BLOCK: &str = "{ display-menu -T \"#[align=centre]#{pane_index} (#{pane_id})\" -t = -x M -y M \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Top,}\" < { send-keys -X history-top } \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Bottom,}\" > { send-keys -X history-bottom } '' \"#{?#{&&:#{buffer_size},#{!:#{pane_in_mode}}},Paste #[underscore]#{=/9/...:buffer_sample},}\" p { paste-buffer } '' \"#{?mouse_word,Search For #[underscore]#{=/9/...:mouse_word},}\" C-r { if-shell -F \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}\" \"copy-mode -t=\" ; send-keys -X -t = search-backward -- \"#{q:mouse_word}\" } \"#{?mouse_word,Type #[underscore]#{=/9/...:mouse_word},}\" C-y { copy-mode -q ; send-keys -l \"#{q:mouse_word}\" } \"#{?mouse_word,Copy #[underscore]#{=/9/...:mouse_word},}\" c { copy-mode -q ; set-buffer \"#{q:mouse_word}\" } \"#{?mouse_line,Copy Line,}\" l { copy-mode -q ; set-buffer \"#{q:mouse_line}\" } '' \"#{?mouse_hyperlink,Type #[underscore]#{=/9/...:mouse_hyperlink},}\" C-h { copy-mode -q ; send-keys -l \"#{q:mouse_hyperlink}\" } \"#{?mouse_hyperlink,Copy #[underscore]#{=/9/...:mouse_hyperlink},}\" h { copy-mode -q ; set-buffer \"#{q:mouse_hyperlink}\" } '' \"#{?#{#{pane_floating_flag}},Move,}\" '' { display-menu -T \"#[align=centre]Move\" -x L -y L Centre c { move-pane -P centre } '' \"Top Left\" 1 { move-pane -P top-left } \"Top Right\" 2 { move-pane -P top-right } \"Bottom Left\" 3 { move-pane -P bottom-left } \"Bottom Right\" 4 { move-pane -P bottom-right } '' Top t { move-pane -P top-centre } Bottom b { move-pane -P bottom-centre } Left l { move-pane -P centre-left } Right r { move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Move & Resize,}\" '' { display-menu -T \"#[align=centre]Move & Resize\" -x L -y L Fill 0 { resize-pane -x \"100%\" -y \"100%\" ; move-pane -P top-left } '' \"Top Left\" 1 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-left } \"Top Right\" 2 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-right } \"Bottom Left\" 3 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-left } \"Bottom Right\" 4 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-right } '' Top t { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P top-centre } Bottom b { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P bottom-centre } Left l { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-left } Right r { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Tile,}\" t { join-pane } \"#{?#{!:#{pane_floating_flag}},Float,}\" f { break-pane -W } \"#{?#{!:#{pane_floating_flag}},Horizontal Split,}\" h { split-window -h } \"#{?#{!:#{pane_floating_flag}},Vertical Split,}\" v { split-window -v } '' \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Up,}\" u { swap-pane -U } \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Down,}\" d { swap-pane -D } \"#{?pane_marked_set,,-}Swap Marked\" s { swap-pane } '' Kill X { kill-pane } Respawn R { respawn-pane -k } \"#{?pane_marked,Unmark,Mark}\" m { select-pane -m } \"#{?#{>:#{window_panes},1},,-}#{?window_zoomed_flag,Unzoom,Zoom}\" z { resize-pane -Z } }";
 
+#[cfg(test)]
+mod generation_tests;
+
 impl KeyTables {
     /// Tables with no bindings at all, for key surfaces that seed their own
     /// defaults (client-local chrome tables) instead of the tmux set.
@@ -1260,7 +1326,17 @@ impl KeyTables {
             prefix: "C-b".to_owned(),
             prefix2: None,
             tables: BTreeMap::new(),
+            generation: next_key_tables_generation(),
         }
+    }
+
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    fn touch(&mut self) {
+        self.generation = next_key_tables_generation();
     }
 
     /// The pin's stock prompted copy-mode bindings. All of them are
@@ -1370,9 +1446,13 @@ impl KeyTables {
     /// `send-prefix -2` entry, so unlike [`Self::set_prefix`] this never
     /// touches the tables.
     pub fn set_prefix2(&mut self, prefix2: Option<&str>) {
-        self.prefix2 = prefix2
+        let prefix2 = prefix2
             .filter(|key| !key.eq_ignore_ascii_case("none"))
             .map(canonical_key);
+        if prefix2 != self.prefix2 {
+            self.prefix2 = prefix2;
+            self.touch();
+        }
     }
 
     /// Whether a canonical key arms the prefix table: the prefix or, when
@@ -1390,6 +1470,7 @@ impl KeyTables {
         if previous == self.prefix {
             return;
         }
+        self.touch();
         if self
             .get("prefix", &previous)
             .is_some_and(Binding::is_send_prefix)
@@ -1406,7 +1487,8 @@ impl KeyTables {
         self.tables
             .entry(table.to_owned())
             .or_default()
-            .insert(canonical_key(key), binding);
+            .insert(canonical_key(key), StoredBinding::new(binding));
+        self.touch();
     }
 
     pub fn update_binding_metadata(
@@ -1416,17 +1498,27 @@ impl KeyTables {
         note: Option<String>,
         repeat: bool,
     ) {
-        let binding = self
-            .tables
-            .entry(table.to_owned())
-            .or_default()
-            .get_mut(&canonical_key(key));
-        if let Some(binding) = binding {
-            if let Some(note) = note {
-                binding.note = Some(note);
-            }
-            binding.repeat |= repeat;
+        if !self.tables.contains_key(table) {
+            self.tables.insert(table.to_owned(), BTreeMap::new());
+            self.touch();
         }
+        let Some(stored) = self
+            .tables
+            .get_mut(table)
+            .and_then(|bindings| bindings.get_mut(&canonical_key(key)))
+        else {
+            return;
+        };
+        let binding = &mut stored.binding;
+        let note = note.filter(|note| binding.note.as_ref() != Some(note));
+        if note.is_none() && (binding.repeat || !repeat) {
+            return;
+        }
+        if let Some(note) = note {
+            binding.note = Some(note);
+        }
+        binding.repeat |= repeat;
+        self.touch();
     }
 
     pub fn unbind(&mut self, table: &str, key: &str) -> bool {
@@ -1438,15 +1530,30 @@ impl KeyTables {
         if removed && self.tables.get(table).is_some_and(BTreeMap::is_empty) {
             self.tables.remove(table);
         }
+        if removed {
+            self.touch();
+        }
         removed
     }
 
     pub fn remove_table(&mut self, table: &str) -> bool {
-        self.tables.remove(table).is_some()
+        let removed = self.tables.remove(table).is_some();
+        if removed {
+            self.touch();
+        }
+        removed
     }
 
     pub fn ensure_table(&mut self, table: &str) {
-        self.tables.entry(table.to_owned()).or_default();
+        if !self.tables.contains_key(table) {
+            self.tables.insert(table.to_owned(), BTreeMap::new());
+            self.touch();
+        }
+    }
+
+    #[must_use]
+    pub fn has_table(&self, table: &str) -> bool {
+        self.tables.contains_key(table)
     }
 
     #[must_use]
@@ -1454,6 +1561,7 @@ impl KeyTables {
         self.tables
             .get(table)
             .and_then(|bindings| bindings.get(&canonical_key(key)))
+            .map(|stored| &stored.binding)
     }
 
     pub fn list(&self, table: Option<&str>) -> impl Iterator<Item = (&str, &str, &Binding)> {
@@ -1461,7 +1569,7 @@ impl KeyTables {
             bindings
                 .iter()
                 .filter(move |_| table.is_none_or(|wanted| wanted == name))
-                .map(move |(key, binding)| (name.as_str(), key.as_str(), binding))
+                .map(move |(key, stored)| (name.as_str(), key.as_str(), &stored.binding))
         })
     }
 
@@ -1496,22 +1604,7 @@ impl KeyTables {
                 name: name.clone(),
                 bindings: bindings
                     .iter()
-                    .map(|(key, binding)| KeyBindingSnapshot {
-                        key: key.clone(),
-                        commands: binding
-                            .commands
-                            .iter()
-                            .map(|command| {
-                                let mut command = command.clone();
-                                command.name =
-                                    crate::catalog::canonical_command(&command.name).to_owned();
-                                command.source = None;
-                                command
-                            })
-                            .collect(),
-                        repeat: binding.repeat,
-                        note: binding.note.clone(),
-                    })
+                    .map(|(key, stored)| stored.snapshot(key))
                     .collect(),
             })
             .collect()
@@ -4050,7 +4143,7 @@ mod tests {
         for table in ["copy-mode", "copy-mode-vi"] {
             let bindings = tables.tables.get(table).expect("stock copy table");
             assert!(!bindings.is_empty());
-            assert!(bindings.values().all(|binding| !binding.repeat));
+            assert!(bindings.values().all(|stored| !stored.binding.repeat));
         }
         assert!(tables.get("prefix", "Left").expect("prefix repeat").repeat);
         assert!(

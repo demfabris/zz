@@ -9797,8 +9797,11 @@ impl Shared {
                 self.delivered_wrap_search_commands.lock().push(enabled);
             }
         }
-        for terminal in copy_mode_terminals {
-            terminal.settle();
+        if !copy_mode_terminals.is_empty() {
+            let _round_trips = zz_terminal::allow_actor_round_trips();
+            for terminal in copy_mode_terminals {
+                terminal.settle();
+            }
         }
         for (selected, pane, keys, repeat) in pane_mode_keys {
             self.inject_pane_mode_keys(selected, context, pane, &keys, repeat)?;

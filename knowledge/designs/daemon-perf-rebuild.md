@@ -1381,9 +1381,10 @@ Built on `perf/exec` (2026-09-28). Where the build departs from the scope above:
 - Cold start: `--bootstrap-ready-fd N` after the server id; the daemon writes one byte right after
   `bind` and closes it; the CLI polls the pipe (6 s) and dials once. The backoff (0.5/1/2/5 ms) runs
   only without the pipe (Windows) or when a racing daemon won the socket. `prepare_socket` now
-  holds `<socket>.lock` (flock) from the probe to `bind`, as tmux's `client_get_lock` does: two
-  concurrent cold commands (the new CLI test) otherwise let one daemon unlink the other's socket
-  between its `bind` and `listen`, leaving a daemon nobody could reach. The probe is a
+  holds `<socket>.lock` (flock, the file stays beside the socket) from the probe to `bind`, as
+  tmux's `client_get_lock` does: two concurrent cold commands (the new CLI test) otherwise let
+  one daemon unlink the other's socket between its `bind` and `listen`, leaving a daemon nobody
+  could reach. The probe is a
   zero-command Exec: a daemon that answers releases the loser's CLI through the readiness pipe and
   the loser exits at once (before, it looped for 3 s and could bind after the winner was killed,
   an orphan), and one that does not answer is still waited out as a stopping daemon. Identity

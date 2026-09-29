@@ -29,9 +29,10 @@ pub(super) fn command_is_read_only(command: &str, args: &[RawText]) -> bool {
 }
 
 pub(super) fn format_facts_unread(command: &str, args: &[RawText]) -> bool {
-    if *EAGER_FACTS {
-        return false;
-    }
+    !*EAGER_FACTS && expands_no_format(command, args)
+}
+
+pub(super) fn expands_no_format(command: &str, args: &[RawText]) -> bool {
     match command {
         "bind-key" | "unbind-key" | "has-session" => true,
         "set-option" | "set-window-option" => zz_protocol::catalog_command_spec(command)

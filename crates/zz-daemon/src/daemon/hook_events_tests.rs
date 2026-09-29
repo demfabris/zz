@@ -49,11 +49,10 @@ fn read_only_commands_still_fire_their_after_hooks() {
     ];
     for command in commands {
         assert!(
-            hook_events::command_is_read_only(
-                command[0],
-                &CommandInvocation::new(command[0], command[1..].iter().copied()).args
-            ),
-            "{command:?} takes the read-only path"
+            !zz_protocol::catalog_command_spec(command[0])
+                .expect("catalogued command")
+                .mutates(&CommandInvocation::new(command[0], command[1..].iter().copied()).args),
+            "{command:?} is read-only"
         );
         let hook = format!("after-{}", command[0]);
         run(
@@ -106,7 +105,7 @@ fn read_only_commands_leave_the_structure_and_its_hooks_alone() {
 #[test]
 fn facts_are_withheld_only_from_commands_that_expand_nothing() {
     let unread = |args: &[&str]| {
-        hook_events::format_facts_unread(
+        hook_events::expands_no_format(
             args[0],
             &CommandInvocation::new(args[0], args[1..].iter().copied()).args,
         )
